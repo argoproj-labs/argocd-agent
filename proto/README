@@ -1,0 +1,2 @@
+This directory contains proto specifications that we directly vendor into our
+tree, because they are not available from our dependencies.

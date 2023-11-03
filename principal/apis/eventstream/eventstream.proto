@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+option go_package = "github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi";
+
+package eventstreamapi;
+
+import "google/api/annotations.proto";
+
+// The following imports require dependencies to be vendored in
+import "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1/generated.proto";
+
+// Event describes an event
+message Event {
+    // Event is the type of event. See pkg/types for valid event types.
+    int32 event = 1;
+    // Application is the application of the event
+    optional github.com.argoproj.argo_cd.v2.pkg.apis.application.v1alpha1.Application application = 2;
+}
+
+message PushSummary {
+    string result = 1;
+    int32 received = 2;
+    int32 processed = 3;
+}
+
+message PingRequest {
+
+}
+
+message PongReply {
+
+}
+
+service EventStream {
+    rpc Subscribe(stream Event) returns (stream Event) {
+        option (google.api.http).get = "/api/v1/events/stream";
+    }
+
+    rpc Push(stream Event) returns (PushSummary) {
+        option (google.api.http).get = "/api/v1/events/push";
+    }
+
+    rpc Ping(PingRequest) returns (PongReply) {
+        option (google.api.http).get = "/api/v1/ping";
+    }
+}

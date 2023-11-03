@@ -1,0 +1,11 @@
+with-expecter: true
+all: true
+dir: "{{.InterfaceDir}}/mocks"
+mockname: "{{.InterfaceName}}"
+outpkg: "mocks"
+filename: "{{.InterfaceName}}.go"
+packages:
+  github.com/jannfis/argocd-agent/internal/auth:
+  github.com/jannfis/argocd-agent/internal/queue:
+  github.com/jannfis/argocd-agent/internal/issuer:
+  github.com/jannfis/argocd-agent/internal/backend:

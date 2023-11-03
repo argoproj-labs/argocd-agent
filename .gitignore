@@ -1,0 +1,5 @@
+dist/
+test/out
+test/profile
+vendor/
+.vscode

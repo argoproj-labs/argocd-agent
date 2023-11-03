@@ -1,0 +1,40 @@
+syntax = "proto3";
+option go_package = "github.com/jannfis/argocd-agent/pkg/api/grpc/authapi";
+
+package authapi;
+
+import "google/api/annotations.proto";
+
+message AuthRequest {
+    // Method specifies the type of authentication to use. The value is implementation specific.
+    string method = 1;
+    // Credentials specifies the credentials to use for authentication in a key/value fashion.
+    map<string,string> credentials = 2;
+    // Agent's mode of operation, usually either managed or autonomous
+    string mode = 3;
+}
+
+message AuthResponse {
+    string accessToken = 1;
+    string refreshToken = 2;
+}
+
+message RefreshTokenRequest {
+    string refreshToken = 1;
+}
+
+service Authentication {
+    rpc Authenticate(AuthRequest) returns (AuthResponse) {
+        option (google.api.http) = {
+            post: "/api/v1/auth/authenticate"
+            body: "auth"
+        };
+    }
+
+    rpc RefreshToken(RefreshTokenRequest) returns (AuthResponse) {
+        option (google.api.http) = {
+            post: "/api/v1/auth/refresh"
+            body: "refresh"
+        };
+    }
+}

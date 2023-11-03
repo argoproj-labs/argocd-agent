@@ -1,0 +1,19 @@
+syntax = "proto3";
+option go_package = "github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi";
+
+package versionapi;
+
+import "google/api/annotations.proto";
+
+message VersionRequest {
+}
+
+message VersionResponse {
+    string version = 1;
+}
+
+service Version {
+    rpc Version(VersionRequest) returns (VersionResponse) {
+        option (google.api.http).get = "/api/v1/version";
+    }
+}

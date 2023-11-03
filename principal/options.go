@@ -1,0 +1,218 @@
+package principal
+
+import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"fmt"
+	"math/big"
+	"net"
+	"time"
+
+	"github.com/jannfis/argocd-agent/internal/auth"
+)
+
+// supportedTLSVersion is a list of TLS versions we support
+var supportedTLSVersion map[string]int = map[string]int{
+	"tls1.1": tls.VersionTLS11,
+	"tls1.2": tls.VersionTLS12,
+	"tls1.3": tls.VersionTLS13,
+}
+
+type ServerOptions struct {
+	serverName      string
+	port            int
+	address         string
+	tlsCertPath     string
+	tlsKeyPath      string
+	tlsCert         *x509.Certificate
+	tlsKey          *rsa.PrivateKey
+	tlsCiphers      *tls.CipherSuite
+	tlsMinVersion   int
+	gracePeriod     time.Duration
+	namespaces      []string
+	signingKey      *rsa.PrivateKey
+	unauthMethods   map[string]bool
+	serveGRPC       bool
+	serveREST       bool
+	eventProcessors int64
+	metricsEnabled  bool
+	metricsPort     int
+}
+
+type ServerOption func(o *Server) error
+
+// defaultOptions returns a set of default options for the server
+func defaultOptions() *ServerOptions {
+	return &ServerOptions{
+		port:            443,
+		address:         "",
+		tlsMinVersion:   tls.VersionTLS13,
+		unauthMethods:   make(map[string]bool),
+		eventProcessors: 10,
+	}
+}
+
+// WithEventProcessors sets the maximum number of event processors to run
+// concurrently.
+func WithEventProcessors(numProcessors int64) ServerOption {
+	return func(o *Server) error {
+		o.options.eventProcessors = numProcessors
+		return nil
+	}
+}
+
+// WithTokenSigningKey sets the RSA private key to use for signing the tokens
+// issued by the Server
+func WithTokenSigningKey(key *rsa.PrivateKey) ServerOption {
+	return func(o *Server) error {
+		o.options.signingKey = key
+		return nil
+	}
+}
+
+// WithListenerPort sets the listening port for the server. If the port is not
+// valid, an error is returned.
+func WithListenerPort(port int) ServerOption {
+	return func(o *Server) error {
+		if port < 0 || port > 65535 {
+			return fmt.Errorf("port must be between 0 and 65535")
+		}
+		o.options.port = port
+		return nil
+	}
+}
+
+// WithListenerAddress sets the address the server should listen on.
+func WithListenerAddress(host string) ServerOption {
+	return func(o *Server) error {
+		o.options.address = host
+		return nil
+	}
+}
+
+// WithTLSKeyPair configures the TLS certificate and private key to be used by
+// the server. The function will not check whether the files exists, or if they
+// contain valid data because it is assumed that they may be created at a later
+// point in time.
+func WithTLSKeyPair(certPath, keyPath string) ServerOption {
+	return func(o *Server) error {
+		o.options.tlsCertPath = certPath
+		o.options.tlsKeyPath = keyPath
+		return nil
+	}
+}
+
+func WithGeneratedTLS(serverName string) ServerOption {
+	log().Warnf("Generating and using a self-signed, volatile TLS certificate")
+	return func(o *Server) error {
+		templ := x509.Certificate{
+			SerialNumber:          big.NewInt(1),
+			Subject:               pkix.Name{CommonName: serverName},
+			DNSNames:              []string{serverName},
+			IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+			Issuer:                pkix.Name{CommonName: serverName},
+			NotBefore:             time.Now().Add(-1 * time.Hour),
+			NotAfter:              time.Now().Add(1 * time.Hour),
+			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			BasicConstraintsValid: true,
+		}
+		pKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return err
+		}
+		db, err := x509.CreateCertificate(rand.Reader, &templ, &templ, &pKey.PublicKey, pKey)
+		if err != nil {
+			return err
+		}
+		cert, err := x509.ParseCertificate(db)
+		if err != nil {
+			return err
+		}
+		o.options.tlsCert = cert
+		o.options.tlsKey = pKey
+		return nil
+	}
+}
+
+// WithTLSCipherSuite configures the TLS cipher suite to be used by the server.
+// If an unknown cipher suite is specified, an error is returned.
+func WithTLSCipherSuite(cipherSuite string) ServerOption {
+	return func(o *Server) error {
+		for _, cs := range tls.CipherSuites() {
+			if cs.Name == cipherSuite {
+				o.options.tlsCiphers = cs
+				return nil
+			}
+		}
+		return fmt.Errorf("no such cipher suite: %s", cipherSuite)
+	}
+}
+
+// WithMinimumTLSVersion configures the minimum TLS version to be accepted by
+// the server.
+func WithMinimumTLSVersion(version string) ServerOption {
+	return func(o *Server) error {
+		v, ok := supportedTLSVersion[version]
+		if !ok {
+			return fmt.Errorf("TLS version %s is not supported", version)
+		}
+		o.options.tlsMinVersion = v
+		return nil
+	}
+}
+
+// WithShutDownGracePeriod configures how long the server should wait for
+// client connections to close during shutdown. If d is 0, the server will
+// not use a grace period for shutdown but instead close immediately.
+func WithShutDownGracePeriod(d time.Duration) ServerOption {
+	return func(o *Server) error {
+		o.options.gracePeriod = d
+		return nil
+	}
+}
+
+// WithNamespaces sets an
+func WithNamespaces(namespaces ...string) ServerOption {
+	return func(o *Server) error {
+		o.options.namespaces = namespaces
+		return nil
+	}
+}
+
+func WithGRPC(serveGRPC bool) ServerOption {
+	return func(o *Server) error {
+		o.options.serveGRPC = serveGRPC
+		return nil
+	}
+}
+
+func WithREST(serveREST bool) ServerOption {
+	return func(o *Server) error {
+		o.options.serveREST = serveREST
+		return nil
+	}
+}
+
+func WithServerName(serverName string) ServerOption {
+	return func(o *Server) error {
+		o.options.serverName = serverName
+		return nil
+	}
+}
+
+func WithMetricsPort(port int) ServerOption {
+	return func(o *Server) error {
+		o.options.metricsPort = port
+		return nil
+	}
+}
+
+func WithAuthMethods(am *auth.Methods) ServerOption {
+	return func(o *Server) error {
+		o.authMethods = am
+		return nil
+	}
+}

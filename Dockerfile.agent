@@ -1,0 +1,5 @@
+FROM alpine
+
+COPY dist/argocd-agent /usr/local/bin/argocd-agent
+
+ENTRYPOINT ["/usr/local/bin/argocd-agent"]
