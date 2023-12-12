@@ -60,7 +60,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 	ev := event.Event{
-		Type:        event.EvenAppSpecUpdated,
+		Type:        event.EventAppSpecUpdated,
 		Application: new,
 	}
 	q.Add(ev)

@@ -16,10 +16,10 @@ const (
 	EventAppAdded
 	// EventAppDeleted is an event to let the peer know about the deletion of an app
 	EventAppDeleted
-	// EvenAppSpecUpdated is an event to update an application's spec field
-	EvenAppSpecUpdated
-	// EvenAppStatusUpdated is an event to update an application's status field
-	EvenAppStatusUpdated
+	// EventAppSpecUpdated is an event to update an application's spec field
+	EventAppSpecUpdated
+	// EventAppStatusUpdated is an event to update an application's status field
+	EventAppStatusUpdated
 	// EventAppOperationUpdated is an event to update an application's operation field
 	EventAppOperationUpdated
 )
@@ -41,11 +41,11 @@ func (et EventType) String() string {
 		return "add"
 	case EventAppDeleted:
 		return "delete"
-	case EvenAppSpecUpdated:
+	case EventAppSpecUpdated:
 		return "update_spec"
 	case EventAppOperationUpdated:
 		return "update_operation"
-	case EvenAppStatusUpdated:
+	case EventAppStatusUpdated:
 		return "update_status"
 	default:
 		return "unknown"

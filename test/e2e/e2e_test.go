@@ -184,7 +184,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 	start := time.Now()
 	for i := 0; i < 10; i += 1 {
 		pushc.Send(&eventstreamapi.Event{
-			Event: int32(event.EvenAppSpecUpdated),
+			Event: int32(event.EventAppSpecUpdated),
 			Application: &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{
 				Name:      fmt.Sprintf("test%d", i),
 				Namespace: "default",

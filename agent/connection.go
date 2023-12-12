@@ -69,7 +69,7 @@ func (a *Agent) handleStreamEvents() error {
 				if err != nil {
 					logCtx.Errorf("Error creating application: %v", err)
 				}
-			case event.EvenAppSpecUpdated:
+			case event.EventAppSpecUpdated:
 				_, err = a.updateApplication(ev.Application)
 				if err != nil {
 					logCtx.Errorf("Error updating application: %v", err)

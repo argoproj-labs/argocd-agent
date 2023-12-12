@@ -264,7 +264,7 @@ recvloop:
 			// is observed may result in the creation of this particular app
 			// in the server's application backend.
 			ev := &event.Event{
-				Type:        event.EvenAppStatusUpdated,
+				Type:        event.EventAppStatusUpdated,
 				Application: u.Application,
 			}
 			s.queues.RecvQ(agentName).Add(ev)

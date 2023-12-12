@@ -47,7 +47,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
 			return nil
 		}
-	case event.EvenAppStatusUpdated:
+	case event.EventAppStatusUpdated:
 		var err error
 		if agentMode == types.AgentModeAutonomous {
 			_, err = s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
@@ -58,7 +58,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Updated application status %s", incoming.QualifiedName())
-	case event.EvenAppSpecUpdated:
+	case event.EventAppSpecUpdated:
 		var err error
 		if agentMode == types.AgentModeManaged {
 			_, err = s.appManager.UpdateStatus(ctx, agentName, incoming)
