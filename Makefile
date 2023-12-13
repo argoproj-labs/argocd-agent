@@ -14,11 +14,19 @@ test:
 	mkdir -p test/out
 	./hack/test.sh
 
+.PHONY: mod-vendor
+mod-vendor:
+	go mod vendor
+
+.PHONY: clean
+clean:
+	rm -rf dist/
+
 .PHONY: codegen
 codegen: protogen
 
 .PHONY: protogen
-protogen:
+protogen: mod-vendor
 	./hack/generate-proto.sh
 
 .PHONY: agent
