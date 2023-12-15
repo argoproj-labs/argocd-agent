@@ -9,6 +9,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 func (a *Agent) maintainConnection() error {
@@ -53,7 +56,7 @@ func (a *Agent) handleStreamEvents() error {
 		})
 		logCtx.Info("Starting to receive events from event stream")
 		for a.connected.Load() {
-			ev, err := stream.Recv()
+			rcvd, err := stream.Recv()
 			if err != nil {
 				if err == io.EOF {
 					close(syncCh)
@@ -62,25 +65,30 @@ func (a *Agent) handleStreamEvents() error {
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
+			ev, incomingApp, err := event.ApplicationFromWire(rcvd.Event)
+			if err != nil {
+				logCtx.Errorf("Could not unwrap event: %v", err)
+				continue
+			}
 			logCtx.Debugf("Received a new event from stream")
-			switch event.EventType(ev.Event) {
-			case event.EventAppAdded:
-				_, err := a.createApplication(ev.Application)
+			switch ev.Type() {
+			case event.ApplicationCreated:
+				_, err := a.createApplication(incomingApp)
 				if err != nil {
 					logCtx.Errorf("Error creating application: %v", err)
 				}
-			case event.EventAppSpecUpdated:
-				_, err = a.updateApplication(ev.Application)
+			case event.ApplicationSpecUpdated:
+				_, err = a.updateApplication(incomingApp)
 				if err != nil {
 					logCtx.Errorf("Error updating application: %v", err)
 				}
-			case event.EventAppDeleted:
-				err = a.deleteApplication(ev.Application)
+			case event.ApplicationDeleted:
+				err = a.deleteApplication(incomingApp)
 				if err != nil {
 					logCtx.Errorf("Error deleting application: %v", err)
 				}
 			default:
-				logCtx.Warnf("Received an unknown event: %d. Protocol mismatch?", ev.Event)
+				logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
 			}
 		}
 	}()
@@ -116,15 +124,21 @@ func (a *Agent) handleStreamEvents() error {
 					return
 				}
 
-				ev, ok := item.(event.Event)
+				ev, ok := item.(*cloudevents.Event)
 				if !ok {
 					logCtx.Warnf("invalid data in sendqueue")
 					continue
 				}
 
 				logCtx.Tracef("Sending an item to the event stream")
-				// A Send() on the stream is actually not blocking.
-				err := stream.Send(&eventstreamapi.Event{Event: int32(ev.Type), Application: ev.Application})
+
+				pev, perr := format.ToProto(ev)
+				if perr != nil {
+					logCtx.Warnf("Could not wire event: %v", err)
+					continue
+				}
+
+				err := stream.Send(&eventstreamapi.Event{Event: pev})
 				// TODO: How to handle errors on send?
 				if err != nil {
 					status, ok := status.FromError(err)

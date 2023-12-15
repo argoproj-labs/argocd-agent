@@ -27,15 +27,22 @@ func Test_Subscribe(t *testing.T) {
 			log().WithField("component", "RecvHook").Tracef("Entry")
 			ticker := time.NewTicker(500 * time.Millisecond)
 			<-ticker.C
+			ticker.Stop()
 			log().WithField("component", "RecvHook").Tracef("Exit")
 			return io.EOF
 		})
-		qs.SendQ("default").Add(event.Event{Type: event.EventAppAdded, Application: &v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
-		})
-		qs.SendQ("default").Add(event.Event{Type: event.EventAppAdded, Application: &v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{Name: "bar", Namespace: "test"}},
-		})
+		emitter := event.NewEventEmitter("test")
+		// qs.SendQ("default").Add(event.LegacyEvent{Type: event.EventAppAdded, Application: &v1alpha1.Application{
+		// 	ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
+		// })
+		qs.SendQ("default").Add(emitter.NewApplicationEvent(
+			event.ApplicationCreated,
+			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
+		))
+		qs.SendQ("default").Add(emitter.NewApplicationEvent(
+			event.ApplicationCreated,
+			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "bar", Namespace: "test"}},
+		))
 		err := s.Subscribe(st)
 		assert.Nil(t, err)
 		assert.Equal(t, 0, int(st.NumRecv.Load()))

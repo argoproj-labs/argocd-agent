@@ -9,6 +9,7 @@ import (
 
 	"github.com/jannfis/argocd-agent/internal/application"
 	kube_backend "github.com/jannfis/argocd-agent/internal/backend/kubernetes"
+	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/internal/filter"
 	appinformer "github.com/jannfis/argocd-agent/internal/informers/application"
 	"github.com/jannfis/argocd-agent/internal/queue"
@@ -43,7 +44,8 @@ type Agent struct {
 	appManager        *application.Manager
 	mode              types.AgentMode
 
-	queues *queue.SendRecvQueues
+	queues  *queue.SendRecvQueues
+	emitter *event.Event
 
 	// managedApps is a map whose key is the qualified
 	// managedApps *ManagedApps
@@ -126,6 +128,8 @@ func (a *Agent) Start(ctx context.Context) error {
 		a.remote.SetClientMode(a.mode)
 		a.maintainConnection()
 	}
+
+	a.emitter = event.NewEventEmitter(fmt.Sprintf("agent://%s", "agent-managed"))
 
 	// Wait for the informer to be synced
 	err := a.informer.EnsureSynced(waitForSyncedDuration)

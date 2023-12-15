@@ -12,6 +12,7 @@ import (
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	"github.com/jannfis/argocd-agent/agent"
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/auth/userpass"
@@ -29,6 +30,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	fakekube "github.com/jannfis/argocd-agent/test/fake/kube"
 )
@@ -103,7 +105,7 @@ func Test_EndToEnd_Subscribe(t *testing.T) {
 	defer cancel()
 
 	// Get authentication token and store in context
-	authr, err := authC.Authenticate(clientCtx, &authapi.AuthRequest{Method: "userpass", Credentials: map[string]string{
+	authr, err := authC.Authenticate(clientCtx, &authapi.AuthRequest{Method: "userpass", Mode: "managed", Credentials: map[string]string{
 		userpass.ClientIDField:     "default",
 		userpass.ClientSecretField: "password",
 	}})
@@ -162,7 +164,11 @@ func Test_EndToEnd_Subscribe(t *testing.T) {
 }
 
 func Test_EndToEnd_Push(t *testing.T) {
-	appC := fakeappclient.NewSimpleClientset()
+	objs := make([]runtime.Object, 10)
+	for i := 0; i < 10; i += 1 {
+		objs[i] = runtime.Object(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: fmt.Sprintf("test%d", i), Namespace: "default"}})
+	}
+	appC := fakeappclient.NewSimpleClientset(objs...)
 	conn, s := newConn(t, appC)
 	defer conn.Close()
 	authC := authapi.NewAuthenticationClient(conn)
@@ -172,7 +178,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 	defer cancel()
 
 	// Get authentication token and store in context
-	authr, err := authC.Authenticate(clientCtx, &authapi.AuthRequest{Method: "userpass", Credentials: map[string]string{
+	authr, err := authC.Authenticate(clientCtx, &authapi.AuthRequest{Method: "userpass", Mode: "managed", Credentials: map[string]string{
 		userpass.ClientIDField:     "default",
 		userpass.ClientSecretField: "password",
 	}})
@@ -183,13 +189,14 @@ func Test_EndToEnd_Push(t *testing.T) {
 	require.NoError(t, err)
 	start := time.Now()
 	for i := 0; i < 10; i += 1 {
-		pushc.Send(&eventstreamapi.Event{
-			Event: int32(event.EventAppSpecUpdated),
-			Application: &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{
+		ev := event.NewEventEmitter("").NewApplicationEvent(event.ApplicationSpecUpdated, &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
 				Name:      fmt.Sprintf("test%d", i),
 				Namespace: "default",
-			}},
-		})
+			}})
+		cev, cerr := format.ToProto(ev)
+		require.NoError(t, cerr)
+		pushc.Send(&eventstreamapi.Event{Event: cev})
 	}
 	summary, err := pushc.CloseAndRecv()
 	require.NoError(t, err)
@@ -251,6 +258,7 @@ func Test_AgentServer(t *testing.T) {
 	fakeKubecAgent := fakekube.NewFakeKubeClient()
 	a, err := agent.NewAgent(actx, fakeKubecAgent, fakeAppcAgent, "client",
 		agent.WithRemote(remote),
+		agent.WithMode(""),
 	)
 	require.NotNil(t, a)
 	require.NoError(t, err)

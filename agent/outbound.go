@@ -51,12 +51,8 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 		logCtx.Error("Default queue disappeared!")
 		return
 	}
-	ev := event.Event{
-		Type:        event.EventAppAdded,
-		Application: app,
-	}
 
-	q.Add(ev)
+	q.Add(a.emitter.NewApplicationEvent(event.ApplicationCreated, app))
 	logCtx.WithField("sendq_len", q.Len()).WithField("sendq_name", a.remote.ClientID()).Debugf("Added app create event to send queue")
 }
 
@@ -92,20 +88,16 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 
 	// Depending on what mode the agent operates in, we sent a different type
 	// of event.
-	eventType := event.EventUnknown
+	eventType := ""
 	switch a.mode {
 	case types.AgentModeAutonomous:
-		eventType = event.EventAppStatusUpdated
+		eventType = event.ApplicationStatusUpdate
 	case types.AgentModeManaged:
-		eventType = event.EventAppSpecUpdated
+		eventType = event.ApplicationSpecUpdated
 	}
 
-	ev := event.Event{
-		Type:        eventType,
-		Application: new,
-	}
-
-	q.Add(ev)
+	q.Add(a.emitter.NewApplicationEvent(eventType, new))
+	// q.Add(ev)
 	logCtx.
 		WithField("sendq_len", q.Len()).
 		WithField("sendq_name", a.remote.ClientID()).
@@ -134,11 +126,6 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 		logCtx.Error("Default queue disappeared!")
 		return
 	}
-	ev := event.Event{
-		Type:        event.EventAppDeleted,
-		Application: app,
-	}
-
-	q.Add(ev)
+	q.Add(a.emitter.NewApplicationEvent(event.ApplicationDeleted, app))
 	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app delete event to send queue")
 }

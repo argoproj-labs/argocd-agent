@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
@@ -14,6 +15,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 type Server struct {
@@ -21,6 +25,7 @@ type Server struct {
 
 	options *ServerOptions
 	queues  queue.QueuePair
+	event   event.Event
 }
 
 type ServerOptions struct {
@@ -124,7 +129,25 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 					cancelFn()
 					continue
 				}
-				logCtx.Infof("Received update for application %v (%p)", u.Application.QualifiedName(), u.Application)
+				app := &v1alpha1.Application{}
+				if u == nil || u.Event == nil {
+					logCtx.Errorf("Invalid wire transmission")
+					cancelFn()
+					continue
+				}
+				incomingEvent, err := format.FromProto(u.Event)
+				if err != nil {
+					logCtx.Errorf("Could not unserialize Event from wire: %v", err)
+					cancelFn()
+					continue
+				}
+				err = incomingEvent.DataAs(app)
+				if err != nil {
+					logCtx.Errorf("Could not unserialize Application from wire: %v", err)
+					cancelFn()
+					continue
+				}
+				logCtx.Infof("Received update for application %v", app.QualifiedName())
 				q := s.queues.RecvQ(agentName)
 				if q == nil {
 					logCtx.Warnf("I have no receive queue for agent")
@@ -132,12 +155,14 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 					continue
 				}
 
-				ev := &event.Event{
-					Type:        event.EventType(u.Event),
-					Application: u.Application,
-				}
+				q.Add(incomingEvent)
 
-				q.Add(ev)
+				// ev := &event.LegacyEvent{
+				// 	Type:        event.EventType(u.Event),
+				// 	Application: u.Application,
+				// }
+				// ev := s.event.NewApplicationEvent()
+				// q.Add(ev)
 			}
 		}
 	}()
@@ -181,16 +206,24 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 					continue
 				}
 
-				ev, ok := item.(event.Event)
+				// ev, ok := item.(event.LegacyEvent)
+				ev, ok := item.(*cloudevents.Event)
 				if !ok {
-					logCtx.Warnf("Invalid data in sendqueue. Want: %T, have %T", event.Event{}, item)
+					logCtx.Warnf("Invalid data in sendqueue. Want: %T, have %T", cloudevents.Event{}, item)
 					cancelFn()
 					continue
 				}
 
+				prEv, err := format.ToProto(ev)
+				if err != nil {
+					logCtx.Errorf("Could not serialize event to wire formaT: %v", err)
+					continue
+				}
+				q.Done(item)
+
 				logCtx.Tracef("Sending an item to the event stream")
 				// A Send() on the stream is actually not blocking.
-				err := subs.Send(&eventstreamapi.Event{Event: int32(ev.Type), Application: ev.Application})
+				err = subs.Send(&eventstreamapi.Event{Event: prEv})
 				// TODO: How to handle errors on send?
 				if err != nil {
 					status, ok := status.FromError(err)
@@ -258,15 +291,22 @@ recvloop:
 			logCtx.Infof("Context canceled")
 			break recvloop
 		default:
-			logCtx.Infof("Received update for: %s", u.Application.QualifiedName())
 			// In the Push stream, only application updates will be processed.
 			// However, depending on configuration, an application update that
 			// is observed may result in the creation of this particular app
 			// in the server's application backend.
-			ev := &event.Event{
-				Type:        event.EventAppStatusUpdated,
-				Application: u.Application,
+			ev, err := format.FromProto(u.Event)
+			if err != nil {
+				logCtx.Errorf("Could not deserialize event from wire: %v", err)
+				continue
 			}
+			app := &v1alpha1.Application{}
+			err = ev.DataAs(app)
+			if err != nil {
+				logCtx.Errorf("Could not deserialize application from event: %v", err)
+				continue
+			}
+			logCtx.Infof("Received update for: %s", app.QualifiedName())
 			s.queues.RecvQ(agentName).Add(ev)
 			summary.Received += 1
 		}

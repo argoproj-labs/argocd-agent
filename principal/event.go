@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/internal/namedlock"
 	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 	"k8s.io/client-go/util/workqueue"
+
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // processRecvQueue processes an entry from the receiver queue, which holds the
@@ -18,36 +21,42 @@ import (
 // server's backend.
 func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workqueue.RateLimitingInterface) error {
 	i, _ := q.Get()
-	ev, ok := i.(*event.Event)
+	// ev, ok := i.(*event.LegacyEvent)
+	ev, ok := i.(*cloudevents.Event)
 	if !ok {
 		return fmt.Errorf("invalid data in queue: have:%T want:%T", i, ev)
 	}
 
 	agentMode := s.agentMode(agentName)
-	incoming := ev.Application
+	// incoming := ev.Application
+	incoming := &v1alpha1.Application{}
+	err := ev.DataAs(incoming)
+	if err != nil {
+		return err
+	}
 
 	logCtx := log().WithFields(logrus.Fields{
 		"module":   "QueueProcessor",
 		"client":   agentName,
 		"mode":     agentMode.String(),
-		"event":    ev.Type.String(),
+		"event":    ev.Type(),
 		"incoming": incoming.QualifiedName(),
 	})
 
 	logCtx.Debugf("Processing event")
-	switch ev.Type {
-	case event.EventAppAdded:
+	switch ev.Type() {
+	case event.ApplicationCreated:
 		if agentMode == types.AgentModeAutonomous {
 			incoming.SetNamespace(agentName)
 			_, err := s.appManager.Create(ctx, incoming)
 			if err != nil {
-				return fmt.Errorf("could not create application %s: %w", ev.Application.QualifiedName(), err)
+				return fmt.Errorf("could not create application %s: %w", incoming.QualifiedName(), err)
 			}
 		} else {
 			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
 			return nil
 		}
-	case event.EventAppStatusUpdated:
+	case event.ApplicationStatusUpdate:
 		var err error
 		if agentMode == types.AgentModeAutonomous {
 			_, err = s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
@@ -58,7 +67,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Updated application status %s", incoming.QualifiedName())
-	case event.EventAppSpecUpdated:
+	case event.ApplicationSpecUpdated:
 		var err error
 		if agentMode == types.AgentModeManaged {
 			_, err = s.appManager.UpdateStatus(ctx, agentName, incoming)
@@ -70,7 +79,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		}
 		logCtx.Infof("Updated application spec %s", incoming.QualifiedName())
 	default:
-		return fmt.Errorf("unable to process event of type %s", ev.Type.String())
+		return fmt.Errorf("unable to process event of type %s", ev.Type())
 	}
 	q.Done(ev)
 	return nil

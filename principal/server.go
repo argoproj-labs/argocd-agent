@@ -17,6 +17,7 @@ import (
 	"github.com/jannfis/argocd-agent/internal/application"
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/backend/kubernetes"
+	"github.com/jannfis/argocd-agent/internal/event"
 	appinformer "github.com/jannfis/argocd-agent/internal/informers/application"
 	"github.com/jannfis/argocd-agent/internal/issuer"
 	"github.com/jannfis/argocd-agent/internal/metrics"
@@ -46,6 +47,7 @@ type Server struct {
 	clientMap    map[string]string
 	namespaceMap map[string]types.AgentMode
 	clientLock   sync.RWMutex
+	events       *event.Event
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
@@ -155,6 +157,8 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	go func() {
 		s.appManager.Application.StartInformer(ctx)
 	}()
+
+	s.events = event.NewEventEmitter(s.options.serverName)
 
 	s.informer.EnsureSynced(waitForSyncedDuration)
 	log().Infof("Informer synced and ready")

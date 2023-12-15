@@ -5,6 +5,8 @@ import (
 	"sync/atomic"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
+	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/jannfis/argocd-agent/pkg/types"
 	"google.golang.org/grpc"
@@ -71,7 +73,13 @@ func (s *MockEventServer) Recv() (*eventstreamapi.Event, error) {
 	}
 	if err == nil {
 		s.NumRecv.Add(1)
-		return &eventstreamapi.Event{Application: s.Application.DeepCopy()}, nil
+		wev := event.NewEventEmitter("foo").NewApplicationEvent(event.ApplicationCreated, &s.Application)
+		pev, perr := format.ToProto(wev)
+		if perr == nil {
+			return &eventstreamapi.Event{Event: pev}, nil
+		} else {
+			return nil, perr
+		}
 	}
 
 	return nil, err
