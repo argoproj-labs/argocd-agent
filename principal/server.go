@@ -269,7 +269,7 @@ func (s *Server) agentMode(namespace string) types.AgentMode {
 	if mode, ok := s.namespaceMap[namespace]; ok {
 		return mode
 	}
-	return types.AgentModeNone
+	return types.AgentModeUnknown
 }
 
 func (s *Server) setAgentMode(namespace string, mode types.AgentMode) {

@@ -60,7 +60,7 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 		logCtx.Tracef("Reusing existing queue pair for client %s", agentInfo.ClientID)
 	}
 	mode := types.AgentModeFromString(agentInfo.Mode)
-	if mode == types.AgentModeNone {
+	if mode == types.AgentModeUnknown {
 		return nil, status.Error(codes.Unauthenticated, "invalid operation mode")
 	}
 	s.setAgentMode(agentInfo.ClientID, mode)

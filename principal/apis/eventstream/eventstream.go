@@ -34,6 +34,17 @@ type ServerOptions struct {
 
 type ServerOption func(o *ServerOptions)
 
+type client struct {
+	ctx       context.Context
+	cancelFn  context.CancelFunc
+	logCtx    *logrus.Entry
+	agentName string
+	wg        *sync.WaitGroup
+	start     time.Time
+	end       time.Time
+	lock      sync.RWMutex
+}
+
 func WithMaxStreamDuration(d time.Duration) ServerOption {
 	return func(o *ServerOptions) {
 		o.MaxStreamDuration = d
@@ -52,6 +63,36 @@ func NewServer(queues queue.QueuePair, opts ...ServerOption) *Server {
 	}
 }
 
+// newClientConnection returns a new client object to be used to read from and
+// send to the subscription stream.
+func newClientConnection(ctx context.Context, timeout time.Duration) (*client, error) {
+	c := &client{}
+	c.wg = &sync.WaitGroup{}
+
+	agentName, err := agentName(ctx)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	c.agentName = agentName
+
+	c.logCtx = logrus.WithFields(logrus.Fields{
+		"method": "Subscribe",
+		"client": c.agentName,
+	})
+
+	// The stream can have on optional expiry time
+	if timeout > 0 {
+		c.logCtx.Tracef("StreamContext expires in %v", timeout)
+		c.ctx, c.cancelFn = context.WithTimeout(ctx, timeout)
+	} else {
+		c.logCtx.Trace("StreamContext does not expire ")
+		c.ctx, c.cancelFn = context.WithCancel(ctx)
+	}
+	c.start = time.Now()
+	c.logCtx.Debug("An agent connected to the subscription stream")
+	return c, nil
+}
+
 // agentName gets the agent name from the context ctx. If no agent identifier
 // could be found in the context, returns an error.
 func agentName(ctx context.Context) (string, error) {
@@ -62,6 +103,125 @@ func agentName(ctx context.Context) (string, error) {
 	return agentName, nil
 }
 
+// onDisconnect must be called whenever client c disconnects from the stream
+func (s *Server) onDisconnect(c *client) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	if s.queues.HasQueuePair(c.agentName) {
+		s.queues.Delete(c.agentName, true)
+	}
+	c.wg.Done()
+}
+
+// recvFunc retrieves exactly one message from the client c on the event stream
+// sub. The function will block until a message is available on the stream.
+//
+// This function must NOT be called concurrently.
+//
+// On success, it adds the message in cloudevents format to the internal event
+// queue for further processing and returns nil.
+//
+// Any error that occurs during receive or processing will be returned to the
+// caller.
+func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeServer) error {
+	logCtx := c.logCtx.WithField("direction", "recv")
+	logCtx.Tracef("Waiting to receive from channel")
+	event, err := subs.Recv()
+	if err != nil {
+		if err == io.EOF {
+			logCtx.Tracef("Remote end hung up")
+		} else {
+			st, ok := status.FromError(err)
+			if ok {
+				if st.Code() != codes.DeadlineExceeded && st.Code() != codes.Canceled {
+					logCtx.WithError(err).Error("Error receiving application update")
+				} else if st.Code() == codes.Canceled {
+					logCtx.Trace("Context was canceled")
+				}
+			} else {
+				logCtx.WithError(err).Error("Unknown error")
+			}
+		}
+		return err
+	}
+	if event == nil || event.Event == nil {
+		return fmt.Errorf("invalid wire transmission")
+	}
+	app := &v1alpha1.Application{}
+	incomingEvent, err := format.FromProto(event.Event)
+	if err != nil {
+		return fmt.Errorf("could not unserialize event from wire: %w", err)
+	}
+	err = incomingEvent.DataAs(app)
+	if err != nil {
+		return fmt.Errorf("could not unserialize app data from wire: %w", err)
+	}
+	logCtx.Infof("Received update for application %v", app.QualifiedName())
+	q := s.queues.RecvQ(c.agentName)
+	if q == nil {
+		return fmt.Errorf("panic: no recvq for agent %s", c.agentName)
+	}
+
+	q.Add(incomingEvent)
+	return nil
+}
+
+// sendFunc gets the next event from the internal event queue, transforms it
+// into wire format and sends it via the eventstream sub to client c. The
+// function will block until there is an event on the internal event queue.
+//
+// This function must NOT be called concurrently.
+//
+// If an error occurs, it will be returned to the caller. Otherwise, nil is
+// returned.
+func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeServer) error {
+	logCtx := c.logCtx.WithField("direction", "send")
+	q := s.queues.SendQ(c.agentName)
+	if q == nil {
+		return fmt.Errorf("panic: no sendq for agent %s", c.agentName)
+	}
+
+	// Get() is blocking until there is at least one item in the
+	// queue.
+	logCtx.Tracef("Waiting to grab an item from the queue")
+	item, shutdown := q.Get()
+	if shutdown {
+		return fmt.Errorf("sendq shutdown in progress")
+	}
+	logCtx.Tracef("Grabbed an item")
+	if item == nil {
+		return fmt.Errorf("panic: nil item in queue")
+	}
+
+	ev, ok := item.(*cloudevents.Event)
+	if !ok {
+		return fmt.Errorf("panic: invalid data in sendqueue: want: %T, have %T", cloudevents.Event{}, item)
+	}
+
+	prEv, err := format.ToProto(ev)
+	if err != nil {
+		return fmt.Errorf("panic: could not serialize event to wire format: %v", err)
+	}
+
+	q.Done(item)
+
+	logCtx.Tracef("Sending an item to the event stream")
+
+	// A Send() on the stream is actually not blocking.
+	err = subs.Send(&eventstreamapi.Event{Event: prEv})
+	if err != nil {
+		status, ok := status.FromError(err)
+		if !ok && err != io.EOF {
+			return fmt.Errorf("error sending data to stream: %w", err)
+		}
+		if err == io.EOF || status.Code() == codes.Unavailable {
+			return fmt.Errorf("remote hung up while sending data to stream: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // Subscribe implements a bi-directional stream to exchange application updates
 // between the agent and the server.
 //
@@ -70,179 +230,57 @@ func agentName(ctx context.Context) (string, error) {
 func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) error {
 	logCtx := log().WithField("method", "Subscribe")
 
-	var ctx context.Context
-	var cancelFn context.CancelFunc
-
-	var wg sync.WaitGroup
-
-	// The stream can have on optional expiry time
-	if s.options.MaxStreamDuration > 0 {
-		logCtx.Tracef("StreamContext expires in %v", s.options.MaxStreamDuration)
-		ctx, cancelFn = context.WithTimeout(subs.Context(), s.options.MaxStreamDuration)
-	} else {
-		logCtx.Trace("StreamContext does not expire ")
-		ctx, cancelFn = context.WithCancel(subs.Context())
-	}
-	defer cancelFn()
-
-	agentName, err := agentName(ctx)
+	c, err := newClientConnection(subs.Context(), s.options.MaxStreamDuration)
 	if err != nil {
-		return status.Error(codes.InvalidArgument, err.Error())
+		return err
 	}
-
-	logCtx = logCtx.WithField("client", agentName)
-
-	logCtx.Debug("New client connection")
 
 	// We receive events in a dedicated go routine
-	wg.Add(1)
+	c.wg.Add(1)
 	go func() {
-		defer func() {
-			s.queues.Delete(agentName, true)
-			wg.Done()
-		}()
-		logCtx := logCtx.WithField("direction", "recv")
-		logCtx.Trace("Starting event receiver routine")
+		defer s.onDisconnect(c)
+		c.logCtx.Trace("Starting event receiver routine")
 		for {
 			select {
-			case <-ctx.Done():
-				logCtx.Info("Stopping event receiver routine")
+			case <-c.ctx.Done():
+				c.logCtx.Info("Stopping event receiver routine")
 				return
 			default:
-				logCtx.Tracef("Waiting to receive from channel")
-				u, err := subs.Recv()
+				err := s.recvFunc(c, subs)
 				if err != nil {
-					if err == io.EOF {
-						logCtx.Tracef("Remote end hung up")
-					} else {
-						st, ok := status.FromError(err)
-						if ok {
-							if st.Code() != codes.DeadlineExceeded && st.Code() != codes.Canceled {
-								logCtx.WithError(err).Error("Error receiving application update")
-							} else if st.Code() == codes.Canceled {
-								logCtx.Trace("Context was canceled")
-							}
-						} else {
-							logCtx.WithError(err).Error("Unknown error")
-						}
-					}
-					cancelFn()
-					continue
+					c.logCtx.Infof("Receiver disconnected: %v", err)
+					c.cancelFn()
 				}
-				app := &v1alpha1.Application{}
-				if u == nil || u.Event == nil {
-					logCtx.Errorf("Invalid wire transmission")
-					cancelFn()
-					continue
-				}
-				incomingEvent, err := format.FromProto(u.Event)
-				if err != nil {
-					logCtx.Errorf("Could not unserialize Event from wire: %v", err)
-					cancelFn()
-					continue
-				}
-				err = incomingEvent.DataAs(app)
-				if err != nil {
-					logCtx.Errorf("Could not unserialize Application from wire: %v", err)
-					cancelFn()
-					continue
-				}
-				logCtx.Infof("Received update for application %v", app.QualifiedName())
-				q := s.queues.RecvQ(agentName)
-				if q == nil {
-					logCtx.Warnf("I have no receive queue for agent")
-					cancelFn()
-					continue
-				}
-
-				q.Add(incomingEvent)
-
-				// ev := &event.LegacyEvent{
-				// 	Type:        event.EventType(u.Event),
-				// 	Application: u.Application,
-				// }
-				// ev := s.event.NewApplicationEvent()
-				// q.Add(ev)
 			}
 		}
 	}()
 
 	// We send events in a dedicated go routine
-	wg.Add(1)
+	c.wg.Add(1)
 	go func() {
-		defer func() {
-			s.queues.Delete(agentName, true)
-			wg.Done()
-		}()
-		logCtx := logCtx.WithFields(logrus.Fields{
+		defer s.onDisconnect(c)
+		logCtx := c.logCtx.WithFields(logrus.Fields{
 			"direction": "send",
-			"queue":     agentName,
+			"queue":     c.agentName,
 		})
 		logCtx.Tracef("Starting event sender routine")
 		for {
 			select {
-			case <-ctx.Done():
+			case <-c.ctx.Done():
 				logCtx.Info("Stopping event sender routine")
 				return
 			default:
-				q := s.queues.SendQ(agentName)
-				if q == nil {
-					logCtx.Warnf("Send queue for agent disappeared")
-					cancelFn()
-					continue
-				}
-				// Get() is blocking until there is at least one item in the
-				// queue.
-				logCtx.Tracef("Waiting to grab an item from the queue")
-				item, shutdown := q.Get()
-				if shutdown {
-					logCtx.Tracef("Queue shutdown in progress")
-					cancelFn()
-					continue
-				}
-				logCtx.Tracef("Grabbed an item")
-				if item == nil {
-					cancelFn()
-					continue
-				}
-
-				// ev, ok := item.(event.LegacyEvent)
-				ev, ok := item.(*cloudevents.Event)
-				if !ok {
-					logCtx.Warnf("Invalid data in sendqueue. Want: %T, have %T", cloudevents.Event{}, item)
-					cancelFn()
-					continue
-				}
-
-				prEv, err := format.ToProto(ev)
+				err := s.sendFunc(c, subs)
 				if err != nil {
-					logCtx.Errorf("Could not serialize event to wire formaT: %v", err)
-					continue
+					logCtx.Infof("Send: %v", err)
+					c.cancelFn()
 				}
-				q.Done(item)
 
-				logCtx.Tracef("Sending an item to the event stream")
-				// A Send() on the stream is actually not blocking.
-				err = subs.Send(&eventstreamapi.Event{Event: prEv})
-				// TODO: How to handle errors on send?
-				if err != nil {
-					status, ok := status.FromError(err)
-					if !ok && err != io.EOF {
-						logCtx.WithError(err).Error("Error sending data")
-						cancelFn()
-						continue
-					}
-					if err == io.EOF || status.Code() == codes.Unavailable {
-						logCtx.Debug("Send() returned EOF or codes.Unavailable")
-						cancelFn()
-						continue
-					}
-				}
 			}
 		}
 	}()
 
-	wg.Wait()
+	c.wg.Wait()
 	logCtx.Info("Closing EventStream")
 	return nil
 }

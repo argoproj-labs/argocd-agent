@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"path"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/jannfis/argocd-agent/pkg/client"
+	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/jannfis/argocd-agent/principal"
 	fakecerts "github.com/jannfis/argocd-agent/test/fake/certs"
 	"github.com/sirupsen/logrus"
@@ -30,7 +32,6 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	fakekube "github.com/jannfis/argocd-agent/test/fake/kube"
 )
@@ -119,15 +120,14 @@ func Test_EndToEnd_Subscribe(t *testing.T) {
 	waitc := make(chan struct{})
 	serverRunning := true
 	appsCreated := 0
-
+	numRecvd := atomic.Int32{}
 	go func() {
-		numRecvd := 0
 		for {
 			ev, err := sub.Recv()
 			require.NoError(t, err)
-			numRecvd += 1
+			numRecvd.Add(1)
 			logrus.WithField("module", "test-client").Infof("Received event %v", ev)
-			if numRecvd >= 4 {
+			if numRecvd.Load() >= 4 {
 				logrus.Infof("Finished receiving")
 				break
 			}
@@ -142,11 +142,13 @@ func Test_EndToEnd_Subscribe(t *testing.T) {
 			serverRunning = false
 		case <-waitc:
 			logrus.Infof("Client closed the connection")
+			cancel()
 			serverRunning = false
 		default:
 			if appsCreated > 4 {
 				log().Infof("Reached limit")
 				serverRunning = false
+				cancel()
 				continue
 			}
 			time.Sleep(100 * time.Millisecond)
@@ -160,15 +162,18 @@ func Test_EndToEnd_Subscribe(t *testing.T) {
 			appsCreated += 1
 		}
 	}
+	<-waitc
 	s.Shutdown()
+	assert.Equal(t, 5, appsCreated)
+	assert.Equal(t, int32(4), numRecvd.Load())
 }
 
 func Test_EndToEnd_Push(t *testing.T) {
-	objs := make([]runtime.Object, 10)
-	for i := 0; i < 10; i += 1 {
-		objs[i] = runtime.Object(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: fmt.Sprintf("test%d", i), Namespace: "default"}})
-	}
-	appC := fakeappclient.NewSimpleClientset(objs...)
+	// objs := make([]runtime.Object, 10)
+	// for i := 0; i < 10; i += 1 {
+	// 	objs[i] = runtime.Object(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: fmt.Sprintf("test%d", i), Namespace: "default"}})
+	// }
+	appC := fakeappclient.NewSimpleClientset() //objs...)
 	conn, s := newConn(t, appC)
 	defer conn.Close()
 	authC := authapi.NewAuthenticationClient(conn)
@@ -258,7 +263,7 @@ func Test_AgentServer(t *testing.T) {
 	fakeKubecAgent := fakekube.NewFakeKubeClient()
 	a, err := agent.NewAgent(actx, fakeKubecAgent, fakeAppcAgent, "client",
 		agent.WithRemote(remote),
-		agent.WithMode(""),
+		agent.WithMode(types.AgentModeManaged.String()),
 	)
 	require.NotNil(t, a)
 	require.NoError(t, err)
