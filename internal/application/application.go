@@ -144,7 +144,7 @@ func (m *Manager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Appli
 
 	incoming.SetNamespace(m.Namespace)
 
-	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+	updated, err = m.update(ctx, m.AllowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
 		existing.Spec = *incoming.Spec.DeepCopy()

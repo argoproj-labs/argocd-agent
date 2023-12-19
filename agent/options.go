@@ -29,7 +29,7 @@ func WithMode(mode string) AgentOption {
 		case "managed":
 			a.mode = types.AgentModeManaged
 		default:
-			a.mode = types.AgentModeNone
+			a.mode = types.AgentModeUnknown
 			return fmt.Errorf("unknown agent mode: %s. Must be one of: managed,autonomous", mode)
 		}
 		return nil

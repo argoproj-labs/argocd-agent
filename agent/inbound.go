@@ -79,7 +79,7 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 		logCtx.Tracef("Calling update operation for this event")
 		napp, err = a.appManager.UpdateOperation(a.context, incoming)
 	} else {
-		err = fmt.Errorf("unknown operation mode: %d", a.mode)
+		err = fmt.Errorf("unknown operation mode: %s", a.mode)
 	}
 	return napp, err
 }

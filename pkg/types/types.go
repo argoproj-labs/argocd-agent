@@ -5,18 +5,16 @@ const (
 	AuthResultUnauthorized string = "unauthorized"
 )
 
-type AgentMode int
+type AgentMode string
 
 const (
-	AgentModeNone AgentMode = iota
-	AgentModeManaged
-	AgentModeAutonomous
+	AgentModeUnknown    AgentMode = ""
+	AgentModeManaged    AgentMode = "managed"
+	AgentModeAutonomous AgentMode = "autonomous"
 )
 
 func (m AgentMode) String() string {
 	switch m {
-	case AgentModeNone:
-		return "none"
 	case AgentModeManaged:
 		return "managed"
 	case AgentModeAutonomous:
@@ -32,7 +30,7 @@ func AgentModeFromString(mode string) AgentMode {
 	case "autonomous":
 		return AgentModeAutonomous
 	default:
-		return AgentModeNone
+		return AgentModeUnknown
 	}
 }
 
