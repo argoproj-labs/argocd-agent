@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,7 +27,7 @@ type patchTransformer func(existing, incoming *v1alpha1.Application) (jsondiff.P
 
 const (
 	ManagerRoleUnset ManagerRole = iota
-	ManagerRoleServer
+	ManagerRolePrincipal
 	ManagerRoleAgent
 )
 
@@ -35,6 +36,10 @@ const (
 	ManagerModeAutonomous
 	ManagerModeManaged
 )
+
+// LastUpdatedLabel is a label put on applications which contains the time when
+// an update was last received for this Application
+const LastUpdatedLabel = "argocd-agent.argoproj.io/last-updated"
 
 // Manager manages Argo CD application resources on a given backend.
 //
@@ -97,6 +102,14 @@ func NewManager(be backend.Application, namespace string, opts ...ManagerOption)
 	return m
 }
 
+// stampLastUpdated "stamps" an application with the last updated label
+func stampLastUpdated(app *v1alpha1.Application) {
+	if app.Labels == nil {
+		app.Labels = make(map[string]string)
+	}
+	app.Labels[LastUpdatedLabel] = time.Now().Format(time.RFC3339)
+}
+
 // Create creates the application app using the Manager's application backend.
 func (m *Manager) Create(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
 
@@ -104,9 +117,10 @@ func (m *Manager) Create(ctx context.Context, app *v1alpha1.Application) (*v1alp
 	app.ResourceVersion = ""
 	app.Generation = 0
 
-	// We never want Operation to be set on the server side.
-	if m.Role == ManagerRoleServer {
+	// We never want Operation to be set on the principal's side.
+	if m.Role == ManagerRolePrincipal {
 		app.Operation = nil
+		stampLastUpdated(app)
 	}
 
 	created, err := m.Application.Create(ctx, app)
@@ -143,7 +157,9 @@ func (m *Manager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Appli
 	var err error
 
 	incoming.SetNamespace(m.Namespace)
-
+	if m.Role == ManagerRolePrincipal {
+		stampLastUpdated(incoming)
+	}
 	updated, err = m.update(ctx, m.AllowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
@@ -217,6 +233,9 @@ func (m *Manager) UpdateAutonomousApp(ctx context.Context, namespace string, inc
 	var updated *v1alpha1.Application
 	var err error
 	incoming.SetNamespace(namespace)
+	if m.Role == ManagerRolePrincipal {
+		stampLastUpdated(incoming)
+	}
 	updated, err = m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
@@ -283,6 +302,9 @@ func (m *Manager) UpdateStatus(ctx context.Context, namespace string, incoming *
 	var updated *v1alpha1.Application
 	var err error
 	incoming.SetNamespace(namespace)
+	if m.Role == ManagerRolePrincipal {
+		stampLastUpdated(incoming)
+	}
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
@@ -356,6 +378,9 @@ func (m *Manager) UpdateOperation(ctx context.Context, incoming *v1alpha1.Applic
 
 	var updated *v1alpha1.Application
 	var err error
+	if m.Role == ManagerRolePrincipal {
+		stampLastUpdated(incoming)
+	}
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels

@@ -449,6 +449,41 @@ func Test_IgnoreChange(t *testing.T) {
 	})
 }
 
+func Test_stampLastUpdated(t *testing.T) {
+	t.Run("Stamp app without labels", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foo",
+				Namespace: "bar",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "baz",
+			},
+		}
+		stampLastUpdated(app)
+		assert.Contains(t, app.Labels, LastUpdatedLabel)
+		assert.Len(t, app.Labels, 1)
+	})
+	t.Run("Stamp app with existing labels", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foo",
+				Namespace: "bar",
+				Labels: map[string]string{
+					"foo": "bar",
+					"bar": "baz",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "baz",
+			},
+		}
+		stampLastUpdated(app)
+		assert.Contains(t, app.Labels, LastUpdatedLabel)
+		assert.Len(t, app.Labels, 3)
+	})
+}
+
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
 }
