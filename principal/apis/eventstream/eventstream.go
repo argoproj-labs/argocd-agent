@@ -89,7 +89,7 @@ func newClientConnection(ctx context.Context, timeout time.Duration) (*client, e
 		c.ctx, c.cancelFn = context.WithCancel(ctx)
 	}
 	c.start = time.Now()
-	c.logCtx.Debug("An agent connected to the subscription stream")
+	c.logCtx.Info("An agent connected to the subscription stream")
 	return c, nil
 }
 
@@ -228,8 +228,6 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 // The connection is kept open until the agent closes it, and the stream tries
 // to send updates to the agent as long as possible.
 func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) error {
-	logCtx := log().WithField("method", "Subscribe")
-
 	c, err := newClientConnection(subs.Context(), s.options.MaxStreamDuration)
 	if err != nil {
 		return err
@@ -259,20 +257,16 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	c.wg.Add(1)
 	go func() {
 		defer s.onDisconnect(c)
-		logCtx := c.logCtx.WithFields(logrus.Fields{
-			"direction": "send",
-			"queue":     c.agentName,
-		})
-		logCtx.Tracef("Starting event sender routine")
+		c.logCtx.Tracef("Starting event sender routine")
 		for {
 			select {
 			case <-c.ctx.Done():
-				logCtx.Info("Stopping event sender routine")
+				c.logCtx.Info("Stopping event sender routine")
 				return
 			default:
 				err := s.sendFunc(c, subs)
 				if err != nil {
-					logCtx.Infof("Send: %v", err)
+					c.logCtx.Infof("Send: %v", err)
 					c.cancelFn()
 				}
 
@@ -281,7 +275,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}()
 
 	c.wg.Wait()
-	logCtx.Info("Closing EventStream")
+	c.logCtx.Info("Closing EventStream")
 	return nil
 }
 
