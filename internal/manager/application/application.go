@@ -14,28 +14,14 @@ import (
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/jannfis/argocd-agent/internal/backend"
+	"github.com/jannfis/argocd-agent/internal/manager"
 	"github.com/jannfis/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 )
 
-type ManagerRole int
-type ManagerMode int
-
 type updateTransformer func(existing, incoming *v1alpha1.Application)
 type patchTransformer func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error)
-
-const (
-	ManagerRoleUnset ManagerRole = iota
-	ManagerRolePrincipal
-	ManagerRoleAgent
-)
-
-const (
-	ManagerModeUnset ManagerMode = iota
-	ManagerModeAutonomous
-	ManagerModeManaged
-)
 
 // LastUpdatedLabel is a label put on applications which contains the time when
 // an update was last received for this Application
@@ -48,41 +34,41 @@ type ApplicationManager struct {
 	AllowUpsert bool
 	Application backend.Application
 	Metrics     *metrics.ApplicationClientMetrics
-	Role        ManagerRole
-	Mode        ManagerMode
+	Role        manager.ManagerRole
+	Mode        manager.ManagerMode
 	Namespace   string
 	managedApps map[string]bool // Managed apps is a list of apps we manage
 	observedApp map[string]string
 	lock        sync.RWMutex
 }
 
-// ManagerOption is a callback function to set an option to the Application
+// ApplicationManagerOption is a callback function to set an option to the Application
 // manager
-type ManagerOption func(*ApplicationManager)
+type ApplicationManagerOption func(*ApplicationManager)
 
 // WithMetrics sets the metrics provider for the Manager
-func WithMetrics(m *metrics.ApplicationClientMetrics) ManagerOption {
+func WithMetrics(m *metrics.ApplicationClientMetrics) ApplicationManagerOption {
 	return func(mgr *ApplicationManager) {
 		mgr.Metrics = m
 	}
 }
 
 // WithAllowUpsert sets the upsert operations allowed flag
-func WithAllowUpsert(upsert bool) ManagerOption {
+func WithAllowUpsert(upsert bool) ApplicationManagerOption {
 	return func(m *ApplicationManager) {
 		m.AllowUpsert = upsert
 	}
 }
 
 // WithRole sets the role of the Application manager
-func WithRole(role ManagerRole) ManagerOption {
+func WithRole(role manager.ManagerRole) ApplicationManagerOption {
 	return func(m *ApplicationManager) {
 		m.Role = role
 	}
 }
 
 // WithMode sets the mode of the Application manager
-func WithMode(mode ManagerMode) ManagerOption {
+func WithMode(mode manager.ManagerMode) ApplicationManagerOption {
 	return func(m *ApplicationManager) {
 		m.Mode = mode
 	}
@@ -90,7 +76,7 @@ func WithMode(mode ManagerMode) ManagerOption {
 
 // NewApplicationManager initializes and returns a new Manager with the given backend and
 // options.
-func NewApplicationManager(be backend.Application, namespace string, opts ...ManagerOption) *ApplicationManager {
+func NewApplicationManager(be backend.Application, namespace string, opts ...ApplicationManagerOption) *ApplicationManager {
 	m := &ApplicationManager{}
 	for _, o := range opts {
 		o(m)
@@ -118,7 +104,7 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 	app.Generation = 0
 
 	// We never want Operation to be set on the principal's side.
-	if m.Role == ManagerRolePrincipal {
+	if m.Role == manager.ManagerRolePrincipal {
 		app.Operation = nil
 		stampLastUpdated(app)
 	}
@@ -157,7 +143,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	var err error
 
 	incoming.SetNamespace(m.Namespace)
-	if m.Role == ManagerRolePrincipal {
+	if m.Role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
 	}
 	updated, err = m.update(ctx, m.AllowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
@@ -233,7 +219,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 	var updated *v1alpha1.Application
 	var err error
 	incoming.SetNamespace(namespace)
-	if m.Role == ManagerRolePrincipal {
+	if m.Role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
 	}
 	updated, err = m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
@@ -302,7 +288,7 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 	var updated *v1alpha1.Application
 	var err error
 	incoming.SetNamespace(namespace)
-	if m.Role == ManagerRolePrincipal {
+	if m.Role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
 	}
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
@@ -378,7 +364,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 
 	var updated *v1alpha1.Application
 	var err error
-	if m.Role == ManagerRolePrincipal {
+	if m.Role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
 	}
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {

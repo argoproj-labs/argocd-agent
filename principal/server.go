@@ -105,7 +105,7 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 		appinformer.WithDeleteAppCallback(s.deleteAppCallback),
 	}
 
-	managerOpts := []application.ManagerOption{
+	managerOpts := []application.ApplicationManagerOption{
 		application.WithAllowUpsert(true),
 	}
 
