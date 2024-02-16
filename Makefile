@@ -1,9 +1,14 @@
 DOCKER_BIN?=docker
 
+# Image names
 IMAGE_REPOSITORY=quay.io/jannfis
 IMAGE_NAME_AGENT=argocd-agent-agent
 IMAGE_NAME_PRINCIPAL=argocd-agent-principal
 IMAGE_TAG?=latest
+
+# Binary names
+BIN_NAME_AGENT=argocd-agent-agent
+BIN_NAME_PRINCIPAL=argocd-agent-principal
 
 .PHONY: build
 build:
@@ -31,11 +36,11 @@ protogen: mod-vendor
 
 .PHONY: agent
 agent:
-	CGO_ENABLED=0 go build -v -o dist/argocd-agent -ldflags="-extldflags=-static" cmd/agent/main.go 
+	CGO_ENABLED=0 go build -v -o dist/$(BIN_NAME_AGENT) -ldflags="-extldflags=-static" cmd/agent/main.go 
 
 .PHONY: principal
 principal:
-	CGO_ENABLED=0 go build -v -o dist/argocd-principal -ldflags="-extldflags=-static" cmd/server/main.go
+	CGO_ENABLED=0 go build -v -o dist/$(BIN_NAME_PRINCIPAL) -ldflags="-extldflags=-static" cmd/principal/main.go
 
 .PHONY: images
 images: image-agent image-principal
