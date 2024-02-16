@@ -14,12 +14,12 @@ import (
 	"time"
 
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
-	"github.com/jannfis/argocd-agent/internal/application"
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/backend/kubernetes"
 	"github.com/jannfis/argocd-agent/internal/event"
 	appinformer "github.com/jannfis/argocd-agent/internal/informers/application"
 	"github.com/jannfis/argocd-agent/internal/issuer"
+	"github.com/jannfis/argocd-agent/internal/manager/application"
 	"github.com/jannfis/argocd-agent/internal/metrics"
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/internal/version"

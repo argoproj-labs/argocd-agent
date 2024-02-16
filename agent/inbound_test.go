@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/jannfis/argocd-agent/internal/application"
 	backend_mocks "github.com/jannfis/argocd-agent/internal/backend/mocks"
+	"github.com/jannfis/argocd-agent/internal/manager/application"
 	"github.com/jannfis/argocd-agent/pkg/types"
 )
 

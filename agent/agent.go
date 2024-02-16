@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jannfis/argocd-agent/internal/application"
 	kube_backend "github.com/jannfis/argocd-agent/internal/backend/kubernetes"
 	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/internal/filter"
 	appinformer "github.com/jannfis/argocd-agent/internal/informers/application"
+	"github.com/jannfis/argocd-agent/internal/manager/application"
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/internal/version"
 	"github.com/jannfis/argocd-agent/pkg/client"
