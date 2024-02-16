@@ -41,10 +41,10 @@ const (
 // an update was last received for this Application
 const LastUpdatedLabel = "argocd-agent.argoproj.io/last-updated"
 
-// Manager manages Argo CD application resources on a given backend.
+// ApplicationManager manages Argo CD application resources on a given backend.
 //
 // It provides primitives to create, update, upsert and delete applications.
-type Manager struct {
+type ApplicationManager struct {
 	AllowUpsert bool
 	Application backend.Application
 	Metrics     *metrics.ApplicationClientMetrics
@@ -58,40 +58,40 @@ type Manager struct {
 
 // ManagerOption is a callback function to set an option to the Application
 // manager
-type ManagerOption func(*Manager)
+type ManagerOption func(*ApplicationManager)
 
 // WithMetrics sets the metrics provider for the Manager
 func WithMetrics(m *metrics.ApplicationClientMetrics) ManagerOption {
-	return func(mgr *Manager) {
+	return func(mgr *ApplicationManager) {
 		mgr.Metrics = m
 	}
 }
 
 // WithAllowUpsert sets the upsert operations allowed flag
 func WithAllowUpsert(upsert bool) ManagerOption {
-	return func(m *Manager) {
+	return func(m *ApplicationManager) {
 		m.AllowUpsert = upsert
 	}
 }
 
 // WithRole sets the role of the Application manager
 func WithRole(role ManagerRole) ManagerOption {
-	return func(m *Manager) {
+	return func(m *ApplicationManager) {
 		m.Role = role
 	}
 }
 
 // WithMode sets the mode of the Application manager
 func WithMode(mode ManagerMode) ManagerOption {
-	return func(m *Manager) {
+	return func(m *ApplicationManager) {
 		m.Mode = mode
 	}
 }
 
-// NewManager initializes and returns a new Manager with the given backend and
+// NewApplicationManager initializes and returns a new Manager with the given backend and
 // options.
-func NewManager(be backend.Application, namespace string, opts ...ManagerOption) *Manager {
-	m := &Manager{}
+func NewApplicationManager(be backend.Application, namespace string, opts ...ManagerOption) *ApplicationManager {
+	m := &ApplicationManager{}
 	for _, o := range opts {
 		o(m)
 	}
@@ -111,7 +111,7 @@ func stampLastUpdated(app *v1alpha1.Application) {
 }
 
 // Create creates the application app using the Manager's application backend.
-func (m *Manager) Create(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
+func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
 
 	// A new Application must neither specify ResourceVersion nor Generation
 	app.ResourceVersion = ""
@@ -146,7 +146,7 @@ func (m *Manager) Create(ctx context.Context, app *v1alpha1.Application) (*v1alp
 // and any operation field of the incoming application. A possibly existing
 // refresh annotation on the agent's app will be retained, because it will be
 // removed by the agent's application controller.
-func (m *Manager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "UpdateManaged",
 		"application":     incoming.QualifiedName(),
@@ -223,7 +223,7 @@ func (m *Manager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Appli
 //
 // This method is usually only executed by the control plane for updates that
 // are received by agents in autonomous mode.
-func (m *Manager) UpdateAutonomousApp(ctx context.Context, namespace string, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace string, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "UpdateAutonomous",
 		"application":     incoming.QualifiedName(),
@@ -292,7 +292,7 @@ func (m *Manager) UpdateAutonomousApp(ctx context.Context, namespace string, inc
 // Additionally, if a refresh annotation exists on the app on the app of the
 // server, but not in the incoming app, the annotation will be removed. Any
 // operation field on the existing resource will be removed as well.
-func (m *Manager) UpdateStatus(ctx context.Context, namespace string, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "UpdateStatus",
 		"application":     incoming.QualifiedName(),
@@ -369,7 +369,7 @@ func (m *Manager) UpdateStatus(ctx context.Context, namespace string, incoming *
 // This method is usually executed only by an agent in autonomous mode, because
 // it has the leading version of the resource and we are not supposed to change
 // its Application manifests.
-func (m *Manager) UpdateOperation(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "UpdateOperation",
 		"application":     incoming.QualifiedName(),
@@ -434,7 +434,7 @@ func (m *Manager) UpdateOperation(ctx context.Context, incoming *v1alpha1.Applic
 //
 // The updated application will be returned on success, otherwise an error will
 // be returned.
-func (m *Manager) update(ctx context.Context, upsert bool, incoming *v1alpha1.Application, updateFn updateTransformer, patchFn patchTransformer) (*v1alpha1.Application, error) {
+func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *v1alpha1.Application, updateFn updateTransformer, patchFn patchTransformer) (*v1alpha1.Application, error) {
 	var updated *v1alpha1.Application
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		existing, ierr := m.Application.Get(ctx, incoming.Name, incoming.Namespace)

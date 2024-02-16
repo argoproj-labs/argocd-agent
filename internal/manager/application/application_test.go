@@ -28,18 +28,18 @@ var appNotFoundError = errors.NewNotFound(schema.GroupResource{Group: "argoproj.
 
 func Test_ManagerOptions(t *testing.T) {
 	t.Run("NewManager with default options", func(t *testing.T) {
-		m := NewManager(nil, "")
+		m := NewApplicationManager(nil, "")
 		assert.Equal(t, false, m.AllowUpsert)
 		assert.Nil(t, m.Metrics)
 	})
 
 	t.Run("NewManager with metrics", func(t *testing.T) {
-		m := NewManager(nil, "", WithMetrics(metrics.NewApplicationClientMetrics()))
+		m := NewApplicationManager(nil, "", WithMetrics(metrics.NewApplicationClientMetrics()))
 		assert.NotNil(t, m.Metrics)
 	})
 
 	t.Run("NewManager with upsert enabled", func(t *testing.T) {
-		m := NewManager(nil, "", WithAllowUpsert(true))
+		m := NewApplicationManager(nil, "", WithAllowUpsert(true))
 		assert.True(t, m.AllowUpsert)
 	})
 }
@@ -55,7 +55,7 @@ func Test_ManagerCreate(t *testing.T) {
 					return nil, nil
 				}
 			})
-		m := NewManager(mockedBackend, "")
+		m := NewApplicationManager(mockedBackend, "")
 		_, err := m.Create(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "existing", Namespace: "default"}})
 		assert.ErrorIs(t, err, appExistsError)
 	})
@@ -68,7 +68,7 @@ func Test_ManagerCreate(t *testing.T) {
 			},
 		}
 		mockedBackend := appmock.NewApplication(t)
-		m := NewManager(mockedBackend, "")
+		m := NewApplicationManager(mockedBackend, "")
 		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
 		rapp, err := m.Create(context.TODO(), app)
 		assert.NoError(t, err)
@@ -155,7 +155,7 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := kubernetes.NewKubernetesBackend(appC, informer, true)
-		mgr := NewManager(be, "argocd")
+		mgr := NewApplicationManager(be, "argocd")
 
 		updated, err := mgr.UpdateManagedApp(context.Background(), incoming)
 		require.NoError(t, err)
@@ -241,7 +241,7 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := kubernetes.NewKubernetesBackend(appC, informer, true)
-		mgr := NewManager(be, "argocd")
+		mgr := NewApplicationManager(be, "argocd")
 		updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
 		require.NoError(t, err)
 		b, err := json.MarshalIndent(updated, "", " ")
@@ -314,7 +314,7 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := kubernetes.NewKubernetesBackend(appC, informer, true)
-		mgr := NewManager(be, "argocd")
+		mgr := NewApplicationManager(be, "argocd")
 		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
@@ -380,7 +380,7 @@ func Test_ManagerUpdateOperation(t *testing.T) {
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := kubernetes.NewKubernetesBackend(appC, informer, true)
-		mgr := NewManager(be, "argocd")
+		mgr := NewApplicationManager(be, "argocd")
 		updated, err := mgr.UpdateOperation(context.TODO(), incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
@@ -390,7 +390,7 @@ func Test_ManagerUpdateOperation(t *testing.T) {
 
 func Test_ManageApp(t *testing.T) {
 	t.Run("Mark app as managed", func(t *testing.T) {
-		appm := NewManager(nil, "")
+		appm := NewApplicationManager(nil, "")
 		assert.False(t, appm.IsManaged("foo"))
 		err := appm.Manage("foo")
 		assert.NoError(t, err)
@@ -404,7 +404,7 @@ func Test_ManageApp(t *testing.T) {
 	})
 
 	t.Run("Mark app as unmanaged", func(t *testing.T) {
-		appm := NewManager(nil, "")
+		appm := NewApplicationManager(nil, "")
 		err := appm.Manage("foo")
 		assert.True(t, appm.IsManaged("foo"))
 		assert.NoError(t, err)
@@ -419,7 +419,7 @@ func Test_ManageApp(t *testing.T) {
 
 func Test_IgnoreChange(t *testing.T) {
 	t.Run("Ignore a change", func(t *testing.T) {
-		appm := NewManager(nil, "")
+		appm := NewApplicationManager(nil, "")
 		assert.False(t, appm.IsChangeIgnored("foo", "1"))
 		err := appm.IgnoreChange("foo", "1")
 		assert.NoError(t, err)
@@ -433,7 +433,7 @@ func Test_IgnoreChange(t *testing.T) {
 	})
 
 	t.Run("Unignore a change", func(t *testing.T) {
-		appm := NewManager(nil, "")
+		appm := NewApplicationManager(nil, "")
 		err := appm.UnignoreChange("foo")
 		assert.Error(t, err)
 		assert.False(t, appm.IsChangeIgnored("foo", "1"))

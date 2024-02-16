@@ -41,7 +41,7 @@ type Agent struct {
 	connected         atomic.Bool
 	syncCh            chan bool
 	remote            *client.Remote
-	appManager        *application.Manager
+	appManager        *application.ApplicationManager
 	mode              types.AgentMode
 
 	queues  *queue.SendRecvQueues
@@ -111,7 +111,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 	}
 
 	// The agent only supports Kubernetes as application backend
-	a.appManager = application.NewManager(
+	a.appManager = application.NewApplicationManager(
 		kube_backend.NewKubernetesBackend(a.appclient, a.informer, true),
 		a.namespace,
 		application.WithAllowUpsert(allowUpsert),

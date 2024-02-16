@@ -41,7 +41,7 @@ type Server struct {
 	noauth       map[string]bool // noauth contains endpoints accessible without authentication
 	ctx          context.Context
 	ctxCancel    context.CancelFunc
-	appManager   *application.Manager
+	appManager   *application.ApplicationManager
 	informer     *appinformer.AppInformer
 	watchLock    sync.RWMutex
 	clientMap    map[string]string
@@ -119,7 +119,7 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 		informerOpts...,
 	)
 
-	s.appManager = application.NewManager(kubernetes.NewKubernetesBackend(appClient, s.informer, true), s.namespace,
+	s.appManager = application.NewApplicationManager(kubernetes.NewKubernetesBackend(appClient, s.informer, true), s.namespace,
 		managerOpts...,
 	)
 
@@ -259,7 +259,7 @@ func (s *Server) Queues() *queue.SendRecvQueues {
 	return s.queues
 }
 
-func (s *Server) AppManager() *application.Manager {
+func (s *Server) AppManager() *application.ApplicationManager {
 	return s.appManager
 }
 

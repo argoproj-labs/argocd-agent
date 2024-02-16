@@ -17,7 +17,7 @@ import (
 func Test_CreateApplication(t *testing.T) {
 	a := newAgent(t)
 	be := backend_mocks.NewApplication(t)
-	a.appManager = application.NewManager(be, "argocd", application.WithAllowUpsert(true))
+	a.appManager = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true))
 	require.NotNil(t, a)
 	app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{
 		Name:      "test",
@@ -53,7 +53,7 @@ func Test_CreateApplication(t *testing.T) {
 func Test_UpdateApplication(t *testing.T) {
 	a := newAgent(t)
 	be := backend_mocks.NewApplication(t)
-	a.appManager = application.NewManager(be, "argocd", application.WithAllowUpsert(true))
+	a.appManager = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true))
 	require.NotNil(t, a)
 	app := &v1alpha1.Application{
 		ObjectMeta: v1.ObjectMeta{
