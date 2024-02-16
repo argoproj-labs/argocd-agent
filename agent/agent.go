@@ -43,13 +43,9 @@ type Agent struct {
 	remote            *client.Remote
 	appManager        *application.ApplicationManager
 	mode              types.AgentMode
-
-	queues  *queue.SendRecvQueues
-	emitter *event.Event
-
-	// managedApps is a map whose key is the qualified
-	// managedApps *ManagedApps
-	watchLock sync.RWMutex
+	queues            *queue.SendRecvQueues
+	emitter           *event.Event
+	watchLock         sync.RWMutex
 }
 
 const defaultQueueName = "default"
