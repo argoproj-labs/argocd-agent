@@ -36,14 +36,14 @@ type JwtIssuer struct {
 type JwtIssuerOption func(i *JwtIssuer) error
 
 // WithRSAPrivateKey sets the private RSA for the Issuer
-func WithRSAPrivateKey(key *rsa.PrivateKey) JwtIssuerOption {
+func WithRSAPrivateKey(key crypto.PrivateKey) JwtIssuerOption {
 	return func(i *JwtIssuer) error {
 		i.privateKey = key
 		return nil
 	}
 }
 
-func WithRSAPublicKey(key *rsa.PublicKey) JwtIssuerOption {
+func WithRSAPublicKey(key crypto.PublicKey) JwtIssuerOption {
 	return func(i *JwtIssuer) error {
 		i.publicKey = key
 		return nil

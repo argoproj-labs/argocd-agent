@@ -7,9 +7,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
+	"os"
 	"time"
 
 	"github.com/jannfis/argocd-agent/internal/auth"
@@ -34,7 +37,7 @@ type ServerOptions struct {
 	tlsMinVersion   int
 	gracePeriod     time.Duration
 	namespaces      []string
-	signingKey      *rsa.PrivateKey
+	signingKey      crypto.PrivateKey
 	unauthMethods   map[string]bool
 	serveGRPC       bool
 	serveREST       bool
@@ -67,8 +70,45 @@ func WithEventProcessors(numProcessors int64) ServerOption {
 
 // WithTokenSigningKey sets the RSA private key to use for signing the tokens
 // issued by the Server
-func WithTokenSigningKey(key *rsa.PrivateKey) ServerOption {
+func WithTokenSigningKey(key crypto.PrivateKey) ServerOption {
 	return func(o *Server) error {
+		o.options.signingKey = key
+		return nil
+	}
+}
+
+func WithGeneratedTokenSigningKey() ServerOption {
+	return func(o *Server) error {
+		log().Warnf("Generating and using a volatile token signing key - multiple replicas not possible")
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return fmt.Errorf("could not generate signing key: %w", err)
+		}
+		o.options.signingKey = key
+		return nil
+	}
+}
+
+// WithTokenSigningKey sets the RSA private key to use for signing the tokens
+// issued by the Server
+func WithTokenSigningKeyFromFile(path string) ServerOption {
+	return func(o *Server) error {
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		bytes, err := io.ReadAll(f)
+		if err != nil {
+			return err
+		}
+		pemBlock, _ := pem.Decode(bytes)
+		if pemBlock == nil {
+			return fmt.Errorf("%s contains malformed PEM data", path)
+		}
+		key, err := x509.ParsePKCS8PrivateKey(pemBlock.Bytes)
+		if err != nil {
+			return fmt.Errorf("could not parse RSA key: %w", err)
+		}
 		o.options.signingKey = key
 		return nil
 	}

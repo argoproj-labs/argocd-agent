@@ -66,6 +66,16 @@ func NewPrincipalRunCommand() *cobra.Command {
 				opts = append(opts, principal.WithTLSKeyPairFromPath(tlsCert, tlsKey))
 			} else if allowTlsGenerate {
 				opts = append(opts, principal.WithGeneratedTLS("argocd-agent"))
+			} else {
+				cmd.Fatal("No TLS configuration given and auto generation not allowed.")
+			}
+
+			if jwtKey != "" {
+				opts = append(opts, principal.WithTokenSigningKeyFromFile(jwtKey))
+			} else if allowJwtGenerate {
+				opts = append(opts, principal.WithGeneratedTokenSigningKey())
+			} else {
+				cmd.Fatal("No JWT signing key given and auto generation not allowed.")
 			}
 
 			authMethods := auth.NewMethods()

@@ -2,8 +2,6 @@ package principal
 
 import (
 	context "context"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
 	"fmt"
 	"net/http"
@@ -80,15 +78,8 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 
 	var err error
 
-	// The server supports generating and using a volatile signing keys for the
-	// tokens it issues. This should not be used in production.
 	if s.options.signingKey == nil {
-		log().Warnf("Generating and using a volatile token signing key - multiple replicas not possible")
-		key, err := rsa.GenerateKey(rand.Reader, 2048)
-		if err != nil {
-			return nil, fmt.Errorf("could not generate signing key: %v", err)
-		}
-		s.options.signingKey = key
+		return nil, fmt.Errorf("unexpected missing JWT signing key")
 	}
 
 	s.issuer, err = issuer.NewIssuer("argocd-agent-server", issuer.WithRSAPrivateKey(s.options.signingKey))
