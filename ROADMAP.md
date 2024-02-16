@@ -4,7 +4,7 @@ The following is a list of things and items we want to support in the future. He
 
 Please note: Not all of these items are scoped for the v1.0 release.
 
-## General
+## Docs and testing
 
 * Docs, docs, docs
 * Proper end-to-end test suite
@@ -21,4 +21,5 @@ Please note: Not all of these items are scoped for the v1.0 release.
 
 ## Scalability
 
+* Make the principal elastic and highly available, i.e. support mechanisms such as HPA
 * Provide Application backends other than the Kubernetes API (for example, a database or a more scalable key-value store) to support more than a couple of thousands of clusters
