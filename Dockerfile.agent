@@ -1,5 +1,5 @@
 FROM scratch
 
-COPY dist/argocd-agent /usr/local/bin/argocd-agent
+COPY dist/argocd-agent-agent /usr/local/bin/argocd-agent-agent
 
-ENTRYPOINT ["/usr/local/bin/argocd-agent"]
+ENTRYPOINT ["/usr/local/bin/argocd-agent-agent"]

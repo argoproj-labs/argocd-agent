@@ -1,0 +1,5 @@
+FROM scratch
+
+COPY dist/argocd-agent-principal /usr/local/bin/argocd-agent-principal
+
+ENTRYPOINT ["/usr/local/bin/argocd-agent-principal"]
