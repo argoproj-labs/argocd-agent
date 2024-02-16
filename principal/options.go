@@ -1,6 +1,7 @@
 package principal
 
 import (
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -28,7 +29,7 @@ type ServerOptions struct {
 	tlsCertPath     string
 	tlsKeyPath      string
 	tlsCert         *x509.Certificate
-	tlsKey          *rsa.PrivateKey
+	tlsKey          crypto.PrivateKey
 	tlsCiphers      *tls.CipherSuite
 	tlsMinVersion   int
 	gracePeriod     time.Duration
@@ -93,11 +94,19 @@ func WithListenerAddress(host string) ServerOption {
 	}
 }
 
-// WithTLSKeyPair configures the TLS certificate and private key to be used by
+func WithTLSKeyPair(cert *x509.Certificate, key *rsa.PrivateKey) ServerOption {
+	return func(o *Server) error {
+		o.options.tlsCert = cert
+		o.options.tlsKey = key
+		return nil
+	}
+}
+
+// WithTLSKeyPairFromPath configures the TLS certificate and private key to be used by
 // the server. The function will not check whether the files exists, or if they
 // contain valid data because it is assumed that they may be created at a later
 // point in time.
-func WithTLSKeyPair(certPath, keyPath string) ServerOption {
+func WithTLSKeyPairFromPath(certPath, keyPath string) ServerOption {
 	return func(o *Server) error {
 		o.options.tlsCertPath = certPath
 		o.options.tlsKeyPath = keyPath

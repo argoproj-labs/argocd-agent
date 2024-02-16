@@ -24,7 +24,7 @@ import (
 	"github.com/jannfis/argocd-agent/pkg/client"
 	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/jannfis/argocd-agent/principal"
-	fakecerts "github.com/jannfis/argocd-agent/test/fake/certs"
+	fakecerts "github.com/jannfis/argocd-agent/test/fake/testcerts"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,11 +51,11 @@ func newConn(t *testing.T, appC *fakeappclient.Clientset) (*grpc.ClientConn, *pr
 	t.Helper()
 	tempDir := t.TempDir()
 	templ := certTempl
-	fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
+	fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 	errch := make(chan error)
 
 	s, err := principal.NewServer(context.TODO(), appC, testNamespace,
-		principal.WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+		principal.WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		principal.WithListenerPort(0),
 		principal.WithListenerAddress("127.0.0.1"),
 		principal.WithShutDownGracePeriod(2*time.Second),

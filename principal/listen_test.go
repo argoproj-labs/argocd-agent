@@ -15,7 +15,7 @@ import (
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/jannfis/argocd-agent/pkg/types"
-	fakecerts "github.com/jannfis/argocd-agent/test/fake/certs"
+	fakecerts "github.com/jannfis/argocd-agent/test/fake/testcerts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -64,10 +64,10 @@ func Test_parseAddress(t *testing.T) {
 func Test_Listen(t *testing.T) {
 	tempDir := t.TempDir()
 	templ := certTempl
-	fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
+	fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 	t.Run("Auto-select port for listener", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
-			WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithListenerPort(0),
 			WithListenerAddress("127.0.0.1"),
 		)
@@ -81,7 +81,7 @@ func Test_Listen(t *testing.T) {
 
 	t.Run("Listen on privileged port", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
-			WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithListenerPort(443),
 			WithListenerAddress("127.0.0.1"),
 		)
@@ -127,11 +127,11 @@ func creds(username, password string) auth.Credentials {
 func Test_Serve(t *testing.T) {
 	tempDir := t.TempDir()
 	templ := certTempl
-	fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
+	fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 
 	// We start a real (non-mocked) server
 	s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
-		WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+		WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		WithListenerPort(0),
 		WithListenerAddress("127.0.0.1"),
 		WithShutDownGracePeriod(2*time.Second),

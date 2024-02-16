@@ -1,6 +1,7 @@
 package issuer
 
 import (
+	"crypto"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -24,8 +25,8 @@ var _ Issuer = &JwtIssuer{}
 // private key.
 type JwtIssuer struct {
 	name       string
-	privateKey *rsa.PrivateKey
-	publicKey  *rsa.PublicKey
+	privateKey crypto.PrivateKey
+	publicKey  crypto.PublicKey
 	atAudience string
 	rtAudience string
 	clock      clock.Clock
@@ -61,7 +62,7 @@ func WithRSAPrivateKeyFromFile(path string) JwtIssuerOption {
 		if p == nil {
 			return fmt.Errorf("no valid PEM data found in %s", path)
 		}
-		key, err := x509.ParsePKCS1PrivateKey(p.Bytes)
+		key, err := x509.ParsePKCS8PrivateKey(p.Bytes)
 		if err != nil {
 			return fmt.Errorf("no RSA private key in %s: %w", path, err)
 		}
@@ -109,13 +110,13 @@ func NewIssuer(name string, opts ...JwtIssuerOption) (*JwtIssuer, error) {
 }
 
 func (i *JwtIssuer) validationKey(t *jwt.Token) (interface{}, error) {
-	var pubKey *rsa.PublicKey
+	var pubKey crypto.PublicKey
 	switch t.Method {
 	case jwt.SigningMethodRS512:
 		if i.publicKey != nil {
 			pubKey = i.publicKey
 		} else {
-			pubKey = &i.privateKey.PublicKey
+			pubKey = &i.privateKey.(*rsa.PrivateKey).PublicKey
 		}
 	default:
 		return nil, fmt.Errorf("token isn't signed with %s method", jwt.SigningMethodRS512)

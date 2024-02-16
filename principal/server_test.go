@@ -10,7 +10,7 @@ import (
 	"time"
 
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
-	fakecerts "github.com/jannfis/argocd-agent/test/fake/certs"
+	fakecerts "github.com/jannfis/argocd-agent/test/fake/testcerts"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,9 +31,9 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Run("Valid TLS key pair", func(t *testing.T) {
 		templ := certTempl
-		fakecerts.WriteSelfSignedCert(t, path.Join(tempDir, "test-cert"), templ)
+		fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
-			WithTLSKeyPair(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")))
+			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")))
 		require.NoError(t, err)
 		tlsConfig, err := s.loadTLSConfig()
 		assert.NoError(t, err)
@@ -41,7 +41,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 	})
 	t.Run("Non-existing TLS key pair", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
-			WithTLSKeyPair(path.Join(tempDir, "other-cert.crt"), path.Join(tempDir, "other-cert.key")))
+			WithTLSKeyPairFromPath(path.Join(tempDir, "other-cert.crt"), path.Join(tempDir, "other-cert.key")))
 		require.NoError(t, err)
 		tlsConfig, err := s.loadTLSConfig()
 		assert.ErrorIs(t, err, os.ErrNotExist)
@@ -50,11 +50,11 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 
 	t.Run("Invalid TLS certificate", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
-			WithTLSKeyPair("server_test.go", "server_test.go"))
+			WithTLSKeyPairFromPath("server_test.go", "server_test.go"))
 		require.NoError(t, err)
 		require.NotNil(t, s)
 		tlsConfig, err := s.loadTLSConfig()
-		assert.ErrorContains(t, err, "could not load X509 keypair:")
+		assert.ErrorContains(t, err, "failed to find any PEM data")
 		assert.Nil(t, tlsConfig)
 	})
 }

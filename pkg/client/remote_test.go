@@ -14,7 +14,7 @@ import (
 	"github.com/jannfis/argocd-agent/internal/auth/userpass"
 	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/jannfis/argocd-agent/principal"
-	"github.com/jannfis/argocd-agent/test/fake/certs"
+	"github.com/jannfis/argocd-agent/test/fake/testcerts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,11 +22,11 @@ import (
 func Test_Connect(t *testing.T) {
 	tempDir := t.TempDir()
 	basePath := path.Join(tempDir, "certs")
-	certs.WriteSelfSignedCert(t, basePath, x509.Certificate{SerialNumber: big.NewInt(1)})
+	testcerts.WriteSelfSignedCert(t, "rsa", basePath, x509.Certificate{SerialNumber: big.NewInt(1)})
 	s, err := principal.NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), "default",
 		principal.WithGRPC(true),
 		principal.WithListenerPort(0),
-		principal.WithTLSKeyPair(basePath+".crt", basePath+".key"),
+		principal.WithTLSKeyPairFromPath(basePath+".crt", basePath+".key"),
 	)
 
 	am := userpass.NewUserPassAuthentication()

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/jannfis/argocd-agent/test/fake/certs"
+	"github.com/jannfis/argocd-agent/test/fake/testcerts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -164,7 +164,7 @@ func Test_Issuer(t *testing.T) {
 	t.Run("Issue a JWT with key from file", func(t *testing.T) {
 		tempDir := t.TempDir()
 		keyPath := path.Join(tempDir, "somekey.key")
-		certs.WriteRSAPrivateKey(t, keyPath)
+		testcerts.WritePrivateKey(t, "rsa", keyPath)
 		i, err := NewIssuer("server", WithRSAPrivateKeyFromFile(keyPath))
 		require.NoError(t, err)
 		tok, err = i.IssueAccessToken("agent", 5*time.Second)
@@ -173,7 +173,7 @@ func Test_Issuer(t *testing.T) {
 	t.Run("Create an issuer with public key from file", func(t *testing.T) {
 		tempDir := t.TempDir()
 		keyPath := path.Join(tempDir, "somekey.key")
-		certs.WriteRSAPublicKey(t, keyPath)
+		testcerts.WriteRSAPublicKey(t, keyPath)
 		i, err := NewIssuer("server", WithRSAPublicKeyFromFile(keyPath))
 		require.NoError(t, err)
 		require.NotNil(t, i)
@@ -182,13 +182,13 @@ func Test_Issuer(t *testing.T) {
 	t.Run("Validate tokens with public key", func(t *testing.T) {
 		tempDir := t.TempDir()
 		keyPath := path.Join(tempDir, "somekey.key")
-		key := certs.WriteRSAPrivateKey(t, keyPath)
+		key := testcerts.WritePrivateKey(t, "rsa", keyPath)
 		i, err := NewIssuer("server", WithRSAPrivateKeyFromFile(keyPath))
 		require.NoError(t, err)
 		require.NotNil(t, i)
 		tok, err := i.IssueAccessToken("agent", 5*time.Second)
 		require.NoError(t, err)
-		i, err = NewIssuer("server", WithRSAPublicKey(&key.PublicKey))
+		i, err = NewIssuer("server", WithRSAPublicKey(&key.(*rsa.PrivateKey).PublicKey))
 		require.NoError(t, err)
 		c, err := i.ValidateAccessToken(tok)
 		require.NoError(t, err)
@@ -213,7 +213,7 @@ func Test_Issuer(t *testing.T) {
 	t.Run("Issuer using RSA key from file that has PEM without private key", func(t *testing.T) {
 		tempDir := t.TempDir()
 		basePath := path.Join(tempDir, "cert")
-		certs.WriteSelfSignedCert(t, basePath, x509.Certificate{SerialNumber: big.NewInt(1)})
+		testcerts.WriteSelfSignedCert(t, "rsa", basePath, x509.Certificate{SerialNumber: big.NewInt(1)})
 		_, err := NewIssuer("server", WithRSAPrivateKeyFromFile(basePath+".crt"))
 		require.ErrorContains(t, err, "no RSA private key")
 	})

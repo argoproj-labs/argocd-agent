@@ -27,7 +27,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 		kubeConfig        string
 		tlsCert           string
 		tlsKey            string
-		tlsGenerate       bool
+		jwtKey            string
+		allowTlsGenerate  bool
+		allowJwtGenerate  bool
 		userDB            string
 	)
 	var command = &cobra.Command{
@@ -61,8 +63,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithNamespaces(allowedNamespaces...))
 
 			if tlsCert != "" && tlsKey != "" {
-				opts = append(opts, principal.WithTLSKeyPair(tlsCert, tlsKey))
-			} else if tlsGenerate {
+				opts = append(opts, principal.WithTLSKeyPairFromPath(tlsCert, tlsKey))
+			} else if allowTlsGenerate {
 				opts = append(opts, principal.WithGeneratedTLS("argocd-agent"))
 			}
 
@@ -116,7 +118,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&tlsCert, "tls-cert", "", "Use TLS certificate from path")
 	command.Flags().StringVar(&tlsKey, "tls-key", "", "Use TLS private key from path")
-	command.Flags().BoolVar(&tlsGenerate, "insecure-tls-generate", false, "INSECURE: Generate and use temporary TLS cert and key")
+	command.Flags().StringVar(&jwtKey, "jwt-key", "", "Use JWT signing key from path")
+	command.Flags().BoolVar(&allowTlsGenerate, "insecure-tls-generate", false, "INSECURE: Generate and use temporary TLS cert and key")
+	command.Flags().BoolVar(&allowJwtGenerate, "insecure-jwt-generate", false, "INSECURE: Generate and use temporary JWT signing key")
 	command.Flags().StringVar(&userDB, "passwd", "", "Path to userpass passwd file")
 
 	return command

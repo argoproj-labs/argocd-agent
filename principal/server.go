@@ -1,13 +1,10 @@
 package principal
 
 import (
-	"bytes"
 	context "context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"net/http"
 	"sync"
@@ -22,6 +19,7 @@ import (
 	"github.com/jannfis/argocd-agent/internal/manager/application"
 	"github.com/jannfis/argocd-agent/internal/metrics"
 	"github.com/jannfis/argocd-agent/internal/queue"
+	"github.com/jannfis/argocd-agent/internal/tlsutil"
 	"github.com/jannfis/argocd-agent/internal/version"
 	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -200,36 +198,12 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	var cert tls.Certificate
 	var err error
 	if s.options.tlsCertPath != "" && s.options.tlsKeyPath != "" {
-		cert, err = tls.LoadX509KeyPair(s.options.tlsCertPath, s.options.tlsKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("could not load X509 keypair: %w", err)
-		}
-		for _, c := range cert.Certificate {
-			cert, err := x509.ParseCertificate(c)
-			if err != nil {
-				return nil, fmt.Errorf("could not parse certificate from %s: %w", s.options.tlsCertPath, err)
-			}
-			if !cert.NotAfter.After(time.Now()) {
-				log().Warnf("Server certificate has expired on %s", cert.NotAfter.Format(time.RFC1123Z))
-			}
-		}
+		cert, err = tlsutil.TlsCertFromFile(s.options.tlsCertPath, s.options.tlsKeyPath, false)
 	} else if s.options.tlsCert != nil && s.options.tlsKey != nil {
-		cBytes := &bytes.Buffer{}
-		kBytes := &bytes.Buffer{}
-		err := pem.Encode(cBytes, &pem.Block{Type: "CERTIFICATE", Bytes: s.options.tlsCert.Raw})
-		if err != nil {
-			return nil, fmt.Errorf("error encoding cert: %w", err)
-		}
-		err = pem.Encode(kBytes, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(s.options.tlsKey)})
-		if err != nil {
-			return nil, fmt.Errorf("error encoding key: %w", err)
-		}
-		cert, err = tls.X509KeyPair(cBytes.Bytes(), kBytes.Bytes())
-		if err != nil {
-			return nil, fmt.Errorf("error creating key pair: %w", err)
-		}
-	} else {
-		return nil, fmt.Errorf("TLS not configured")
+		cert, err = tlsutil.TlsCertFromX509(s.options.tlsCert, s.options.tlsKey)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("unable to load TLS config: %w", err)
 	}
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
