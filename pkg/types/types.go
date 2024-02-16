@@ -7,6 +7,10 @@ const (
 
 type AgentMode string
 
+const agentModeManaged = "managed"
+const agentModeAutonomous = "autonomous"
+const agentModeUnknown = "unknown"
+
 const (
 	AgentModeUnknown    AgentMode = ""
 	AgentModeManaged    AgentMode = "managed"
@@ -16,18 +20,18 @@ const (
 func (m AgentMode) String() string {
 	switch m {
 	case AgentModeManaged:
-		return "managed"
+		return agentModeManaged
 	case AgentModeAutonomous:
-		return "autonomous"
+		return agentModeAutonomous
 	}
-	return "unknown"
+	return agentModeUnknown
 }
 
 func AgentModeFromString(mode string) AgentMode {
 	switch mode {
-	case "managed":
+	case agentModeManaged:
 		return AgentModeManaged
-	case "autonomous":
+	case agentModeAutonomous:
 		return AgentModeAutonomous
 	default:
 		return AgentModeUnknown
