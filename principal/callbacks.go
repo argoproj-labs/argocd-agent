@@ -30,10 +30,6 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", outbound.Namespace)
 		return
 	}
-	// ev := event.LegacyEvent{
-	// 	Type:        event.EventAppAdded,
-	// 	Application: outbound,
-	// }
 	ev := s.events.NewApplicationEvent(event.ApplicationCreated, outbound)
 	q.Add(ev)
 	logCtx.Tracef("Added app %s to send queue, total length now %d", outbound.QualifiedName(), q.Len())
