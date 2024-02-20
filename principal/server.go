@@ -242,23 +242,3 @@ func (s *Server) setAgentMode(namespace string, mode types.AgentMode) {
 	defer s.clientLock.Unlock()
 	s.namespaceMap[namespace] = mode
 }
-
-// func (s *Server) namespaceFromClient(clientID string) (string, error) {
-// 	s.clientLock.RLock()
-// 	defer s.clientLock.RUnlock()
-// 	ns, ok := s.clientMap[clientID]
-// 	if !ok {
-// 		return "", fmt.Errorf("no mapping for client ID %s", clientID)
-// 	}
-// 	return ns, nil
-// }
-
-// func (s *Server) clientFromNamespace(namespace string) (string, error) {
-// 	s.clientLock.RLock()
-// 	defer s.clientLock.RUnlock()
-// 	client, ok := s.namespaceMap[namespace]
-// 	if !ok {
-// 		return "", fmt.Errorf("no mapping for namespace %s", namespace)
-// 	}
-// 	return client, nil
-// }
