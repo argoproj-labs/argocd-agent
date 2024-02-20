@@ -25,11 +25,12 @@ type KubernetesBackend struct {
 	usePatch  bool
 }
 
-func NewKubernetesBackend(appClient appclientset.Interface, informer *appinformer.AppInformer, usePatch bool) *KubernetesBackend {
+func NewKubernetesBackend(appClient appclientset.Interface, namespace string, informer *appinformer.AppInformer, usePatch bool) *KubernetesBackend {
 	return &KubernetesBackend{
 		appClient: appClient,
 		informer:  informer,
 		usePatch:  usePatch,
+		namespace: namespace,
 	}
 }
 

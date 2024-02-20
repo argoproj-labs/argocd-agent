@@ -154,7 +154,7 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		// We are on the agent
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := kubernetes.NewKubernetesBackend(appC, informer, true)
+		be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
 		mgr := NewApplicationManager(be, "argocd")
 
 		updated, err := mgr.UpdateManagedApp(context.Background(), incoming)
@@ -240,7 +240,7 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := kubernetes.NewKubernetesBackend(appC, informer, true)
+		be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
 		mgr := NewApplicationManager(be, "argocd")
 		updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
 		require.NoError(t, err)
@@ -313,7 +313,7 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := kubernetes.NewKubernetesBackend(appC, informer, true)
+		be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
 		mgr := NewApplicationManager(be, "argocd")
 		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
 		require.NoError(t, err)
@@ -379,7 +379,7 @@ func Test_ManagerUpdateOperation(t *testing.T) {
 
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := kubernetes.NewKubernetesBackend(appC, informer, true)
+		be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
 		mgr := NewApplicationManager(be, "argocd")
 		updated, err := mgr.UpdateOperation(context.TODO(), incoming)
 		require.NoError(t, err)
