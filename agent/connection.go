@@ -31,7 +31,10 @@ func (a *Agent) maintainConnection() error {
 					}
 				}
 			} else {
-				a.handleStreamEvents()
+				err = a.handleStreamEvents()
+				if err != nil {
+					log().Warnf("Error while handling stream events: %v", err)
+				}
 			}
 			time.Sleep(100 * time.Millisecond)
 		}

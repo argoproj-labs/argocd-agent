@@ -89,7 +89,9 @@ func NewAgentRunCommand() *cobra.Command {
 			if err != nil {
 				cmd.Fatal("Could not create a new agent instance: %v", err)
 			}
-			ag.Start(ctx)
+			if err := ag.Start(ctx); err != nil {
+				cmd.Fatal("Could not start agent: %v", err)
+			}
 			<-ctx.Done()
 		},
 	}

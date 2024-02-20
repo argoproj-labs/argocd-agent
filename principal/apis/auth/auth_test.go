@@ -22,8 +22,9 @@ func Test_Authenticate(t *testing.T) {
 	encodedSubject := `{"clientID":"user1","mode":"managed"}`
 	queues := queue.NewSendRecvQueues()
 	t.Run("Authentication method unsupported", func(t *testing.T) {
-		auths := NewServer(queues, nil, nil)
-		_, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+		auths, err := NewServer(queues, nil, nil)
+		require.NoError(t, err)
+		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
@@ -40,7 +41,8 @@ func Test_Authenticate(t *testing.T) {
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
 		iss.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("refresh", nil)
 
-		auths := NewServer(queues, ams, iss)
+		auths, err := NewServer(queues, ams, iss)
+		require.NoError(t, err)
 		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
@@ -57,8 +59,9 @@ func Test_Authenticate(t *testing.T) {
 		am := authmock.NewMethod(t)
 		am.On("Authenticate", mock.Anything).Return("", errAuthenticationFailed)
 		ams.RegisterMethod("userpass", am)
-		auths := NewServer(queues, ams, nil)
-		_, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+		auths, err := NewServer(queues, ams, nil)
+		require.NoError(t, err)
+		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "wordpass"},
 			Mode:        "managed",
@@ -73,8 +76,9 @@ func Test_Authenticate(t *testing.T) {
 		ams.RegisterMethod("userpass", am)
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("", fmt.Errorf("oops"))
-		auths := NewServer(queues, ams, iss)
-		_, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+		auths, err := NewServer(queues, ams, iss)
+		require.NoError(t, err)
+		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "wordpass"},
 			Mode:        "managed",
@@ -90,8 +94,9 @@ func Test_Authenticate(t *testing.T) {
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
 		iss.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("", fmt.Errorf("oops"))
-		auths := NewServer(queues, ams, iss)
-		_, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+		auths, err := NewServer(queues, ams, iss)
+		require.NoError(t, err)
+		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "wordpass"},
 			Mode:        "managed",
@@ -115,7 +120,8 @@ func Test_RefreshToken(t *testing.T) {
 		issuer.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
 		// issuer.On("IssueRefreshToken", "user1", mock.Anything).Return("refresh", nil)
 
-		auths := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, methods, issuer)
+		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.NoError(t, err)
 		require.NotNil(t, nr)
@@ -133,7 +139,8 @@ func Test_RefreshToken(t *testing.T) {
 		issuer.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
 		issuer.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("refresh", nil)
 
-		auths := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, methods, issuer)
+		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.NoError(t, err)
 		require.NotNil(t, nr)
@@ -145,7 +152,8 @@ func Test_RefreshToken(t *testing.T) {
 		methods := auth.NewMethods()
 
 		issuer := issuermock.NewIssuer(t)
-		auths := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, methods, issuer)
+		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{})
 		require.Error(t, err)
 		require.Nil(t, nr)
@@ -157,7 +165,8 @@ func Test_RefreshToken(t *testing.T) {
 		issuer := issuermock.NewIssuer(t)
 		issuer.On("ValidateRefreshToken", "refresh").Return(nil, fmt.Errorf("oops"))
 
-		auths := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, methods, issuer)
+		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.Error(t, err)
 		require.Nil(t, nr)
@@ -172,7 +181,8 @@ func Test_RefreshToken(t *testing.T) {
 		issuer := issuermock.NewIssuer(t)
 		issuer.On("ValidateRefreshToken", "refresh").Return(claims, nil)
 
-		auths := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, methods, issuer)
+		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.Error(t, err)
 		require.Nil(t, nr)
@@ -188,7 +198,8 @@ func Test_RefreshToken(t *testing.T) {
 		issuer := issuermock.NewIssuer(t)
 		issuer.On("ValidateRefreshToken", "refresh").Return(claims, nil)
 
-		auths := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, methods, issuer)
+		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.Error(t, err)
 		require.Nil(t, nr)
@@ -205,7 +216,8 @@ func Test_RefreshToken(t *testing.T) {
 		issuer.On("ValidateRefreshToken", "refresh").Return(claims, nil)
 		issuer.On("IssueAccessToken", encodedSubject, mock.Anything).Return("", fmt.Errorf("ooops"))
 
-		auths := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, methods, issuer)
+		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.Error(t, err)
 		require.Nil(t, nr)

@@ -120,7 +120,7 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(500 * time.Millisecond)
 				running = false
 			default:
-				fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Create(context.TODO(), app1, v1.CreateOptions{})
+				_, _ = fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Create(context.TODO(), app1, v1.CreateOptions{})
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
@@ -158,7 +158,7 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 				appc := app1.DeepCopy()
 				appc.Spec.Project = "hello"
-				fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Update(context.TODO(), appc, v1.UpdateOptions{})
+				_, _ = fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Update(context.TODO(), appc, v1.UpdateOptions{})
 			}
 		}
 		apps, err := inf.AppLister.Applications(inf.options.namespace).List(labels.Everything())
@@ -191,7 +191,7 @@ func Test_AppInformer(t *testing.T) {
 				running = false
 			default:
 				time.Sleep(100 * time.Millisecond)
-				fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Delete(context.TODO(), "test1", v1.DeleteOptions{})
+				_ = fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Delete(context.TODO(), "test1", v1.DeleteOptions{})
 			}
 		}
 		apps, err := inf.AppLister.Applications(inf.options.namespace).List(labels.Everything())

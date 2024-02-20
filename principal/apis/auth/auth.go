@@ -42,7 +42,7 @@ type ServerOption func(o *ServerOptions) error
 
 // NewServer creates a new instance of an authentication server with the given
 // authentication methods and options.
-func NewServer(queues *queue.SendRecvQueues, authMethods *auth.Methods, iss issuer.Issuer, opts ...ServerOption) *Server {
+func NewServer(queues *queue.SendRecvQueues, authMethods *auth.Methods, iss issuer.Issuer, opts ...ServerOption) (*Server, error) {
 	s := &Server{}
 	s.options = &ServerOptions{}
 	if authMethods != nil {
@@ -53,9 +53,12 @@ func NewServer(queues *queue.SendRecvQueues, authMethods *auth.Methods, iss issu
 	s.queues = queues
 	s.issuer = iss
 	for _, o := range opts {
-		o(s.options)
+		err := o(s.options)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return s
+	return s, nil
 }
 
 func (s *Server) issueTokens(subject *auth.AuthSubject, refresh bool) (accessToken string, refreshToken string, err error) {

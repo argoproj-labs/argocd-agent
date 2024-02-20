@@ -15,8 +15,12 @@ func (a *Agent) listAppCallback(apps []v1alpha1.Application) []v1alpha1.Applicat
 	// and re-add all apps returned by the lister.
 	a.appManager.ClearManaged()
 	for _, app := range apps {
-		a.appManager.Manage(app.QualifiedName())
-		a.appManager.IgnoreChange(app.QualifiedName(), app.ResourceVersion)
+		if err := a.appManager.Manage(app.QualifiedName()); err != nil {
+			log().Warnf("Could not manage app %s: %v", app.QualifiedName(), err)
+		}
+		if err := a.appManager.IgnoreChange(app.QualifiedName(), app.ResourceVersion); err != nil {
+			log().Warnf("Could not ignore change %s for app %s: %v", app.ResourceVersion, app.QualifiedName(), err)
+		}
 	}
 	return apps
 }

@@ -111,8 +111,12 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 
 	created, err := m.Application.Create(ctx, app)
 	if err == nil {
-		m.Manage(created.QualifiedName())
-		m.IgnoreChange(created.QualifiedName(), created.ResourceVersion)
+		if err := m.Manage(created.QualifiedName()); err != nil {
+			log().Warnf("Could not manage app %s: %v", created.QualifiedName(), err)
+		}
+		if err := m.IgnoreChange(created.QualifiedName(), created.ResourceVersion); err != nil {
+			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.QualifiedName(), err)
+		}
 		if m.Metrics != nil {
 			m.Metrics.AppsCreated.WithLabelValues(app.Namespace).Inc()
 		}
@@ -188,7 +192,9 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		} else {
 			logCtx.Infof("Updated application")
 		}
-		m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion)
+		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
+			logCtx.Warnf("Couldn't unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+		}
 		if m.Metrics != nil {
 			m.Metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
 		}
@@ -258,7 +264,9 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		return patch, nil
 	})
 	if err == nil {
-		m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion)
+		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
+			logCtx.Warnf("Could not unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
 		if m.Metrics != nil {
 			m.Metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
@@ -334,7 +342,9 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		return patch, err
 	})
 	if err == nil {
-		m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion)
+		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
+			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
 		if m.Metrics != nil {
 			m.Metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
@@ -394,7 +404,9 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		return patch, err
 	})
 	if err == nil {
-		m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion)
+		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
+			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
 		if m.Metrics != nil {
 			m.Metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()

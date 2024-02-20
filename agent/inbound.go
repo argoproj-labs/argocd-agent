@@ -106,19 +106,9 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	if err != nil {
 		return err
 	}
-	a.appManager.Unmanage(app.QualifiedName())
-	return nil
-}
-
-func (a *Agent) copyAndMutateApp(app *v1alpha1.Application, create bool) *v1alpha1.Application {
-	rapp := &v1alpha1.Application{}
-	rapp.ObjectMeta.Annotations = app.ObjectMeta.Annotations
-	rapp.ObjectMeta.Labels = app.ObjectMeta.Labels
-	rapp.ObjectMeta.Namespace = a.namespace
-	rapp.Spec = *app.Spec.DeepCopy()
-	rapp.Operation = app.Operation.DeepCopy()
-	if rapp.ObjectMeta.Annotations != nil {
-		delete(rapp.ObjectMeta.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
+	err = a.appManager.Unmanage(app.QualifiedName())
+	if err != nil {
+		log().Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
 	}
-	return rapp
+	return nil
 }

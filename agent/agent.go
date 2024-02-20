@@ -9,7 +9,6 @@ import (
 
 	kube_backend "github.com/jannfis/argocd-agent/internal/backend/kubernetes"
 	"github.com/jannfis/argocd-agent/internal/event"
-	"github.com/jannfis/argocd-agent/internal/filter"
 	appinformer "github.com/jannfis/argocd-agent/internal/informers/application"
 	"github.com/jannfis/argocd-agent/internal/manager/application"
 	"github.com/jannfis/argocd-agent/internal/queue"
@@ -20,7 +19,6 @@ import (
 
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 )
 
@@ -37,7 +35,6 @@ type Agent struct {
 	allowedNamespaces []string
 	informer          *appinformer.AppInformer
 	infStopCh         chan struct{}
-	filters           *filter.Chain
 	connected         atomic.Bool
 	syncCh            chan bool
 	remote            *client.Remote
@@ -56,16 +53,6 @@ type AgentOptions struct {
 }
 
 type AgentOption func(*Agent) error
-
-func (a *Agent) informerListCallback(apps []v1alpha1.Application) []v1alpha1.Application {
-	newApps := make([]v1alpha1.Application, 0)
-	for _, app := range apps {
-		if a.filters.Admit(&app) {
-			newApps = append(newApps, app)
-		}
-	}
-	return newApps
-}
 
 // NewAgent creates a new agent instance, using the given client interfaces and
 // options.
@@ -91,7 +78,9 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 
 	// We have one queue in the agent, named default
 	a.queues = queue.NewSendRecvQueues()
-	a.queues.Create(defaultQueueName)
+	if err := a.queues.Create(defaultQueueName); err != nil {
+		return nil, fmt.Errorf("unable to create default queue: %w", err)
+	}
 
 	a.informer = appinformer.NewAppInformer(ctx, a.appclient, a.namespace,
 		appinformer.WithListAppCallback(a.listAppCallback),
@@ -128,7 +117,9 @@ func (a *Agent) Start(ctx context.Context) error {
 	}()
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
-		a.maintainConnection()
+		// TODO: Right now, maintainConnection always returns nil. Revisit
+		// this.
+		_ = a.maintainConnection()
 	}
 
 	a.emitter = event.NewEventEmitter(fmt.Sprintf("agent://%s", "agent-managed"))

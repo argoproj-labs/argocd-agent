@@ -80,15 +80,13 @@ func NewEventEmitter(source string) *Event {
 	return ev
 }
 
-func foo() {
-}
-
 func (ev Event) NewApplicationEvent(evType string, app *v1alpha1.Application) *cloudevents.Event {
 	cev := cloudevents.NewEvent()
 	cev.SetSource(ev.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(evType)
-	cev.SetData(cloudevents.ApplicationJSON, app)
+	// TODO: Handle this error situation?
+	_ = cev.SetData(cloudevents.ApplicationJSON, app)
 	return &cev
 }
 

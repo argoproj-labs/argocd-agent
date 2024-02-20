@@ -55,7 +55,10 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 	authCtx := context.WithValue(ctx, types.ContextAgentIdentifier, agentInfo.ClientID)
 	if !s.queues.HasQueuePair(agentInfo.ClientID) {
 		logCtx.Tracef("Creating a new queue pair for client %s", agentInfo.ClientID)
-		s.queues.Create(agentInfo.ClientID)
+		if err := s.queues.Create(agentInfo.ClientID); err != nil {
+			logCtx.Errorf("Cannot authenticate client: Can't create agent queue: %v", err)
+			return nil, status.Error(codes.Internal, "internal server error")
+		}
 	} else {
 		logCtx.Tracef("Reusing existing queue pair for client %s", agentInfo.ClientID)
 	}

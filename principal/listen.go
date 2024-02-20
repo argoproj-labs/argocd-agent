@@ -130,8 +130,11 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 			s.unaryAuthInterceptor,
 		),
 	)
-
-	authapi.RegisterAuthenticationServer(s.grpcServer, auth.NewServer(s.queues, s.authMethods, s.issuer))
+	authSrv, err := auth.NewServer(s.queues, s.authMethods, s.issuer)
+	if err != nil {
+		return fmt.Errorf("could not create new auth server: %w", err)
+	}
+	authapi.RegisterAuthenticationServer(s.grpcServer, authSrv)
 	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer(s.authenticate))
 	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues))
 

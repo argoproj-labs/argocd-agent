@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/jannfis/argocd-agent/pkg/types"
@@ -25,7 +24,6 @@ type Server struct {
 
 	options *ServerOptions
 	queues  queue.QueuePair
-	event   event.Event
 }
 
 type ServerOptions struct {
@@ -107,8 +105,12 @@ func agentName(ctx context.Context) (string, error) {
 func (s *Server) onDisconnect(c *client) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
+	c.end = time.Now()
 	if s.queues.HasQueuePair(c.agentName) {
-		s.queues.Delete(c.agentName, true)
+		err := s.queues.Delete(c.agentName, true)
+		if err != nil {
+			log().Warnf("Could not delete agent queue %s: %v", c.agentName, err)
+		}
 	}
 	c.wg.Done()
 }

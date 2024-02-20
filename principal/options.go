@@ -258,8 +258,13 @@ func WithServerName(serverName string) ServerOption {
 
 func WithMetricsPort(port int) ServerOption {
 	return func(o *Server) error {
-		o.options.metricsPort = port
-		return nil
+		if port > 0 && port < 32768 {
+			o.options.metricsEnabled = true
+			o.options.metricsPort = port
+			return nil
+		} else {
+			return fmt.Errorf("invalid port: %d", port)
+		}
 	}
 }
 

@@ -149,7 +149,10 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	s.events = event.NewEventEmitter(s.options.serverName)
 
-	s.informer.EnsureSynced(waitForSyncedDuration)
+	if err := s.informer.EnsureSynced(waitForSyncedDuration); err != nil {
+		return fmt.Errorf("unable to sync informer: %v", err)
+	}
+
 	log().Infof("Informer synced and ready")
 
 	return nil

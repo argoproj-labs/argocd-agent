@@ -60,7 +60,7 @@ type Remote struct {
 	conn         *grpc.ClientConn
 	clientID     string
 	clientMode   types.AgentMode
-	// timeouts   timeouts
+	timeouts     timeouts
 }
 
 type RemoteOption func(r *Remote) error
@@ -68,6 +68,20 @@ type RemoteOption func(r *Remote) error
 func (r *Remote) WithBackoff(backoff wait.Backoff) RemoteOption {
 	return func(r *Remote) error {
 		r.backoff = backoff
+		return nil
+	}
+}
+
+func (r *Remote) WithDialTimeout(t time.Duration) RemoteOption {
+	return func(r *Remote) error {
+		r.timeouts.dialTimeout = t
+		return nil
+	}
+}
+
+func (r *Remote) WithTLSHandShakeTimeout(t time.Duration) RemoteOption {
+	return func(r *Remote) error {
+		r.timeouts.tlsHandshakeTimeout = t
 		return nil
 	}
 }

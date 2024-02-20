@@ -67,7 +67,7 @@ func (a *UserPassAuthentication) Authenticate(creds auth.Credentials) (clientID 
 	if !ok {
 		// To make timing attacks a little more complex, we compare the given
 		// password with our dummy hash.
-		bcrypt.CompareHashAndPassword(a.dummy, []byte(incomingPassword))
+		_ = bcrypt.CompareHashAndPassword(a.dummy, []byte(incomingPassword))
 		return "", fmt.Errorf("authentication failed")
 	}
 
@@ -89,9 +89,6 @@ func (a *UserPassAuthentication) UpsertUser(username, password string) {
 		log().WithError(err).Warnf("unable to upsert user")
 	}
 }
-
-// Client ID must be 32 characters, hexadecimal string
-var clientIDRe = regexp.MustCompile(`^[a-zA-Z0-9]{2,}$`)
 
 // We actually support all current bcrypt variants
 var clientSecretRe = regexp.MustCompile(`^\$2[abxy]\$[0-9]{2}.*`)
@@ -128,7 +125,6 @@ func (a *UserPassAuthentication) LoadAuthDataFromFile(path string) error {
 			continue
 		}
 		if errs := validation.IsDNS1123Label(tok[0]); len(errs) > 0 {
-			// if !clientIDRe.MatchString(tok[0]) {
 			log().Warnf("Client ID isn't valid: %s:%d", path, lno)
 			continue
 		}

@@ -3,7 +3,6 @@ package queue
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"k8s.io/client-go/util/workqueue"
 )
@@ -21,9 +20,8 @@ type QueuePair interface {
 }
 
 type queuepair struct {
-	recvq     workqueue.RateLimitingInterface
-	sendq     workqueue.RateLimitingInterface
-	consumers atomic.Int32
+	recvq workqueue.RateLimitingInterface
+	sendq workqueue.RateLimitingInterface
 }
 
 type SendRecvQueues struct {

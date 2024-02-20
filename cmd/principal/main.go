@@ -85,7 +85,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if err != nil {
 					cmd.Fatal("Could not load user database: %v", err)
 				}
-				authMethods.RegisterMethod("userpass", userauth)
+				err = authMethods.RegisterMethod("userpass", userauth)
+				if err != nil {
+					cmd.Fatal("Could not register userpass auth method")
+				}
 				opts = append(opts, principal.WithAuthMethods(authMethods))
 			}
 

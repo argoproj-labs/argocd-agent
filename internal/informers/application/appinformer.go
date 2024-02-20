@@ -203,7 +203,9 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 		},
 	)
 	i.AppLister = applisters.NewApplicationLister(i.AppInformer.GetIndexer())
-	i.AppInformer.SetWatchErrorHandler(cache.DefaultWatchErrorHandler)
+	// SetWatchErrorHandler only returns error when informer already started,
+	// so it should be safe to not handle the error.
+	_ = i.AppInformer.SetWatchErrorHandler(cache.DefaultWatchErrorHandler)
 	return i
 }
 
