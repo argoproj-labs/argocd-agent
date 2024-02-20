@@ -77,6 +77,10 @@ func WithTokenSigningKey(key crypto.PrivateKey) ServerOption {
 	}
 }
 
+// WithGeneratedTokenSigningKey generates a temporary JWT signing key. Note
+// that this option should only be used for testing.
+//
+// INSECURE: Do not use this in production.
 func WithGeneratedTokenSigningKey() ServerOption {
 	return func(o *Server) error {
 		log().Warnf("Generating and using a volatile token signing key - multiple replicas not possible")
