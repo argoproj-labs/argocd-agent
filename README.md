@@ -44,13 +44,13 @@ Binaries are available for the following CPU architectures (Linux only):
 
 The *control plane* represents a central location that implements central management and observability, e.g. the Argo CD API and UI components. However, no reconciliation of Applications happens on the control plane.
 
-An *agent* is deployed to each managed cluster. These clusters, however, are not connected from the control plane, like they would have been in the classical Argo CD multi-cluster setup. Instead, a subset of Argo CD (the application-controller, the applicationset-controller and the repo-server) is deployed to those servers as well. Depending on its configuration, the role of the agent is to either:
+An *agent* is deployed to each managed cluster. These clusters, however, are not connected from the control plane, like they would have been in the classical Argo CD multi-cluster setup. Instead, a subset of Argo CD (the application-controller, the applicationset-controller and the repo-server) is deployed to those servers as well. Depending on its operational mode configuration, the role of the agent is to either:
 
 * Submit status information from the Applications on the managed cluster back to the control plane,
-* Receive updates to Application configuration from the control plane
+* Receive updates to Application configuration from the control plane or
 * A combination of above tasks
 
-In all cases, it's the agent that initiates the connection to the control plane.
+In all cases, it's the agent that initiates the connection to the control plane, and never the other way round.
 
 The following diagram displays an architecture in maximum autonomy mode:
 
@@ -68,7 +68,7 @@ Thus, `argocd-agent` is designed around the assumption that the connection betwe
 
 ### Managed clusters are and will stay autonomous
 
-When the agent cannot reach the control plane, the agent's cluster still is able to perform its operations in an autonomous way. Depending on the agent's mode of operation (see [Architecture](#Architecture) above), cluster admins may still be able to perform configuration (i.e. manage applications, etc) but those changes will only take effect once the agent is connected again.
+When the agent cannot reach the control plane, the agent's cluster still will be able to perform its operations in an autonomous way. Depending on the agent's mode of operation (see [Architecture](#Architecture) above), cluster admins may still be able to perform configuration (i.e. manage applications, etc) but those changes will only take effect once the agent is connected again.
 
 There might be architectural variants where a managed cluster will be dependent upon the availability of the control plane, for example when the managed cluster uses a repository server on the control plane. However, there will always be a variant where fully autonomous managed clusters are supported.
 
@@ -78,7 +78,7 @@ Connections are established in one direction only: from the agent to the control
 
 ### Security
 
-The control plane component of `argocd-agent` provides a gRPC API over HTTPS/2. The connections to the API require mutual TLS and strong authentication. The agent won't need access to the control plane's Kubernetes API, and the control plane component has limited capabilities on the cluster it is running in. 
+The control plane component of `argocd-agent` provides a gRPC API over HTTPS/2. The connections to the API require mutual TLS and strong authentication. The agent won't need access to the control plane's Kubernetes API, and the control plane component has limited capabilities on the cluster it is running in. Thus, depending on the operational mode of the agents, there will be no single point of compromise - even in the case the control plane is compromised, the blast radius will be limited.
 
 ## Operational variants
 
@@ -99,3 +99,5 @@ In *autonomous mode*, the agent will not create or delete Applications on the ag
 We are grateful for all contributions to this project!
 
 Please note that at this point in time, contributors are expected to hack. We do not have any guidelines, the build & test process is bumpy, things will change at high speed.
+
+Please note that code contributions will only be accepted if the changes adhere to the design principles, are following the code guidelines and are accompanied by proper unit tests. No exceptions.
