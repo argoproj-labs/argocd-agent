@@ -33,7 +33,9 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 		templ := certTempl
 		fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
-			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")))
+			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+			WithGeneratedTokenSigningKey(),
+		)
 		require.NoError(t, err)
 		tlsConfig, err := s.loadTLSConfig()
 		assert.NoError(t, err)
@@ -41,7 +43,9 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 	})
 	t.Run("Non-existing TLS key pair", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
-			WithTLSKeyPairFromPath(path.Join(tempDir, "other-cert.crt"), path.Join(tempDir, "other-cert.key")))
+			WithTLSKeyPairFromPath(path.Join(tempDir, "other-cert.crt"), path.Join(tempDir, "other-cert.key")),
+			WithGeneratedTokenSigningKey(),
+		)
 		require.NoError(t, err)
 		tlsConfig, err := s.loadTLSConfig()
 		assert.ErrorIs(t, err, os.ErrNotExist)
@@ -50,7 +54,9 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 
 	t.Run("Invalid TLS certificate", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
-			WithTLSKeyPairFromPath("server_test.go", "server_test.go"))
+			WithTLSKeyPairFromPath("server_test.go", "server_test.go"),
+			WithGeneratedTokenSigningKey(),
+		)
 		require.NoError(t, err)
 		require.NotNil(t, s)
 		tlsConfig, err := s.loadTLSConfig()
@@ -61,7 +67,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 
 func Test_NewServer(t *testing.T) {
 	t.Run("Instantiate new server object with non-default options", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace, WithListenerAddress("0.0.0.0"))
+		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace, WithListenerAddress("0.0.0.0"), WithGeneratedTokenSigningKey())
 		assert.NoError(t, err)
 		assert.NotNil(t, s)
 		assert.NotEqual(t, defaultOptions(), s.options)
@@ -69,7 +75,7 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("Instantiate new server object with invalid option", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace, WithListenerPort(-1))
+		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace, WithListenerPort(-1), WithGeneratedTokenSigningKey())
 		assert.Error(t, err)
 		assert.Nil(t, s)
 	})

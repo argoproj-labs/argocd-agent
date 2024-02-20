@@ -69,6 +69,7 @@ func Test_Listen(t *testing.T) {
 		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithListenerPort(0),
+			WithGeneratedTokenSigningKey(),
 			WithListenerAddress("127.0.0.1"),
 		)
 		require.NoError(t, err)
@@ -82,6 +83,7 @@ func Test_Listen(t *testing.T) {
 	t.Run("Listen on privileged port", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+			WithGeneratedTokenSigningKey(),
 			WithListenerPort(443),
 			WithListenerAddress("127.0.0.1"),
 		)
@@ -132,6 +134,7 @@ func Test_Serve(t *testing.T) {
 	// We start a real (non-mocked) server
 	s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
 		WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+		WithGeneratedTokenSigningKey(),
 		WithListenerPort(0),
 		WithListenerAddress("127.0.0.1"),
 		WithShutDownGracePeriod(2*time.Second),

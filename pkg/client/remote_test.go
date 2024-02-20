@@ -27,6 +27,7 @@ func Test_Connect(t *testing.T) {
 		principal.WithGRPC(true),
 		principal.WithListenerPort(0),
 		principal.WithTLSKeyPairFromPath(basePath+".crt", basePath+".key"),
+		principal.WithGeneratedTokenSigningKey(),
 	)
 
 	am := userpass.NewUserPassAuthentication()
