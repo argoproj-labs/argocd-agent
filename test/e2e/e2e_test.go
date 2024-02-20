@@ -68,7 +68,8 @@ func newConn(t *testing.T, appC *fakeappclient.Clientset) (*grpc.ClientConn, *pr
 
 	am := userpass.NewUserPassAuthentication()
 	am.UpsertUser("default", "password")
-	s.AuthMethods().RegisterMethod("userpass", am)
+	err = s.AuthMethods().RegisterMethod("userpass", am)
+	require.NoError(t, err)
 
 	tlsC := &tls.Config{InsecureSkipVerify: true}
 	creds := credentials.NewTLS(tlsC)
@@ -77,19 +78,6 @@ func newConn(t *testing.T, appC *fakeappclient.Clientset) (*grpc.ClientConn, *pr
 	require.NoError(t, err)
 	return conn, s
 }
-
-func newServer(t *testing.T) *principal.Server {
-	return nil
-}
-
-func newAgent(t *testing.T) *agent.Agent {
-	return nil
-}
-
-// func newStreamingClient(t *testing.T, conn) (eventstreamapi.EventStreamClient, *grpc.ClientConn) {
-// 	t.Helper()
-// 	return eventstreamapi.NewEventStreamClient(conn), conn
-// }
 
 func Test_EndToEnd_Subscribe(t *testing.T) {
 	// token, err := s.TokenIssuer().Issue("default", 1*time.Minute)
@@ -163,7 +151,8 @@ func Test_EndToEnd_Subscribe(t *testing.T) {
 		}
 	}
 	<-waitc
-	s.Shutdown()
+	err = s.Shutdown()
+	require.NoError(t, err)
 	assert.Equal(t, 5, appsCreated)
 	assert.Equal(t, int32(4), numRecvd.Load())
 }
@@ -201,7 +190,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 			}})
 		cev, cerr := format.ToProto(ev)
 		require.NoError(t, cerr)
-		pushc.Send(&eventstreamapi.Event{Event: cev})
+		_ = pushc.Send(&eventstreamapi.Event{Event: cev})
 	}
 	summary, err := pushc.CloseAndRecv()
 	require.NoError(t, err)
@@ -213,7 +202,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 	<-clientCtx.Done()
 
 	log().Infof("Took %v to process", end.Sub(start))
-	s.Shutdown()
+	_ = s.Shutdown()
 
 	// Should have been grabbed by queue processor
 	q := s.Queues()
@@ -237,7 +226,8 @@ func Test_AgentServer(t *testing.T) {
 	fakeAppcServer := fakeappclient.NewSimpleClientset()
 	am := auth.NewMethods()
 	up := userpass.NewUserPassAuthentication()
-	am.RegisterMethod("userpass", up)
+	err := am.RegisterMethod("userpass", up)
+	require.NoError(t, err)
 	up.UpsertUser("client", "insecure")
 	s, err := principal.NewServer(sctx, fakeAppcServer, "server",
 		principal.WithGRPC(true),
@@ -250,7 +240,7 @@ func Test_AgentServer(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, s)
 	errch := make(chan error)
-	s.Start(sctx, errch)
+	_ = s.Start(sctx, errch)
 	defer scancel()
 	defer acancel()
 
@@ -267,7 +257,7 @@ func Test_AgentServer(t *testing.T) {
 	)
 	require.NotNil(t, a)
 	require.NoError(t, err)
-	a.Start(actx)
+	_ = a.Start(actx)
 	for !a.IsConnected() {
 		log().Infof("waiting to connect")
 		time.Sleep(100 * time.Millisecond)
