@@ -1,0 +1,75 @@
+name: Integration tests
+on:
+  push:
+    branches:
+      - 'master'
+  pull_request:
+    branches:
+      - 'master'
+env:
+  # Golang version to use across CI steps
+  GOLANG_VERSION: '1.21'
+
+permissions:
+  contents: read
+
+jobs:
+  check-go:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac # v4.0.0
+      - name: Setup Golang
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.0.0
+        with:
+          go-version: ${{ env.GOLANG_VERSION }}
+      - name: Download all Go modules
+        run: |
+          go mod download
+      - name: Check for tidyness of go.mod and go.sum
+        run: |
+          go mod tidy
+          git diff --exit-code -- .
+
+  build-go:
+    name: Build & cache Go code
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac # v4.0.0
+      - name: Setup Golang
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.0.0
+        with:
+          go-version: ${{ env.GOLANG_VERSION }}
+      - name: Restore go build cache
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3.3.2
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-go-build-v1-${{ github.run_id }}
+      - name: Download all Go modules
+        run: |
+          go mod download
+      - name: Compile all packages
+        run: make build
+
+  test:
+    name: Run unit tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac # v4.0.0
+      - name: Setup Golang
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.0.0
+        with:
+          go-version: ${{ env.GOLANG_VERSION }}
+      - name: Restore go build cache
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3.3.2
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-go-build-v1-${{ github.run_id }}
+      - name: Download all Go modules
+        run: |
+          go mod download
+      - name: Run all unit tests
+        run: make test
+

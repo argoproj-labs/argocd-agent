@@ -13,8 +13,7 @@ BIN_ARCH?=$(shell go env GOARCH)
 BIN_OS?=$(shell go env GOOS)
 
 .PHONY: build
-build:
-	go build ./...
+build: agent principal
 
 .PHONY: test
 test:
