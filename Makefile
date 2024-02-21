@@ -9,6 +9,8 @@ IMAGE_TAG?=latest
 # Binary names
 BIN_NAME_AGENT=argocd-agent-agent
 BIN_NAME_PRINCIPAL=argocd-agent-principal
+BIN_ARCH?=$(shell go env GOARCH)
+BIN_OS?=$(shell go env GOOS)
 
 .PHONY: build
 build:
@@ -25,7 +27,7 @@ mod-vendor:
 
 .PHONY: clean
 clean:
-	rm -rf dist/
+	rm -rf dist/ vendor/
 
 .PHONY: codegen
 codegen: protogen
@@ -34,13 +36,17 @@ codegen: protogen
 protogen: mod-vendor
 	./hack/generate-proto.sh
 
+.PHONY: lint
+lint:
+	golangci-lint run --verbose
+
 .PHONY: agent
 agent:
-	CGO_ENABLED=0 go build -v -o dist/$(BIN_NAME_AGENT) -ldflags="-extldflags=-static" cmd/agent/main.go 
+	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_AGENT) -ldflags="-extldflags=-static" cmd/agent/main.go
 
 .PHONY: principal
 principal:
-	CGO_ENABLED=0 go build -v -o dist/$(BIN_NAME_PRINCIPAL) -ldflags="-extldflags=-static" cmd/principal/main.go
+	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_PRINCIPAL) -ldflags="-extldflags=-static" cmd/principal/main.go
 
 .PHONY: images
 images: image-agent image-principal
