@@ -3,6 +3,7 @@
 set -eo pipefail
 
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE}")"/..; pwd)
+PATH=${PROJECT_ROOT}/build/bin:${PATH}
 
 GENERATE_PATHS="
 	${PROJECT_ROOT}/principal/apis/auth;authapi
@@ -24,7 +25,7 @@ for p in ${GENERATE_PATHS}; do
 		protoc  -I=${src_path} \
 			-I=${PROJECT_ROOT}/vendor \
 			-I=${PROJECT_ROOT}/proto \
-			-I=${PROJECT_ROOT}/dist/protoc-include \
+			-I=${PROJECT_ROOT}/build/bin/protoc-include \
 			--go_out=${PROJECT_ROOT}/pkg/api/grpc/${api_name} \
 			--go_opt=paths=source_relative \
 			--go-grpc_out=${PROJECT_ROOT}/pkg/api/grpc/${api_name} \

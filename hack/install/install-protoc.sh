@@ -2,10 +2,11 @@
 set -eux -o pipefail
 
 PROJECT_ROOT=$(cd $(dirname ${BASH_SOURCE})/../..; pwd)
-DIST_PATH="${PROJECT_ROOT}/dist"
+DIST_PATH="${PROJECT_ROOT}/build/bin"
+mkdir -p "${DIST_PATH}"
 PATH="${DIST_PATH}:${PATH}"
 
-protoc_version="24.3"
+protoc_version="25.3"
 OS=$(go env GOOS)
 ARCHITECTURE=$(go env GOARCH)
 DOWNLOADS=$(mktemp -d /tmp/downloads.XXXXXXXXX)

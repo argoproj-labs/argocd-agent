@@ -28,11 +28,26 @@ mod-vendor:
 clean:
 	rm -rf dist/ vendor/ build/
 
+./build/bin/protoc-gen-go:
+	./hack/install/install-codegen-go-tools.sh
+
+./build/bin/protoc-gen-go-grpc:
+	./hack/install/install-codegen-go-tools.sh
+
+./build/bin/protoc:
+	./hack/install/install-protoc.sh
+
+.PHONY: install-protoc-go
+install-protoc-go: ./build/bin/protoc-gen-go ./build/bin/protoc-gen-go-grpc
+
+.PHONY: install-protoc
+install-protoc: ./build/bin/protoc
+
 .PHONY: codegen
 codegen: protogen
 
 .PHONY: protogen
-protogen: mod-vendor
+protogen: mod-vendor install-protoc-go install-protoc
 	./hack/generate-proto.sh
 
 .PHONY: lint
