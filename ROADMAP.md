@@ -2,7 +2,9 @@
 
 The following is a list of things and items we want to support in the future. Here, the future may mean anything between short term, mid term and long term. We have not yet decided on timelines for the items.
 
-Please note: Not all of these items are scoped for the v1.0 release.
+Please note: 
+* Not all of these items are scoped for the v1.0 release.
+* This is a living list. Items may be added and removed without further notice.
 
 ## Docs and testing
 
