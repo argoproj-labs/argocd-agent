@@ -9,6 +9,10 @@ on:
 env:
   # Golang version to use across CI steps
   GOLANG_VERSION: '1.21'
+  # Version for actions/checkout
+  CHECKOUT_VERSION: b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+  # Version for actions/setup-go
+  SETUP_GO_VERSIOM: 0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
 
 permissions:
   contents: read
@@ -18,10 +22,10 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@${{ env.CHECKOUT_VERSION }}
       - name: Setup Golang
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
-        with:
+        uses: actions/setup-go@${{ env.SETUP_GO_VERSION }}
+        with: 
           go-version: ${{ env.GOLANG_VERSION }}
       - name: Download all Go modules
         run: |
@@ -36,9 +40,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@${{ env.CHECKOUT_VERSION }}
       - name: Setup Golang
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        uses: actions/setup-go@${{ env.SETUP_GO_VERSION }}
         with:
           go-version: ${{ env.GOLANG_VERSION }}
       - name: Restore go build cache
@@ -57,9 +61,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@${{ env.CHECKOUT_VERSION }}
       - name: Setup Golang
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        uses: actions/setup-go@${{ env.SETUP_GO_VERSION }}
         with:
           go-version: ${{ env.GOLANG_VERSION }}
       - name: Restore go build cache
