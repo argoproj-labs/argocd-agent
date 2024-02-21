@@ -30,8 +30,8 @@ See the [quickstart guide](docs/quickstart.md) for more information.
 
 Binaries are available for the following CPU architectures (Linux only):
 
-* x86-64
-* amd64
+* amd64 (x86-64)
+* arm64
 * ppc64le
 * s390x
 
