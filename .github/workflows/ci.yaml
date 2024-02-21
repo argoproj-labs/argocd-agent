@@ -2,10 +2,10 @@ name: Integration tests
 on:
   push:
     branches:
-      - 'master'
+      - 'main'
   pull_request:
     branches:
-      - 'master'
+      - 'main'
 env:
   # Golang version to use across CI steps
   GOLANG_VERSION: '1.21'
