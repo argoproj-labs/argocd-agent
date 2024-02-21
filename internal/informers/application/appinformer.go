@@ -114,7 +114,7 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 			},
 		},
 	)
-	i.AppInformer.AddEventHandler(
+	_, _ = i.AppInformer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				app, ok := obj.(*v1alpha1.Application)
