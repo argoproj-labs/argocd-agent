@@ -26,7 +26,7 @@ mod-vendor:
 
 .PHONY: clean
 clean:
-	rm -rf dist/ vendor/
+	rm -rf dist/ vendor/ build/
 
 .PHONY: codegen
 codegen: protogen
