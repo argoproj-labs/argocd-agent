@@ -3,3 +3,4 @@ test/out
 test/profile
 vendor/
 .vscode
+build/
