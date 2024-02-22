@@ -1,6 +1,6 @@
 # argocd-agent
 
-`argocd-agent` implements a hub/spoke architecture with a central control plane for the popular GitOps tool
+`argocd-agent` provides building blocks for implementing a hub/spoke architecture with a central control plane for the popular GitOps tool
 [Argo CD](https://github.com/argoproj/argo-cd). It allows to scale out Argo CD in many-cluster scenarios by moving compute intensive parts of Argo CD (application controller, repository server) to the managed clusters, while keeping the control and observe components (API and UI) in a central location.
 
 Some might refer to this architecture as the "pull model" with a "single pane of glass".
