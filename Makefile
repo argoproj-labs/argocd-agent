@@ -48,12 +48,15 @@ clean:
 
 .PHONY: install-golangci-lint
 install-golangci-lint: ./build/bin/golangci-lint
+	@echo "golangci-lint installed."
 
 .PHONY: install-protoc-go
 install-protoc-go: ./build/bin/protoc-gen-go ./build/bin/protoc-gen-go-grpc
+	@echo "protoc-gen-go and protoc-gen-go-grpc installed."
 
 .PHONY: install-protoc
 install-protoc: ./build/bin/protoc
+	@echo "protoc installed."
 
 .PHONY: install-proto-toolchain
 install-proto-toolchain: install-protoc install-protoc-go
