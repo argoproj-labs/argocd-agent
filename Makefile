@@ -12,6 +12,9 @@ BIN_NAME_PRINCIPAL=argocd-agent-principal
 BIN_ARCH?=$(shell go env GOARCH)
 BIN_OS?=$(shell go env GOOS)
 
+current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+BIN_DIR := $(current_dir)/build/bin
+
 .PHONY: build
 build: agent principal
 
@@ -28,14 +31,23 @@ mod-vendor:
 clean:
 	rm -rf dist/ vendor/ build/
 
-./build/bin/protoc-gen-go:
-	./hack/install/install-codegen-go-tools.sh
+./build/bin:
+	mkdir -p build/bin
 
-./build/bin/protoc-gen-go-grpc:
-	./hack/install/install-codegen-go-tools.sh
+./build/bin/golangci-lint: ./build/bin
+	GOBIN=$(current_dir)/build/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
-./build/bin/protoc:
+./build/bin/protoc-gen-go: ./build/bin
+	GOBIN=$(current_dir)/build/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
+
+./build/bin/protoc-gen-go-grpc: ./build/bin
+	GOBIN=$(current_dir)/build/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
+
+./build/bin/protoc: ./build/bin
 	./hack/install/install-protoc.sh
+
+.PHONY: install-golangci-lint
+install-golangci-lint: ./build/bin/golangci-lint
 
 .PHONY: install-protoc-go
 install-protoc-go: ./build/bin/protoc-gen-go ./build/bin/protoc-gen-go-grpc
@@ -43,16 +55,24 @@ install-protoc-go: ./build/bin/protoc-gen-go ./build/bin/protoc-gen-go-grpc
 .PHONY: install-protoc
 install-protoc: ./build/bin/protoc
 
+.PHONY: install-proto-toolchain
+install-proto-toolchain: install-protoc install-protoc-go
+	@echo "Build toolchain installed."
+
+.PHONY: install-lint-toolchain
+install-lint-toolchain: install-golangci-lint
+	@echo "Lint toolchain installed."
+
+.PHONY: protogen
+protogen: mod-vendor install-proto-toolchain
+	./hack/generate-proto.sh
+
 .PHONY: codegen
 codegen: protogen
 
-.PHONY: protogen
-protogen: mod-vendor install-protoc-go install-protoc
-	./hack/generate-proto.sh
-
 .PHONY: lint
-lint:
-	golangci-lint run --verbose
+lint: install-lint-toolchain
+	$(BIN_DIR)/golangci-lint run --verbose
 
 .PHONY: agent
 agent:

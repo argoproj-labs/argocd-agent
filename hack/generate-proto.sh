@@ -22,7 +22,7 @@ for p in ${GENERATE_PATHS}; do
 	for f in $(ls $src_path/*.proto); do
 		echo "--> Generating Protobuf and gRPC client for $api_name"
 		mkdir -p ${PROJECT_ROOT}/pkg/api/grpc/${api_name}
-		protoc  -I=${src_path} \
+		${PROJECT_ROOT}/build/bin/protoc  -I=${src_path} \
 			-I=${PROJECT_ROOT}/vendor \
 			-I=${PROJECT_ROOT}/proto \
 			-I=${PROJECT_ROOT}/build/bin/protoc-include \
