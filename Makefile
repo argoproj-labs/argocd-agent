@@ -13,6 +13,7 @@ BIN_ARCH?=$(shell go env GOARCH)
 BIN_OS?=$(shell go env GOOS)
 
 current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+BIN_DIR := $(current_dir)/build/bin
 
 .PHONY: build
 build: agent principal
@@ -55,7 +56,7 @@ install-protoc-go: ./build/bin/protoc-gen-go ./build/bin/protoc-gen-go-grpc
 install-protoc: ./build/bin/protoc
 
 .PHONY: install-proto-toolchain
-install-build-toolchain: install-protoc install-protoc-go
+install-proto-toolchain: install-protoc install-protoc-go
 	@echo "Build toolchain installed."
 
 .PHONY: install-lint-toolchain
@@ -71,7 +72,7 @@ codegen: protogen
 
 .PHONY: lint
 lint: install-lint-toolchain
-	golangci-lint run --verbose
+	$(BIN_DIR)/golangci-lint run --verbose
 
 .PHONY: agent
 agent:
