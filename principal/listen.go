@@ -71,14 +71,16 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 	var err error
 	try := 1
 	bind := fmt.Sprintf("%s:%d", s.options.address, s.options.port)
-	s.tlsConfig, err = s.loadTLSConfig()
-	if err != nil {
-		return err
-	}
+	// It should not be a fatal failure if the listener could not be started.
+	// Instead, retry with backoff until the context has expired.
 	err = wait.ExponentialBackoff(backoff, func() (done bool, err error) {
 		var lerr error
 		if try == 1 {
 			log().Debugf("Starting TCP listener on %s", bind)
+		}
+		s.tlsConfig, lerr = s.loadTLSConfig()
+		if lerr != nil {
+			return false, lerr
 		}
 		c, lerr = tls.Listen("tcp", bind, s.tlsConfig)
 		if lerr != nil {
@@ -88,7 +90,7 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 		}
 		return true, nil
 	})
-
+	// The following condition will probably never be true
 	if err != nil {
 		return err
 	}
