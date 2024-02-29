@@ -49,7 +49,7 @@ type Server struct {
 // noAuthEndpoints is a list of endpoints that are available without the need
 // for the request to be authenticated.
 var noAuthEndpoints = map[string]bool{
-	// "/versionapi.Version/Version":          true,
+	"/versionapi.Version/Version":          true,
 	"/authapi.Authentication/Authenticate": true,
 }
 
