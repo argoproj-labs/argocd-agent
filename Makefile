@@ -71,6 +71,10 @@ install-proto-toolchain: install-protoc install-protoc-go
 install-lint-toolchain: install-golangci-lint
 	@echo "Lint toolchain installed."
 
+.PHONY: install-build-deps
+install-build-deps: install-lint-toolchain install-proto-toolchain
+	@echo "Build dependencies installed"
+
 .PHONY: protogen
 protogen: mod-vendor install-proto-toolchain
 	./hack/generate-proto.sh
