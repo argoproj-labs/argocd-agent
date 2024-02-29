@@ -3,15 +3,62 @@ package principal
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/pkg/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
+
+// clientCertificateMatches checks whether the client certificate credentials
+func (s *Server) clientCertificateMatches(ctx context.Context, match string) error {
+	logCtx := log().WithField("client_addr", addressFromContext(ctx))
+	if !s.options.clientCertSubjectMatch {
+		logCtx.Debug("No client cert subject matching requested")
+		return nil
+	}
+	c, ok := peer.FromContext(ctx)
+	if !ok {
+		return fmt.Errorf("could not get peer from context")
+	}
+	tls, ok := c.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return fmt.Errorf("connection requires TLS credentials but has none")
+	}
+	if len(tls.State.VerifiedChains) < 1 {
+		return fmt.Errorf("no verified certificates found in TLS cred")
+	}
+	cn := tls.State.VerifiedChains[0][0].Subject.CommonName
+	if match != cn {
+		return fmt.Errorf("the TLS subject '%s' does not match agent name '%s'", cn, match)
+	}
+
+	logCtx.WithField("client_name", cn).Infof("Successful match of client cert subject '%s'", cn)
+
+	// Subject has been matched
+	return nil
+}
+
+// unauthenticated is a wrapper function to return a gRPC unauthenticated
+// response to the caller.
+func unauthenticated() (context.Context, error) {
+	return nil, status.Error(codes.Unauthenticated, "invalid authentication data")
+}
+
+// addressFromContext returns the peer's IP address from the context
+func addressFromContext(ctx context.Context) string {
+	c, ok := peer.FromContext(ctx)
+	if !ok {
+		return "unknown"
+	}
+	return c.Addr.String()
+}
 
 // authenticate is used as a gRPC interceptor to decide whether a request is
 // authenticated or not. If the request is authenticated, authenticate will
@@ -22,32 +69,44 @@ import (
 // If the request turns out to be unauthenticated, authenticate will
 // return an appropriate error.
 func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
-	logCtx := log().WithField("module", "AuthHandler")
+	logCtx := log().WithField("module", "AuthHandler").WithField("client", addressFromContext(ctx))
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "could not get metadata from request")
+		logCtx.Error("No metadata in incoming request")
+		return unauthenticated()
 	}
 	jwt, ok := md["authorization"]
 	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "no authentication data found")
+		logCtx.Error("No authorization header in request")
+		return unauthenticated()
 	}
 	claims, err := s.issuer.ValidateAccessToken(jwt[0])
 	if err != nil {
 		logCtx.Warnf("Error validating token: %v", err)
-		return nil, status.Error(codes.Unauthenticated, "invalid authentication data")
+		return unauthenticated()
 	}
 
 	subject, err := claims.GetSubject()
 	if err != nil {
 		logCtx.Warnf("Could not get subject from token: %v", err)
-		return nil, status.Error(codes.Unauthenticated, "invalid authentication data")
+		return unauthenticated()
 	}
 
 	var agentInfo auth.AuthSubject
 	err = json.Unmarshal([]byte(subject), &agentInfo)
 	if err != nil {
 		logCtx.Warnf("Could not unmarshal subject from token: %v", err)
-		return nil, status.Error(codes.Unauthenticated, "invalid authentication data")
+		return unauthenticated()
+	}
+
+	// If we require client certificates, we enforce any potential rules for
+	// the certificate here, instead of at time the connection is made.
+	if s.options.requireClientCerts {
+		if err := s.clientCertificateMatches(ctx, agentInfo.ClientID); err != nil {
+			logCtx.Errorf("could not match TLS certificate: %v", err)
+			return unauthenticated()
+		}
+		logCtx.Infof("Matched client cert subject to agent name")
 	}
 
 	// claims at this point is validated and we can propagate values to the
@@ -64,7 +123,8 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 	}
 	mode := types.AgentModeFromString(agentInfo.Mode)
 	if mode == types.AgentModeUnknown {
-		return nil, status.Error(codes.Unauthenticated, "invalid operation mode")
+		logCtx.Warnf("Client requested invalid operation mode: %s", agentInfo.Mode)
+		return unauthenticated()
 	}
 	s.setAgentMode(agentInfo.ClientID, mode)
 	logCtx.WithField("client", agentInfo.ClientID).WithField("mode", agentInfo.Mode).Tracef("Client passed authentication")
@@ -84,7 +144,7 @@ func (s *Server) unaryAuthInterceptor(ctx context.Context, req any, info *grpc.U
 	if err != nil {
 		return nil, err
 	}
-	return handler(newCtx, nil)
+	return handler(newCtx, req)
 }
 
 // streamAuthInterceptor is a server interceptor for streaming gRPC requests.

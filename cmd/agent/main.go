@@ -30,6 +30,8 @@ func NewAgentRunCommand() *cobra.Command {
 		agentMode     string
 		creds         string
 		showVersion   bool
+		tlsClientCrt  string
+		tlsClientKey  string
 	)
 	command := &cobra.Command{
 		Short: "Run the argocd-agent agent component",
@@ -67,6 +69,9 @@ func NewAgentRunCommand() *cobra.Command {
 				remoteOpts = append(remoteOpts, client.WithInsecureSkipTLSVerify())
 			} else if rootCAPath != "" {
 				remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromFile(rootCAPath))
+			}
+			if tlsClientCrt != "" && tlsClientKey != "" {
+				remoteOpts = append(remoteOpts, client.WithTLSClientCertFromFile(tlsClientCrt, tlsClientKey))
 			}
 			remoteOpts = append(remoteOpts, client.WithClientMode(types.AgentModeFromString(agentMode)))
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
@@ -106,6 +111,8 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&agentMode, "agent-mode", "autonomous", "Mode of operation")
 	command.Flags().StringVar(&creds, "creds", "", "Credentials to use when connecting to server")
 	command.Flags().BoolVar(&showVersion, "version", false, "Display version information and exit")
+	command.Flags().StringVar(&tlsClientCrt, "tls-client-cert", "", "Path to TLS client certificate")
+	command.Flags().StringVar(&tlsClientKey, "tls-client-key", "", "Path to TLS client key")
 	return command
 }
 

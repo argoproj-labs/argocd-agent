@@ -26,24 +26,27 @@ var supportedTLSVersion map[string]int = map[string]int{
 }
 
 type ServerOptions struct {
-	serverName      string
-	port            int
-	address         string
-	tlsCertPath     string
-	tlsKeyPath      string
-	tlsCert         *x509.Certificate
-	tlsKey          crypto.PrivateKey
-	tlsCiphers      *tls.CipherSuite
-	tlsMinVersion   int
-	gracePeriod     time.Duration
-	namespaces      []string
-	signingKey      crypto.PrivateKey
-	unauthMethods   map[string]bool
-	serveGRPC       bool
-	serveREST       bool
-	eventProcessors int64
-	metricsEnabled  bool
-	metricsPort     int
+	serverName             string
+	port                   int
+	address                string
+	tlsCertPath            string
+	tlsKeyPath             string
+	tlsCert                *x509.Certificate
+	tlsKey                 crypto.PrivateKey
+	tlsCiphers             *tls.CipherSuite
+	tlsMinVersion          int
+	gracePeriod            time.Duration
+	namespaces             []string
+	signingKey             crypto.PrivateKey
+	unauthMethods          map[string]bool
+	serveGRPC              bool
+	serveREST              bool
+	eventProcessors        int64
+	metricsEnabled         bool
+	metricsPort            int
+	requireClientCerts     bool
+	rootCa                 *x509.CertPool
+	clientCertSubjectMatch bool
 }
 
 type ServerOption func(o *Server) error
@@ -56,6 +59,7 @@ func defaultOptions() *ServerOptions {
 		tlsMinVersion:   tls.VersionTLS13,
 		unauthMethods:   make(map[string]bool),
 		eventProcessors: 10,
+		rootCa:          x509.NewCertPool(),
 	}
 }
 
@@ -83,7 +87,7 @@ func WithTokenSigningKey(key crypto.PrivateKey) ServerOption {
 // INSECURE: Do not use this in production.
 func WithGeneratedTokenSigningKey() ServerOption {
 	return func(o *Server) error {
-		log().Warnf("Generating and using a volatile token signing key - multiple replicas not possible")
+		log().Warnf("INSECURE: Generating and using a volatile token signing key - multiple replicas not possible")
 		key, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			return fmt.Errorf("could not generate signing key: %w", err)
@@ -138,6 +142,44 @@ func WithListenerAddress(host string) ServerOption {
 	}
 }
 
+// WithClientCertSubjectMatch sets whether the subject of a client certificate
+// presented by the agent must match the agent's name. Has no effect if client
+// certificates are not required.
+func WithClientCertSubjectMatch(match bool) ServerOption {
+	return func(o *Server) error {
+		o.options.clientCertSubjectMatch = match
+		return nil
+	}
+}
+
+// WithTLSRootCaFromFile loads the root CAs to be used to validate client
+// certificates from the file at caPath.
+func WithTLSRootCaFromFile(caPath string) ServerOption {
+	return func(o *Server) error {
+		pem, err := os.ReadFile(caPath)
+		if err != nil {
+			return err
+		}
+		ok := o.options.rootCa.AppendCertsFromPEM(pem)
+		if !ok {
+			return fmt.Errorf("invalid certificate data in %s", caPath)
+		}
+		log().Infof("Loaded %d cert(s) into the root CA pool", len(o.options.rootCa.Subjects()))
+		return nil
+	}
+}
+
+// WithRequireClientCerts sets whether all incoming agent connections must
+// present a valid client certificate before being accepted.
+func WithRequireClientCerts(require bool) ServerOption {
+	return func(o *Server) error {
+		o.options.requireClientCerts = require
+		return nil
+	}
+}
+
+// WithTLSKeyPair configures the TLS certificate and private key to be used by
+// the server. The key must not be passphrase protected.
 func WithTLSKeyPair(cert *x509.Certificate, key *rsa.PrivateKey) ServerOption {
 	return func(o *Server) error {
 		o.options.tlsCert = cert
@@ -158,8 +200,12 @@ func WithTLSKeyPairFromPath(certPath, keyPath string) ServerOption {
 	}
 }
 
+// WithGeneratedTLS configures the server to generate and use a new TLS keypair
+// upon startup.
+//
+// INSECURE: Do not use in production.
 func WithGeneratedTLS(serverName string) ServerOption {
-	log().Warnf("Generating and using a self-signed, volatile TLS certificate")
+	log().Warnf("INSECURE: Generating and using a self-signed, volatile TLS certificate")
 	return func(o *Server) error {
 		templ := x509.Certificate{
 			SerialNumber:          big.NewInt(1),

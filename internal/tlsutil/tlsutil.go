@@ -72,3 +72,11 @@ func TlsCertFromX509(cert *x509.Certificate, key crypto.PrivateKey) (tls.Certifi
 
 	return tlsCert, nil
 }
+
+// func X509CertFromFile(path string) (*x509.Certificate, error) {
+// 	b, err := os.ReadFile(path)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// }

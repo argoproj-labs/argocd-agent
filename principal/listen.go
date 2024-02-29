@@ -2,7 +2,6 @@ package principal
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net"
 	"strconv"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
@@ -72,17 +72,21 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 	try := 1
 	bind := fmt.Sprintf("%s:%d", s.options.address, s.options.port)
 	// It should not be a fatal failure if the listener could not be started.
-	// Instead, retry with backoff until the context has expired.
+	// Instead, retry with backoff until the context has expired or the
+	// number of maximum retries has been exceeded.
 	err = wait.ExponentialBackoff(backoff, func() (done bool, err error) {
 		var lerr error
 		if try == 1 {
 			log().Debugf("Starting TCP listener on %s", bind)
 		}
+		// Even though we load TLS configuration here, we will not use create
+		// a TLS listener. TLS will be setup using the appropriate grpc-go API
+		// functions.
 		s.tlsConfig, lerr = s.loadTLSConfig()
 		if lerr != nil {
 			return false, lerr
 		}
-		c, lerr = tls.Listen("tcp", bind, s.tlsConfig)
+		c, lerr = net.Listen("tcp", bind)
 		if lerr != nil {
 			log().WithError(err).Debugf("Retrying to start TCP listener on %s (retry %d/%d)", bind, try, listenerRetries)
 			try += 1
@@ -131,6 +135,7 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 			// ),
 			s.unaryAuthInterceptor,
 		),
+		grpc.Creds(credentials.NewTLS(s.tlsConfig)),
 	)
 	authSrv, err := auth.NewServer(s.queues, s.authMethods, s.issuer)
 	if err != nil {

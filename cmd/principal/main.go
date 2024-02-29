@@ -17,20 +17,23 @@ import (
 
 func NewPrincipalRunCommand() *cobra.Command {
 	var (
-		listenHost        string
-		listenPort        int
-		logLevel          string
-		metricsPort       int
-		disableMetrics    bool
-		namespace         string
-		allowedNamespaces []string
-		kubeConfig        string
-		tlsCert           string
-		tlsKey            string
-		jwtKey            string
-		allowTlsGenerate  bool
-		allowJwtGenerate  bool
-		userDB            string
+		listenHost             string
+		listenPort             int
+		logLevel               string
+		metricsPort            int
+		disableMetrics         bool
+		namespace              string
+		allowedNamespaces      []string
+		kubeConfig             string
+		tlsCert                string
+		tlsKey                 string
+		jwtKey                 string
+		allowTlsGenerate       bool
+		allowJwtGenerate       bool
+		userDB                 string
+		rootCaPath             string
+		requireClientCerts     bool
+		clientCertSubjectMatch bool
 	)
 	var command = &cobra.Command{
 		Short: "Run the argocd-agent principal component",
@@ -64,11 +67,20 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			if tlsCert != "" && tlsKey != "" {
 				opts = append(opts, principal.WithTLSKeyPairFromPath(tlsCert, tlsKey))
+			} else if (tlsCert != "" && tlsKey == "") || (tlsCert == "" && tlsKey != "") {
+				cmd.Fatal("Both --tls-cert and --tls-key have to be given")
 			} else if allowTlsGenerate {
 				opts = append(opts, principal.WithGeneratedTLS("argocd-agent"))
 			} else {
 				cmd.Fatal("No TLS configuration given and auto generation not allowed.")
 			}
+
+			if rootCaPath != "" {
+				opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
+			}
+
+			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
+			opts = append(opts, principal.WithClientCertSubjectMatch(clientCertSubjectMatch))
 
 			if jwtKey != "" {
 				opts = append(opts, principal.WithTokenSigningKeyFromFile(jwtKey))
@@ -135,6 +147,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&allowTlsGenerate, "insecure-tls-generate", false, "INSECURE: Generate and use temporary TLS cert and key")
 	command.Flags().BoolVar(&allowJwtGenerate, "insecure-jwt-generate", false, "INSECURE: Generate and use temporary JWT signing key")
 	command.Flags().StringVar(&userDB, "passwd", "", "Path to userpass passwd file")
+	command.Flags().StringVar(&rootCaPath, "root-ca-path", "", "Path to a file containing root CA certificate for verifying client certs")
+	command.Flags().BoolVar(&requireClientCerts, "require-client-certs", false, "Whether to require agents to present a client certificate")
+	command.Flags().BoolVar(&clientCertSubjectMatch, "client-cert-subject-match", false, "Whether a client cert's subject must match the agent name")
 
 	return command
 }

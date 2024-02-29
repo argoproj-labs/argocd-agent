@@ -49,7 +49,7 @@ type Server struct {
 // noAuthEndpoints is a list of endpoints that are available without the need
 // for the request to be authenticated.
 var noAuthEndpoints = map[string]bool{
-	"/versionapi.Version/Version":          true,
+	// "/versionapi.Version/Version":          true,
 	"/authapi.Authentication/Authenticate": true,
 }
 
@@ -128,7 +128,7 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 func (s *Server) Start(ctx context.Context, errch chan error) error {
 	log().Infof("Starting %s (server) v%s (ns=%s, allowed_namespaces=%v)", version.Name(), version.Version(), s.namespace, s.options.namespaces)
 	if s.options.serveGRPC {
-		if err := s.serveGRPC(s.ctx, errch); err != nil {
+		if err := s.serveGRPC(ctx, errch); err != nil {
 			return err
 		}
 	}
@@ -188,9 +188,13 @@ func (s *Server) Shutdown() error {
 	return err
 }
 
+// loadTLSConfig will configure and return a tls.Config object that can be
+// used by the server's listener. It will use options set in the server for
+// configuring the returned object.
 func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	var cert tls.Certificate
 	var err error
+
 	if s.options.tlsCertPath != "" && s.options.tlsKeyPath != "" {
 		cert, err = tlsutil.TlsCertFromFile(s.options.tlsCertPath, s.options.tlsKeyPath, false)
 	} else if s.options.tlsCert != nil && s.options.tlsKey != nil {
@@ -199,9 +203,21 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to load TLS config: %w", err)
 	}
+
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
+
+	// If the server is configured to require client certificates, set up the
+	// TLS config accordingly. On verification, we store the common name of
+	// the validated certificate in the server's context, so we can access it
+	// later on.
+	if s.options.requireClientCerts {
+		log().Infof("This server will require TLS client certs as part of authentication")
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsConfig.ClientCAs = s.options.rootCa
+	}
+
 	return tlsConfig, nil
 }
 

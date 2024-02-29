@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/jannfis/argocd-agent/internal/tlsutil"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/jannfis/argocd-agent/pkg/types"
@@ -86,10 +88,21 @@ func (r *Remote) WithTLSHandShakeTimeout(t time.Duration) RemoteOption {
 	}
 }
 
-// WithTLSClientCerte configures the Remote to present the client cert given
-// as certData and private key given as keyData on every outbound connection.
-// Both, certData and keyData must be PEM encoded.
-func WithTLSClientCert(certData []byte, keyData []byte) RemoteOption {
+func WithTLSClientCert(cert *x509.Certificate, key crypto.PrivateKey) RemoteOption {
+	return func(r *Remote) error {
+		c, err := tlsutil.TlsCertFromX509(cert, key)
+		if err != nil {
+			return err
+		}
+		r.tlsConfig.Certificates = append(r.tlsConfig.Certificates, c)
+		return nil
+	}
+}
+
+// WithTLSClientCertFromBytes configures the Remote to present the client cert
+// given as certData and private key given as keyData on every outbound
+// connection. Both, certData and keyData must be PEM encoded.
+func WithTLSClientCertFromBytes(certData []byte, keyData []byte) RemoteOption {
 	return func(r *Remote) error {
 		c, err := tls.X509KeyPair(certData, keyData)
 		if err != nil {
@@ -105,9 +118,9 @@ func WithTLSClientCert(certData []byte, keyData []byte) RemoteOption {
 // connection.
 func WithTLSClientCertFromFile(certPath, keyPath string) RemoteOption {
 	return func(r *Remote) error {
-		c, err := tls.LoadX509KeyPair(certPath, keyPath)
+		c, err := tlsutil.TlsCertFromFile(certPath, keyPath, true)
 		if err != nil {
-			return err
+			return fmt.Errorf("unable to read TLS client cert: %v", err)
 		}
 		r.tlsConfig.Certificates = append(r.tlsConfig.Certificates, c)
 		return nil
