@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"io"
 	"time"
 
@@ -18,7 +19,7 @@ func (a *Agent) maintainConnection() error {
 	go func() {
 		var err error
 		for {
-			if !a.connected.Load() {
+			if !a.IsConnected() {
 				err = a.remote.Connect(a.context, false)
 				if err != nil {
 					log().Warnf("Could not connect to %s: %v", a.remote.Addr(), err)
@@ -27,7 +28,7 @@ func (a *Agent) maintainConnection() error {
 					if err != nil {
 						log().Warnf("Could not create agent queue pair: %v", err)
 					} else {
-						a.connected.Store(true)
+						a.SetConnected(true)
 					}
 				}
 			} else {
@@ -103,7 +104,7 @@ func (a *Agent) handleStreamEvents() error {
 			"direction": "Send",
 		})
 		logCtx.Info("Starting to send events to event stream")
-		for a.connected.Load() {
+		for a.IsConnected() {
 			select {
 			case <-a.context.Done():
 				logCtx.Info("Context canceled")
@@ -146,12 +147,19 @@ func (a *Agent) handleStreamEvents() error {
 				if err != nil {
 					status, ok := status.FromError(err)
 					if !ok {
-						logCtx.Errorf("Error sending data: %v", err)
+						if errors.Is(err, io.EOF) {
+							logCtx.Errorf("Remote disappeared")
+							a.SetConnected(false)
+							close(syncCh)
+							return
+						} else {
+							logCtx.Errorf("Error sending data: %v", err)
+						}
 						continue
 					}
 					if status.Code() == codes.Unavailable {
 						logCtx.Info("Agent has closed the connection during send, closing send loop")
-						a.cancelFn()
+						close(syncCh)
 						return
 					}
 				}
@@ -165,7 +173,11 @@ func (a *Agent) handleStreamEvents() error {
 		case <-a.context.Done():
 			return nil
 		case <-syncCh:
-			log().WithField("componet", "EventHandller").Info("Stream closed")
+			log().WithField("component", "EventHandler").Info("Stream closed")
+			err := a.queues.Delete(a.remote.ClientID(), true)
+			if err != nil {
+				log().Errorf("Could not remove agent queue: %v", err)
+			}
 			return nil
 		default:
 			time.Sleep(100 * time.Millisecond)
