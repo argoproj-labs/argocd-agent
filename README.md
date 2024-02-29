@@ -42,7 +42,7 @@ Binaries are available for the following CPU architectures (Linux only):
 * The *control plane* aka the *principle*, which also hosts the Argo CD API server and some other requirements
 * One or more *agents*
 
-The *control plane* represents a central location that implements central management and observability, e.g. the Argo CD API and UI components. However, no reconciliation of Applications happens on the control plane.
+The *control plane* represents a central location that implements management and observability, e.g. the Argo CD API and UI components. However, no reconciliation of Applications happens on the control plane.
 
 An *agent* is deployed to each managed cluster. These clusters, however, are not connected from the control plane, like they would have been in the classical Argo CD multi-cluster setup. Instead, a subset of Argo CD (the application-controller, the applicationset-controller and the repo-server) is deployed to those servers as well. Depending on its operational mode configuration, the role of the agent is to either:
 
@@ -74,7 +74,7 @@ There might be architectural variants where a managed cluster will be dependent 
 
 ### The initiating component is always the agent, not the control plane
 
-Connections are established in one direction only: from the agent to the control plane. Neither the control plane nor the agents need to know exaxct details about the topology of the system, as long as the agents know which control plane to connect to. In some parts of this doucmentation, we mention something called a _bi-directional stream_. This refers to a gRPC mechanisms where both parties may randomly transmit and receive data from its peer, all while the connection is established only in one direction.
+Connections are established in one direction only: from the agent to the control plane. Neither the control plane nor the agents need to know exact details about the topology of the system, as long as the agents know which control plane to connect to. In some parts of this doucmentation, we mention something called a _bi-directional stream_. This refers to a gRPC mechanisms where both parties may randomly transmit and receive data from its peer, all while the connection is established only in one direction.
 
 ### Security
 
@@ -82,7 +82,7 @@ The control plane component of `argocd-agent` provides a gRPC API over HTTPS/2. 
 
 ## Operational variants
 
-`argocd-agent` can run in two distinct modes of operation: A *managed* mode and an *autonomous* mode. Both modes cater for different types of setups, and the control plane can handle a mixed-mode scenario where some of the agents run in managed mode, and others run in autonomous mode. However, an agent can only run in either of the modes. Having some parts on the agent's system in managed, and others in autonomous mode, is not supported.
+`argocd-agent` can run in two distinct modes of operation: A *managed* mode and an *autonomous* mode. Both modes cater for different types of setups, and the control plane can handle a mixed-mode scenario where some of the agents run in managed mode, and others run in autonomous mode. However, an agent can only run in one of the modes. Having some parts on the agent's system in managed, and others in autonomous mode, is not supported.
 
 ### Managed mode
 
