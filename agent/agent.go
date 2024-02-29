@@ -152,8 +152,14 @@ func (a *Agent) Stop() error {
 	return nil
 }
 
+// IsConnected returns whether the agent is connected to the principal
 func (a *Agent) IsConnected() bool {
 	return a.remote != nil && a.connected.Load()
+}
+
+// SetConnected sets the connection state of the agent
+func (a *Agent) SetConnected(connected bool) {
+	a.connected.Store(connected)
 }
 
 func log() *logrus.Entry {
