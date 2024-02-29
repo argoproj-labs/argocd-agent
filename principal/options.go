@@ -164,6 +164,7 @@ func WithTLSRootCaFromFile(caPath string) ServerOption {
 		if !ok {
 			return fmt.Errorf("invalid certificate data in %s", caPath)
 		}
+		//nolint:staticcheck
 		log().Infof("Loaded %d cert(s) into the root CA pool", len(o.options.rootCa.Subjects()))
 		return nil
 	}
