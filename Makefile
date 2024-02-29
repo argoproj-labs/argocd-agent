@@ -29,7 +29,12 @@ mod-vendor:
 
 .PHONY: clean
 clean:
-	rm -rf dist/ vendor/ build/
+	rm -rf dist/ vendor/
+
+# clean-all also removes any build-time dependencies installed into the tree
+.PHONY: clean-all
+clean-all: clean
+	rm -rf build
 
 ./build/bin:
 	mkdir -p build/bin
