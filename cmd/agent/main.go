@@ -26,6 +26,7 @@ func NewAgentRunCommand() *cobra.Command {
 		insecure      bool
 		rootCAPath    string
 		kubeConfig    string
+		kubeContext   string
 		namespace     string
 		agentMode     string
 		creds         string
@@ -84,7 +85,7 @@ func NewAgentRunCommand() *cobra.Command {
 				cmd.Fatal("No remote specified")
 			}
 
-			kubeConfig, err := cmd.GetKubeConfig(ctx, namespace, kubeConfig)
+			kubeConfig, err := cmd.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
 			if err != nil {
 				cmd.Fatal("Could not load Kubernetes config: %v", err)
 			}
@@ -107,6 +108,7 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&insecure, "insecure-tls", false, "INSECURE: Do not verify remote TLS certificate")
 	command.Flags().StringVar(&rootCAPath, "root-ca-path", "", "Path to a file containing root CA certificate for verifying remote TLS")
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
+	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
 	command.Flags().StringVarP(&namespace, "namespace", "n", "argocd", "Namespace to manage applications in")
 	command.Flags().StringVar(&agentMode, "agent-mode", "autonomous", "Mode of operation")
 	command.Flags().StringVar(&creds, "creds", "", "Credentials to use when connecting to server")

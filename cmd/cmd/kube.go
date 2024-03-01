@@ -8,7 +8,7 @@ import (
 	"github.com/jannfis/argocd-agent/internal/kube"
 )
 
-func GetKubeConfig(ctx context.Context, namespace string, kubeConfig string) (*kube.KubernetesClient, error) {
+func GetKubeConfig(ctx context.Context, namespace string, kubeConfig string, kubecontext string) (*kube.KubernetesClient, error) {
 	var fullKubeConfigPath string
 	var kubeClient *kube.KubernetesClient
 	var err error
@@ -20,7 +20,7 @@ func GetKubeConfig(ctx context.Context, namespace string, kubeConfig string) (*k
 		}
 	}
 
-	kubeClient, err = kube.NewKubernetesClientFromConfig(ctx, namespace, fullKubeConfigPath)
+	kubeClient, err = kube.NewKubernetesClientFromConfig(ctx, namespace, fullKubeConfigPath, kubecontext)
 	if err != nil {
 		return nil, err
 	}

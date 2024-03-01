@@ -28,11 +28,14 @@ func NewKubernetesClient(ctx context.Context, client kubernetes.Interface, appli
 // NewKubernetesClient creates a new Kubernetes client object from given
 // configuration file. If configuration file is the empty string, in-cluster
 // client will be created.
-func NewKubernetesClientFromConfig(ctx context.Context, namespace string, kubeconfig string) (*KubernetesClient, error) {
+func NewKubernetesClientFromConfig(ctx context.Context, namespace string, kubeconfig string, kubecontext string) (*KubernetesClient, error) {
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	loadingRules.DefaultClientConfig = &clientcmd.DefaultClientConfig
 	loadingRules.ExplicitPath = kubeconfig
 	overrides := clientcmd.ConfigOverrides{}
+	if kubecontext != "" {
+		overrides.CurrentContext = kubecontext
+	}
 	clientConfig := clientcmd.NewInteractiveDeferredLoadingClientConfig(loadingRules, &overrides, os.Stdin)
 
 	config, err := clientConfig.ClientConfig()
