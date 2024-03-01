@@ -25,6 +25,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		namespace              string
 		allowedNamespaces      []string
 		kubeConfig             string
+		kubeContext            string
 		tlsCert                string
 		tlsKey                 string
 		jwtKey                 string
@@ -50,7 +51,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				logrus.SetLevel(lvl)
 			}
 
-			kubeConfig, err := cmd.GetKubeConfig(ctx, namespace, kubeConfig)
+			kubeConfig, err := cmd.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
 			if err != nil {
 				cmd.Fatal("Could not load Kubernetes config: %v", err)
 			}
@@ -141,6 +142,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVarP(&namespace, "namespace", "n", "", "The namespace the server will use for configuration. Set only when running out of cluster.")
 	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces", []string{}, "List of namespaces the server is allowed to operate in")
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
+	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
 	command.Flags().StringVar(&tlsCert, "tls-cert", "", "Use TLS certificate from path")
 	command.Flags().StringVar(&tlsKey, "tls-key", "", "Use TLS private key from path")
 	command.Flags().StringVar(&jwtKey, "jwt-key", "", "Use JWT signing key from path")
