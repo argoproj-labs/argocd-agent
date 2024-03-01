@@ -7,6 +7,7 @@ import (
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
 	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/jannfis/argocd-agent/internal/grpcutil"
 	"github.com/jannfis/argocd-agent/pkg/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -18,7 +19,7 @@ import (
 
 // clientCertificateMatches checks whether the client certificate credentials
 func (s *Server) clientCertificateMatches(ctx context.Context, match string) error {
-	logCtx := log().WithField("client_addr", addressFromContext(ctx))
+	logCtx := log().WithField("client_addr", grpcutil.AddressFromContext(ctx))
 	if !s.options.clientCertSubjectMatch {
 		logCtx.Debug("No client cert subject matching requested")
 		return nil
@@ -51,15 +52,6 @@ func unauthenticated() (context.Context, error) {
 	return nil, status.Error(codes.Unauthenticated, "invalid authentication data")
 }
 
-// addressFromContext returns the peer's IP address from the context
-func addressFromContext(ctx context.Context) string {
-	c, ok := peer.FromContext(ctx)
-	if !ok {
-		return "unknown"
-	}
-	return c.Addr.String()
-}
-
 // authenticate is used as a gRPC interceptor to decide whether a request is
 // authenticated or not. If the request is authenticated, authenticate will
 // also augment the Context of the request with additional information about
@@ -69,7 +61,7 @@ func addressFromContext(ctx context.Context) string {
 // If the request turns out to be unauthenticated, authenticate will
 // return an appropriate error.
 func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
-	logCtx := log().WithField("module", "AuthHandler").WithField("client", addressFromContext(ctx))
+	logCtx := log().WithField("module", "AuthHandler").WithField("client", grpcutil.AddressFromContext(ctx))
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		logCtx.Error("No metadata in incoming request")
