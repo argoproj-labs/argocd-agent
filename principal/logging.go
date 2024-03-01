@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
+	"github.com/jannfis/argocd-agent/internal/grpcutil"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
@@ -36,14 +37,20 @@ func InterceptorLogger(l logrus.FieldLogger) logging.Logger {
 
 func unaryRequestLogger() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-		log().WithField("method", info.FullMethod).Debug("Processing unary gRPC request")
+		log().WithFields(logrus.Fields{
+			"method":      info.FullMethod,
+			"client_addr": grpcutil.AddressFromContext(ctx),
+		}).Debug("Processing unary gRPC request")
 		return handler(ctx, req)
 	}
 }
 
 func streamRequestLogger() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		log().WithField("method", info.FullMethod).Debug("Processing streaming gRPC request")
+		log().WithFields(logrus.Fields{
+			"method":      info.FullMethod,
+			"client_addr": grpcutil.AddressFromContext(ss.Context()),
+		}).Debug("Processing unary gRPC request")
 		return handler(srv, ss)
 	}
 }
