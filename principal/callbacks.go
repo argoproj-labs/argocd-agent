@@ -12,17 +12,22 @@ import (
 // is in autonomous mode, this event will be discarded.
 func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 	logCtx := log().WithFields(logrus.Fields{
-		"component": "NewAppCallback",
-		"namespace": outbound.Namespace,
+		"component":        "EventCallback",
+		"queue":            outbound.Namespace,
+		"event":            "application_new",
+		"application_name": outbound.Name,
 	})
 
-	mode := s.agentMode(outbound.Namespace)
-	if mode != types.AgentModeManaged {
-		logCtx.Tracef("Discarding NewApp event for unmanaged agent")
+	// Return early if no interested agent is connected
+	if !s.queues.HasQueuePair(outbound.Namespace) {
+		logCtx.Debug("No agent is connected to this queue, discarding event")
 		return
 	}
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		logCtx.Tracef("no agent connected to namespace %s, discarding", outbound.Namespace)
+
+	// New app events are only relevant for managed agents
+	mode := s.agentMode(outbound.Namespace)
+	if mode != types.AgentModeManaged {
+		logCtx.Tracef("Discarding event for unmanaged agent")
 		return
 	}
 	q := s.queues.SendQ(outbound.Namespace)
@@ -39,21 +44,22 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 	s.watchLock.Lock()
 	defer s.watchLock.Unlock()
 	logCtx := log().WithFields(logrus.Fields{
-		"component":   "UpdateAppCallback",
-		"application": old.Name,
-		"queue":       old.Namespace,
+		"component":        "EventCallback",
+		"queue":            old.Namespace,
+		"event":            "application_update",
+		"application_name": old.Name,
 	})
 	if s.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
-		logCtx.Debugf("I have seen this version %s already", new.ResourceVersion)
+		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
 		return
 	}
 	if !s.queues.HasQueuePair(old.Namespace) {
-		logCtx.Tracef("no agent connected to namespace %s, discarding", old.Namespace)
+		logCtx.Tracef("No agent is connected to this queue, discarding event")
 		return
 	}
 	q := s.queues.SendQ(old.Namespace)
 	if q == nil {
-		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", old.Namespace)
+		logCtx.Error("Help! Queue pair has disappeared!")
 		return
 	}
 	ev := s.events.NewApplicationEvent(event.ApplicationSpecUpdated, new)
@@ -62,19 +68,24 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 }
 
 func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
-	logCtx := log().WithField("component", "DeleteAppCallback")
+	logCtx := log().WithFields(logrus.Fields{
+		"component":        "EventCallback",
+		"queue":            outbound.Namespace,
+		"event":            "application_delete",
+		"application_name": outbound.Name,
+	})
 	if !s.queues.HasQueuePair(outbound.Namespace) {
-		logCtx.Tracef("no agent connected to namespace %s, discarding", outbound.Namespace)
+		logCtx.Tracef("No agent is connected to this queue, discarding event")
 		return
 	}
 	mode := s.agentMode(outbound.Namespace)
 	if mode != types.AgentModeManaged {
-		logCtx.Tracef("Discarding DeleteApp event for unmanaged agent")
+		logCtx.Tracef("Discarding event for unmanaged agent")
 		return
 	}
 	q := s.queues.SendQ(outbound.Namespace)
 	if q == nil {
-		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", outbound.Namespace)
+		logCtx.Error("Help! Queue pair has disappeared!")
 		return
 	}
 	ev := s.events.NewApplicationEvent(event.ApplicationDeleted, outbound)
