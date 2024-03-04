@@ -5,7 +5,7 @@ go 1.21
 toolchain go1.21.1
 
 require (
-	github.com/argoproj/argo-cd/v2 v2.10.1
+	github.com/argoproj/argo-cd/v2 v2.10.2
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.15.1
 	github.com/cloudevents/sdk-go/v2 v2.15.1
 	github.com/golang-jwt/jwt/v5 v5.2.0
@@ -140,7 +140,7 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/api v0.26.11 // indirect
-	k8s.io/apiextensions-apiserver v0.26.4 // indirect
+	k8s.io/apiextensions-apiserver v0.26.10 // indirect
 	k8s.io/apiserver v0.26.11 // indirect
 	k8s.io/cli-runtime v0.26.11 // indirect
 	k8s.io/component-base v0.26.11 // indirect
