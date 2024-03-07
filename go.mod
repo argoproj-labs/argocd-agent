@@ -6,8 +6,8 @@ toolchain go1.21.1
 
 require (
 	github.com/argoproj/argo-cd/v2 v2.10.2
-	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.15.1
-	github.com/cloudevents/sdk-go/v2 v2.15.1
+	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.15.2
+	github.com/cloudevents/sdk-go/v2 v2.15.2
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.0.1
