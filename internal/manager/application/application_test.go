@@ -8,7 +8,7 @@ import (
 
 	"github.com/jannfis/argocd-agent/internal/backend/kubernetes"
 	appmock "github.com/jannfis/argocd-agent/internal/backend/mocks"
-	appinformer "github.com/jannfis/argocd-agent/internal/informers/application"
+	appinformer "github.com/jannfis/argocd-agent/internal/informer/application"
 	"github.com/jannfis/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"

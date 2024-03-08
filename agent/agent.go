@@ -9,7 +9,7 @@ import (
 
 	kube_backend "github.com/jannfis/argocd-agent/internal/backend/kubernetes"
 	"github.com/jannfis/argocd-agent/internal/event"
-	appinformer "github.com/jannfis/argocd-agent/internal/informers/application"
+	appinformer "github.com/jannfis/argocd-agent/internal/informer/application"
 	"github.com/jannfis/argocd-agent/internal/manager/application"
 	"github.com/jannfis/argocd-agent/internal/queue"
 	"github.com/jannfis/argocd-agent/internal/version"

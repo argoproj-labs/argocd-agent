@@ -11,7 +11,7 @@ import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"github.com/jannfis/argocd-agent/internal/backend"
-	appinformer "github.com/jannfis/argocd-agent/internal/informers/application"
+	appinformer "github.com/jannfis/argocd-agent/internal/informer/application"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
