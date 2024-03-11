@@ -5,6 +5,8 @@ import (
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
+	applisters "github.com/argoproj/argo-cd/v2/pkg/client/listers/application/v1alpha1"
+
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -21,6 +23,8 @@ type AppProjectInformer struct {
 	addFunc    func(proj *v1alpha1.AppProject)
 	updateFunc func(oldProj *v1alpha1.AppProject, newProj *v1alpha1.AppProject)
 	deleteFunc func(proj *v1alpha1.AppProject)
+
+	projLister applisters.AppProjectLister
 }
 
 type AppProjectInformerOption func(pi *AppProjectInformer) error
@@ -67,14 +71,14 @@ func WithLogger(l *logrus.Entry) AppProjectInformerOption {
 	}
 }
 
-func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, options ...AppProjectInformerOption) (*informer.GenericInformer, error) {
+func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, options ...AppProjectInformerOption) (*informer.GenericInformer, applisters.AppProjectLister, error) {
 	pi := &AppProjectInformer{
 		namespaces: make([]string, 0),
 	}
 	for _, o := range options {
 		err := o(pi)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if pi.logger == nil {
@@ -105,11 +109,6 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 				pi.logger.Errorf("Received add event for unknown type %T", obj)
 				return
 			}
-			if pi.filterFunc != nil {
-				if !pi.filterFunc(proj) {
-					return
-				}
-			}
 			pi.logger.Debugf("AppProject add event: %s", proj.Name)
 			if pi.addFunc != nil {
 				pi.addFunc(proj)
@@ -122,11 +121,6 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 				pi.logger.Errorf("Received update event for unknown type old:%T new:%T", oldObj, newObj)
 				return
 			}
-			if pi.filterFunc != nil {
-				if !pi.filterFunc(newProj) {
-					return
-				}
-			}
 			pi.logger.Debugf("AppProject update event: old:%s new:%s", oldProj.Name, newProj.Name)
 			if pi.updateFunc != nil {
 				pi.updateFunc(oldProj, newProj)
@@ -138,16 +132,22 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 				pi.logger.Errorf("Received delete event for unknown type %T", obj)
 				return
 			}
-			if pi.filterFunc != nil {
-				if !pi.filterFunc(proj) {
-					return
-				}
-			}
 			pi.logger.Debugf("AppProject delete event: %s", proj.Name)
 			if pi.deleteFunc != nil {
 				pi.deleteFunc(proj)
 			}
 		}),
+		informer.WithFilterFunc(func(obj interface{}) bool {
+			if pi.filterFunc == nil {
+				return true
+			}
+			o, ok := obj.(*v1alpha1.AppProject)
+			if !ok {
+				pi.logger.Errorf("Failed type conversion for unknown type %T", obj)
+				return false
+			}
+			return pi.filterFunc(o)
+		}),
 	)
-	return i, err
+	return i, applisters.NewAppProjectLister(i.Indexer()), err
 }

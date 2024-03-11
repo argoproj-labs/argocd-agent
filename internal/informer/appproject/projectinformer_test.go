@@ -20,7 +20,7 @@ func Test_AppProjectInformer(t *testing.T) {
 	numUpdated := atomic.Uint32{}
 	numDeleted := atomic.Uint32{}
 	ac := fakeappclient.NewSimpleClientset()
-	pi, err := NewAppProjectInformer(context.TODO(), ac,
+	pi, lister, err := NewAppProjectInformer(context.TODO(), ac,
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
 		}),
@@ -50,6 +50,14 @@ func Test_AppProjectInformer(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 		}
 		assert.EqualValues(t, 5, numAdded.Load())
+		// Projects should be available from the indexer now
+		for _, i := range []int{1, 2, 3, 4, 5} {
+			n := fmt.Sprintf("proj%d", i)
+			p, err := lister.AppProjects("argocd").Get(n)
+			require.NotNil(t, p)
+			require.NoError(t, err)
+			assert.Equal(t, n, p.Name)
+		}
 	})
 	t.Run("Modify AppProjects", func(t *testing.T) {
 		for _, i := range []int{1, 2, 3, 4, 5} {
@@ -81,7 +89,7 @@ func Test_FilterFunc(t *testing.T) {
 	numUpdated := atomic.Uint32{}
 	numDeleted := atomic.Uint32{}
 	ac := fakeappclient.NewSimpleClientset()
-	pi, err := NewAppProjectInformer(context.TODO(), ac,
+	pi, lister, err := NewAppProjectInformer(context.TODO(), ac,
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
 			if numAdded.Load() > 1 {
@@ -122,6 +130,9 @@ func Test_FilterFunc(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{Name: fmt.Sprintf("proj%d", i)},
 			}, v1.CreateOptions{})
 		}
+		p, err := lister.AppProjects("argocd").Get("proj1")
+		assert.NotNil(t, p)
+		assert.NoError(t, err)
 	})
 	t.Run("Update AppProjects", func(t *testing.T) {
 		for _, i := range []int{1, 2, 3, 4, 5} {

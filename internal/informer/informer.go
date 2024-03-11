@@ -333,6 +333,10 @@ func toUnstructured(obj interface{}) (unstructured.Unstructured, error) {
 	}
 }
 
+func (i *GenericInformer) Indexer() cache.Indexer {
+	return i.informer.GetIndexer()
+}
+
 func log() *logrus.Entry {
 	return logrus.WithFields(logrus.Fields{
 		"module": "Informer",
