@@ -23,12 +23,14 @@ type AppProjectInformer struct {
 	addFunc    func(proj *v1alpha1.AppProject)
 	updateFunc func(oldProj *v1alpha1.AppProject, newProj *v1alpha1.AppProject)
 	deleteFunc func(proj *v1alpha1.AppProject)
-
-	projLister applisters.AppProjectLister
 }
 
 type AppProjectInformerOption func(pi *AppProjectInformer) error
 
+// WithNamespaces restricts the informer to certain namespaces. If no namespace
+// is set, or if multiple are set, the informer requires cluster-wide access to
+// AppProjects. When one or more namespaces are set, only objects in these
+// namespaces will be considered by the informer.
 func WithNamespaces(namespaces ...string) AppProjectInformerOption {
 	return func(pi *AppProjectInformer) error {
 		pi.namespaces = namespaces
@@ -84,7 +86,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 	if pi.logger == nil {
 		pi.logger = logrus.WithField("module", "AppProjectInformer")
 	}
-	i, err := informer.NewInformer(&v1alpha1.AppProject{},
+	i, err := informer.NewGenericInformer(&v1alpha1.AppProject{},
 		informer.WithListCallback(func(options v1.ListOptions, namespace string) (runtime.Object, error) {
 			projects, err := client.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, options)
 			pi.logger.Debugf("Lister returned %d AppProjects", len(projects.Items))

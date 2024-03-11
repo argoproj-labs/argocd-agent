@@ -88,6 +88,9 @@ func Test_FilterFunc(t *testing.T) {
 	numAdded := atomic.Uint32{}
 	numUpdated := atomic.Uint32{}
 	numDeleted := atomic.Uint32{}
+	addCh := make(chan bool)
+	updateCh := make(chan bool)
+	deleteCh := make(chan bool)
 	ac := fakeappclient.NewSimpleClientset()
 	pi, lister, err := NewAppProjectInformer(context.TODO(), ac,
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
@@ -95,18 +98,21 @@ func Test_FilterFunc(t *testing.T) {
 			if numAdded.Load() > 1 {
 				t.Fatalf("AddFunc called for %s", proj.GetName())
 			}
+			addCh <- true
 		}),
 		WithUpdateFunc(func(oldProj, newProj *v1alpha1.AppProject) {
 			numUpdated.Add(1)
 			if numUpdated.Load() > 1 {
 				t.Fatalf("UpdateFunc called for %s", newProj.GetName())
 			}
+			updateCh <- true
 		}),
 		WithDeleteFunc(func(proj *v1alpha1.AppProject) {
 			numDeleted.Add(1)
 			if numDeleted.Load() > 1 {
 				t.Fatalf("DeleteFunc called for %s", proj.GetName())
 			}
+			deleteCh <- true
 		}),
 		WithListFilter(func(proj *v1alpha1.AppProject) bool {
 			if proj.Name == "proj1" {
@@ -130,6 +136,7 @@ func Test_FilterFunc(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{Name: fmt.Sprintf("proj%d", i)},
 			}, v1.CreateOptions{})
 		}
+		<-addCh
 		p, err := lister.AppProjects("argocd").Get("proj1")
 		assert.NotNil(t, p)
 		assert.NoError(t, err)
@@ -140,11 +147,16 @@ func Test_FilterFunc(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{Name: fmt.Sprintf("proj%d", i)}, Spec: v1alpha1.AppProjectSpec{Description: "Foo"},
 			}, v1.UpdateOptions{})
 		}
+		<-updateCh
 	})
 	t.Run("Delete AppProjects", func(t *testing.T) {
 		for _, i := range []int{1, 2, 3, 4, 5} {
 			ac.ArgoprojV1alpha1().AppProjects("argocd").Delete(context.TODO(), fmt.Sprintf("proj%d", i), v1.DeleteOptions{})
 		}
+		<-deleteCh
+		p, err := lister.AppProjects("argocd").Get("proj1")
+		assert.Nil(t, p)
+		assert.ErrorContains(t, err, "not found")
 	})
 
 }
