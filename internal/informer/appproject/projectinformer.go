@@ -38,6 +38,9 @@ func WithNamespaces(namespaces ...string) AppProjectInformerOption {
 	}
 }
 
+// WithListFilter sets a filter function for the add, update and delete events.
+// This function will be called for each event, and if it returns false, the
+// event's execution will not continue.
 func WithListFilter(f func(proj *v1alpha1.AppProject) bool) AppProjectInformerOption {
 	return func(pi *AppProjectInformer) error {
 		pi.filterFunc = f
@@ -45,6 +48,8 @@ func WithListFilter(f func(proj *v1alpha1.AppProject) bool) AppProjectInformerOp
 	}
 }
 
+// WithAddFunc sets the function to be called when an AppProject is created
+// on the cluster.
 func WithAddFunc(f func(proj *v1alpha1.AppProject)) AppProjectInformerOption {
 	return func(pi *AppProjectInformer) error {
 		pi.addFunc = f
@@ -52,6 +57,8 @@ func WithAddFunc(f func(proj *v1alpha1.AppProject)) AppProjectInformerOption {
 	}
 }
 
+// WithUpdateFunc sets the function to be called when an AppProject is updated
+// on the cluster.
 func WithUpdateFunc(f func(oldProj *v1alpha1.AppProject, newProj *v1alpha1.AppProject)) AppProjectInformerOption {
 	return func(pi *AppProjectInformer) error {
 		pi.updateFunc = f
@@ -59,6 +66,8 @@ func WithUpdateFunc(f func(oldProj *v1alpha1.AppProject, newProj *v1alpha1.AppPr
 	}
 }
 
+// WithDeleteFunc sets the function to be called when an AppProject is deleted
+// on the cluster.
 func WithDeleteFunc(f func(proj *v1alpha1.AppProject)) AppProjectInformerOption {
 	return func(pi *AppProjectInformer) error {
 		pi.deleteFunc = f
@@ -66,6 +75,7 @@ func WithDeleteFunc(f func(proj *v1alpha1.AppProject)) AppProjectInformerOption 
 	}
 }
 
+// WithLogger sets the logger to use with this AppProjectInformer
 func WithLogger(l *logrus.Entry) AppProjectInformerOption {
 	return func(pi *AppProjectInformer) error {
 		pi.logger = l
@@ -73,6 +83,9 @@ func WithLogger(l *logrus.Entry) AppProjectInformerOption {
 	}
 }
 
+// NewAppProjectInformer returns a new instance of a GenericInformer set up to
+// handle AppProjects. It will be configured with the given options, using the
+// given appclientset.
 func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, options ...AppProjectInformerOption) (*informer.GenericInformer, applisters.AppProjectLister, error) {
 	pi := &AppProjectInformer{
 		namespaces: make([]string, 0),
