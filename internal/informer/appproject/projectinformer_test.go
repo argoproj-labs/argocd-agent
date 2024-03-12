@@ -162,7 +162,42 @@ func Test_FilterFunc(t *testing.T) {
 }
 
 func Test_NamespaceNotAllowed(t *testing.T) {
+	numAdded := atomic.Uint32{}
+	addCh := make(chan bool)
+	ac := fakeappclient.NewSimpleClientset()
+	pi, lister, err := NewAppProjectInformer(context.TODO(), ac,
+		WithNamespaces("argocd"),
+		WithAddFunc(func(proj *v1alpha1.AppProject) {
+			numAdded.Add(1)
+			require.Equal(t, "argocd", proj.Namespace)
+			if numAdded.Load() == 3 {
+				addCh <- true
+			}
+		}),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, pi)
+	require.NotNil(t, lister)
+	err = pi.Start(context.TODO())
+	require.NoError(t, err)
 
+	ac.ArgoprojV1alpha1().AppProjects("argocd").Create(context.TODO(), &v1alpha1.AppProject{
+		ObjectMeta: v1.ObjectMeta{Name: "proj1"},
+	}, v1.CreateOptions{})
+	ac.ArgoprojV1alpha1().AppProjects("argocd").Create(context.TODO(), &v1alpha1.AppProject{
+		ObjectMeta: v1.ObjectMeta{Name: "proj2"},
+	}, v1.CreateOptions{})
+	ac.ArgoprojV1alpha1().AppProjects("default").Create(context.TODO(), &v1alpha1.AppProject{
+		ObjectMeta: v1.ObjectMeta{Name: "proj1"},
+	}, v1.CreateOptions{})
+	ac.ArgoprojV1alpha1().AppProjects("kube-system").Create(context.TODO(), &v1alpha1.AppProject{
+		ObjectMeta: v1.ObjectMeta{Name: "proj1"},
+	}, v1.CreateOptions{})
+	ac.ArgoprojV1alpha1().AppProjects("argocd").Create(context.TODO(), &v1alpha1.AppProject{
+		ObjectMeta: v1.ObjectMeta{Name: "proj3"},
+	}, v1.CreateOptions{})
+
+	<-addCh
 }
 
 func init() {

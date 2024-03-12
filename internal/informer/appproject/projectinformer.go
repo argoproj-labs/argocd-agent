@@ -102,6 +102,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 			}
 			return projects, err
 		}),
+		informer.WithNamespaces(pi.namespaces...),
 		informer.WithWatchCallback(func(options v1.ListOptions, namespace string) (watch.Interface, error) {
 			return client.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, options)
 		}),
