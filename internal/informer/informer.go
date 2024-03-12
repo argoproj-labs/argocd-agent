@@ -227,6 +227,10 @@ func NewGenericInformer(objType runtime.Object, options ...InformerOption) (*Gen
 	if err != nil {
 		return nil, err
 	}
+	// SetWatchErrorHandler only returns error when informer already started,
+	// so it should be safe to not handle the error.
+	// TODO: Do we need a unique error handler?
+	_ = i.informer.SetWatchErrorHandler(cache.DefaultWatchErrorHandler)
 	return i, nil
 }
 
