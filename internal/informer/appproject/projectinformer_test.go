@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 func Test_AppProjectInformer(t *testing.T) {
@@ -198,6 +199,16 @@ func Test_NamespaceNotAllowed(t *testing.T) {
 	}, v1.CreateOptions{})
 
 	<-addCh
+
+	// All three apps in argocd namespace should be in cache
+	ps, err := lister.AppProjects("argocd").List(labels.Everything())
+	assert.NoError(t, err)
+	assert.Len(t, ps, 3)
+
+	// Cache should not have anything in default namespace
+	ps, err = lister.AppProjects("default").List(labels.Everything())
+	assert.NoError(t, err)
+	assert.Len(t, ps, 0)
 }
 
 func init() {
