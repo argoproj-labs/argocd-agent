@@ -38,12 +38,12 @@ type Server struct {
 	ctx          context.Context
 	ctxCancel    context.CancelFunc
 	appManager   *application.ApplicationManager
-	informer     *appinformer.AppInformer
+	appInformer  *appinformer.AppInformer
 	watchLock    sync.RWMutex
 	clientMap    map[string]string
 	namespaceMap map[string]types.AgentMode
 	clientLock   sync.RWMutex
-	events       *event.Event
+	events       *event.EventSource
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
@@ -103,12 +103,12 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 		managerOpts = append(managerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
 	}
 
-	s.informer = appinformer.NewAppInformer(s.ctx, appClient,
+	s.appInformer = appinformer.NewAppInformer(s.ctx, appClient,
 		s.namespace,
 		informerOpts...,
 	)
 
-	s.appManager = application.NewApplicationManager(kubernetes.NewKubernetesBackend(appClient, s.namespace, s.informer, true), s.namespace,
+	s.appManager = application.NewApplicationManager(kubernetes.NewKubernetesBackend(appClient, s.namespace, s.appInformer, true), s.namespace,
 		managerOpts...,
 	)
 
@@ -147,9 +147,9 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		s.appManager.Application.StartInformer(ctx)
 	}()
 
-	s.events = event.NewEventEmitter(s.options.serverName)
+	s.events = event.NewEventSource(s.options.serverName)
 
-	if err := s.informer.EnsureSynced(waitForSyncedDuration); err != nil {
+	if err := s.appInformer.EnsureSynced(waitForSyncedDuration); err != nil {
 		return fmt.Errorf("unable to sync informer: %v", err)
 	}
 

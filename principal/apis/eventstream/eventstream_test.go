@@ -31,16 +31,16 @@ func Test_Subscribe(t *testing.T) {
 			log().WithField("component", "RecvHook").Tracef("Exit")
 			return io.EOF
 		})
-		emitter := event.NewEventEmitter("test")
+		emitter := event.NewEventSource("test")
 		// qs.SendQ("default").Add(event.LegacyEvent{Type: event.EventAppAdded, Application: &v1alpha1.Application{
 		// 	ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
 		// })
 		qs.SendQ("default").Add(emitter.NewApplicationEvent(
-			event.ApplicationCreated,
+			event.Create,
 			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
 		))
 		qs.SendQ("default").Add(emitter.NewApplicationEvent(
-			event.ApplicationCreated,
+			event.Create,
 			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "bar", Namespace: "test"}},
 		))
 		err := s.Subscribe(st)

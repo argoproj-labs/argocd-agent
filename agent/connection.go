@@ -109,31 +109,35 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 			return nil
 		}
 	}
-	ev, incomingApp, err := event.ApplicationFromWire(rcvd.Event)
+	ev, err := event.FromWire(rcvd.Event)
 	if err != nil {
 		logCtx.Errorf("Could not unwrap event: %v", err)
 		return nil
 	}
 	logCtx.Debugf("Received a new event from stream")
-	switch ev.Type() {
-	case event.ApplicationCreated:
-		_, err := a.createApplication(incomingApp)
-		if err != nil {
-			logCtx.Errorf("Error creating application: %v", err)
-		}
-	case event.ApplicationSpecUpdated:
-		_, err = a.updateApplication(incomingApp)
-		if err != nil {
-			logCtx.Errorf("Error updating application: %v", err)
-		}
-	case event.ApplicationDeleted:
-		err = a.deleteApplication(incomingApp)
-		if err != nil {
-			logCtx.Errorf("Error deleting application: %v", err)
-		}
-	default:
-		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
+	err = a.processIncomingEvent(ev)
+	if err != nil {
+		logCtx.WithError(err).Errorf("Unable to process incoming event")
 	}
+	// switch ev.Type() {
+	// case event.Create:
+	// 	_, err := a.createApplication(incomingApp)
+	// 	if err != nil {
+	// 		logCtx.Errorf("Error creating application: %v", err)
+	// 	}
+	// case event.SpecUpdate:
+	// 	_, err = a.updateApplication(incomingApp)
+	// 	if err != nil {
+	// 		logCtx.Errorf("Error updating application: %v", err)
+	// 	}
+	// case event.Delete:
+	// 	err = a.deleteApplication(incomingApp)
+	// 	if err != nil {
+	// 		logCtx.Errorf("Error deleting application: %v", err)
+	// 	}
+	// default:
+	// 	logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
+	// }
 
 	return nil
 }

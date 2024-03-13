@@ -28,13 +28,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	}
 
 	agentMode := s.agentMode(agentName)
-	// incoming := ev.Application
 	incoming := &v1alpha1.Application{}
-	err := ev.DataAs(incoming)
-	if err != nil {
-		return err
-	}
-
 	logCtx := log().WithFields(logrus.Fields{
 		"module":   "QueueProcessor",
 		"client":   agentName,
@@ -44,8 +38,37 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	})
 
 	logCtx.Debugf("Processing event")
+	var err error
+	target := event.Target(ev)
+	switch target {
+	case event.TargetApplication:
+		err = s.processApplicationEvent(ctx, agentName, ev)
+	case event.TargetAppProject:
+	default:
+		err = fmt.Errorf("unable to process event of unknown type %s", target)
+	}
+	q.Done(ev)
+	return err
+}
+
+func (s *Server) processApplicationEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
+	incoming := &v1alpha1.Application{}
+	err := ev.DataAs(incoming)
+	if err != nil {
+		return err
+	}
+	agentMode := s.agentMode(agentName)
+
+	logCtx := log().WithFields(logrus.Fields{
+		"module":   "QueueProcessor",
+		"client":   agentName,
+		"mode":     agentMode.String(),
+		"event":    ev.Type(),
+		"incoming": incoming.QualifiedName(),
+	})
+
 	switch ev.Type() {
-	case event.ApplicationCreated:
+	case event.Create.String():
 		if agentMode == types.AgentModeAutonomous {
 			incoming.SetNamespace(agentName)
 			_, err := s.appManager.Create(ctx, incoming)
@@ -56,7 +79,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
 			return nil
 		}
-	case event.ApplicationStatusUpdate:
+	case event.StatusUpdate.String():
 		var err error
 		if agentMode == types.AgentModeAutonomous {
 			_, err = s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
@@ -67,7 +90,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Updated application status %s", incoming.QualifiedName())
-	case event.ApplicationSpecUpdated:
+	case event.SpecUpdate.String():
 		var err error
 		if agentMode == types.AgentModeManaged {
 			_, err = s.appManager.UpdateStatus(ctx, agentName, incoming)
@@ -81,7 +104,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	default:
 		return fmt.Errorf("unable to process event of type %s", ev.Type())
 	}
-	q.Done(ev)
+
 	return nil
 }
 
