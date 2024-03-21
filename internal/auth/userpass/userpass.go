@@ -2,6 +2,7 @@ package userpass
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -23,6 +24,8 @@ const ClientIDField = "clientid"
 
 // ClientSecretField is the name of the field in the Credentials containing the client secret
 const ClientSecretField = "clientsecret"
+
+var errAuthFailed = errors.New("authentication failed")
 
 // UserPassAuthentication implements a simple username/password authentication
 // method.
@@ -68,14 +71,14 @@ func (a *UserPassAuthentication) Authenticate(creds auth.Credentials) (clientID 
 		// To make timing attacks a little more complex, we compare the given
 		// password with our dummy hash.
 		_ = bcrypt.CompareHashAndPassword(a.dummy, []byte(incomingPassword))
-		return "", fmt.Errorf("authentication failed")
+		return "", errAuthFailed
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(realPassword), []byte(incomingPassword)); err == nil {
 		return incomingUsername, nil
 	}
 
-	return "", fmt.Errorf("authentication failed")
+	return "", errAuthFailed
 }
 
 // UpsertUser adds or updates a user with username and password
