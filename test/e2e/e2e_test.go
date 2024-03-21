@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	fakekube "github.com/jannfis/argocd-agent/test/fake/kube"
 )
@@ -61,6 +62,7 @@ func newConn(t *testing.T, appC *fakeappclient.Clientset) (*grpc.ClientConn, *pr
 		principal.WithShutDownGracePeriod(2*time.Second),
 		principal.WithGRPC(true),
 		principal.WithEventProcessors(10),
+		principal.WithGeneratedTokenSigningKey(),
 	)
 	require.NoError(t, err)
 	err = s.Start(context.Background(), errch)
@@ -158,11 +160,11 @@ func Test_EndToEnd_Subscribe(t *testing.T) {
 }
 
 func Test_EndToEnd_Push(t *testing.T) {
-	// objs := make([]runtime.Object, 10)
-	// for i := 0; i < 10; i += 1 {
-	// 	objs[i] = runtime.Object(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: fmt.Sprintf("test%d", i), Namespace: "default"}})
-	// }
-	appC := fakeappclient.NewSimpleClientset() //objs...)
+	objs := make([]runtime.Object, 10)
+	for i := 0; i < 10; i += 1 {
+		objs[i] = runtime.Object(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: fmt.Sprintf("test%d", i), Namespace: "default"}})
+	}
+	appC := fakeappclient.NewSimpleClientset(objs...)
 	conn, s := newConn(t, appC)
 	defer conn.Close()
 	authC := authapi.NewAuthenticationClient(conn)
@@ -183,7 +185,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 	require.NoError(t, err)
 	start := time.Now()
 	for i := 0; i < 10; i += 1 {
-		ev := event.NewEventEmitter("").NewApplicationEvent(event.ApplicationSpecUpdated, &v1alpha1.Application{
+		ev := event.NewEventSource("").NewApplicationEvent(event.SpecUpdate, &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      fmt.Sprintf("test%d", i),
 				Namespace: "default",
@@ -236,6 +238,7 @@ func Test_AgentServer(t *testing.T) {
 		principal.WithGeneratedTLS("control-plane"),
 		principal.WithAuthMethods(am),
 		principal.WithNamespaces("client"),
+		principal.WithGeneratedTokenSigningKey(),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, s)

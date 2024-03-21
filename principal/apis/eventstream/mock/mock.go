@@ -73,7 +73,7 @@ func (s *MockEventServer) Recv() (*eventstreamapi.Event, error) {
 	}
 	if err == nil {
 		s.NumRecv.Add(1)
-		wev := event.NewEventEmitter("foo").NewApplicationEvent(event.ApplicationCreated, &s.Application)
+		wev := event.NewEventSource("foo").NewApplicationEvent(event.Create, &s.Application)
 		pev, perr := format.ToProto(wev)
 		if perr == nil {
 			return &eventstreamapi.Event{Event: pev}, nil

@@ -1,6 +1,8 @@
 package event
 
 import (
+	"fmt"
+
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 
 	_ "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
@@ -9,96 +11,107 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
-type EventType int32
-
-const (
-	EventUnknown EventType = iota
-	// EventPing is an empty event request to check whether the connection is still intact
-	EventPing
-	// EventAppAdded is an event to let the peer know about a new application
-	EventAppAdded
-	// EventAppDeleted is an event to let the peer know about the deletion of an app
-	EventAppDeleted
-	// EventAppSpecUpdated is an event to update an application's spec field
-	EventAppSpecUpdated
-	// EventAppStatusUpdated is an event to update an application's status field
-	EventAppStatusUpdated
-	// EventAppOperationUpdated is an event to update an application's operation field
-	EventAppOperationUpdated
-)
-
 const cloudEventSpecVersion = "1.0"
 
-const TypePrefix = "io.argoproj.argocd-agent"
+type EventType string
+type EventTarget string
+
+const TypePrefix = "io.argoproj.argocd-agent.event"
 
 const (
-	Ping                       = TypePrefix + ".ping"
-	Pong                       = TypePrefix + ".pong"
-	ApplicationCreated         = TypePrefix + ".application.create"
-	ApplicationDeleted         = TypePrefix + ".application.delete"
-	ApplicationSpecUpdated     = TypePrefix + ".application.spec-update"
-	ApplicationStatusUpdate    = TypePrefix + ".application.status-update"
-	ApplicationOperationUpdate = TypePrefix + ".application.operation-update"
+	Ping            EventType = TypePrefix + ".ping"
+	Pong            EventType = TypePrefix + ".pong"
+	Create          EventType = TypePrefix + ".create"
+	Delete          EventType = TypePrefix + ".delete"
+	Update          EventType = TypePrefix + ".update"
+	SpecUpdate      EventType = TypePrefix + ".spec-update"
+	StatusUpdate    EventType = TypePrefix + ".status-update"
+	OperationUpdate EventType = TypePrefix + ".operation-update"
 )
 
-// type LegacyEvent struct {
-// 	Type           EventType
-// 	Application    *v1alpha1.Application
-// 	AppProject     *v1alpha1.AppProject     // Forward compatibility
-// 	ApplicationSet *v1alpha1.ApplicationSet // Forward compatibility
-// 	Created        *time.Time
-// 	Processed      *time.Time
-// 	Event          cloudevents.Event
-// }
+const (
+	TargetUnknown     EventTarget = "unknown"
+	TargetApplication EventTarget = "application"
+	TargetAppProject  EventTarget = "appproject"
+)
 
-type Event struct {
+func (t EventType) String() string {
+	return string(t)
+}
+
+func (t EventTarget) String() string {
+	return string(t)
+}
+
+type EventSource struct {
 	source string
 }
 
-func (et EventType) String() string {
-	switch et {
-	case EventUnknown:
-		return "unknown"
-	case EventAppAdded:
-		return "add"
-	case EventAppDeleted:
-		return "delete"
-	case EventAppSpecUpdated:
-		return "update_spec"
-	case EventAppOperationUpdated:
-		return "update_operation"
-	case EventAppStatusUpdated:
-		return "update_status"
-	default:
-		return "unknown"
-	}
+type Event struct {
+	event  *cloudevents.Event
+	target EventTarget
 }
 
-func NewEventEmitter(source string) *Event {
-	ev := &Event{}
+func NewEventSource(source string) *EventSource {
+	ev := &EventSource{}
 	ev.source = source
 	return ev
 }
 
-func (ev Event) NewApplicationEvent(evType string, app *v1alpha1.Application) *cloudevents.Event {
+func (evs EventSource) NewApplicationEvent(evType EventType, app *v1alpha1.Application) *cloudevents.Event {
 	cev := cloudevents.NewEvent()
-	cev.SetSource(ev.source)
+	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
-	cev.SetType(evType)
+	cev.SetType(evType.String())
+	cev.SetDataSchema(TargetApplication.String())
 	// TODO: Handle this error situation?
 	_ = cev.SetData(cloudevents.ApplicationJSON, app)
 	return &cev
 }
 
-func ApplicationFromWire(pev *pb.CloudEvent) (*cloudevents.Event, *v1alpha1.Application, error) {
-	app := v1alpha1.Application{}
-	ev, err := format.FromProto(pev)
+// FromWire validates an event from the wire in protobuf format, converts it
+// into an Event object and returns it. If the event on the wire is invalid,
+// or could not be converted for another reason, FromWire returns an error.
+func FromWire(pev *pb.CloudEvent) (*Event, error) {
+	raw, err := format.FromProto(pev)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	err = ev.DataAs(&app)
-	if err != nil {
-		return nil, nil, err
+	ev := &Event{}
+	var target EventTarget
+	if ev.target = Target(raw); ev.target == "" {
+		return nil, fmt.Errorf("unknown event target: %s", target)
 	}
-	return ev, &app, nil
+	ev.event = raw
+	return ev, nil
+}
+
+func Target(raw *cloudevents.Event) EventTarget {
+	switch raw.DataSchema() {
+	case TargetApplication.String():
+		return TargetApplication
+	case TargetAppProject.String():
+		return TargetAppProject
+	}
+	return ""
+}
+
+func (ev Event) Target() EventTarget {
+	return ev.target
+}
+
+func (ev Event) Type() EventType {
+	return EventType(ev.event.Type())
+}
+
+func (ev Event) Application() (*v1alpha1.Application, error) {
+	app := &v1alpha1.Application{}
+	err := ev.event.DataAs(app)
+	return app, err
+}
+
+func (ev Event) AppProject() (*v1alpha1.AppProject, error) {
+	proj := &v1alpha1.AppProject{}
+	err := ev.event.DataAs(proj)
+	return proj, err
 }

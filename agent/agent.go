@@ -41,7 +41,7 @@ type Agent struct {
 	appManager        *application.ApplicationManager
 	mode              types.AgentMode
 	queues            *queue.SendRecvQueues
-	emitter           *event.Event
+	emitter           *event.EventSource
 	watchLock         sync.RWMutex
 }
 
@@ -122,7 +122,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		_ = a.maintainConnection()
 	}
 
-	a.emitter = event.NewEventEmitter(fmt.Sprintf("agent://%s", "agent-managed"))
+	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"))
 
 	// Wait for the informer to be synced
 	err := a.informer.EnsureSynced(waitForSyncedDuration)

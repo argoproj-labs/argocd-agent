@@ -35,7 +35,7 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", outbound.Namespace)
 		return
 	}
-	ev := s.events.NewApplicationEvent(event.ApplicationCreated, outbound)
+	ev := s.events.NewApplicationEvent(event.Create, outbound)
 	q.Add(ev)
 	logCtx.Tracef("Added app %s to send queue, total length now %d", outbound.QualifiedName(), q.Len())
 }
@@ -62,7 +62,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		logCtx.Error("Help! Queue pair has disappeared!")
 		return
 	}
-	ev := s.events.NewApplicationEvent(event.ApplicationSpecUpdated, new)
+	ev := s.events.NewApplicationEvent(event.SpecUpdate, new)
 	q.Add(ev)
 	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
 }
@@ -88,7 +88,7 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 		logCtx.Error("Help! Queue pair has disappeared!")
 		return
 	}
-	ev := s.events.NewApplicationEvent(event.ApplicationDeleted, outbound)
+	ev := s.events.NewApplicationEvent(event.Delete, outbound)
 	logCtx.WithField("event", "DeleteApp").WithField("sendq_len", q.Len()+1).Tracef("Added event to send queue")
 	q.Add(ev)
 }

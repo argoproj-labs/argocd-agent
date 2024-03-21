@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/jannfis/argocd-agent/internal/event"
 	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,6 +16,51 @@ This file contains a collection of callbacks to process inbound events.
 Inbound events are those coming through our gRPC interface, e.g. those that
 were received from a server.
 */
+
+func (a *Agent) processIncomingEvent(ev *event.Event) error {
+	var err error
+	switch ev.Target() {
+	case event.TargetApplication:
+		err = a.processIncomingApplication(ev)
+	case event.TargetAppProject:
+	default:
+		err = fmt.Errorf("unknown event target: %s", ev.Target())
+	}
+
+	return err
+}
+
+func (a *Agent) processIncomingApplication(ev *event.Event) error {
+	logCtx := log().WithFields(logrus.Fields{
+		"method": "processIncomingEvents",
+	})
+	incomingApp, err := ev.Application()
+	if err != nil {
+		return err
+	}
+
+	switch ev.Type() {
+	case event.Create:
+		_, err = a.createApplication(incomingApp)
+		if err != nil {
+			logCtx.Errorf("Error creating application: %v", err)
+		}
+	case event.SpecUpdate:
+		_, err = a.updateApplication(incomingApp)
+		if err != nil {
+			logCtx.Errorf("Error updating application: %v", err)
+		}
+	case event.Delete:
+		err = a.deleteApplication(incomingApp)
+		if err != nil {
+			logCtx.Errorf("Error deleting application: %v", err)
+		}
+	default:
+		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
+	}
+
+	return err
+}
 
 // createApplication creates an Application upon an event in the agent's work
 // queue.
