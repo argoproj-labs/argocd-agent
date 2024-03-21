@@ -36,17 +36,19 @@ var errAuthFailed = errors.New("authentication failed")
 // Needs to be initialized properly before being used.
 // Use the NewUserPassAuthentication function to get a new instance.
 type UserPassAuthentication struct {
+	dbpath string
 	lock   sync.RWMutex
 	userdb map[string]string
 	dummy  []byte
 }
 
 // NewUserPassAuthentication creates a new instance of UserPassAuthentication
-func NewUserPassAuthentication() *UserPassAuthentication {
+func NewUserPassAuthentication(path string) *UserPassAuthentication {
 	dummy, _ := bcrypt.GenerateFromPassword([]byte("bdf3fdc6da5b5029e83f3024858c3c1e6aa3d1e71fa09e4691212f7571b5a3e3"), bcrypt.DefaultCost)
 	return &UserPassAuthentication{
 		userdb: make(map[string]string),
 		dummy:  dummy,
+		dbpath: path,
 	}
 }
 
@@ -146,6 +148,14 @@ func (a *UserPassAuthentication) LoadAuthDataFromFile(path string) error {
 	a.userdb = newUserDB
 
 	return nil
+}
+
+func (a *UserPassAuthentication) Init() error {
+	if a.dbpath != "" {
+		return a.LoadAuthDataFromFile(a.dbpath)
+	} else {
+		return nil
+	}
 }
 
 func log() *logrus.Entry {

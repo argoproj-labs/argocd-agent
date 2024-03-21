@@ -29,6 +29,16 @@ func (m *Methods) RegisterMethod(name string, method Method) error {
 	return nil
 }
 
+func (m *Methods) Names() []string {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+	ret := []string{}
+	for n := range m.methods {
+		ret = append(ret, n)
+	}
+	return ret
+}
+
 // Method gets the authentication method identified by name. If no such
 // method exists, returns nil.
 func (m *Methods) Method(name string) Method {

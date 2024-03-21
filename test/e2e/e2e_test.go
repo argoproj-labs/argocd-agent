@@ -68,7 +68,7 @@ func newConn(t *testing.T, appC *fakeappclient.Clientset) (*grpc.ClientConn, *pr
 	err = s.Start(context.Background(), errch)
 	assert.NoError(t, err)
 
-	am := userpass.NewUserPassAuthentication()
+	am := userpass.NewUserPassAuthentication("")
 	am.UpsertUser("default", "password")
 	err = s.AuthMethods().RegisterMethod("userpass", am)
 	require.NoError(t, err)
@@ -227,7 +227,7 @@ func Test_AgentServer(t *testing.T) {
 	actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
 	fakeAppcServer := fakeappclient.NewSimpleClientset()
 	am := auth.NewMethods()
-	up := userpass.NewUserPassAuthentication()
+	up := userpass.NewUserPassAuthentication("")
 	err := am.RegisterMethod("userpass", up)
 	require.NoError(t, err)
 	up.UpsertUser("client", "insecure")

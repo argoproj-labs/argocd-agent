@@ -1,0 +1,6 @@
+.vscode/
+vendor/
+dist/
+build/bin
+Dockerfile.agent
+Dockerfile.principal

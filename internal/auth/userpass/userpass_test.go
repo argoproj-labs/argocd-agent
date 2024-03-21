@@ -10,7 +10,7 @@ import (
 )
 
 func Test_UpsertUser(t *testing.T) {
-	a := NewUserPassAuthentication()
+	a := NewUserPassAuthentication("")
 	assert.Len(t, a.userdb, 0)
 	t.Run("Add a new user", func(t *testing.T) {
 		a.UpsertUser("user1", "password")
@@ -39,7 +39,7 @@ func Test_UpsertUser(t *testing.T) {
 }
 
 func Test_Authenticate(t *testing.T) {
-	a := NewUserPassAuthentication()
+	a := NewUserPassAuthentication("")
 	t.Run("Successful authentication", func(t *testing.T) {
 		a.UpsertUser("user1", "password")
 		creds := make(auth.Credentials)
@@ -88,7 +88,7 @@ func Test_Authenticate(t *testing.T) {
 }
 
 func Test_LoadUserDB(t *testing.T) {
-	a := NewUserPassAuthentication()
+	a := NewUserPassAuthentication("")
 	t.Run("Load good user DB", func(t *testing.T) {
 		err := a.LoadAuthDataFromFile("testdata/userdb-good.txt")
 		assert.NoError(t, err)

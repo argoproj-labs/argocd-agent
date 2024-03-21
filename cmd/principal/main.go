@@ -9,6 +9,7 @@ import (
 	"github.com/jannfis/argocd-agent/cmd/cmd"
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/auth/userpass"
+	"github.com/jannfis/argocd-agent/internal/env"
 	"github.com/jannfis/argocd-agent/principal"
 
 	"github.com/sirupsen/logrus"
@@ -92,7 +93,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			authMethods := auth.NewMethods()
-			userauth := userpass.NewUserPassAuthentication()
+			userauth := userpass.NewUserPassAuthentication(userDB)
+
 			if userDB != "" {
 				err = userauth.LoadAuthDataFromFile(userDB)
 				if err != nil {
@@ -134,26 +136,66 @@ func NewPrincipalRunCommand() *cobra.Command {
 			<-ctx.Done()
 		},
 	}
-	command.Flags().StringVar(&listenHost, "listen-host", "", "Name of the host to listen on")
-	command.Flags().IntVar(&listenPort, "listen-port", 8443, "Port the gRPC server will listen on")
-	command.Flags().StringVar(&logLevel, "log-level", logrus.InfoLevel.String(), "The log level to use")
-	command.Flags().IntVar(&metricsPort, "metrics-port", 8000, "Port the metrics server will listen on")
-	command.Flags().BoolVar(&disableMetrics, "disable-metrics", false, "Disable metrics collection and metrics server")
-	command.Flags().StringVarP(&namespace, "namespace", "n", "", "The namespace the server will use for configuration. Set only when running out of cluster.")
-	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces", []string{}, "List of namespaces the server is allowed to operate in")
+	command.Flags().StringVar(&listenHost, "listen-host",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_LISTEN_HOST", nil, ""),
+		"Name of the host to listen on")
+	command.Flags().IntVar(&listenPort, "listen-port",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_LISTEN_PORT", cmd.ValidPort, 8443),
+		"Port the gRPC server will listen on")
+
+	command.Flags().StringVar(&logLevel, "log-level",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_LEVEL", nil, logrus.InfoLevel.String()),
+		"The log level to use")
+
+	command.Flags().IntVar(&metricsPort, "metrics-port",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_METRICS_PORT", cmd.ValidPort, 8000),
+		"Port the metrics server will listen on")
+	command.Flags().BoolVar(&disableMetrics, "disable-metrics",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_DISABLE_METRICS", false),
+		"Disable metrics collection and metrics server")
+
+	command.Flags().StringVarP(&namespace, "namespace", "n",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_NAMESPACE", nil, ""),
+		"The namespace the server will use for configuration. Set only when running out of cluster.")
+	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_ALLOWED_NAMESPACES", nil, []string{}),
+		"List of namespaces the server is allowed to operate in")
+
+	command.Flags().StringVar(&tlsCert, "tls-cert",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_CERT_PATH", nil, ""),
+		"Use TLS certificate from path")
+	command.Flags().StringVar(&tlsKey, "tls-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_KEY_PATH", nil, ""),
+		"Use TLS private key from path")
+	command.Flags().BoolVar(&allowTlsGenerate, "insecure-tls-generate",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ALLOW_GENERATE", false),
+		"INSECURE: Generate and use temporary TLS cert and key")
+	command.Flags().StringVar(&rootCaPath, "root-ca-path",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_PATH", nil, ""),
+		"Path to a file containing root CA certificate for verifying client certs")
+	command.Flags().BoolVar(&requireClientCerts, "require-client-certs",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_TLS_CLIENT_CERT_REQUIRE", false),
+		"Whether to require agents to present a client certificate")
+	command.Flags().BoolVar(&clientCertSubjectMatch, "client-cert-subject-match",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_TLS_CLIENT_CERT_MATCH_SUBJECT", false),
+		"Whether a client cert's subject must match the agent name")
+
+	command.Flags().StringVar(&jwtKey, "jwt-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_JWT_KEY_PATH", nil, ""),
+		"Use JWT signing key from path")
+	command.Flags().BoolVar(&allowJwtGenerate, "insecure-jwt-generate",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_JWT_ALLOW_GENERATE", false),
+		"INSECURE: Generate and use temporary JWT signing key")
+
+	command.Flags().StringVar(&userDB, "passwd",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_USER_DB_PATH", nil, ""),
+		"Path to userpass passwd file")
+
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
-	command.Flags().StringVar(&tlsCert, "tls-cert", "", "Use TLS certificate from path")
-	command.Flags().StringVar(&tlsKey, "tls-key", "", "Use TLS private key from path")
-	command.Flags().StringVar(&jwtKey, "jwt-key", "", "Use JWT signing key from path")
-	command.Flags().BoolVar(&allowTlsGenerate, "insecure-tls-generate", false, "INSECURE: Generate and use temporary TLS cert and key")
-	command.Flags().BoolVar(&allowJwtGenerate, "insecure-jwt-generate", false, "INSECURE: Generate and use temporary JWT signing key")
-	command.Flags().StringVar(&userDB, "passwd", "", "Path to userpass passwd file")
-	command.Flags().StringVar(&rootCaPath, "root-ca-path", "", "Path to a file containing root CA certificate for verifying client certs")
-	command.Flags().BoolVar(&requireClientCerts, "require-client-certs", false, "Whether to require agents to present a client certificate")
-	command.Flags().BoolVar(&clientCertSubjectMatch, "client-cert-subject-match", false, "Whether a client cert's subject must match the agent name")
 
 	return command
+
 }
 
 func main() {

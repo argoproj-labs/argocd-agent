@@ -30,7 +30,7 @@ func Test_Connect(t *testing.T) {
 		principal.WithGeneratedTokenSigningKey(),
 	)
 
-	am := userpass.NewUserPassAuthentication()
+	am := userpass.NewUserPassAuthentication("")
 	am.UpsertUser("default", "password")
 	s.AuthMethods().RegisterMethod("userpass", am)
 
