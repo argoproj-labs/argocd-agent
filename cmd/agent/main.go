@@ -31,6 +31,7 @@ func NewAgentRunCommand() *cobra.Command {
 		agentMode     string
 		creds         string
 		showVersion   bool
+		versionFormat string
 		tlsClientCrt  string
 		tlsClientKey  string
 	)
@@ -38,7 +39,7 @@ func NewAgentRunCommand() *cobra.Command {
 		Short: "Run the argocd-agent agent component",
 		Run: func(c *cobra.Command, args []string) {
 			if showVersion {
-				fmt.Printf("%s v%s\n", version.Name(), version.Version())
+				cmd.PrintVersion(version.New("argocd-agent", "agent"), versionFormat)
 				os.Exit(0)
 			}
 			ctx, cancelFn := context.WithCancel(context.Background())
@@ -113,6 +114,7 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&agentMode, "agent-mode", "autonomous", "Mode of operation")
 	command.Flags().StringVar(&creds, "creds", "", "Credentials to use when connecting to server")
 	command.Flags().BoolVar(&showVersion, "version", false, "Display version information and exit")
+	command.Flags().StringVar(&versionFormat, "version-format", "text", "Output version information in format: text, json, json-indent")
 	command.Flags().StringVar(&tlsClientCrt, "tls-client-cert", "", "Path to TLS client certificate")
 	command.Flags().StringVar(&tlsClientKey, "tls-client-key", "", "Path to TLS client key")
 	return command
