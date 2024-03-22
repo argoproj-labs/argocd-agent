@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jannfis/argocd-agent/internal/version"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/stretchr/testify/assert"
 )
@@ -14,6 +13,6 @@ func Test_Version(t *testing.T) {
 		s := NewServer(nil)
 		r, err := s.Version(context.Background(), &versionapi.VersionRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, version.QualifiedVersion(), r.Version)
+		assert.Equal(t, s.version.QualifiedVersion(), r.Version)
 	})
 }

@@ -11,7 +11,6 @@ import (
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/auth/userpass"
-	"github.com/jannfis/argocd-agent/internal/version"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/jannfis/argocd-agent/pkg/types"
@@ -162,7 +161,7 @@ func Test_Serve(t *testing.T) {
 	versionC := versionapi.NewVersionClient(conn)
 	v, err := versionC.Version(context.Background(), &versionapi.VersionRequest{})
 	require.NoError(t, err)
-	assert.Equal(t, v.Version, version.QualifiedVersion())
+	assert.Equal(t, v.Version, s.version.QualifiedVersion())
 	err = s.Shutdown()
 	assert.NoError(t, err)
 }

@@ -43,6 +43,7 @@ type Agent struct {
 	queues            *queue.SendRecvQueues
 	emitter           *event.EventSource
 	watchLock         sync.RWMutex
+	version           *version.Version
 }
 
 const defaultQueueName = "default"
@@ -57,7 +58,9 @@ type AgentOption func(*Agent) error
 // NewAgent creates a new agent instance, using the given client interfaces and
 // options.
 func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appclientset.Interface, namespace string, opts ...AgentOption) (*Agent, error) {
-	a := &Agent{}
+	a := &Agent{
+		version: version.New("argocd-agent", "agent"),
+	}
 	a.client = client
 	a.appclient = appclient
 	a.infStopCh = make(chan struct{})
@@ -108,7 +111,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 
 func (a *Agent) Start(ctx context.Context) error {
 	infCtx, cancelFn := context.WithCancel(ctx)
-	log().Infof("Starting %s (agent) v%s (ns=%s, allowed_namespaces=%v, mode=%s)", version.Name(), version.Version(), a.namespace, a.options.namespaces, a.mode)
+	log().Infof("Starting %s (agent) v%s (ns=%s, allowed_namespaces=%v, mode=%s)", a.version.Name(), a.version.Version(), a.namespace, a.options.namespaces, a.mode)
 	a.context = infCtx
 	a.cancelFn = cancelFn
 	go func() {

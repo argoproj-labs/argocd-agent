@@ -16,14 +16,15 @@ var unauthenticatedMethods map[string]bool = map[string]bool{
 type server struct {
 	versionapi.UnimplementedVersionServer
 	authfunc func(context.Context) (context.Context, error)
+	version  *version.Version
 }
 
 func NewServer(authfunc func(context.Context) (context.Context, error)) *server {
-	return &server{authfunc: authfunc}
+	return &server{authfunc: authfunc, version: version.New("argocd-agent", "principal")}
 }
 
 func (s *server) Version(ctx context.Context, r *versionapi.VersionRequest) (*versionapi.VersionResponse, error) {
-	return &versionapi.VersionResponse{Version: version.QualifiedVersion()}, nil
+	return &versionapi.VersionResponse{Version: s.version.QualifiedVersion()}, nil
 }
 
 func (s *server) AuthFuncOverride(ctx context.Context, fullMethodName string) (context.Context, error) {
