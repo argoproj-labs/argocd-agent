@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+data:
+  repo.server: 192.168.56.222:8081
+  redis.server: 192.168.56.221:6379

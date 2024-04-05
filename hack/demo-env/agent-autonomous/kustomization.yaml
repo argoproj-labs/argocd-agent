@@ -1,0 +1,10 @@
+resources:
+- https://github.com/argoproj/argo-cd/manifests/crds?ref=stable
+- https://github.com/argoproj/argo-cd/manifests/base/config?ref=stable
+- https://github.com/argoproj/argo-cd/manifests/base/redis?ref=stable
+- https://github.com/argoproj/argo-cd/manifests/base/repo-server?ref=stable
+- https://github.com/argoproj/argo-cd/manifests/base/application-controller?ref=stable
+- https://github.com/argoproj/argo-cd/manifests/cluster-rbac/application-controller?ref=stable
+
+patches:
+- argocd-secret.yaml
