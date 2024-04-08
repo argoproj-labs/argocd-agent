@@ -272,7 +272,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		grpc.WithStreamInterceptor(r.streamAuthInterceptor),
 	}
 
-	conn, err := grpc.DialContext(ctx, r.Addr(), opts...)
+	conn, err := grpc.NewClient(r.Addr(), opts...)
 	if err != nil {
 		return err
 	}
