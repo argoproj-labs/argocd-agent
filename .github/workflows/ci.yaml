@@ -8,7 +8,7 @@ on:
       - 'main'
 env:
   # Golang version to use across CI steps
-  GOLANG_VERSION: '1.21'
+  GOLANG_VERSION: '1.22'
 
 permissions:
   contents: read
