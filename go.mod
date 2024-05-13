@@ -2,6 +2,8 @@ module github.com/jannfis/argocd-agent
 
 go 1.22
 
+toolchain go1.22.3
+
 require (
 	github.com/argoproj/argo-cd/v2 v2.11.0
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.15.2
