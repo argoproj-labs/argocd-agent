@@ -15,6 +15,11 @@ BIN_OS?=$(shell go env GOOS)
 current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BIN_DIR := $(current_dir)/build/bin
 
+PROTOC_GEN_GO_VERSION?=v1.28
+PROTOC_GEN_GO_GRPC_VERSION=v1.2
+GOLANG_CI_LINT_VERSION=v1.58.1
+MOCKERY_V2_VERSION?=v2.43.0
+
 .PHONY: build
 build: agent principal
 
@@ -40,16 +45,22 @@ clean-all: clean
 	mkdir -p build/bin
 
 ./build/bin/golangci-lint: ./build/bin
-	GOBIN=$(current_dir)/build/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	GOBIN=$(current_dir)/build/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANG_CI_LINT_VERSION)
 
 ./build/bin/protoc-gen-go: ./build/bin
-	GOBIN=$(current_dir)/build/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
+	GOBIN=$(current_dir)/build/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 
 ./build/bin/protoc-gen-go-grpc: ./build/bin
-	GOBIN=$(current_dir)/build/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
+	GOBIN=$(current_dir)/build/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
 
 ./build/bin/protoc: ./build/bin
 	./hack/install/install-protoc.sh
+
+./build/bin/mockery: ./build/bin
+	GOBIN=$(current_dir)/build/bin go install github.com/vektra/mockery/v2@$(MOCKERY_V2_VERSION)
+
+.PHONY: install-mockery
+install-mockery: ./build/bin/mockery
 
 .PHONY: install-golangci-lint
 install-golangci-lint: ./build/bin/golangci-lint
@@ -78,6 +89,10 @@ install-build-deps: install-lint-toolchain install-proto-toolchain
 .PHONY: protogen
 protogen: mod-vendor install-proto-toolchain
 	./hack/generate-proto.sh
+
+.PHONY: mocks
+mocks: install-mockery
+	$(BIN_DIR)/mockery
 
 .PHONY: codegen
 codegen: protogen
