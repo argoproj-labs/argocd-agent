@@ -118,6 +118,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 	queueLock := namedlock.NewNamedLock()
 	logCtx := log().WithField("module", "EventProcessor")
 	for {
+		queuesProcessed := 0
 		for _, queueName := range s.queues.Names() {
 			select {
 			case <-ctx.Done():
@@ -138,6 +139,8 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					break
 				}
 
+				queuesProcessed += 1
+
 				// We lock this specific queue, so that we won't process two
 				// items of the same queue at the same time. Queues must be
 				// processed in FIFO order, always.
@@ -145,6 +148,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 				// If it's not possible to get a lock (i.e. a lock is already
 				// being held elsewhere), we continue with the next queue.
 				if !queueLock.TryLock(queueName) {
+					logCtx.Tracef("Could not acquire queue lock, skipping queue")
 					break
 				}
 
@@ -172,7 +176,9 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 			}
 		}
 		// Give the CPU a little rest when no agents are connected
-		time.Sleep(10 * time.Millisecond)
+		if queuesProcessed == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 
 }
