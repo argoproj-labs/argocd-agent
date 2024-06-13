@@ -12,6 +12,10 @@ func (a *mockAuth) Authenticate(creds Credentials) (string, error) {
 	return "some", nil
 }
 
+func (a *mockAuth) Init() error {
+	return nil
+}
+
 func Test_AuthMethods(t *testing.T) {
 	t.Run("Register an auth method and verify", func(t *testing.T) {
 		m := NewMethods()

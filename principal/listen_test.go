@@ -110,7 +110,7 @@ func userPass(t *testing.T, kv ...string) *userpass.UserPassAuthentication {
 	if len(kv)%2 != 0 {
 		t.Fatalf("kv must have pairs of 2")
 	}
-	up := userpass.NewUserPassAuthentication()
+	up := userpass.NewUserPassAuthentication("")
 	for i := 0; i < len(kv); i = i + 2 {
 		up.UpsertUser(kv[i], kv[i+1])
 	}

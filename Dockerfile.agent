@@ -1,5 +1,10 @@
-FROM scratch
+FROM docker.io/library/golang:1.21 as builder
+WORKDIR /src
+COPY . .
+RUN make agent
+	
+FROM docker.io/library/alpine:latest
 
-COPY dist/argocd-agent-agent /usr/local/bin/argocd-agent-agent
+COPY --from=builder /src/dist/argocd-agent-agent /bin/argocd-agent-agent
 
-ENTRYPOINT ["/usr/local/bin/argocd-agent-agent"]
+ENTRYPOINT ["/bin/argocd-agent-agent"]

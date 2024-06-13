@@ -4,6 +4,7 @@ DOCKER_BIN?=docker
 IMAGE_REPOSITORY=quay.io/jannfis
 IMAGE_NAME_AGENT=argocd-agent-agent
 IMAGE_NAME_PRINCIPAL=argocd-agent-principal
+IMAGE_PLATFORMS?=linux/amd64
 IMAGE_TAG?=latest
 
 # Binary names
@@ -45,13 +46,13 @@ clean-all: clean
 	mkdir -p build/bin
 
 ./build/bin/golangci-lint: ./build/bin
-	GOBIN=$(current_dir)/build/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANG_CI_LINT_VERSION)
+	GOBIN=$(BIN_DIR) go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANG_CI_LINT_VERSION)
 
 ./build/bin/protoc-gen-go: ./build/bin
-	GOBIN=$(current_dir)/build/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
+	GOBIN=$(BIN_DIR) go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 
 ./build/bin/protoc-gen-go-grpc: ./build/bin
-	GOBIN=$(current_dir)/build/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
+	GOBIN=$(BIN_DIR) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
 
 ./build/bin/protoc: ./build/bin
 	./hack/install/install-protoc.sh
@@ -113,9 +114,17 @@ principal:
 images: image-agent image-principal
 
 .PHONY: image-agent
-image-agent: agent
-	$(DOCKER_BIN) build -f Dockerfile.agent -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_AGENT):$(IMAGE_TAG)
+image-agent:
+	$(DOCKER_BIN) build -f Dockerfile.agent --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_AGENT):$(IMAGE_TAG)
 
 .PHONY: image-principal
-image-principal: principal
-	$(DOCKER_BIN) build -f Dockerfile.principal -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_PRINCIPAL):$(IMAGE_TAG)
+image-principal:
+	$(DOCKER_BIN) build -f Dockerfile.principal --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_PRINCIPAL):$(IMAGE_TAG)
+
+push-images:
+	$(DOCKER_BIN) push $(IMAGE_REPOSITORY)/$(IMAGE_NAME_AGENT):$(IMAGE_TAG)
+	$(DOCKER_BIN) push $(IMAGE_REPOSITORY)/$(IMAGE_NAME_PRINCIPAL):$(IMAGE_TAG)
+
+.PHONY: help
+help:
+	@echo "Not yet, sorry."
