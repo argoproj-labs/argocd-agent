@@ -114,4 +114,10 @@ jobs:
           go mod download
       - name: Run all unit tests
         run: make test
+      - name: Upload coverage results
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: test/out/coverage.out
+
 
