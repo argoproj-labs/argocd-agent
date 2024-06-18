@@ -1,0 +1,46 @@
+name: Build & publish images
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+    branches:
+    - main
+
+permissions:
+  contents: read
+  repository-projects: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  set-vars:
+    name: Gather job information
+    runs-on: ubuntu-22.04
+    outputs:
+      image-tag: ${{ steps.image.outputs.tag}}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Set image tag for pushing to ghcr
+        run: |
+          if test "${{ github.event_name }}" = "pull_request"; then
+            echo "tag=pr-${{ github.event.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+          fi
+        id: image
+ 
+  build-agent:
+    name: Build agent image
+    runs-on: ubuntu-22.04
+    needs: [set-vars]
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+    - name: Build image
+      run: |
+        IMAGE_TAG=${{ needs.set-vars.outputs.tag }} make image-agent
+      
