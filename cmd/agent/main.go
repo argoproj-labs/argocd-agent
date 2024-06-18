@@ -11,6 +11,7 @@ import (
 	"github.com/jannfis/argocd-agent/cmd/cmd"
 	"github.com/jannfis/argocd-agent/internal/auth"
 	"github.com/jannfis/argocd-agent/internal/auth/userpass"
+	"github.com/jannfis/argocd-agent/internal/env"
 	"github.com/jannfis/argocd-agent/internal/version"
 	"github.com/jannfis/argocd-agent/pkg/client"
 	"github.com/jannfis/argocd-agent/pkg/types"
@@ -103,20 +104,41 @@ func NewAgentRunCommand() *cobra.Command {
 		},
 	}
 
-	command.Flags().StringVar(&serverAddress, "server-address", "", "Address of the server to connect to")
-	command.Flags().IntVar(&serverPort, "server-port", 443, "Port on the server to connect to")
-	command.Flags().StringVar(&logLevel, "log-level", "info", "The log level for the agent")
-	command.Flags().BoolVar(&insecure, "insecure-tls", false, "INSECURE: Do not verify remote TLS certificate")
-	command.Flags().StringVar(&rootCAPath, "root-ca-path", "", "Path to a file containing root CA certificate for verifying remote TLS")
+	command.Flags().StringVar(&serverAddress, "server-address",
+		env.StringWithDefault("ARGOCD_AGENT_REMOTE_SERVER", nil, ""),
+		"Address of the server to connect to")
+	command.Flags().IntVar(&serverPort, "server-port",
+		env.NumWithDefault("ARGOCD_AGENT_REMOTE_PORT", nil, 443),
+		"Port on the server to connect to")
+	command.Flags().StringVar(&logLevel, "log-level",
+		env.StringWithDefault("ARGOCD_AGENT_LOG_LEVEL", nil, "info"),
+		"The log level for the agent")
+	command.Flags().BoolVar(&insecure, "insecure-tls",
+		env.BoolWithDefault("ARGOCD_AGENT_TLS_INSECURE", false),
+		"INSECURE: Do not verify remote TLS certificate")
+	command.Flags().StringVarP(&namespace, "namespace", "n",
+		env.StringWithDefault("ARGOCD_AGENT_NAMESPACE", nil, "argocd"),
+		"Namespace to manage applications in")
+	command.Flags().StringVar(&agentMode, "agent-mode",
+		env.StringWithDefault("ARGOCD_AGENT_MODE", nil, "autonomous"),
+		"Mode of operation")
+	command.Flags().StringVar(&creds, "creds",
+		env.StringWithDefault("ARGOCD_AGENT_CREDS", nil, ""),
+		"Credentials to use when connecting to server")
+	command.Flags().StringVar(&rootCAPath, "root-ca-path",
+		env.StringWithDefault("ARGOCD_AGENT_TLS_ROOT_CA_PATH", nil, ""),
+		"Path to a file containing root CA certificate for verifying remote TLS")
+	command.Flags().StringVar(&tlsClientCrt, "tls-client-cert",
+		env.StringWithDefault("ARGOCD_AGENT_TLS_CLIENT_CERT_PATH", nil, ""),
+		"Path to TLS client certificate")
+	command.Flags().StringVar(&tlsClientKey, "tls-client-key",
+		env.StringWithDefault("ARGOCD_AGENT_TLS_CLIENT_KEY_PATH", nil, ""),
+		"Path to TLS client key")
+
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
-	command.Flags().StringVarP(&namespace, "namespace", "n", "argocd", "Namespace to manage applications in")
-	command.Flags().StringVar(&agentMode, "agent-mode", "autonomous", "Mode of operation")
-	command.Flags().StringVar(&creds, "creds", "", "Credentials to use when connecting to server")
 	command.Flags().BoolVar(&showVersion, "version", false, "Display version information and exit")
 	command.Flags().StringVar(&versionFormat, "version-format", "text", "Output version information in format: text, json, json-indent")
-	command.Flags().StringVar(&tlsClientCrt, "tls-client-cert", "", "Path to TLS client certificate")
-	command.Flags().StringVar(&tlsClientKey, "tls-client-key", "", "Path to TLS client key")
 	return command
 }
 
