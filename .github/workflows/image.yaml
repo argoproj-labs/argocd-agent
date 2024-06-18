@@ -18,6 +18,7 @@ concurrency:
 jobs:
   set-vars:
     name: Gather job information
+    if: github.repository == 'jannfis/argocd-agent'
     runs-on: ubuntu-22.04
     outputs:
       image-tag: ${{ steps.image.outputs.tag }}
@@ -33,14 +34,33 @@ jobs:
           fi
         id: image
  
-  build-agent:
+  build-and-push:
+    strategy:
+      fail-fast: true
+      matrix:
+        components:
+        - name: agent
+        - name: principal
+      
     name: Build agent image
     runs-on: ubuntu-22.04
+    if: github.repository == 'jannfis/argocd-agent'
     needs: [set-vars]
+    env:
+      DOCKER_BIN: podman
+      IMAGE_TAG: ${{ needs.set-vars.outputs.image-tag }}
+      IMAGE_REPOSITORY: ghcr.io/jannfis/argocd-agent
     steps:
     - name: Checkout source code
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-    - name: Build image
+    - name: Build ${{ matrix.component.name }} image
       run: |
-        IMAGE_TAG=${{ needs.set-vars.outputs.image-tag }} make image-agent
-      
+          make image-${{ matrix.components.name }}
+    - name: Push agent image to ghcr.io
+      uses: redhat-actions/push-to-registry@v2
+      with:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        registry: ghcr.io
+        image: ${{ env.IMAGE_REPOSITORY }}/argocd-agent-${{ matrix.components.name }}
+        tags: ${{ env.IMAGE_TAG }}
