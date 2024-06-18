@@ -3,19 +3,64 @@ kind: ConfigMap
 metadata:
   name: argocd-agent-params
 data:
+  # principal.listen.host: The interface address to listen on. Leave empty
+  # for all interfaces.
+  # Default: ""
   principal.listen.host: ""
+  # principal.listen.port: The port the gRPC server should listen on. 
+  # Default: 8443
   principal.listen.port: "8443"
+  # principal.log.level: The logging level to use. One of trace, debug, info,
+  # warn or error. 
+  # Default: info
   principal.log.level: info
+  # principal.metrics.port: The port the metrics server should listen on.
+  # Default: 8000
   principal.metrics.port: "8000"
+  # principal.metrics.enabled: Whether the metrics server should be started.
   principal.metrics.enabled: "true"
+  # principal.namespace: The namespace the principal will operate in. If left
+  # blank, the namespace where the pod is running in will be used.
+  # Default: ""
   principal.namespace: ""
+  # principal.allowed-namespaces: A list of namespaces the principal shall
+  # watch and process Argo CD resources in. Seperate entries using commas.
+  # Entries may contain shell-style wildcards.
+  # Default: ""
   principal.allowed-namespaces: ""
+  # principal.tls.server.cert-path: Path to the TLS certificate to be used by
+  # the gRPC server.
+  # Default: ""
   principal.tls.server.cert-path: "/app/config/tls/tls.crt"
+  # principal.tls.server.key-path: Path to the TLS private key to be used by
+  # the gRPC server.
+  # Default: ""
   principal.tls.server.key-path: "/app/config/tls/tls.key"
+  # principal.tls.server.allow-generate: Whether to allow the principal to
+  # generate its own set of TLS cert and key on startup when none are
+  # configured. This is insecure. Do only use for development.
+  # Default: false
   principal.tls.server.allow-generate: "false"
+  # principal.tls.server.root-ca-path: Path to a TLS root certificate authority
+  # to be used to validate agent's client certificates against.
+  # Default: ""
   principal.tls.server.root-ca-path: "/app/config/tls/ca.crt"
+  # principal.tls.client-cert.require: Whether to require client certs from
+  # agents upon connection.
+  # Default: false
   principal.tls.client-cert.require: "false"
+  # principal.tls.client-cert.match-subject: Whether to match the subject field
+  # in a client certificate presented by an agent to the agent's name.
+  # Default: false
   principal.tls.client-cert.match-subject: "false"
+  # principal.jwt.allow-generate: Whether to allow the principal to generate
+  # its own private key for signing JWT tokens. This is insecure. Do only use
+  # for development.
+  # Default: false
   principal.jwt.allow-generate: "false"
+  # principal.jwt.key-path: Path to the private key to be used for signing JWT
+  # tokens.
   principal.jwt.key-path: "/app/config/jwt/jwt.key"
+  # principal.user-db.path: Path to the file containing encrypted credentials
+  # for authenticating agent connections.
   principal.user-db.path: "/app/config/userpass/passwd"
