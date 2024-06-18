@@ -44,7 +44,7 @@ jobs:
       
     name: Build and push images
     runs-on: ubuntu-22.04
-    if: github.repository == 'jannfis/argocd-agent' && ( github.event_name == "push" || contains(github.event.pull_request.labels.*.name, 'ok-to-build') )
+    if: github.repository == 'jannfis/argocd-agent' && ( github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ok-to-build') )
     needs: [set-vars]
     env:
       DOCKER_BIN: podman
