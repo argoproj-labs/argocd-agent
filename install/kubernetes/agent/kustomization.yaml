@@ -1,0 +1,6 @@
+resources:
+- agent-sa.yaml
+- agent-role.yaml
+- agent-rolebinding.yaml
+- agent-deployment.yaml
+- agent-params-cm.yaml
