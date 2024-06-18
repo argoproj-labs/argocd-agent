@@ -20,7 +20,7 @@ jobs:
     name: Gather job information
     runs-on: ubuntu-22.04
     outputs:
-      image-tag: ${{ steps.image.outputs.tag}}
+      image-tag: ${{ steps.image.outputs.tag }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -42,5 +42,5 @@ jobs:
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
     - name: Build image
       run: |
-        IMAGE_TAG=${{ needs.set-vars.outputs.tag }} make image-agent
+        IMAGE_TAG=${{ needs.set-vars.outputs.image-tag }} make image-agent
       
