@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: argocd-agent-agent
+  name: argocd-agent-agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-agent-agent
+      app.kubernetes.io/part-of: argocd-agent
+      app.kubernetes.io/component: agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: argocd-agent-agent
+        app.kubernetes.io/part-of: argocd-agent
+        app.kubernetes.io/component: agent
+    spec:
+      containers:
+        - args:
+            - /usr/local/bin/argocd-agent-agent
+          env:
+          - name: ARGOCD_AGENT_REMOTE_SERVER
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.principal.address
+                optional: true
+          - name: ARGOCD_AGENT_REMOTE_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.principal.port
+                optional: true
+          - name: ARGOCD_AGENT_LOG_LEVEL
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.log.level
+                optional: true
+          - name: ARGOCD_AGENT_NAMESPACE
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.namespace
+                optional: true
+          - name: ARGOCD_AGENT_TLS_CLIENT_CERT_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.tls.client.cert-path
+                optional: true
+          - name: ARGOCD_AGENT_TLS_CLIENT_KEY_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.tls.client.key-path
+                optional: true
+          - name: ARGOCD_AGENT_TLS_INSECURE
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.tls.client.insecure
+                optional: true
+          - name: ARGOCD_AGENT_TLS_ROOT_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.tls.root-ca-path
+                optional: true
+          - name: ARGOCD_AGENT_MODE
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.agent.mode
+                optional: true
+          - name: ARGOCD_AGENT_USERPASS_CREDS_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.creds.userpass.path
+                optional: true
+
+          image: quay.io/jannfis/argocd-agent-agent:latest
+          imagePullPolicy: Always
+          name: argocd-agent-agent
+          ports:
+            - containerPort: 8000
+              name: metrics
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tls-secret
+              mountPath: /app/config/tls
+            - name: userpass-passwd
+              mountPath: /app/config/creds
+      serviceAccountName: argocd-agent-agent
+      volumes:
+      - name: userpass-passwd
+        secret:
+          secretName: argocd-agent-agent-userpass
+          items:
+          - key: credentials
+            path: userpass.creds
+      - name: tls-secret
+        secret:
+          secretName: argocd-agent-tls
+          items:
+          - key: tls.crt
+            path: tls.crt
+          - key: tls.key
+            path: tls.key
+          - key: ca.crt
+            path: ca.crt
+          optional: true
