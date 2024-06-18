@@ -115,11 +115,11 @@ images: image-agent image-principal
 
 .PHONY: image-agent
 image-agent:
-	$(DOCKER_BIN) build -f Dockerfile.agent --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_AGENT):$(IMAGE_TAG)
+	$(DOCKER_BIN) build -f Dockerfile.agent --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_AGENT):$(IMAGE_TAG) .
 
 .PHONY: image-principal
 image-principal:
-	$(DOCKER_BIN) build -f Dockerfile.principal --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_PRINCIPAL):$(IMAGE_TAG)
+	$(DOCKER_BIN) build -f Dockerfile.principal --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_PRINCIPAL):$(IMAGE_TAG) .
 
 push-images:
 	$(DOCKER_BIN) push $(IMAGE_REPOSITORY)/$(IMAGE_NAME_AGENT):$(IMAGE_TAG)
