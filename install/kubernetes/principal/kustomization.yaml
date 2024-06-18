@@ -1,9 +1,9 @@
 resources:
-- agent-sa.yaml
-- agent-role.yaml
-- agent-clusterrole.yaml
-- agent-rolebinding.yaml
-- agent-clusterrolebinding.yaml
-- agent-deployment.yaml
-- agent-service.yaml
-- agent-params-cm.yaml
+- principal-sa.yaml
+- principal-role.yaml
+- principal-clusterrole.yaml
+- principal-rolebinding.yaml
+- principal-clusterrolebinding.yaml
+- principal-deployment.yaml
+- principal-service.yaml
+- principal-params-cm.yaml
