@@ -7,4 +7,4 @@ resources:
 - https://github.com/argoproj/argo-cd/manifests/cluster-rbac/application-controller?ref=stable
 
 patches:
-- argocd-secret.yaml
+- path: argocd-secret.yaml
