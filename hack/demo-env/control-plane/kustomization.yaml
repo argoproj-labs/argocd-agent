@@ -7,6 +7,7 @@ resources:
 - https://github.com/argoproj/argo-cd/manifests/base/server?ref=stable
 - https://github.com/argoproj/argo-cd/manifests/cluster-rbac/server?ref=stable
 - https://github.com/argoproj/argo-cd/examples/k8s-rbac/argocd-server-applications?ref=stable
+- ../common
 
 patches:
 - path: argocd-cmd-params-cm.yaml

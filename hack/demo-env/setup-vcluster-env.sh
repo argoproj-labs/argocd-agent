@@ -21,11 +21,12 @@ create)
 		echo "  --> Creating vcluster $cluster"
 		vcluster create --context=default -n vcluster-${cluster} --expose --kube-config-context-name vcluster-${cluster} vcluster-${cluster}
 	done
+	sleep 2
 	echo "-> Creating Argo CD instances in vclusters"
 	for cluster in $VCLUSTERS; do
 		echo "  --> Creating instance in vcluster $cluster"
 		kubectl --context vcluster-${cluster} create ns argocd
-		kubectl --context vcluster-${cluster} apply -n argocd -k ${SCRIPTPATH}${cluster}
+		kubectl --context vcluster-${cluster} apply -n argocd -k ${SCRIPTPATH}/${cluster}
 	done
 	;;
 delete)

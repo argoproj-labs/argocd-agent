@@ -5,6 +5,7 @@ resources:
 - https://github.com/argoproj/argo-cd/manifests/base/repo-server?ref=stable
 - https://github.com/argoproj/argo-cd/manifests/base/application-controller?ref=stable
 - https://github.com/argoproj/argo-cd/manifests/cluster-rbac/application-controller?ref=stable
+- ../common
 
 patches:
 - path: argocd-cmd-params-cm.yaml
