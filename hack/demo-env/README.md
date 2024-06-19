@@ -49,3 +49,29 @@ This is a local development environment. It comes with pre-configured credential
 You can authenticate to the the Argo CD UI or API server with user `admin` and password `adminadmin`. Creative, isn't it.
 
 You will need to generate credentials for the agents. Run the `gen-creds.sh` script before you start any of the agent or principal components.
+
+## Starting the components
+
+### Running locally in your shell
+
+There are three scripts which can be used to start the respective component locally on your system. You will have to have the vclusters created for them to work, and also you must have created the credentials already.
+
+* `start-principal.sh` will start the agent's principal component
+* `start-agent-autonomous.sh` will start an agent in autonomous mode
+* `start-agent-managed.sh` will start an agent in managed mode
+
+Starting multiple agents of the same type is not supported in this demo/testing environment.
+
+Components will be started in insecure and transient mode, that means:
+
+* TLS verification will be disabled on the agents,
+* the principal will generate and use a self-signed, temporary TLS certificate and key
+* the principal will generate and use a temporary RSA key for signing issued JWTs
+
+### Starting a debug session from vscode
+
+To be written.
+
+### Running in a cluster
+
+To be written.
