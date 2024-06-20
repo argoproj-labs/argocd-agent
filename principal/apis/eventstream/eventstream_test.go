@@ -35,11 +35,11 @@ func Test_Subscribe(t *testing.T) {
 		// qs.SendQ("default").Add(event.LegacyEvent{Type: event.EventAppAdded, Application: &v1alpha1.Application{
 		// 	ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
 		// })
-		qs.SendQ("default").Add(emitter.NewApplicationEvent(
+		qs.SendQ("default").Add(emitter.ApplicationEvent(
 			event.Create,
 			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
 		))
-		qs.SendQ("default").Add(emitter.NewApplicationEvent(
+		qs.SendQ("default").Add(emitter.ApplicationEvent(
 			event.Create,
 			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "bar", Namespace: "test"}},
 		))

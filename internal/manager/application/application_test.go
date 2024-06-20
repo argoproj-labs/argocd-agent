@@ -12,6 +12,7 @@ import (
 	"github.com/jannfis/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
@@ -25,6 +26,13 @@ import (
 
 var appExistsError = errors.NewAlreadyExists(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
 var appNotFoundError = errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
+
+func fakeAppManager(objects ...runtime.Object) (*fakeappclient.Clientset, *ApplicationManager) {
+	appC := fakeappclient.NewSimpleClientset(objects...)
+	informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+	be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
+	return appC, NewApplicationManager(be, "argocd")
+}
 
 func Test_ManagerOptions(t *testing.T) {
 	t.Run("NewManager with default options", func(t *testing.T) {
@@ -377,14 +385,87 @@ func Test_ManagerUpdateOperation(t *testing.T) {
 			},
 		}
 
-		appC := fakeappclient.NewSimpleClientset(existing)
-		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
-		mgr := NewApplicationManager(be, "argocd")
+		// appC := fakeappclient.NewSimpleClientset(existing)
+		// informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+		// be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
+		// mgr := NewApplicationManager(be, "argocd")
+		_, mgr := fakeAppManager(existing)
 		updated, err := mgr.UpdateOperation(context.TODO(), incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
-		prettyPrint(updated)
+	})
+}
+
+func Test_DeleteApp(t *testing.T) {
+	t.Run("Delete without finalizer", func(t *testing.T) {
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"foo": "bar",
+					"bar": "foo",
+				},
+				Finalizers: []string{"resource-finalizer.argoproj.io"},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+			Operation: &v1alpha1.Operation{
+				InitiatedBy: v1alpha1.OperationInitiator{Username: "foobar"},
+			},
+		}
+		appC, mgr := fakeAppManager(existing)
+		app, err := appC.ArgoprojV1alpha1().Applications("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
+		assert.NoError(t, err)
+		assert.NotNil(t, app)
+		err = mgr.Delete(context.TODO(), "argocd", existing)
+		assert.NoError(t, err)
+		app, err = appC.ArgoprojV1alpha1().Applications("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
+		assert.True(t, errors.IsNotFound(err))
+		assert.Nil(t, app)
+	})
+	t.Run("Remove finalizers", func(t *testing.T) {
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"foo": "bar",
+					"bar": "foo",
+				},
+				Finalizers: []string{"resource-finalizer.argoproj.io"},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+			Operation: &v1alpha1.Operation{
+				InitiatedBy: v1alpha1.OperationInitiator{Username: "foobar"},
+			},
+		}
+		appC, mgr := fakeAppManager(existing)
+		app, err := appC.ArgoprojV1alpha1().Applications("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
+		assert.NoError(t, err)
+		assert.NotNil(t, app)
+		app, err = mgr.RemoveFinalizers(context.TODO(), app)
+		assert.NoError(t, err)
+		assert.Empty(t, app.ObjectMeta.Finalizers)
 	})
 }
 
@@ -461,15 +542,15 @@ func Test_stampLastUpdated(t *testing.T) {
 			},
 		}
 		stampLastUpdated(app)
-		assert.Contains(t, app.Labels, LastUpdatedLabel)
-		assert.Len(t, app.Labels, 1)
+		assert.Contains(t, app.Annotations, LastUpdatedAnnotation)
+		assert.Len(t, app.Annotations, 1)
 	})
-	t.Run("Stamp app with existing labels", func(t *testing.T) {
+	t.Run("Stamp app with existing annotations", func(t *testing.T) {
 		app := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "foo",
 				Namespace: "bar",
-				Labels: map[string]string{
+				Annotations: map[string]string{
 					"foo": "bar",
 					"bar": "baz",
 				},
@@ -479,8 +560,8 @@ func Test_stampLastUpdated(t *testing.T) {
 			},
 		}
 		stampLastUpdated(app)
-		assert.Contains(t, app.Labels, LastUpdatedLabel)
-		assert.Len(t, app.Labels, 3)
+		assert.Contains(t, app.Annotations, LastUpdatedAnnotation)
+		assert.Len(t, app.Annotations, 3)
 	})
 }
 

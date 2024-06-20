@@ -14,6 +14,7 @@ import (
 	"github.com/jannfis/argocd-agent/internal/event"
 	appinformer "github.com/jannfis/argocd-agent/internal/informer/application"
 	"github.com/jannfis/argocd-agent/internal/issuer"
+	"github.com/jannfis/argocd-agent/internal/manager"
 	"github.com/jannfis/argocd-agent/internal/manager/application"
 	"github.com/jannfis/argocd-agent/internal/metrics"
 	"github.com/jannfis/argocd-agent/internal/queue"
@@ -98,6 +99,7 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 
 	managerOpts := []application.ApplicationManagerOption{
 		application.WithAllowUpsert(true),
+		application.WithRole(manager.ManagerRolePrincipal),
 	}
 
 	if s.options.metricsPort > 0 {
@@ -113,7 +115,6 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 	s.appManager = application.NewApplicationManager(kubernetes.NewKubernetesBackend(appClient, s.namespace, s.appInformer, true), s.namespace,
 		managerOpts...,
 	)
-
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
 	}

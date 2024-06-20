@@ -58,7 +58,7 @@ func NewEventSource(source string) *EventSource {
 	return ev
 }
 
-func (evs EventSource) NewApplicationEvent(evType EventType, app *v1alpha1.Application) *cloudevents.Event {
+func (evs EventSource) ApplicationEvent(evType EventType, app *v1alpha1.Application) *cloudevents.Event {
 	cev := cloudevents.NewEvent()
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)

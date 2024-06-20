@@ -185,7 +185,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 	require.NoError(t, err)
 	start := time.Now()
 	for i := 0; i < 10; i += 1 {
-		ev := event.NewEventSource("").NewApplicationEvent(event.SpecUpdate, &v1alpha1.Application{
+		ev := event.NewEventSource("").ApplicationEvent(event.SpecUpdate, &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      fmt.Sprintf("test%d", i),
 				Namespace: "default",

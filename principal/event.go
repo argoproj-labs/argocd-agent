@@ -2,6 +2,7 @@ package principal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -24,6 +25,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	// ev, ok := i.(*event.LegacyEvent)
 	ev, ok := i.(*cloudevents.Event)
 	if !ok {
+		q.Done(ev)
 		return fmt.Errorf("invalid data in queue: have:%T want:%T", i, ev)
 	}
 
@@ -68,8 +70,10 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	})
 
 	switch ev.Type() {
+
+	// App creation event will only be processed in autonomous mode
 	case event.Create.String():
-		if agentMode == types.AgentModeAutonomous {
+		if agentMode.IsAutonomous() {
 			incoming.SetNamespace(agentName)
 			_, err := s.appManager.Create(ctx, incoming)
 			if err != nil {
@@ -79,6 +83,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
 			return nil
 		}
+	// Status update
 	case event.StatusUpdate.String():
 		var err error
 		if agentMode == types.AgentModeAutonomous {
@@ -90,6 +95,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Updated application status %s", incoming.QualifiedName())
+	// Spec update
 	case event.SpecUpdate.String():
 		var err error
 		if agentMode == types.AgentModeManaged {
@@ -101,6 +107,18 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Updated application spec %s", incoming.QualifiedName())
+	// App deletion
+	case event.Delete.String():
+		var err error
+		if agentMode.IsManaged() {
+			err = errors.New("event type not allowed when mode is not autonomous")
+		} else {
+			err = s.appManager.Delete(ctx, agentName, incoming)
+		}
+		if err != nil {
+			return fmt.Errorf("could not delete application %s: %w", incoming.QualifiedName(), err)
+		}
+		logCtx.Infof("Deleted application %s", incoming.QualifiedName())
 	default:
 		return fmt.Errorf("unable to process event of type %s", ev.Type())
 	}
@@ -139,8 +157,6 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					break
 				}
 
-				queuesProcessed += 1
-
 				// We lock this specific queue, so that we won't process two
 				// items of the same queue at the same time. Queues must be
 				// processed in FIFO order, always.
@@ -148,9 +164,11 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 				// If it's not possible to get a lock (i.e. a lock is already
 				// being held elsewhere), we continue with the next queue.
 				if !queueLock.TryLock(queueName) {
-					logCtx.Tracef("Could not acquire queue lock, skipping queue")
+					// logCtx.Tracef("Could not acquire queue lock, skipping queue")
 					break
 				}
+
+				queuesProcessed += 1
 
 				logCtx.Trace("Acquired queue lock")
 
