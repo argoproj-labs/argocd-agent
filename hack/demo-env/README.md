@@ -70,7 +70,7 @@ Components will be started in insecure and transient mode, that means:
 
 ### Starting a debug session from vscode
 
-To be written.
+There is a vscode launch configuration to assist with debugging components in `hack/vscode/launch.json`
 
 ### Running in a cluster
 

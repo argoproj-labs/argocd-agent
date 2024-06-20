@@ -1,0 +1,55 @@
+// vscode launch configuration for debugging argocd-agent
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug principal",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/cmd/principal",
+            "args": [
+                "--allowed-namespaces='*'",
+                "--insecure-tls-generate",
+                "--insecure-jwt-generate",
+                "--kubecontext=vcluster-control-plane",
+                "--log-level=trace",
+                "--passwd=${workspaceFolder}/hack/demo-env/creds/users.control-plane"
+            ]
+        },
+        {
+            "name": "Debug agent-autonomous",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/cmd/agent",
+            "args": [
+                "--agent-mode=autonomous",
+                "--creds=userpass:${workspaceFolder}/hack/demo-env/creds/creds.agent-autonomous",
+                "--server-address=127.0.0.1",
+                "--server-port=8443",
+                "--insecure-tls",
+                "--kubecontext=vcluster-agent-autonomous",
+                "--log-level=trace",
+                "--namespace=argocd"
+            ]
+        },
+        {
+            "name": "Debug agent-managed",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/cmd/agent",
+            "args": [
+                "--agent-mode=managed",
+                "--creds=userpass:${workspaceFolder}/hack/demo-env/creds/creds.agent-autonomous",
+                "--server-address=127.0.0.1",
+                "--server-port=8443",
+                "--insecure-tls",
+                "--kubecontext=vcluster-agent-autonomous",
+                "--log-level=trace",
+                "--namespace=argocd"
+            ]
+        }
+    ]
+}
