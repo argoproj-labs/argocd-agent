@@ -21,7 +21,7 @@ As of now, the following limitations apply to `argocd-agent`:
 
 ## Quickstart
 
-See the [quickstart guide](docs/quickstart.md) for more information.
+See the [quickstart guide](docs/hack/quickstart.md) for more information.
 
 ## Compatibility
 
