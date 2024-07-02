@@ -47,7 +47,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		err = s.processApplicationEvent(ctx, agentName, ev)
 	case event.TargetAppProject:
 	default:
-		err = fmt.Errorf("unable to process event of unknown type %s", target)
+		err = fmt.Errorf("unable to process event with unknown target %s", target)
 	}
 	q.Done(ev)
 	return err
@@ -81,7 +81,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			}
 		} else {
 			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
-			return nil
+			return event.ErrEventDiscarded
 		}
 	// Status update
 	case event.StatusUpdate.String():

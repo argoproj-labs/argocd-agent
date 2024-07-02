@@ -1,6 +1,7 @@
 package event
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
@@ -35,6 +36,8 @@ const (
 	TargetAppProject  EventTarget = "appproject"
 )
 
+var ErrEventDiscarded error = errors.New("discarded")
+
 func (t EventType) String() string {
 	return string(t)
 }
@@ -56,6 +59,10 @@ func NewEventSource(source string) *EventSource {
 	ev := &EventSource{}
 	ev.source = source
 	return ev
+}
+
+func IsEventDiscarded(err error) bool {
+	return errors.Is(err, ErrEventDiscarded)
 }
 
 func (evs EventSource) ApplicationEvent(evType EventType, app *v1alpha1.Application) *cloudevents.Event {

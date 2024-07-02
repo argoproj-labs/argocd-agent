@@ -9,3 +9,9 @@ packages:
   github.com/jannfis/argocd-agent/internal/queue:
   github.com/jannfis/argocd-agent/internal/issuer:
   github.com/jannfis/argocd-agent/internal/backend:
+  k8s.io/client-go/util/workqueue:
+    config:
+      dir: "test/mocks/k8s-workqueue"
+      all: false
+    interfaces:
+      RateLimitingInterface:
