@@ -56,7 +56,7 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 		return
 	}
 
-	q.Add(a.emitter.NewApplicationEvent(event.Create, app))
+	q.Add(a.emitter.ApplicationEvent(event.Create, app))
 	logCtx.WithField("sendq_len", q.Len()).WithField("sendq_name", a.remote.ClientID()).Debugf("Added app create event to send queue")
 }
 
@@ -100,7 +100,7 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 		eventType = event.SpecUpdate
 	}
 
-	q.Add(a.emitter.NewApplicationEvent(eventType, new))
+	q.Add(a.emitter.ApplicationEvent(eventType, new))
 	// q.Add(ev)
 	logCtx.
 		WithField("sendq_len", q.Len()).
@@ -130,6 +130,6 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 		logCtx.Error("Default queue disappeared!")
 		return
 	}
-	q.Add(a.emitter.NewApplicationEvent(event.Delete, app))
+	q.Add(a.emitter.ApplicationEvent(event.Delete, app))
 	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app delete event to send queue")
 }

@@ -35,7 +35,7 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", outbound.Namespace)
 		return
 	}
-	ev := s.events.NewApplicationEvent(event.Create, outbound)
+	ev := s.events.ApplicationEvent(event.Create, outbound)
 	q.Add(ev)
 	logCtx.Tracef("Added app %s to send queue, total length now %d", outbound.QualifiedName(), q.Len())
 }
@@ -49,6 +49,15 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		"event":            "application_update",
 		"application_name": old.Name,
 	})
+	if len(new.Finalizers) > 0 && len(new.Finalizers) != len(old.Finalizers) {
+		var err error
+		new, err = s.appManager.RemoveFinalizers(s.ctx, new)
+		if err != nil {
+			logCtx.WithError(err).Warnf("Could not remove finalizer")
+		} else {
+			logCtx.Debug("Removed finalizer")
+		}
+	}
 	if s.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
 		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
 		return
@@ -62,7 +71,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		logCtx.Error("Help! Queue pair has disappeared!")
 		return
 	}
-	ev := s.events.NewApplicationEvent(event.SpecUpdate, new)
+	ev := s.events.ApplicationEvent(event.SpecUpdate, new)
 	q.Add(ev)
 	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
 }
@@ -79,7 +88,7 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 		return
 	}
 	mode := s.agentMode(outbound.Namespace)
-	if mode != types.AgentModeManaged {
+	if !mode.IsManaged() {
 		logCtx.Tracef("Discarding event for unmanaged agent")
 		return
 	}
@@ -88,7 +97,7 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 		logCtx.Error("Help! Queue pair has disappeared!")
 		return
 	}
-	ev := s.events.NewApplicationEvent(event.Delete, outbound)
+	ev := s.events.ApplicationEvent(event.Delete, outbound)
 	logCtx.WithField("event", "DeleteApp").WithField("sendq_len", q.Len()+1).Tracef("Added event to send queue")
 	q.Add(ev)
 }

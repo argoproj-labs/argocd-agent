@@ -27,6 +27,14 @@ func (m AgentMode) String() string {
 	return agentModeUnknown
 }
 
+func (m AgentMode) IsAutonomous() bool {
+	return m == AgentModeAutonomous
+}
+
+func (m AgentMode) IsManaged() bool {
+	return m == AgentModeManaged
+}
+
 func AgentModeFromString(mode string) AgentMode {
 	switch mode {
 	case agentModeManaged:
