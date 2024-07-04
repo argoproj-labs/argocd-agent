@@ -36,7 +36,10 @@ const (
 	TargetAppProject  EventTarget = "appproject"
 )
 
-var ErrEventDiscarded error = errors.New("discarded")
+var (
+	ErrEventDiscarded  error = errors.New("event discarded")
+	ErrEventNotAllowed error = errors.New("event not allowed in this agent mode")
+)
 
 func (t EventType) String() string {
 	return string(t)

@@ -22,10 +22,9 @@ import (
 // server's backend.
 func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workqueue.RateLimitingInterface) error {
 	i, _ := q.Get()
-	// ev, ok := i.(*event.LegacyEvent)
 	ev, ok := i.(*cloudevents.Event)
 	if !ok {
-		q.Done(ev)
+		q.Done(i)
 		return fmt.Errorf("invalid data in queue: have:%T want:%T", i, ev)
 	}
 
@@ -49,7 +48,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	default:
 		err = fmt.Errorf("unable to process event with unknown target %s", target)
 	}
-	q.Done(ev)
+	q.Done(i)
 	return err
 }
 
@@ -83,8 +82,8 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
 			return event.ErrEventDiscarded
 		}
-	// Status update
-	case event.StatusUpdate.String():
+	// Spec updates are only allowed in autonomous mode
+	case event.SpecUpdate.String():
 		var err error
 		if agentMode == types.AgentModeAutonomous {
 			_, err = s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
@@ -95,8 +94,8 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Updated application status %s", incoming.QualifiedName())
-	// Spec update
-	case event.SpecUpdate.String():
+	// Status updates are only allowed in managed mode
+	case event.StatusUpdate.String():
 		var err error
 		if agentMode == types.AgentModeManaged {
 			_, err = s.appManager.UpdateStatus(ctx, agentName, incoming)
