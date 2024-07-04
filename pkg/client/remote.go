@@ -18,7 +18,6 @@ import (
 	"github.com/jannfis/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -189,7 +188,6 @@ func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error)
 		port:      port,
 		tlsConfig: &tls.Config{},
 		backoff: wait.Backoff{
-			Steps:    math.MaxInt,
 			Duration: 1 * time.Second,
 			Factor:   2,
 			Cap:      1 * time.Minute,
@@ -250,6 +248,15 @@ func (r *Remote) streamAuthInterceptor(ctx context.Context, desc *grpc.StreamDes
 	return streamer(nCtx, desc, cc, method, opts...)
 }
 
+func connectBackoff() wait.Backoff {
+	return wait.Backoff{
+		Steps:    math.MaxInt,
+		Duration: 1 * time.Second,
+		Factor:   1.2,
+		Cap:      1 * time.Minute,
+	}
+}
+
 // Connect connects this Remote to the remote host and performs authentication.
 // If the remote is configured with a retry, Connect will keep trying to
 // establish a connection to the remote host until either the number of maximum
@@ -260,7 +267,7 @@ func (r *Remote) streamAuthInterceptor(ctx context.Context, desc *grpc.StreamDes
 func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 	creds := credentials.NewTLS(r.tlsConfig)
 	cparams := grpc.ConnectParams{
-		Backoff: backoff.DefaultConfig,
+		MinConnectTimeout: 365 * 24 * time.Hour,
 	}
 
 	// Some default options
@@ -279,43 +286,52 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 
 	authC := authapi.NewAuthenticationClient(conn)
 
+	authenticated := false
+	cBackoff := connectBackoff()
+
 	// We try to authenticate to the remote repeatedly, until either of the
 	// following events happen:
 	//
 	// 1) The retry attempts are used up or
 	// 2) The context expires or is canceled
-	retries := r.backoff.Steps
-	err = retry.OnError(r.backoff, r.retriable, func() error {
-		retries -= 1
+	err = retry.OnError(cBackoff, r.retriable, func() error {
 		select {
 		case <-ctx.Done():
 			return status.Error(codes.Canceled, "context canceled")
 		default:
 			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String()})
 			if ierr != nil {
-				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, r.backoff.Step())
+				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
 				return ierr
 			}
 			r.accessToken, ierr = NewToken(resp.AccessToken)
 			if ierr != nil {
-				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, r.backoff.Step())
+				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
 				return ierr
 			}
 			r.refreshToken, ierr = NewToken(resp.RefreshToken)
 			if ierr != nil {
-				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, r.backoff.Step())
+				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
 				return ierr
 			}
 			r.clientID, ierr = r.accessToken.Claims.GetSubject()
 			if ierr != nil {
 				return err
 			}
+			authenticated = true
 			return nil
 		}
 	})
 	if err != nil {
 		conn.Close()
 		return err
+	}
+
+	// Gotta make sure we went through the retry.OnError loop at least once and
+	// successfully authenticated during execution.
+	if !authenticated {
+		conn.Close()
+		return fmt.Errorf("unknown authentication failure")
 	}
 	log().Infof("Authentication successful")
 	versionC := versionapi.NewVersionClient(conn)

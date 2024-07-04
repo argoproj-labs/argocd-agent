@@ -22,7 +22,7 @@ import (
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 )
 
-const waitForSyncedDuration = 1 * time.Second
+const waitForSyncedDuration = 10 * time.Second
 
 // Agent is a controller that synchronizes Application resources
 type Agent struct {
