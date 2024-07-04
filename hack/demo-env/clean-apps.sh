@@ -1,3 +1,5 @@
+# Script to clean all apps in the demo environment. It will remove any resource
+# finalizer before deletion, so it might leave your workloads behind.
 for cluster in control-plane agent-managed agent-autonomous; do
 	apps=$(kubectl --context vcluster-${cluster} get apps -A --no-headers -o go-template="{{range .items}}{{.metadata.namespace}} {{.metadata.name}}{{end}}")
 	test -z "$apps" && continue
