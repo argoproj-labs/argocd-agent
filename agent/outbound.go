@@ -95,9 +95,9 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	var eventType event.EventType
 	switch a.mode {
 	case types.AgentModeAutonomous:
-		eventType = event.StatusUpdate
-	case types.AgentModeManaged:
 		eventType = event.SpecUpdate
+	case types.AgentModeManaged:
+		eventType = event.StatusUpdate
 	}
 
 	q.Add(a.emitter.ApplicationEvent(eventType, new))
