@@ -4,6 +4,22 @@ This is **not** a guide to set-up argocd-agent for a production environment. It 
 
 Please note that some resource names might be out-of-date (e.g. have changed names, or were removed and replaced by something else). If you notice something, please figure it out and submit a PR to this guide. Thanks!
 
+## Terminology and concepts
+
+### Terminology used throughout this doc
+
+* **control plane** refers to the cluster with the management (or, controlling) components installed on. This typically will have the Argo CD UI on it, is connected to SSO, etc.
+* **workload cluster** refers to any cluster on which applications are reconciled to by Argo CD
+* **principal** is the component of `argocd-agent` that runs on the control plane cluster. It provides gRPC services to the outside world. It will connect to the Kubernetes API on the control plane cluster only.
+* **agent** is the component of `argocd-agent` that runs on each workload cluster. It connects to the principal on the control plane via gRPC and will send and receive events over that connection. It will also connect to the Kubernetes API on the workload cluster.
+
+### Agent modes
+
+Each agent can operate in one of the following modes:
+
+* **autonomous** - In autonomous mode, configuration is maintained outside of the agents scope on the workload cluster. For example, through local ApplicationSets, App-of-Apps pattern or similar. Applications created on the workload cluster will be visible on the control plane. It is possible to trigger sync or refresh from the control plane, however, any changes made to the Applications on the control plane will not be propagated to the agents.
+* **managed** - In managed mode, configuration is maintained on the control plane and transmitted to the workload cluster. Configuration can be performed using the Argo CD UI or CLI on the control plane, but could also come from other sources such as ApplicationSet. In managed mode, the Argo CD on the workload clusters may use the Redis on the control plane for enhanced observability. Also, it is possible to trigger sync and refresh from the control plane. However, any changes made to Applications on the workload clusters will be reverted to the state on the control plane.
+
 ## Installing the principal
 
 To install the principal, we will need the following things:
