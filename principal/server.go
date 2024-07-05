@@ -10,7 +10,7 @@ import (
 
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"github.com/jannfis/argocd-agent/internal/auth"
-	"github.com/jannfis/argocd-agent/internal/backend/kubernetes"
+	kubeapp "github.com/jannfis/argocd-agent/internal/backend/kubernetes/application"
 	"github.com/jannfis/argocd-agent/internal/event"
 	appinformer "github.com/jannfis/argocd-agent/internal/informer/application"
 	"github.com/jannfis/argocd-agent/internal/issuer"
@@ -112,7 +112,7 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 		informerOpts...,
 	)
 
-	s.appManager = application.NewApplicationManager(kubernetes.NewKubernetesBackend(appClient, s.namespace, s.appInformer, true), s.namespace,
+	s.appManager = application.NewApplicationManager(kubeapp.NewKubernetesBackend(appClient, s.namespace, s.appInformer, true), s.namespace,
 		managerOpts...,
 	)
 	s.clientMap = map[string]string{

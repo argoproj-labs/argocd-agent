@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jannfis/argocd-agent/internal/backend/kubernetes"
+	"github.com/jannfis/argocd-agent/internal/backend/kubernetes/application"
 	appmock "github.com/jannfis/argocd-agent/internal/backend/mocks"
 	appinformer "github.com/jannfis/argocd-agent/internal/informer/application"
 	"github.com/jannfis/argocd-agent/internal/metrics"
@@ -30,7 +30,7 @@ var appNotFoundError = errors.NewNotFound(schema.GroupResource{Group: "argoproj.
 func fakeAppManager(objects ...runtime.Object) (*fakeappclient.Clientset, *ApplicationManager) {
 	appC := fakeappclient.NewSimpleClientset(objects...)
 	informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-	be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
+	be := application.NewKubernetesBackend(appC, "", informer, true)
 	return appC, NewApplicationManager(be, "argocd")
 }
 
@@ -162,7 +162,7 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		// We are on the agent
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
+		be := application.NewKubernetesBackend(appC, "", informer, true)
 		mgr := NewApplicationManager(be, "argocd")
 
 		updated, err := mgr.UpdateManagedApp(context.Background(), incoming)
@@ -248,7 +248,7 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
+		be := application.NewKubernetesBackend(appC, "", informer, true)
 		mgr := NewApplicationManager(be, "argocd")
 		updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
 		require.NoError(t, err)
@@ -321,7 +321,7 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
+		be := application.NewKubernetesBackend(appC, "", informer, true)
 		mgr := NewApplicationManager(be, "argocd")
 		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
 		require.NoError(t, err)

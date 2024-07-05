@@ -3,7 +3,7 @@ Package kubernetes implements an Application backend that uses a Kubernetes
 informer to keep track of resources, and an appclientset to manipulate
 Application resources on the cluster.
 */
-package kubernetes
+package application
 
 import (
 	"context"
