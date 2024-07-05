@@ -20,6 +20,31 @@ Each agent can operate in one of the following modes:
 * **autonomous** - In autonomous mode, configuration is maintained outside of the agents scope on the workload cluster. For example, through local ApplicationSets, App-of-Apps pattern or similar. Applications created on the workload cluster will be visible on the control plane. It is possible to trigger sync or refresh from the control plane, however, any changes made to the Applications on the control plane will not be propagated to the agents.
 * **managed** - In managed mode, configuration is maintained on the control plane and transmitted to the workload cluster. Configuration can be performed using the Argo CD UI or CLI on the control plane, but could also come from other sources such as ApplicationSet. In managed mode, the Argo CD on the workload clusters may use the Redis on the control plane for enhanced observability. Also, it is possible to trigger sync and refresh from the control plane. However, any changes made to Applications on the workload clusters will be reverted to the state on the control plane.
 
+### Interactions between the agent and the principal
+
+The principal does not need to know details about topology details of the workload clusters or agents. However, agents need to authenticate to the principal using a pre-assigned, unique name. Agent names must comply to the [RFC 1123 DNS label](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names) naming scheme. You need to create the credentials for the agent on the control plane cluster. You may also want to add an extra layer of authentication by requiring the agents to use TLS client certificates in addition to their credentials.
+
+Each agent is assigned a dedicated, unique namespace on the control plane. This namespace will hold all of the workload cluster's configuration. The namespace must be created manually for now, before the agent is connecting the first time (this may change in the future).
+
+On the workload cluster, the agent must be configured at least with:
+
+* the address or FQDN of the principal's gRPC service,
+* the agent's credentials,
+* optionally, the agent's TLS client certificate and key,
+* the agent's mode of operation (autonomous or managed)
+
+### Current limitations
+
+A loose and incomplete collection of current limitations that you should be aware of.
+
+* The connection from the agent to the principal needs to be end-to-end HTTP/2. If you have a network component that is not able to speak HTTP/2 in either direction, argocd-agent will not work for you at the moment.
+* On the workload clusters, the apps-in-any-namespace feature cannot be used. This may or may not change in the future.
+* Argo CD UI/API features that do not work in either mode, managed or autonomous:
+  * Pod logs
+  * Resource actions
+  * Resource manipulation
+* Other Argo CD UI/API features such as resource diffing, live manifests, etc only work within specific topologies.
+
 ## Installing the principal
 
 To install the principal, we will need the following things:
