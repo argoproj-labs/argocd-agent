@@ -54,7 +54,7 @@ jobs:
       IMAGE_TAG: ${{ needs.set-vars.outputs.image-tag }}
       IMAGE_LATEST: ${{ needs.set-vars.outputs.latest }}
       IMAGE_REPOSITORY: ghcr.io/jannfis/argocd-agent
-      IMAGE_NAME: ${{ env.IMAGE_REPOSITORY }}/argocd-agent-${{ matrix.components.name }}
+      IMAGE_NAME: ghcr.io/jannfis/argocd-agent/argocd-agent-${{ matrix.components.name }}
     steps:
     - name: Checkout source code
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -72,7 +72,7 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
         registry: ghcr.io
-        image: ${{ env.IMAGE_REPOSITORY }}/argocd-agent-${{ matrix.components.name }}
+        image: ${{ env.IMAGE_NAME }}
         tags: ${{ env.IMAGE_TAG }}
     - name: Push latest tag to ghcr.io
       uses: redhat-actions/push-to-registry@v2
