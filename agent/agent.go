@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	kube_backend "github.com/jannfis/argocd-agent/internal/backend/kubernetes"
+	kubeapp "github.com/jannfis/argocd-agent/internal/backend/kubernetes/application"
 	"github.com/jannfis/argocd-agent/internal/event"
 	appinformer "github.com/jannfis/argocd-agent/internal/informer/application"
 	"github.com/jannfis/argocd-agent/internal/manager/application"
@@ -100,7 +100,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 
 	// The agent only supports Kubernetes as application backend
 	a.appManager = application.NewApplicationManager(
-		kube_backend.NewKubernetesBackend(a.appclient, a.namespace, a.informer, true),
+		kubeapp.NewKubernetesBackend(a.appclient, a.namespace, a.informer, true),
 		a.namespace,
 		application.WithAllowUpsert(allowUpsert),
 	)
