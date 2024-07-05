@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       image-tag: ${{ steps.image.outputs.tag }}
+      latest: ${{ steps.image.outputs.latest }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -32,6 +33,7 @@ jobs:
             echo "tag=pr-${{ github.event.number }}" >> $GITHUB_OUTPUT
           else
             echo "tag=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+            echo "latest=yes" >> $GITHUB_OUTPUT
           fi
         id: image
  
@@ -50,13 +52,19 @@ jobs:
     env:
       DOCKER_BIN: podman
       IMAGE_TAG: ${{ needs.set-vars.outputs.image-tag }}
+      IMAGE_LATEST: ${{ needs.set-vars.outputs.latest }}
       IMAGE_REPOSITORY: ghcr.io/jannfis/argocd-agent
+      IMAGE_NAME: ${{ env.IMAGE_REPOSITORY }}/argocd-agent-${{ matrix.components.name }}
     steps:
     - name: Checkout source code
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
     - name: Build ${{ matrix.component.name }} image
       run: |
           make image-${{ matrix.components.name }}
+    - name: Tag latest
+      if: env.IMAGE_LATEST == 'yes'
+      run: |
+          podman tag ${{ env.IMAGE_NAME }}:${{ IMAGE_TAG }} ${{ env.IMAGE_NAME }}:latest
     - name: Push agent image to ghcr.io
       uses: redhat-actions/push-to-registry@v2
       if: github.repository == 'jannfis/argocd-agent' && ( github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ok-to-push') )
@@ -66,3 +74,12 @@ jobs:
         registry: ghcr.io
         image: ${{ env.IMAGE_REPOSITORY }}/argocd-agent-${{ matrix.components.name }}
         tags: ${{ env.IMAGE_TAG }}
+    - name: Push latest tag to ghcr.io
+      uses: redhat-actions/push-to-registry@v2
+      if: github.repository == 'jannfis/argocd-agent' && ( github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ok-to-push') && env.IMAGE_LATEST == 'yes' )
+      with:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        registry: ghcr.io
+        image: ${{ env.IMAGE_NAME }}
+        tags: latest
