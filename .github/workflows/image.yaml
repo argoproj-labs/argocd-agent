@@ -64,7 +64,7 @@ jobs:
     - name: Tag latest
       if: env.IMAGE_LATEST == 'yes'
       run: |
-          podman tag ${{ env.IMAGE_NAME }}:${{ IMAGE_TAG }} ${{ env.IMAGE_NAME }}:latest
+          podman tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.IMAGE_NAME }}:latest
     - name: Push agent image to ghcr.io
       uses: redhat-actions/push-to-registry@v2
       if: github.repository == 'jannfis/argocd-agent' && ( github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ok-to-push') )
