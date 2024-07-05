@@ -62,11 +62,11 @@ It is understood that workload clusters can be everywhere: In your black-fibre c
 
 Thus, `argocd-agent` is designed around the assumption that the connection between workload clusters (agents) and the control plane is not always available, and that it might not be possible to keep up a stable, good performing network connection between the components. However, the system will benefit from a stable network connection with low latency.
 
-### Managed clusters are and will stay autonomous
+### Workload clusters are and will stay autonomous
 
-When the agent cannot reach the control plane, the agent's cluster still will be able to perform its operations in an autonomous way. Depending on the agent's mode of operation (see [Architecture](#Architecture) above), cluster admins may still be able to perform configuration (i.e. manage applications, etc) but those changes will only take effect once the agent is connected again.
+When the agent cannot reach the control plane, the workload cluster still will be able to perform its operations in an autonomous way. Depending on the agent's mode of operation (see [Architecture](#Architecture) above), cluster admins may still be able to perform configuration (i.e. manage applications, etc) but those changes will only take effect once the agent is connected again.
 
-There might be architectural variants where a workload cluster will be dependent upon the availability of the control plane, for example when the workload cluster uses a repository server on the control plane. However, there will always be a variant where fully autonomous workload clusters are supported.
+There are architectural variants in which a workload cluster will be dependent upon the availability of the control plane, for example when the workload cluster uses a repository server or Redis cache on the control plane. However, there will always be a variant where fully autonomous workload clusters are supported.
 
 ### The initiating component is always the agent, not the control plane
 
