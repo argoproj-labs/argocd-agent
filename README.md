@@ -76,6 +76,10 @@ Connections are established in one direction only: from the agent to the control
 
 The control plane component of `argocd-agent` provides a gRPC API over HTTPS/2. The connections to the API require mutual TLS and strong authentication. The agent won't need access to the control plane's Kubernetes API, and the control plane component has limited capabilities on the cluster it is running in. Thus, depending on the operational mode of the agents, there will be no single point of compromise - even in the case the control plane is compromised, the blast radius will be limited.
 
+### Be lightweight by default but keep extensibility in mind
+
+The `argocd-agent` should not impose any mandatory, heavy runtime dependencies or operational patterns. The hurdle of getting started should be as low as possible. The project should stay unencumbered of requirements such as persistant storage or relational databases by default. We are aware that at some point in time we may hit a scaling limit, especially when it comes to etcd and the Kubernetes API. Thus, major parts such as Application backends on the principal are designed to be pluggable, so users can contribute and use different kinds of backends according to their scalability requirements and operational preferences.
+
 ## Operational variants
 
 `argocd-agent` can run in two distinct modes of operation: A *managed* mode and an *autonomous* mode. Both modes cater for different types of setups, and the control plane can handle a mixed-mode scenario where some of the agents run in managed mode, and others run in autonomous mode. However, an agent can only run in one of the modes. Having some parts on the agent's system in managed, and others in autonomous mode, is not supported.
