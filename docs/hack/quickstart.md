@@ -9,7 +9,9 @@ Please note that some resource names might be out-of-date (e.g. have changed nam
 ### Terminology used throughout this doc
 
 * **control plane** refers to the cluster with the management (or, controlling) components installed on. This typically will have the Argo CD UI on it, is connected to SSO, etc.
+* **hub** is synonymous with control plane
 * **workload cluster** refers to any cluster on which applications are reconciled to by Argo CD
+* **spoke** is synonymous with workload cluster
 * **principal** is the component of `argocd-agent` that runs on the control plane cluster. It provides gRPC services to the outside world. It will connect to the Kubernetes API on the control plane cluster only.
 * **agent** is the component of `argocd-agent` that runs on each workload cluster. It connects to the principal on the control plane via gRPC and will send and receive events over that connection. It will also connect to the Kubernetes API on the workload cluster.
 
