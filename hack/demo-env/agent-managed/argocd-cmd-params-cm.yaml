@@ -5,3 +5,4 @@ metadata:
 data:
   repo.server: 192.168.56.222:8081
   redis.server: 192.168.56.221:6379
+  application.namespaces: agent-managed
