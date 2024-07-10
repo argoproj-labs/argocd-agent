@@ -8,7 +8,7 @@ This directory and sub-directories contain scripts, kustomize manifests and othe
 
 The scripts are targeting the author's development system. Do not run them against yours or be prepared to dive into undocumented configuration and to clean up after yourself.
 
-It uses `vcluster` to create three virtual clusters:
+It uses [vcluster](https://github.com/loft-sh/vcluster) to create three virtual clusters:
 
 * vcluster-control-plane - For hosting the control plane and principal
 * vcluster-agent-managed - A cluster with agent in managed mode
@@ -19,6 +19,8 @@ It will install Argo CD to each of those vclusters, in varying degrees of comple
 Both, vclusters and Argo CD installations, will require that LoadBalancer functionality is available on the host cluster (metalllb will be totally ok).
 
 ## Set up
+
+Make sure you have administrative access to a cluster and [vcluster](https://github.com/loft-sh/vcluster) is installed on your machine and within your `$PATH`. 
 
 To setup, run
 
