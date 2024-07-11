@@ -20,15 +20,41 @@ Both, vclusters and Argo CD installations, will require that LoadBalancer functi
 
 ## Set up
 
+### Host cluster
+
+The author uses [microk8s](https://microk8s.io/) as the host Kubernetes cluster. On Fedora, you can install it using `snap`, for Mac OS refer to their [installation tutorial](https://ubuntu.com/tutorials/install-microk8s-on-mac-os#1-overview). Microk8s comes with metallb, which makes things very easy.
+
+After installing microk8s, you want to enable metallb and hostpath storage in that cluster. metallb gives your cluster load balancer capabilities, and the hostpath storage will allow vcluster to persist its configuration:  
+
+```shell
+sudo microk8s.enable metallb
+sudo microk8s.enable hostpath-storage
+```
+
+You may want to export the kubectl configuration from microk8s so that your non-root user can easily use it. The following assumes that you will not have an existing kubectl configuration in your user's home, as it will overwrite any existing configuration.
+
+```shell
+mkdir -p ~/.kube
+sudo microk8s.config > ~/.kube/config
+```
+
+What's left is to install the metallb configuration. You should be good now.
+
+```
+kubectl apply -n metallb-system -f hack/demo-env/metallb-ipaddresspool.yaml
+```
+
+### Virtual clusters
+
 Make sure you have administrative access to a cluster and [vcluster](https://github.com/loft-sh/vcluster) is installed on your machine and within your `$PATH`. 
 
-To setup, run
+To setup all required virtual clusters, run
 
 ```
 ./hack/demo-env/setup-vcluster-env.sh create
 ```
 
-This will create three vclusters on your current cluster, and install opinionated Argo CD into each of them.
+This will create three vclusters on your current cluster, and install an opinionated Argo CD into each of them.
 
 You will need `vcluster` in your `$PATH`, and the current kubeconfig context must be configured to connect to your cluster as a cluster admin.
 
