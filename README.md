@@ -25,6 +25,12 @@ As of now, the following hard limitations apply to `argocd-agent`:
 
 See the [quickstart guide](docs/hack/quickstart.md) for more information.
 
+## Hacking, testing, demoing
+
+For a development and demo environment, we provide [some scripts and docs](https://github.com/jannfis/argocd-agent/tree/main/hack/demo-env). 
+
+Please refer to the [Contributing](#contributing) section below for information on how to contribute.
+
 ## Compatibility
 
 `argocd-agent` works with an out-of-the-box Argo CD. We aim to support the currently supported Argo CD versions.
