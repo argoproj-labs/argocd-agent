@@ -93,7 +93,7 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 }
 
 // receiver receives and processes a single event from the event stream. It
-// will block until an event has been received, or an error has occured.
+// will block until an event has been received, or an error has occurred.
 func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) error {
 	logCtx := log().WithFields(logrus.Fields{
 		"module":      "StreamEvent",

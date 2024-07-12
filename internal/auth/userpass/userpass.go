@@ -65,7 +65,7 @@ func (a *UserPassAuthentication) Authenticate(creds auth.Credentials) (clientID 
 
 	a.lock.RLock()
 	realPassword, ok := a.userdb[incomingUsername]
-	// We unlock explictly instead of using defer, because bcrypt is expensive
+	// We unlock explicitly instead of using defer, because bcrypt is expensive
 	// and takes a while to compute.
 	a.lock.RUnlock()
 
