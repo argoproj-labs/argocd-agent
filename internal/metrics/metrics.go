@@ -27,11 +27,11 @@ func NewApplicationWatcherMetrics() *ApplicationWatcherMetrics {
 	am := &ApplicationWatcherMetrics{
 		AppsWatched: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "argocd_agent_watcher_applications_watched",
-			Help: "The total number of apps watched by the agent",
+			Help: "The total number of applications watched by the agent",
 		}),
 		AppsAdded: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "argocd_agent_watcher_applications_added",
-			Help: "The number of applicatins that have been added to the agent",
+			Help: "The number of applications that have been added to the agent",
 		}),
 		AppsUpdated: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "argocd_agent_watcher_applications_updated",
