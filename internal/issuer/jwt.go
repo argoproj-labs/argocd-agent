@@ -170,14 +170,14 @@ func (i *JwtIssuer) IssueRefreshToken(client string, exp time.Duration) (string,
 	return t.SignedString(i.privateKey)
 }
 
-// ValidateAccessToken validates an access token. On successfull validation,
+// ValidateAccessToken validates an access token. On successful validation,
 // it returns the claims from the token. If validation fails, an error with
 // the failure reason is returned.
 func (i *JwtIssuer) ValidateAccessToken(token string) (Claims, error) {
 	return i.validateToken(token, i.atAudience)
 }
 
-// ValidateRefreshToken validates an access token. On successfull validation,
+// ValidateRefreshToken validates an access token. On successful validation,
 // it returns the claims from the token. If validation fails, an error with
 // the failure reason is returned.
 func (i *JwtIssuer) ValidateRefreshToken(token string) (Claims, error) {
