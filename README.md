@@ -1,5 +1,10 @@
 # argocd-agent
 
+[![Integration tests](https://github.com/jannfis/argocd-agent/actions/workflows/ci.yaml/badge.svg)](https://github.com/jannfis/argocd-agent/actions/workflows/ci.yaml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jannfis/argocd-agent)](https://goreportcard.com/report/github.com/jannfis/argocd-agent)
+[![codecov](https://codecov.io/gh/jannfis/argocd-agent/graph/badge.svg?token=NP5UEU279Z)](https://codecov.io/gh/jannfis/argocd-agent)
+
+
 `argocd-agent` provides building blocks for implementing a distributed architecture with a central control plane for the popular GitOps tool
 [Argo CD](https://github.com/argoproj/argo-cd). It allows to scale out Argo CD in many-cluster scenarios by moving compute intensive parts of Argo CD (application controller, repository server) to the workload clusters ("spokes"), while keeping the control and observe components (API and UI) in a central location (control plane, or "hub").
 
