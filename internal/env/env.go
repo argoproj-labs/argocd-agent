@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// BoolWithDefault parses the contents of the environment variable refered by
+// BoolWithDefault parses the contents of the environment variable referred by
 // key into a boolean value and returns it. If the environment is not set, or
 // is not a string that can be converted into a boolean, the default value def
 // will be returned.
@@ -23,7 +23,7 @@ func BoolWithDefault(key string, def bool) bool {
 	return bv
 }
 
-// StringWithDefault gets the contents of the environment variable refered to
+// StringWithDefault gets the contents of the environment variable referred to
 // by key. If the validator function is non-nil, it will be called with the
 // environment's value as argument. If the validator returns an error or if
 // the environment variable is not set, the default value will be returned.
@@ -39,7 +39,7 @@ func StringWithDefault(key string, validator func(string) error, def string) str
 	return ev
 }
 
-// NumWithDefault parses the contents of the environment variable refered to by
+// NumWithDefault parses the contents of the environment variable referred to by
 // key into an integer. If the validator function is non-nil, it will be called
 // with the parsed integer as argument. If the validator returns an error or if
 // the environment variable was not set, the default value will be returned.
