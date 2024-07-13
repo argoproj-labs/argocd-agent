@@ -15,8 +15,10 @@ Some might refer to this architecture as "hub and spokes" or the "pull model" wi
 **Important notice:** The `argocd-agent` project has just been born and is far from ready for general consumption. We decided to make the code available as early as possible to attract potential collaborators and contributors along the way, and to get input from the community as the project progresses.
 
 You can check the
-[roadmap](ROADMAP.md)
-for things that we plan to work in the future.
+[issue tracker](https://github.com/jannfis/argocd-agent/issues)
+for things that we plan to work in the future, and the
+[milestones](https://github.com/jannfis/argocd-agent/milestones)
+for when we plan to.
 
 Going forward, things *will* change dramatically. Do not use unless you can cope with that.
 
