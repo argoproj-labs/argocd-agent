@@ -199,6 +199,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 }
 
 func main() {
+	cmd.InitLogging()
 	cmd := NewPrincipalRunCommand()
 	err := cmd.Execute()
 	if err != nil {
