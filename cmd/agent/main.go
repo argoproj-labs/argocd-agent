@@ -183,6 +183,7 @@ func loadCreds(path string) (auth.Credentials, error) {
 }
 
 func main() {
+	cmd.InitLogging()
 	c := NewAgentRunCommand()
 	err := c.Execute()
 	if err != nil {

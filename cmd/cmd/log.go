@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/writer"
 )
 
 func StringToLoglevel(l string) (logrus.Level, error) {
@@ -32,4 +35,28 @@ func AvailableLogLevels() string {
 		levels[i] = l.String()
 	}
 	return strings.Join(levels, ", ")
+}
+
+// InitLogging will initialize logrus with the setting and hooks we want it to
+// use by default.
+func InitLogging() {
+	logrus.SetOutput(io.Discard) // Send all logs to nowhere by default
+	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetFormatter(&logrus.JSONFormatter{})
+	logrus.AddHook(&writer.Hook{ // Send logs with level higher than warning to stderr
+		Writer: os.Stderr,
+		LogLevels: []logrus.Level{
+			logrus.PanicLevel,
+			logrus.FatalLevel,
+			logrus.ErrorLevel,
+			logrus.WarnLevel,
+		},
+	})
+	logrus.AddHook(&writer.Hook{ // Send info and debug logs to stdout
+		Writer: os.Stdout,
+		LogLevels: []logrus.Level{
+			logrus.InfoLevel,
+			logrus.DebugLevel,
+		},
+	})
 }
