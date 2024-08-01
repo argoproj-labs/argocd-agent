@@ -60,3 +60,14 @@ func InitLogging() {
 		},
 	})
 }
+
+func LogFormatter(format string) (logrus.Formatter, error) {
+	switch strings.ToLower(format) {
+	case "text":
+		return &logrus.TextFormatter{}, nil
+	case "json":
+		return &logrus.JSONFormatter{}, nil
+	default:
+		return nil, fmt.Errorf("invalid format '%s', must be one of text, json", format)
+	}
+}

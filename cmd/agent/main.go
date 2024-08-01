@@ -24,6 +24,7 @@ func NewAgentRunCommand() *cobra.Command {
 		serverAddress string
 		serverPort    int
 		logLevel      string
+		logFormat     string
 		insecure      bool
 		rootCAPath    string
 		kubeConfig    string
@@ -58,6 +59,11 @@ func NewAgentRunCommand() *cobra.Command {
 					cmd.Fatal("invalid log level: %s. Available levels are: %s", logLevel, cmd.AvailableLogLevels())
 				}
 				logrus.SetLevel(lvl)
+			}
+			if formatter, err := cmd.LogFormatter(logFormat); err != nil {
+				cmd.Fatal(err.Error())
+			} else {
+				logrus.SetFormatter(formatter)
 			}
 			if creds != "" {
 				authMethod, authCreds, err := parseCreds(creds)
@@ -113,6 +119,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&logLevel, "log-level",
 		env.StringWithDefault("ARGOCD_AGENT_LOG_LEVEL", nil, "info"),
 		"The log level for the agent")
+	command.Flags().StringVar(&logFormat, "log-format",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),
+		"The log format to use (one of: text, json)")
 	command.Flags().BoolVar(&insecure, "insecure-tls",
 		env.BoolWithDefault("ARGOCD_AGENT_TLS_INSECURE", false),
 		"INSECURE: Do not verify remote TLS certificate")
