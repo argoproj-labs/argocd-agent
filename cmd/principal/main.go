@@ -21,6 +21,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		listenHost             string
 		listenPort             int
 		logLevel               string
+		logFormat              string
 		metricsPort            int
 		disableMetrics         bool
 		namespace              string
@@ -50,6 +51,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 					cmd.Fatal("invalid log level: %s. Available levels are: %s", logLevel, cmd.AvailableLogLevels())
 				}
 				logrus.SetLevel(lvl)
+			}
+			if formatter, err := cmd.LogFormatter(logFormat); err != nil {
+				cmd.Fatal(err.Error())
+			} else {
+				logrus.SetFormatter(formatter)
 			}
 
 			kubeConfig, err := cmd.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
@@ -146,6 +152,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&logLevel, "log-level",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_LEVEL", nil, logrus.InfoLevel.String()),
 		"The log level to use")
+	command.Flags().StringVar(&logFormat, "log-format",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),
+		"The log format to use (one of: text, json)")
 
 	command.Flags().IntVar(&metricsPort, "metrics-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_METRICS_PORT", cmd.ValidPort, 8000),
