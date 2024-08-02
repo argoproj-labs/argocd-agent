@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 ##############################################################################
 # Script to generate credentials for development/e2e-tests of argocd-agent.
 #
@@ -7,11 +7,22 @@
 # credentials for your dev or demo environments. The passwords produced are
 # weak.
 ##############################################################################
-set -ex -o pipefail
+
+set -x -o pipefail
+
+# Use pwmake if it exists, otherwise use pwgen
+which pwmake
+if [[ $? == 0 ]]; then
+	set -e
+	pwmake=$(which pwmake)
+
+else
+	set -e
+	pwmake=$(which pwgen)
+fi
 
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 htpasswd=$(which htpasswd)
-pwmake=$(which pwmake)
 creds_path=${SCRIPTPATH}/creds
 test -d ${creds_path} || mkdir ${creds_path}
 
