@@ -11,14 +11,14 @@ VCLUSTERS_AGENTS="agent-managed:argocd agent-autonomous:argocd"
 action="$1"
 
 # Kubectl context to restore
-initial_context=`kubectl config current-context`
+initial_context=$(kubectl config current-context)
 
 cleanup() {
 	kubectl config use-context ${initial_context}
 }
 
 on_error() {
-	echo "ERROR: Error occured, terminating."
+	echo "ERROR: Error occured, terminating." >&2
 	cleanup
 }
 
