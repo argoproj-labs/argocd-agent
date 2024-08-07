@@ -18,7 +18,7 @@ cleanup() {
 }
 
 on_error() {
-	echo "ERROR: Error occured, terminating." >&2
+	echo "ERROR: Error occurred, terminating." >&2
 	cleanup
 }
 
@@ -35,15 +35,12 @@ trap on_error ERR
 
 # check_for_openshift looks for cluster OpenShift API Resources, and if found, sets OPENSHIFT=true
 check_for_openshift() {
-	set +e
 
-	OPENSHIFT_RESOURCES=`kubectl api-resources | grep "openshift.io" | wc -l`
-
-	if [[ "$OPENSHIFT_RESOURCES" != "0" ]]; then
-		OPENSHIFT=true
+	OPENSHIFT=true
+	if kubectl api-resources | grep -q "openshift.io"; then 
+		OPENSHIFT=
 	fi
 
-	set -e
 }
 
 

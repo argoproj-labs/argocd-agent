@@ -8,16 +8,8 @@
 # weak.
 ##############################################################################
 
-set -x -o pipefail
-
-# Use pwmake if it exists, otherwise use pwgen
-which pwmake
-if [[ $? == 0 ]]; then
-	set -e
-	pwmake=$(which pwmake)
-
-else
-	set -e
+set -eo pipefail
+if ! pwmake=$(which pwmake); then
 	pwmake=$(which pwgen)
 fi
 
