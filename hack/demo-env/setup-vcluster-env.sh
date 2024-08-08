@@ -36,9 +36,9 @@ trap on_error ERR
 # check_for_openshift looks for cluster OpenShift API Resources, and if found, sets OPENSHIFT=true
 check_for_openshift() {
 
-	OPENSHIFT=true
+	OPENSHIFT=
 	if kubectl api-resources | grep -q "openshift.io"; then 
-		OPENSHIFT=
+		OPENSHIFT=true
 	fi
 
 }
