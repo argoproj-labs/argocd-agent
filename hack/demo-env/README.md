@@ -41,7 +41,7 @@ sudo microk8s.config > ~/.kube/config
 What's left is to install the metallb configuration. You should be good now.
 
 ```
-kubectl apply -n metallb-system -f hack/demo-env/metallb-ipaddresspool.yaml
+kubectl apply -n metallb-system -f hack/demo-env/resources/metallb-ipaddresspool.yaml
 ```
 
 ### Virtual clusters

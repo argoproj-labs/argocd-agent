@@ -3,6 +3,6 @@ kind: ConfigMap
 metadata:
   name: argocd-cmd-params-cm
 data:
-  repo.server: 192.168.56.222:8081
-  redis.server: 192.168.56.221:6379
+  repo.server: repo-server-address:8081
+  redis.server: redis-server-address:6379
   application.namespaces: agent-managed
