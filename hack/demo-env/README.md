@@ -58,6 +58,8 @@ This will create three vclusters on your current cluster, and install an opinion
 
 You will need `vcluster` in your `$PATH`, and the current kubeconfig context must be configured to connect to your cluster as a cluster admin.
 
+Please note: The script requires `vcluster` version 0.20-beta4 or newer to function correctly.
+
 ## Details
 
 ### Endpoints
