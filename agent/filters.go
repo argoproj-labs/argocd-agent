@@ -1,9 +1,9 @@
 package agent
 
 import (
+	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v2/util/glob"
-	"github.com/jannfis/argocd-agent/internal/filter"
 )
 
 // DefaultFilterChain returns a FilterChain with a set of default filters that

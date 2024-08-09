@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	server "github.com/jannfis/argocd-agent/principal"
+	server "github.com/argoproj-labs/argocd-agent/principal"
 	mock "github.com/stretchr/testify/mock"
 )
 

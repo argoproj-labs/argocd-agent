@@ -10,11 +10,11 @@ import (
 
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 
-	"github.com/jannfis/argocd-agent/internal/auth"
-	"github.com/jannfis/argocd-agent/internal/auth/userpass"
-	"github.com/jannfis/argocd-agent/pkg/types"
-	"github.com/jannfis/argocd-agent/principal"
-	"github.com/jannfis/argocd-agent/test/fake/testcerts"
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/principal"
+	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

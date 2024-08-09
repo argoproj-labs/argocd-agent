@@ -4,11 +4,11 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	"github.com/jannfis/argocd-agent/internal/event"
-	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
-	"github.com/jannfis/argocd-agent/pkg/types"
 	"google.golang.org/grpc"
 )
 

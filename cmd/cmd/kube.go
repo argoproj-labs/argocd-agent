@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/jannfis/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 )
 
 func GetKubeConfig(ctx context.Context, namespace string, kubeConfig string, kubecontext string) (*kube.KubernetesClient, error) {

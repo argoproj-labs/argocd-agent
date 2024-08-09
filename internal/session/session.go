@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jannfis/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 )
 
 /*

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
-	"github.com/jannfis/argocd-agent/internal/grpcutil"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )

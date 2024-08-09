@@ -15,7 +15,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 )
 
 // supportedTLSVersion is a list of TLS versions we support

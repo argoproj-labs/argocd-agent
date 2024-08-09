@@ -9,9 +9,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/clock"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/jannfis/argocd-agent/internal/clock"
 )
 
 var _ Issuer = &JwtIssuer{}

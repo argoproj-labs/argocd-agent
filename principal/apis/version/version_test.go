@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jannfis/argocd-agent/internal/event"
-	"github.com/jannfis/argocd-agent/internal/grpcutil"
-	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/sirupsen/logrus"
 
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"

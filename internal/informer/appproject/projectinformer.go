@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 
-	"github.com/jannfis/argocd-agent/internal/informer"
+	"github.com/argoproj-labs/argocd-agent/internal/informer"
 )
 
 type AppProjectInformer struct {

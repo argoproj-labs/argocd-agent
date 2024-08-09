@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	backend_mocks "github.com/jannfis/argocd-agent/internal/backend/mocks"
-	"github.com/jannfis/argocd-agent/internal/manager/application"
-	"github.com/jannfis/argocd-agent/pkg/types"
+	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 )
 
 func Test_CreateApplication(t *testing.T) {

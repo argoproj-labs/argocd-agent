@@ -12,12 +12,12 @@ import (
 	"google.golang.org/grpc/credentials"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/jannfis/argocd-agent/pkg/api/grpc/authapi"
-	"github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi"
-	"github.com/jannfis/argocd-agent/pkg/api/grpc/versionapi"
-	"github.com/jannfis/argocd-agent/principal/apis/auth"
-	"github.com/jannfis/argocd-agent/principal/apis/eventstream"
-	"github.com/jannfis/argocd-agent/principal/apis/version"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
+	"github.com/argoproj-labs/argocd-agent/principal/apis/auth"
+	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
+	"github.com/argoproj-labs/argocd-agent/principal/apis/version"
 )
 
 const listenerRetries = 5

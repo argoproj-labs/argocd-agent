@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/jannfis/argocd-agent/internal/version"
+	"github.com/argoproj-labs/argocd-agent/internal/version"
 )
 
 const (
