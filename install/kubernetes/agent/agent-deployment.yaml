@@ -82,7 +82,7 @@ spec:
                 key: agent.creds.userpass.path
                 optional: true
 
-          image: ghcr.io/jannfis/argocd-agent/argocd-agent-agent:latest
+          image: ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent:latest
           imagePullPolicy: Always
           name: argocd-agent-agent
           ports:

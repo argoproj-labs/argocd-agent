@@ -110,7 +110,7 @@ kubectl get -n argocd pods
 ### Configuring the principal
 
 You can configure the principal by editing the `argocd-agent-params` ConfigMap in the principal's installation namespace. For an up-to-date example with comments, have a look at the
-[example](https://github.com/jannfis/argocd-agent/blob/main/install/kubernetes/principal/principal-params-cm.yaml)
+[example](https://github.com/argoproj-labs/argocd-agent/blob/main/install/kubernetes/principal/principal-params-cm.yaml)
 
 After a change to the `argocd-agent-params` ConfigMap, the principal needs to be restarted to pick up the changes:
 
