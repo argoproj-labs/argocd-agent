@@ -1,5 +1,5 @@
 syntax = "proto3";
-option go_package = "github.com/jannfis/argocd-agent/pkg/api/grpc/authapi";
+option go_package = "github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi";
 
 package authapi;
 

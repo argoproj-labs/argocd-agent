@@ -113,7 +113,7 @@ spec:
                 key: principal.user-db.path
                 optional: true
 
-          image: ghcr.io/jannfis/argocd-agent/argocd-agent-principal:latest
+          image: ghcr.io/argoproj-labs/argocd-agent/argocd-agent-principal:latest
           imagePullPolicy: Always
           name: argocd-agent-principal
           ports:

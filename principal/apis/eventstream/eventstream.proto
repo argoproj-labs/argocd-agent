@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option go_package = "github.com/jannfis/argocd-agent/pkg/api/grpc/eventstreamapi";
+option go_package = "github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi";
 
 package eventstreamapi;
 
