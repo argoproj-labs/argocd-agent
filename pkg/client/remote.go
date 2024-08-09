@@ -10,12 +10,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

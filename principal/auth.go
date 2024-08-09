@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"

@@ -8,11 +8,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	applisters "github.com/argoproj/argo-cd/v2/pkg/client/listers/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v2/util/glob"
-	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"

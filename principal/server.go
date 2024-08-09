@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -21,6 +20,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
