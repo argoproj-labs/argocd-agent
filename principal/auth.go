@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
-	"github.com/jannfis/argocd-agent/internal/auth"
-	"github.com/jannfis/argocd-agent/internal/grpcutil"
-	"github.com/jannfis/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"

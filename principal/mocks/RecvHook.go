@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	eventstreammock "github.com/jannfis/argocd-agent/principal/apis/eventstream/mock"
+	eventstreammock "github.com/argoproj-labs/argocd-agent/principal/apis/eventstream/mock"
 	mock "github.com/stretchr/testify/mock"
 )
 

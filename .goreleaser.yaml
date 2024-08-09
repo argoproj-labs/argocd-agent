@@ -14,7 +14,7 @@ builds:
     goos:
       - linux
     binary: argocd-agent-agent
-    ldflags: "-extldflags=-static -X github.com/jannfis/argocd-agent/internal/version.version={{.Version}}"
+    ldflags: "-extldflags=-static -X github.com/argoproj-labs/argocd-agent/internal/version.version={{.Version}}"
     goarch:
       - amd64
       - arm64
@@ -27,7 +27,7 @@ builds:
     goos:
       - linux
     binary: argocd-agent-principal
-    ldflags: "-extldflags=-static -X github.com/jannfis/argocd-agent/internal/version.version={{.Version}}"
+    ldflags: "-extldflags=-static -X github.com/argoproj-labs/argocd-agent/internal/version.version={{.Version}}"
     goarch:
       - amd64
       - arm64

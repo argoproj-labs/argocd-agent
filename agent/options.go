@@ -3,8 +3,8 @@ package agent
 import (
 	"fmt"
 
-	"github.com/jannfis/argocd-agent/pkg/client"
-	"github.com/jannfis/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/pkg/client"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 )
 
 func WithAllowedNamespaces(namespaces ...string) AgentOption {

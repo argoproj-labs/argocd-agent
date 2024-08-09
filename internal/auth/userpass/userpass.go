@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/sirupsen/logrus"
 
 	"k8s.io/apimachinery/pkg/util/validation"

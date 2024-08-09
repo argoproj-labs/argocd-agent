@@ -6,11 +6,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/jannfis/argocd-agent/cmd/cmd"
-	"github.com/jannfis/argocd-agent/internal/auth"
-	"github.com/jannfis/argocd-agent/internal/auth/userpass"
-	"github.com/jannfis/argocd-agent/internal/env"
-	"github.com/jannfis/argocd-agent/principal"
+	"github.com/argoproj-labs/argocd-agent/cmd/cmd"
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
+	"github.com/argoproj-labs/argocd-agent/internal/env"
+	"github.com/argoproj-labs/argocd-agent/principal"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"

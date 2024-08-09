@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/jannfis/argocd-agent/internal/event"
-	"github.com/jannfis/argocd-agent/internal/queue"
-	"github.com/jannfis/argocd-agent/principal/apis/eventstream/mock"
+	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream/mock"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 

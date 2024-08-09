@@ -13,9 +13,9 @@ import (
 	"k8s.io/client-go/util/retry"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/jannfis/argocd-agent/internal/backend"
-	"github.com/jannfis/argocd-agent/internal/manager"
-	"github.com/jannfis/argocd-agent/internal/metrics"
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 )

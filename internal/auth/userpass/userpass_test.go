@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jannfis/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )

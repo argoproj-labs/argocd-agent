@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	issuer "github.com/jannfis/argocd-agent/internal/issuer"
+	issuer "github.com/argoproj-labs/argocd-agent/internal/issuer"
 	mock "github.com/stretchr/testify/mock"
 )
 

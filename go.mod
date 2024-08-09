@@ -1,4 +1,4 @@
-module github.com/jannfis/argocd-agent
+module github.com/argoproj-labs/argocd-agent
 
 go 1.22.0
 

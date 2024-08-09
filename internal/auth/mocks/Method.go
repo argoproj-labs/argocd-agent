@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	auth "github.com/jannfis/argocd-agent/internal/auth"
+	auth "github.com/argoproj-labs/argocd-agent/internal/auth"
 	mock "github.com/stretchr/testify/mock"
 )
 

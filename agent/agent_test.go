@@ -7,8 +7,8 @@ import (
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	"github.com/sirupsen/logrus"
 
-	"github.com/jannfis/argocd-agent/pkg/client"
-	fakekube "github.com/jannfis/argocd-agent/test/fake/kube"
+	"github.com/argoproj-labs/argocd-agent/pkg/client"
+	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/stretchr/testify/require"
 )
 
