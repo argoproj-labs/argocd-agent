@@ -1,8 +1,8 @@
 # argocd-agent
 
-[![Integration tests](https://github.com/jannfis/argocd-agent/actions/workflows/ci.yaml/badge.svg)](https://github.com/jannfis/argocd-agent/actions/workflows/ci.yaml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/jannfis/argocd-agent)](https://goreportcard.com/report/github.com/jannfis/argocd-agent)
-[![codecov](https://codecov.io/gh/jannfis/argocd-agent/graph/badge.svg?token=NP5UEU279Z)](https://codecov.io/gh/jannfis/argocd-agent)
+[![Integration tests](https://github.com/argoproj-labs/argocd-agent/actions/workflows/ci.yaml/badge.svg)](https://github.com/argoproj-labs/argocd-agent/actions/workflows/ci.yaml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/argoproj-labs/argocd-agent)](https://goreportcard.com/report/github.com/argoproj-labs/argocd-agent)
+[![codecov](https://codecov.io/gh/argoproj-labs/argocd-agent/graph/badge.svg?token=NP5UEU279Z)](https://codecov.io/gh/argoproj-labs/argocd-agent)
 
 
 `argocd-agent` provides building blocks for implementing a distributed architecture with a central control plane for the popular GitOps tool
@@ -15,9 +15,9 @@ Some might refer to this architecture as "hub and spokes" or the "pull model" wi
 **Important notice:** The `argocd-agent` project has just been born and is far from ready for general consumption. We decided to make the code available as early as possible to attract potential collaborators and contributors along the way, and to get input from the community as the project progresses.
 
 You can check the
-[issue tracker](https://github.com/jannfis/argocd-agent/issues)
+[issue tracker](https://github.com/argoproj-labs/argocd-agent/issues)
 for things that we plan to work in the future, and the
-[milestones](https://github.com/jannfis/argocd-agent/milestones)
+[milestones](https://github.com/argoproj-labs/argocd-agent/milestones)
 for when we plan to.
 
 Going forward, things *will* change dramatically. Do not use unless you can cope with that.
@@ -34,7 +34,7 @@ See the [quickstart guide](docs/hack/quickstart.md) for more information.
 
 ## Hacking, testing, demoing
 
-For a development and demo environment, we provide [some scripts and docs](https://github.com/jannfis/argocd-agent/tree/main/hack/demo-env). 
+For a development and demo environment, we provide [some scripts and docs](https://github.com/argoproj-labs/argocd-agent/tree/main/hack/demo-env). 
 
 Please refer to the [Contributing](#contributing) section below for information on how to contribute.
 
