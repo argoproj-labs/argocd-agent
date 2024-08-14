@@ -109,8 +109,10 @@ In *autonomous mode*, the agent will not create or delete Applications on the ag
 
 ## Contributing
 
-We are grateful for all contributions to this project!
+We are grateful for all contributions to this project, and everybody is welcome to contribute to it in various ways.
 
-Please note that at this point in time, contributors are expected to hack. We do not have any guidelines, the build & test process is bumpy, things will change at high speed.
+Participating in this project is subject to the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/main/code-of-conduct.md).
 
-Please note that code contributions will only be accepted if accompanied by proper unit tests. No exceptions.
+Please note that at this point in time, code contributors are expected to hack with minimal guidance. We do not yet have any guidelines, the build & test process is bumpy, things will change at high speed. It's best to orientate yourself on existing code. Also, 
+
+Please also note that code contributions will only be accepted if accompanied by proper unit tests, are passing the CI and are using signed-off commits to satisfy the DCO. No exceptions.
