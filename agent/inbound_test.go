@@ -24,6 +24,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 )
@@ -31,7 +32,9 @@ import (
 func Test_CreateApplication(t *testing.T) {
 	a := newAgent(t)
 	be := backend_mocks.NewApplication(t)
-	a.appManager = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true))
+	var err error
+	a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true))
+	require.NoError(t, err)
 	require.NotNil(t, a)
 	app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{
 		Name:      "test",
@@ -67,7 +70,9 @@ func Test_CreateApplication(t *testing.T) {
 func Test_UpdateApplication(t *testing.T) {
 	a := newAgent(t)
 	be := backend_mocks.NewApplication(t)
-	a.appManager = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true))
+	var err error
+	a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true))
+	require.NoError(t, err)
 	require.NotNil(t, a)
 	app := &v1alpha1.Application{
 		ObjectMeta: v1.ObjectMeta{
@@ -85,6 +90,8 @@ func Test_UpdateApplication(t *testing.T) {
 
 	t.Run("Update application using patch in managed mode", func(t *testing.T) {
 		a.mode = types.AgentModeManaged
+		a.appManager.Role = manager.ManagerRoleAgent
+		a.appManager.Mode = manager.ManagerModeManaged
 		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer getEvent.Unset()
 		supportsPatchEvent := be.On("SupportsPatch").Return(true)
@@ -98,6 +105,8 @@ func Test_UpdateApplication(t *testing.T) {
 
 	t.Run("Update application using update in managed mode", func(t *testing.T) {
 		a.mode = types.AgentModeManaged
+		a.appManager.Role = manager.ManagerRoleAgent
+		a.appManager.Mode = manager.ManagerModeManaged
 		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer getEvent.Unset()
 		supportsPatchEvent := be.On("SupportsPatch").Return(false)
@@ -111,6 +120,8 @@ func Test_UpdateApplication(t *testing.T) {
 
 	t.Run("Update application using patch in autonomous mode", func(t *testing.T) {
 		a.mode = types.AgentModeAutonomous
+		a.appManager.Role = manager.ManagerRoleAgent
+		a.appManager.Mode = manager.ManagerModeAutonomous
 		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer getEvent.Unset()
 		supportsPatchEvent := be.On("SupportsPatch").Return(true)
@@ -124,6 +135,8 @@ func Test_UpdateApplication(t *testing.T) {
 
 	t.Run("Update application using update in autonomous mode", func(t *testing.T) {
 		a.mode = types.AgentModeAutonomous
+		a.appManager.Role = manager.ManagerRoleAgent
+		a.appManager.Mode = manager.ManagerModeAutonomous
 		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer getEvent.Unset()
 		supportsPatchEvent := be.On("SupportsPatch").Return(false)

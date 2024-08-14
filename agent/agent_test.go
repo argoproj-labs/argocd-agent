@@ -40,7 +40,7 @@ func newAgent(t *testing.T) *Agent {
 func Test_NewAgent(t *testing.T) {
 	fakec := fakekube.NewFakeClientsetWithResources()
 	appc := fakeappclient.NewSimpleClientset()
-	agent, err := NewAgent(context.TODO(), fakec, appc, "agent")
+	agent, err := NewAgent(context.TODO(), fakec, appc, "agent", WithRemote(&client.Remote{}))
 	require.NotNil(t, agent)
 	require.NoError(t, err)
 }

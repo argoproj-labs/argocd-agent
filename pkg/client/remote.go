@@ -62,7 +62,7 @@ func NewToken(tok string) (*token, error) {
 	return r, nil
 }
 
-// Remote represents a remote argocd-agent server component
+// Remote represents a remote argocd-agent server component. Remote is used only by the agent component, and not by principal.
 type Remote struct {
 	hostname     string
 	port         int

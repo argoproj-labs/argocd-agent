@@ -49,11 +49,18 @@ type ApplicationManager struct {
 	Application backend.Application
 	Metrics     *metrics.ApplicationClientMetrics
 	Role        manager.ManagerRole
-	Mode        manager.ManagerMode
-	Namespace   string
-	managedApps map[string]bool // Managed apps is a list of apps we manage
+	// Mode is only set when Role is ManagerRoleAgent
+	Mode manager.ManagerMode
+	// Namespace is not guaranteed to have a value in all cases. For instance, this value is empty for principal when the principal is running on cluster.
+	Namespace string
+	// managedApps is a list of apps we manage, key is qualified name in form '(namespace of Application CR)/(name of Application CR)', value is not used.
+	// - acquire 'lock' before accessing
+	managedApps map[string]bool
+	// observedApp, key is qualified name of the application, value is the Application's .metadata.resourceValue field
+	// - acquire 'lock' before accessing
 	observedApp map[string]string
-	lock        sync.RWMutex
+	// lock should be acquired before accessing managedApps/observedApps
+	lock sync.RWMutex
 }
 
 // ApplicationManagerOption is a callback function to set an option to the Application
@@ -90,7 +97,7 @@ func WithMode(mode manager.ManagerMode) ApplicationManagerOption {
 
 // NewApplicationManager initializes and returns a new Manager with the given backend and
 // options.
-func NewApplicationManager(be backend.Application, namespace string, opts ...ApplicationManagerOption) *ApplicationManager {
+func NewApplicationManager(be backend.Application, namespace string, opts ...ApplicationManagerOption) (*ApplicationManager, error) {
 	m := &ApplicationManager{}
 	for _, o := range opts {
 		o(m)
@@ -99,7 +106,12 @@ func NewApplicationManager(be backend.Application, namespace string, opts ...App
 	m.observedApp = make(map[string]string)
 	m.managedApps = make(map[string]bool)
 	m.Namespace = namespace
-	return m
+
+	if m.Role == manager.ManagerRolePrincipal && m.Mode != manager.ManagerModeUnset {
+		return nil, fmt.Errorf("mode should be unset when role is principal")
+	}
+
+	return m, nil
 }
 
 // stampLastUpdated "stamps" an application with the last updated label
@@ -161,9 +173,11 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	var err error
 
 	incoming.SetNamespace(m.Namespace)
-	if m.Role == manager.ManagerRolePrincipal {
-		stampLastUpdated(incoming)
+
+	if !(m.Role == manager.ManagerRoleAgent && m.Mode == manager.ManagerModeManaged) {
+		return nil, fmt.Errorf("updatedManagedApp should be called on a managed agent, only")
 	}
+
 	updated, err = m.update(ctx, m.AllowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
@@ -243,7 +257,10 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 	incoming.SetNamespace(namespace)
 	if m.Role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
+	} else {
+		return nil, fmt.Errorf("UpdateAutonomousApp should only be called from principal")
 	}
+
 	updated, err = m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
@@ -323,7 +340,10 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 	incoming.SetNamespace(namespace)
 	if m.Role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
+	} else {
+		return nil, fmt.Errorf("UpdateStatus should only be called on principal")
 	}
+
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
@@ -399,9 +419,11 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 
 	var updated *v1alpha1.Application
 	var err error
-	if m.Role.IsPrincipal() {
-		stampLastUpdated(incoming)
+
+	if !(m.Role.IsAgent() && m.Mode.IsAutonomous()) {
+		return nil, fmt.Errorf("UpdateOperation should only be called by an agent in autonomous mode: %v %v", m.Role, m.Mode)
 	}
+
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels

@@ -61,6 +61,7 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 		"direction":   "Send",
 		"client_addr": grpcutil.AddressFromContext(stream.Context()),
 	})
+
 	q := a.queues.SendQ(a.remote.ClientID())
 	if q == nil {
 		return fmt.Errorf("no send queue found for the remote principal")
@@ -75,7 +76,7 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 	}
 	logCtx.Tracef("Grabbed an item")
 	if item == nil {
-		// FIXME: Is this really the right thing to do?
+		// TODO: Is this really the right thing to do?
 		return nil
 	}
 
@@ -98,7 +99,7 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 		if grpcutil.NeedReconnectOnError(err) {
 			return err
 		} else {
-			logCtx.Infof("Error while sending: %v", err)
+			logCtx.Errorf("Error while sending: %v", err)
 			return nil
 		}
 	}
@@ -119,7 +120,7 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 		if grpcutil.NeedReconnectOnError(err) {
 			return err
 		} else {
-			logCtx.Infof("Error while receiving: %v", err)
+			logCtx.Errorf("Error while receiving: %v", err)
 			return nil
 		}
 	}
@@ -133,26 +134,6 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 	if err != nil {
 		logCtx.WithError(err).Errorf("Unable to process incoming event")
 	}
-	// switch ev.Type() {
-	// case event.Create:
-	// 	_, err := a.createApplication(incomingApp)
-	// 	if err != nil {
-	// 		logCtx.Errorf("Error creating application: %v", err)
-	// 	}
-	// case event.SpecUpdate:
-	// 	_, err = a.updateApplication(incomingApp)
-	// 	if err != nil {
-	// 		logCtx.Errorf("Error updating application: %v", err)
-	// 	}
-	// case event.Delete:
-	// 	err = a.deleteApplication(incomingApp)
-	// 	if err != nil {
-	// 		logCtx.Errorf("Error deleting application: %v", err)
-	// 	}
-	// default:
-	// 	logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
-	// }
-
 	return nil
 }
 
@@ -175,6 +156,7 @@ func (a *Agent) handleStreamEvents() error {
 		})
 		logCtx.Info("Starting to receive events from event stream")
 		var err error
+		// Continuously retrieve events from the event stream 'inbox' and process them, while the stream is connected
 		for a.IsConnected() && err == nil {
 			err = a.receiver(stream)
 			if err != nil {
@@ -194,6 +176,7 @@ func (a *Agent) handleStreamEvents() error {
 		})
 		logCtx.Info("Starting to send events to event stream")
 		var err error
+		// Continuously read events from the 'outbox', and send them to principal, while the stream is connected
 		for a.IsConnected() && err == nil {
 			err = a.sender(stream)
 			if err != nil {

@@ -23,6 +23,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	appmock "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,27 +42,34 @@ import (
 var appExistsError = errors.NewAlreadyExists(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
 var appNotFoundError = errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
 
-func fakeAppManager(objects ...runtime.Object) (*fakeappclient.Clientset, *ApplicationManager) {
+func fakeAppManager(t *testing.T, objects ...runtime.Object) (*fakeappclient.Clientset, *ApplicationManager) {
 	appC := fakeappclient.NewSimpleClientset(objects...)
 	informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 	be := application.NewKubernetesBackend(appC, "", informer, true)
-	return appC, NewApplicationManager(be, "argocd")
+
+	am, err := NewApplicationManager(be, "argocd")
+	assert.NoError(t, err)
+
+	return appC, am
 }
 
 func Test_ManagerOptions(t *testing.T) {
 	t.Run("NewManager with default options", func(t *testing.T) {
-		m := NewApplicationManager(nil, "")
+		m, err := NewApplicationManager(nil, "")
+		require.NoError(t, err)
 		assert.Equal(t, false, m.AllowUpsert)
 		assert.Nil(t, m.Metrics)
 	})
 
 	t.Run("NewManager with metrics", func(t *testing.T) {
-		m := NewApplicationManager(nil, "", WithMetrics(metrics.NewApplicationClientMetrics()))
+		m, err := NewApplicationManager(nil, "", WithMetrics(metrics.NewApplicationClientMetrics()))
+		require.NoError(t, err)
 		assert.NotNil(t, m.Metrics)
 	})
 
 	t.Run("NewManager with upsert enabled", func(t *testing.T) {
-		m := NewApplicationManager(nil, "", WithAllowUpsert(true))
+		m, err := NewApplicationManager(nil, "", WithAllowUpsert(true))
+		require.NoError(t, err)
 		assert.True(t, m.AllowUpsert)
 	})
 }
@@ -77,8 +85,9 @@ func Test_ManagerCreate(t *testing.T) {
 					return nil, nil
 				}
 			})
-		m := NewApplicationManager(mockedBackend, "")
-		_, err := m.Create(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "existing", Namespace: "default"}})
+		m, err := NewApplicationManager(mockedBackend, "")
+		require.NoError(t, err)
+		_, err = m.Create(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "existing", Namespace: "default"}})
 		assert.ErrorIs(t, err, appExistsError)
 	})
 
@@ -90,7 +99,8 @@ func Test_ManagerCreate(t *testing.T) {
 			},
 		}
 		mockedBackend := appmock.NewApplication(t)
-		m := NewApplicationManager(mockedBackend, "")
+		m, err := NewApplicationManager(mockedBackend, "")
+		require.NoError(t, err)
 		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
 		rapp, err := m.Create(context.TODO(), app)
 		assert.NoError(t, err)
@@ -177,7 +187,8 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := application.NewKubernetesBackend(appC, "", informer, true)
-		mgr := NewApplicationManager(be, "argocd")
+		mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent))
+		require.NoError(t, err)
 
 		updated, err := mgr.UpdateManagedApp(context.Background(), incoming)
 		require.NoError(t, err)
@@ -263,7 +274,10 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := application.NewKubernetesBackend(appC, "", informer, true)
-		mgr := NewApplicationManager(be, "argocd")
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.Mode = manager.ManagerModeManaged
+		mgr.Role = manager.ManagerRolePrincipal
 		updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
 		require.NoError(t, err)
 		b, err := json.MarshalIndent(updated, "", " ")
@@ -336,7 +350,9 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 		appC := fakeappclient.NewSimpleClientset(existing)
 		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		be := application.NewKubernetesBackend(appC, "", informer, true)
-		mgr := NewApplicationManager(be, "argocd")
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.Role = manager.ManagerRolePrincipal
 		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
@@ -403,7 +419,9 @@ func Test_ManagerUpdateOperation(t *testing.T) {
 		// informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
 		// be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
 		// mgr := NewApplicationManager(be, "argocd")
-		_, mgr := fakeAppManager(existing)
+		_, mgr := fakeAppManager(t, existing)
+		mgr.Mode = manager.ManagerModeAutonomous
+		mgr.Role = manager.ManagerRoleAgent
 		updated, err := mgr.UpdateOperation(context.TODO(), incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
@@ -437,7 +455,7 @@ func Test_DeleteApp(t *testing.T) {
 				InitiatedBy: v1alpha1.OperationInitiator{Username: "foobar"},
 			},
 		}
-		appC, mgr := fakeAppManager(existing)
+		appC, mgr := fakeAppManager(t, existing)
 		app, err := appC.ArgoprojV1alpha1().Applications("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
@@ -473,7 +491,7 @@ func Test_DeleteApp(t *testing.T) {
 				InitiatedBy: v1alpha1.OperationInitiator{Username: "foobar"},
 			},
 		}
-		appC, mgr := fakeAppManager(existing)
+		appC, mgr := fakeAppManager(t, existing)
 		app, err := appC.ArgoprojV1alpha1().Applications("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
@@ -485,9 +503,10 @@ func Test_DeleteApp(t *testing.T) {
 
 func Test_ManageApp(t *testing.T) {
 	t.Run("Mark app as managed", func(t *testing.T) {
-		appm := NewApplicationManager(nil, "")
+		appm, err := NewApplicationManager(nil, "")
+		require.NoError(t, err)
 		assert.False(t, appm.IsManaged("foo"))
-		err := appm.Manage("foo")
+		err = appm.Manage("foo")
 		assert.NoError(t, err)
 		assert.True(t, appm.IsManaged("foo"))
 		err = appm.Manage("foo")
@@ -499,8 +518,9 @@ func Test_ManageApp(t *testing.T) {
 	})
 
 	t.Run("Mark app as unmanaged", func(t *testing.T) {
-		appm := NewApplicationManager(nil, "")
-		err := appm.Manage("foo")
+		appm, err := NewApplicationManager(nil, "")
+		require.NoError(t, err)
+		err = appm.Manage("foo")
 		assert.True(t, appm.IsManaged("foo"))
 		assert.NoError(t, err)
 		err = appm.Unmanage("foo")
@@ -514,9 +534,10 @@ func Test_ManageApp(t *testing.T) {
 
 func Test_IgnoreChange(t *testing.T) {
 	t.Run("Ignore a change", func(t *testing.T) {
-		appm := NewApplicationManager(nil, "")
+		appm, err := NewApplicationManager(nil, "")
+		require.NoError(t, err)
 		assert.False(t, appm.IsChangeIgnored("foo", "1"))
-		err := appm.IgnoreChange("foo", "1")
+		err = appm.IgnoreChange("foo", "1")
 		assert.NoError(t, err)
 		assert.True(t, appm.IsChangeIgnored("foo", "1"))
 		err = appm.IgnoreChange("foo", "1")
@@ -528,8 +549,9 @@ func Test_IgnoreChange(t *testing.T) {
 	})
 
 	t.Run("Unignore a change", func(t *testing.T) {
-		appm := NewApplicationManager(nil, "")
-		err := appm.UnignoreChange("foo")
+		appm, err := NewApplicationManager(nil, "")
+		require.NoError(t, err)
+		err = appm.UnignoreChange("foo")
 		assert.Error(t, err)
 		assert.False(t, appm.IsChangeIgnored("foo", "1"))
 		err = appm.IgnoreChange("foo", "1")

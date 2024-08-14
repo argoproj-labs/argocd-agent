@@ -30,22 +30,26 @@ import (
 )
 
 type GenericInformer struct {
-	listFunc      ListFunc
-	watchFunc     WatchFunc
-	addFunc       AddFunc
-	updateFunc    UpdateFunc
-	deleteFunc    DeleteFunc
-	filterFunc    FilterFunc
-	synced        atomic.Bool
-	running       atomic.Bool
-	resyncPeriod  time.Duration
-	informer      cache.SharedIndexInformer
-	runch         chan struct{}
-	logger        *logrus.Entry
-	mutex         sync.RWMutex
+	listFunc     ListFunc
+	watchFunc    WatchFunc
+	addFunc      AddFunc
+	updateFunc   UpdateFunc
+	deleteFunc   DeleteFunc
+	filterFunc   FilterFunc
+	synced       atomic.Bool
+	running      atomic.Bool
+	resyncPeriod time.Duration
+	informer     cache.SharedIndexInformer
+	runch        chan struct{}
+	logger       *logrus.Entry
+	// mutex prevents unsynchronized access to namespaces, and ensures that Start/Stop logic is only called once.
+	mutex sync.RWMutex
+	// labelSelector is not currently implemented
 	labelSelector string
+	// fieldSelector is not currently implemented
 	fieldSelector string
-	namespaces    map[string]interface{}
+	// mutex should be owned before accessing namespaces
+	namespaces map[string]interface{}
 }
 
 type InformerOption func(i *GenericInformer) error

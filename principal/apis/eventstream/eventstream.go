@@ -33,6 +33,15 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
+var _ eventstreamapi.EventStreamServer = &Server{}
+
+// Server:
+// - Reads Application CR events from GRPC stream and writes them to the relevant agent receive queue (the 'inbox') in 'queues' for processing (see recvFunc)
+// - Reads Application CR events from agent send queue in 'queues' (the 'outbox'), and writes to GRPC stream (see sendFunc)
+//
+// Server implements the pkg/api/grpc/evenstreamapi/EventStreamServer interface
+//
+// Server is only used by principal.
 type Server struct {
 	eventstreamapi.UnimplementedEventStreamServer
 
@@ -53,8 +62,9 @@ type client struct {
 	agentName string
 	wg        *sync.WaitGroup
 	start     time.Time
-	end       time.Time
-	lock      sync.RWMutex
+	// lock must be owned before read/writing to 'end' var
+	end  time.Time
+	lock sync.RWMutex
 }
 
 func WithMaxStreamDuration(d time.Duration) ServerOption {
@@ -243,6 +253,8 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 //
 // The connection is kept open until the agent closes it, and the stream tries
 // to send updates to the agent as long as possible.
+//
+// Subscribe is called by GRPC machinery.
 func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) error {
 	c, err := newClientConnection(subs.Context(), s.options.MaxStreamDuration)
 	if err != nil {
@@ -297,6 +309,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 
 // Push implements a client-side stream to receive updates for the client's
 // Application resources.
+// Push is called by GRPC machinery.
 func (s *Server) Push(pushs eventstreamapi.EventStream_PushServer) error {
 	logCtx := log().WithField("method", "Push")
 

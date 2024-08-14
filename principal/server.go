@@ -40,26 +40,39 @@ import (
 )
 
 type Server struct {
-	options      *ServerOptions
-	tlsConfig    *tls.Config
-	listener     *Listener
-	server       *http.Server
-	grpcServer   *grpc.Server
-	authMethods  *auth.Methods
-	queues       *queue.SendRecvQueues
-	namespace    string
-	issuer       issuer.Issuer
-	noauth       map[string]bool // noauth contains endpoints accessible without authentication
-	ctx          context.Context
-	ctxCancel    context.CancelFunc
-	appManager   *application.ApplicationManager
-	appInformer  *appinformer.AppInformer
-	watchLock    sync.RWMutex
-	clientMap    map[string]string
+	options   *ServerOptions
+	tlsConfig *tls.Config
+	// listener contains GRPC server listener
+	listener *Listener
+	// server is not currently used
+	server      *http.Server
+	grpcServer  *grpc.Server
+	authMethods *auth.Methods
+	// queues contains events that are EITHER queued to be sent to the agent ('outbox'), OR that have been received by the agent and are waiting to be processed ('inbox').
+	// Server uses clientID/namespace as a key, to refer to each specific agent's queue
+	queues *queue.SendRecvQueues
+	// namespace is the namespace the server will use for configuration. Set only when running out of cluster.
+	namespace  string
+	issuer     issuer.Issuer
+	noauth     map[string]bool // noauth contains endpoints accessible without authentication
+	ctx        context.Context
+	ctxCancel  context.CancelFunc
+	appManager *application.ApplicationManager
+	// appInformer is used to watch for change events for Argo CD Application resources on the cluster
+	appInformer *appinformer.AppInformer
+	// At present, 'watchLock' is only acquired on calls to 'updateAppCallback'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
+	watchLock sync.RWMutex
+	// clientMap is not currently used
+	clientMap map[string]string
+	// namespaceMap keeps track of which local namespaces are managed by agents using which mode
+	// The key of namespaceMap is the client id which the agent used to authenticate with principal, via AuthSubject.ClientID (which, it is also assumed here, corresponds to a control plane namespace of the same name)
+	// NOTE: clientLock should be owned before accessing namespaceMap
 	namespaceMap map[string]types.AgentMode
-	clientLock   sync.RWMutex
-	events       *event.EventSource
-	version      *version.Version
+	// clientLock should be owned before accessing namespaceMap
+	clientLock sync.RWMutex
+	// events is used to construct events to pass on the wire to connected agents.
+	events  *event.EventSource
+	version *version.Version
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
@@ -126,9 +139,12 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 		informerOpts...,
 	)
 
-	s.appManager = application.NewApplicationManager(kubeapp.NewKubernetesBackend(appClient, s.namespace, s.appInformer, true), s.namespace,
+	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(appClient, s.namespace, s.appInformer, true), s.namespace,
 		managerOpts...,
 	)
+	if err != nil {
+		return nil, err
+	}
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
 	}
@@ -238,13 +254,13 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-// Listener returns the listener of Server s
-func (s *Server) Listener() *Listener {
+// ListenerForE2EOnly returns the listener of Server s
+func (s *Server) ListenerForE2EOnly() *Listener {
 	return s.listener
 }
 
-// TokenIssuer returns the token issuer of Server s
-func (s *Server) TokenIssuer() issuer.Issuer {
+// TokenIssuerForE2EOnly returns the token issuer of Server s
+func (s *Server) TokenIssuerForE2EOnly() issuer.Issuer {
 	return s.issuer
 }
 
@@ -252,15 +268,16 @@ func log() *logrus.Entry {
 	return logrus.WithField("module", "server")
 }
 
-func (s *Server) AuthMethods() *auth.Methods {
+func (s *Server) AuthMethodsForE2EOnly() *auth.Methods {
 	return s.authMethods
 }
 
-func (s *Server) Queues() *queue.SendRecvQueues {
+func (s *Server) QueuesForE2EOnly() *queue.SendRecvQueues {
 	return s.queues
 }
 
-func (s *Server) AppManager() *application.ApplicationManager {
+// AppManagerForE2EOnly should only be used for E2E tests
+func (s *Server) AppManagerForE2EOnly() *application.ApplicationManager {
 	return s.appManager
 }
 

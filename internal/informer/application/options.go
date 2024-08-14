@@ -26,6 +26,7 @@ import (
 // Options should not be modified concurrently, they are not implemented in a
 // thread-safe way.
 type AppInformerOptions struct {
+	// namespace will be set to "", if len(namespaces) > 0
 	namespace  string
 	namespaces []string
 	appMetrics *metrics.ApplicationWatcherMetrics
