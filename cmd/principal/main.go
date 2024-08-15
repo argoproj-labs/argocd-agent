@@ -212,7 +212,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 }
 
 // observer puts some valuable debug information in the logs every interval.
-// It will launch a its own go routine and run in it indefinetely.
+// It will launch a its own go routine and run in it indefinitely.
 func observer(interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
