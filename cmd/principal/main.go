@@ -219,7 +219,7 @@ func observer(interval time.Duration) {
 		for {
 			select {
 			case <-ticker.C:
-				logrus.Infof("Number of go routines running: %d", runtime.NumGoroutine())
+				logrus.Debugf("Number of go routines running: %d", runtime.NumGoroutine())
 			default:
 				time.Sleep(10 * time.Millisecond)
 			}
