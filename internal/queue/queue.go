@@ -23,6 +23,7 @@ import (
 
 var _ QueuePair = &SendRecvQueues{}
 
+// QueuePair maintains a map (indexed by name) of send/receive queue pairs
 type QueuePair interface {
 	Names() []string
 	HasQueuePair(name string) bool
@@ -63,7 +64,7 @@ func (q *SendRecvQueues) Names() []string {
 	return names
 }
 
-// HasQueuePair retruns true if a queue pair with name currently exists
+// HasQueuePair returns true if a queue pair with name currently exists
 func (q *SendRecvQueues) HasQueuePair(name string) bool {
 	q.queuelock.RLock()
 	defer q.queuelock.RUnlock()
@@ -78,7 +79,7 @@ func (q *SendRecvQueues) Len() int {
 	return len(q.queues)
 }
 
-// RecvQ will return the send queue from the queue pair named name. If no such
+// SendQ will return the send queue from the queue pair named name. If no such
 // queue pair exists, returns nil
 func (q *SendRecvQueues) SendQ(name string) workqueue.RateLimitingInterface {
 	q.queuelock.RLock()

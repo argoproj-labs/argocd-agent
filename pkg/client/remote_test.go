@@ -46,7 +46,7 @@ func Test_Connect(t *testing.T) {
 
 	am := userpass.NewUserPassAuthentication("")
 	am.UpsertUser("default", "password")
-	s.AuthMethods().RegisterMethod("userpass", am)
+	s.AuthMethodsForE2EOnly().RegisterMethod("userpass", am)
 
 	require.NoError(t, err)
 	errch := make(chan error)
@@ -54,7 +54,7 @@ func Test_Connect(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("Connect to a server", func(t *testing.T) {
-		r, err := NewRemote("127.0.0.1", s.Listener().Port(),
+		r, err := NewRemote("127.0.0.1", s.ListenerForE2EOnly().Port(),
 			WithInsecureSkipTLSVerify(),
 			WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "default", userpass.ClientSecretField: "password"}),
 			WithClientMode(types.AgentModeManaged),
@@ -76,7 +76,7 @@ func Test_Connect(t *testing.T) {
 	})
 
 	t.Run("Invalid auth and context deadline reached", func(t *testing.T) {
-		r, err := NewRemote("127.0.0.1", s.Listener().Port(),
+		r, err := NewRemote("127.0.0.1", s.ListenerForE2EOnly().Port(),
 			WithInsecureSkipTLSVerify(),
 			WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "default", userpass.ClientSecretField: "passwor"}),
 		)

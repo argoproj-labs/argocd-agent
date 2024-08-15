@@ -43,6 +43,7 @@ var listenerBackoff = wait.Backoff{
 	Jitter:   0.1,
 }
 
+// Listener is a utility wrapper around net.Listener and associated data
 type Listener struct {
 	host   string
 	port   int

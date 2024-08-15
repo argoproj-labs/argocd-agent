@@ -84,12 +84,12 @@ func newConn(t *testing.T, appC *fakeappclient.Clientset) (*grpc.ClientConn, *pr
 
 	am := userpass.NewUserPassAuthentication("")
 	am.UpsertUser("default", "password")
-	err = s.AuthMethods().RegisterMethod("userpass", am)
+	err = s.AuthMethodsForE2EOnly().RegisterMethod("userpass", am)
 	require.NoError(t, err)
 
 	tlsC := &tls.Config{InsecureSkipVerify: true}
 	creds := credentials.NewTLS(tlsC)
-	conn, err := grpc.Dial(s.Listener().Address(),
+	conn, err := grpc.Dial(s.ListenerForE2EOnly().Address(),
 		grpc.WithTransportCredentials(creds))
 	require.NoError(t, err)
 	return conn, s
@@ -221,11 +221,11 @@ func Test_EndToEnd_Push(t *testing.T) {
 	_ = s.Shutdown()
 
 	// Should have been grabbed by queue processor
-	q := s.Queues()
+	q := s.QueuesForE2EOnly()
 	assert.Equal(t, 0, q.RecvQ("default").Len())
 
 	// All applications should have been created by now on the server
-	apps, err := s.AppManager().Application.List(context.Background(), backend.ApplicationSelector{})
+	apps, err := s.AppManagerForE2EOnly().Application.List(context.Background(), backend.ApplicationSelector{})
 	assert.NoError(t, err)
 	assert.Len(t, apps, 10)
 }
@@ -261,7 +261,7 @@ func Test_AgentServer(t *testing.T) {
 	defer scancel()
 	defer acancel()
 
-	remote, err := client.NewRemote(s.Listener().Host(), s.Listener().Port(),
+	remote, err := client.NewRemote(s.ListenerForE2EOnly().Host(), s.ListenerForE2EOnly().Port(),
 		client.WithInsecureSkipTLSVerify(),
 		client.WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "client", userpass.ClientSecretField: "insecure"}),
 	)

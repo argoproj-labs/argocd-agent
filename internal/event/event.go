@@ -33,6 +33,7 @@ type EventTarget string
 
 const TypePrefix = "io.argoproj.argocd-agent.event"
 
+// Supported EventTypes that are sent agent <-> principal
 const (
 	Ping            EventType = TypePrefix + ".ping"
 	Pong            EventType = TypePrefix + ".pong"
@@ -63,10 +64,12 @@ func (t EventTarget) String() string {
 	return string(t)
 }
 
+// EventSource is a utility to construct new 'cloudevents.Event' events for a given 'source'
 type EventSource struct {
 	source string
 }
 
+// Event is the 'on the wire' representation of an event, and is parsed by from protobuf via FromWire
 type Event struct {
 	event  *cloudevents.Event
 	target EventTarget

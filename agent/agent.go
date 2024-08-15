@@ -24,6 +24,7 @@ import (
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
@@ -40,30 +41,41 @@ const waitForSyncedDuration = 10 * time.Second
 
 // Agent is a controller that synchronizes Application resources
 type Agent struct {
-	context           context.Context
-	cancelFn          context.CancelFunc
-	client            kubernetes.Interface
-	appclient         appclientset.Interface
-	options           AgentOptions
-	namespace         string
+	context   context.Context
+	cancelFn  context.CancelFunc
+	client    kubernetes.Interface
+	appclient appclientset.Interface
+	options   AgentOptions
+	// namespace is the namespace to manage applications in
+	namespace string
+	// allowedNamespaces is not currently used. See also 'namespaces' field in AgentOptions
 	allowedNamespaces []string
-	informer          *appinformer.AppInformer
-	infStopCh         chan struct{}
-	connected         atomic.Bool
-	syncCh            chan bool
-	remote            *client.Remote
-	appManager        *application.ApplicationManager
-	mode              types.AgentMode
-	queues            *queue.SendRecvQueues
-	emitter           *event.EventSource
-	watchLock         sync.RWMutex
-	version           *version.Version
+	// informer is used to watch for change events for Argo CD Application resources on the cluster
+	informer *appinformer.AppInformer
+	// infStopCh is not currently used
+	infStopCh chan struct{}
+	connected atomic.Bool
+	// syncCh is not currently used
+	syncCh     chan bool
+	remote     *client.Remote
+	appManager *application.ApplicationManager
+	mode       types.AgentMode
+	// queues is a queue of create/update/delete events to send to the principal
+	queues  *queue.SendRecvQueues
+	emitter *event.EventSource
+	// At present, 'watchLock' is only acquired on calls to 'addAppUpdateToQueue'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
+	watchLock sync.RWMutex
+	version   *version.Version
 }
 
 const defaultQueueName = "default"
 
 // AgentOptions defines the options for a given Controller
 type AgentOptions struct {
+	// In the future, the 'namespaces' field may be used to support multiple Argo CD namespaces (for example, apps in any namespace) from a single agent instance, on a workload cluster. See 'filters.go' (in this package) for logic that reads from this value and avoids processing events outside of the specified namespaces.
+	// - However, note that the 'namespace' field of Agent is automatically included by default.
+	//
+	// However, as of this writing, this feature is not available.
 	namespaces []string
 }
 
@@ -88,6 +100,10 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 		}
 	}
 
+	if a.remote == nil {
+		return nil, fmt.Errorf("remote not defined")
+	}
+
 	// Initial state of the agent is disconnected
 	a.connected.Store(false)
 
@@ -97,6 +113,15 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 	a.queues = queue.NewSendRecvQueues()
 	if err := a.queues.Create(defaultQueueName); err != nil {
 		return nil, fmt.Errorf("unable to create default queue: %w", err)
+	}
+
+	var managerMode manager.ManagerMode
+	if a.mode == types.AgentModeAutonomous {
+		managerMode = manager.ManagerModeAutonomous
+	} else if a.mode == types.AgentModeManaged {
+		managerMode = manager.ManagerModeManaged
+	} else {
+		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
 	a.informer = appinformer.NewAppInformer(ctx, a.appclient, a.namespace,
@@ -112,12 +137,20 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 		allowUpsert = true
 	}
 
+	var err error
+
 	// The agent only supports Kubernetes as application backend
-	a.appManager = application.NewApplicationManager(
+	a.appManager, err = application.NewApplicationManager(
 		kubeapp.NewKubernetesBackend(a.appclient, a.namespace, a.informer, true),
 		a.namespace,
 		application.WithAllowUpsert(allowUpsert),
+		application.WithRole(manager.ManagerRoleAgent),
+		application.WithMode(managerMode),
 	)
+
+	if err != nil {
+		return nil, err
+	}
 
 	a.syncCh = make(chan bool, 1)
 	return a, nil

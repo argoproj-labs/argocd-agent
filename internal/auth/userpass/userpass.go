@@ -53,11 +53,17 @@ type UserPassAuthentication struct {
 	dbpath string
 	lock   sync.RWMutex
 	userdb map[string]string
-	dummy  []byte
+
+	// dummy is not a password itself, but rather is used to make timing attacks
+	// a little more complex: in the case where an invalid username is sent, we
+	// will hash the dummy password instead (to prevent attackers from
+	// determining whether a username exists by timing response times)
+	dummy []byte
 }
 
 // NewUserPassAuthentication creates a new instance of UserPassAuthentication
 func NewUserPassAuthentication(path string) *UserPassAuthentication {
+	// see 'dummy' field of UserPassAuthentication for explanation of this value
 	dummy, _ := bcrypt.GenerateFromPassword([]byte("bdf3fdc6da5b5029e83f3024858c3c1e6aa3d1e71fa09e4691212f7571b5a3e3"), bcrypt.DefaultCost)
 	return &UserPassAuthentication{
 		userdb: make(map[string]string),

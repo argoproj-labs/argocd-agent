@@ -107,6 +107,10 @@ func NewAgentRunCommand() *cobra.Command {
 				cmd.Fatal("No remote specified")
 			}
 
+			if namespace == "" {
+				cmd.Fatal("namespace value is empty and must be specified")
+			}
+
 			kubeConfig, err := cmd.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
 			if err != nil {
 				cmd.Fatal("Could not load Kubernetes config: %v", err)

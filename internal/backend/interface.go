@@ -24,12 +24,23 @@ import (
 )
 
 type ApplicationSelector struct {
-	Labels     map[string]string
-	Names      []string
+
+	// Labels is not currently implemented.
+	Labels map[string]string
+
+	// Names is not currently implemented.
+	Names []string
+
+	// Namespaces is used by the 'List' Application interface function to restrict the list of Applications returned to a specific set of Namespaces.
 	Namespaces []string
-	Projects   []string
+
+	// Projects is not currently implemented.
+	Projects []string
 }
 
+// Application defines a generic interface to store/track Argo CD Application state, via ApplicationManager.
+//
+// As of this writing (August 2024), the only implementation is a Kubernetes-based backend (KubernetesBackend in 'internal/backend/kubernetes/application') but other backends (e.g. RDBMS-backed) could be implemented in the future.
 type Application interface {
 	List(ctx context.Context, selector ApplicationSelector) ([]v1alpha1.Application, error)
 	Create(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error)

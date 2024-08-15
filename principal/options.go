@@ -40,22 +40,27 @@ var supportedTLSVersion map[string]int = map[string]int{
 }
 
 type ServerOptions struct {
-	serverName             string
-	port                   int
-	address                string
-	tlsCertPath            string
-	tlsKeyPath             string
-	tlsCert                *x509.Certificate
-	tlsKey                 crypto.PrivateKey
-	tlsCiphers             *tls.CipherSuite
-	tlsMinVersion          int
-	gracePeriod            time.Duration
-	namespaces             []string
-	signingKey             crypto.PrivateKey
-	unauthMethods          map[string]bool
-	serveGRPC              bool
-	serveREST              bool
-	eventProcessors        int64
+	serverName  string
+	port        int
+	address     string
+	tlsCertPath string
+	tlsKeyPath  string
+	tlsCert     *x509.Certificate
+	tlsKey      crypto.PrivateKey
+	// tlsCiphers is not currently read
+	tlsCiphers *tls.CipherSuite
+	// tlsMinVersion is not currently read
+	tlsMinVersion int
+	gracePeriod   time.Duration
+	namespaces    []string
+	signingKey    crypto.PrivateKey
+	// unauthMethods is not currently implemented
+	unauthMethods map[string]bool
+	serveGRPC     bool
+	// serveREST is not currently implemented
+	serveREST       bool
+	eventProcessors int64
+	// metricsEnabled is not currently read
 	metricsEnabled         bool
 	metricsPort            int
 	requireClientCerts     bool

@@ -32,9 +32,16 @@ import (
 
 var _ backend.Application = &KubernetesBackend{}
 
+// KubernetesBackend is an implementation of the backend.Application interface, which is used by ApplicationManager to track/update the state of Argo CD Applications.
+// KubernetesBackend stores/retrieves all data from Argo CD Application CRs on the cluster that is local to the agent/principal.
+//
+// KubernetesBackend is used by both the principal and agent components.
 type KubernetesBackend struct {
+	// appClient is used to interfact with Argo CD Application resources on the cluster on which agent/principal is installed.
 	appClient appclientset.Interface
-	informer  *appinformer.AppInformer
+	// informer is used to watch for change events for Argo CD Application resources on the cluster
+	informer *appinformer.AppInformer
+	// namespace is not currently read, is not guaranteed to be non-empty, and is not guaranteed to contain the source of Argo CD Application CRs in all cases
 	namespace string
 	usePatch  bool
 }

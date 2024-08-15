@@ -40,7 +40,7 @@ const defaultResyncPeriod = 1 * time.Minute
 // AppInformer is a filtering and customizable SharedIndexInformer for Argo CD
 // Application resources in a cluster. It works across a configurable set of
 // namespaces, lets you define a list of filters to indicate interest in the
-// resource of a particular even and allows you to set up callbacks to handle
+// resource of a particular event and allows you to set up callbacks to handle
 // the events.
 type AppInformer struct {
 	appClient appclientset.Interface
@@ -49,6 +49,7 @@ type AppInformer struct {
 	AppInformer cache.SharedIndexInformer
 	AppLister   applisters.ApplicationLister
 
+	// lock should be acquired when reading/writing from callbacks defined in 'options' field
 	lock sync.RWMutex
 
 	// synced indicates whether the informer is synced and the watch is set up
