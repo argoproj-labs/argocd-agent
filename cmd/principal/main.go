@@ -130,18 +130,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 			// In debug or higher log level, we start a little observer routine
 			// to get some insights.
 			if logrus.GetLevel() >= logrus.DebugLevel {
-				ticker := time.NewTicker(10 * time.Second)
-				go func() {
-					logrus.Info("Starting observer goroutine")
-					for {
-						select {
-						case <-ticker.C:
-							logrus.Infof("Number of go routines running: %d", runtime.NumGoroutine())
-						default:
-							time.Sleep(10 * time.Millisecond)
-						}
-					}
-				}()
+				logrus.Info("Starting observer goroutine")
+				observer(10 * time.Second)
 			}
 
 			s, err := principal.NewServer(ctx, kubeConfig.ApplicationsClientset, namespace, opts...)
@@ -219,6 +209,22 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 	return command
 
+}
+
+// observer puts some valuable debug information in the logs every interval.
+// It will launch a its own go routine and run in it indefinetely.
+func observer(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		for {
+			select {
+			case <-ticker.C:
+				logrus.Infof("Number of go routines running: %d", runtime.NumGoroutine())
+			default:
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}()
 }
 
 func main() {
