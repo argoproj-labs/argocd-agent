@@ -45,14 +45,14 @@ const LastUpdatedAnnotation = "argocd-agent.argoproj.io/last-updated"
 //
 // It provides primitives to create, update, upsert and delete applications.
 type ApplicationManager struct {
-	AllowUpsert bool
-	Application backend.Application
-	Metrics     *metrics.ApplicationClientMetrics
-	Role        manager.ManagerRole
-	// Mode is only set when Role is ManagerRoleAgent
-	Mode manager.ManagerMode
-	// Namespace is not guaranteed to have a value in all cases. For instance, this value is empty for principal when the principal is running on cluster.
-	Namespace string
+	allowUpsert        bool
+	applicationBackend backend.Application
+	metrics            *metrics.ApplicationClientMetrics
+	role               manager.ManagerRole
+	// mode is only set when Role is ManagerRoleAgent
+	mode manager.ManagerMode
+	// namespace is not guaranteed to have a value in all cases. For instance, this value is empty for principal when the principal is running on cluster.
+	namespace string
 	// managedApps is a list of apps we manage, key is qualified name in form '(namespace of Application CR)/(name of Application CR)', value is not used.
 	// - acquire 'lock' before accessing
 	managedApps map[string]bool
@@ -70,28 +70,28 @@ type ApplicationManagerOption func(*ApplicationManager)
 // WithMetrics sets the metrics provider for the Manager
 func WithMetrics(m *metrics.ApplicationClientMetrics) ApplicationManagerOption {
 	return func(mgr *ApplicationManager) {
-		mgr.Metrics = m
+		mgr.metrics = m
 	}
 }
 
 // WithAllowUpsert sets the upsert operations allowed flag
 func WithAllowUpsert(upsert bool) ApplicationManagerOption {
 	return func(m *ApplicationManager) {
-		m.AllowUpsert = upsert
+		m.allowUpsert = upsert
 	}
 }
 
 // WithRole sets the role of the Application manager
 func WithRole(role manager.ManagerRole) ApplicationManagerOption {
 	return func(m *ApplicationManager) {
-		m.Role = role
+		m.role = role
 	}
 }
 
 // WithMode sets the mode of the Application manager
 func WithMode(mode manager.ManagerMode) ApplicationManagerOption {
 	return func(m *ApplicationManager) {
-		m.Mode = mode
+		m.mode = mode
 	}
 }
 
@@ -102,16 +102,20 @@ func NewApplicationManager(be backend.Application, namespace string, opts ...App
 	for _, o := range opts {
 		o(m)
 	}
-	m.Application = be
+	m.applicationBackend = be
 	m.observedApp = make(map[string]string)
 	m.managedApps = make(map[string]bool)
-	m.Namespace = namespace
+	m.namespace = namespace
 
-	if m.Role == manager.ManagerRolePrincipal && m.Mode != manager.ManagerModeUnset {
+	if m.role == manager.ManagerRolePrincipal && m.mode != manager.ManagerModeUnset {
 		return nil, fmt.Errorf("mode should be unset when role is principal")
 	}
 
 	return m, nil
+}
+
+func (m *ApplicationManager) StartBackend(ctx context.Context) {
+	m.applicationBackend.StartInformer(ctx)
 }
 
 // stampLastUpdated "stamps" an application with the last updated label
@@ -130,12 +134,12 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 	app.Generation = 0
 
 	// We never want Operation to be set on the principal's side.
-	if m.Role == manager.ManagerRolePrincipal {
+	if m.role == manager.ManagerRolePrincipal {
 		app.Operation = nil
 		stampLastUpdated(app)
 	}
 
-	created, err := m.Application.Create(ctx, app)
+	created, err := m.applicationBackend.Create(ctx, app)
 	if err == nil {
 		if err := m.Manage(created.QualifiedName()); err != nil {
 			log().Warnf("Could not manage app %s: %v", created.QualifiedName(), err)
@@ -143,12 +147,12 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 		if err := m.IgnoreChange(created.QualifiedName(), created.ResourceVersion); err != nil {
 			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.QualifiedName(), err)
 		}
-		if m.Metrics != nil {
-			m.Metrics.AppsCreated.WithLabelValues(app.Namespace).Inc()
+		if m.metrics != nil {
+			m.metrics.AppsCreated.WithLabelValues(app.Namespace).Inc()
 		}
 	} else {
-		if m.Metrics != nil {
-			m.Metrics.Errors.Inc()
+		if m.metrics != nil {
+			m.metrics.Errors.Inc()
 		}
 	}
 
@@ -172,13 +176,13 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	var updated *v1alpha1.Application
 	var err error
 
-	incoming.SetNamespace(m.Namespace)
+	incoming.SetNamespace(m.namespace)
 
-	if !(m.Role == manager.ManagerRoleAgent && m.Mode == manager.ManagerModeManaged) {
+	if !(m.role == manager.ManagerRoleAgent && m.mode == manager.ManagerModeManaged) {
 		return nil, fmt.Errorf("updatedManagedApp should be called on a managed agent, only")
 	}
 
-	updated, err = m.update(ctx, m.AllowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
+	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
 		existing.ObjectMeta.Finalizers = incoming.ObjectMeta.Finalizers
@@ -225,12 +229,12 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Couldn't unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		if m.Metrics != nil {
-			m.Metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
+		if m.metrics != nil {
+			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
 		}
 	} else {
-		if m.Metrics != nil {
-			m.Metrics.Errors.Inc()
+		if m.metrics != nil {
+			m.metrics.Errors.Inc()
 		}
 	}
 	return updated, err
@@ -255,7 +259,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 	var updated *v1alpha1.Application
 	var err error
 	incoming.SetNamespace(namespace)
-	if m.Role == manager.ManagerRolePrincipal {
+	if m.role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
 	} else {
 		return nil, fmt.Errorf("UpdateAutonomousApp should only be called from principal")
@@ -310,12 +314,12 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 			logCtx.Warnf("Could not unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
-		if m.Metrics != nil {
-			m.Metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
+		if m.metrics != nil {
+			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
 		}
 	} else {
-		if m.Metrics != nil {
-			m.Metrics.Errors.Inc()
+		if m.metrics != nil {
+			m.metrics.Errors.Inc()
 		}
 	}
 	return updated, err
@@ -338,7 +342,7 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 	var updated *v1alpha1.Application
 	var err error
 	incoming.SetNamespace(namespace)
-	if m.Role == manager.ManagerRolePrincipal {
+	if m.role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
 	} else {
 		return nil, fmt.Errorf("UpdateStatus should only be called on principal")
@@ -391,12 +395,12 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
-		if m.Metrics != nil {
-			m.Metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
+		if m.metrics != nil {
+			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
 		}
 	} else {
-		if m.Metrics != nil {
-			m.Metrics.Errors.Inc()
+		if m.metrics != nil {
+			m.metrics.Errors.Inc()
 		}
 	}
 	return updated, err
@@ -420,8 +424,8 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 	var updated *v1alpha1.Application
 	var err error
 
-	if !(m.Role.IsAgent() && m.Mode.IsAutonomous()) {
-		return nil, fmt.Errorf("UpdateOperation should only be called by an agent in autonomous mode: %v %v", m.Role, m.Mode)
+	if !(m.role.IsAgent() && m.mode.IsAutonomous()) {
+		return nil, fmt.Errorf("UpdateOperation should only be called by an agent in autonomous mode: %v %v", m.role, m.mode)
 	}
 
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
@@ -455,12 +459,12 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
-		if m.Metrics != nil {
-			m.Metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
+		if m.metrics != nil {
+			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
 		}
 	} else {
-		if m.Metrics != nil {
-			m.Metrics.Errors.Inc()
+		if m.metrics != nil {
+			m.metrics.Errors.Inc()
 		}
 	}
 	return updated, err
@@ -476,7 +480,7 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 		"application":     incoming.QualifiedName(),
 		"resourceVersion": incoming.ResourceVersion,
 	})
-	if m.Role.IsPrincipal() {
+	if m.role.IsPrincipal() {
 		removeFinalizer = true
 		incoming.SetNamespace(namespace)
 	}
@@ -492,7 +496,7 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 		}
 	}
 
-	err = m.Application.Delete(ctx, incoming.Name, incoming.Namespace)
+	err = m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace)
 
 	return err
 }
@@ -513,7 +517,7 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *v1alpha1.Application, updateFn updateTransformer, patchFn patchTransformer) (*v1alpha1.Application, error) {
 	var updated *v1alpha1.Application
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		existing, ierr := m.Application.Get(ctx, incoming.Name, incoming.Namespace)
+		existing, ierr := m.applicationBackend.Get(ctx, incoming.Name, incoming.Namespace)
 		if ierr != nil {
 			if errors.IsNotFound(ierr) && upsert {
 				updated, ierr = m.Create(ctx, incoming)
@@ -522,7 +526,7 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 				return fmt.Errorf("error updating application %s: %w", incoming.QualifiedName(), ierr)
 			}
 		} else {
-			if m.Application.SupportsPatch() && patchFn != nil {
+			if m.applicationBackend.SupportsPatch() && patchFn != nil {
 				patch, err := patchFn(existing, incoming)
 				if err != nil {
 					return fmt.Errorf("could not create patch: %w", err)
@@ -531,12 +535,12 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 				if err != nil {
 					return fmt.Errorf("could not marshal jsonpatch: %w", err)
 				}
-				updated, ierr = m.Application.Patch(ctx, incoming.Name, incoming.Namespace, jsonpatch)
+				updated, ierr = m.applicationBackend.Patch(ctx, incoming.Name, incoming.Namespace, jsonpatch)
 			} else {
 				if updateFn != nil {
 					updateFn(existing, incoming)
 				}
-				updated, ierr = m.Application.Update(ctx, existing)
+				updated, ierr = m.applicationBackend.Update(ctx, existing)
 			}
 		}
 		return ierr

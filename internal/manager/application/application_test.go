@@ -57,20 +57,20 @@ func Test_ManagerOptions(t *testing.T) {
 	t.Run("NewManager with default options", func(t *testing.T) {
 		m, err := NewApplicationManager(nil, "")
 		require.NoError(t, err)
-		assert.Equal(t, false, m.AllowUpsert)
-		assert.Nil(t, m.Metrics)
+		assert.Equal(t, false, m.allowUpsert)
+		assert.Nil(t, m.metrics)
 	})
 
 	t.Run("NewManager with metrics", func(t *testing.T) {
 		m, err := NewApplicationManager(nil, "", WithMetrics(metrics.NewApplicationClientMetrics()))
 		require.NoError(t, err)
-		assert.NotNil(t, m.Metrics)
+		assert.NotNil(t, m.metrics)
 	})
 
 	t.Run("NewManager with upsert enabled", func(t *testing.T) {
 		m, err := NewApplicationManager(nil, "", WithAllowUpsert(true))
 		require.NoError(t, err)
-		assert.True(t, m.AllowUpsert)
+		assert.True(t, m.allowUpsert)
 	})
 }
 
@@ -276,8 +276,8 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		be := application.NewKubernetesBackend(appC, "", informer, true)
 		mgr, err := NewApplicationManager(be, "argocd")
 		require.NoError(t, err)
-		mgr.Mode = manager.ManagerModeManaged
-		mgr.Role = manager.ManagerRolePrincipal
+		mgr.mode = manager.ManagerModeManaged
+		mgr.role = manager.ManagerRolePrincipal
 		updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
 		require.NoError(t, err)
 		b, err := json.MarshalIndent(updated, "", " ")
@@ -352,7 +352,7 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 		be := application.NewKubernetesBackend(appC, "", informer, true)
 		mgr, err := NewApplicationManager(be, "argocd")
 		require.NoError(t, err)
-		mgr.Role = manager.ManagerRolePrincipal
+		mgr.role = manager.ManagerRolePrincipal
 		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
@@ -420,8 +420,8 @@ func Test_ManagerUpdateOperation(t *testing.T) {
 		// be := kubernetes.NewKubernetesBackend(appC, "", informer, true)
 		// mgr := NewApplicationManager(be, "argocd")
 		_, mgr := fakeAppManager(t, existing)
-		mgr.Mode = manager.ManagerModeAutonomous
-		mgr.Role = manager.ManagerRoleAgent
+		mgr.mode = manager.ManagerModeAutonomous
+		mgr.role = manager.ManagerRoleAgent
 		updated, err := mgr.UpdateOperation(context.TODO(), incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)

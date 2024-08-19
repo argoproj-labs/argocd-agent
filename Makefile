@@ -29,6 +29,10 @@ test:
 	mkdir -p test/out
 	./hack/test.sh
 
+.PHONY: test-e2e
+test-e2e:
+	go test -race -timeout 60s github.com/argoproj-labs/argocd-agent/test/e2e
+
 .PHONY: mod-vendor
 mod-vendor:
 	go mod vendor

@@ -25,13 +25,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
-	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	"github.com/argoproj-labs/argocd-agent/agent"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
-	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
@@ -39,6 +35,9 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal"
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -225,9 +224,9 @@ func Test_EndToEnd_Push(t *testing.T) {
 	assert.Equal(t, 0, q.RecvQ("default").Len())
 
 	// All applications should have been created by now on the server
-	apps, err := s.AppManagerForE2EOnly().Application.List(context.Background(), backend.ApplicationSelector{})
+	apps, err := appC.ArgoprojV1alpha1().Applications("default").List(context.Background(), v1.ListOptions{})
 	assert.NoError(t, err)
-	assert.Len(t, apps, 10)
+	assert.Len(t, apps.Items, 10)
 }
 
 func Test_AgentServer(t *testing.T) {
