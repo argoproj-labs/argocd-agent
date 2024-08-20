@@ -90,8 +90,7 @@ func Test_UpdateApplication(t *testing.T) {
 
 	t.Run("Update application using patch in managed mode", func(t *testing.T) {
 		a.mode = types.AgentModeManaged
-		a.appManager.Role = manager.ManagerRoleAgent
-		a.appManager.Mode = manager.ManagerModeManaged
+		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true), application.WithMode(manager.ManagerModeManaged), application.WithRole(manager.ManagerRoleAgent))
 		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer getEvent.Unset()
 		supportsPatchEvent := be.On("SupportsPatch").Return(true)
@@ -105,8 +104,7 @@ func Test_UpdateApplication(t *testing.T) {
 
 	t.Run("Update application using update in managed mode", func(t *testing.T) {
 		a.mode = types.AgentModeManaged
-		a.appManager.Role = manager.ManagerRoleAgent
-		a.appManager.Mode = manager.ManagerModeManaged
+		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true), application.WithMode(manager.ManagerModeManaged), application.WithRole(manager.ManagerRoleAgent))
 		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer getEvent.Unset()
 		supportsPatchEvent := be.On("SupportsPatch").Return(false)
@@ -120,8 +118,8 @@ func Test_UpdateApplication(t *testing.T) {
 
 	t.Run("Update application using patch in autonomous mode", func(t *testing.T) {
 		a.mode = types.AgentModeAutonomous
-		a.appManager.Role = manager.ManagerRoleAgent
-		a.appManager.Mode = manager.ManagerModeAutonomous
+		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true), application.WithMode(manager.ManagerModeAutonomous), application.WithRole(manager.ManagerRoleAgent))
+
 		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer getEvent.Unset()
 		supportsPatchEvent := be.On("SupportsPatch").Return(true)
@@ -135,8 +133,8 @@ func Test_UpdateApplication(t *testing.T) {
 
 	t.Run("Update application using update in autonomous mode", func(t *testing.T) {
 		a.mode = types.AgentModeAutonomous
-		a.appManager.Role = manager.ManagerRoleAgent
-		a.appManager.Mode = manager.ManagerModeAutonomous
+		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true), application.WithMode(manager.ManagerModeAutonomous), application.WithRole(manager.ManagerRoleAgent))
+
 		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer getEvent.Unset()
 		supportsPatchEvent := be.On("SupportsPatch").Return(false)

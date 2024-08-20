@@ -46,8 +46,8 @@ type AppInformer struct {
 	appClient appclientset.Interface
 	options   *AppInformerOptions
 
-	AppInformer cache.SharedIndexInformer
-	AppLister   applisters.ApplicationLister
+	appInformer cache.SharedIndexInformer
+	appLister   applisters.ApplicationLister
 
 	// lock should be acquired when reading/writing from callbacks defined in 'options' field
 	lock sync.RWMutex
@@ -75,7 +75,7 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 
 	i := &AppInformer{options: o, appClient: client}
 
-	i.AppInformer = cache.NewSharedIndexInformer(
+	i.appInformer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				logCtx := log().WithField("component", "ListWatch")
@@ -129,7 +129,7 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 			},
 		},
 	)
-	_, _ = i.AppInformer.AddEventHandler(
+	_, _ = i.appInformer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				app, ok := obj.(*v1alpha1.Application)
@@ -217,16 +217,16 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 			},
 		},
 	)
-	i.AppLister = applisters.NewApplicationLister(i.AppInformer.GetIndexer())
+	i.appLister = applisters.NewApplicationLister(i.appInformer.GetIndexer())
 	// SetWatchErrorHandler only returns error when informer already started,
 	// so it should be safe to not handle the error.
-	_ = i.AppInformer.SetWatchErrorHandler(cache.DefaultWatchErrorHandler)
+	_ = i.appInformer.SetWatchErrorHandler(cache.DefaultWatchErrorHandler)
 	return i
 }
 
 func (i *AppInformer) Start(stopch <-chan struct{}) {
 	log().Infof("Starting app informer (namespaces: %s)", strings.Join(append([]string{i.options.namespace}, i.options.namespaces...), ","))
-	i.AppInformer.Run(stopch)
+	i.appInformer.Run(stopch)
 	log().Infof("App informer has shutdown")
 }
 

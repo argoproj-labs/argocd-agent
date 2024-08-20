@@ -177,7 +177,7 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	// The application informer lives in its own go routine
 	go func() {
-		s.appManager.Application.StartInformer(ctx)
+		s.appManager.StartBackend(s.ctx)
 	}()
 
 	s.events = event.NewEventSource(s.options.serverName)
@@ -274,11 +274,6 @@ func (s *Server) AuthMethodsForE2EOnly() *auth.Methods {
 
 func (s *Server) QueuesForE2EOnly() *queue.SendRecvQueues {
 	return s.queues
-}
-
-// AppManagerForE2EOnly should only be used for E2E tests
-func (s *Server) AppManagerForE2EOnly() *application.ApplicationManager {
-	return s.appManager
 }
 
 func (s *Server) agentMode(namespace string) types.AgentMode {
