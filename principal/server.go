@@ -58,8 +58,6 @@ type Server struct {
 	ctx        context.Context
 	ctxCancel  context.CancelFunc
 	appManager *application.ApplicationManager
-	// appInformer is used to watch for change events for Argo CD Application resources on the cluster
-	appInformer *appinformer.AppInformer
 	// At present, 'watchLock' is only acquired on calls to 'updateAppCallback'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
 	watchLock sync.RWMutex
 	// clientMap is not currently used
@@ -134,12 +132,12 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 		managerOpts = append(managerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
 	}
 
-	s.appInformer = appinformer.NewAppInformer(s.ctx, appClient,
+	appInformer := appinformer.NewAppInformer(s.ctx, appClient,
 		s.namespace,
 		informerOpts...,
 	)
 
-	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(appClient, s.namespace, s.appInformer, true), s.namespace,
+	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(appClient, s.namespace, appInformer, true), s.namespace,
 		managerOpts...,
 	)
 	if err != nil {
@@ -182,8 +180,8 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	s.events = event.NewEventSource(s.options.serverName)
 
-	if err := s.appInformer.EnsureSynced(waitForSyncedDuration); err != nil {
-		return fmt.Errorf("unable to sync informer: %v", err)
+	if err := s.appManager.EnsureSynced(waitForSyncedDuration); err != nil {
+		return fmt.Errorf("unable to sync application manager backend: %v", err)
 	}
 
 	log().Infof("Informer synced and ready")

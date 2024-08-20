@@ -126,7 +126,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		if agentMode.IsManaged() {
 			err = errors.New("event type not allowed when mode is not autonomous")
 		} else {
-			err = s.appManager.Delete(ctx, agentName, incoming)
+			err = s.appManager.Delete(ctx, agentName, incoming, false)
 		}
 		if err != nil {
 			return fmt.Errorf("could not delete application %s: %w", incoming.QualifiedName(), err)

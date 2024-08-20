@@ -459,7 +459,7 @@ func Test_DeleteApp(t *testing.T) {
 		app, err := appC.ArgoprojV1alpha1().Applications("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
-		err = mgr.Delete(context.TODO(), "argocd", existing)
+		err = mgr.Delete(context.TODO(), "argocd", existing, false)
 		assert.NoError(t, err)
 		app, err = appC.ArgoprojV1alpha1().Applications("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
 		assert.True(t, errors.IsNotFound(err))

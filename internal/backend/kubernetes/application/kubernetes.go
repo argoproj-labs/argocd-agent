@@ -21,6 +21,7 @@ package application
 
 import (
 	"context"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
@@ -83,8 +84,15 @@ func (be *KubernetesBackend) Get(ctx context.Context, name string, namespace str
 	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Get(ctx, name, v1.GetOptions{})
 }
 
-func (be *KubernetesBackend) Delete(ctx context.Context, name string, namespace string) error {
-	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Delete(ctx, name, v1.DeleteOptions{})
+func (be *KubernetesBackend) Delete(ctx context.Context, name string, namespace string, deletionPropagationBackground bool) error {
+	deleteOptions := v1.DeleteOptions{}
+
+	if deletionPropagationBackground {
+		deletePropagationBackground := v1.DeletePropagationBackground
+		deleteOptions.PropagationPolicy = &deletePropagationBackground
+	}
+
+	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Delete(ctx, name, deleteOptions)
 }
 
 func (be *KubernetesBackend) Update(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
@@ -101,4 +109,8 @@ func (be *KubernetesBackend) SupportsPatch() bool {
 
 func (be *KubernetesBackend) StartInformer(ctx context.Context) {
 	be.informer.Start(ctx.Done())
+}
+
+func (be *KubernetesBackend) EnsureSynced(duration time.Duration) error {
+	return be.informer.EnsureSynced(duration)
 }

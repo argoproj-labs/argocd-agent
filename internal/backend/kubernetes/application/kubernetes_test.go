@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
-	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wI2L/jsondiff"
@@ -131,13 +131,13 @@ func Test_Delete(t *testing.T) {
 	t.Run("Delete existing app", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		err := k.Delete(context.TODO(), "app", "ns1")
+		err := k.Delete(context.TODO(), "app", "ns1", false)
 		assert.NoError(t, err)
 	})
 	t.Run("Delete non-existing app", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		err := k.Delete(context.TODO(), "app", "ns10")
+		err := k.Delete(context.TODO(), "app", "ns10", false)
 		assert.ErrorContains(t, err, "not found")
 	})
 }
