@@ -39,6 +39,21 @@ type ApplicationSelector struct {
 	Projects []string
 }
 
+// DeletionPropagation is based on the kubernetes DeletionPropagation API, and follows its behaviours for deletion propagation,
+// specifically that it controls how deletion will propagate to the dependents of the object (and corresponding GC behaviour)
+type DeletionPropagation string
+
+const (
+	// Orphans the dependents: the object is deleted, the dependents are not.
+	DeletePropagationOrphan DeletionPropagation = "Orphan"
+
+	// The object is deleted, and any dependent objects are deleted in the background.
+	DeletePropagationBackground DeletionPropagation = "Background"
+
+	// The object continues to exist until all dependents are deleted. This same behaviour cascades to dependent objects.
+	DeletePropagationForeground DeletionPropagation = "Foreground"
+)
+
 // Application defines a generic interface to store/track Argo CD Application state, via ApplicationManager.
 //
 // As of this writing (August 2024), the only implementation is a Kubernetes-based backend (KubernetesBackend in 'internal/backend/kubernetes/application') but other backends (e.g. RDBMS-backed) could be implemented in the future.
@@ -46,7 +61,7 @@ type Application interface {
 	List(ctx context.Context, selector ApplicationSelector) ([]v1alpha1.Application, error)
 	Create(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error)
 	Get(ctx context.Context, name string, namespace string) (*v1alpha1.Application, error)
-	Delete(ctx context.Context, name string, namespace string, deletionPropagationBackground bool) error
+	Delete(ctx context.Context, name string, namespace string, deletionPropagation *DeletionPropagation) error
 	Update(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error)
 	Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.Application, error)
 	SupportsPatch() bool

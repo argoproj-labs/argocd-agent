@@ -481,8 +481,8 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 // Delete will delete an application resource. If Delete is called by the
 // principal, any existing finalizers will be removed before deletion is
 // attempted.
-// if 'deletionPropagationBackground' is true, the deletion operation will return once the owner object is deleted, but before child objects are deleted.
-func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incoming *v1alpha1.Application, deletionPropagationBackground bool) error {
+// 'deletionPropagation' follows the corresponding K8s behaviour, defaulting to Foreground if nil.
+func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incoming *v1alpha1.Application, deletionPropagation *backend.DeletionPropagation) error {
 	removeFinalizer := false
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "DeleteOperation",
@@ -505,7 +505,7 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 		}
 	}
 
-	err = m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagationBackground)
+	err = m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
 
 	return err
 }

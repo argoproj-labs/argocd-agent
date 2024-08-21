@@ -17,6 +17,7 @@ package agent
 import (
 	"fmt"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
@@ -160,7 +161,8 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 
 	logCtx.Infof("Deleting application")
 
-	err := a.appManager.Delete(a.context, a.namespace, app, true)
+	deletionPropagation := backend.DeletePropagationBackground
+	err := a.appManager.Delete(a.context, a.namespace, app, &deletionPropagation)
 	if err != nil {
 		return err
 	}

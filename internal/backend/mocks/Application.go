@@ -86,17 +86,17 @@ func (_c *Application_Create_Call) RunAndReturn(run func(context.Context, *v1alp
 	return _c
 }
 
-// Delete provides a mock function with given fields: ctx, name, namespace, deletionPropagationBackground
-func (_m *Application) Delete(ctx context.Context, name string, namespace string, deletionPropagationBackground bool) error {
-	ret := _m.Called(ctx, name, namespace, deletionPropagationBackground)
+// Delete provides a mock function with given fields: ctx, name, namespace, deletionPropagation
+func (_m *Application) Delete(ctx context.Context, name string, namespace string, deletionPropagation *backend.DeletionPropagation) error {
+	ret := _m.Called(ctx, name, namespace, deletionPropagation)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, bool) error); ok {
-		r0 = rf(ctx, name, namespace, deletionPropagationBackground)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, *backend.DeletionPropagation) error); ok {
+		r0 = rf(ctx, name, namespace, deletionPropagation)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -113,14 +113,14 @@ type Application_Delete_Call struct {
 //   - ctx context.Context
 //   - name string
 //   - namespace string
-//   - deletionPropagationBackground bool
-func (_e *Application_Expecter) Delete(ctx interface{}, name interface{}, namespace interface{}, deletionPropagationBackground interface{}) *Application_Delete_Call {
-	return &Application_Delete_Call{Call: _e.mock.On("Delete", ctx, name, namespace, deletionPropagationBackground)}
+//   - deletionPropagation *backend.DeletionPropagation
+func (_e *Application_Expecter) Delete(ctx interface{}, name interface{}, namespace interface{}, deletionPropagation interface{}) *Application_Delete_Call {
+	return &Application_Delete_Call{Call: _e.mock.On("Delete", ctx, name, namespace, deletionPropagation)}
 }
 
-func (_c *Application_Delete_Call) Run(run func(ctx context.Context, name string, namespace string, deletionPropagationBackground bool)) *Application_Delete_Call {
+func (_c *Application_Delete_Call) Run(run func(ctx context.Context, name string, namespace string, deletionPropagation *backend.DeletionPropagation)) *Application_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(bool))
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(*backend.DeletionPropagation))
 	})
 	return _c
 }
@@ -130,7 +130,7 @@ func (_c *Application_Delete_Call) Return(_a0 error) *Application_Delete_Call {
 	return _c
 }
 
-func (_c *Application_Delete_Call) RunAndReturn(run func(context.Context, string, string, bool) error) *Application_Delete_Call {
+func (_c *Application_Delete_Call) RunAndReturn(run func(context.Context, string, string, *backend.DeletionPropagation) error) *Application_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }

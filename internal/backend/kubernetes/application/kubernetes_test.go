@@ -131,13 +131,15 @@ func Test_Delete(t *testing.T) {
 	t.Run("Delete existing app", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		err := k.Delete(context.TODO(), "app", "ns1", false)
+		deletionPropagation := backend.DeletePropagationForeground
+		err := k.Delete(context.TODO(), "app", "ns1", &deletionPropagation)
 		assert.NoError(t, err)
 	})
 	t.Run("Delete non-existing app", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		err := k.Delete(context.TODO(), "app", "ns10", false)
+		deletionPropagation := backend.DeletePropagationForeground
+		err := k.Delete(context.TODO(), "app", "ns10", &deletionPropagation)
 		assert.ErrorContains(t, err, "not found")
 	})
 }

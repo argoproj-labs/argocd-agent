@@ -66,6 +66,7 @@ func Test_Connect(t *testing.T) {
 		err = r.Connect(ctx, false)
 		assert.NoError(t, err)
 		assert.NotNil(t, r.conn)
+		require.NotNil(t, r.accessToken)
 		require.NotNil(t, r.accessToken.Claims)
 		sub, err := r.accessToken.Claims.GetSubject()
 		assert.NoError(t, err)
