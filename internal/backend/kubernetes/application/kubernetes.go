@@ -21,6 +21,8 @@ package application
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
@@ -83,8 +85,31 @@ func (be *KubernetesBackend) Get(ctx context.Context, name string, namespace str
 	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Get(ctx, name, v1.GetOptions{})
 }
 
-func (be *KubernetesBackend) Delete(ctx context.Context, name string, namespace string) error {
-	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Delete(ctx, name, v1.DeleteOptions{})
+func (be *KubernetesBackend) Delete(ctx context.Context, name string, namespace string, deletionPropagation *backend.DeletionPropagation) error {
+
+	// If nil, default to foreground
+	k8sPropagationPolicy := v1.DeletePropagationForeground
+
+	if deletionPropagation != nil {
+		// Otherwise, directly translate constant from backend to k8s version
+
+		switch *deletionPropagation {
+		case backend.DeletePropagationForeground:
+			k8sPropagationPolicy = v1.DeletePropagationForeground
+		case backend.DeletePropagationBackground:
+			k8sPropagationPolicy = v1.DeletePropagationBackground
+		case backend.DeletePropagationOrphan:
+			k8sPropagationPolicy = v1.DeletePropagationOrphan
+		default:
+			return fmt.Errorf("unexpected propagationPolicy value: '%v'", deletionPropagation)
+		}
+	}
+
+	deleteOptions := v1.DeleteOptions{
+		PropagationPolicy: &k8sPropagationPolicy,
+	}
+
+	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Delete(ctx, name, deleteOptions)
 }
 
 func (be *KubernetesBackend) Update(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
@@ -101,4 +126,8 @@ func (be *KubernetesBackend) SupportsPatch() bool {
 
 func (be *KubernetesBackend) StartInformer(ctx context.Context) {
 	be.informer.Start(ctx.Done())
+}
+
+func (be *KubernetesBackend) EnsureSynced(duration time.Duration) error {
+	return be.informer.EnsureSynced(duration)
 }

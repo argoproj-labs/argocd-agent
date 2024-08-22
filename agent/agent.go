@@ -41,17 +41,13 @@ const waitForSyncedDuration = 10 * time.Second
 
 // Agent is a controller that synchronizes Application resources
 type Agent struct {
-	context   context.Context
-	cancelFn  context.CancelFunc
-	client    kubernetes.Interface
-	appclient appclientset.Interface
-	options   AgentOptions
+	context  context.Context
+	cancelFn context.CancelFunc
+	options  AgentOptions
 	// namespace is the namespace to manage applications in
 	namespace string
 	// allowedNamespaces is not currently used. See also 'namespaces' field in AgentOptions
 	allowedNamespaces []string
-	// informer is used to watch for change events for Argo CD Application resources on the cluster
-	informer *appinformer.AppInformer
 	// infStopCh is not currently used
 	infStopCh chan struct{}
 	connected atomic.Bool
@@ -87,8 +83,6 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 	a := &Agent{
 		version: version.New("argocd-agent", "agent"),
 	}
-	a.client = client
-	a.appclient = appclient
 	a.infStopCh = make(chan struct{})
 	a.namespace = namespace
 	a.mode = types.AgentModeAutonomous
@@ -124,7 +118,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
-	a.informer = appinformer.NewAppInformer(ctx, a.appclient, a.namespace,
+	informer := appinformer.NewAppInformer(ctx, appclient, a.namespace,
 		appinformer.WithListAppCallback(a.listAppCallback),
 		appinformer.WithNewAppCallback(a.addAppCreationToQueue),
 		appinformer.WithUpdateAppCallback(a.addAppUpdateToQueue),
@@ -141,7 +135,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 
 	// The agent only supports Kubernetes as application backend
 	a.appManager, err = application.NewApplicationManager(
-		kubeapp.NewKubernetesBackend(a.appclient, a.namespace, a.informer, true),
+		kubeapp.NewKubernetesBackend(appclient, a.namespace, informer, true),
 		a.namespace,
 		application.WithAllowUpsert(allowUpsert),
 		application.WithRole(manager.ManagerRoleAgent),
@@ -162,7 +156,7 @@ func (a *Agent) Start(ctx context.Context) error {
 	a.context = infCtx
 	a.cancelFn = cancelFn
 	go func() {
-		a.informer.Start(a.context.Done())
+		a.appManager.StartBackend(a.context)
 		log().Warnf("Informer has exited")
 	}()
 	if a.remote != nil {
@@ -175,7 +169,7 @@ func (a *Agent) Start(ctx context.Context) error {
 	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"))
 
 	// Wait for the informer to be synced
-	err := a.informer.EnsureSynced(waitForSyncedDuration)
+	err := a.appManager.EnsureSynced(waitForSyncedDuration)
 	return err
 }
 

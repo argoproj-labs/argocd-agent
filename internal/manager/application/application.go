@@ -114,8 +114,16 @@ func NewApplicationManager(be backend.Application, namespace string, opts ...App
 	return m, nil
 }
 
+// StartBackend informs the backend to run startup logic, which usually means beginning to listen for events.
+// For example, in the case of the Kubernetes backend, the shared informer is started, which will listen for Application events from the watch api of the K8s cluster.
 func (m *ApplicationManager) StartBackend(ctx context.Context) {
 	m.applicationBackend.StartInformer(ctx)
+}
+
+// EnsureSynced waits until either the backend indicates it has fully synced, or the
+// timeout has been reached (which will return an error)
+func (m *ApplicationManager) EnsureSynced(duration time.Duration) error {
+	return m.applicationBackend.EnsureSynced(duration)
 }
 
 // stampLastUpdated "stamps" an application with the last updated label
@@ -473,7 +481,8 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 // Delete will delete an application resource. If Delete is called by the
 // principal, any existing finalizers will be removed before deletion is
 // attempted.
-func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incoming *v1alpha1.Application) error {
+// 'deletionPropagation' follows the corresponding K8s behaviour, defaulting to Foreground if nil.
+func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incoming *v1alpha1.Application, deletionPropagation *backend.DeletionPropagation) error {
 	removeFinalizer := false
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "DeleteOperation",
@@ -496,7 +505,7 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 		}
 	}
 
-	err = m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace)
+	err = m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
 
 	return err
 }

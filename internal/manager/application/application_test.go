@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	appmock "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
@@ -459,7 +460,8 @@ func Test_DeleteApp(t *testing.T) {
 		app, err := appC.ArgoprojV1alpha1().Applications("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
-		err = mgr.Delete(context.TODO(), "argocd", existing)
+		deletionPropagation := backend.DeletePropagationForeground
+		err = mgr.Delete(context.TODO(), "argocd", existing, &deletionPropagation)
 		assert.NoError(t, err)
 		app, err = appC.ArgoprojV1alpha1().Applications("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
 		assert.True(t, errors.IsNotFound(err))

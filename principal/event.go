@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -126,7 +127,8 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		if agentMode.IsManaged() {
 			err = errors.New("event type not allowed when mode is not autonomous")
 		} else {
-			err = s.appManager.Delete(ctx, agentName, incoming)
+			deletionPropagation := backend.DeletePropagationForeground
+			err = s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
 		}
 		if err != nil {
 			return fmt.Errorf("could not delete application %s: %w", incoming.QualifiedName(), err)

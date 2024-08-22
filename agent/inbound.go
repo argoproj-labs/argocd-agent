@@ -17,11 +17,11 @@ package agent
 import (
 	"fmt"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 /*
@@ -161,8 +161,8 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 
 	logCtx.Infof("Deleting application")
 
-	delPol := v1.DeletePropagationBackground
-	err := a.appclient.ArgoprojV1alpha1().Applications(a.namespace).Delete(a.context, app.Name, v1.DeleteOptions{PropagationPolicy: &delPol})
+	deletionPropagation := backend.DeletePropagationBackground
+	err := a.appManager.Delete(a.context, a.namespace, app, &deletionPropagation)
 	if err != nil {
 		return err
 	}
