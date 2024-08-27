@@ -633,8 +633,8 @@ github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kd
 github.com/apache/arrow/go/v10 v10.0.1/go.mod h1:YvhnlEePVnBS4+0z3fhPfUy7W1Ikj0Ih0vcRo/gZ1M0=
 github.com/apache/arrow/go/v11 v11.0.0/go.mod h1:Eg5OsL5H+e299f7u5ssuXsuHQVEGC4xei5aX110hRiI=
 github.com/apache/thrift v0.16.0/go.mod h1:PHK3hniurgQaNMZYaCLEqXKsYK8upmhPbmdP2FXSqgU=
-github.com/argoproj/argo-cd/v2 v2.12.2 h1:+XFRSHe18xkIgvD6BklWIbxR3/gq/17w1uL0mAKVl+4=
-github.com/argoproj/argo-cd/v2 v2.12.2/go.mod h1:QbdGVT7f4aqrowJrMlJdoeKknLVcKKr5YDrzm1mVRmI=
+github.com/argoproj/argo-cd/v2 v2.12.3 h1:Bi4QahHTnKl3esU5MplQP1wraGhaTpvgAV4GsMqc3Zc=
+github.com/argoproj/argo-cd/v2 v2.12.3/go.mod h1:2fh6q4NX/cylbH6Ktx/KjJsX7sOBwF3jbGnO0IZyNOc=
 github.com/argoproj/gitops-engine v0.7.1-0.20240714153147-adb68bcaab73 h1:7kyTgFsPjvb6noafslp2pr7fBCS9s8OJ759LdLzrOro=
 github.com/argoproj/gitops-engine v0.7.1-0.20240714153147-adb68bcaab73/go.mod h1:xMIbuLg9Qj2e0egTy+8NcukbhRaVmWwK9vm3aAQZoi4=
 github.com/argoproj/pkg v0.13.7-0.20230626144333-d56162821bd1 h1:qsHwwOJ21K2Ao0xPju1sNuqphyMnMYkyB3ZLoLtxWpo=
@@ -710,6 +710,8 @@ github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f h1:lO4WD4F/r
 github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f/go.mod h1:cuUVRXasLTGF7a8hSLbxyZXjz+1KgoB3wDUb6vlszIc=
 github.com/distribution/reference v0.5.0 h1:/FUIFXtfc/x2gpa5/VGfiGLuOIdYa1t65IKK2OFGvA0=
 github.com/distribution/reference v0.5.0/go.mod h1:BbU0aIcezP1/5jX/8MP0YiH4SdvB5Y4f/wlDRiLyi3E=
+github.com/dlclark/regexp2 v1.11.2 h1:/u628IuisSTwri5/UKloiIsH8+qF2Pu7xEQX+yIKg68=
+github.com/dlclark/regexp2 v1.11.2/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815/go.mod h1:WwZ+bS3ebgob9U8Nd0kOddGdZWjyMGR8Wziv+TBNwSE=
 github.com/dustin/go-humanize v1.0.0/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
