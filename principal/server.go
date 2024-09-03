@@ -27,10 +27,12 @@ import (
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
+	appprojectinformer "github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/issuer"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
@@ -54,12 +56,13 @@ type Server struct {
 	// Server uses clientID/namespace as a key, to refer to each specific agent's queue
 	queues *queue.SendRecvQueues
 	// namespace is the namespace the server will use for configuration. Set only when running out of cluster.
-	namespace  string
-	issuer     issuer.Issuer
-	noauth     map[string]bool // noauth contains endpoints accessible without authentication
-	ctx        context.Context
-	ctxCancel  context.CancelFunc
-	appManager *application.ApplicationManager
+	namespace      string
+	issuer         issuer.Issuer
+	noauth         map[string]bool // noauth contains endpoints accessible without authentication
+	ctx            context.Context
+	ctxCancel      context.CancelFunc
+	appManager     *application.ApplicationManager
+	projectManager *appproject.AppProjectManager
 	// At present, 'watchLock' is only acquired on calls to 'updateAppCallback'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
 	watchLock sync.RWMutex
 	// clientMap is not currently used
@@ -123,7 +126,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
-	informerOpts := []appinformer.AppInformerOption{
+	appInformerOptions := []appinformer.AppInformerOption{
 		appinformer.WithNamespaces(s.options.namespaces...),
 		appinformer.WithNewAppCallback(s.newAppCallback),
 		appinformer.WithUpdateAppCallback(s.updateAppCallback),
@@ -136,13 +139,14 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	if s.options.metricsPort > 0 {
-		informerOpts = append(informerOpts, appinformer.WithMetrics(metrics.NewApplicationWatcherMetrics()))
+		appInformerOptions = append(appInformerOptions, appinformer.WithMetrics(metrics.NewApplicationWatcherMetrics()))
 		managerOpts = append(managerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
+
 	}
 
 	appInformer := appinformer.NewAppInformer(s.ctx, kubeClient.ApplicationsClientset,
 		s.namespace,
-		informerOpts...,
+		appInformerOptions...,
 	)
 
 	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appInformer, true), s.namespace,
@@ -151,6 +155,22 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	if err != nil {
 		return nil, err
 	}
+
+	appProjectInformerOptions := []appprojectinformer.AppProjectInformerOption{
+		appprojectinformer.WithAddFunc(s.newAppProjectCallback),
+		appprojectinformer.WithUpdateFunc(s.updateAppProjectCallback),
+		appprojectinformer.WithDeleteFunc(s.deleteAppProjectCallback),
+	}
+
+	projectInformer, _, err := appprojectinformer.NewAppProjectInformer(s.ctx, appClient,
+		appProjectInformerOptions...,
+	)
+
+	s.projectManager, err = appproject.NewAppProjectManager(kubeapp.NewKubernetesBackend(appClient, s.namespace, projectInformer, true), appClient, projectInformer)
+	if err != nil {
+		return nil, err
+	}
+
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
 	}

@@ -26,6 +26,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
+	"github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +34,7 @@ import (
 )
 
 var _ backend.Application = &KubernetesBackend{}
+var _ backend.AppProject = &KubernetesBackend{}
 
 // KubernetesBackend is an implementation of the backend.Application interface, which is used by ApplicationManager to track/update the state of Argo CD Applications.
 // KubernetesBackend stores/retrieves all data from Argo CD Application CRs on the cluster that is local to the agent/principal.
@@ -41,19 +43,22 @@ var _ backend.Application = &KubernetesBackend{}
 type KubernetesBackend struct {
 	// appClient is used to interfact with Argo CD Application resources on the cluster on which agent/principal is installed.
 	appClient appclientset.Interface
-	// informer is used to watch for change events for Argo CD Application resources on the cluster
-	informer *appinformer.AppInformer
+	// appInformer is used to watch for change events for Argo CD Application resources on the cluster
+	appInformer *appinformer.AppInformer
+	// appProjectInformer is used to watch for change events for Argo CD AppProject resources on the cluster
+	appProjectInformer *appproject.AppProjectInformer
 	// namespace is not currently read, is not guaranteed to be non-empty, and is not guaranteed to contain the source of Argo CD Application CRs in all cases
 	namespace string
 	usePatch  bool
 }
 
-func NewKubernetesBackend(appClient appclientset.Interface, namespace string, informer *appinformer.AppInformer, usePatch bool) *KubernetesBackend {
+func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appInformer *appinformer.AppInformer, appProjectInformer *appproject.AppProjectInformer, usePatch bool) *KubernetesBackend {
 	return &KubernetesBackend{
-		appClient: appClient,
-		informer:  informer,
-		usePatch:  usePatch,
-		namespace: namespace,
+		appClient:          appClient,
+		appInformer:        appInformer,
+		appProjectInformer: appProjectInformer,
+		usePatch:           usePatch,
+		namespace:          namespace,
 	}
 }
 
@@ -125,9 +130,9 @@ func (be *KubernetesBackend) SupportsPatch() bool {
 }
 
 func (be *KubernetesBackend) StartInformer(ctx context.Context) {
-	be.informer.Start(ctx.Done())
+	be.appInformer.Start(ctx.Done())
 }
 
 func (be *KubernetesBackend) EnsureSynced(duration time.Duration) error {
-	return be.informer.EnsureSynced(duration)
+	return be.appInformer.EnsureSynced(duration)
 }

@@ -39,6 +39,14 @@ type ApplicationSelector struct {
 	Projects []string
 }
 
+type AppProjectSelector struct {
+	// Labels is not currently implemented.
+	Labels map[string]string
+
+	// Names is not currently implemented.
+	Names []string
+}
+
 // DeletionPropagation is based on the kubernetes DeletionPropagation API, and follows its behaviours for deletion propagation,
 // specifically that it controls how deletion will propagate to the dependents of the object (and corresponding GC behaviour)
 type DeletionPropagation string
@@ -64,6 +72,21 @@ type Application interface {
 	Delete(ctx context.Context, name string, namespace string, deletionPropagation *DeletionPropagation) error
 	Update(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error)
 	Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.Application, error)
+	SupportsPatch() bool
+	StartInformer(ctx context.Context)
+	EnsureSynced(duration time.Duration) error
+}
+
+// AppProject defines a generic interface to store/track Argo CD AppProject state, via AppProjectManager.
+//
+// As of this writing (August 2024), the only implementation is a Kubernetes-based backend (KubernetesBackend in 'internal/backend/kubernetes/appproject') but other backends (e.g. RDBMS-backed) could be implemented in the future.
+type AppProject interface {
+	List(ctx context.Context, selector AppProjectSelector) ([]v1alpha1.AppProject, error)
+	Create(ctx context.Context, app *v1alpha1.AppProject) (*v1alpha1.AppProject, error)
+	Get(ctx context.Context, name string) (*v1alpha1.AppProject, error)
+	Delete(ctx context.Context, name string, deletionPropagation *DeletionPropagation) error
+	Update(ctx context.Context, app *v1alpha1.AppProject) (*v1alpha1.AppProject, error)
+	Patch(ctx context.Context, name string, patch []byte) (*v1alpha1.AppProject, error)
 	SupportsPatch() bool
 	StartInformer(ctx context.Context)
 	EnsureSynced(duration time.Duration) error

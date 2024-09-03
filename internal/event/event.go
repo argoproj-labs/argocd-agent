@@ -96,6 +96,17 @@ func (evs EventSource) ApplicationEvent(evType EventType, app *v1alpha1.Applicat
 	return &cev
 }
 
+func (evs EventSource) AppProjectEvent(evType EventType, appProject *v1alpha1.AppProject) *cloudevents.Event {
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(evType.String())
+	cev.SetDataSchema(TargetAppProject.String())
+	// TODO: Handle this error situation?
+	_ = cev.SetData(cloudevents.AppProjectJSON, appProject)
+	return &cev
+}
+
 // FromWire validates an event from the wire in protobuf format, converts it
 // into an Event object and returns it. If the event on the wire is invalid,
 // or could not be converted for another reason, FromWire returns an error.

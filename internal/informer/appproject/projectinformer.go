@@ -41,17 +41,6 @@ type AppProjectInformer struct {
 
 type AppProjectInformerOption func(pi *AppProjectInformer) error
 
-// WithNamespaces restricts the informer to certain namespaces. If no namespace
-// is set, or if multiple are set, the informer requires cluster-wide access to
-// AppProjects. When one or more namespaces are set, only objects in these
-// namespaces will be considered by the informer.
-func WithNamespaces(namespaces ...string) AppProjectInformerOption {
-	return func(pi *AppProjectInformer) error {
-		pi.namespaces = namespaces
-		return nil
-	}
-}
-
 // WithListFilter sets a filter function for the add, update and delete events.
 // This function will be called for each event, and if it returns false, the
 // event's execution will not continue.
