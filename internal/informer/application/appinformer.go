@@ -232,7 +232,7 @@ func (i *AppInformer) Start(stopch <-chan struct{}) {
 
 // shouldProcessApp returns true if the app is allowed to be processed
 func (i *AppInformer) shouldProcessApp(app *v1alpha1.Application) bool {
-	return glob.MatchStringInList(append([]string{i.options.namespace}, i.options.namespaces...), app.Namespace, false) &&
+	return glob.MatchStringInList(append([]string{i.options.namespace}, i.options.namespaces...), app.Namespace, glob.REGEXP) &&
 		i.options.filters.Admit(app)
 }
 
