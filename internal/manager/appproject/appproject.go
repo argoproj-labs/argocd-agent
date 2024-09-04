@@ -19,11 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +45,7 @@ const LastUpdatedAnnotation = "argocd-agent.argoproj.io/last-updated"
 type AppProjectManager struct {
 	allowUpsert       bool
 	appprojectBackend backend.AppProject
-	metrics           *metrics.ApplicationClientMetrics
+	metrics           *metrics.AppProjectClientMetrics
 	role              manager.ManagerRole
 	// mode is only set when Role is ManagerRoleAgent
 	mode manager.ManagerMode
@@ -78,6 +80,67 @@ func NewAppProjectManager(be backend.AppProject, opts ...AppProjectManagerOption
 	return m, nil
 }
 
+// WithMetrics sets the metrics provider for the Manager
+func WithMetrics(m *metrics.AppProjectClientMetrics) AppProjectManagerOption {
+	return func(mgr *AppProjectManager) {
+		mgr.metrics = m
+	}
+}
+
+// WithAllowUpsert sets the upsert operations allowed flag
+func WithAllowUpsert(upsert bool) AppProjectManagerOption {
+	return func(m *AppProjectManager) {
+		m.allowUpsert = upsert
+	}
+}
+
+// WithRole sets the role of the AppProject manager
+func WithRole(role manager.ManagerRole) AppProjectManagerOption {
+	return func(m *AppProjectManager) {
+		m.role = role
+	}
+}
+
+// stampLastUpdated "stamps" an application with the last updated label
+func stampLastUpdated(app *v1alpha1.AppProject) {
+	if app.Annotations == nil {
+		app.Annotations = make(map[string]string)
+	}
+	app.Annotations[LastUpdatedAnnotation] = time.Now().Format(time.RFC3339)
+}
+
+// Create creates the AppProject using the Manager's AppProject backend.
+func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+
+	// A new AppProject must neither specify ResourceVersion nor Generation
+	project.ResourceVersion = ""
+	project.Generation = 0
+
+	// We never want Operation to be set on the principal's side.
+	if m.role == manager.ManagerRolePrincipal {
+		stampLastUpdated(project)
+	}
+
+	created, err := m.appprojectBackend.Create(ctx, project)
+	if err == nil {
+		if err := m.Manage(created.Name); err != nil {
+			log().Warnf("Could not manage app %s: %v", created.Name, err)
+		}
+		if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
+			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
+		}
+		if m.metrics != nil {
+			m.metrics.AppProjectsCreated.WithLabelValues(project.Namespace).Inc()
+		}
+	} else {
+		if m.metrics != nil {
+			m.metrics.Errors.Inc()
+		}
+	}
+
+	return created, err
+}
+
 // update updates an existing AppProject resource on the Manager m's backend
 // to match the incoming resource. If the backend supports patch, the existing
 // resource will be patched, otherwise it will be updated.
@@ -94,7 +157,7 @@ func NewAppProjectManager(be backend.AppProject, opts ...AppProjectManagerOption
 func (m *AppProjectManager) update(ctx context.Context, upsert bool, incoming *v1alpha1.AppProject, updateFn updateTransformer, patchFn patchTransformer) (*v1alpha1.AppProject, error) {
 	var updated *v1alpha1.AppProject
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		existing, ierr := m.appprojectBackend.Get(ctx, incoming.Name)
+		existing, ierr := m.appprojectBackend.Get(ctx, incoming.Name, incoming.Namespace)
 		if ierr != nil {
 			if errors.IsNotFound(ierr) && upsert {
 				updated, ierr = m.Create(ctx, incoming)
@@ -112,7 +175,7 @@ func (m *AppProjectManager) update(ctx context.Context, upsert bool, incoming *v
 				if err != nil {
 					return fmt.Errorf("could not marshal jsonpatch: %w", err)
 				}
-				updated, ierr = m.appprojectBackend.Patch(ctx, incoming.Name, jsonpatch)
+				updated, ierr = m.appprojectBackend.Patch(ctx, incoming.Name, incoming.Namespace, jsonpatch)
 			} else {
 				if updateFn != nil {
 					updateFn(existing, incoming)
@@ -146,4 +209,8 @@ func (m *AppProjectManager) RemoveFinalizers(ctx context.Context, incoming *v1al
 		return patch, err
 	})
 	return updated, err
+}
+
+func log() *logrus.Entry {
+	return logrus.WithField("component", "AppManager")
 }

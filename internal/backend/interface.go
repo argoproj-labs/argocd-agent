@@ -43,6 +43,9 @@ type AppProjectSelector struct {
 	// Labels is not currently implemented.
 	Labels map[string]string
 
+	// Namespaces is used by the 'List' AppProject interface function to restrict the list of AppProjects returned to a specific set of Namespaces.
+	Namespaces []string
+
 	// Names is not currently implemented.
 	Names []string
 }
@@ -83,11 +86,9 @@ type Application interface {
 type AppProject interface {
 	List(ctx context.Context, selector AppProjectSelector) ([]v1alpha1.AppProject, error)
 	Create(ctx context.Context, app *v1alpha1.AppProject) (*v1alpha1.AppProject, error)
-	Get(ctx context.Context, name string) (*v1alpha1.AppProject, error)
-	Delete(ctx context.Context, name string, deletionPropagation *DeletionPropagation) error
+	Get(ctx context.Context, name string, namespace string) (*v1alpha1.AppProject, error)
+	Delete(ctx context.Context, name string, namespace string, deletionPropagation *DeletionPropagation) error
 	Update(ctx context.Context, app *v1alpha1.AppProject) (*v1alpha1.AppProject, error)
-	Patch(ctx context.Context, name string, patch []byte) (*v1alpha1.AppProject, error)
+	Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.AppProject, error)
 	SupportsPatch() bool
-	StartInformer(ctx context.Context)
-	EnsureSynced(duration time.Duration) error
 }

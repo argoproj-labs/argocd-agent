@@ -167,7 +167,7 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 			logCtx.Debug("Removed finalizer")
 		}
 	}
-	if s.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
+	if s.appManager.IsChangeIgnored(new.Name, new.ResourceVersion) {
 		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
 		return
 	}
@@ -180,7 +180,7 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		logCtx.Error("Help! Queue pair has disappeared!")
 		return
 	}
-	ev := s.events.ApplicationEvent(event.SpecUpdate, new)
+	ev := s.events.AppProjectEvent(event.SpecUpdate, new)
 	q.Add(ev)
 	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
 }

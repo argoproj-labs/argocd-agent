@@ -25,6 +25,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
+	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
 	appprojectinformer "github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
@@ -138,10 +139,15 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		application.WithRole(manager.ManagerRolePrincipal),
 	}
 
+	appProjectManagerOption := []appproject.AppProjectManagerOption{
+		appproject.WithAllowUpsert(true),
+		appproject.WithRole(manager.ManagerRolePrincipal),
+	}
+
 	if s.options.metricsPort > 0 {
 		appInformerOptions = append(appInformerOptions, appinformer.WithMetrics(metrics.NewApplicationWatcherMetrics()))
 		managerOpts = append(managerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
-
+		appProjectManagerOption = append(appProjectManagerOption, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
 	}
 
 	appInformer := appinformer.NewAppInformer(s.ctx, kubeClient.ApplicationsClientset,
@@ -166,7 +172,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		appProjectInformerOptions...,
 	)
 
-	s.projectManager, err = appproject.NewAppProjectManager(kubeapp.NewKubernetesBackend(appClient, s.namespace, projectInformer, true), appClient, projectInformer)
+	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(appClient, s.namespace, projectInformer, true), appProjectManagerOption...)
 	if err != nil {
 		return nil, err
 	}

@@ -126,14 +126,6 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 		appinformer.WithFilterChain(a.DefaultFilterChain()),
 	)
 
-	a.projInformer = projInformer.NewAppProjectInformer(ctx, a.appclient, a.namespace,
-		projInformer.WithListAppProjectCallback(a.listAppProjectCallback),
-		projInformer.WithNewAppProjectCallback(a.addAppProjectCreationToQueue),
-		projInformer.WithUpdateAppProjectCallback(a.addAppProjectUpdateToQueue),
-		projInformer.WithDeleteAppProjectCallback(a.addAppProjectDeletionToQueue),
-		projInformer.WithFilterChain(projInformer.DefaultFilterChain()),
-	)
-
 	allowUpsert := false
 	if a.mode == types.AgentModeManaged {
 		allowUpsert = true

@@ -86,6 +86,14 @@ func WithLogger(l *logrus.Entry) AppProjectInformerOption {
 	}
 }
 
+// WithNamespaces sets additional namespaces to be watched by the AppProjectInformer
+func WithNamespaces(namespaces ...string) AppProjectInformerOption {
+	return func(o *AppProjectInformer) error {
+		o.namespaces = namespaces
+		return nil
+	}
+}
+
 // NewAppProjectInformer returns a new instance of a GenericInformer set up to
 // handle AppProjects. It will be configured with the given options, using the
 // given appclientset.
