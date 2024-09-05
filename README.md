@@ -116,3 +116,5 @@ Participating in this project is subject to the [CNCF Code of Conduct](https://g
 Please note that at this point in time, code contributors are expected to hack with minimal guidance. We do not yet have any guidelines, the build & test process is bumpy, things will change at high speed. It's best to orientate yourself on existing code.
 
 Please also note that code contributions will only be accepted if accompanied by proper unit tests, are passing the CI and are using signed-off commits to satisfy the DCO. No exceptions.
+
+If you want to get in touch, please use GitHub's [discussions](https://github.com/argoproj-labs/argocd-agent/discussions) or [issue tracker](https://github.com/argoproj-labs/argocd-agent/issues) or join [#argo-cd-agent](https://cloud-native.slack.com/archives/C07L5SX6A9J) on the [CNCF Slack](https://slack.cncf.io/).
