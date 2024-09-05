@@ -117,4 +117,4 @@ Please note that at this point in time, code contributors are expected to hack w
 
 Please also note that code contributions will only be accepted if accompanied by proper unit tests, are passing the CI and are using signed-off commits to satisfy the DCO. No exceptions.
 
-If you want to get in touch, please use GitHub's discussions or issue tracker or join [#argo-cd-agent](https://cloud-native.slack.com/archives/C07L5SX6A9J) on the [CNCF Slack](https://slack.cncf.io/).
+If you want to get in touch, please use GitHub's [discussions](https://github.com/argoproj-labs/argocd-agent/discussions) or [issue tracker](https://github.com/argoproj-labs/argocd-agent/issues) or join [#argo-cd-agent](https://cloud-native.slack.com/archives/C07L5SX6A9J) on the [CNCF Slack](https://slack.cncf.io/).
