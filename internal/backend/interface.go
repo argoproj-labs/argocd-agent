@@ -91,4 +91,5 @@ type AppProject interface {
 	Update(ctx context.Context, app *v1alpha1.AppProject) (*v1alpha1.AppProject, error)
 	Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.AppProject, error)
 	SupportsPatch() bool
+	StartInformer(ctx context.Context)
 }

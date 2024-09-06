@@ -109,6 +109,12 @@ func stampLastUpdated(app *v1alpha1.AppProject) {
 	app.Annotations[LastUpdatedAnnotation] = time.Now().Format(time.RFC3339)
 }
 
+// StartBackend informs the backend to run startup logic, which usually means beginning to listen for events.
+// For example, in the case of the Kubernetes backend, the shared informer is started, which will listen for AppProject events from the watch api of the K8s cluster.
+func (m *AppProjectManager) StartBackend(ctx context.Context) {
+	m.appprojectBackend.StartInformer(ctx)
+}
+
 // Create creates the AppProject using the Manager's AppProject backend.
 func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
 

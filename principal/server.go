@@ -212,6 +212,11 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		s.appManager.StartBackend(s.ctx)
 	}()
 
+	// The project informer lives in its own go routine
+	go func() {
+		s.projectManager.StartBackend(s.ctx)
+	}()
+
 	s.events = event.NewEventSource(s.options.serverName)
 
 	if err := s.appManager.EnsureSynced(waitForSyncedDuration); err != nil {

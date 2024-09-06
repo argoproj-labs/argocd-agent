@@ -122,3 +122,7 @@ func (be *KubernetesBackend) Patch(ctx context.Context, name string, namespace s
 func (be *KubernetesBackend) SupportsPatch() bool {
 	return be.usePatch
 }
+
+func (be *KubernetesBackend) StartInformer(ctx context.Context) {
+	be.appProjectInformer.Start(ctx)
+}

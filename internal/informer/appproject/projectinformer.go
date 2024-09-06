@@ -34,6 +34,8 @@ type AppProjectInformer struct {
 	namespaces []string
 	logger     *logrus.Entry
 
+	projectInformer *informer.GenericInformer
+
 	addFunc    func(proj *v1alpha1.AppProject)
 	updateFunc func(oldProj *v1alpha1.AppProject, newProj *v1alpha1.AppProject)
 	deleteFunc func(proj *v1alpha1.AppProject)
@@ -176,5 +178,9 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 			return pi.filterFunc(o)
 		}),
 	)
+	pi.projectInformer = i
 	return i, applisters.NewAppProjectLister(i.Indexer()), err
+}
+
+func init() {
 }
