@@ -24,7 +24,7 @@ import (
 	"fmt"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
-	"github.com/argoproj-labs/argocd-agent/internal/informer"
+	"github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,13 +41,13 @@ type KubernetesBackend struct {
 	// appClient is used to interfact with Argo CD AppProject resources on the cluster on which agent/principal is installed.
 	appClient appclientset.Interface
 	// appProjectInformer is used to watch for change events for Argo CD AppProject resources on the cluster
-	appProjectInformer *informer.GenericInformer
+	appProjectInformer *appproject.AppProjectInformer
 	// namespace is not currently read, is not guaranteed to be non-empty, and is not guaranteed to contain the source of Argo CD Application CRs in all cases
 	namespace string
 	usePatch  bool
 }
 
-func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appProjectInformer *informer.GenericInformer, usePatch bool) *KubernetesBackend {
+func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appProjectInformer *appproject.AppProjectInformer, usePatch bool) *KubernetesBackend {
 	return &KubernetesBackend{
 		appClient:          appClient,
 		appProjectInformer: appProjectInformer,

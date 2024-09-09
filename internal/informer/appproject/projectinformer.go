@@ -16,6 +16,7 @@ package appproject
 
 import (
 	"context"
+	"strings"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
@@ -34,7 +35,8 @@ type AppProjectInformer struct {
 	namespaces []string
 	logger     *logrus.Entry
 
-	projectInformer *informer.GenericInformer
+	projectInformer informer.GenericInformer
+	projectLister   applisters.AppProjectLister
 
 	addFunc    func(proj *v1alpha1.AppProject)
 	updateFunc func(oldProj *v1alpha1.AppProject, newProj *v1alpha1.AppProject)
@@ -99,14 +101,14 @@ func WithNamespaces(namespaces ...string) AppProjectInformerOption {
 // NewAppProjectInformer returns a new instance of a GenericInformer set up to
 // handle AppProjects. It will be configured with the given options, using the
 // given appclientset.
-func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, options ...AppProjectInformerOption) (*informer.GenericInformer, applisters.AppProjectLister, error) {
+func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, namespace string, options ...AppProjectInformerOption) (*AppProjectInformer, error) {
 	pi := &AppProjectInformer{
 		namespaces: make([]string, 0),
 	}
 	for _, o := range options {
 		err := o(pi)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	if pi.logger == nil {
@@ -178,8 +180,18 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 			return pi.filterFunc(o)
 		}),
 	)
-	pi.projectInformer = i
-	return i, applisters.NewAppProjectLister(i.Indexer()), err
+	pi.projectLister = applisters.NewAppProjectLister(i.Indexer())
+	return pi, err
+}
+
+func (i *AppProjectInformer) Start(ctx context.Context) {
+	log().Infof("Starting app project informer (namespaces: %s)", strings.Join(i.namespaces, ","))
+	i.projectInformer.Start(ctx)
+	log().Infof("App informer has shutdown")
+}
+
+func log() *logrus.Entry {
+	return logrus.WithField("module", "AppProjectInformer")
 }
 
 func init() {

@@ -49,6 +49,8 @@ type AppProjectManager struct {
 	role              manager.ManagerRole
 	// mode is only set when Role is ManagerRoleAgent
 	mode manager.ManagerMode
+	// namespace is not guaranteed to have a value in all cases. For instance, this value is empty for principal when the principal is running on cluster.
+	namespace string
 	// managedAppProjects is a list of apps we manage, key is name of AppProjects CR, value is not used.
 	// - acquire 'lock' before accessing
 	managedAppProjects map[string]bool
@@ -147,6 +149,82 @@ func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppPro
 	return created, err
 }
 
+// UpdateManagedAppProject updates the AppProject resource on the agent when it is in
+// managed mode.
+//
+// The AppProject on the agent will inherit labels and annotations as well as the spec
+// and any operation field of the incoming AppProject.
+func (m *AppProjectManager) UpdateManagedAppProject(ctx context.Context, incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+	logCtx := log().WithFields(logrus.Fields{
+		"component":       "UpdateManaged",
+		"appProject":      incoming.Name,
+		"resourceVersion": incoming.ResourceVersion,
+	})
+
+	var updated *v1alpha1.AppProject
+	var err error
+
+	incoming.SetNamespace(m.namespace)
+
+	if !(m.role == manager.ManagerRoleAgent && m.mode == manager.ManagerModeManaged) {
+		return nil, fmt.Errorf("updatedManagedAppProject should be called on a managed agent, only")
+	}
+
+	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.AppProject) {
+		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
+		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
+		existing.ObjectMeta.Finalizers = incoming.ObjectMeta.Finalizers
+		existing.Spec = *incoming.Spec.DeepCopy()
+		existing.Status = *incoming.Status.DeepCopy()
+	}, func(existing, incoming *v1alpha1.AppProject) (jsondiff.Patch, error) {
+		// We need to keep the refresh label if it is set on the existing app
+		if v, ok := existing.Annotations["argocd.argoproj.io/refresh"]; ok {
+			if incoming.Annotations == nil {
+				incoming.Annotations = make(map[string]string)
+			}
+			incoming.Annotations["argocd.argoproj.io/refresh"] = v
+		}
+		target := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Annotations: incoming.Annotations,
+				Labels:      incoming.Labels,
+				Finalizers:  incoming.Finalizers,
+			},
+			Spec: incoming.Spec,
+		}
+		source := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Annotations: existing.Annotations,
+				Labels:      existing.Labels,
+			},
+			Spec: existing.Spec,
+		}
+		patch, err := jsondiff.Compare(source, target)
+		if err != nil {
+			return nil, err
+		}
+		return patch, err
+	})
+	if err == nil {
+		if updated.Generation == 1 {
+			logCtx.Infof("Created AppProject")
+		} else {
+			logCtx.Infof("Updated AppProject")
+		}
+		if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
+			logCtx.Warnf("Couldn't unignore change %s for AppProject %s: %v", updated.ResourceVersion, updated.Name, err)
+		}
+		if m.metrics != nil {
+			m.metrics.AppProjectsUpdated.WithLabelValues(incoming.Namespace).Inc()
+		}
+	} else {
+		if m.metrics != nil {
+			m.metrics.Errors.Inc()
+		}
+	}
+	return updated, err
+}
+
 // update updates an existing AppProject resource on the Manager m's backend
 // to match the incoming resource. If the backend supports patch, the existing
 // resource will be patched, otherwise it will be updated.
@@ -192,6 +270,38 @@ func (m *AppProjectManager) update(ctx context.Context, upsert bool, incoming *v
 		return ierr
 	})
 	return updated, err
+}
+
+// Delete will delete an AppProject resource. If Delete is called by the
+// principal, any existing finalizers will be removed before deletion is
+// attempted.
+// 'deletionPropagation' follows the corresponding K8s behaviour, defaulting to Foreground if nil.
+func (m *AppProjectManager) Delete(ctx context.Context, namespace string, incoming *v1alpha1.AppProject, deletionPropagation *backend.DeletionPropagation) error {
+	removeFinalizer := false
+	logCtx := log().WithFields(logrus.Fields{
+		"component":       "DeleteOperation",
+		"appProject":      incoming.Name,
+		"resourceVersion": incoming.ResourceVersion,
+	})
+	if m.role.IsPrincipal() {
+		removeFinalizer = true
+		incoming.SetNamespace(namespace)
+	}
+	var err error
+	var updated *v1alpha1.AppProject
+
+	if removeFinalizer {
+		updated, err = m.RemoveFinalizers(ctx, incoming)
+		if err == nil {
+			logCtx.Debugf("Removed finalizer for app %s", updated.Name)
+		} else {
+			return fmt.Errorf("error removing finalizer: %w", err)
+		}
+	}
+
+	err = m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+
+	return err
 }
 
 // RemoveFinalizers will remove finalizers on an existing application

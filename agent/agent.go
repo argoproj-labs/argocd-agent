@@ -26,6 +26,8 @@ import (
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
@@ -52,10 +54,11 @@ type Agent struct {
 	infStopCh chan struct{}
 	connected atomic.Bool
 	// syncCh is not currently used
-	syncCh     chan bool
-	remote     *client.Remote
-	appManager *application.ApplicationManager
-	mode       types.AgentMode
+	syncCh         chan bool
+	remote         *client.Remote
+	appManager     *application.ApplicationManager
+	projectManager *appproject.AppProjectManager
+	mode           types.AgentMode
 	// queues is a queue of create/update/delete events to send to the principal
 	queues  *queue.SendRecvQueues
 	emitter *event.EventSource
@@ -118,7 +121,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
-	informer := appinformer.NewAppInformer(ctx, appclient, a.namespace,
+	appInformer := appinformer.NewAppInformer(ctx, appclient, a.namespace,
 		appinformer.WithListAppCallback(a.listAppCallback),
 		appinformer.WithNewAppCallback(a.addAppCreationToQueue),
 		appinformer.WithUpdateAppCallback(a.addAppUpdateToQueue),
@@ -133,9 +136,31 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 
 	var err error
 
+	appProjectManagerOption := []appproject.AppProjectManagerOption{
+		appproject.WithAllowUpsert(true),
+		appproject.WithRole(manager.ManagerRolePrincipal),
+	}
+
+	appProjectManagerOption = append(appProjectManagerOption, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
+
+	// appProjectInformerOptions := []appprojectinformer.AppProjectInformerOption{
+	// 	appprojectinformer.WithListFilter(a.newAppProjectCallback),
+	// 	appprojectinformer.WithUpdateFunc(a.updateAppProjectCallback),
+	// 	appprojectinformer.WithDeleteFunc(a.deleteAppProjectCallback),
+	// }
+
+	// projectInformer, _, err := appprojectinformer.NewAppProjectInformer(a.context, appclient, a.namespace,
+	// 	appProjectInformerOptions...,
+	// )
+
+	// a.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(appclient, a.namespace, projectInformer, true), appProjectManagerOption...)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
 	// The agent only supports Kubernetes as application backend
 	a.appManager, err = application.NewApplicationManager(
-		kubeapp.NewKubernetesBackend(appclient, a.namespace, informer, true),
+		kubeapp.NewKubernetesBackend(appclient, a.namespace, appInformer, true),
 		a.namespace,
 		application.WithAllowUpsert(allowUpsert),
 		application.WithRole(manager.ManagerRoleAgent),

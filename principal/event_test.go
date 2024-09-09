@@ -326,3 +326,42 @@ func Test_createNamespaceIfNotExists(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+func Test_processAppProjectEvent(t *testing.T) {
+	t.Run("Create appproject in managed mode", func(t *testing.T) {
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("appproject")
+		ev.SetType(event.Create.String())
+		wq := wqmock.NewRateLimitingInterface(t)
+		wq.On("Get").Return(&ev, false)
+		wq.On("Done", &ev)
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
+		require.NoError(t, err)
+		err = s.processRecvQueue(context.Background(), "foo", wq)
+		assert.ErrorIs(t, err, event.ErrEventDiscarded)
+	})
+
+	t.Run("Delete AppProject", func(t *testing.T) {
+		upApp := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceRepos: []string{"foo"},
+			},
+		}
+		fac := kube.NewKubernetesFakeClient()
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("appproject")
+		ev.SetType(event.Delete.String())
+		ev.SetData(cloudevents.ApplicationJSON, upApp)
+		wq := wqmock.NewRateLimitingInterface(t)
+		wq.On("Get").Return(&ev, false)
+		wq.On("Done", &ev)
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		require.NoError(t, err)
+		s.setAgentMode("foo", types.AgentModeManaged)
+		err = s.processRecvQueue(context.Background(), "foo", wq)
+		assert.ErrorContains(t, err, "event type not allowed")
+	})
+}

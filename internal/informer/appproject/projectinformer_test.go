@@ -35,7 +35,7 @@ func Test_AppProjectInformer(t *testing.T) {
 	numUpdated := atomic.Uint32{}
 	numDeleted := atomic.Uint32{}
 	ac := fakeappclient.NewSimpleClientset()
-	pi, lister, err := NewAppProjectInformer(context.TODO(), ac,
+	pi, err := NewAppProjectInformer(context.TODO(), ac, "test",
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
 		}),
@@ -50,9 +50,9 @@ func Test_AppProjectInformer(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, pi)
-	err = pi.Start(context.TODO())
+	err = pi.projectInformer.Start(context.TODO())
 	require.NoError(t, err)
-	for !pi.IsSynced() {
+	for !pi.projectInformer.IsSynced() {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Run("Add AppProjects", func(t *testing.T) {
@@ -68,7 +68,7 @@ func Test_AppProjectInformer(t *testing.T) {
 		// Projects should be available from the indexer now
 		for _, i := range []int{1, 2, 3, 4, 5} {
 			n := fmt.Sprintf("proj%d", i)
-			p, err := lister.AppProjects("argocd").Get(n)
+			p, err := pi.projectLister.AppProjects("argocd").Get(n)
 			require.NotNil(t, p)
 			require.NoError(t, err)
 			assert.Equal(t, n, p.Name)
@@ -107,7 +107,7 @@ func Test_FilterFunc(t *testing.T) {
 	updateCh := make(chan bool)
 	deleteCh := make(chan bool)
 	ac := fakeappclient.NewSimpleClientset()
-	pi, lister, err := NewAppProjectInformer(context.TODO(), ac,
+	pi, err := NewAppProjectInformer(context.TODO(), ac, "test",
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
 			if numAdded.Load() > 1 {
@@ -139,9 +139,9 @@ func Test_FilterFunc(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, pi)
-	err = pi.Start(context.TODO())
+	err = pi.projectInformer.Start(context.TODO())
 	require.NoError(t, err)
-	for !pi.IsSynced() {
+	for !pi.projectInformer.IsSynced() {
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -152,7 +152,7 @@ func Test_FilterFunc(t *testing.T) {
 			}, v1.CreateOptions{})
 		}
 		<-addCh
-		p, err := lister.AppProjects("argocd").Get("proj1")
+		p, err := pi.projectLister.AppProjects("argocd").Get("proj1")
 		assert.NotNil(t, p)
 		assert.NoError(t, err)
 	})
@@ -169,7 +169,7 @@ func Test_FilterFunc(t *testing.T) {
 			ac.ArgoprojV1alpha1().AppProjects("argocd").Delete(context.TODO(), fmt.Sprintf("proj%d", i), v1.DeleteOptions{})
 		}
 		<-deleteCh
-		p, err := lister.AppProjects("argocd").Get("proj1")
+		p, err := pi.projectLister.AppProjects("argocd").Get("proj1")
 		assert.Nil(t, p)
 		assert.ErrorContains(t, err, "not found")
 	})
@@ -180,7 +180,7 @@ func Test_NamespaceNotAllowed(t *testing.T) {
 	numAdded := atomic.Uint32{}
 	addCh := make(chan bool)
 	ac := fakeappclient.NewSimpleClientset()
-	pi, lister, err := NewAppProjectInformer(context.TODO(), ac,
+	pi, err := NewAppProjectInformer(context.TODO(), ac, "argocd",
 		WithNamespaces("argocd"),
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
@@ -192,8 +192,8 @@ func Test_NamespaceNotAllowed(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, pi)
-	require.NotNil(t, lister)
-	err = pi.Start(context.TODO())
+	require.NotNil(t, pi.projectLister)
+	err = pi.projectInformer.Start(context.TODO())
 	require.NoError(t, err)
 
 	ac.ArgoprojV1alpha1().AppProjects("argocd").Create(context.TODO(), &v1alpha1.AppProject{
@@ -215,12 +215,12 @@ func Test_NamespaceNotAllowed(t *testing.T) {
 	<-addCh
 
 	// All three apps in argocd namespace should be in cache
-	ps, err := lister.AppProjects("argocd").List(labels.Everything())
+	ps, err := pi.projectLister.AppProjects("argocd").List(labels.Everything())
 	assert.NoError(t, err)
 	assert.Len(t, ps, 3)
 
 	// Cache should not have anything in default namespace
-	ps, err = lister.AppProjects("default").List(labels.Everything())
+	ps, err = pi.projectLister.AppProjects("default").List(labels.Everything())
 	assert.NoError(t, err)
 	assert.Len(t, ps, 0)
 }
