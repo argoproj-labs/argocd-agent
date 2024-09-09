@@ -138,6 +138,9 @@ func Test_CreateEvents(t *testing.T) {
 		assert.Equal(t, "HEAD", napp.Spec.Source.TargetRevision)
 		assert.Nil(t, napp.Operation)
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, napp.Status.Sync.Status)
+		ns, err := fac.Clientset.CoreV1().Namespaces().Get(context.TODO(), "foo", v1.GetOptions{})
+		assert.NoError(t, err)
+		assert.NotNil(t, ns)
 	})
 	t.Run("Create pre-existing application in autonomous mode", func(t *testing.T) {
 		app := &v1alpha1.Application{
@@ -282,4 +285,18 @@ func Test_UpdateEvents(t *testing.T) {
 		assert.ErrorContains(t, err, "event type not allowed")
 	})
 
+}
+
+func Test_createNamespaceIfNotExists(t *testing.T) {
+	t.Run("Namespace is created only once", func(t *testing.T) {
+		fac := kube.NewKubernetesFakeClient()
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		require.NoError(t, err)
+		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
+		assert.True(t, created)
+		assert.NoError(t, err)
+		created, err = s.createNamespaceIfNotExist(context.TODO(), "test")
+		assert.False(t, created)
+		assert.NoError(t, err)
+	})
 }

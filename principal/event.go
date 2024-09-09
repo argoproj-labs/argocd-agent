@@ -27,6 +27,9 @@ import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
+	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/workqueue"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -42,7 +45,6 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		q.Done(i)
 		return fmt.Errorf("invalid data in queue: have:%T want:%T", i, ev)
 	}
-
 	agentMode := s.agentMode(agentName)
 	incoming := &v1alpha1.Application{}
 	logCtx := log().WithFields(logrus.Fields{
@@ -82,6 +84,16 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		"event":    ev.Type(),
 		"incoming": incoming.QualifiedName(),
 	})
+
+	// For autonomous agents, we may have to create the appropriate namespace
+	// on the control plane on Create or SpecUpdate events.
+	if agentMode.IsAutonomous() && (ev.Type() == event.Create.String() || ev.Type() == event.SpecUpdate.String()) {
+		if created, err := s.createNamespaceIfNotExist(ctx, agentName); err != nil {
+			return fmt.Errorf("could not create namespace %s: %w", agentName, err)
+		} else if created {
+			logCtx.Infof("Created namespace %s", agentName)
+		}
+	}
 
 	switch ev.Type() {
 
@@ -229,4 +241,21 @@ func (s *Server) StartEventProcessor(ctx context.Context) error {
 		err = s.eventProcessor(ctx)
 	}()
 	return err
+}
+
+func (s *Server) createNamespaceIfNotExist(ctx context.Context, name string) (bool, error) {
+	_, err := s.kubeClient.CoreV1().Namespaces().Get(ctx, name, v1.GetOptions{})
+	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			return false, err
+		} else {
+			_, err = s.kubeClient.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+				ObjectMeta: v1.ObjectMeta{
+					Name: name,
+				}},
+				v1.CreateOptions{})
+			return true, err
+		}
+	}
+	return false, nil
 }
