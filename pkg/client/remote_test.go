@@ -22,12 +22,11 @@ import (
 	"testing"
 	"time"
 
-	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
-
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal"
+	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,7 +36,7 @@ func Test_Connect(t *testing.T) {
 	tempDir := t.TempDir()
 	basePath := path.Join(tempDir, "certs")
 	testcerts.WriteSelfSignedCert(t, "rsa", basePath, x509.Certificate{SerialNumber: big.NewInt(1)})
-	s, err := principal.NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), "default",
+	s, err := principal.NewServer(context.TODO(), kube.NewKubernetesFakeClient(), "default",
 		principal.WithGRPC(true),
 		principal.WithListenerPort(0),
 		principal.WithTLSKeyPairFromPath(basePath+".crt", basePath+".key"),

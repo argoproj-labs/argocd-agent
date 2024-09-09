@@ -29,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
@@ -61,14 +62,14 @@ var certTempl = x509.Certificate{
 
 var testNamespace = "default"
 
-func newConn(t *testing.T, appC *fakeappclient.Clientset) (*grpc.ClientConn, *principal.Server) {
+func newConn(t *testing.T, kubeClt *kube.KubernetesClient) (*grpc.ClientConn, *principal.Server) {
 	t.Helper()
 	tempDir := t.TempDir()
 	templ := certTempl
 	fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 	errch := make(chan error)
 
-	s, err := principal.NewServer(context.TODO(), appC, testNamespace,
+	s, err := principal.NewServer(context.TODO(), kubeClt, testNamespace,
 		principal.WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		principal.WithListenerPort(0),
 		principal.WithListenerAddress("127.0.0.1"),
@@ -99,7 +100,7 @@ func Test_EndToEnd_Subscribe(t *testing.T) {
 	// require.NoError(t, err)
 
 	appC := fakeappclient.NewSimpleClientset()
-	conn, s := newConn(t, appC)
+	conn, s := newConn(t, fakekube.NewKubernetesFakeClient())
 	defer conn.Close()
 
 	authC := authapi.NewAuthenticationClient(conn)
@@ -178,7 +179,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 		objs[i] = runtime.Object(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: fmt.Sprintf("test%d", i), Namespace: "default"}})
 	}
 	appC := fakeappclient.NewSimpleClientset(objs...)
-	conn, s := newConn(t, appC)
+	conn, s := newConn(t, fakekube.NewKubernetesFakeClient())
 	defer conn.Close()
 	authC := authapi.NewAuthenticationClient(conn)
 	eventC := eventstreamapi.NewEventStreamClient(conn)
@@ -244,7 +245,7 @@ func Test_AgentServer(t *testing.T) {
 	err := am.RegisterMethod("userpass", up)
 	require.NoError(t, err)
 	up.UpsertUser("client", "insecure")
-	s, err := principal.NewServer(sctx, fakeAppcServer, "server",
+	s, err := principal.NewServer(sctx, fakekube.NewKubernetesFakeClient(), "server",
 		principal.WithGRPC(true),
 		principal.WithListenerPort(0),
 		principal.WithServerName("control-plane"),

@@ -27,6 +27,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
 	"github.com/argoproj-labs/argocd-agent/internal/issuer"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -34,7 +35,6 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
-	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
@@ -82,7 +82,7 @@ var noAuthEndpoints = map[string]bool{
 
 const waitForSyncedDuration = 1 * time.Second
 
-func NewServer(ctx context.Context, appClient appclientset.Interface, namespace string, opts ...ServerOption) (*Server, error) {
+func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
 		options:   defaultOptions(),
 		queues:    queue.NewSendRecvQueues(),
@@ -132,12 +132,12 @@ func NewServer(ctx context.Context, appClient appclientset.Interface, namespace 
 		managerOpts = append(managerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
 	}
 
-	appInformer := appinformer.NewAppInformer(s.ctx, appClient,
+	appInformer := appinformer.NewAppInformer(s.ctx, kubeClient.ApplicationsClientset,
 		s.namespace,
 		informerOpts...,
 	)
 
-	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(appClient, s.namespace, appInformer, true), s.namespace,
+	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appInformer, true), s.namespace,
 		managerOpts...,
 	)
 	if err != nil {

@@ -15,6 +15,8 @@
 package kube
 
 import (
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 )
@@ -27,4 +29,11 @@ func NewFakeKubeClient() *kubefake.Clientset {
 func NewFakeClientsetWithResources(objects ...runtime.Object) *kubefake.Clientset {
 	clientset := kubefake.NewSimpleClientset(objects...)
 	return clientset
+}
+
+func NewKubernetesFakeClient(objects ...runtime.Object) *kube.KubernetesClient {
+	c := &kube.KubernetesClient{}
+	c.Clientset = NewFakeClientsetWithResources()
+	c.ApplicationsClientset = fakeappclient.NewSimpleClientset(objects...)
+	return c
 }

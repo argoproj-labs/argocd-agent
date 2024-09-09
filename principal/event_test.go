@@ -18,12 +18,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	wqmock "github.com/argoproj-labs/argocd-agent/test/mocks/k8s-workqueue"
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -36,7 +36,7 @@ func Test_InvalidEvents(t *testing.T) {
 		item := "foo"
 		wq.On("Get").Return(&item, false)
 		wq.On("Done", &item)
-		s, err := NewServer(context.Background(), fakeappclient.NewSimpleClientset(), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		err = s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "invalid data in queue")
@@ -49,7 +49,7 @@ func Test_InvalidEvents(t *testing.T) {
 		wq := wqmock.NewRateLimitingInterface(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fakeappclient.NewSimpleClientset(), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		err = s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "unable to process event with unknown target")
@@ -62,7 +62,7 @@ func Test_InvalidEvents(t *testing.T) {
 		wq := wqmock.NewRateLimitingInterface(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fakeappclient.NewSimpleClientset(), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		err = s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "unable to process event of type application")
@@ -76,7 +76,7 @@ func Test_InvalidEvents(t *testing.T) {
 		wq := wqmock.NewRateLimitingInterface(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fakeappclient.NewSimpleClientset(), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		err = s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "failed to unmarshal")
@@ -91,7 +91,7 @@ func Test_CreateEvents(t *testing.T) {
 		wq := wqmock.NewRateLimitingInterface(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fakeappclient.NewSimpleClientset(), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		err = s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorIs(t, err, event.ErrEventDiscarded)
@@ -119,7 +119,7 @@ func Test_CreateEvents(t *testing.T) {
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
 			},
 		}
-		fac := fakeappclient.NewSimpleClientset()
+		fac := kube.NewKubernetesFakeClient(app)
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
@@ -132,7 +132,7 @@ func Test_CreateEvents(t *testing.T) {
 		s.setAgentMode("foo", types.AgentModeAutonomous)
 		err = s.processRecvQueue(context.Background(), "foo", wq)
 		assert.NoError(t, err)
-		napp, err := fac.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
+		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
 		assert.NoError(t, err)
 		require.NotNil(t, napp)
 		assert.Equal(t, "HEAD", napp.Spec.Source.TargetRevision)
@@ -163,7 +163,7 @@ func Test_CreateEvents(t *testing.T) {
 		}
 		exapp := app.DeepCopy()
 		exapp.Namespace = "foo"
-		fac := fakeappclient.NewSimpleClientset(exapp)
+		fac := kube.NewKubernetesFakeClient(exapp)
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
@@ -224,7 +224,7 @@ func Test_UpdateEvents(t *testing.T) {
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
 			},
 		}
-		fac := fakeappclient.NewSimpleClientset(exApp)
+		fac := kube.NewKubernetesFakeClient(exApp)
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.SpecUpdate.String())
@@ -237,7 +237,7 @@ func Test_UpdateEvents(t *testing.T) {
 		s.setAgentMode("foo", types.AgentModeAutonomous)
 		err = s.processRecvQueue(context.Background(), "foo", wq)
 		assert.NoError(t, err)
-		napp, err := fac.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
+		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
 		assert.NoError(t, err)
 		require.NotNil(t, napp)
 		assert.Equal(t, "HEAD", napp.Spec.Source.TargetRevision)
@@ -267,7 +267,7 @@ func Test_UpdateEvents(t *testing.T) {
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
 			},
 		}
-		fac := fakeappclient.NewSimpleClientset()
+		fac := kube.NewKubernetesFakeClient()
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.SpecUpdate.String())
