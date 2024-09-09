@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package application
+package appproject
 
 import (
 	"context"
@@ -22,7 +22,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	fakeclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wI2L/jsondiff"
@@ -49,7 +49,7 @@ func mkAppProjects() []runtime.Object {
 	for i := 0; i < 10; i += 1 {
 		appProjects[i] = runtime.Object(&v1alpha1.AppProject{
 			ObjectMeta: v1.ObjectMeta{
-				Name:      "app-project" + fmt.Sprintf("%d", i),
+				Name:      "app-project",
 				Namespace: fmt.Sprintf("ns%d", i),
 			},
 		})
@@ -60,31 +60,31 @@ func mkAppProjects() []runtime.Object {
 func Test_List(t *testing.T) {
 	appProjects := mkAppProjects()
 	t.Run("No appProjects", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset()
+		fakeAppC := fakeclient.NewSimpleClientset()
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		appProjects, err := k.List(context.TODO(), backend.AppProjectSelector{})
+		projects, err := k.List(context.TODO(), backend.AppProjectSelector{})
 		require.NoError(t, err)
-		assert.Len(t, appProjects, 0)
+		assert.Len(t, projects, 0)
 	})
 	t.Run("Few appProjects", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		appProjects, err := k.List(context.TODO(), backend.AppProjectSelector{})
 		require.NoError(t, err)
 		assert.Len(t, appProjects, 10)
 	})
-	t.Run("appProjects with matching selector", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Apps with matching selector", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		appProjects, err := k.List(context.TODO(), backend.AppProjectSelector{Names: []string{"app-project1", "app-project2"}})
+		appProjects, err := k.List(context.TODO(), backend.AppProjectSelector{Namespaces: []string{"ns1", "ns2"}})
 		require.NoError(t, err)
 		assert.Len(t, appProjects, 2)
 	})
 
-	t.Run("appProjects with non-matching selector", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Apps with non-matching selector", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		appProjects, err := k.List(context.TODO(), backend.AppProjectSelector{Names: []string{"app-project1", "app-project2"}})
+		appProjects, err := k.List(context.TODO(), backend.AppProjectSelector{Namespaces: []string{"ns11", "ns12"}})
 		require.NoError(t, err)
 		assert.Len(t, appProjects, 0)
 	})
@@ -92,93 +92,93 @@ func Test_List(t *testing.T) {
 
 func Test_Create(t *testing.T) {
 	appProjects := mkAppProjects()
-	t.Run("Create app", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Create app project", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Create(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "bar"}})
+		project, err := k.Create(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "bar"}})
 		assert.NoError(t, err)
-		assert.NotNil(t, app)
+		assert.NotNil(t, project)
 	})
-	t.Run("Create existing app", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Create existing app project", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Create(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns1"}})
+		project, err := k.Create(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app-project", Namespace: "ns1"}})
 		assert.ErrorContains(t, err, "exists")
-		assert.Nil(t, app)
+		assert.Nil(t, project)
 	})
 }
 
 func Test_Get(t *testing.T) {
 	appProjects := mkAppProjects()
-	t.Run("Get existing app", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Get existing app project", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Get(context.TODO(), "app", "ns1")
+		project, err := k.Get(context.TODO(), "app-project", "ns1")
 		assert.NoError(t, err)
-		assert.NotNil(t, app)
+		assert.NotNil(t, project)
 	})
-	t.Run("Get non-existing app", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Get non-existing app project", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Get(context.TODO(), "foo", "ns1")
+		project, err := k.Get(context.TODO(), "foo", "ns1")
 		assert.ErrorContains(t, err, "not found")
-		assert.Nil(t, app)
+		assert.Nil(t, project)
 	})
 }
 
 func Test_Delete(t *testing.T) {
 	appProjects := mkAppProjects()
-	t.Run("Delete existing app", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Delete existing app project", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		deletionPropagation := backend.DeletePropagationForeground
-		err := k.Delete(context.TODO(), "app", "ns1", &deletionPropagation)
+		err := k.Delete(context.TODO(), "app-project", "ns1", &deletionPropagation)
 		assert.NoError(t, err)
 	})
-	t.Run("Delete non-existing app", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Delete non-existing app project", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		deletionPropagation := backend.DeletePropagationForeground
-		err := k.Delete(context.TODO(), "app", "ns10", &deletionPropagation)
+		err := k.Delete(context.TODO(), "app-project", "ns10", &deletionPropagation)
 		assert.ErrorContains(t, err, "not found")
 	})
 }
 
 func Test_Update(t *testing.T) {
 	appProjects := mkAppProjects()
-	t.Run("Update existing app", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Update existing app project", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Update(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns1"}})
+		project, err := k.Update(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app-project", Namespace: "ns1"}})
 		assert.NoError(t, err)
-		assert.NotNil(t, app)
+		assert.NotNil(t, project)
 	})
-	t.Run("Update non-existing app", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Update non-existing app project", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Update(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns10"}})
+		project, err := k.Update(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app-project", Namespace: "ns10"}})
 		assert.ErrorContains(t, err, "not found")
-		assert.Nil(t, app)
+		assert.Nil(t, project)
 	})
 }
 
 func Test_Patch(t *testing.T) {
 	appProjects := mkAppProjects()
-	t.Run("Patch existing app", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Patch existing app project", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		p := jsondiff.Patch{jsondiff.Operation{Type: "add", Path: "/foo", Value: "bar"}}
 		jsonpatch, err := json.Marshal(p)
 		require.NoError(t, err)
-		app, err := k.Patch(context.TODO(), "app", "ns1", jsonpatch)
+		project, err := k.Patch(context.TODO(), "app-project", "ns1", jsonpatch)
 		assert.NoError(t, err)
-		assert.NotNil(t, app)
+		assert.NotNil(t, project)
 	})
-	t.Run("Update non-existing app", func(t *testing.T) {
-		fakeAppC := fakeappclient.NewSimpleClientset(appProjects...)
+	t.Run("Update non-existing app project", func(t *testing.T) {
+		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Update(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns10"}})
+		project, err := k.Update(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app-project", Namespace: "ns10"}})
 		assert.ErrorContains(t, err, "not found")
-		assert.Nil(t, app)
+		assert.Nil(t, project)
 	})
 }

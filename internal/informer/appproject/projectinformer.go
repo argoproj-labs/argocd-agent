@@ -180,6 +180,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 			return pi.filterFunc(o)
 		}),
 	)
+	pi.projectInformer = *i
 	pi.projectLister = applisters.NewAppProjectLister(i.Indexer())
 	return pi, err
 }

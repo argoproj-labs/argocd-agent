@@ -26,8 +26,6 @@ import (
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
-	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
-	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
@@ -54,11 +52,11 @@ type Agent struct {
 	infStopCh chan struct{}
 	connected atomic.Bool
 	// syncCh is not currently used
-	syncCh         chan bool
-	remote         *client.Remote
-	appManager     *application.ApplicationManager
-	projectManager *appproject.AppProjectManager
-	mode           types.AgentMode
+	syncCh     chan bool
+	remote     *client.Remote
+	appManager *application.ApplicationManager
+	// projectManager *appproject.AppProjectManager
+	mode types.AgentMode
 	// queues is a queue of create/update/delete events to send to the principal
 	queues  *queue.SendRecvQueues
 	emitter *event.EventSource
@@ -136,12 +134,12 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 
 	var err error
 
-	appProjectManagerOption := []appproject.AppProjectManagerOption{
-		appproject.WithAllowUpsert(true),
-		appproject.WithRole(manager.ManagerRolePrincipal),
-	}
+	// appProjectManagerOption := []appproject.AppProjectManagerOption{
+	// 	appproject.WithAllowUpsert(true),
+	// 	appproject.WithRole(manager.ManagerRolePrincipal),
+	// }
 
-	appProjectManagerOption = append(appProjectManagerOption, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
+	// appProjectManagerOption = append(appProjectManagerOption, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
 
 	// appProjectInformerOptions := []appprojectinformer.AppProjectInformerOption{
 	// 	appprojectinformer.WithListFilter(a.newAppProjectCallback),

@@ -35,7 +35,7 @@ func Test_AppProjectInformer(t *testing.T) {
 	numUpdated := atomic.Uint32{}
 	numDeleted := atomic.Uint32{}
 	ac := fakeappclient.NewSimpleClientset()
-	pi, err := NewAppProjectInformer(context.TODO(), ac, "test",
+	pi, err := NewAppProjectInformer(context.TODO(), ac, "argocd",
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
 		}),
@@ -52,9 +52,7 @@ func Test_AppProjectInformer(t *testing.T) {
 	require.NotNil(t, pi)
 	err = pi.projectInformer.Start(context.TODO())
 	require.NoError(t, err)
-	for !pi.projectInformer.IsSynced() {
-		time.Sleep(100 * time.Millisecond)
-	}
+
 	t.Run("Add AppProjects", func(t *testing.T) {
 		for _, i := range []int{1, 2, 3, 4, 5} {
 			ac.ArgoprojV1alpha1().AppProjects("argocd").Create(context.TODO(), &v1alpha1.AppProject{
