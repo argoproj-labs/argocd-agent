@@ -24,6 +24,7 @@ import (
 	appproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	appmock "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	appprojectinformer "github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -61,7 +62,7 @@ func Test_ManagerOptions(t *testing.T) {
 	})
 
 	t.Run("NewManager with metrics", func(t *testing.T) {
-		m, err := NewAppProjectManager(nil)
+		m, err := NewAppProjectManager(nil, WithMetrics(&metrics.AppProjectClientMetrics{}))
 		require.NoError(t, err)
 		assert.NotNil(t, m.metrics)
 	})
@@ -167,9 +168,9 @@ func Test_DeleteAppProject(t *testing.T) {
 	})
 }
 
-func Test_ManageApp(t *testing.T) {
-	t.Run("Mark app as managed", func(t *testing.T) {
-		appm, err := NewAppProjectManager(nil, nil)
+func Test_ManageAppProjects(t *testing.T) {
+	t.Run("Mark appProject as managed", func(t *testing.T) {
+		appm, err := NewAppProjectManager(nil)
 		require.NoError(t, err)
 		assert.False(t, appm.IsManaged("foo"))
 		err = appm.Manage("foo")
@@ -183,8 +184,8 @@ func Test_ManageApp(t *testing.T) {
 		assert.Len(t, appm.managedAppProjects, 0)
 	})
 
-	t.Run("Mark app as unmanaged", func(t *testing.T) {
-		appm, err := NewAppProjectManager(nil, nil)
+	t.Run("Mark appProject as unmanaged", func(t *testing.T) {
+		appm, err := NewAppProjectManager(nil)
 		require.NoError(t, err)
 		err = appm.Manage("foo")
 		assert.True(t, appm.IsManaged("foo"))
@@ -200,7 +201,7 @@ func Test_ManageApp(t *testing.T) {
 
 func Test_IgnoreChange(t *testing.T) {
 	t.Run("Ignore a change", func(t *testing.T) {
-		appm, err := NewAppProjectManager(nil, nil)
+		appm, err := NewAppProjectManager(nil)
 		require.NoError(t, err)
 		assert.False(t, appm.IsChangeIgnored("foo", "1"))
 		err = appm.IgnoreChange("foo", "1")
@@ -215,7 +216,7 @@ func Test_IgnoreChange(t *testing.T) {
 	})
 
 	t.Run("Unignore a change", func(t *testing.T) {
-		appm, err := NewAppProjectManager(nil, nil)
+		appm, err := NewAppProjectManager(nil)
 		require.NoError(t, err)
 		err = appm.UnignoreChange("foo")
 		assert.Error(t, err)
