@@ -127,7 +127,7 @@ func Test_CreateEvents(t *testing.T) {
 		wq := wqmock.NewRateLimitingInterface(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, ""))
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeAutonomous)
 		err = s.processRecvQueue(context.Background(), "foo", wq)
