@@ -87,7 +87,7 @@ func NewServer(queues queue.QueuePair, opts ...ServerOption) *Server {
 
 // newClientConnection returns a new client object to be used to read from and
 // send to the subscription stream.
-func newClientConnection(ctx context.Context, timeout time.Duration) (*client, error) {
+func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration) (*client, error) {
 	c := &client{}
 	c.wg = &sync.WaitGroup{}
 
@@ -122,6 +122,7 @@ func agentName(ctx context.Context) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("invalid context: no agent name")
 	}
+	// TODO: check agentName for validity
 	return agentName, nil
 }
 
@@ -256,7 +257,7 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 //
 // Subscribe is called by GRPC machinery.
 func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) error {
-	c, err := newClientConnection(subs.Context(), s.options.MaxStreamDuration)
+	c, err := s.newClientConnection(subs.Context(), s.options.MaxStreamDuration)
 	if err != nil {
 		return err
 	}

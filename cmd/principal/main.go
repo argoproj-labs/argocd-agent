@@ -134,7 +134,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				observer(10 * time.Second)
 			}
 
-			s, err := principal.NewServer(ctx, kubeConfig.ApplicationsClientset, namespace, opts...)
+			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
 				cmd.Fatal("Could not create new server instance: %v", err)
 			}

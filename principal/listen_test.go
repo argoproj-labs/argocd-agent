@@ -22,12 +22,12 @@ import (
 	"testing"
 	"time"
 
-	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -79,7 +79,7 @@ func Test_Listen(t *testing.T) {
 	templ := certTempl
 	fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 	t.Run("Auto-select port for listener", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithListenerPort(0),
 			WithGeneratedTokenSigningKey(),
@@ -94,7 +94,7 @@ func Test_Listen(t *testing.T) {
 	})
 
 	t.Run("Listen on privileged port", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithGeneratedTokenSigningKey(),
 			WithListenerPort(443),
@@ -145,7 +145,7 @@ func Test_Serve(t *testing.T) {
 	fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 
 	// We start a real (non-mocked) server
-	s, err := NewServer(context.TODO(), fakeappclient.NewSimpleClientset(), testNamespace,
+	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
 		WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		WithGeneratedTokenSigningKey(),
 		WithListenerPort(0),
