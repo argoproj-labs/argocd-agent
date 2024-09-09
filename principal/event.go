@@ -244,6 +244,14 @@ func (s *Server) StartEventProcessor(ctx context.Context) error {
 }
 
 func (s *Server) createNamespaceIfNotExist(ctx context.Context, name string) (bool, error) {
+	if !s.autoNamespaceAllow {
+		return false, nil
+	}
+	if s.autoNamespacePattern != nil {
+		if !s.autoNamespacePattern.MatchString(name) {
+			return false, nil
+		}
+	}
 	_, err := s.kubeClient.CoreV1().Namespaces().Get(ctx, name, v1.GetOptions{})
 	if err != nil {
 		if !kerrors.IsNotFound(err) {

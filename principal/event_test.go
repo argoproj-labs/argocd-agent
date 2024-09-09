@@ -288,9 +288,35 @@ func Test_UpdateEvents(t *testing.T) {
 }
 
 func Test_createNamespaceIfNotExists(t *testing.T) {
-	t.Run("Namespace is created only once", func(t *testing.T) {
+	t.Run("Namespace creation is not enabled", func(t *testing.T) {
 		fac := kube.NewKubernetesFakeClient()
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		require.NoError(t, err)
+		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
+		assert.False(t, created)
+		assert.NoError(t, err)
+	})
+	t.Run("Pattern matches and namespace is created", func(t *testing.T) {
+		fac := kube.NewKubernetesFakeClient()
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a-z]+$"))
+		require.NoError(t, err)
+		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
+		assert.True(t, created)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Pattern does not match and namespace is not created", func(t *testing.T) {
+		fac := kube.NewKubernetesFakeClient()
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a]+$"))
+		require.NoError(t, err)
+		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
+		assert.False(t, created)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Namespace is created only once", func(t *testing.T) {
+		fac := kube.NewKubernetesFakeClient()
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, ""))
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
 		assert.True(t, created)

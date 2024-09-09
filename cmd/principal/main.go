@@ -51,6 +51,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		rootCaPath             string
 		requireClientCerts     bool
 		clientCertSubjectMatch bool
+		autoNamespaceAllow     bool
+		autoNamespacePattern   string
 	)
 	var command = &cobra.Command{
 		Short: "Run the argocd-agent principal component",
@@ -80,6 +82,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithListenerAddress(listenHost))
 			opts = append(opts, principal.WithListenerPort(listenPort))
 			opts = append(opts, principal.WithGRPC(true))
+			opts = append(opts, principal.WithAutoNamespaceCreate(autoNamespaceAllow, autoNamespacePattern))
 
 			if !disableMetrics {
 				opts = append(opts, principal.WithMetricsPort(metricsPort))
@@ -173,6 +176,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_ALLOWED_NAMESPACES", nil, []string{}),
 		"List of namespaces the server is allowed to operate in")
+	command.Flags().BoolVar(&autoNamespaceAllow, "namespace-create-enabled", false,
+		"Whether to allow automatic namespace creation for autonomous agents")
+	command.Flags().StringVar(&autoNamespacePattern, "namespace-create-pattern", "",
+		"Only automatically create namespaces matching pattern")
 
 	command.Flags().StringVar(&tlsCert, "tls-cert",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_CERT_PATH", nil, ""),

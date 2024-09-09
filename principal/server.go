@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -73,6 +74,9 @@ type Server struct {
 	events     *event.EventSource
 	version    *version.Version
 	kubeClient kubernetes.Interface
+
+	autoNamespaceAllow   bool
+	autoNamespacePattern *regexp.Regexp
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
