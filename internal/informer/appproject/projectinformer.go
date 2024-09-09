@@ -35,7 +35,7 @@ type AppProjectInformer struct {
 	namespaces []string
 	logger     *logrus.Entry
 
-	projectInformer informer.GenericInformer
+	projectInformer *informer.GenericInformer
 	projectLister   applisters.AppProjectLister
 
 	addFunc    func(proj *v1alpha1.AppProject)
@@ -180,14 +180,18 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 			return pi.filterFunc(o)
 		}),
 	)
-	pi.projectInformer = *i
+	pi.projectInformer = i
 	pi.projectLister = applisters.NewAppProjectLister(i.Indexer())
 	return pi, err
 }
 
 func (i *AppProjectInformer) Start(ctx context.Context) {
 	log().Infof("Starting app project informer (namespaces: %s)", strings.Join(i.namespaces, ","))
-	i.projectInformer.Start(ctx)
+	err := i.projectInformer.Start(ctx)
+	if err != nil {
+		log().Errorf("Failed to start app project informer: %v", err)
+		return
+	}
 	log().Infof("App informer has shutdown")
 }
 
