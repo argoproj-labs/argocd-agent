@@ -16,19 +16,17 @@ package appproject
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	appproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	appmock "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	appprojectinformer "github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
@@ -39,15 +37,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var appExistsError = errors.NewAlreadyExists(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
-var appNotFoundError = errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
-
 func fakeAppManager(t *testing.T, objects ...runtime.Object) (*fakeappclient.Clientset, *AppProjectManager) {
 	appC := fakeappclient.NewSimpleClientset(objects...)
 	informer, err := appprojectinformer.NewAppProjectInformer(context.Background(), appC, "argocd")
+	assert.NoError(t, err)
+
 	be := appproject.NewKubernetesBackend(appC, "", informer, true)
 
-	am, err := NewAppProjectManager(be)
+	am, err := NewAppProjectManager(be, "")
 	assert.NoError(t, err)
 
 	return appC, am
@@ -55,65 +52,23 @@ func fakeAppManager(t *testing.T, objects ...runtime.Object) (*fakeappclient.Cli
 
 func Test_ManagerOptions(t *testing.T) {
 	t.Run("NewManager with default options", func(t *testing.T) {
-		m, err := NewAppProjectManager(nil)
+		m, err := NewAppProjectManager(nil, "")
 		require.NoError(t, err)
 		assert.Equal(t, false, m.allowUpsert)
 		assert.Nil(t, m.metrics)
 	})
 
 	t.Run("NewManager with metrics", func(t *testing.T) {
-		m, err := NewAppProjectManager(nil, WithMetrics(&metrics.AppProjectClientMetrics{}))
+		m, err := NewAppProjectManager(nil, "", WithMetrics(&metrics.AppProjectClientMetrics{}))
 		require.NoError(t, err)
 		assert.NotNil(t, m.metrics)
 	})
 
 	t.Run("NewManager with upsert enabled", func(t *testing.T) {
-		m, err := NewAppProjectManager(nil, WithAllowUpsert(true))
+		m, err := NewAppProjectManager(nil, "", WithAllowUpsert(true))
 		require.NoError(t, err)
 		assert.True(t, m.allowUpsert)
 	})
-}
-
-func Test_ManagerCreate(t *testing.T) {
-	t.Run("Create an appproject that exists", func(t *testing.T) {
-		mockedBackend := appmock.NewAppProject(t)
-		mockedBackend.On("Create", mock.Anything, mock.Anything, mock.Anything).
-			Return(func(ctx context.Context, app *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
-				if app.Name == "existing" {
-					return nil, appExistsError
-				} else {
-					return nil, nil
-				}
-			})
-		m, err := NewAppProjectManager(mockedBackend)
-		require.NoError(t, err)
-		_, err = m.Create(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "existing", Namespace: "default"}})
-		assert.ErrorIs(t, err, appExistsError)
-	})
-
-	t.Run("Create a new application", func(t *testing.T) {
-		app := &v1alpha1.AppProject{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "test",
-				Namespace: "default",
-			},
-		}
-		mockedBackend := appmock.NewAppProject(t)
-		m, err := NewAppProjectManager(mockedBackend)
-		require.NoError(t, err)
-		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
-		rapp, err := m.Create(context.TODO(), app)
-		assert.NoError(t, err)
-		assert.Equal(t, "test", rapp.Name)
-	})
-}
-
-func prettyPrint(app *v1alpha1.AppProject) {
-	b, err := json.MarshalIndent(app, "", "  ")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("%s", b)
 }
 
 func Test_DeleteAppProject(t *testing.T) {
@@ -170,7 +125,7 @@ func Test_DeleteAppProject(t *testing.T) {
 
 func Test_ManageAppProjects(t *testing.T) {
 	t.Run("Mark appProject as managed", func(t *testing.T) {
-		appm, err := NewAppProjectManager(nil)
+		appm, err := NewAppProjectManager(nil, "")
 		require.NoError(t, err)
 		assert.False(t, appm.IsManaged("foo"))
 		err = appm.Manage("foo")
@@ -185,7 +140,7 @@ func Test_ManageAppProjects(t *testing.T) {
 	})
 
 	t.Run("Mark appProject as unmanaged", func(t *testing.T) {
-		appm, err := NewAppProjectManager(nil)
+		appm, err := NewAppProjectManager(nil, "")
 		require.NoError(t, err)
 		err = appm.Manage("foo")
 		assert.True(t, appm.IsManaged("foo"))
@@ -201,7 +156,7 @@ func Test_ManageAppProjects(t *testing.T) {
 
 func Test_IgnoreChange(t *testing.T) {
 	t.Run("Ignore a change", func(t *testing.T) {
-		appm, err := NewAppProjectManager(nil)
+		appm, err := NewAppProjectManager(nil, "")
 		require.NoError(t, err)
 		assert.False(t, appm.IsChangeIgnored("foo", "1"))
 		err = appm.IgnoreChange("foo", "1")
@@ -216,7 +171,7 @@ func Test_IgnoreChange(t *testing.T) {
 	})
 
 	t.Run("Unignore a change", func(t *testing.T) {
-		appm, err := NewAppProjectManager(nil)
+		appm, err := NewAppProjectManager(nil, "")
 		require.NoError(t, err)
 		err = appm.UnignoreChange("foo")
 		assert.Error(t, err)
@@ -265,6 +220,43 @@ func Test_stampLastUpdated(t *testing.T) {
 		stampLastUpdated(app)
 		assert.Contains(t, app.Annotations, LastUpdatedAnnotation)
 		assert.Len(t, app.Annotations, 3)
+	})
+}
+
+func TestCreateAppProject(t *testing.T) {
+	t.Run("Create an appproject on Agent", func(t *testing.T) {
+		app := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "default",
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceNamespaces: []string{"default"},
+			},
+		}
+		mockedBackend := appmock.NewAppProject(t)
+		m, err := NewAppProjectManager(mockedBackend, "default", WithRole(manager.ManagerRoleAgent))
+		require.NoError(t, err)
+		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
+		rapp, err := m.Create(context.TODO(), app)
+		assert.NoError(t, err)
+		assert.Equal(t, "test", rapp.Name)
+	})
+
+	t.Run("Create a new AppProject on Principal", func(t *testing.T) {
+		app := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "default",
+			},
+		}
+		mockedBackend := appmock.NewAppProject(t)
+		m, err := NewAppProjectManager(mockedBackend, "", WithRole(manager.ManagerRolePrincipal))
+		require.NoError(t, err)
+		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
+		rapp, err := m.Create(context.TODO(), app)
+		assert.NoError(t, err)
+		assert.Equal(t, "test", rapp.Name)
 	})
 }
 

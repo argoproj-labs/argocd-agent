@@ -140,31 +140,49 @@ func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppPro
 
 	// If the AppProject has a source namespace, we only allow the agent to manage the AppProject
 	// if the source namespace matches the agent's namespace
-	if len(project.Spec.SourceNamespaces) > 0 {
-		for _, ns := range project.Spec.SourceNamespaces {
-			if glob.Match(ns, m.namespace) {
-				created, err := m.appprojectBackend.Create(ctx, project)
-				if err == nil {
-					if err := m.Manage(created.Name); err != nil {
-						log().Warnf("Could not manage app %s: %v", created.Name, err)
-					}
-					if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
-						log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
-					}
-					if m.metrics != nil {
-						m.metrics.AppProjectsCreated.WithLabelValues(project.Namespace).Inc()
+	if m.role == manager.ManagerRoleAgent {
+		fmt.Printf("Agent Namespace %v\n", m.namespace)
+		if len(project.Spec.SourceNamespaces) > 0 {
+			for _, ns := range project.Spec.SourceNamespaces {
+				if glob.Match(ns, m.namespace) {
+					created, err := createAppProject(ctx, m, project)
+					if err != nil {
+						return nil, err
 					}
 					return created, nil
-				} else {
-					if m.metrics != nil {
-						m.metrics.Errors.Inc()
-					}
 				}
 			}
 		}
+		return nil, fmt.Errorf("cannot create appproject: agent is not allowed to manage this namespace")
 	}
 
-	return nil, fmt.Errorf("cannot create appproject: agent is not allowed to manage this namespace")
+	//	Principal can create AppProject in any namespace
+	created, err := createAppProject(ctx, m, project)
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+	created, err := m.appprojectBackend.Create(ctx, project)
+	if err == nil {
+		if err := m.Manage(created.Name); err != nil {
+			log().Warnf("Could not manage app %s: %v", created.Name, err)
+		}
+		if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
+			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
+		}
+		if m.metrics != nil {
+			m.metrics.AppProjectsCreated.WithLabelValues(project.Namespace).Inc()
+		}
+		return created, nil
+	} else {
+		if m.metrics != nil {
+			m.metrics.Errors.Inc()
+		}
+	}
+	return nil, nil
 }
 
 // UpdateAppProject updates the AppProject resource on the agent's backend.

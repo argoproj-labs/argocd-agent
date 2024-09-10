@@ -172,7 +172,7 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 
 	switch ev.Type() {
 
-	// App creation event will only be processed in autonomous mode
+	// AppProject creation event will only be processed in autonomous mode
 	case event.Create.String():
 		if agentMode.IsAutonomous() {
 			incoming.SetNamespace(agentName)
@@ -184,7 +184,7 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
 			return event.ErrEventDiscarded
 		}
-	// App deletion
+	// AppProject deletion
 	case event.Delete.String():
 		var err error
 		if agentMode.IsManaged() {
