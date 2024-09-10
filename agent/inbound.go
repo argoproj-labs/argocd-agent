@@ -21,6 +21,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v2/util/glob"
 	"github.com/sirupsen/logrus"
 )
 
@@ -237,8 +238,18 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		delete(incoming.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 	}
 
-	created, err := a.projectManager.Create(a.context, incoming)
-	return created, err
+	// If the AppProject has a list of source namespaces, we need to check if
+	// the agent is allowed to manage the AppProject in one of the source namespaces.
+	if len(incoming.Spec.SourceNamespaces) > 0 {
+		for _, ns := range incoming.Spec.SourceNamespaces {
+			if glob.Match(ns, a.namespace) {
+				created, err := a.projectManager.Create(a.context, incoming)
+				return created, err
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("cannot create appproject: agent is not allowed to manage this namespace")
 }
 
 func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
@@ -259,7 +270,7 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	logCtx.Infof("Updating appProject")
 
 	logCtx.Tracef("Calling update spec for this event")
-	return a.projectManager.UpdateManagedAppProject(a.context, incoming)
+	return a.projectManager.UpdateAppProject(a.context, incoming)
 
 }
 

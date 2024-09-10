@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v2/util/glob"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -66,11 +67,12 @@ type AppProjectManagerOption func(*AppProjectManager)
 
 // NewAppProjectManager initializes and returns a new Manager with the given backend and
 // options.
-func NewAppProjectManager(be backend.AppProject, opts ...AppProjectManagerOption) (*AppProjectManager, error) {
+func NewAppProjectManager(be backend.AppProject, namespace string, opts ...AppProjectManagerOption) (*AppProjectManager, error) {
 	m := &AppProjectManager{}
 	for _, o := range opts {
 		o(m)
 	}
+	m.namespace = namespace
 	m.appprojectBackend = be
 	m.observedAppProjects = make(map[string]string)
 	m.managedAppProjects = make(map[string]bool)
@@ -136,32 +138,40 @@ func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppPro
 		stampLastUpdated(project)
 	}
 
-	created, err := m.appprojectBackend.Create(ctx, project)
-	if err == nil {
-		if err := m.Manage(created.Name); err != nil {
-			log().Warnf("Could not manage app %s: %v", created.Name, err)
-		}
-		if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
-			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
-		}
-		if m.metrics != nil {
-			m.metrics.AppProjectsCreated.WithLabelValues(project.Namespace).Inc()
-		}
-	} else {
-		if m.metrics != nil {
-			m.metrics.Errors.Inc()
+	// If the AppProject has a source namespace, we only allow the agent to manage the AppProject
+	// if the source namespace matches the agent's namespace
+	if len(project.Spec.SourceNamespaces) > 0 {
+		for _, ns := range project.Spec.SourceNamespaces {
+			if glob.Match(ns, m.namespace) {
+				created, err := m.appprojectBackend.Create(ctx, project)
+				if err == nil {
+					if err := m.Manage(created.Name); err != nil {
+						log().Warnf("Could not manage app %s: %v", created.Name, err)
+					}
+					if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
+						log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
+					}
+					if m.metrics != nil {
+						m.metrics.AppProjectsCreated.WithLabelValues(project.Namespace).Inc()
+					}
+					return created, nil
+				} else {
+					if m.metrics != nil {
+						m.metrics.Errors.Inc()
+					}
+				}
+			}
 		}
 	}
 
-	return created, err
+	return nil, fmt.Errorf("cannot create appproject: agent is not allowed to manage this namespace")
 }
 
-// UpdateManagedAppProject updates the AppProject resource on the agent when it is in
-// managed mode.
+// UpdateAppProject updates the AppProject resource on the agent's backend.
 //
 // The AppProject on the agent will inherit labels and annotations as well as the spec
-// and any operation field of the incoming AppProject.
-func (m *AppProjectManager) UpdateManagedAppProject(ctx context.Context, incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+// of the incoming AppProject.
+func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "UpdateManaged",
 		"appProject":      incoming.Name,
@@ -180,13 +190,6 @@ func (m *AppProjectManager) UpdateManagedAppProject(ctx context.Context, incomin
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Status = *incoming.Status.DeepCopy()
 	}, func(existing, incoming *v1alpha1.AppProject) (jsondiff.Patch, error) {
-		// We need to keep the refresh label if it is set on the existing app
-		if v, ok := existing.Annotations["argocd.argoproj.io/refresh"]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
-			}
-			incoming.Annotations["argocd.argoproj.io/refresh"] = v
-		}
 		target := &v1alpha1.AppProject{
 			ObjectMeta: v1.ObjectMeta{
 				Annotations: incoming.Annotations,
@@ -200,7 +203,8 @@ func (m *AppProjectManager) UpdateManagedAppProject(ctx context.Context, incomin
 				Annotations: existing.Annotations,
 				Labels:      existing.Labels,
 			},
-			Spec: existing.Spec,
+			Spec:   existing.Spec,
+			Status: existing.Status,
 		}
 		patch, err := jsondiff.Compare(source, target)
 		if err != nil {

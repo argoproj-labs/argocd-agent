@@ -175,7 +175,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
-	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, projectInformer, true), appProjectManagerOption...)
+	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, projectInformer, true), s.namespace, appProjectManagerOption...)
 	if err != nil {
 		return nil, err
 	}

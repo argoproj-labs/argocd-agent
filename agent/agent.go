@@ -148,7 +148,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 		return nil, err
 	}
 
-	a.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(appclient, a.namespace, projectInformer, true), appProjectManagerOption...)
+	a.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(appclient, a.namespace, projectInformer, true), a.namespace, appProjectManagerOption...)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,11 @@ func (a *Agent) Start(ctx context.Context) error {
 	a.cancelFn = cancelFn
 	go func() {
 		a.appManager.StartBackend(a.context)
-		log().Warnf("Informer has exited")
+		log().Warnf("App Informer has exited")
+	}()
+	go func() {
+		a.projectManager.StartBackend(a.context)
+		log().Warnf("Project Informer has exited")
 	}()
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
@@ -188,8 +192,12 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"))
 
-	// Wait for the informer to be synced
+	// Wait for the app informer to be synced
 	err := a.appManager.EnsureSynced(waitForSyncedDuration)
+	if err != nil {
+		return fmt.Errorf("failed to sync applications: %w", err)
+	}
+
 	return err
 }
 

@@ -153,13 +153,17 @@ func Test_CreateAppProject(t *testing.T) {
 	a := newAgent(t)
 	be := backend_mocks.NewAppProject(t)
 	var err error
-	a.projectManager, err = appproject.NewAppProjectManager(be, appproject.WithAllowUpsert(true))
+	a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true))
 	require.NoError(t, err)
 	require.NotNil(t, a)
-	project := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{
-		Name:      "test",
-		Namespace: "default",
-	}}
+	project := &v1alpha1.AppProject{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "default",
+		}, Spec: v1alpha1.AppProjectSpec{
+			SourceNamespaces: []string{"default", "argocd"},
+		},
+	}
 
 	t.Run("Discard event in unmanaged mode", func(t *testing.T) {
 		napp, err := a.createAppProject(project)
@@ -192,7 +196,7 @@ func Test_UpdateAppProject(t *testing.T) {
 	a := newAgent(t)
 	be := backend_mocks.NewAppProject(t)
 	var err error
-	a.projectManager, err = appproject.NewAppProjectManager(be, appproject.WithAllowUpsert(true))
+	a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true))
 	require.NoError(t, err)
 	require.NotNil(t, a)
 	project := &v1alpha1.AppProject{
@@ -200,11 +204,14 @@ func Test_UpdateAppProject(t *testing.T) {
 			Name:            "test",
 			Namespace:       "argocd",
 			ResourceVersion: "12345",
+		},
+		Spec: v1alpha1.AppProjectSpec{
+			SourceNamespaces: []string{"default", "argocd"},
 		}}
 
 	t.Run("Update appproject using patch", func(t *testing.T) {
 		a.mode = types.AgentModeManaged
-		a.projectManager, err = appproject.NewAppProjectManager(be, appproject.WithAllowUpsert(true), appproject.WithMode(manager.ManagerModeManaged), appproject.WithRole(manager.ManagerRoleAgent))
+		a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true), appproject.WithMode(manager.ManagerModeManaged), appproject.WithRole(manager.ManagerRoleAgent))
 		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.AppProject{}, nil)
 		defer getEvent.Unset()
 		supportsPatchEvent := be.On("SupportsPatch").Return(true)
