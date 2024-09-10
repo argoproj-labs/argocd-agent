@@ -103,6 +103,13 @@ func WithRole(role manager.ManagerRole) AppProjectManagerOption {
 	}
 }
 
+// WithMode sets the mode of the AppProject manager
+func WithMode(mode manager.ManagerMode) AppProjectManagerOption {
+	return func(m *AppProjectManager) {
+		m.mode = mode
+	}
+}
+
 // stampLastUpdated "stamps" an application with the last updated label
 func stampLastUpdated(app *v1alpha1.AppProject) {
 	if app.Annotations == nil {
@@ -165,10 +172,6 @@ func (m *AppProjectManager) UpdateManagedAppProject(ctx context.Context, incomin
 	var err error
 
 	incoming.SetNamespace(m.namespace)
-
-	if !(m.role == manager.ManagerRoleAgent && m.mode == manager.ManagerModeManaged) {
-		return nil, fmt.Errorf("updatedManagedAppProject should be called on a managed agent, only")
-	}
 
 	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.AppProject) {
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
