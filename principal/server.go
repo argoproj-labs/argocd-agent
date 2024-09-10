@@ -168,14 +168,14 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		appprojectinformer.WithDeleteFunc(s.deleteAppProjectCallback),
 	}
 
-	projectInformer, err := appprojectinformer.NewAppProjectInformer(s.ctx, appClient, s.namespace,
+	projectInformer, err := appprojectinformer.NewAppProjectInformer(s.ctx, kubeClient.ApplicationsClientset, s.namespace,
 		appProjectInformerOptions...,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(appClient, s.namespace, projectInformer, true), appProjectManagerOption...)
+	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, projectInformer, true), appProjectManagerOption...)
 	if err != nil {
 		return nil, err
 	}
