@@ -63,7 +63,7 @@ func (m *AppProjectManager) Unmanage(projectName string) error {
 	}
 }
 
-// IgnoreChange adds a particular version for the application named projectName to
+// IgnoreChange adds a particular version for the app-project named projectName to
 // list of changes to ignore.
 func (m *AppProjectManager) IgnoreChange(projectName string, version string) error {
 	m.lock.Lock()

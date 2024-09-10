@@ -178,7 +178,7 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 			incoming.SetNamespace(agentName)
 			_, err := s.projectManager.Create(ctx, incoming)
 			if err != nil {
-				return fmt.Errorf("could not create application %s: %w", incoming.Name, err)
+				return fmt.Errorf("could not create app-project %s: %w", incoming.Name, err)
 			}
 		} else {
 			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
@@ -194,9 +194,9 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 			err = s.projectManager.Delete(ctx, agentName, incoming, &deletionPropagation)
 		}
 		if err != nil {
-			return fmt.Errorf("could not delete application %s: %w", incoming.Name, err)
+			return fmt.Errorf("could not delete app-project %s: %w", incoming.Name, err)
 		}
-		logCtx.Infof("Deleted application %s", incoming.Name)
+		logCtx.Infof("Deleted app-project %s", incoming.Name)
 	default:
 		return fmt.Errorf("unable to process event of type %s", ev.Type())
 	}

@@ -103,7 +103,7 @@ func (evs EventSource) AppProjectEvent(evType EventType, appProject *v1alpha1.Ap
 	cev.SetType(evType.String())
 	cev.SetDataSchema(TargetAppProject.String())
 	// TODO: Handle this error situation?
-	_ = cev.SetData(cloudevents.TextPlain, appProject)
+	_ = cev.SetData(cloudevents.ApplicationJSON, appProject)
 	return &cev
 }
 

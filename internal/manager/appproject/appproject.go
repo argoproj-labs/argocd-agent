@@ -112,7 +112,7 @@ func WithMode(mode manager.ManagerMode) AppProjectManagerOption {
 	}
 }
 
-// stampLastUpdated "stamps" an application with the last updated label
+// stampLastUpdated "stamps" an app-project with the last updated label
 func stampLastUpdated(app *v1alpha1.AppProject) {
 	if app.Annotations == nil {
 		app.Annotations = make(map[string]string)
@@ -272,7 +272,7 @@ func (m *AppProjectManager) update(ctx context.Context, upsert bool, incoming *v
 				updated, ierr = m.Create(ctx, incoming)
 				return ierr
 			} else {
-				return fmt.Errorf("error updating application %s: %w", incoming.Name, ierr)
+				return fmt.Errorf("error updating app-project %s: %w", incoming.Name, ierr)
 			}
 		} else {
 			if m.appprojectBackend.SupportsPatch() && patchFn != nil {
@@ -329,7 +329,7 @@ func (m *AppProjectManager) Delete(ctx context.Context, namespace string, incomi
 	return err
 }
 
-// RemoveFinalizers will remove finalizers on an existing application
+// RemoveFinalizers will remove finalizers on an existing app project.
 func (m *AppProjectManager) RemoveFinalizers(ctx context.Context, incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
 	updated, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.AppProject) {
 		existing.ObjectMeta.Finalizers = nil

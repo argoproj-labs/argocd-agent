@@ -13,9 +13,9 @@
 // limitations under the License.
 
 /*
-Package kubernetes implements an Application backend that uses a Kubernetes
+Package kubernetes implements an AppProject backend that uses a Kubernetes
 informer to keep track of resources, and an appclientset to manipulate
-Application resources on the cluster.
+AppProject resources on the cluster.
 */
 package appproject
 
@@ -42,7 +42,7 @@ type KubernetesBackend struct {
 	appClient appclientset.Interface
 	// appProjectInformer is used to watch for change events for Argo CD AppProject resources on the cluster
 	appProjectInformer *appproject.AppProjectInformer
-	// namespace is not currently read, is not guaranteed to be non-empty, and is not guaranteed to contain the source of Argo CD Application CRs in all cases
+	// namespace to contain the source of Argo CD AppProject CRs in all cases, mainly used by agents
 	namespace string
 	usePatch  bool
 }

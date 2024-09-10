@@ -153,10 +153,10 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 	s.watchLock.Lock()
 	defer s.watchLock.Unlock()
 	logCtx := log().WithFields(logrus.Fields{
-		"component":        "EventCallback",
-		"queue":            old.Namespace,
-		"event":            "application_update",
-		"application_name": old.Name,
+		"component":       "EventCallback",
+		"queue":           old.Namespace,
+		"event":           "appproject_update",
+		"appproject_name": old.Name,
 	})
 	if len(new.Finalizers) > 0 && len(new.Finalizers) != len(old.Finalizers) {
 		var err error
