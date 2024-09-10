@@ -17,7 +17,6 @@ package appproject
 import (
 	"context"
 	"strings"
-	"sync/atomic"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
@@ -42,9 +41,6 @@ type AppProjectInformer struct {
 	addFunc    func(proj *v1alpha1.AppProject)
 	updateFunc func(oldProj *v1alpha1.AppProject, newProj *v1alpha1.AppProject)
 	deleteFunc func(proj *v1alpha1.AppProject)
-
-	// synced indicates whether the informer is synced and the watch is set up
-	synced atomic.Bool
 }
 
 type AppProjectInformerOption func(pi *AppProjectInformer) error
