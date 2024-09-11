@@ -25,13 +25,13 @@ spec:
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: agent.principal.address
+                key: agent.server.address
                 optional: true
           - name: ARGOCD_AGENT_REMOTE_PORT
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: agent.principal.port
+                key: agent.server.port
                 optional: true
           - name: ARGOCD_AGENT_LOG_LEVEL
             valueFrom:
@@ -73,9 +73,9 @@ spec:
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: agent.agent.mode
+                key: agent.mode
                 optional: true
-          - name: ARGOCD_AGENT_USERPASS_CREDS_PATH
+          - name: ARGOCD_AGENT_CREDS
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params

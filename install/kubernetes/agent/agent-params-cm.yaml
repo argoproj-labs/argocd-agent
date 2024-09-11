@@ -10,7 +10,7 @@ data:
   # agent.creds: Valid credential identifier for this agent. Must be in the
   # format <method>:<configuration>.
   # Default: ""
-  agent.creds: "userpass:/app/config/creds/userpass.creds"
+  agent.creds.userpass.path: "userpass:/app/config/creds/userpass.creds"
   # agent.tls.client.insecure: Whether to skip the validation of the remote TLS
   # credentials. Insecure. Do only use for development purposes.
   # Default: false
