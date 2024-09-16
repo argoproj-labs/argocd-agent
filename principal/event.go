@@ -259,7 +259,8 @@ func (s *Server) createNamespaceIfNotExist(ctx context.Context, name string) (bo
 		} else {
 			_, err = s.kubeClient.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
 				ObjectMeta: v1.ObjectMeta{
-					Name: name,
+					Name:   name,
+					Labels: s.autoNamespaceLabels,
 				}},
 				v1.CreateOptions{})
 			return true, err

@@ -342,10 +342,11 @@ func WithAuthMethods(am *auth.Methods) ServerOption {
 	}
 }
 
-func WithAutoNamespaceCreate(enabled bool, pattern string) ServerOption {
+func WithAutoNamespaceCreate(enabled bool, pattern string, labels map[string]string) ServerOption {
 	return func(o *Server) error {
 		var err error
 		o.autoNamespaceAllow = enabled
+		o.autoNamespaceLabels = labels
 		if pattern != "" {
 			o.autoNamespacePattern, err = regexp.Compile(pattern)
 			if err != nil {

@@ -127,7 +127,7 @@ func Test_CreateEvents(t *testing.T) {
 		wq := wqmock.NewRateLimitingInterface(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, ""))
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil))
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeAutonomous)
 		err = s.processRecvQueue(context.Background(), "foo", wq)
@@ -298,7 +298,7 @@ func Test_createNamespaceIfNotExists(t *testing.T) {
 	})
 	t.Run("Pattern matches and namespace is created", func(t *testing.T) {
 		fac := kube.NewKubernetesFakeClient()
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a-z]+$"))
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a-z]+$", nil))
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
 		assert.True(t, created)
@@ -307,7 +307,7 @@ func Test_createNamespaceIfNotExists(t *testing.T) {
 
 	t.Run("Pattern does not match and namespace is not created", func(t *testing.T) {
 		fac := kube.NewKubernetesFakeClient()
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a]+$"))
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a]+$", nil))
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
 		assert.False(t, created)
@@ -316,7 +316,7 @@ func Test_createNamespaceIfNotExists(t *testing.T) {
 
 	t.Run("Namespace is created only once", func(t *testing.T) {
 		fac := kube.NewKubernetesFakeClient()
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, ""))
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil))
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
 		assert.True(t, created)

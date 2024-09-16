@@ -77,6 +77,7 @@ type Server struct {
 
 	autoNamespaceAllow   bool
 	autoNamespacePattern *regexp.Regexp
+	autoNamespaceLabels  map[string]string
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
