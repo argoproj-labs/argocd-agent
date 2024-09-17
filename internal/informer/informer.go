@@ -285,8 +285,9 @@ func (i *GenericInformer) Start(ctx context.Context) error {
 		return fmt.Errorf("cannot start informer: already running")
 	}
 	i.setRunning(true)
-	i.logger.Debug("Starting informer goroutine")
+	i.logger.Info("Starting informer goroutine")
 	go i.informer.Run(i.runch)
+	i.logger.Info("Failed to start informer goroutine")
 	return nil
 }
 

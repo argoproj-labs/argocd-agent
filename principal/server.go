@@ -91,7 +91,7 @@ var noAuthEndpoints = map[string]bool{
 	"/authapi.Authentication/Authenticate": true,
 }
 
-const waitForSyncedDuration = 1 * time.Second
+const waitForSyncedDuration = 60 * time.Second
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{

@@ -116,8 +116,9 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 	}
 	i, err := informer.NewGenericInformer(&v1alpha1.AppProject{},
 		informer.WithListCallback(func(options v1.ListOptions, namespace string) (runtime.Object, error) {
+			log().Infof("Listing AppProjects %v", client.ArgoprojV1alpha1().AppProjects(namespace))
 			projects, err := client.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, options)
-			pi.logger.Debugf("Lister returned %d AppProjects", len(projects.Items))
+			log().Infof("Lister returned %d AppProjects", len(projects.Items))
 			if pi.filterFunc != nil {
 				newItems := make([]v1alpha1.AppProject, 0)
 				for _, p := range projects.Items {
@@ -132,9 +133,11 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 		}),
 		informer.WithNamespaces(pi.namespaces...),
 		informer.WithWatchCallback(func(options v1.ListOptions, namespace string) (watch.Interface, error) {
+			log().Info("Watching AppProjects")
 			return client.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, options)
 		}),
 		informer.WithAddCallback(func(obj interface{}) {
+			log().Info("Add AppProject Callback")
 			proj, ok := obj.(*v1alpha1.AppProject)
 			if !ok {
 				pi.logger.Errorf("Received add event for unknown type %T", obj)
@@ -146,6 +149,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 			}
 		}),
 		informer.WithUpdateCallback(func(oldObj, newObj interface{}) {
+			log().Info("Update AppProject Callback")
 			oldProj, oldProjOk := oldObj.(*v1alpha1.AppProject)
 			newProj, newProjOk := newObj.(*v1alpha1.AppProject)
 			if !newProjOk || !oldProjOk {
@@ -158,6 +162,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 			}
 		}),
 		informer.WithDeleteCallback(func(obj interface{}) {
+			log().Info("Delete AppProject Callback")
 			proj, ok := obj.(*v1alpha1.AppProject)
 			if !ok {
 				pi.logger.Errorf("Received delete event for unknown type %T", obj)
@@ -192,7 +197,7 @@ func (i *AppProjectInformer) Start(ctx context.Context) {
 		log().Errorf("Failed to start app project informer: %v", err)
 		return
 	}
-	log().Infof("App informer has shutdown")
+	log().Infof("project informer has shutdown")
 }
 
 func log() *logrus.Entry {

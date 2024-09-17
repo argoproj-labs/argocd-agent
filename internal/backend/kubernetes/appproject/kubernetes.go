@@ -57,23 +57,13 @@ func NewKubernetesBackend(appClient appclientset.Interface, namespace string, ap
 }
 
 func (be *KubernetesBackend) List(ctx context.Context, selector backend.AppProjectSelector) ([]v1alpha1.AppProject, error) {
-	res := make([]v1alpha1.AppProject, 0)
-	if len(selector.Namespaces) > 0 {
-		for _, ns := range selector.Namespaces {
-			l, err := be.appClient.ArgoprojV1alpha1().AppProjects(ns).List(ctx, v1.ListOptions{})
-			if err != nil {
-				return nil, err
-			}
-			res = append(res, l.Items...)
-		}
-	} else {
-		l, err := be.appClient.ArgoprojV1alpha1().AppProjects("").List(ctx, v1.ListOptions{})
-		if err != nil {
-			return nil, err
-		}
-		res = append(res, l.Items...)
+
+	l, err := be.appClient.ArgoprojV1alpha1().AppProjects(be.namespace).List(ctx, v1.ListOptions{})
+	if err != nil {
+		return nil, err
 	}
-	return res, nil
+
+	return l.Items, nil
 }
 
 func (be *KubernetesBackend) Create(ctx context.Context, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {

@@ -35,8 +35,6 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 
-	"k8s.io/client-go/kubernetes"
-
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 )
 
@@ -83,7 +81,7 @@ type AgentOption func(*Agent) error
 
 // NewAgent creates a new agent instance, using the given client interfaces and
 // options.
-func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appclientset.Interface, namespace string, opts ...AgentOption) (*Agent, error) {
+func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace string, opts ...AgentOption) (*Agent, error) {
 	a := &Agent{
 		version: version.New("argocd-agent", "agent"),
 	}
@@ -148,11 +146,6 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 		return nil, err
 	}
 
-	a.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(appclient, a.namespace, projectInformer, true), a.namespace, appProjectManagerOption...)
-	if err != nil {
-		return nil, err
-	}
-
 	// The agent only supports Kubernetes as application backend
 	a.appManager, err = application.NewApplicationManager(
 		kubeapp.NewKubernetesBackend(appclient, a.namespace, appInformer, true),
@@ -162,6 +155,11 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 		application.WithMode(managerMode),
 	)
 
+	if err != nil {
+		return nil, err
+	}
+
+	a.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(appclient, a.namespace, projectInformer, true), a.namespace, appProjectManagerOption...)
 	if err != nil {
 		return nil, err
 	}
