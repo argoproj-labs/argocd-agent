@@ -120,4 +120,32 @@ kubectl rollout -n argocd restart deployment argocd-agent-principal
 
 ## Installing the agent
 
-TODO.
+To install the agent, we will need the following things:
+
+- A set of TLS certificates and private keys, 
+- A credentials file for authenticating agents
+
+we will use the `argocd` namespace to install all required resources into the cluster.
+
+#### Apply the installation manifests
+
+Now that the required secrets exist, it's time to apply the installation manifests and install the agent into the cluster:
+
+```shell 
+kubectl apply -n argocd -k install/kubernetes/principal
+```
+This should create all the required agent related resources.
+
+#### Configuring the agent
+
+You can configure the agent by editing the `argocd-agent-params` ConfigMap in the agent's installation namespace. For an up-to-date example with comments, have a look at the
+[example](https://github.com/argoproj-labs/argocd-agent/blob/main/install/kubernetes/agent/agent-params-cm.yaml)
+
+__Note:__
+Set `agent.tls.client.insecure` to `insecure` to if needed.
+
+After a change to the `argocd-agent-params` ConfigMap, the agent needs to be restarted to pick up the changes:
+
+```shell
+kubectl rollout -n argocd restart deployment argocd-agent-agent
+```
