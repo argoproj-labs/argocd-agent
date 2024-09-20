@@ -252,6 +252,8 @@ func (s *Server) createNamespaceIfNotExist(ctx context.Context, name string) (bo
 			return false, nil
 		}
 	}
+	// TODO: Handle namespaces that are currently being deleted in a graceful
+	// way.
 	_, err := s.kubeClient.CoreV1().Namespaces().Get(ctx, name, v1.GetOptions{})
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
