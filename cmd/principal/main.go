@@ -185,14 +185,14 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_ALLOWED_NAMESPACES", nil, []string{}),
 		"List of namespaces the server is allowed to operate in")
-	command.Flags().BoolVar(&autoNamespaceAllow, "namespace-create-enabled",
-		env.BoolWithDefault("ARGOCD_PRINCIPAL_NAMESPACE_CREATE_ALLOW", false),
+	command.Flags().BoolVar(&autoNamespaceAllow, "namespace-create-enable",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_NAMESPACE_CREATE_ENABLE", false),
 		"Whether to allow automatic namespace creation for autonomous agents")
 	command.Flags().StringVar(&autoNamespacePattern, "namespace-create-pattern",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_NAMESPACE_CREATE_PATTERN", nil, ""),
 		"Only automatically create namespaces matching pattern")
 	command.Flags().StringSliceVar(&autoNamespaceLabels, "namespace-create-labels",
-		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_NAMESPACE_CREATE_PATTERN", nil, []string{}),
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_NAMESPACE_CREATE_LABELS", nil, []string{}),
 		"Labels to apply to auto-created namespaces")
 
 	command.Flags().StringVar(&tlsCert, "tls-cert",

@@ -63,11 +63,11 @@ spec:
                 name: argocd-agent-params
                 key: principal.allowed-namespaces
                 optional: true
-          - name: ARGOCD_PRINCIPAL_NAMESPACE_CREATE_ALLOW
+          - name: ARGOCD_PRINCIPAL_NAMESPACE_CREATE_ENABLE
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: principal.namespace-create.allow
+                key: principal.namespace-create.enable
                 optional: true
           - name: ARGOCD_PRINCIPAL_NAMESPACE_CREATE_PATTERN
             valueFrom:

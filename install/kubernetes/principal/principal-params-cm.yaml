@@ -28,11 +28,11 @@ data:
   # Entries may contain shell-style wildcards.
   # Default: ""
   principal.allowed-namespaces: ""
-  # principal.namespace-create.allow: Whether the principal is allowed to
+  # principal.namespace-create.enable: Whether the principal is allowed to
   # create namespaces for agents if they don't exist yet. Either "true" or
   # "false".
   # Default: "false"
-  principal.namespace-create.allow: "false"
+  principal.namespace-create.enable: "false"
   # principal.namespace-create.pattern: A regexp pattern to restrict the names
   # of namespaces to be created. If empty, all patterns are allowed.
   # Default: ""
