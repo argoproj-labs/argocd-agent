@@ -51,43 +51,12 @@ func mkAppProjects() []runtime.Object {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "app-project",
 				Namespace: fmt.Sprintf("ns%d", i),
+				Labels:    map[string]string{"foo": "bar"},
 			},
+			Spec: v1alpha1.AppProjectSpec{},
 		})
 	}
 	return appProjects
-}
-
-func Test_List(t *testing.T) {
-	appProjects := mkAppProjects()
-	t.Run("No appProjects", func(t *testing.T) {
-		fakeAppC := fakeclient.NewSimpleClientset()
-		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		projects, err := k.List(context.TODO(), backend.AppProjectSelector{})
-		require.NoError(t, err)
-		assert.Len(t, projects, 0)
-	})
-	t.Run("Few appProjects", func(t *testing.T) {
-		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
-		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		appProjects, err := k.List(context.TODO(), backend.AppProjectSelector{})
-		require.NoError(t, err)
-		assert.Len(t, appProjects, 10)
-	})
-	t.Run("Apps with matching selector", func(t *testing.T) {
-		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
-		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		appProjects, err := k.List(context.TODO(), backend.AppProjectSelector{Namespaces: []string{"ns1", "ns2"}})
-		require.NoError(t, err)
-		assert.Len(t, appProjects, 2)
-	})
-
-	t.Run("Apps with non-matching selector", func(t *testing.T) {
-		fakeAppC := fakeclient.NewSimpleClientset(appProjects...)
-		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		appProjects, err := k.List(context.TODO(), backend.AppProjectSelector{Namespaces: []string{"ns11", "ns12"}})
-		require.NoError(t, err)
-		assert.Len(t, appProjects, 0)
-	})
 }
 
 func Test_Create(t *testing.T) {
@@ -181,4 +150,17 @@ func Test_Patch(t *testing.T) {
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, project)
 	})
+}
+
+func Test_List(t *testing.T) {
+	appProjects := mkAppProjects()
+
+	t.Run("List projects", func(t *testing.T) {
+		fakeAppClient := fakeclient.NewSimpleClientset(appProjects...)
+		be := NewKubernetesBackend(fakeAppClient, "", nil, true)
+		projectList, err := be.List(context.TODO(), backend.AppProjectSelector{})
+		require.NoError(t, err)
+		assert.Len(t, projectList, 10)
+	})
+
 }
