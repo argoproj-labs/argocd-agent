@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"k8s.io/client-go/kubernetes"
 )
 
 type Server struct {
@@ -69,8 +71,13 @@ type Server struct {
 	// clientLock should be owned before accessing namespaceMap
 	clientLock sync.RWMutex
 	// events is used to construct events to pass on the wire to connected agents.
-	events  *event.EventSource
-	version *version.Version
+	events     *event.EventSource
+	version    *version.Version
+	kubeClient kubernetes.Interface
+
+	autoNamespaceAllow   bool
+	autoNamespacePattern *regexp.Regexp
+	autoNamespaceLabels  map[string]string
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
@@ -84,11 +91,12 @@ const waitForSyncedDuration = 1 * time.Second
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
-		options:   defaultOptions(),
-		queues:    queue.NewSendRecvQueues(),
-		namespace: namespace,
-		noauth:    noAuthEndpoints,
-		version:   version.New("argocd-agent", "principal"),
+		options:    defaultOptions(),
+		queues:     queue.NewSendRecvQueues(),
+		namespace:  namespace,
+		noauth:     noAuthEndpoints,
+		version:    version.New("argocd-agent", "principal"),
+		kubeClient: kubeClient.Clientset,
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)

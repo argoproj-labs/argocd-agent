@@ -27,6 +27,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
@@ -337,6 +338,21 @@ func WithMetricsPort(port int) ServerOption {
 func WithAuthMethods(am *auth.Methods) ServerOption {
 	return func(o *Server) error {
 		o.authMethods = am
+		return nil
+	}
+}
+
+func WithAutoNamespaceCreate(enabled bool, pattern string, labels map[string]string) ServerOption {
+	return func(o *Server) error {
+		var err error
+		o.autoNamespaceAllow = enabled
+		o.autoNamespaceLabels = labels
+		if pattern != "" {
+			o.autoNamespacePattern, err = regexp.Compile(pattern)
+			if err != nil {
+				return fmt.Errorf("invalid auto-namespace pattern: %w", err)
+			}
+		}
 		return nil
 	}
 }

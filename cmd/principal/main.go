@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
+	"github.com/argoproj-labs/argocd-agent/internal/labels"
 	"github.com/argoproj-labs/argocd-agent/principal"
 
 	"github.com/sirupsen/logrus"
@@ -51,6 +52,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 		rootCaPath             string
 		requireClientCerts     bool
 		clientCertSubjectMatch bool
+		autoNamespaceAllow     bool
+		autoNamespacePattern   string
+		autoNamespaceLabels    []string
 	)
 	var command = &cobra.Command{
 		Short: "Run the argocd-agent principal component",
@@ -80,6 +84,14 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithListenerAddress(listenHost))
 			opts = append(opts, principal.WithListenerPort(listenPort))
 			opts = append(opts, principal.WithGRPC(true))
+			nsLabels := make(map[string]string)
+			if len(autoNamespaceLabels) > 0 {
+				nsLabels, err = labels.StringsToMap(autoNamespaceLabels)
+				if err != nil {
+					cmd.Fatal("Could not parse auto namespace labels: %v", err)
+				}
+			}
+			opts = append(opts, principal.WithAutoNamespaceCreate(autoNamespaceAllow, autoNamespacePattern, nsLabels))
 
 			if !disableMetrics {
 				opts = append(opts, principal.WithMetricsPort(metricsPort))
@@ -173,6 +185,15 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_ALLOWED_NAMESPACES", nil, []string{}),
 		"List of namespaces the server is allowed to operate in")
+	command.Flags().BoolVar(&autoNamespaceAllow, "namespace-create-enable",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_NAMESPACE_CREATE_ENABLE", false),
+		"Whether to allow automatic namespace creation for autonomous agents")
+	command.Flags().StringVar(&autoNamespacePattern, "namespace-create-pattern",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_NAMESPACE_CREATE_PATTERN", nil, ""),
+		"Only automatically create namespaces matching pattern")
+	command.Flags().StringSliceVar(&autoNamespaceLabels, "namespace-create-labels",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_NAMESPACE_CREATE_LABELS", nil, []string{}),
+		"Labels to apply to auto-created namespaces")
 
 	command.Flags().StringVar(&tlsCert, "tls-cert",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_CERT_PATH", nil, ""),

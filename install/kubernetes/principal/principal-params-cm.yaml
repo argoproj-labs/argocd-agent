@@ -28,6 +28,20 @@ data:
   # Entries may contain shell-style wildcards.
   # Default: ""
   principal.allowed-namespaces: ""
+  # principal.namespace-create.enable: Whether the principal is allowed to
+  # create namespaces for agents if they don't exist yet. Either "true" or
+  # "false".
+  # Default: "false"
+  principal.namespace-create.enable: "false"
+  # principal.namespace-create.pattern: A regexp pattern to restrict the names
+  # of namespaces to be created. If empty, all patterns are allowed.
+  # Default: ""
+  principal.namespace-create.pattern: ""
+  # principal.namespace-create.labels: A set of labels to apply to namespaces
+  # created for agents. Each label definition needs to be in the format of
+  # "key=value". Empty values are not allowed. Multiple labels can be given
+  # as a comma separated list, e.g. "foo=bar,bar=baz"
+  principal.namespace-create.labels: ""
   # principal.tls.server.cert-path: Path to the TLS certificate to be used by
   # the gRPC server.
   # Default: ""
