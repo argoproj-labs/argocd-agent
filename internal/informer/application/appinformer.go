@@ -225,7 +225,11 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 }
 
 func (i *AppInformer) Start(stopch <-chan struct{}) {
-	log().Infof("Starting app informer (namespaces: %s)", strings.Join(append([]string{i.options.namespace}, i.options.namespaces...), ","))
+	ns := ""
+	if i.options.namespace != "" {
+		ns = i.options.namespace + ","
+	}
+	log().Infof("Starting app informer (namespaces: %s)", strings.TrimSuffix(ns+strings.Join(i.options.namespaces, ","), ","))
 	i.appInformer.Run(stopch)
 	log().Infof("App informer has shutdown")
 }
