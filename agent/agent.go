@@ -141,7 +141,7 @@ func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace s
 		appproject.WithMode(managerMode),
 	}
 
-	projectInformer, err := appprojectinformer.NewAppProjectInformer(a.context, appclient, a.namespace)
+	projectInformer, err := appprojectinformer.NewAppProjectInformer(ctx, appclient, a.namespace)
 	if err != nil {
 		return nil, err
 	}
