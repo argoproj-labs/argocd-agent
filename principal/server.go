@@ -194,7 +194,13 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 // error during startup, before the go routines are running, will be returned
 // immediately. Errors during the runtime will be propagated via errch.
 func (s *Server) Start(ctx context.Context, errch chan error) error {
-	log().Infof("Starting %s (server) v%s (ns=%s, allowed_namespaces=%v)", s.version.Name(), s.version.Version(), s.namespace, s.options.namespaces)
+
+	if s.namespace != "" {
+		log().Infof("Starting %s (server) v%s (ns=%s, allowed_namespaces=%v)", s.version.Name(), s.version.Version(), s.namespace, s.options.namespaces)
+	} else {
+		log().Infof("Starting %s (server) v%s (allowed_namespaces=%v)", s.version.Name(), s.version.Version(), s.options.namespaces)
+	}
+
 	if s.options.serveGRPC {
 		if err := s.serveGRPC(ctx, errch); err != nil {
 			return err
