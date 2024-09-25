@@ -197,7 +197,6 @@ func (i *AppProjectInformer) Start(ctx context.Context) {
 		log().Errorf("Failed to start app project informer: %v", err)
 		return
 	}
-	log().Infof("project informer has shutdown")
 }
 
 func log() *logrus.Entry {
