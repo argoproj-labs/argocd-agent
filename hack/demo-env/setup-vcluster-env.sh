@@ -238,4 +238,3 @@ delete)
 	echo "$0 (create|delete)" >&2
 	exit 1
 esac
-

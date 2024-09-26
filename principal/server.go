@@ -25,12 +25,15 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
+	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
+	appprojectinformer "github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/issuer"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
@@ -54,12 +57,13 @@ type Server struct {
 	// Server uses clientID/namespace as a key, to refer to each specific agent's queue
 	queues *queue.SendRecvQueues
 	// namespace is the namespace the server will use for configuration. Set only when running out of cluster.
-	namespace  string
-	issuer     issuer.Issuer
-	noauth     map[string]bool // noauth contains endpoints accessible without authentication
-	ctx        context.Context
-	ctxCancel  context.CancelFunc
-	appManager *application.ApplicationManager
+	namespace      string
+	issuer         issuer.Issuer
+	noauth         map[string]bool // noauth contains endpoints accessible without authentication
+	ctx            context.Context
+	ctxCancel      context.CancelFunc
+	appManager     *application.ApplicationManager
+	projectManager *appproject.AppProjectManager
 	// At present, 'watchLock' is only acquired on calls to 'updateAppCallback'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
 	watchLock sync.RWMutex
 	// clientMap is not currently used
@@ -87,7 +91,7 @@ var noAuthEndpoints = map[string]bool{
 	"/authapi.Authentication/Authenticate": true,
 }
 
-const waitForSyncedDuration = 1 * time.Second
+const waitForSyncedDuration = 60 * time.Second
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
@@ -123,7 +127,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
-	informerOpts := []appinformer.AppInformerOption{
+	appInformerOptions := []appinformer.AppInformerOption{
 		appinformer.WithNamespaces(s.options.namespaces...),
 		appinformer.WithNewAppCallback(s.newAppCallback),
 		appinformer.WithUpdateAppCallback(s.updateAppCallback),
@@ -135,14 +139,20 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		application.WithRole(manager.ManagerRolePrincipal),
 	}
 
+	appProjectManagerOption := []appproject.AppProjectManagerOption{
+		appproject.WithAllowUpsert(true),
+		appproject.WithRole(manager.ManagerRolePrincipal),
+	}
+
 	if s.options.metricsPort > 0 {
-		informerOpts = append(informerOpts, appinformer.WithMetrics(metrics.NewApplicationWatcherMetrics()))
+		appInformerOptions = append(appInformerOptions, appinformer.WithMetrics(metrics.NewApplicationWatcherMetrics()))
 		managerOpts = append(managerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
+		appProjectManagerOption = append(appProjectManagerOption, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
 	}
 
 	appInformer := appinformer.NewAppInformer(s.ctx, kubeClient.ApplicationsClientset,
 		s.namespace,
-		informerOpts...,
+		appInformerOptions...,
 	)
 
 	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appInformer, true), s.namespace,
@@ -151,6 +161,25 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	if err != nil {
 		return nil, err
 	}
+
+	appProjectInformerOptions := []appprojectinformer.AppProjectInformerOption{
+		appprojectinformer.WithAddFunc(s.newAppProjectCallback),
+		appprojectinformer.WithUpdateFunc(s.updateAppProjectCallback),
+		appprojectinformer.WithDeleteFunc(s.deleteAppProjectCallback),
+	}
+
+	projectInformer, err := appprojectinformer.NewAppProjectInformer(s.ctx, kubeClient.ApplicationsClientset, s.namespace,
+		appProjectInformerOptions...,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, projectInformer, true), s.namespace, appProjectManagerOption...)
+	if err != nil {
+		return nil, err
+	}
+
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
 	}
@@ -190,6 +219,11 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	// The application informer lives in its own go routine
 	go func() {
 		s.appManager.StartBackend(s.ctx)
+	}()
+
+	// The project informer lives in its own go routine
+	go func() {
+		s.projectManager.StartBackend(s.ctx)
 	}()
 
 	s.events = event.NewEventSource(s.options.serverName)

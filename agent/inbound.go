@@ -37,6 +37,7 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	case event.TargetApplication:
 		err = a.processIncomingApplication(ev)
 	case event.TargetAppProject:
+		err = a.processIncomingAppProject(ev)
 	default:
 		err = fmt.Errorf("unknown event target: %s", ev.Target())
 	}
@@ -68,6 +69,38 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		err = a.deleteApplication(incomingApp)
 		if err != nil {
 			logCtx.Errorf("Error deleting application: %v", err)
+		}
+	default:
+		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
+	}
+
+	return err
+}
+
+func (a *Agent) processIncomingAppProject(ev *event.Event) error {
+	logCtx := log().WithFields(logrus.Fields{
+		"method": "processIncomingEvents",
+	})
+	incomingAppProject, err := ev.AppProject()
+	if err != nil {
+		return err
+	}
+
+	switch ev.Type() {
+	case event.Create:
+		_, err = a.createAppProject(incomingAppProject)
+		if err != nil {
+			logCtx.Errorf("Error creating appproject: %v", err)
+		}
+	case event.SpecUpdate:
+		_, err = a.updateAppProject(incomingAppProject)
+		if err != nil {
+			logCtx.Errorf("Error updating appproject: %v", err)
+		}
+	case event.Delete:
+		err = a.deleteAppProject(incomingAppProject)
+		if err != nil {
+			logCtx.Errorf("Error deleting appproject: %v", err)
 		}
 	default:
 		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
@@ -169,6 +202,92 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	err = a.appManager.Unmanage(app.QualifiedName())
 	if err != nil {
 		log().Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
+	}
+	return nil
+}
+
+// createAppProject creates an AppProject upon an event in the agent's work
+// queue.
+func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+	incoming.ObjectMeta.SetNamespace(a.namespace)
+	logCtx := log().WithFields(logrus.Fields{
+		"method": "CreateAppProject",
+		"app":    incoming.Name,
+	})
+
+	// In modes other than "managed", we don't process new AppProject events
+	// that are incoming.
+	if a.mode != types.AgentModeManaged {
+		logCtx.Trace("Discarding this event, because agent is not in managed mode")
+		return nil, fmt.Errorf("cannot create appproject: agent is not in managed mode")
+	}
+
+	// If we receive a new AppProject event for an AppProject we already manage, it usually
+	// means that we're out-of-sync from the control plane.
+	if a.appManager.IsManaged(incoming.Name) {
+		logCtx.Trace("Discarding this event, because AppProject is already managed on this agent")
+		return nil, fmt.Errorf("appproject %s is already managed", incoming.Name)
+	}
+
+	logCtx.Infof("Creating a new AppProject on behalf of an incoming event")
+
+	// Get rid of some fields that we do not want to have on the AppProject
+	// as we start fresh.
+	if incoming.Annotations != nil {
+		delete(incoming.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
+	}
+
+	created, err := a.projectManager.Create(a.context, incoming)
+	return created, err
+}
+
+func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+	//
+	incoming.ObjectMeta.SetNamespace(a.namespace)
+	logCtx := log().WithFields(logrus.Fields{
+		"method":          "UpdateAppProject",
+		"app":             incoming.Name,
+		"resourceVersion": incoming.ResourceVersion,
+	})
+	if a.appManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
+		logCtx.Tracef("Discarding this event, because agent has seen this version %s already", incoming.ResourceVersion)
+		return nil, fmt.Errorf("the version %s has already been seen by this agent", incoming.ResourceVersion)
+	} else {
+		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
+	}
+
+	logCtx.Infof("Updating appProject")
+
+	logCtx.Tracef("Calling update spec for this event")
+	return a.projectManager.UpdateAppProject(a.context, incoming)
+
+}
+
+func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
+	project.ObjectMeta.SetNamespace(a.namespace)
+	logCtx := log().WithFields(logrus.Fields{
+		"method": "DeleteAppProject",
+		"app":    project.Name,
+	})
+
+	// If we receive an update appproject event for an AppProject we don't know about yet it
+	// means that we're out-of-sync from the control plane.
+	//
+	// TODO(jannfis): Handle this situation properly instead of throwing an error.
+	if !a.appManager.IsManaged(project.Name) {
+		return fmt.Errorf("appProject %s is not managed", project.Name)
+	}
+
+	logCtx.Infof("Deleting appProject")
+
+	deletionPropagation := backend.DeletePropagationBackground
+	err := a.projectManager.Delete(a.context, a.namespace, project, &deletionPropagation)
+	if err != nil {
+		return err
+	}
+	err = a.projectManager.Unmanage(project.Name)
+	if err != nil {
+		log().Warnf("Could not unmanage appProject %s: %v", project.Name, err)
 	}
 	return nil
 }

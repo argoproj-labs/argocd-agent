@@ -22,25 +22,22 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
-	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/stretchr/testify/require"
 )
 
 func newAgent(t *testing.T) *Agent {
 	t.Helper()
-	fakec := fakekube.NewFakeClientsetWithResources()
 	appc := fakeappclient.NewSimpleClientset()
 	remote, err := client.NewRemote("127.0.0.1", 8080)
 	require.NoError(t, err)
-	agent, err := NewAgent(context.TODO(), fakec, appc, "argocd", WithRemote(remote))
+	agent, err := NewAgent(context.TODO(), appc, "argocd", WithRemote(remote))
 	require.NoError(t, err)
 	return agent
 }
 
 func Test_NewAgent(t *testing.T) {
-	fakec := fakekube.NewFakeClientsetWithResources()
 	appc := fakeappclient.NewSimpleClientset()
-	agent, err := NewAgent(context.TODO(), fakec, appc, "agent", WithRemote(&client.Remote{}))
+	agent, err := NewAgent(context.TODO(), appc, "agent", WithRemote(&client.Remote{}))
 	require.NotNil(t, agent)
 	require.NoError(t, err)
 }

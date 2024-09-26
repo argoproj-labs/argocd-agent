@@ -16,6 +16,7 @@ package appproject
 
 import (
 	"context"
+	"strings"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
@@ -34,23 +35,15 @@ type AppProjectInformer struct {
 	namespaces []string
 	logger     *logrus.Entry
 
+	projectInformer *informer.GenericInformer
+	projectLister   applisters.AppProjectLister
+
 	addFunc    func(proj *v1alpha1.AppProject)
 	updateFunc func(oldProj *v1alpha1.AppProject, newProj *v1alpha1.AppProject)
 	deleteFunc func(proj *v1alpha1.AppProject)
 }
 
 type AppProjectInformerOption func(pi *AppProjectInformer) error
-
-// WithNamespaces restricts the informer to certain namespaces. If no namespace
-// is set, or if multiple are set, the informer requires cluster-wide access to
-// AppProjects. When one or more namespaces are set, only objects in these
-// namespaces will be considered by the informer.
-func WithNamespaces(namespaces ...string) AppProjectInformerOption {
-	return func(pi *AppProjectInformer) error {
-		pi.namespaces = namespaces
-		return nil
-	}
-}
 
 // WithListFilter sets a filter function for the add, update and delete events.
 // This function will be called for each event, and if it returns false, the
@@ -97,17 +90,25 @@ func WithLogger(l *logrus.Entry) AppProjectInformerOption {
 	}
 }
 
+// WithNamespaces sets additional namespaces to be watched by the AppProjectInformer
+func WithNamespaces(namespaces ...string) AppProjectInformerOption {
+	return func(o *AppProjectInformer) error {
+		o.namespaces = namespaces
+		return nil
+	}
+}
+
 // NewAppProjectInformer returns a new instance of a GenericInformer set up to
 // handle AppProjects. It will be configured with the given options, using the
 // given appclientset.
-func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, options ...AppProjectInformerOption) (*informer.GenericInformer, applisters.AppProjectLister, error) {
+func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, namespace string, options ...AppProjectInformerOption) (*AppProjectInformer, error) {
 	pi := &AppProjectInformer{
 		namespaces: make([]string, 0),
 	}
 	for _, o := range options {
 		err := o(pi)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	if pi.logger == nil {
@@ -115,8 +116,9 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 	}
 	i, err := informer.NewGenericInformer(&v1alpha1.AppProject{},
 		informer.WithListCallback(func(options v1.ListOptions, namespace string) (runtime.Object, error) {
+			log().Infof("Listing AppProjects %v", client.ArgoprojV1alpha1().AppProjects(namespace))
 			projects, err := client.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, options)
-			pi.logger.Debugf("Lister returned %d AppProjects", len(projects.Items))
+			log().Infof("Lister returned %d AppProjects", len(projects.Items))
 			if pi.filterFunc != nil {
 				newItems := make([]v1alpha1.AppProject, 0)
 				for _, p := range projects.Items {
@@ -131,9 +133,11 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 		}),
 		informer.WithNamespaces(pi.namespaces...),
 		informer.WithWatchCallback(func(options v1.ListOptions, namespace string) (watch.Interface, error) {
+			log().Info("Watching AppProjects")
 			return client.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, options)
 		}),
 		informer.WithAddCallback(func(obj interface{}) {
+			log().Info("Add AppProject Callback")
 			proj, ok := obj.(*v1alpha1.AppProject)
 			if !ok {
 				pi.logger.Errorf("Received add event for unknown type %T", obj)
@@ -145,6 +149,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 			}
 		}),
 		informer.WithUpdateCallback(func(oldObj, newObj interface{}) {
+			log().Info("Update AppProject Callback")
 			oldProj, oldProjOk := oldObj.(*v1alpha1.AppProject)
 			newProj, newProjOk := newObj.(*v1alpha1.AppProject)
 			if !newProjOk || !oldProjOk {
@@ -157,6 +162,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 			}
 		}),
 		informer.WithDeleteCallback(func(obj interface{}) {
+			log().Info("Delete AppProject Callback")
 			proj, ok := obj.(*v1alpha1.AppProject)
 			if !ok {
 				pi.logger.Errorf("Received delete event for unknown type %T", obj)
@@ -179,5 +185,23 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, o
 			return pi.filterFunc(o)
 		}),
 	)
-	return i, applisters.NewAppProjectLister(i.Indexer()), err
+	pi.projectInformer = i
+	pi.projectLister = applisters.NewAppProjectLister(i.Indexer())
+	return pi, err
+}
+
+func (i *AppProjectInformer) Start(ctx context.Context) {
+	log().Infof("Starting app project informer (namespaces: %s)", strings.Join(i.namespaces, ","))
+	err := i.projectInformer.Start(ctx)
+	if err != nil {
+		log().Errorf("Failed to start app project informer: %v", err)
+		return
+	}
+}
+
+func log() *logrus.Entry {
+	return logrus.WithField("module", "AppProjectInformer")
+}
+
+func init() {
 }

@@ -85,6 +85,7 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 					logCtx.Warnf("Error listing apps: %v", err)
 					return nil, err
 				}
+				logCtx.Info("Listing apps into cache successful")
 
 				// The result of the list call will get pre-filtered to only
 				// contain apps that a) are in a namespace we are allowed to

@@ -36,6 +36,13 @@ type ApplicationClientMetrics struct {
 	Errors      prometheus.Counter
 }
 
+type AppProjectClientMetrics struct {
+	AppProjectsCreated *prometheus.CounterVec
+	AppProjectsUpdated *prometheus.CounterVec
+	AppProjectsDeleted *prometheus.CounterVec
+	Errors             prometheus.Counter
+}
+
 // NewApplicationWatcherMetrics returns a new instance of ApplicationMetrics
 func NewApplicationWatcherMetrics() *ApplicationWatcherMetrics {
 	am := &ApplicationWatcherMetrics{
@@ -76,6 +83,27 @@ func NewApplicationClientMetrics() *ApplicationClientMetrics {
 		Errors: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "argocd_agent_client_applications_errors",
 			Help: "The total number of applications deleted by the application client",
+		}),
+	}
+}
+
+func NewAppProjectClientMetrics() *AppProjectClientMetrics {
+	return &AppProjectClientMetrics{
+		AppProjectsCreated: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_appprojects_created",
+			Help: "The total number of appprojects created by the appproject client",
+		}, []string{"namespace"}),
+		AppProjectsUpdated: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_appprojects_updated",
+			Help: "The total number of appprojects updated by the appproject client",
+		}, []string{"namespace"}),
+		AppProjectsDeleted: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_appprojects_deleted",
+			Help: "The total number of appprojects deleted by the appproject client",
+		}, []string{"namespace"}),
+		Errors: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "argocd_agent_client_appprojects_errors",
+			Help: "The total number of appprojects deleted by the appproject client",
 		}),
 	}
 }

@@ -26,6 +26,7 @@ import (
 	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 )
 
@@ -142,6 +143,82 @@ func Test_UpdateApplication(t *testing.T) {
 		patchEvent := be.On("Update", mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer patchEvent.Unset()
 		napp, err := a.updateApplication(app)
+		require.NoError(t, err)
+		require.NotNil(t, napp)
+	})
+
+}
+
+func Test_CreateAppProject(t *testing.T) {
+	a := newAgent(t)
+	be := backend_mocks.NewAppProject(t)
+	var err error
+	a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true))
+	require.NoError(t, err)
+	require.NotNil(t, a)
+	project := &v1alpha1.AppProject{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "default",
+		}, Spec: v1alpha1.AppProjectSpec{
+			SourceNamespaces: []string{"default", "argocd"},
+		},
+	}
+
+	t.Run("Discard event in unmanaged mode", func(t *testing.T) {
+		napp, err := a.createAppProject(project)
+		require.Nil(t, napp)
+		require.ErrorContains(t, err, "not in managed mode")
+	})
+
+	t.Run("Discard event because appproject is already managed", func(t *testing.T) {
+		defer a.appManager.Unmanage(project.Name)
+		a.mode = types.AgentModeManaged
+		a.appManager.Manage(project.Name)
+		napp, err := a.createAppProject(project)
+		require.ErrorContains(t, err, "is already managed")
+		require.Nil(t, napp)
+	})
+
+	t.Run("Create appproject", func(t *testing.T) {
+		defer a.appManager.Unmanage(project.Name)
+		a.mode = types.AgentModeManaged
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(&v1alpha1.AppProject{}, nil)
+		defer createMock.Unset()
+		napp, err := a.createAppProject(project)
+		require.NoError(t, err)
+		require.NotNil(t, napp)
+	})
+
+}
+
+func Test_UpdateAppProject(t *testing.T) {
+	a := newAgent(t)
+	be := backend_mocks.NewAppProject(t)
+	var err error
+	a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true))
+	require.NoError(t, err)
+	require.NotNil(t, a)
+	project := &v1alpha1.AppProject{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "test",
+			Namespace:       "argocd",
+			ResourceVersion: "12345",
+		},
+		Spec: v1alpha1.AppProjectSpec{
+			SourceNamespaces: []string{"default", "argocd"},
+		}}
+
+	t.Run("Update appproject using patch", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+		a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true), appproject.WithMode(manager.ManagerModeManaged), appproject.WithRole(manager.ManagerRoleAgent))
+		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.AppProject{}, nil)
+		defer getEvent.Unset()
+		supportsPatchEvent := be.On("SupportsPatch").Return(true)
+		defer supportsPatchEvent.Unset()
+		patchEvent := be.On("Patch", mock.Anything, "test", "argocd", mock.Anything).Return(&v1alpha1.AppProject{}, nil)
+		defer patchEvent.Unset()
+		napp, err := a.updateAppProject(project)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 	})

@@ -267,8 +267,7 @@ func Test_AgentServer(t *testing.T) {
 	)
 	require.NoError(t, err)
 	fakeAppcAgent := fakeappclient.NewSimpleClientset()
-	fakeKubecAgent := fakekube.NewFakeKubeClient()
-	a, err := agent.NewAgent(actx, fakeKubecAgent, fakeAppcAgent, "client",
+	a, err := agent.NewAgent(actx, fakeAppcAgent, "client",
 		agent.WithRemote(remote),
 		agent.WithMode(types.AgentModeManaged.String()),
 	)

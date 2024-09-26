@@ -22,17 +22,18 @@ import (
 	"time"
 
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
+	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
+	appprojectinformer "github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
-
-	"k8s.io/client-go/kubernetes"
 
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 )
@@ -52,10 +53,11 @@ type Agent struct {
 	infStopCh chan struct{}
 	connected atomic.Bool
 	// syncCh is not currently used
-	syncCh     chan bool
-	remote     *client.Remote
-	appManager *application.ApplicationManager
-	mode       types.AgentMode
+	syncCh         chan bool
+	remote         *client.Remote
+	appManager     *application.ApplicationManager
+	projectManager *appproject.AppProjectManager
+	mode           types.AgentMode
 	// queues is a queue of create/update/delete events to send to the principal
 	queues  *queue.SendRecvQueues
 	emitter *event.EventSource
@@ -79,7 +81,7 @@ type AgentOption func(*Agent) error
 
 // NewAgent creates a new agent instance, using the given client interfaces and
 // options.
-func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appclientset.Interface, namespace string, opts ...AgentOption) (*Agent, error) {
+func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace string, opts ...AgentOption) (*Agent, error) {
 	a := &Agent{
 		version: version.New("argocd-agent", "agent"),
 	}
@@ -118,7 +120,7 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
-	informer := appinformer.NewAppInformer(ctx, appclient, a.namespace,
+	appInformer := appinformer.NewAppInformer(ctx, appclient, a.namespace,
 		appinformer.WithListAppCallback(a.listAppCallback),
 		appinformer.WithNewAppCallback(a.addAppCreationToQueue),
 		appinformer.WithUpdateAppCallback(a.addAppUpdateToQueue),
@@ -133,15 +135,31 @@ func NewAgent(ctx context.Context, client kubernetes.Interface, appclient appcli
 
 	var err error
 
+	appProjectManagerOption := []appproject.AppProjectManagerOption{
+		appproject.WithAllowUpsert(true),
+		appproject.WithRole(manager.ManagerRoleAgent),
+		appproject.WithMode(managerMode),
+	}
+
+	projectInformer, err := appprojectinformer.NewAppProjectInformer(ctx, appclient, a.namespace)
+	if err != nil {
+		return nil, err
+	}
+
 	// The agent only supports Kubernetes as application backend
 	a.appManager, err = application.NewApplicationManager(
-		kubeapp.NewKubernetesBackend(appclient, a.namespace, informer, true),
+		kubeapp.NewKubernetesBackend(appclient, a.namespace, appInformer, true),
 		a.namespace,
 		application.WithAllowUpsert(allowUpsert),
 		application.WithRole(manager.ManagerRoleAgent),
 		application.WithMode(managerMode),
 	)
 
+	if err != nil {
+		return nil, err
+	}
+
+	a.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(appclient, a.namespace, projectInformer, true), a.namespace, appProjectManagerOption...)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +175,11 @@ func (a *Agent) Start(ctx context.Context) error {
 	a.cancelFn = cancelFn
 	go func() {
 		a.appManager.StartBackend(a.context)
-		log().Warnf("Informer has exited")
+		log().Warnf("App Informer has exited")
+	}()
+	go func() {
+		a.projectManager.StartBackend(a.context)
+		log().Warnf("Project Informer has exited")
 	}()
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
@@ -168,8 +190,12 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"))
 
-	// Wait for the informer to be synced
+	// Wait for the app informer to be synced
 	err := a.appManager.EnsureSynced(waitForSyncedDuration)
+	if err != nil {
+		return fmt.Errorf("failed to sync applications: %w", err)
+	}
+
 	return err
 }
 

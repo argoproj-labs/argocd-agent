@@ -3,7 +3,6 @@ kind: IPAddressPool
 metadata:
   name: default-addresspool
   namespace: metallb-system
-  uid: 1812d024-a3f6-4c4e-8aa3-68d2260618ed
 spec:
   addresses:
   - 192.168.56.100-192.168.56.254

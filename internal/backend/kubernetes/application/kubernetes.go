@@ -41,19 +41,19 @@ var _ backend.Application = &KubernetesBackend{}
 type KubernetesBackend struct {
 	// appClient is used to interfact with Argo CD Application resources on the cluster on which agent/principal is installed.
 	appClient appclientset.Interface
-	// informer is used to watch for change events for Argo CD Application resources on the cluster
-	informer *appinformer.AppInformer
+	// appInformer is used to watch for change events for Argo CD Application resources on the cluster
+	appInformer *appinformer.AppInformer
 	// namespace is not currently read, is not guaranteed to be non-empty, and is not guaranteed to contain the source of Argo CD Application CRs in all cases
 	namespace string
 	usePatch  bool
 }
 
-func NewKubernetesBackend(appClient appclientset.Interface, namespace string, informer *appinformer.AppInformer, usePatch bool) *KubernetesBackend {
+func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appInformer *appinformer.AppInformer, usePatch bool) *KubernetesBackend {
 	return &KubernetesBackend{
-		appClient: appClient,
-		informer:  informer,
-		usePatch:  usePatch,
-		namespace: namespace,
+		appClient:   appClient,
+		appInformer: appInformer,
+		usePatch:    usePatch,
+		namespace:   namespace,
 	}
 }
 
@@ -125,9 +125,9 @@ func (be *KubernetesBackend) SupportsPatch() bool {
 }
 
 func (be *KubernetesBackend) StartInformer(ctx context.Context) {
-	be.informer.Start(ctx.Done())
+	be.appInformer.Start(ctx.Done())
 }
 
 func (be *KubernetesBackend) EnsureSynced(duration time.Duration) error {
-	return be.informer.EnsureSynced(duration)
+	return be.appInformer.EnsureSynced(duration)
 }
