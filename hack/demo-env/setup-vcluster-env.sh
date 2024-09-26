@@ -69,7 +69,7 @@ wait_for_pods() {
         echo "  -> Waiting for $1 pods to be running. Expecting $2 running pods."
 
         kubectl get pods --context="$1" -A
-        RUNNING_PODS=`kubectl get pods --context="$1" -A | grep "Running" | wc -l`
+        RUNNING_PODS=`kubectl get pods --context="$1" -A | grep "Running" | wc -l | tr -d '[:space:]'`
 
         if [[ "$RUNNING_PODS" == "$2" ]]; then
             break
@@ -238,4 +238,3 @@ delete)
 	echo "$0 (create|delete)" >&2
 	exit 1
 esac
-
