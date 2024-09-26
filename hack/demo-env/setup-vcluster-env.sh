@@ -51,7 +51,7 @@ trap on_error ERR
 check_for_openshift() {
 
 	OPENSHIFT=
-	if kubectl api-resources | grep -q "openshift.io"; then 
+	if (kubectl api-resources || true) | grep -q "openshift.io"; then
 		OPENSHIFT=true
 	fi
 
