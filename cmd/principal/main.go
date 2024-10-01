@@ -55,6 +55,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		autoNamespaceAllow     bool
 		autoNamespacePattern   string
 		autoNamespaceLabels    []string
+		enableWebSocket        bool
 	)
 	var command = &cobra.Command{
 		Short: "Run the argocd-agent principal component",
@@ -146,6 +147,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 				observer(10 * time.Second)
 			}
 
+			opts = append(opts, principal.WithWebSocket(enableWebSocket))
+
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
 				cmd.Fatal("Could not create new server instance: %v", err)
@@ -224,6 +227,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&userDB, "passwd",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_USER_DB_PATH", nil, ""),
 		"Path to userpass passwd file")
+
+	command.Flags().BoolVar(&enableWebSocket, "enable-websocket",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET", false),
+		"Principal will rely on gRPC over WebSocket to stream events to the Agent")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

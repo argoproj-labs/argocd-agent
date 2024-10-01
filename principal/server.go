@@ -82,6 +82,10 @@ type Server struct {
 	autoNamespaceAllow   bool
 	autoNamespacePattern *regexp.Regexp
 	autoNamespaceLabels  map[string]string
+
+	// The Principal will rely on gRPC over WebSocket for bi-directional streaming. This option could be enabled
+	// when there is an intermediate component that is HTTP/2 incompatible and downgrades the incoming request to HTTP/1.1
+	enableWebSocket bool
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need

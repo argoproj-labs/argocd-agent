@@ -36,6 +36,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal"
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
+	"github.com/argoproj-labs/argocd-agent/test/proxy"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
@@ -299,6 +300,148 @@ func Test_AgentServer(t *testing.T) {
 	<-actx.Done()
 	err = s.Shutdown()
 	require.NoError(t, err)
+}
+
+func Test_WithHTTP1WebSocket(t *testing.T) {
+	fakeAppcServer := fakeappclient.NewSimpleClientset()
+	am := auth.NewMethods()
+	up := userpass.NewUserPassAuthentication("")
+	err := am.RegisterMethod("userpass", up)
+	require.NoError(t, err)
+	up.UpsertUser("client", "insecure")
+
+	proxyPort := 9090
+	hostPort := func(host string, port int) string {
+		return fmt.Sprintf("%s:%d", host, port)
+	}
+
+	startPrincipal := func(t *testing.T, ctx context.Context, enableWebSocket bool) *principal.Server {
+		t.Helper()
+
+		serverOpts := []principal.ServerOption{
+			principal.WithGRPC(true),
+			principal.WithListenerPort(0),
+			principal.WithServerName("control-plane"),
+			principal.WithGeneratedTLS("control-plane"),
+			principal.WithAuthMethods(am),
+			principal.WithNamespaces("client"),
+			principal.WithGeneratedTokenSigningKey(),
+		}
+
+		if enableWebSocket {
+			serverOpts = append(serverOpts, principal.WithWebSocket(true))
+		}
+
+		s, err := principal.NewServer(ctx, fakekube.NewKubernetesFakeClient(), "server", serverOpts...)
+
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		errch := make(chan error)
+		err = s.Start(ctx, errch)
+		require.NoError(t, err)
+
+		return s
+	}
+
+	createRemote := func(t *testing.T, enableWebSocket bool, port int) *client.Remote {
+		t.Helper()
+		opts := []client.RemoteOption{
+			client.WithInsecureSkipTLSVerify(),
+			client.WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "client", userpass.ClientSecretField: "insecure"}),
+		}
+
+		if enableWebSocket {
+			opts = append(opts, client.WithWebSocket(true))
+		}
+
+		remote, err := client.NewRemote("", port, opts...)
+		require.NoError(t, err)
+
+		return remote
+	}
+
+	startAgent := func(t *testing.T, ctx context.Context, remote *client.Remote) (*client.Remote, *agent.Agent) {
+		t.Helper()
+
+		fakeAppcAgent := fakeappclient.NewSimpleClientset()
+		a, err := agent.NewAgent(ctx, fakeAppcAgent, "client",
+			agent.WithRemote(remote),
+			agent.WithMode(types.AgentModeManaged.String()),
+		)
+		require.NotNil(t, a)
+		require.NoError(t, err)
+		err = a.Start(ctx)
+		require.NoError(t, err)
+		return remote, a
+	}
+
+	t.Run("agent should not connect via proxy with WebSocket disabled", func(t *testing.T) {
+		sctx, scancel := context.WithTimeout(context.Background(), 20*time.Second)
+		actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer scancel()
+		defer acancel()
+
+		// Create the principal server with WebSocket disabled.
+		s := startPrincipal(t, sctx, false)
+		defer s.Shutdown()
+
+		// Create a reverse proxy that downgrades the incoming requests to HTTP/1.1
+		http1Proxy := proxy.StartHTTP2DowngradingProxy(t, hostPort("", proxyPort), hostPort("", s.ListenerForE2EOnly().Port()))
+		defer http1Proxy.Close()
+
+		// Create a remote agent with WebSocket disabled
+		remote := createRemote(t, false, proxyPort)
+
+		// We should not be able to connect since WebSocket is disabled and proxy downgrades to HTTP/1.1
+		err = remote.Connect(actx, false)
+		require.Error(t, err)
+	})
+
+	t.Run("agent should connect via proxy with WebSocket enabled", func(t *testing.T) {
+		sctx, scancel := context.WithTimeout(context.Background(), 20*time.Second)
+		actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer scancel()
+		defer acancel()
+
+		// Create the principal server with WebSocket enabled.
+		s := startPrincipal(t, sctx, true)
+		defer s.Shutdown()
+
+		// Create a reverse proxy that downgrades the incoming requests to HTTP/1.1
+		http1Proxy := proxy.StartHTTP2DowngradingProxy(t, hostPort("", proxyPort), hostPort("", s.ListenerForE2EOnly().Port()))
+		defer http1Proxy.Close()
+
+		// Create an agent with WebSocket enabled
+		remote, a := startAgent(t, actx, createRemote(t, true, proxyPort))
+		defer a.Stop()
+
+		// The agent should be able to connect to the principal via the HTTP/2 incompatible proxy.
+		require.NoError(t, remote.Connect(actx, false))
+		require.True(t, a.IsConnected())
+
+		log().Infof("Creating application")
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "testapp",
+				Namespace: "client",
+			},
+		}
+		_, err = fakeAppcServer.ArgoprojV1alpha1().Applications("client").Create(sctx, app, v1.CreateOptions{})
+		require.NoError(t, err)
+		for i := 0; i < 5; i += 1 {
+			app, err = fakeAppcServer.ArgoprojV1alpha1().Applications("client").Get(actx, "testapp", v1.GetOptions{})
+			if err == nil {
+				break
+			}
+			time.Sleep(1 * time.Second)
+		}
+		require.NoError(t, err)
+		require.NotNil(t, app)
+		app.Spec.Project = "hulahup"
+		time.Sleep(1 * time.Second)
+		_, err = fakeAppcServer.ArgoprojV1alpha1().Applications("client").Update(actx, app, v1.UpdateOptions{})
+		require.NoError(t, err)
+	})
 }
 
 func log() *logrus.Entry {

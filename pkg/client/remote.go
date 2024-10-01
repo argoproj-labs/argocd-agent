@@ -31,6 +31,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
+	grpchttp1client "golang.stackrox.io/grpc-http1/client"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -64,18 +65,19 @@ func NewToken(tok string) (*token, error) {
 
 // Remote represents a remote argocd-agent server component. Remote is used only by the agent component, and not by principal.
 type Remote struct {
-	hostname     string
-	port         int
-	tlsConfig    *tls.Config
-	accessToken  *token
-	refreshToken *token
-	authMethod   string
-	creds        auth.Credentials
-	backoff      wait.Backoff
-	conn         *grpc.ClientConn
-	clientID     string
-	clientMode   types.AgentMode
-	timeouts     timeouts
+	hostname        string
+	port            int
+	tlsConfig       *tls.Config
+	accessToken     *token
+	refreshToken    *token
+	authMethod      string
+	creds           auth.Credentials
+	backoff         wait.Backoff
+	conn            *grpc.ClientConn
+	clientID        string
+	clientMode      types.AgentMode
+	timeouts        timeouts
+	enableWebSocket bool
 }
 
 type RemoteOption func(r *Remote) error
@@ -177,6 +179,15 @@ func WithRootAuthoritiesFromFile(caPath string) RemoteOption {
 func WithInsecureSkipTLSVerify() RemoteOption {
 	return func(r *Remote) error {
 		r.tlsConfig.InsecureSkipVerify = true
+		return nil
+	}
+}
+
+// The agent will rely on gRPC over WebSocket for bi-directional streaming. This option could be enabled
+// when there is an intermediate component that is HTTP/2 incompatible and downgrades the incoming request to HTTP/1.1
+func WithWebSocket(enableWebSocket bool) RemoteOption {
+	return func(r *Remote) error {
+		r.enableWebSocket = enableWebSocket
 		return nil
 	}
 }
@@ -286,16 +297,32 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 
 	// Some default options
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(creds),
 		grpc.WithConnectParams(cparams),
 		grpc.WithUserAgent("argocd-agent/v0.0.1"),
 		grpc.WithUnaryInterceptor(r.unaryAuthInterceptor),
 		grpc.WithStreamInterceptor(r.streamAuthInterceptor),
 	}
 
-	conn, err := grpc.NewClient(r.Addr(), opts...)
-	if err != nil {
-		return err
+	var (
+		conn *grpc.ClientConn
+		err  error
+	)
+	if r.enableWebSocket {
+		grpcHTTP1Opts := []grpchttp1client.ConnectOption{
+			grpchttp1client.UseWebSocket(true),
+			grpchttp1client.DialOpts(opts...),
+		}
+
+		conn, err = grpchttp1client.ConnectViaProxy(ctx, r.Addr(), r.tlsConfig, grpcHTTP1Opts...)
+		if err != nil {
+			return err
+		}
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(creds))
+		conn, err = grpc.NewClient(r.Addr(), opts...)
+		if err != nil {
+			return err
+		}
 	}
 
 	authC := authapi.NewAuthenticationClient(conn)

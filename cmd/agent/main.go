@@ -35,21 +35,22 @@ import (
 
 func NewAgentRunCommand() *cobra.Command {
 	var (
-		serverAddress string
-		serverPort    int
-		logLevel      string
-		logFormat     string
-		insecure      bool
-		rootCAPath    string
-		kubeConfig    string
-		kubeContext   string
-		namespace     string
-		agentMode     string
-		creds         string
-		showVersion   bool
-		versionFormat string
-		tlsClientCrt  string
-		tlsClientKey  string
+		serverAddress   string
+		serverPort      int
+		logLevel        string
+		logFormat       string
+		insecure        bool
+		rootCAPath      string
+		kubeConfig      string
+		kubeContext     string
+		namespace       string
+		agentMode       string
+		creds           string
+		showVersion     bool
+		versionFormat   string
+		tlsClientCrt    string
+		tlsClientKey    string
+		enableWebSocket bool
 	)
 	command := &cobra.Command{
 		Short: "Run the argocd-agent agent component",
@@ -96,6 +97,7 @@ func NewAgentRunCommand() *cobra.Command {
 			if tlsClientCrt != "" && tlsClientKey != "" {
 				remoteOpts = append(remoteOpts, client.WithTLSClientCertFromFile(tlsClientCrt, tlsClientKey))
 			}
+			remoteOpts = append(remoteOpts, client.WithWebSocket(enableWebSocket))
 			remoteOpts = append(remoteOpts, client.WithClientMode(types.AgentModeFromString(agentMode)))
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
 				remote, err = client.NewRemote(serverAddress, serverPort, remoteOpts...)
@@ -161,6 +163,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&tlsClientKey, "tls-client-key",
 		env.StringWithDefault("ARGOCD_AGENT_TLS_CLIENT_KEY_PATH", nil, ""),
 		"Path to TLS client key")
+	command.Flags().BoolVar(&enableWebSocket, "enable-websocket",
+		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_WEBSOCKET", false),
+		"Agent will rely on gRPC over WebSocket to stream events to the Principal")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
