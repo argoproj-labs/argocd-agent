@@ -34,6 +34,7 @@ func StartHTTP2DowngradingProxy(t *testing.T, addr string, target string) *http.
 		Addr:    lis.Addr().String(),
 	}
 
+    //nolint:errcheck
 	go server.ServeTLS(lis, basePath+".crt", basePath+".key")
 
 	return server
