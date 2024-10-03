@@ -18,10 +18,13 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -32,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/principal/apis/auth"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/version"
+	grpchttp1server "golang.stackrox.io/grpc-http1/server"
 )
 
 const listenerRetries = 5
@@ -160,11 +164,26 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer(s.authenticate))
 	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues))
 
-	// The gRPC server lives in its own go routine
-	go func() {
-		err = s.grpcServer.Serve(s.listener.l)
-		errch <- err
-	}()
+	if s.enableWebSocket {
+		opts := []grpchttp1server.Option{grpchttp1server.PreferGRPCWeb(true)}
+
+		downgradingHandler := grpchttp1server.CreateDowngradingHandler(s.grpcServer, http.NotFoundHandler(), opts...)
+		downgradingServer := &http.Server{
+			TLSConfig: s.tlsConfig,
+			Handler:   h2c.NewHandler(downgradingHandler, &http2.Server{}),
+		}
+
+		go func() {
+			err = downgradingServer.ServeTLS(s.listener.l, s.options.tlsCertPath, s.options.tlsKeyPath)
+			errch <- err
+		}()
+	} else {
+		// The gRPC server lives in its own go routine
+		go func() {
+			err = s.grpcServer.Serve(s.listener.l)
+			errch <- err
+		}()
+	}
 
 	return nil
 }

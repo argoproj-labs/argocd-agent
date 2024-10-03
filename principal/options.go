@@ -356,3 +356,10 @@ func WithAutoNamespaceCreate(enabled bool, pattern string, labels map[string]str
 		return nil
 	}
 }
+
+func WithWebSocket(enableWebSocket bool) ServerOption {
+	return func(o *Server) error {
+		o.enableWebSocket = enableWebSocket
+		return nil
+	}
+}
