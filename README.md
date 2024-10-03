@@ -24,7 +24,7 @@ Going forward, things *will* change dramatically. Do not use unless you can cope
 
 As of now, the following hard limitations apply to `argocd-agent`:
 
-* Because `argocd-agent` makes extensive use of bidirectional streams, a HTTP/2 connection between the agents and the server is a hard requirement. None of the current RPC libaries (gRPC, connectrpc) support HTTP/1.x. If you have any forward or reverse proxies in between who do not support HTTP/2, many features of `argocd-agent` will not work.
+* ~~Because `argocd-agent` makes extensive use of bidirectional streams, a HTTP/2 connection between the agents and the server is a hard requirement. None of the current RPC libaries (gRPC, connectrpc) support HTTP/1.x. If you have any forward or reverse proxies in between who do not support HTTP/2, many features of `argocd-agent` will not work.~~ https://github.com/argoproj-labs/argocd-agent/pull/190 introduced preliminary support for HTTP/1 via websockets.
 
 `argocd-agent` is way from being feature complete. Things we need to figure out are, among others, retrieving and displaying pod logs, running resource actions and resource manipulation.
 
