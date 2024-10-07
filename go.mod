@@ -22,7 +22,7 @@ require (
 	golang.stackrox.io/grpc-http1 v0.3.13
 	google.golang.org/genproto/googleapis/api v0.0.0-20240814211410-ddb44dafa142
 	google.golang.org/grpc v1.67.1
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/protobuf v1.35.1
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.29.6
 	k8s.io/apimachinery v0.29.6
