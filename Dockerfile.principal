@@ -1,4 +1,4 @@
-FROM docker.io/library/golang:1.22 as builder
+FROM docker.io/library/golang:1.22 AS builder
 WORKDIR /src
 COPY . .
 RUN make principal

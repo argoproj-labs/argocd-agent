@@ -1,7 +1,7 @@
 DOCKER_BIN?=docker
 
 # Image names
-IMAGE_REPOSITORY?=quay.io/jannfis
+IMAGE_REPOSITORY?=ghcr.io/argoproj-labs/argocd-agent
 IMAGE_NAME_AGENT=argocd-agent-agent
 IMAGE_NAME_PRINCIPAL=argocd-agent-principal
 IMAGE_PLATFORMS?=linux/amd64
