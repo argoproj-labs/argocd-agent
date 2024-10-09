@@ -64,12 +64,12 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		"application_name": old.Name,
 	})
 	if len(new.Finalizers) > 0 && len(new.Finalizers) != len(old.Finalizers) {
-		var err error
-		new, err = s.appManager.RemoveFinalizers(s.ctx, new)
+		tmp, err := s.appManager.RemoveFinalizers(s.ctx, new)
 		if err != nil {
 			logCtx.WithError(err).Warnf("Could not remove finalizer")
 		} else {
 			logCtx.Debug("Removed finalizer")
+			new = tmp
 		}
 	}
 	if s.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
