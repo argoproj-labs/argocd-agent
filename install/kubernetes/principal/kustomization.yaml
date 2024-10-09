@@ -7,3 +7,4 @@ resources:
 - principal-deployment.yaml
 - principal-service.yaml
 - principal-params-cm.yaml
+- principal-userpass-secret.yaml
