@@ -86,7 +86,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithListenerPort(listenPort))
 			opts = append(opts, principal.WithGRPC(true))
 			nsLabels := make(map[string]string)
-			if len(autoNamespaceLabels) > 0 {
+			if len(autoNamespaceLabels) > 0 &&
+				!(len(autoNamespaceLabels) == 1 && autoNamespaceLabels[0] == "") {
 				nsLabels, err = labels.StringsToMap(autoNamespaceLabels)
 				if err != nil {
 					cmd.Fatal("Could not parse auto namespace labels: %v", err)
