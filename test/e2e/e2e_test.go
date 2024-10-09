@@ -387,7 +387,7 @@ func Test_WithHTTP1WebSocket(t *testing.T) {
 
 		// Create a reverse proxy that downgrades the incoming requests to HTTP/1.1
 		http1Proxy := proxy.StartHTTP2DowngradingProxy(t, hostPort("", proxyPort), hostPort("", s.ListenerForE2EOnly().Port()))
-		defer http1Proxy.Close()
+		defer http1Proxy.Shutdown(sctx)
 
 		// Create a remote agent with WebSocket disabled
 		remote := createRemote(t, false, proxyPort)
@@ -409,7 +409,7 @@ func Test_WithHTTP1WebSocket(t *testing.T) {
 
 		// Create a reverse proxy that downgrades the incoming requests to HTTP/1.1
 		http1Proxy := proxy.StartHTTP2DowngradingProxy(t, hostPort("", proxyPort), hostPort("", s.ListenerForE2EOnly().Port()))
-		defer http1Proxy.Close()
+		defer http1Proxy.Shutdown(sctx)
 
 		// Create an agent with WebSocket enabled
 		remote, a := startAgent(t, actx, createRemote(t, true, proxyPort))
@@ -441,6 +441,27 @@ func Test_WithHTTP1WebSocket(t *testing.T) {
 		time.Sleep(1 * time.Second)
 		_, err = fakeAppcServer.ArgoprojV1alpha1().Applications("client").Update(actx, app, v1.UpdateOptions{})
 		require.NoError(t, err)
+	})
+
+	t.Run("principal with WebSocket enabled should also support agents that use raw gRPC", func(t *testing.T) {
+		// Check if the principal with WebSocket enabled can also handle raw gRPC requests
+		// from agents that are not behind HTTP/1.1 proxy.
+		sctx, scancel := context.WithTimeout(context.Background(), 20*time.Second)
+		actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer scancel()
+		defer acancel()
+
+		// Create the principal server with WebSocket enabled.
+		s := startPrincipal(t, sctx, true)
+		defer s.Shutdown()
+
+		// Create an agent with WebSocket disabled that is not behind a proxy. The agent will use a regular gRPC client.
+		remote, a := startAgent(t, actx, createRemote(t, false, s.ListenerForE2EOnly().Port()))
+		defer a.Stop()
+
+		// The agent should be able to connect to the principal via regular gRPC.
+		require.NoError(t, remote.Connect(actx, false))
+		require.True(t, a.IsConnected())
 	})
 }
 
