@@ -40,7 +40,7 @@ sudo microk8s.config > ~/.kube/config
 
 What's left is to install the metallb configuration. You should be good now.
 
-```
+```shell
 kubectl apply -n metallb-system -f hack/demo-env/resources/metallb-ipaddresspool.yaml
 ```
 
@@ -50,7 +50,7 @@ Make sure you have administrative access to a cluster and [vcluster](https://git
 
 To setup all required virtual clusters, run
 
-```
+```shell
 ./hack/demo-env/setup-vcluster-env.sh create
 ```
 
@@ -78,7 +78,11 @@ This is a local development environment. It comes with pre-configured credential
 
 You can authenticate to the the Argo CD UI or API server with user `admin` and password `adminadmin`. Creative, isn't it.
 
-You will need to generate credentials for the agents. Run the `gen-creds.sh` script before you start any of the agent or principal components.
+You will need to generate credentials for the agents. Before you start any of the agent or principal components run:
+
+```shell
+gen-creds.sh
+```
 
 ## Starting the components
 
