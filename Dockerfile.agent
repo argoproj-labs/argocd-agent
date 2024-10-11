@@ -6,5 +6,5 @@ RUN make agent
 FROM docker.io/library/alpine:latest
 
 COPY --from=builder /src/dist/argocd-agent-agent /bin/argocd-agent-agent
-
+USER 999
 ENTRYPOINT ["/bin/argocd-agent-agent"]
