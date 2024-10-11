@@ -116,7 +116,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 	}
 	i, err := informer.NewGenericInformer(&v1alpha1.AppProject{},
 		informer.WithListCallback(func(options v1.ListOptions, namespace string) (runtime.Object, error) {
-			log().Infof("Listing AppProjects %v", client.ArgoprojV1alpha1().AppProjects(namespace))
+			log().Infof("Listing AppProjects in namespace %s", namespace)
 			projects, err := client.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, options)
 			log().Infof("Lister returned %d AppProjects", len(projects.Items))
 			if pi.filterFunc != nil {
