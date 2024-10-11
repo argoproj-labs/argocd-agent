@@ -39,7 +39,7 @@ On the workload cluster, the agent must be configured at least with:
 
 A loose and incomplete collection of current limitations that you should be aware of.
 
-* The connection from the agent to the principal needs to be end-to-end HTTP/2. If you have a network component that is not able to speak HTTP/2 in either direction, argocd-agent will not work for you at the moment.
+* ~~The connection from the agent to the principal needs to be end-to-end HTTP/2. If you have a network component that is not able to speak HTTP/2 in either direction, argocd-agent will not work for you at the moment.~~  https://github.com/argoproj-labs/argocd-agent/pull/190 introduced preliminary support for HTTP/1 via websockets.
 * On the workload clusters, the apps-in-any-namespace feature cannot be used. This may or may not change in the future.
 * Argo CD UI/API features that do not work in either mode, managed or autonomous:
   * Pod logs
@@ -92,6 +92,12 @@ Keep the `ca.crt` file, as you will need it for the installation of agents, too.
 
 ### Apply the installation manifests
 
+Create the principal user password secret; replace `<PASSWORD>` with the password of your choice:
+
+```
+kubectl create -n argocd secret generic argocd-agent-principal-userpass --from-literal=passwd='<PASSWORD>'
+```
+
 Now that the required secrets exist, it's time to apply the installation manifests and install the principal into the cluster:
 
 ```
@@ -129,10 +135,16 @@ we will use the `argocd` namespace to install all required resources into the cl
 
 #### Apply the installation manifests
 
+Create the agent user password secret; replace `<CREDENTIALS>` with the credentials of your choice:
+
+```
+kubectl create -n argocd secret generic argocd-agent-agent-userpass --from-literal=credentials='<CREDENTIALS>'
+```
+
 Now that the required secrets exist, it's time to apply the installation manifests and install the agent into the cluster:
 
 ```shell 
-kubectl apply -n argocd -k install/kubernetes/principal
+kubectl apply -n argocd -k install/kubernetes/agent
 ```
 This should create all the required agent related resources.
 
