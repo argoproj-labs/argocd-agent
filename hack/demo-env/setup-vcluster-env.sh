@@ -205,7 +205,7 @@ create)
 	for c in $VCLUSTERS; do
 		cluster=$(cluster $c)
  		echo "  --> Creating vcluster $cluster"
-		vcluster create --context=${initial_context} ${EXTRA_VCLUSTER_PARAMS} --switch-context=false -n vcluster-${cluster} --expose --kube-config-context-name vcluster-${cluster} vcluster-${cluster}
+		vcluster create --context=${initial_context} ${EXTRA_VCLUSTER_PARAMS} -n vcluster-${cluster} --expose --kube-config-context-name vcluster-${cluster} vcluster-${cluster}
 
 		# I found a sleep statement here was beneficial to allow time for the load balancer to become available. If we find this is not required, these commented out lines should be removed.
 		# if [[ "$OPENSHIFT" != "" ]]; then
