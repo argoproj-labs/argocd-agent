@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Copyright 2024 The argocd-agent Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -e -o pipefail
+set -ex -o pipefail
 ARGS=$*
 if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^vcluster-agent-autonomous$'; then
     echo "kube context vcluster-agent-autonomous is not configured; missing setup?" >&2
