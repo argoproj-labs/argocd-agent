@@ -39,7 +39,7 @@ fi
 touch "${creds_path}/users.control-plane"
 
 for ag in agent-managed agent-autonomous; do
-	password=$(pwmake 56)
-	htpasswd -b -B "${creds_path}/users.control-plane" "${ag}" "${password}"
+	password=$($pwmake 56)
+	$htpasswd -b -B "${creds_path}/users.control-plane" "${ag}" "${password}"
 	echo "${ag}:${password}" > "${creds_path}/creds.${ag}"
 done
