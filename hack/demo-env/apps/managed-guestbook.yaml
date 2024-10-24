@@ -13,5 +13,7 @@ spec:
     server: https://kubernetes.default.svc
     namespace: guestbook
   syncPolicy:
+    automated:
+      prune: true
     syncOptions:
-      - "CreateNamespace=true"
+    - CreateNamespace=true

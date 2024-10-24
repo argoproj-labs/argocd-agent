@@ -1,0 +1,9 @@
+resources:
+- principal-sa.yaml
+- principal-role.yaml
+- principal-clusterrole.yaml
+- principal-rolebinding.yaml
+- principal-clusterrolebinding.yaml
+- principal-deployment.yaml
+- principal-service.yaml
+- principal-params-cm.yaml

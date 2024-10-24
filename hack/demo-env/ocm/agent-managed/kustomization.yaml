@@ -1,0 +1,4 @@
+resources:
+- ocm-agent-managed-addontemplate.yaml
+- ocm-agent-managed-cmaddon.yaml
+- ocm-agent-managed-maddon.yaml
