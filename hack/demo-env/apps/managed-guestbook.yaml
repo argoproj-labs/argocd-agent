@@ -14,4 +14,4 @@ spec:
     namespace: guestbook
   syncPolicy:
     syncOptions:
-      - "CreateNamespace=true"
+    - CreateNamespace=true
