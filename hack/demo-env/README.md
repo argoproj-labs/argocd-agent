@@ -27,7 +27,7 @@ The author uses [microk8s](https://microk8s.io/) as the host Kubernetes cluster.
 After installing microk8s, you want to enable metallb and hostpath storage in that cluster. metallb gives your cluster load balancer capabilities, and the hostpath storage will allow vcluster to persist its configuration:  
 
 ```shell
-sudo microk8s.enable metallb
+sudo microk8s.enable metallb:192.168.56.200-192.168.56.254 # Adjust the range as needed. Currently set to values used in the steps below
 sudo microk8s.enable hostpath-storage
 ```
 
@@ -109,3 +109,8 @@ There is a vscode launch configuration to assist with debugging components in `h
 ### Running in a cluster
 
 To be written.
+
+### Running in a cluster using Open Cluster Management
+
+For running in a cluster using [Open Cluster Management (OCM)](https://open-cluster-management.io/),
+see the [demo environment with OCM](./ocm/README.md) for more information.
