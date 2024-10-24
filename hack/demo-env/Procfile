@@ -1,0 +1,2 @@
+principal: hack/demo-env/start-principal.sh
+agent: if [ "$AUTONOMOUS_MODE" = "true" ]; then hack/demo-env/start-agent-autonomous.sh; else hack/demo-env/start-agent-managed.sh; fi

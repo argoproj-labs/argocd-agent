@@ -21,8 +21,15 @@ PROTOC_GEN_GO_GRPC_VERSION=v1.2
 GOLANG_CI_LINT_VERSION=v1.58.1
 MOCKERY_V2_VERSION?=v2.43.0
 
+AUTONOMOUS_MODE?=false
+GOBIN=$(shell go env GOPATH)/bin
+
 .PHONY: build
 build: agent principal
+
+.PHONY: start-local
+start-local:
+	AUTONOMOUS_MODE=$(AUTONOMOUS_MODE) $(GOBIN)/goreman -set-ports=false -f hack/demo-env/Procfile start
 
 .PHONY: test
 test:
