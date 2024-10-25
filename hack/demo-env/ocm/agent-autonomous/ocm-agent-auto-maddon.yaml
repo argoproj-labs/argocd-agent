@@ -1,0 +1,7 @@
+apiVersion: addon.open-cluster-management.io/v1alpha1
+kind: ManagedClusterAddOn
+metadata:
+  name: argocd-agent-auto
+  namespace: agent-autonomous
+spec:
+  installNamespace: argocd

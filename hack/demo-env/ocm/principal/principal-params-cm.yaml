@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-agent-params
+data:
+  principal.log.level: trace
+  principal.allowed-namespaces: "*"
+  principal.tls.server.allow-generate: "true"
+  principal.jwt.allow-generate: "true"
+  principal.user-db.path: "/app/config/userpass/passwd"

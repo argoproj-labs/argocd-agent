@@ -1,0 +1,15 @@
+apiVersion: addon.open-cluster-management.io/v1alpha1
+kind: ClusterManagementAddOn
+metadata:
+  name: argocd-agent-managed
+  annotations:
+    addon.open-cluster-management.io/lifecycle: "addon-manager"
+spec:
+  addOnMeta:
+    description: argocd-agent-managed is an OCM-io for ArgoCD agent managed mode
+    displayName: ArgoCD Agent Managed
+  supportedConfigs:
+    - group: addon.open-cluster-management.io
+      resource: addontemplates
+      defaultConfig:
+        name: argocd-agent-managed-template
