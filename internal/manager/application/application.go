@@ -160,7 +160,7 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 		}
 	} else {
 		if m.metrics != nil {
-			m.metrics.Errors.Inc()
+			m.metrics.AppClientErrors.Inc()
 		}
 	}
 
@@ -242,7 +242,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		}
 	} else {
 		if m.metrics != nil {
-			m.metrics.Errors.Inc()
+			m.metrics.AppClientErrors.Inc()
 		}
 	}
 	return updated, err
@@ -327,7 +327,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		}
 	} else {
 		if m.metrics != nil {
-			m.metrics.Errors.Inc()
+			m.metrics.AppClientErrors.Inc()
 		}
 	}
 	return updated, err
@@ -408,7 +408,7 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		}
 	} else {
 		if m.metrics != nil {
-			m.metrics.Errors.Inc()
+			m.metrics.AppClientErrors.Inc()
 		}
 	}
 	return updated, err
@@ -472,7 +472,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		}
 	} else {
 		if m.metrics != nil {
-			m.metrics.Errors.Inc()
+			m.metrics.AppClientErrors.Inc()
 		}
 	}
 	return updated, err

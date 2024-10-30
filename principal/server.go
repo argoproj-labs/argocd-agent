@@ -143,6 +143,12 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		application.WithRole(manager.ManagerRolePrincipal),
 	}
 
+	appProjectInformerOptions := []appprojectinformer.AppProjectInformerOption{
+		appprojectinformer.WithAddFunc(s.newAppProjectCallback),
+		appprojectinformer.WithUpdateFunc(s.updateAppProjectCallback),
+		appprojectinformer.WithDeleteFunc(s.deleteAppProjectCallback),
+	}
+
 	appProjectManagerOption := []appproject.AppProjectManagerOption{
 		appproject.WithAllowUpsert(true),
 		appproject.WithRole(manager.ManagerRolePrincipal),
@@ -151,6 +157,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	if s.options.metricsPort > 0 {
 		appInformerOptions = append(appInformerOptions, appinformer.WithMetrics(metrics.NewApplicationWatcherMetrics()))
 		managerOpts = append(managerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
+		appProjectInformerOptions = append(appProjectInformerOptions, appprojectinformer.WithMetrics(metrics.NewAppProjectWatcherMetrics()))
 		appProjectManagerOption = append(appProjectManagerOption, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
 	}
 
@@ -164,12 +171,6 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	)
 	if err != nil {
 		return nil, err
-	}
-
-	appProjectInformerOptions := []appprojectinformer.AppProjectInformerOption{
-		appprojectinformer.WithAddFunc(s.newAppProjectCallback),
-		appprojectinformer.WithUpdateFunc(s.updateAppProjectCallback),
-		appprojectinformer.WithDeleteFunc(s.deleteAppProjectCallback),
 	}
 
 	projectInformer, err := appprojectinformer.NewAppProjectInformer(s.ctx, kubeClient.ApplicationsClientset, s.namespace,

@@ -50,6 +50,30 @@ type GenericInformer struct {
 	fieldSelector string
 	// mutex should be owned before accessing namespaces
 	namespaces map[string]interface{}
+	// metrics is the metrics provider for this informer
+	metrics metrics
+}
+
+// metrics is a simplified and specialized metrics provider for the informer
+type metrics struct {
+	added   metricsCounter
+	updated metricsCounter
+	removed metricsCounter
+	watched metricsGauge
+}
+
+// metricsCounter is an interface for a metrics implementation of type counter.
+// The reason we use an oversimplified abstraction is for testing purposes.
+type metricsCounter interface {
+	Inc()
+}
+
+// metricsGauge is an interface for a metrics implementation of type gauge.
+// The reason we use an oversimplified abstraction is for testing purposes.
+type metricsGauge interface {
+	Inc()
+	Dec()
+	Set(float64)
 }
 
 type InformerOption func(i *GenericInformer) error
@@ -124,6 +148,17 @@ func WithFieldSelector(sel string) InformerOption {
 	}
 }
 
+// WithMetrics sets the metrics functions to use with this informer.
+func WithMetrics(added, updated, removed metricsCounter, watched metricsGauge) InformerOption {
+	return func(i *GenericInformer) error {
+		i.metrics.added = added
+		i.metrics.updated = updated
+		i.metrics.removed = removed
+		i.metrics.watched = watched
+		return nil
+	}
+}
+
 // WithNamespaces sets the namespaces for which the informer will process any
 // event. If an event is seen for an object in a namespace that is not in this
 // list, the event will be ignored. If either zero or multiple namespaces are
@@ -166,6 +201,9 @@ func NewGenericInformer(objType runtime.Object, options ...InformerOption) (*Gen
 		&cache.ListWatch{
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				logCtx.Trace("Executing list")
+				if i.metrics.watched != nil {
+					i.metrics.watched.Set(0)
+				}
 				return i.listFunc(options, i.watchAndListNamespace())
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
@@ -202,6 +240,10 @@ func NewGenericInformer(objType runtime.Object, options ...InformerOption) (*Gen
 			if i.addFunc != nil {
 				i.addFunc(obj)
 			}
+			if i.metrics.added != nil && i.metrics.watched != nil {
+				i.metrics.added.Inc()
+				i.metrics.watched.Inc()
+			}
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			mobj, err := meta.Accessor(newObj)
@@ -221,6 +263,9 @@ func NewGenericInformer(objType runtime.Object, options ...InformerOption) (*Gen
 			if i.updateFunc != nil {
 				i.updateFunc(oldObj, newObj)
 			}
+			if i.metrics.updated != nil {
+				i.metrics.updated.Inc()
+			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			mobj, err := meta.Accessor(obj)
@@ -239,6 +284,10 @@ func NewGenericInformer(objType runtime.Object, options ...InformerOption) (*Gen
 			}
 			if i.deleteFunc != nil {
 				i.deleteFunc(obj)
+			}
+			if i.metrics.removed != nil && i.metrics.watched != nil {
+				i.metrics.removed.Inc()
+				i.metrics.watched.Dec()
 			}
 		},
 	})
@@ -342,6 +391,8 @@ func (i *GenericInformer) watchAndListNamespace() string {
 // isNamespaceAllowed returns whether the namespace of an event's object is
 // permitted.
 func (i *GenericInformer) isNamespaceAllowed(obj v1.Object) bool {
+	i.mutex.RLock()
+	defer i.mutex.RUnlock()
 	if len(i.namespaces) == 0 {
 		return true
 	}
