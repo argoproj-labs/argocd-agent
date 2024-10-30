@@ -3,7 +3,6 @@ on:
   push:
     branches:
       - 'main'
-      - 'gitops-5159-e2e-test-framework'
   pull_request:
     branches:
       - 'main'
