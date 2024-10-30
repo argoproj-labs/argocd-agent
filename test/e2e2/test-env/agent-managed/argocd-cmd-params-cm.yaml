@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+data:
+  repo.server: repo-server-address:8081
+  redis.server: redis-server-address:6379
+  application.namespaces: agent-managed

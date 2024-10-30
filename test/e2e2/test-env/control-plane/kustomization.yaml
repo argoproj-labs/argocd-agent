@@ -1,0 +1,18 @@
+resources:
+- https://github.com/argoproj/argo-cd/manifests/crds?ref=stable&timeout=240s
+- https://github.com/argoproj/argo-cd/manifests/base/config?ref=stable&timeout=240s
+- https://github.com/argoproj/argo-cd/manifests/base/dex?ref=stable&timeout=240s
+- https://github.com/argoproj/argo-cd/manifests/base/redis?ref=stable&timeout=240s
+- https://github.com/argoproj/argo-cd/manifests/base/repo-server?ref=stable&timeout=240s
+- https://github.com/argoproj/argo-cd/manifests/base/server?ref=stable&timeout=240s
+- https://github.com/argoproj/argo-cd/manifests/cluster-rbac/server?ref=stable&timeout=240s
+- https://github.com/argoproj/argo-cd/examples/k8s-rbac/argocd-server-applications?ref=stable&timeout=240s
+- ../common
+
+patches:
+- path: argocd-cmd-params-cm.yaml
+- path: argocd-secret.yaml
+- path: server-service.yaml
+- path: repo-server-service.yaml
+- path: redis-service.yaml
+- path: appproject-default.yaml

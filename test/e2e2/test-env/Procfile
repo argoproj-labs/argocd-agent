@@ -1,0 +1,3 @@
+principal: test/e2e2/test-env/start-principal.sh
+agent-managed: test/e2e2/test-env/start-agent-managed.sh
+agent-autonomous: test/e2e2/test-env/start-agent-autonomous.sh
