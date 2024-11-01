@@ -179,7 +179,7 @@ func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alph
 		return created, nil
 	} else {
 		if m.metrics != nil {
-			m.metrics.Errors.Inc()
+			m.metrics.ProjectClientErrors.Inc()
 		}
 	}
 	return nil, nil
@@ -244,7 +244,7 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 		}
 	} else {
 		if m.metrics != nil {
-			m.metrics.Errors.Inc()
+			m.metrics.ProjectClientErrors.Inc()
 		}
 	}
 	return updated, err
