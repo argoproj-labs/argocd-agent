@@ -98,6 +98,11 @@ apply() {
 		sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/server-service.yaml
 	fi
 
+	LATEST_RELEASE_TAG=`curl -s "https://api.github.com/repos/argoproj/argo-cd/releases/latest" | jq -r .tag_name`
+	sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/control-plane/kustomization.yaml
+	sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/agent-autonomous/kustomization.yaml
+	sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/agent-managed/kustomization.yaml
+
 	echo "-> Create Argo CD on control plane"
 
 	cluster=control-plane

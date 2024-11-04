@@ -9,6 +9,10 @@ resources:
 - https://github.com/argoproj/argo-cd/examples/k8s-rbac/argocd-server-applications?ref=stable
 - ../common
 
+images:
+- name: quay.io/argoproj/argocd
+  newTag: LatestReleaseTag
+
 patches:
 - path: argocd-cmd-params-cm.yaml
 - path: argocd-secret.yaml
