@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,9 +56,7 @@ type Server struct {
 	authMethods *auth.Methods
 	// queues contains events that are EITHER queued to be sent to the agent ('outbox'), OR that have been received by the agent and are waiting to be processed ('inbox').
 	// Server uses clientID/namespace as a key, to refer to each specific agent's queue
-	queues *queue.SendRecvQueues
-	// namespace is the namespace the server will use for configuration. Set only when running out of cluster.
-	namespace      string
+	queues         *queue.SendRecvQueues
 	issuer         issuer.Issuer
 	noauth         map[string]bool // noauth contains endpoints accessible without authentication
 	ctx            context.Context
@@ -101,7 +100,6 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	s := &Server{
 		options:    defaultOptions(),
 		queues:     queue.NewSendRecvQueues(),
-		namespace:  namespace,
 		noauth:     noAuthEndpoints,
 		version:    version.New("argocd-agent", "principal"),
 		kubeClient: kubeClient.Clientset,
@@ -126,13 +124,26 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, fmt.Errorf("unexpected missing JWT signing key")
 	}
 
+	// By default, our configuration namespace is the namespace we're running
+	// in (or the one set as default in the kubeconfig)
+	if s.options.configNamespace == "" {
+		s.options.configNamespace = kubeClient.Namespace
+	}
+
+	// If argo namespace is not set, we use the config namespace
+	if s.options.argoNamespace == "" {
+		s.options.argoNamespace = s.options.configNamespace
+	}
+
 	s.issuer, err = issuer.NewIssuer("argocd-agent-server", issuer.WithRSAPrivateKey(s.options.signingKey))
 	if err != nil {
 		return nil, err
 	}
 
 	appInformerOptions := []appinformer.AppInformerOption{
-		appinformer.WithNamespaces(s.options.namespaces...),
+		// The app informer does not use the argo namespace, only those that
+		// are explicitly set by application namespaces.
+		appinformer.WithNamespaces(s.options.appNamespaces...),
 		appinformer.WithNewAppCallback(s.newAppCallback),
 		appinformer.WithUpdateAppCallback(s.updateAppCallback),
 		appinformer.WithDeleteAppCallback(s.deleteAppCallback),
@@ -147,6 +158,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		appprojectinformer.WithAddFunc(s.newAppProjectCallback),
 		appprojectinformer.WithUpdateFunc(s.updateAppProjectCallback),
 		appprojectinformer.WithDeleteFunc(s.deleteAppProjectCallback),
+		appprojectinformer.WithAppProjectNamespaces(s.options.argoNamespace),
 	}
 
 	appProjectManagerOption := []appproject.AppProjectManagerOption{
@@ -162,25 +174,24 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	appInformer := appinformer.NewAppInformer(s.ctx, kubeClient.ApplicationsClientset,
-		s.namespace,
 		appInformerOptions...,
 	)
 
-	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appInformer, true), s.namespace,
+	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.options.configNamespace, appInformer, true), s.options.configNamespace,
 		managerOpts...,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	projectInformer, err := appprojectinformer.NewAppProjectInformer(s.ctx, kubeClient.ApplicationsClientset, s.namespace,
+	projectInformer, err := appprojectinformer.NewAppProjectInformer(s.ctx, kubeClient.ApplicationsClientset,
 		appProjectInformerOptions...,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, projectInformer, true), s.namespace, appProjectManagerOption...)
+	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.options.configNamespace, projectInformer, true), s.options.configNamespace, appProjectManagerOption...)
 	if err != nil {
 		return nil, err
 	}
@@ -200,11 +211,11 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 // immediately. Errors during the runtime will be propagated via errch.
 func (s *Server) Start(ctx context.Context, errch chan error) error {
 
-	if s.namespace != "" {
-		log().Infof("Starting %s (server) v%s (ns=%s, allowed_namespaces=%v)", s.version.Name(), s.version.Version(), s.namespace, s.options.namespaces)
-	} else {
-		log().Infof("Starting %s (server) v%s (allowed_namespaces=%v)", s.version.Name(), s.version.Version(), s.options.namespaces)
-	}
+	log().WithFields(logrus.Fields{
+		"config_ns": s.options.configNamespace,
+		"argo_ns":   s.options.argoNamespace,
+		"app_ns":    strings.Join(s.options.appNamespaces, ", "),
+	}).Infof("Starting %s (server) v%s", s.version.Name(), s.version.Version())
 
 	if s.options.serveGRPC {
 		if err := s.serveGRPC(ctx, errch); err != nil {
@@ -340,4 +351,16 @@ func (s *Server) setAgentMode(namespace string, mode types.AgentMode) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 	s.namespaceMap[namespace] = mode
+}
+
+func (s *Server) configNamespace() string {
+	return s.options.configNamespace
+}
+
+func (s *Server) argoNamespace() string {
+	if s.options.argoNamespace == "" {
+		return s.options.configNamespace
+	} else {
+		return s.options.argoNamespace
+	}
 }

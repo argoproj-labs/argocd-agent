@@ -51,10 +51,12 @@ type ServerOptions struct {
 	// tlsCiphers is not currently read
 	tlsCiphers *tls.CipherSuite
 	// tlsMinVersion is not currently read
-	tlsMinVersion int
-	gracePeriod   time.Duration
-	namespaces    []string
-	signingKey    crypto.PrivateKey
+	tlsMinVersion   int
+	gracePeriod     time.Duration
+	configNamespace string
+	argoNamespace   string
+	appNamespaces   []string
+	signingKey      crypto.PrivateKey
 	// unauthMethods is not currently implemented
 	unauthMethods map[string]bool
 	serveGRPC     bool
@@ -294,10 +296,25 @@ func WithShutDownGracePeriod(d time.Duration) ServerOption {
 	}
 }
 
-// WithNamespaces sets an
-func WithNamespaces(namespaces ...string) ServerOption {
+// WithApplicationNamespaces sets a list of namespaces that the principal is
+// allowed to list and manipulate application resources in.
+func WithApplicationNamespaces(namespaces ...string) ServerOption {
 	return func(o *Server) error {
-		o.options.namespaces = namespaces
+		o.options.appNamespaces = namespaces
+		return nil
+	}
+}
+
+func WithConfigNamespace(namespace string) ServerOption {
+	return func(o *Server) error {
+		o.options.configNamespace = namespace
+		return nil
+	}
+}
+
+func WithArgoNamespace(namespace string) ServerOption {
+	return func(o *Server) error {
+		o.options.argoNamespace = namespace
 		return nil
 	}
 }

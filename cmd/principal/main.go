@@ -40,7 +40,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		metricsPort            int
 		disableMetrics         bool
 		namespace              string
-		allowedNamespaces      []string
+		argoNamespace          string
+		applicationNamespaces  []string
 		kubeConfig             string
 		kubeContext            string
 		tlsCert                string
@@ -99,7 +100,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				opts = append(opts, principal.WithMetricsPort(metricsPort))
 			}
 
-			opts = append(opts, principal.WithNamespaces(allowedNamespaces...))
+			opts = append(opts, principal.WithApplicationNamespaces(applicationNamespaces...))
 
 			if tlsCert != "" && tlsKey != "" {
 				opts = append(opts, principal.WithTLSKeyPairFromPath(tlsCert, tlsKey))
@@ -185,10 +186,13 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 	command.Flags().StringVarP(&namespace, "namespace", "n",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_NAMESPACE", nil, ""),
-		"The namespace the server will use for configuration. Set only when running out of cluster.")
-	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
-		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_ALLOWED_NAMESPACES", nil, []string{}),
-		"List of namespaces the server is allowed to operate in")
+		"The namespace the principal will use for configuration. If empty, defaults to current namespace.")
+	command.Flags().StringVar(&argoNamespace, "argo-namespace",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_ARGO_NAMESPACE", nil, ""),
+		"The namespace where Argo CD is installed to. If empty, defaults to current namespace.")
+	command.Flags().StringSliceVar(&applicationNamespaces, "application-namespaces",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_APPLICATION_NAMESPACES", nil, []string{}),
+		"List of namespaces the principal is allowed to list and manipulate application resources")
 	command.Flags().BoolVar(&autoNamespaceAllow, "namespace-create-enable",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_NAMESPACE_CREATE_ENABLE", false),
 		"Whether to allow automatic namespace creation for autonomous agents")

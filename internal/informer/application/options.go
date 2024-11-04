@@ -26,17 +26,16 @@ import (
 // Options should not be modified concurrently, they are not implemented in a
 // thread-safe way.
 type AppInformerOptions struct {
-	// namespace will be set to "", if len(namespaces) > 0
-	namespace  string
-	namespaces []string
-	appMetrics *metrics.ApplicationWatcherMetrics
-	filters    *filter.Chain
-	resync     time.Duration
-	listCb     ListAppsCallback
-	newCb      NewAppCallback
-	updateCb   UpdateAppCallback
-	deleteCb   DeleteAppCallback
-	errorCb    ErrorCallback
+	appNamespaces []string
+	appMetrics    *metrics.ApplicationWatcherMetrics
+	filters       *filter.Chain
+	resync        time.Duration
+	listCb        ListAppsCallback
+	newCb         NewAppCallback
+	updateCb      UpdateAppCallback
+	deleteCb      DeleteAppCallback
+	errorCb       ErrorCallback
+	clusterScope  bool
 }
 
 type AppInformerOption func(o *AppInformerOptions)
@@ -51,7 +50,15 @@ func WithMetrics(m *metrics.ApplicationWatcherMetrics) AppInformerOption {
 // WithNamespaces sets additional namespaces to be watched by the AppInformer
 func WithNamespaces(namespaces ...string) AppInformerOption {
 	return func(o *AppInformerOptions) {
-		o.namespaces = namespaces
+		o.appNamespaces = namespaces
+	}
+}
+
+// WithClusterScope sets whether the application watcher should operate on the
+// cluster scope.
+func WithClusterScope(clusterScope bool) AppInformerOption {
+	return func(o *AppInformerOptions) {
+		o.clusterScope = clusterScope
 	}
 }
 

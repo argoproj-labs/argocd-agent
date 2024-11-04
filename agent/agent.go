@@ -120,7 +120,8 @@ func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace s
 		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
-	appInformer := appinformer.NewAppInformer(ctx, appclient, a.namespace,
+	appInformer := appinformer.NewAppInformer(ctx, appclient,
+		appinformer.WithNamespaces(a.allowedNamespaces...),
 		appinformer.WithListAppCallback(a.listAppCallback),
 		appinformer.WithNewAppCallback(a.addAppCreationToQueue),
 		appinformer.WithUpdateAppCallback(a.addAppUpdateToQueue),
@@ -141,7 +142,7 @@ func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace s
 		appproject.WithMode(managerMode),
 	}
 
-	projectInformer, err := appprojectinformer.NewAppProjectInformer(ctx, appclient, a.namespace)
+	projectInformer, err := appprojectinformer.NewAppProjectInformer(ctx, appclient)
 	if err != nil {
 		return nil, err
 	}

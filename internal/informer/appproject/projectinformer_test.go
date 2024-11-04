@@ -35,7 +35,7 @@ func Test_AppProjectInformer(t *testing.T) {
 	numUpdated := atomic.Uint32{}
 	numDeleted := atomic.Uint32{}
 	ac := fakeappclient.NewSimpleClientset()
-	pi, err := NewAppProjectInformer(context.TODO(), ac, "argocd",
+	pi, err := NewAppProjectInformer(context.TODO(), ac,
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
 		}),
@@ -46,7 +46,7 @@ func Test_AppProjectInformer(t *testing.T) {
 		WithDeleteFunc(func(proj *v1alpha1.AppProject) {
 			numDeleted.Add(1)
 		}),
-		WithNamespaces("argocd"),
+		WithAppProjectNamespaces("argocd"),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, pi)
@@ -105,7 +105,7 @@ func Test_FilterFunc(t *testing.T) {
 	updateCh := make(chan bool)
 	deleteCh := make(chan bool)
 	ac := fakeappclient.NewSimpleClientset()
-	pi, err := NewAppProjectInformer(context.TODO(), ac, "test",
+	pi, err := NewAppProjectInformer(context.TODO(), ac,
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
 			if numAdded.Load() > 1 {
@@ -134,6 +134,7 @@ func Test_FilterFunc(t *testing.T) {
 				return false
 			}
 		}),
+		WithAppProjectNamespaces("argocd"),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, pi)
@@ -178,8 +179,7 @@ func Test_NamespaceNotAllowed(t *testing.T) {
 	numAdded := atomic.Uint32{}
 	addCh := make(chan bool)
 	ac := fakeappclient.NewSimpleClientset()
-	pi, err := NewAppProjectInformer(context.TODO(), ac, "argocd",
-		WithNamespaces("argocd"),
+	pi, err := NewAppProjectInformer(context.TODO(), ac,
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
 			require.Equal(t, "argocd", proj.Namespace)
@@ -187,6 +187,7 @@ func Test_NamespaceNotAllowed(t *testing.T) {
 				addCh <- true
 			}
 		}),
+		WithAppProjectNamespaces("argocd"),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, pi)

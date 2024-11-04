@@ -39,7 +39,7 @@ import (
 
 func fakeAppManager(t *testing.T, objects ...runtime.Object) (*fakeappclient.Clientset, *AppProjectManager) {
 	appC := fakeappclient.NewSimpleClientset(objects...)
-	informer, err := appprojectinformer.NewAppProjectInformer(context.Background(), appC, "argocd")
+	informer, err := appprojectinformer.NewAppProjectInformer(context.Background(), appC, appprojectinformer.WithAppProjectNamespaces("argocd"))
 	assert.NoError(t, err)
 
 	be := appproject.NewKubernetesBackend(appC, "", informer, true)

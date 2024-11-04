@@ -252,7 +252,7 @@ func Test_AgentServer(t *testing.T) {
 		principal.WithServerName("control-plane"),
 		principal.WithGeneratedTLS("control-plane"),
 		principal.WithAuthMethods(am),
-		principal.WithNamespaces("client"),
+		principal.WithApplicationNamespaces("client"),
 		principal.WithGeneratedTokenSigningKey(),
 	)
 	require.NoError(t, err)
@@ -324,7 +324,7 @@ func Test_WithHTTP1WebSocket(t *testing.T) {
 			principal.WithServerName("control-plane"),
 			principal.WithGeneratedTLS("control-plane"),
 			principal.WithAuthMethods(am),
-			principal.WithNamespaces("client"),
+			principal.WithApplicationNamespaces("client"),
 			principal.WithGeneratedTokenSigningKey(),
 		}
 

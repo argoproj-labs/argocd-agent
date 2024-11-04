@@ -19,15 +19,22 @@ data:
   principal.metrics.port: "8000"
   # principal.metrics.enabled: Whether the metrics server should be started.
   principal.metrics.enabled: "true"
-  # principal.namespace: The namespace the principal will operate in. If left
-  # blank, the namespace where the pod is running in will be used.
+  # principal.config-namespace: The namespace the principal will operate and
+  # store its configuration in. If left blank, the namespace where the pod is
+  # running in will be used.
   # Default: ""
-  principal.namespace: ""
-  # principal.allowed-namespaces: A list of namespaces the principal shall
-  # watch and process Argo CD resources in. Seperate entries using commas.
+  principal.config-namespace: ""
+  # principal.argo-namespace: The namespace where Argo CD is installed to.
+  # The principal will look for Argo CD configuration resources, including
+  # AppProjects, in this namespace. If left blank, the config namespace (see
+  # principal.config-namespace) will be used as Argo CD namespace.
+  # Default: ""
+  principal.argo-names: ""
+  # principal.application-namespaces: A list of namespaces the principal shall
+  # watch and process Argo CD application in. Seperate entries using commas.
   # Entries may contain shell-style wildcards.
   # Default: ""
-  principal.allowed-namespaces: ""
+  principal.application-namespaces: ""
   # principal.namespace-create.enable: Whether the principal is allowed to
   # create namespaces for agents if they don't exist yet. Either "true" or
   # "false".

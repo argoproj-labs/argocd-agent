@@ -51,13 +51,19 @@ spec:
                 name: argocd-agent-params
                 key: principal.metrics.enabled
                 optional: true
-          - name: ARGOCD_PRINCIPAL_NAMESPACE
+          - name: ARGOCD_PRINCIPAL_CONFIG_NAMESPACE
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: principal.namespace
+                key: principal.config-namespace
                 optional: true
-          - name: ARGOCD_PRINCIPAL_ALLOWED_NAMESPACES
+          - name: ARGOCD_PRINCIPAL_ARGO_NAMESPACE
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.agent-namespace
+                optional: true
+          - name: ARGOCD_PRINCIPAL_APPLICATION_NAMESPACES
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params

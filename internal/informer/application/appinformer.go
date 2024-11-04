@@ -57,7 +57,7 @@ type AppInformer struct {
 }
 
 // NewAppInformer returns a new application informer for a given namespace
-func NewAppInformer(ctx context.Context, client appclientset.Interface, namespace string, opts ...AppInformerOption) *AppInformer {
+func NewAppInformer(ctx context.Context, client appclientset.Interface, opts ...AppInformerOption) *AppInformer {
 	o := &AppInformerOptions{
 		resync: defaultResyncPeriod,
 	}
@@ -66,13 +66,10 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 		opt(o)
 	}
 
-	if len(o.namespaces) > 0 {
-		o.namespaces = append(o.namespaces, namespace)
-		o.namespace = ""
-	} else {
-		o.namespace = namespace
+	watchNs := ""
+	if len(o.appNamespaces) == 1 && !o.clusterScope {
+		watchNs = o.appNamespaces[0]
 	}
-
 	i := &AppInformer{options: o, appClient: client}
 
 	i.appInformer = cache.NewSharedIndexInformer(
@@ -80,7 +77,7 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				logCtx := log().WithField("component", "ListWatch")
 				logCtx.Debugf("Listing apps into cache")
-				appList, err := i.appClient.ArgoprojV1alpha1().Applications(o.namespace).List(ctx, options)
+				appList, err := i.appClient.ArgoprojV1alpha1().Applications(watchNs).List(ctx, options)
 				if err != nil {
 					logCtx.Warnf("Error listing apps: %v", err)
 					return nil, err
@@ -119,7 +116,7 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 				logCtx := log().WithField("component", "WatchFunc")
 				logCtx.Info("Starting application watcher")
 				defer i.synced.Store(true)
-				return i.appClient.ArgoprojV1alpha1().Applications(o.namespace).Watch(ctx, options)
+				return i.appClient.ArgoprojV1alpha1().Applications(watchNs).Watch(ctx, options)
 			},
 		},
 		&v1alpha1.Application{},
@@ -227,17 +224,14 @@ func NewAppInformer(ctx context.Context, client appclientset.Interface, namespac
 
 func (i *AppInformer) Start(stopch <-chan struct{}) {
 	ns := ""
-	if i.options.namespace != "" {
-		ns = i.options.namespace + ","
-	}
-	log().Infof("Starting app informer (namespaces: %s)", strings.TrimSuffix(ns+strings.Join(i.options.namespaces, ","), ","))
+	log().Infof("Starting app informer (namespaces: %s)", strings.TrimSuffix(ns+strings.Join(i.options.appNamespaces, ","), ","))
 	i.appInformer.Run(stopch)
 	log().Infof("App informer has shutdown")
 }
 
 // shouldProcessApp returns true if the app is allowed to be processed
 func (i *AppInformer) shouldProcessApp(app *v1alpha1.Application) bool {
-	return glob.MatchStringInList(append([]string{i.options.namespace}, i.options.namespaces...), app.Namespace, glob.REGEXP) &&
+	return glob.MatchStringInList(i.options.appNamespaces, app.Namespace, glob.REGEXP) &&
 		i.options.filters.Admit(app)
 }
 

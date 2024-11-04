@@ -45,7 +45,7 @@ var appNotFoundError = errors.NewNotFound(schema.GroupResource{Group: "argoproj.
 
 func fakeAppManager(t *testing.T, objects ...runtime.Object) (*fakeappclient.Clientset, *ApplicationManager) {
 	appC := fakeappclient.NewSimpleClientset(objects...)
-	informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+	informer := appinformer.NewAppInformer(context.Background(), appC)
 	be := application.NewKubernetesBackend(appC, "", informer, true)
 
 	am, err := NewApplicationManager(be, "argocd")
@@ -186,7 +186,7 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 
 		// We are on the agent
 		appC := fakeappclient.NewSimpleClientset(existing)
-		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+		informer := appinformer.NewAppInformer(context.Background(), appC)
 		be := application.NewKubernetesBackend(appC, "", informer, true)
 		mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent))
 		require.NoError(t, err)
@@ -273,7 +273,7 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		}
 
 		appC := fakeappclient.NewSimpleClientset(existing)
-		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+		informer := appinformer.NewAppInformer(context.Background(), appC)
 		be := application.NewKubernetesBackend(appC, "", informer, true)
 		mgr, err := NewApplicationManager(be, "argocd")
 		require.NoError(t, err)
@@ -349,7 +349,7 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 		}
 
 		appC := fakeappclient.NewSimpleClientset(existing)
-		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+		informer := appinformer.NewAppInformer(context.Background(), appC)
 		be := application.NewKubernetesBackend(appC, "", informer, true)
 		mgr, err := NewApplicationManager(be, "argocd")
 		require.NoError(t, err)

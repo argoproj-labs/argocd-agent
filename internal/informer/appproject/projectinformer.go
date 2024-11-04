@@ -32,9 +32,9 @@ import (
 )
 
 type AppProjectInformer struct {
-	filterFunc func(proj *v1alpha1.AppProject) bool
-	namespaces []string
-	logger     *logrus.Entry
+	filterFunc           func(proj *v1alpha1.AppProject) bool
+	appProjectNamespaces []string
+	logger               *logrus.Entry
 
 	projectInformer *informer.GenericInformer
 	projectLister   applisters.AppProjectLister
@@ -93,10 +93,10 @@ func WithLogger(l *logrus.Entry) AppProjectInformerOption {
 	}
 }
 
-// WithNamespaces sets additional namespaces to be watched by the AppProjectInformer
-func WithNamespaces(namespaces ...string) AppProjectInformerOption {
+// WithAppProjectNamespaces sets additional namespaces to be watched by the AppProjectInformer
+func WithAppProjectNamespaces(namespaces ...string) AppProjectInformerOption {
 	return func(o *AppProjectInformer) error {
-		o.namespaces = namespaces
+		o.appProjectNamespaces = namespaces
 		return nil
 	}
 }
@@ -113,9 +113,9 @@ func WithMetrics(m *metrics.AppProjectWatcherMetrics) AppProjectInformerOption {
 // NewAppProjectInformer returns a new instance of a GenericInformer set up to
 // handle AppProjects. It will be configured with the given options, using the
 // given appclientset.
-func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, namespace string, options ...AppProjectInformerOption) (*AppProjectInformer, error) {
+func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, options ...AppProjectInformerOption) (*AppProjectInformer, error) {
 	pi := &AppProjectInformer{
-		namespaces: make([]string, 0),
+		appProjectNamespaces: make([]string, 0),
 	}
 	for _, o := range options {
 		err := o(pi)
@@ -133,7 +133,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 	i, err := informer.NewGenericInformer(&v1alpha1.AppProject{},
 		append([]informer.InformerOption{
 			informer.WithListCallback(func(options v1.ListOptions, namespace string) (runtime.Object, error) {
-				log().Infof("Listing AppProjects in namespace %s", namespace)
+				log().WithField("namespace", namespace).Infof("Listing AppProjects")
 				projects, err := client.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, options)
 				log().Infof("Lister returned %d AppProjects", len(projects.Items))
 				if pi.filterFunc != nil {
@@ -148,7 +148,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 				}
 				return projects, err
 			}),
-			informer.WithNamespaces(pi.namespaces...),
+			informer.WithNamespaces(pi.appProjectNamespaces...),
 			informer.WithWatchCallback(func(options v1.ListOptions, namespace string) (watch.Interface, error) {
 				log().Info("Watching AppProjects")
 				return client.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, options)
@@ -208,7 +208,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 }
 
 func (i *AppProjectInformer) Start(ctx context.Context) {
-	log().Infof("Starting app project informer (namespaces: %s)", strings.Join(i.namespaces, ","))
+	log().Infof("Starting app project informer (namespaces: %s)", strings.Join(i.appProjectNamespaces, ","))
 	err := i.projectInformer.Start(ctx)
 	if err != nil {
 		log().Errorf("Failed to start app project informer: %v", err)

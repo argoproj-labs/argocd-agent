@@ -53,7 +53,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Simple list callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1, app2)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "test", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		inf := NewAppInformer(context.TODO(), fac, WithNamespaces("test"), WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
 			eventCh <- true
 			return apps
 		}))
@@ -74,7 +74,7 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.appLister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.appLister.Applications("test").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 2)
 	})
@@ -82,7 +82,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("List callback with filter", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1, app2)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "test", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		inf := NewAppInformer(context.TODO(), fac, WithNamespaces("test"), WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
 			eventCh <- true
 			return []v1alpha1.Application{*app1}
 		}))
@@ -103,13 +103,13 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.appLister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.appLister.Applications("test").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 1)
-		app, err := inf.appLister.Applications(inf.options.namespace).Get("test1")
+		app, err := inf.appLister.Applications("test").Get("test1")
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
-		app, err = inf.appLister.Applications(inf.options.namespace).Get("test2")
+		app, err = inf.appLister.Applications("test").Get("test2")
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, app)
 	})
@@ -117,7 +117,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Add callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset()
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "test", WithNewAppCallback(func(app *v1alpha1.Application) {
+		inf := NewAppInformer(context.TODO(), fac, WithNamespaces("test"), WithNewAppCallback(func(app *v1alpha1.Application) {
 			eventCh <- true
 		}))
 		stopCh := make(chan struct{})
@@ -134,17 +134,17 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(500 * time.Millisecond)
 				running = false
 			default:
-				_, _ = fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Create(context.TODO(), app1, v1.CreateOptions{})
+				_, _ = fac.ArgoprojV1alpha1().Applications("test").Create(context.TODO(), app1, v1.CreateOptions{})
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.appLister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.appLister.Applications("test").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 1)
-		app, err := inf.appLister.Applications(inf.options.namespace).Get("test1")
+		app, err := inf.appLister.Applications("test").Get("test1")
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
-		app, err = inf.appLister.Applications(inf.options.namespace).Get("test2")
+		app, err = inf.appLister.Applications("test").Get("test2")
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, app)
 	})
@@ -152,7 +152,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Update callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "test", WithUpdateAppCallback(func(old *v1alpha1.Application, new *v1alpha1.Application) {
+		inf := NewAppInformer(context.TODO(), fac, WithNamespaces("test"), WithUpdateAppCallback(func(old *v1alpha1.Application, new *v1alpha1.Application) {
 			eventCh <- true
 		}))
 		stopCh := make(chan struct{})
@@ -172,13 +172,13 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 				appc := app1.DeepCopy()
 				appc.Spec.Project = "hello"
-				_, _ = fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Update(context.TODO(), appc, v1.UpdateOptions{})
+				_, _ = fac.ArgoprojV1alpha1().Applications("test").Update(context.TODO(), appc, v1.UpdateOptions{})
 			}
 		}
-		apps, err := inf.appLister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.appLister.Applications("test").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 1)
-		napp, err := inf.appLister.Applications(inf.options.namespace).Get("test1")
+		napp, err := inf.appLister.Applications("test").Get("test1")
 		assert.NoError(t, err)
 		assert.NotNil(t, napp)
 		assert.Equal(t, "hello", napp.Spec.Project)
@@ -187,7 +187,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Delete callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "test", WithDeleteAppCallback(func(app *v1alpha1.Application) {
+		inf := NewAppInformer(context.TODO(), fac, WithNamespaces("test"), WithDeleteAppCallback(func(app *v1alpha1.Application) {
 			eventCh <- true
 		}))
 		stopCh := make(chan struct{})
@@ -205,13 +205,13 @@ func Test_AppInformer(t *testing.T) {
 				running = false
 			default:
 				time.Sleep(100 * time.Millisecond)
-				_ = fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Delete(context.TODO(), "test1", v1.DeleteOptions{})
+				_ = fac.ArgoprojV1alpha1().Applications("test").Delete(context.TODO(), "test1", v1.DeleteOptions{})
 			}
 		}
-		apps, err := inf.appLister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.appLister.Applications("test").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 0)
-		napp, err := inf.appLister.Applications(inf.options.namespace).Get("test1")
+		napp, err := inf.appLister.Applications("test").Get("test1")
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, napp)
 	})
@@ -219,7 +219,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Test admission in forbidden namespace", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "default", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		inf := NewAppInformer(context.TODO(), fac, WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
 			eventCh <- true
 			return apps
 		}), WithNamespaces("kube-system"))
@@ -251,7 +251,7 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Test admission in allowed namespace", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "default", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		inf := NewAppInformer(context.TODO(), fac, WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
 			eventCh <- true
 			return apps
 		}), WithNamespaces("test"))
