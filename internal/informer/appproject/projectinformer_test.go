@@ -46,7 +46,6 @@ func Test_AppProjectInformer(t *testing.T) {
 		WithDeleteFunc(func(proj *v1alpha1.AppProject) {
 			numDeleted.Add(1)
 		}),
-		WithNamespaces("argocd"),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, pi)
@@ -105,7 +104,7 @@ func Test_FilterFunc(t *testing.T) {
 	updateCh := make(chan bool)
 	deleteCh := make(chan bool)
 	ac := fakeappclient.NewSimpleClientset()
-	pi, err := NewAppProjectInformer(context.TODO(), ac, "test",
+	pi, err := NewAppProjectInformer(context.TODO(), ac, "argocd",
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
 			if numAdded.Load() > 1 {
@@ -179,7 +178,6 @@ func Test_NamespaceNotAllowed(t *testing.T) {
 	addCh := make(chan bool)
 	ac := fakeappclient.NewSimpleClientset()
 	pi, err := NewAppProjectInformer(context.TODO(), ac, "argocd",
-		WithNamespaces("argocd"),
 		WithAddFunc(func(proj *v1alpha1.AppProject) {
 			numAdded.Add(1)
 			require.Equal(t, "argocd", proj.Namespace)

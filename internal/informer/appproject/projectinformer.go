@@ -16,7 +16,6 @@ package appproject
 
 import (
 	"context"
-	"strings"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
@@ -33,7 +32,7 @@ import (
 
 type AppProjectInformer struct {
 	filterFunc func(proj *v1alpha1.AppProject) bool
-	namespaces []string
+	namespace  string
 	logger     *logrus.Entry
 
 	projectInformer *informer.GenericInformer
@@ -93,14 +92,6 @@ func WithLogger(l *logrus.Entry) AppProjectInformerOption {
 	}
 }
 
-// WithNamespaces sets additional namespaces to be watched by the AppProjectInformer
-func WithNamespaces(namespaces ...string) AppProjectInformerOption {
-	return func(o *AppProjectInformer) error {
-		o.namespaces = namespaces
-		return nil
-	}
-}
-
 // WithMetrics sets the AppProject watcher metrics to be used with this
 // informer.
 func WithMetrics(m *metrics.AppProjectWatcherMetrics) AppProjectInformerOption {
@@ -115,7 +106,7 @@ func WithMetrics(m *metrics.AppProjectWatcherMetrics) AppProjectInformerOption {
 // given appclientset.
 func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, namespace string, options ...AppProjectInformerOption) (*AppProjectInformer, error) {
 	pi := &AppProjectInformer{
-		namespaces: make([]string, 0),
+		namespace: namespace,
 	}
 	for _, o := range options {
 		err := o(pi)
@@ -148,7 +139,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 				}
 				return projects, err
 			}),
-			informer.WithNamespaces(pi.namespaces...),
+			informer.WithNamespaces(pi.namespace),
 			informer.WithWatchCallback(func(options v1.ListOptions, namespace string) (watch.Interface, error) {
 				log().Info("Watching AppProjects")
 				return client.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, options)
@@ -208,7 +199,7 @@ func NewAppProjectInformer(ctx context.Context, client appclientset.Interface, n
 }
 
 func (i *AppProjectInformer) Start(ctx context.Context) {
-	log().Infof("Starting app project informer (namespaces: %s)", strings.Join(i.namespaces, ","))
+	log().Infof("Starting app project informer (namespace: %s)", i.namespace)
 	err := i.projectInformer.Start(ctx)
 	if err != nil {
 		log().Errorf("Failed to start app project informer: %v", err)
