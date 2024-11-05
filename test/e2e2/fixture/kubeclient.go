@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package fixture provides a client interface similar to the one provided by
+// the controller-runtime package, in order to avoid creating a dependency on
+// the controller-runtime package.
 package fixture
 
 import (
@@ -25,6 +28,7 @@ import (
 	apps "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -37,11 +41,19 @@ import (
 	"k8s.io/client-go/restmapper"
 )
 
+// KubeObject represents a Kubernetes object. This allows the client interface
+// to work seamlessly with any resource that implements both the metav1.Object
+// and runtime.Object interfaces. This is similar to the controller-runtime's
+// client.Object interface.
 type KubeObject interface {
 	metav1.Object
 	runtime.Object
 }
 
+// KubeObjectList represents a Kubernetes object list. This allows the client
+// interface to work seamlessly with any resource that implements both the
+// metav1.ListInterface and runtime.Object interfaces. This is similar to the
+// controller-runtime's client.ObjectList interface.
 type KubeObjectList interface {
 	metav1.ListInterface
 	runtime.Object
@@ -108,6 +120,9 @@ func NewKubeClient(config *rest.Config) (KubeClient, error) {
 	}, nil
 }
 
+// Get returns the object with the specified key from the cluster. object must
+// be a struct pointer so it can be updated with the result returned by the
+// server.
 func (c KubeClient) Get(ctx context.Context, key types.NamespacedName, object KubeObject, options metav1.GetOptions) error {
 	resource, err := c.resourceFor(object)
 	if err != nil {
@@ -131,6 +146,10 @@ func (c KubeClient) Get(ctx context.Context, key types.NamespacedName, object Ku
 	return err
 }
 
+// List returns a list of objects matching the criteria specified by the given
+// list options from the given namespace. list must be a struct pointer so that
+// the Items field in the list can be populated with the results returned by the
+// server.
 func (c KubeClient) List(ctx context.Context, namespace string, list KubeObjectList, options metav1.ListOptions) error {
 	resource, err := c.resourceFor(list)
 	if err != nil {
@@ -150,6 +169,8 @@ func (c KubeClient) List(ctx context.Context, namespace string, list KubeObjectL
 	return err
 }
 
+// Create creates the given object in the cluster. object must be a struct
+// pointer so that it can be updated with the result returned by the server.
 func (c KubeClient) Create(ctx context.Context, object KubeObject, options metav1.CreateOptions) error {
 	resource, err := c.resourceFor(object)
 	if err != nil {
@@ -183,6 +204,8 @@ func (c KubeClient) Create(ctx context.Context, object KubeObject, options metav
 	return err
 }
 
+// Update updates the given object in the cluster. object must be a struct
+// pointer so that it can be updated with the result returned by the server.
 func (c KubeClient) Update(ctx context.Context, object KubeObject, options metav1.UpdateOptions) error {
 	resource, err := c.resourceFor(object)
 	if err != nil {
@@ -206,6 +229,9 @@ func (c KubeClient) Update(ctx context.Context, object KubeObject, options metav
 	return err
 }
 
+// Patch patches the given object in the cluster using the JSONPatch patch type.
+// object must be a struct pointer so that it can be updated with the result
+// returned by the server.
 func (c KubeClient) Patch(ctx context.Context, object KubeObject, jsonPatch []interface{}, options metav1.PatchOptions) error {
 	resource, err := c.resourceFor(object)
 	if err != nil {
@@ -230,6 +256,7 @@ func (c KubeClient) Patch(ctx context.Context, object KubeObject, jsonPatch []in
 	return err
 }
 
+// Delete deletes the given object from the server.
 func (c KubeClient) Delete(ctx context.Context, object KubeObject, options metav1.DeleteOptions) error {
 	resource, err := c.resourceFor(object)
 	if err != nil {
@@ -268,4 +295,27 @@ func (c KubeClient) resourceFor(object runtime.Object) (schema.GroupVersionResou
 		c.typeToResource[objectType] = resource
 	}
 	return resource, nil
+}
+
+// EnsureApplicationUpdate ensures the argocd application with the given key is
+// updated by retrying if there is a conflicting change.
+func (c KubeClient) EnsureApplicationUpdate(ctx context.Context, key types.NamespacedName, modify func(*argoapp.Application) error, options metav1.UpdateOptions) error {
+	var err error
+	for {
+		var app argoapp.Application
+		err = c.Get(ctx, key, &app, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		err = modify(&app)
+		if err != nil {
+			return err
+		}
+
+		err = c.Update(ctx, &app, options)
+		if !errors.IsConflict(err) {
+			return err
+		}
+	}
 }

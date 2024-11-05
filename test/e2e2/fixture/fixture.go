@@ -57,14 +57,14 @@ func (suite *BaseSuite) SetupSuite() {
 
 func (suite *BaseSuite) SetupTest() {
 	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient)
-	suite.Assert().Nil(err)
+	suite.Require().Nil(err)
 	suite.T().Logf("Test begun at: %v", time.Now())
 }
 
 func (suite *BaseSuite) TearDownTest() {
 	suite.T().Logf("Test ended at: %v", time.Now())
 	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient)
-	suite.Assert().Nil(err)
+	suite.Require().Nil(err)
 }
 
 func ensureDeletion(ctx context.Context, kclient KubeClient, app argoapp.Application) error {

@@ -29,7 +29,7 @@ setup-e2e2:
 	test/e2e2/test-env/setup-vcluster-env.sh create
 
 .PHONY: start-argocd-agent
-start-argocd-agent:
+start-e2e2:
 	test/e2e2/test-env/gen-creds.sh
 	goreman -f test/e2e2/test-env/Procfile start
 

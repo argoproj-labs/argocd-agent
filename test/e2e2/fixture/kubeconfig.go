@@ -39,20 +39,5 @@ func GetSystemKubeConfig(kcontext string) (*rest.Config, error) {
 		return nil, err
 	}
 
-	err = setRateLimitOnRestConfig(restConfig)
-	if err != nil {
-		return nil, err
-	}
-
 	return restConfig, nil
-}
-
-// setRateLimitOnRestConfig sets the QPS and Burst for the rest config
-func setRateLimitOnRestConfig(restConfig *rest.Config) error {
-	if restConfig != nil {
-		// Prevent rate limiting of our requests
-		restConfig.QPS = 100
-		restConfig.Burst = 250
-	}
-	return nil
 }

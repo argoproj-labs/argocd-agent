@@ -27,7 +27,7 @@ make setup-e2e2
 To run the principal and agents, execute the following command from the repository root:
 
 ```shell
-make start-argocd-agent
+make start-e2e2
 ```
 
 To run the tests, execute the following command from the repository root in a separate terminal instance:

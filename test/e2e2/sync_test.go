@@ -88,7 +88,7 @@ func (suite *SyncTestSuite) TearDownTest() {
 
 }
 
-func (suite *SyncTestSuite) Test_Sync_Managed() {
+func (suite *SyncTestSuite) Test_SyncManaged() {
 	requires := suite.Require()
 
 	// Create a managed application in the principal's cluster
@@ -152,6 +152,37 @@ func (suite *SyncTestSuite) Test_Sync_Managed() {
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
 	}, 60*time.Second, 1*time.Second)
 
+	// Check that the .spec field of the managed-agent matches that of the
+	// principal
+	app = argoapp.Application{}
+	err = suite.PrincipalClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+	requires.NoError(err)
+	mapp := argoapp.Application{}
+	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &mapp, metav1.GetOptions{})
+	requires.NoError(err)
+	requires.Equal(&app.Spec, &mapp.Spec)
+
+	// Modify the application on the principal and ensure the change is
+	// propagated to the managed-agent
+	err = suite.PrincipalClient.EnsureApplicationUpdate(suite.Ctx, key, func(app *argoapp.Application) error {
+		app.Spec.Info = []argoapp.Info{
+			{
+				Name:  "e2e",
+				Value: "test",
+			},
+		}
+		return nil
+	}, metav1.UpdateOptions{})
+	requires.NoError(err)
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		return err == nil &&
+			len(app.Spec.Info) == 1 &&
+			app.Spec.Info[0].Name == "e2e" &&
+			app.Spec.Info[0].Value == "test"
+	}, 30*time.Second, 1*time.Second)
+
 	// Delete the app from the principal
 	err = suite.PrincipalClient.Delete(suite.Ctx, &app, metav1.DeleteOptions{})
 	requires.NoError(err)
@@ -164,7 +195,7 @@ func (suite *SyncTestSuite) Test_Sync_Managed() {
 	}, 90*time.Second, 1*time.Second)
 }
 
-func (suite *SyncTestSuite) Test_Sync_Autonomous() {
+func (suite *SyncTestSuite) Test_SyncAutonomous() {
 	requires := suite.Require()
 
 	// Create an autonomous application on the autonomous-agent's cluster
@@ -231,6 +262,37 @@ func (suite *SyncTestSuite) Test_Sync_Autonomous() {
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
 	}, 60*time.Second, 1*time.Second)
+
+	// Check that the .spec field of the principal matches that of the
+	// autonomous-agent
+	app = argoapp.Application{}
+	err = suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
+	requires.NoError(err)
+	papp := argoapp.Application{}
+	err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &papp, metav1.GetOptions{})
+	requires.NoError(err)
+	requires.Equal(&app.Spec, &papp.Spec)
+
+	// Modify the application on the autonomous-agent and ensure the change is
+	// propagated to the principal
+	err = suite.AutonomousAgentClient.EnsureApplicationUpdate(suite.Ctx, agentKey, func(app *argoapp.Application) error {
+		app.Spec.Info = []argoapp.Info{
+			{
+				Name:  "e2e",
+				Value: "test",
+			},
+		}
+		return nil
+	}, metav1.UpdateOptions{})
+	requires.NoError(err)
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
+		return err == nil &&
+			len(app.Spec.Info) == 1 &&
+			app.Spec.Info[0].Name == "e2e" &&
+			app.Spec.Info[0].Value == "test"
+	}, 30*time.Second, 1*time.Second)
 
 	// Delete the app from the autonomous-agent
 	err = suite.AutonomousAgentClient.Delete(suite.Ctx, &app, metav1.DeleteOptions{})

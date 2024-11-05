@@ -34,6 +34,10 @@ import (
 	"k8s.io/client-go/restmapper"
 )
 
+// FixtureTestSuit is code used to experiment with and test the e2e fixture code
+// itself. It doesn't test any of the project's components. In order to run, it
+// requires the Argo CD CRDs (i.e. Application etc.) to be installed on the
+// target cluster. It is currently commented out.
 type FixtureTestSuite struct {
 	suite.Suite
 }
