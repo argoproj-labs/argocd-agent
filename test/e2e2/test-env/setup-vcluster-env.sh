@@ -105,12 +105,22 @@ apply() {
 	echo "-> TMP_DIR is $TMP_DIR"
 	cp -r ${SCRIPTPATH}/* $TMP_DIR
 
-  # Comment out 'loadBalancerIP:' lines on OpenShift
+	# Comment out 'loadBalancerIP:' lines on OpenShift
 	if [[ "$OPENSHIFT" != "" ]]; then
 		sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/redis-service.yaml
 		sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/repo-server-service.yaml
 		sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/server-service.yaml
 	fi
+
+	# Generate the server secret key for the argocd running on the managed and autonomous agent clusters
+	echo "-> Generate server.secretkey for agent's argocd-secrets"
+	if ! pwmake=$(which pwmake); then
+		pwmake=$(which pwgen)
+	fi
+	echo "data:" >> $TMP_DIR/agent-managed/argocd-secret.yaml
+	echo "  server.secretkey: $($pwmake 56 | base64)" >> $TMP_DIR/agent-managed/argocd-secret.yaml
+	echo "data:" >> $TMP_DIR/agent-autonomous/argocd-secret.yaml
+	echo "  server.secretkey: $($pwmake 56 | base64)" >> $TMP_DIR/agent-autonomous/argocd-secret.yaml
 
 	echo "-> Create Argo CD on control plane"
 
