@@ -44,8 +44,10 @@ var appExistsError = errors.NewAlreadyExists(schema.GroupResource{Group: "argopr
 var appNotFoundError = errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
 
 func fakeAppManager(t *testing.T, objects ...runtime.Object) (*fakeappclient.Clientset, *ApplicationManager) {
+	t.Helper()
 	appC := fakeappclient.NewSimpleClientset(objects...)
-	informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+	informer, err := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+	require.NoError(t, err)
 	be := application.NewKubernetesBackend(appC, "", informer, true)
 
 	am, err := NewApplicationManager(be, "argocd")
@@ -186,8 +188,9 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 
 		// We are on the agent
 		appC := fakeappclient.NewSimpleClientset(existing)
-		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := application.NewKubernetesBackend(appC, "", informer, true)
+		ai, err := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+		require.NoError(t, err)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
 		mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent))
 		require.NoError(t, err)
 
@@ -273,8 +276,9 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		}
 
 		appC := fakeappclient.NewSimpleClientset(existing)
-		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := application.NewKubernetesBackend(appC, "", informer, true)
+		ai, err := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+		require.NoError(t, err)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
 		mgr, err := NewApplicationManager(be, "argocd")
 		require.NoError(t, err)
 		mgr.mode = manager.ManagerModeManaged
@@ -349,8 +353,9 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 		}
 
 		appC := fakeappclient.NewSimpleClientset(existing)
-		informer := appinformer.NewAppInformer(context.Background(), appC, "argocd")
-		be := application.NewKubernetesBackend(appC, "", informer, true)
+		ai, err := appinformer.NewAppInformer(context.Background(), appC, "argocd")
+		require.NoError(t, err)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
 		mgr, err := NewApplicationManager(be, "argocd")
 		require.NoError(t, err)
 		mgr.role = manager.ManagerRolePrincipal

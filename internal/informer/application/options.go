@@ -19,6 +19,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 )
 
 // AppInformerOptions is a set of options for the AppInformer.
@@ -39,67 +40,67 @@ type AppInformerOptions struct {
 	errorCb    ErrorCallback
 }
 
-type AppInformerOption func(o *AppInformerOptions)
+type AppInformerOption func(ai *AppInformer)
 
 // WithMetrics sets the ApplicationMetrics instance to be used by the AppInformer
 func WithMetrics(m *metrics.ApplicationWatcherMetrics) AppInformerOption {
-	return func(o *AppInformerOptions) {
-		o.appMetrics = m
+	return func(o *AppInformer) {
+		o.metrics = m
 	}
 }
 
 // WithNamespaces sets additional namespaces to be watched by the AppInformer
 func WithNamespaces(namespaces ...string) AppInformerOption {
-	return func(o *AppInformerOptions) {
+	return func(o *AppInformer) {
 		o.namespaces = namespaces
 	}
 }
 
 // WithFilterChain sets the FilterChain to be used by the AppInformer
 func WithFilterChain(fc *filter.Chain) AppInformerOption {
-	return func(o *AppInformerOptions) {
+	return func(o *AppInformer) {
 		o.filters = fc
 	}
 }
 
 // WithListAppCallback sets the ListAppsCallback to be called by the AppInformer
-func WithListAppCallback(cb ListAppsCallback) AppInformerOption {
-	return func(o *AppInformerOptions) {
-		o.listCb = cb
+func WithListAppCallback(cb func(app *v1alpha1.Application) bool) AppInformerOption {
+	return func(o *AppInformer) {
+		o.filterFunc = cb
 	}
 }
 
 // WithNewAppCallback sets the NewAppCallback to be executed by the AppInformer
 func WithNewAppCallback(cb NewAppCallback) AppInformerOption {
-	return func(o *AppInformerOptions) {
-		o.newCb = cb
+	return func(o *AppInformer) {
+		o.addFunc = cb
 	}
 }
 
 // WithUpdateAppCallback sets the UpdateAppCallback to be executed by the AppInformer
 func WithUpdateAppCallback(cb UpdateAppCallback) AppInformerOption {
-	return func(o *AppInformerOptions) {
-		o.updateCb = cb
+	return func(o *AppInformer) {
+		o.updateFunc = cb
 	}
 }
 
 // WithDeleteAppCallback sets the DeleteAppCallback to be executed by the AppInformer
 func WithDeleteAppCallback(cb DeleteAppCallback) AppInformerOption {
-	return func(o *AppInformerOptions) {
-		o.deleteCb = cb
+	return func(o *AppInformer) {
+		o.deleteFunc = cb
 	}
 }
 
-// WithErrorCallback sets the ErrorCallback to be executed by the AppInformer
-func WithErrorCallback(cb ErrorCallback) AppInformerOption {
-	return func(o *AppInformerOptions) {
-		o.errorCb = cb
-	}
-}
+// // WithErrorCallback sets the ErrorCallback to be executed by the AppInformer
+// func WithErrorCallback(cb ErrorCallback) AppInformerOption {
+// 	return func(o *AppInformerOptions) {
+// 		o.errorCb = cb
+// 	}
+// }
 
-// WithResyncDuration sets the resync duration to be used by the AppInformer's lister
-func WithResyncDuration(d time.Duration) AppInformerOption {
-	return func(o *AppInformerOptions) {
-		o.resync = d
-	}
-}
+// // WithResyncDuration sets the resync duration to be used by the AppInformer's lister
+// func WithResyncDuration(d time.Duration) AppInformerOption {
+// 	return func(o *AppInformerOptions) {
+// 		o.resync = d
+// 	}
+// }

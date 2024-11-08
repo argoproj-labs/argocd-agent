@@ -125,7 +125,7 @@ func (be *KubernetesBackend) SupportsPatch() bool {
 }
 
 func (be *KubernetesBackend) StartInformer(ctx context.Context) {
-	be.appInformer.Start(ctx.Done())
+	be.appInformer.Start(ctx)
 }
 
 func (be *KubernetesBackend) EnsureSynced(duration time.Duration) error {

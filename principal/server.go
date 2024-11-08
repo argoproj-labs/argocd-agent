@@ -161,10 +161,13 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		appProjectManagerOption = append(appProjectManagerOption, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
 	}
 
-	appInformer := appinformer.NewAppInformer(s.ctx, kubeClient.ApplicationsClientset,
+	appInformer, err := appinformer.NewAppInformer(s.ctx, kubeClient.ApplicationsClientset,
 		s.namespace,
 		appInformerOptions...,
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appInformer, true), s.namespace,
 		managerOpts...,

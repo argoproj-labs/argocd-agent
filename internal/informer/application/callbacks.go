@@ -52,40 +52,40 @@ type ErrorCallback func(err error, fmt string, args ...string)
 func (i *AppInformer) NewAppCallback() NewAppCallback {
 	i.lock.RLock()
 	defer i.lock.RUnlock()
-	return i.options.newCb
+	return i.addFunc
 }
 
 // SetNewAppCallback sets the new application callback for the AppInformer
 func (i *AppInformer) SetNewAppCallback(cb NewAppCallback) {
 	i.lock.Lock()
 	defer i.lock.Unlock()
-	i.options.newCb = cb
+	i.addFunc = cb
 }
 
 // UpdateAppCallback returns the update application callback of the AppInformer
 func (i *AppInformer) UpdateAppCallback() UpdateAppCallback {
 	i.lock.RLock()
 	defer i.lock.RUnlock()
-	return i.options.updateCb
+	return i.updateFunc
 }
 
 // SetUpdateAppCallback sets the update application callback for the AppInformer
 func (i *AppInformer) SetUpdateAppCallback(cb UpdateAppCallback) {
 	i.lock.Lock()
 	defer i.lock.Unlock()
-	i.options.updateCb = cb
+	i.updateFunc = cb
 }
 
 // DeleteAppCallback returns the delete application callback of the AppInformer
 func (i *AppInformer) DeleteAppCallback() DeleteAppCallback {
 	i.lock.RLock()
 	defer i.lock.RUnlock()
-	return i.options.deleteCb
+	return i.deleteFunc
 }
 
 // SetDeleteAppCallback sets the delete application callback for the AppInformer
 func (i *AppInformer) SetDeleteAppCallback(cb DeleteAppCallback) {
 	i.lock.Lock()
 	defer i.lock.Unlock()
-	i.options.deleteCb = cb
+	i.deleteFunc = cb
 }

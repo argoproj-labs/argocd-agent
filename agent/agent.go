@@ -120,20 +120,21 @@ func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace s
 		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
-	appInformer := appinformer.NewAppInformer(ctx, appclient, a.namespace,
-		appinformer.WithListAppCallback(a.listAppCallback),
+	appInformer, err := appinformer.NewAppInformer(ctx, appclient, a.namespace,
+		// appinformer.WithListAppCallback(a.listAppCallback),
 		appinformer.WithNewAppCallback(a.addAppCreationToQueue),
 		appinformer.WithUpdateAppCallback(a.addAppUpdateToQueue),
 		appinformer.WithDeleteAppCallback(a.addAppDeletionToQueue),
 		appinformer.WithFilterChain(a.DefaultFilterChain()),
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	allowUpsert := false
 	if a.mode == types.AgentModeManaged {
 		allowUpsert = true
 	}
-
-	var err error
 
 	appProjectManagerOption := []appproject.AppProjectManagerOption{
 		appproject.WithAllowUpsert(true),

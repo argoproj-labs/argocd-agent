@@ -23,6 +23,7 @@ import (
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
@@ -52,14 +53,16 @@ func Test_AppInformer(t *testing.T) {
 	}
 	t.Run("Simple list callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1, app2)
-		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "test", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		expected := 2
+		received := 0
+		eventCh := make(chan interface{}, expected)
+		ai, err := NewAppInformer(context.TODO(), fac, "test", WithNamespaces("test"), WithListAppCallback(func(app *v1alpha1.Application) bool {
 			eventCh <- true
-			return apps
+			return true
 		}))
-		stopCh := make(chan struct{})
+		require.NoError(t, err)
 		go func() {
-			inf.appInformer.Run(stopCh)
+			ai.Start(context.TODO())
 		}()
 		ticker := time.NewTicker(1 * time.Second)
 		running := true
@@ -68,27 +71,35 @@ func Test_AppInformer(t *testing.T) {
 			case <-ticker.C:
 				t.Fatal("callback timeout reached")
 			case <-eventCh:
-				time.Sleep(500 * time.Millisecond)
-				running = false
+				received += 1
 			default:
+				if received >= expected {
+					running = false
+				}
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.appLister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := ai.appLister.Applications("test").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 2)
 	})
 
 	t.Run("List callback with filter", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1, app2)
-		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "test", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		expected := 2
+		received := 0
+		eventCh := make(chan interface{}, expected)
+		ai, err := NewAppInformer(context.TODO(), fac, "test", WithNamespaces("test"), WithListAppCallback(func(app *v1alpha1.Application) bool {
 			eventCh <- true
-			return []v1alpha1.Application{*app1}
+			if app.Name == "test1" {
+				return true
+			} else {
+				return false
+			}
 		}))
-		stopCh := make(chan struct{})
+		require.NoError(t, err)
 		go func() {
-			inf.appInformer.Run(stopCh)
+			ai.appInformer.Start(context.TODO())
 		}()
 		ticker := time.NewTicker(1 * time.Second)
 		running := true
@@ -97,19 +108,21 @@ func Test_AppInformer(t *testing.T) {
 			case <-ticker.C:
 				t.Fatal("callback timeout reached")
 			case <-eventCh:
-				time.Sleep(500 * time.Millisecond)
-				running = false
+				received += 1
 			default:
+				if received >= expected {
+					running = false
+				}
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.appLister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := ai.appLister.Applications("test").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 1)
-		app, err := inf.appLister.Applications(inf.options.namespace).Get("test1")
+		app, err := ai.appLister.Applications("test").Get("test1")
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
-		app, err = inf.appLister.Applications(inf.options.namespace).Get("test2")
+		app, err = ai.appLister.Applications("test").Get("test2")
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, app)
 	})
@@ -117,12 +130,12 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Add callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset()
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "test", WithNewAppCallback(func(app *v1alpha1.Application) {
+		inf, err := NewAppInformer(context.TODO(), fac, "test", WithNewAppCallback(func(app *v1alpha1.Application) {
 			eventCh <- true
 		}))
-		stopCh := make(chan struct{})
+		require.NoError(t, err)
 		go func() {
-			inf.appInformer.Run(stopCh)
+			inf.appInformer.Start(context.TODO())
 		}()
 		ticker := time.NewTicker(1 * time.Second)
 		running := true
@@ -134,17 +147,17 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(500 * time.Millisecond)
 				running = false
 			default:
-				_, _ = fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Create(context.TODO(), app1, v1.CreateOptions{})
+				_, _ = fac.ArgoprojV1alpha1().Applications("test").Create(context.TODO(), app1, v1.CreateOptions{})
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		apps, err := inf.appLister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.appLister.Applications("test").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 1)
-		app, err := inf.appLister.Applications(inf.options.namespace).Get("test1")
+		app, err := inf.appLister.Applications("test").Get("test1")
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
-		app, err = inf.appLister.Applications(inf.options.namespace).Get("test2")
+		app, err = inf.appLister.Applications("test").Get("test2")
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, app)
 	})
@@ -152,12 +165,12 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Update callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "test", WithUpdateAppCallback(func(old *v1alpha1.Application, new *v1alpha1.Application) {
+		inf, err := NewAppInformer(context.TODO(), fac, "test", WithUpdateAppCallback(func(old *v1alpha1.Application, new *v1alpha1.Application) {
 			eventCh <- true
 		}))
-		stopCh := make(chan struct{})
+		require.NoError(t, err)
 		go func() {
-			inf.appInformer.Run(stopCh)
+			inf.appInformer.Start(context.TODO())
 		}()
 		ticker := time.NewTicker(2 * time.Second)
 		running := true
@@ -172,13 +185,13 @@ func Test_AppInformer(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 				appc := app1.DeepCopy()
 				appc.Spec.Project = "hello"
-				_, _ = fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Update(context.TODO(), appc, v1.UpdateOptions{})
+				_, _ = fac.ArgoprojV1alpha1().Applications("test").Update(context.TODO(), appc, v1.UpdateOptions{})
 			}
 		}
-		apps, err := inf.appLister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.appLister.Applications("test").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 1)
-		napp, err := inf.appLister.Applications(inf.options.namespace).Get("test1")
+		napp, err := inf.appLister.Applications("test").Get("test1")
 		assert.NoError(t, err)
 		assert.NotNil(t, napp)
 		assert.Equal(t, "hello", napp.Spec.Project)
@@ -187,12 +200,12 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Delete callback", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "test", WithDeleteAppCallback(func(app *v1alpha1.Application) {
+		inf, err := NewAppInformer(context.TODO(), fac, "test", WithDeleteAppCallback(func(app *v1alpha1.Application) {
 			eventCh <- true
 		}))
-		stopCh := make(chan struct{})
+		require.NoError(t, err)
 		go func() {
-			inf.appInformer.Run(stopCh)
+			inf.appInformer.Start(context.TODO())
 		}()
 		ticker := time.NewTicker(2 * time.Second)
 		running := true
@@ -205,38 +218,43 @@ func Test_AppInformer(t *testing.T) {
 				running = false
 			default:
 				time.Sleep(100 * time.Millisecond)
-				_ = fac.ArgoprojV1alpha1().Applications(inf.options.namespace).Delete(context.TODO(), "test1", v1.DeleteOptions{})
+				_ = fac.ArgoprojV1alpha1().Applications("test").Delete(context.TODO(), "test1", v1.DeleteOptions{})
 			}
 		}
-		apps, err := inf.appLister.Applications(inf.options.namespace).List(labels.Everything())
+		apps, err := inf.appLister.Applications("test").List(labels.Everything())
 		assert.NoError(t, err)
 		assert.Len(t, apps, 0)
-		napp, err := inf.appLister.Applications(inf.options.namespace).Get("test1")
+		napp, err := inf.appLister.Applications("test").Get("test1")
 		assert.ErrorContains(t, err, "not found")
 		assert.Nil(t, napp)
 	})
 
 	t.Run("Test admission in forbidden namespace", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
-		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "default", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		expected := 2
+		received := 0
+		eventCh := make(chan interface{}, expected)
+		inf, err := NewAppInformer(context.TODO(), fac, "default", WithListAppCallback(func(app *v1alpha1.Application) bool {
 			eventCh <- true
-			return apps
+			return true
 		}), WithNamespaces("kube-system"))
-		stopCh := make(chan struct{})
+		require.NoError(t, err)
 		go func() {
-			inf.appInformer.Run(stopCh)
+			inf.appInformer.Start(context.TODO())
 		}()
 		ticker := time.NewTicker(2 * time.Second)
 		running := true
 		for running {
 			select {
 			case <-ticker.C:
-				t.Fatal("callback timeout reached")
+				// We do not expect the list callback to execute
+				running = false
 			case <-eventCh:
 				time.Sleep(500 * time.Millisecond)
-				running = false
 			default:
+				if received >= expected {
+					running = false
+				}
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
@@ -251,13 +269,13 @@ func Test_AppInformer(t *testing.T) {
 	t.Run("Test admission in allowed namespace", func(t *testing.T) {
 		fac := fakeappclient.NewSimpleClientset(app1)
 		eventCh := make(chan interface{})
-		inf := NewAppInformer(context.TODO(), fac, "default", WithListAppCallback(func(apps []v1alpha1.Application) []v1alpha1.Application {
+		inf, err := NewAppInformer(context.TODO(), fac, "default", WithListAppCallback(func(app *v1alpha1.Application) bool {
 			eventCh <- true
-			return apps
+			return true
 		}), WithNamespaces("test"))
-		stopCh := make(chan struct{})
+		require.NoError(t, err)
 		go func() {
-			inf.appInformer.Run(stopCh)
+			inf.appInformer.Start(context.TODO())
 		}()
 		ticker := time.NewTicker(2 * time.Second)
 		running := true
@@ -287,7 +305,7 @@ func Test_SetAppCallbacks(t *testing.T) {
 		addFn := func(app *v1alpha1.Application) {
 			called = true
 		}
-		i := &AppInformer{options: &AppInformerOptions{}}
+		i := &AppInformer{}
 		i.SetNewAppCallback(addFn)
 		i.NewAppCallback()(nil)
 		assert.True(t, called)
@@ -298,7 +316,7 @@ func Test_SetAppCallbacks(t *testing.T) {
 		updFn := func(old *v1alpha1.Application, new *v1alpha1.Application) {
 			called = true
 		}
-		i := &AppInformer{options: &AppInformerOptions{}}
+		i := &AppInformer{}
 		i.SetUpdateAppCallback(updFn)
 		i.UpdateAppCallback()(nil, nil)
 		assert.True(t, called)
@@ -309,7 +327,7 @@ func Test_SetAppCallbacks(t *testing.T) {
 		delFn := func(app *v1alpha1.Application) {
 			called = true
 		}
-		i := &AppInformer{options: &AppInformerOptions{}}
+		i := &AppInformer{}
 		i.SetDeleteAppCallback(delFn)
 		i.DeleteAppCallback()(nil)
 		assert.True(t, called)
