@@ -76,7 +76,7 @@ type Application interface {
 	Update(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error)
 	Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.Application, error)
 	SupportsPatch() bool
-	StartInformer(ctx context.Context)
+	StartInformer(ctx context.Context) error
 	EnsureSynced(duration time.Duration) error
 }
 
@@ -91,5 +91,6 @@ type AppProject interface {
 	Update(ctx context.Context, app *v1alpha1.AppProject) (*v1alpha1.AppProject, error)
 	Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.AppProject, error)
 	SupportsPatch() bool
-	StartInformer(ctx context.Context)
+	StartInformer(ctx context.Context) error
+	EnsureSynced(duration time.Duration) error
 }

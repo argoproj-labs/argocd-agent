@@ -69,6 +69,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if err != nil {
 					cmd.Fatal("invalid log level: %s. Available levels are: %s", logLevel, cmd.AvailableLogLevels())
 				}
+				logrus.Printf("Setting loglevel to %s", logLevel)
 				logrus.SetLevel(lvl)
 			}
 			if formatter, err := cmd.LogFormatter(logFormat); err != nil {

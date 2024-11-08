@@ -22,9 +22,10 @@ package appproject
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
-	"github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,13 +42,13 @@ type KubernetesBackend struct {
 	// appClient is used to interfact with Argo CD AppProject resources on the cluster on which agent/principal is installed.
 	appClient appclientset.Interface
 	// appProjectInformer is used to watch for change events for Argo CD AppProject resources on the cluster
-	appProjectInformer *appproject.AppProjectInformer
+	appProjectInformer informer.InformerInterface
 	// namespace to contain the source of Argo CD AppProject CRs in all cases, mainly used by agents
 	namespace string
 	usePatch  bool
 }
 
-func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appProjectInformer *appproject.AppProjectInformer, usePatch bool) *KubernetesBackend {
+func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appProjectInformer informer.InformerInterface, usePatch bool) *KubernetesBackend {
 	return &KubernetesBackend{
 		appClient:          appClient,
 		appProjectInformer: appProjectInformer,
@@ -113,6 +114,13 @@ func (be *KubernetesBackend) SupportsPatch() bool {
 	return be.usePatch
 }
 
-func (be *KubernetesBackend) StartInformer(ctx context.Context) {
+func (be *KubernetesBackend) StartInformer(ctx context.Context) error {
 	be.appProjectInformer.Start(ctx)
+	return nil
+}
+
+func (be *KubernetesBackend) EnsureSynced(timeout time.Duration) error {
+	ctx, cancelFunc := context.WithTimeout(context.Background(), timeout)
+	defer cancelFunc()
+	return be.appProjectInformer.WaitForSync(ctx)
 }

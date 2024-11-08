@@ -27,8 +27,8 @@ import (
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
-	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
-	appprojectinformer "github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/filter"
+	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/issuer"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -39,8 +39,14 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v2/util/glob"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -131,56 +137,70 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
-	appInformerOptions := []appinformer.AppInformerOption{
-		appinformer.WithNamespaces(s.options.namespaces...),
-		appinformer.WithNewAppCallback(s.newAppCallback),
-		appinformer.WithUpdateAppCallback(s.updateAppCallback),
-		appinformer.WithDeleteAppCallback(s.deleteAppCallback),
+	appFilters := s.defaultAppFilterChain()
+
+	appInformerOpts := []informer.InformerOption[*v1alpha1.Application]{
+		informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, opts)
+		}),
+		informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, opts)
+		}),
+		informer.WithAddHandler[*v1alpha1.Application](s.newAppCallback),
+		informer.WithUpdateHandler[*v1alpha1.Application](s.updateAppCallback),
+		informer.WithDeleteHandler[*v1alpha1.Application](s.deleteAppCallback),
+		informer.WithFilters[*v1alpha1.Application](appFilters),
 	}
 
-	managerOpts := []application.ApplicationManagerOption{
+	appManagerOpts := []application.ApplicationManagerOption{
 		application.WithAllowUpsert(true),
 		application.WithRole(manager.ManagerRolePrincipal),
 	}
 
-	appProjectInformerOptions := []appprojectinformer.AppProjectInformerOption{
-		appprojectinformer.WithAddFunc(s.newAppProjectCallback),
-		appprojectinformer.WithUpdateFunc(s.updateAppProjectCallback),
-		appprojectinformer.WithDeleteFunc(s.deleteAppProjectCallback),
+	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
+		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("").List(ctx, opts)
+		}),
+		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("").Watch(ctx, opts)
+		}),
+		informer.WithAddHandler[*v1alpha1.AppProject](s.newAppProjectCallback),
+		informer.WithUpdateHandler[*v1alpha1.AppProject](s.updateAppProjectCallback),
+		informer.WithDeleteHandler[*v1alpha1.AppProject](s.deleteAppProjectCallback),
 	}
 
-	appProjectManagerOption := []appproject.AppProjectManagerOption{
+	projManagerOpts := []appproject.AppProjectManagerOption{
 		appproject.WithAllowUpsert(true),
 		appproject.WithRole(manager.ManagerRolePrincipal),
 	}
 
 	if s.options.metricsPort > 0 {
-		appInformerOptions = append(appInformerOptions, appinformer.WithMetrics(metrics.NewApplicationWatcherMetrics()))
-		managerOpts = append(managerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
-		appProjectInformerOptions = append(appProjectInformerOptions, appprojectinformer.WithMetrics(metrics.NewAppProjectWatcherMetrics()))
-		appProjectManagerOption = append(appProjectManagerOption, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
+		appInformerOpts = append(appInformerOpts, informer.WithMetrics[*v1alpha1.Application](prometheus.NewRegistry(), metrics.NewInformerMetrics("applications")))
+		appManagerOpts = append(appManagerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
+		projInformerOpts = append(projInformerOpts, informer.WithMetrics[*v1alpha1.AppProject](prometheus.NewRegistry(), metrics.NewInformerMetrics("applications")))
+		projManagerOpts = append(projManagerOpts, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
 	}
 
-	appInformer := appinformer.NewAppInformer(s.ctx, kubeClient.ApplicationsClientset,
-		s.namespace,
-		appInformerOptions...,
+	appInformer, err := informer.NewInformer(ctx, appInformerOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	projectInformer, err := informer.NewInformer(s.ctx,
+		projInformerOpts...,
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appInformer, true), s.namespace,
-		managerOpts...,
+		appManagerOpts...,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	projectInformer, err := appprojectinformer.NewAppProjectInformer(s.ctx, kubeClient.ApplicationsClientset, s.namespace,
-		appProjectInformerOptions...,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, projectInformer, true), s.namespace, appProjectManagerOption...)
+	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, projectInformer, true), s.namespace, projManagerOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -223,21 +243,33 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	// The application informer lives in its own go routine
 	go func() {
-		s.appManager.StartBackend(s.ctx)
+		if err := s.appManager.StartBackend(s.ctx); err != nil {
+			log().WithError(err).Error("Application backend has exited non-successfully")
+		} else {
+			log().Info("Application backend has exited")
+		}
 	}()
 
 	// The project informer lives in its own go routine
 	go func() {
-		s.projectManager.StartBackend(s.ctx)
+		if err := s.projectManager.StartBackend(s.ctx); err != nil {
+			log().WithError(err).Error("AppProject backend has exited non-successfully")
+		} else {
+			log().Info("AppProject backend has exited")
+		}
 	}()
 
 	s.events = event.NewEventSource(s.options.serverName)
 
 	if err := s.appManager.EnsureSynced(waitForSyncedDuration); err != nil {
-		return fmt.Errorf("unable to sync application manager backend: %v", err)
+		return fmt.Errorf("unable to sync Application informer: %w", err)
 	}
+	log().Infof("Application informer synced and ready")
 
-	log().Infof("Informer synced and ready")
+	if err := s.projectManager.EnsureSynced(waitForSyncedDuration); err != nil {
+		return fmt.Errorf("unable to sync AppProject informer: %w", err)
+	}
+	log().Infof("AppProject informer synced and ready")
 
 	return nil
 }
@@ -303,6 +335,15 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	}
 
 	return tlsConfig, nil
+}
+
+// defaultAppFilterChain returns the default filter chain for server s to use
+func (s *Server) defaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
+	c := filter.NewFilterChain[*v1alpha1.Application]()
+	c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
+		return glob.MatchStringInList(s.options.namespaces, res.Namespace, glob.REGEXP)
+	})
+	return c
 }
 
 // ListenerForE2EOnly returns the listener of Server s

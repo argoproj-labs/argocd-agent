@@ -21,12 +21,13 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	appproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	appmock "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
-	appprojectinformer "github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
@@ -37,17 +38,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func fakeAppManager(t *testing.T, objects ...runtime.Object) (*fakeappclient.Clientset, *AppProjectManager) {
-	appC := fakeappclient.NewSimpleClientset(objects...)
-	informer, err := appprojectinformer.NewAppProjectInformer(context.Background(), appC, "argocd")
+func fakeProjManager(t *testing.T, namespace string, objects ...runtime.Object) (*fakeappclient.Clientset, *AppProjectManager) {
+	client := fakeappclient.NewSimpleClientset(objects...)
+	informer, err := informer.NewInformer(context.Background(),
+		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return client.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, opts)
+		}),
+		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return client.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, opts)
+		}),
+	)
 	assert.NoError(t, err)
 
-	be := appproject.NewKubernetesBackend(appC, "", informer, true)
+	be := appproject.NewKubernetesBackend(client, "", informer, true)
 
 	am, err := NewAppProjectManager(be, "")
 	assert.NoError(t, err)
 
-	return appC, am
+	return client, am
 }
 
 func Test_ManagerOptions(t *testing.T) {
@@ -87,7 +95,7 @@ func Test_DeleteAppProject(t *testing.T) {
 				SourceRepos: []string{"*"},
 			},
 		}
-		appC, mgr := fakeAppManager(t, existing)
+		appC, mgr := fakeProjManager(t, "argocd", existing)
 		app, err := appC.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
@@ -113,7 +121,7 @@ func Test_DeleteAppProject(t *testing.T) {
 				SourceRepos: []string{"*"},
 			},
 		}
-		appC, mgr := fakeAppManager(t, existing)
+		appC, mgr := fakeProjManager(t, "argocd", existing)
 		app, err := appC.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.NotNil(t, app)

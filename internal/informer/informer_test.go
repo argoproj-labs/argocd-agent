@@ -1,3 +1,17 @@
+// Copyright 2024 The argocd-agent Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package informer
 
 import (
@@ -6,7 +20,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,218 +31,208 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 )
 
-func Test_Informer(t *testing.T) {
-	listFunc := func(options v1.ListOptions, namespace string) (runtime.Object, error) {
-		return &v1alpha1.ApplicationList{Items: []v1alpha1.Application{}}, nil
-	}
-	watcher := watch.NewFake()
-	nopWatchFunc := func(options v1.ListOptions, namespace string) (watch.Interface, error) {
-		return watcher, nil
-	}
-	t.Run("Error when no list function given", func(t *testing.T) {
-		i, err := NewGenericInformer(&v1alpha1.Application{})
-		assert.Nil(t, i)
-		assert.ErrorContains(t, err, "without list function")
-	})
-	t.Run("Error when no watch function given", func(t *testing.T) {
-		i, err := NewGenericInformer(&v1alpha1.Application{},
-			WithListCallback(listFunc))
-		assert.Nil(t, i)
-		assert.ErrorContains(t, err, "without watch function")
-	})
-
-	t.Run("Error on option", func(t *testing.T) {
-		opt := func(i *GenericInformer) error {
-			return errors.New("some error")
-		}
-		i, err := NewGenericInformer(&v1alpha1.Application{}, opt)
-		assert.Nil(t, i)
-		assert.ErrorContains(t, err, "some error")
-	})
-
-	t.Run("Instantiate generic informer without processing", func(t *testing.T) {
-		i, err := NewGenericInformer(&v1alpha1.Application{},
-			WithListCallback(listFunc),
-			WithWatchCallback(nopWatchFunc),
-		)
-		require.NotNil(t, i)
-		require.NoError(t, err)
-		err = i.Start(context.Background())
-		assert.NoError(t, err)
-		assert.True(t, i.IsRunning())
-		err = i.Stop()
-		assert.NoError(t, err)
-		assert.False(t, i.IsRunning())
-	})
-
-	t.Run("Cannot start informer twice", func(t *testing.T) {
-		ctl := fakeGenericInformer(t)
-		err := ctl.i.Start(context.TODO())
-		assert.NoError(t, err)
-		err = ctl.i.Start(context.TODO())
-		assert.Error(t, err)
-	})
-
-	t.Run("Can stop informer only when running", func(t *testing.T) {
-		ctl := fakeGenericInformer(t)
-		// Not running yet
-		err := ctl.i.Stop()
-		assert.Error(t, err)
-		err = ctl.i.Start(context.TODO())
-		assert.NoError(t, err)
-		// Running
-		err = ctl.i.Stop()
-		assert.NoError(t, err)
-		// Not running
-		err = ctl.i.Stop()
-		assert.Error(t, err)
-	})
-
-	t.Run("Run callbacks", func(t *testing.T) {
-		ctl := fakeGenericInformer(t)
-		err := ctl.i.Start(context.TODO())
-		assert.NoError(t, err)
-		app := &v1alpha1.Application{}
-		ctl.watcher.Add(app)
-		ctl.watcher.Modify(app)
-		ctl.watcher.Delete(app)
-		added, updated, deleted := requireCallbacks(t, ctl)
-		assert.True(t, added)
-		assert.True(t, updated)
-		assert.True(t, deleted)
-		err = ctl.i.Stop()
-		assert.NoError(t, err)
-	})
+var apps []*v1alpha1.Application = []*v1alpha1.Application{
+	{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test1",
+			Namespace: "argocd",
+		},
+	},
+	{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test2",
+			Namespace: "other",
+		},
+	},
 }
 
-type informerCtl struct {
-	add     chan (bool)
-	upd     chan (bool)
-	del     chan (bool)
-	i       *GenericInformer
-	watcher *watch.FakeWatcher
-}
-
-// fakeGenericInformer returns a generic informer suitable for unit testing.
-func fakeGenericInformer(t *testing.T, opts ...InformerOption) *informerCtl {
-	var err error
-	ctl := &informerCtl{
-		add: make(chan bool),
-		upd: make(chan bool),
-		del: make(chan bool),
-	}
+func newInformer(t *testing.T, namespace string, objs ...runtime.Object) *Informer[*v1alpha1.Application] {
 	t.Helper()
-	listFunc := func(options v1.ListOptions, namespace string) (runtime.Object, error) {
-		return &v1alpha1.ApplicationList{Items: []v1alpha1.Application{}}, nil
-	}
-	ctl.watcher = watch.NewFake()
-	nopWatchFunc := func(options v1.ListOptions, namespace string) (watch.Interface, error) {
-		return ctl.watcher, nil
-	}
-
-	ctl.i, err = NewGenericInformer(&v1alpha1.Application{},
-		append([]InformerOption{
-			WithListCallback(listFunc),
-			WithWatchCallback(nopWatchFunc),
-			WithAddCallback(func(obj interface{}) {
-				ctl.add <- true
-			}),
-			WithUpdateCallback(func(newObj, oldObj interface{}) {
-				ctl.upd <- true
-			}),
-			WithDeleteCallback(func(obj interface{}) {
-				ctl.del <- true
-			}),
-		}, opts...)...)
+	client := fake.NewSimpleClientset(objs...)
+	i, err := NewInformer[*v1alpha1.Application](context.TODO(),
+		WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return client.ArgoprojV1alpha1().Applications(namespace).List(ctx, opts)
+		}),
+		WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return client.ArgoprojV1alpha1().Applications(namespace).Watch(ctx, opts)
+		}),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ctl
+	return i
 }
 
-func requireCallbacks(t *testing.T, ctl *informerCtl) (added, updated, deleted bool) {
-	t.Helper()
-	run := true
-	tick := time.NewTicker(1 * time.Second)
-	added = false
-	for run {
-		select {
-		case added = <-ctl.add:
-		case updated = <-ctl.upd:
-		case deleted = <-ctl.del:
-		case <-tick.C:
-			run = false
-		}
-	}
-	return
-}
-
-func Test_NamespaceRestrictions(t *testing.T) {
-	app := &v1alpha1.Application{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      "test",
-			Namespace: "argocd",
-		},
-	}
-	t.Run("Namespace is allowed", func(t *testing.T) {
-		ctl := fakeGenericInformer(t)
-		assert.True(t, ctl.i.isNamespaceAllowed(app))
-		ctl = fakeGenericInformer(t, WithNamespaces("argocd"))
-		assert.True(t, ctl.i.isNamespaceAllowed(app))
-	})
-	t.Run("Namespace is not allowed", func(t *testing.T) {
-		ctl := fakeGenericInformer(t, WithNamespaces("argocd"))
-		app := app.DeepCopy()
-		app.Namespace = "foobar"
-		assert.False(t, ctl.i.isNamespaceAllowed(app))
-	})
-	t.Run("Adding a namespace works", func(t *testing.T) {
-		ctl := fakeGenericInformer(t, WithNamespaces("foobar"))
-		assert.False(t, ctl.i.isNamespaceAllowed(app))
-		err := ctl.i.AddNamespace("argocd")
-		require.NoError(t, err)
-		assert.True(t, ctl.i.isNamespaceAllowed(app))
-		// May not be added a second time
-		err = ctl.i.AddNamespace("argocd")
-		require.Error(t, err)
-	})
-	t.Run("Removing a namespace works", func(t *testing.T) {
-		ctl := fakeGenericInformer(t, WithNamespaces("argocd", "foobar"))
-		assert.True(t, ctl.i.isNamespaceAllowed(app))
-		err := ctl.i.RemoveNamespace("argocd")
-		require.NoError(t, err)
-		assert.False(t, ctl.i.isNamespaceAllowed(app))
-		// May not be removed if not existing
-		err = ctl.i.RemoveNamespace("argocd")
-		require.Error(t, err)
-	})
-	t.Run("Prevent resources in non-allowed namespaces to execute add handlers", func(t *testing.T) {
-		ctl := fakeGenericInformer(t, WithNamespaces("argocd"))
-		err := ctl.i.Start(context.TODO())
-		require.NoError(t, err)
-		ctl.watcher.Add(&v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "test",
-				Namespace: "foobar",
+func Test_NewInformer(t *testing.T) {
+	t.Run("Failed option returns error", func(t *testing.T) {
+		rerr := errors.New("stop")
+		i, err := NewInformer[*v1alpha1.Application](context.TODO(),
+			func(i *Informer[*v1alpha1.Application]) error {
+				return rerr
 			},
-		})
-		added, _, _ := requireCallbacks(t, ctl)
-		assert.False(t, added)
+		)
+		assert.Nil(t, i)
+		assert.ErrorIs(t, err, rerr)
+	})
+	t.Run("List func has to be set", func(t *testing.T) {
+		i, err := NewInformer[*v1alpha1.Application](context.TODO())
+		assert.Nil(t, i)
+		assert.ErrorIs(t, err, ErrNoListFunc)
+	})
+	t.Run("Watch func has to be set", func(t *testing.T) {
+		client := fake.NewSimpleClientset()
+		i, err := NewInformer[*v1alpha1.Application](context.TODO(),
+			WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+				return client.ArgoprojV1alpha1().Applications("").List(ctx, opts)
+			}))
+		assert.Nil(t, i)
+		assert.ErrorIs(t, err, ErrNoWatchFunc)
+	})
+	t.Run("It starts and stops", func(t *testing.T) {
+		i := newInformer(t, "", apps[0])
+		go i.Start(context.TODO())
+		i.WaitForSync(context.TODO())
+		err := i.Stop()
+		require.NoError(t, err)
+	})
+
+	t.Run("It doesn't start twice", func(t *testing.T) {
+		i := newInformer(t, "")
+		go i.Start(context.TODO())
+		i.WaitForSync(context.TODO())
+		err := i.Start(context.TODO())
+		assert.ErrorIs(t, err, ErrRunning)
+	})
+
+	t.Run("It doesn't stop when not started", func(t *testing.T) {
+		i := newInformer(t, "")
+		err := i.Stop()
+		assert.ErrorIs(t, err, ErrNotRunning)
+	})
+
+	t.Run("It doesn't wait endless for the sync", func(t *testing.T) {
+		client := fake.NewSimpleClientset(apps[0])
+		i, err := NewInformer[*v1alpha1.Application](context.TODO(),
+			WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+				return client.ArgoprojV1alpha1().Applications("").List(ctx, opts)
+			}),
+			WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+				return client.ArgoprojV1alpha1().Applications("").Watch(ctx, opts)
+			}),
+		)
+		require.NotNil(t, i)
+		require.NoError(t, err)
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+		err = i.WaitForSync(ctx)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
 	})
 }
 
-func Test_watchAndListNamespaces(t *testing.T) {
-	t.Run("Watch namespace is empty when no namespace is given", func(t *testing.T) {
-		ctl := fakeGenericInformer(t)
-		assert.Empty(t, ctl.i.watchAndListNamespace())
+func Test_InformerScope(t *testing.T) {
+	t.Run("It adheres to namespace scope", func(t *testing.T) {
+		client := fake.NewSimpleClientset(apps[0], apps[1])
+		added := 0
+		listed := 0
+		i, err := NewInformer[*v1alpha1.Application](context.TODO(),
+			WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+				objs, err := client.ArgoprojV1alpha1().Applications("argocd").List(ctx, opts)
+				listed = len(objs.Items)
+				return objs, err
+			}),
+			WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+				return client.ArgoprojV1alpha1().Applications("argocd").Watch(ctx, opts)
+			}),
+			WithAddHandler[*v1alpha1.Application](func(obj *v1alpha1.Application) {
+				added += 1
+			}),
+		)
+		require.NotNil(t, i)
+		require.NoError(t, err)
+		go i.Start(context.TODO())
+		i.WaitForSync(context.TODO())
+		assert.Equal(t, 1, listed)
+		assert.Equal(t, 1, added)
 	})
-	t.Run("Watch namespace is same as single namespace constraint", func(t *testing.T) {
-		ctl := fakeGenericInformer(t, WithNamespaces("argocd"))
-		assert.Equal(t, "argocd", ctl.i.watchAndListNamespace())
+	t.Run("It adheres to cluster scope", func(t *testing.T) {
+		listed := 0
+		added := 0
+		client := fake.NewSimpleClientset(apps[0], apps[1])
+		i, err := NewInformer[*v1alpha1.Application](context.TODO(),
+			WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+				objs, err := client.ArgoprojV1alpha1().Applications("").List(ctx, opts)
+				listed = len(objs.Items)
+				return objs, err
+			}),
+			WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+				return client.ArgoprojV1alpha1().Applications("").Watch(ctx, opts)
+			}),
+			WithAddHandler[*v1alpha1.Application](func(obj *v1alpha1.Application) {
+				added += 1
+			}),
+		)
+		require.NotNil(t, i)
+		require.NoError(t, err)
+		go i.Start(context.TODO())
+		i.WaitForSync(context.TODO())
+		assert.Equal(t, 2, listed)
+		assert.Equal(t, 2, added)
 	})
 
-	t.Run("Watch namespace is empty when multiple namespaces are given", func(t *testing.T) {
-		ctl := fakeGenericInformer(t, WithNamespaces("argocd", "foobar"))
-		assert.Empty(t, ctl.i.watchAndListNamespace())
+	t.Run("It adheres to filters on all callbacks", func(t *testing.T) {
+		listed := 0
+		addch := make(chan int, 2)
+		updch := make(chan int, 2)
+		delch := make(chan int, 2)
+		client := fake.NewSimpleClientset(apps[0], apps[1])
+		filters := filter.NewFilterChain[*v1alpha1.Application]()
+		filters.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
+			return res.Name == "test1"
+		})
+		i, err := NewInformer[*v1alpha1.Application](context.TODO(),
+			WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+				// The lister is cluster scoped, and lists all available resources
+				objs, err := client.ArgoprojV1alpha1().Applications("").List(ctx, opts)
+				listed = len(objs.Items)
+				return objs, err
+			}),
+			WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+				return client.ArgoprojV1alpha1().Applications("").Watch(ctx, opts)
+			}),
+			WithAddHandler[*v1alpha1.Application](func(obj *v1alpha1.Application) {
+				addch <- 1
+			}),
+			WithUpdateHandler[*v1alpha1.Application](func(old, new *v1alpha1.Application) {
+				updch <- 1
+			}),
+			WithDeleteHandler[*v1alpha1.Application](func(obj *v1alpha1.Application) {
+				delch <- 1
+			}),
+			WithFilters[*v1alpha1.Application](filters),
+		)
+		require.NotNil(t, i)
+		require.NoError(t, err)
+		go i.Start(context.TODO())
+		i.WaitForSync(context.TODO())
+		assert.Equal(t, 2, listed)
+		added := <-addch
+		assert.Equal(t, 1, added)
+		napp1 := apps[0].DeepCopy()
+		napp2 := apps[1].DeepCopy()
+		_, err = client.ArgoprojV1alpha1().Applications("argocd").Update(context.TODO(), napp1, v1.UpdateOptions{})
+		require.NoError(t, err)
+		_, err = client.ArgoprojV1alpha1().Applications("other").Update(context.TODO(), napp2, v1.UpdateOptions{})
+		require.NoError(t, err)
+		updated := <-updch
+		assert.Equal(t, 1, updated)
+		err = client.ArgoprojV1alpha1().Applications("argocd").Delete(context.TODO(), "test1", v1.DeleteOptions{})
+		require.NoError(t, err)
+		deleted := <-delch
+		assert.Equal(t, 1, deleted)
 	})
+
+}
+
+func init() {
+	logrus.SetLevel(logrus.TraceLevel)
 }

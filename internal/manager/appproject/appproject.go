@@ -122,8 +122,8 @@ func stampLastUpdated(app *v1alpha1.AppProject) {
 
 // StartBackend informs the backend to run startup logic, which usually means beginning to listen for events.
 // For example, in the case of the Kubernetes backend, the shared informer is started, which will listen for AppProject events from the watch api of the K8s cluster.
-func (m *AppProjectManager) StartBackend(ctx context.Context) {
-	m.appprojectBackend.StartInformer(ctx)
+func (m *AppProjectManager) StartBackend(ctx context.Context) error {
+	return m.appprojectBackend.StartInformer(ctx)
 }
 
 // Create creates the AppProject using the Manager's AppProject backend.
@@ -350,6 +350,12 @@ func (m *AppProjectManager) RemoveFinalizers(ctx context.Context, incoming *v1al
 		return patch, err
 	})
 	return updated, err
+}
+
+// EnsureSynced waits until either the backend indicates it has fully synced, or the
+// timeout has been reached (which will return an error)
+func (m *AppProjectManager) EnsureSynced(duration time.Duration) error {
+	return m.appprojectBackend.EnsureSynced(duration)
 }
 
 func log() *logrus.Entry {

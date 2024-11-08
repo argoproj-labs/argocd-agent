@@ -20,10 +20,11 @@ import (
 	"github.com/argoproj/argo-cd/v2/util/glob"
 )
 
-// DefaultFilterChain returns a FilterChain with a set of default filters that
-// the agent will evaluate for every change.
-func (a *Agent) DefaultFilterChain() *filter.Chain {
-	fc := &filter.Chain{}
+// DefaultAppFilterChain returns a FilterChain for Application resources.
+// This chain contains a set of default filters that the agent will
+// evaluate for every change.
+func (a *Agent) DefaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
+	fc := &filter.Chain[*v1alpha1.Application]{}
 
 	// Admit based on namespace of the application
 	fc.AppendAdmitFilter(func(app *v1alpha1.Application) bool {

@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
-	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
+	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,13 +42,13 @@ type KubernetesBackend struct {
 	// appClient is used to interfact with Argo CD Application resources on the cluster on which agent/principal is installed.
 	appClient appclientset.Interface
 	// appInformer is used to watch for change events for Argo CD Application resources on the cluster
-	appInformer *appinformer.AppInformer
+	appInformer informer.InformerInterface
 	// namespace is not currently read, is not guaranteed to be non-empty, and is not guaranteed to contain the source of Argo CD Application CRs in all cases
 	namespace string
 	usePatch  bool
 }
 
-func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appInformer *appinformer.AppInformer, usePatch bool) *KubernetesBackend {
+func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appInformer informer.InformerInterface, usePatch bool) *KubernetesBackend {
 	return &KubernetesBackend{
 		appClient:   appClient,
 		appInformer: appInformer,
@@ -124,10 +124,12 @@ func (be *KubernetesBackend) SupportsPatch() bool {
 	return be.usePatch
 }
 
-func (be *KubernetesBackend) StartInformer(ctx context.Context) {
-	be.appInformer.Start(ctx.Done())
+func (be *KubernetesBackend) StartInformer(ctx context.Context) error {
+	return be.appInformer.Start(ctx)
 }
 
-func (be *KubernetesBackend) EnsureSynced(duration time.Duration) error {
-	return be.appInformer.EnsureSynced(duration)
+func (be *KubernetesBackend) EnsureSynced(timeout time.Duration) error {
+	ctx, cancelFunc := context.WithTimeout(context.Background(), timeout)
+	defer cancelFunc()
+	return be.appInformer.WaitForSync(ctx)
 }

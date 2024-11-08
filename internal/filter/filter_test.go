@@ -23,7 +23,7 @@ import (
 )
 
 func Test_Admit(t *testing.T) {
-	fc := NewFilterChain()
+	fc := NewFilterChain[*v1alpha1.Application]()
 	app := &v1alpha1.Application{}
 	t.Run("Empty FilterChain always admits", func(t *testing.T) {
 		assert.True(t, fc.Admit(app))
@@ -42,7 +42,7 @@ func Test_Admit(t *testing.T) {
 	})
 }
 func Test_ProcessChange(t *testing.T) {
-	fc := NewFilterChain()
+	fc := NewFilterChain[*v1alpha1.Application]()
 	app := &v1alpha1.Application{}
 	t.Run("Empty FilterChain always allows change", func(t *testing.T) {
 		assert.True(t, fc.ProcessChange(app, app))
