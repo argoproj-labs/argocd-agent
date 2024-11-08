@@ -18,7 +18,7 @@ require (
 	github.com/wI2L/jsondiff v0.6.0
 	golang.org/x/crypto v0.28.0
 	golang.org/x/net v0.30.0
-	golang.org/x/sync v0.8.0
+	golang.org/x/sync v0.9.0
 	golang.stackrox.io/grpc-http1 v0.3.13
 	google.golang.org/genproto/googleapis/api v0.0.0-20240814211410-ddb44dafa142
 	google.golang.org/grpc v1.67.1
