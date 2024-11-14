@@ -97,7 +97,7 @@ func (cp *Checkpoint) Steps() []Step {
 	return cp.steps
 }
 
-// String returns a string represantation of the checkpoint's timing data.
+// String returns a string representation of the checkpoint's timing data.
 // Steps that are still running will be ignored.
 func (cp *Checkpoint) String() string {
 	cp.mutex.RLock()
