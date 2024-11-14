@@ -45,5 +45,10 @@ func Test_SeededClock(t *testing.T) {
 		assert.Equal(t, 2023, now.Year())
 		assert.Equal(t, time.Month(12), now.Month())
 		assert.Equal(t, 12, now.Day())
+		assert.Equal(t, 1, now.Minute())
+		seed, err = time.Parse(time.RFC3339, "2023-12-12T00:02:00Z")
+		require.NoError(t, err)
+		now = SeededClock(seed).Now()
+		assert.Equal(t, 2, now.Minute())
 	})
 }
