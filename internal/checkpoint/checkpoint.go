@@ -85,11 +85,15 @@ func (cp *Checkpoint) Duration() time.Duration {
 
 // NumSteps returns the number of steps checkpoint cp has measured
 func (cp *Checkpoint) NumSteps() int {
+	cp.mutex.RLock()
+	defer cp.mutex.RUnlock()
 	return len(cp.steps)
 }
 
 // Steps returns the steps within the checkpoint cp
 func (cp *Checkpoint) Steps() []Step {
+	cp.mutex.RLock()
+	defer cp.mutex.RUnlock()
 	return cp.steps
 }
 
