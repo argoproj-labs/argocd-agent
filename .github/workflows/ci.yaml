@@ -14,6 +14,26 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code_any_changed }}
+      docs: ${{ steps.filter.outputs.docs_any_changed }}
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: tj-actions/changed-files@c3a1bb2c992d77180ae65be6ae6c166cf40f857c # v45.0.3
+        id: filter
+        with:
+          files_yaml: |
+            code:
+              - '!**.md'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!Dockerfile.*'
+              - '!hack/**'
+            docs:
+              - 'docs/**'
+
   check-go:
     name: Check go modules synchronicity
     runs-on: ubuntu-22.04
@@ -58,7 +78,10 @@ jobs:
       pull-requests: read  # for golangci/golangci-lint-action to fetch pull requests
       checks: write
     name: Lint Go code
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-22.04
+    needs:
+      - changes
     steps:
       - name: Checkout code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -75,7 +98,10 @@ jobs:
 
   build-go:
     name: Build & cache Go code
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-22.04
+    needs:
+      - changes
     steps:
       - name: Checkout code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -91,7 +117,10 @@ jobs:
 
   test:
     name: Run unit tests
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-22.04
+    needs:
+      - changes
     steps:
       - name: Checkout code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -110,4 +139,96 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: test/out/coverage.out
 
-
+  test-e2e:
+    name: Run end-to-end tests
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-22.04
+    needs:
+      - changes
+    env:
+      GOPATH: /home/runner/go
+    steps:
+      - name: Install required packages
+        run: |
+          sudo apt-get install libpwquality-tools
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Setup Golang
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        with:
+          go-version: ${{ env.GOLANG_VERSION }}
+      - name: GH actions workaround - Kill XSP4 process
+        run: |
+          sudo pkill mono || true
+      - name: Install microk8s
+        run: |
+          set -x
+          sudo snap install --classic microk8s
+          sudo microk8s enable metallb:192.168.56.100-192.168.56.254
+          sudo microk8s enable hostpath-storage
+          mkdir -p $HOME/.kube
+          sudo microk8s config > $HOME/.kube/config
+          sudo chown runner $HOME/.kube/config
+          sudo chmod go-r $HOME/.kube/config
+          kubectl version
+      - name: Restore go build cache
+        uses: actions/cache@13aacd865c20de90d75de3b17ebe84f7a17d57d2 # v4.0.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-go-build-v1-${{ github.run_id }}
+      - name: Add ~/go/bin to PATH
+        run: |
+          echo "/home/runner/go/bin" >> $GITHUB_PATH
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+      - name: Install vcluster
+        run: |
+          curl -L -o vcluster "https://github.com/loft-sh/vcluster/releases/latest/download/vcluster-linux-amd64" && sudo install -c -m 0755 vcluster /usr/local/bin && rm -f vcluster
+          vcluster --version
+      - name: Download Go dependencies
+        run: |
+          go mod download
+          go install github.com/mattn/goreman@latest
+      - name: Set up the test environment
+        run: |
+          make setup-e2e2
+      - name: Run the principal and agents
+        run: |
+          make start-e2e2 2>&1 | sed -r "s/[[:cntrl:]]\[[0-9]{1,3}m//g" > /tmp/e2e-argocd-agent.log &
+          sleep 10
+      - name: Run the e2e tests
+        run: |
+          set -o pipefail
+          make test-e2e2 2>&1 | tee /tmp/test-e2e.log
+          goreman run stop-all || echo "goreman trouble"
+          sleep 30
+      - name: Create Argo CD logs
+        run: |
+          kubectl --context vcluster-agent-autonomous logs -n argocd argocd-application-controller-0 > /tmp/vcluster-agent-autonomous-controller.log
+          kubectl --context vcluster-agent-managed logs -n argocd argocd-application-controller-0 > /tmp/vcluster-agent-managed-controller.log
+        if: ${{ failure() }}
+      - name: Upload e2e-argocd-agent logs
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: e2e-argocd-agent.log
+          path: /tmp/e2e-argocd-agent.log
+        if: ${{ failure() }}
+      - name: Upload test logs
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-e2e.log
+          path: /tmp/test-e2e.log
+        if: ${{ failure() }}
+      - name: Upload vcluster-agent-autonomous-controller logs
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: vcluster-agent-autonomous-controller.log
+          path: /tmp/vcluster-agent-autonomous-controller.log
+        if: ${{ failure() }}
+      - name: Upload vcluster-agent-managed-controller logs
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: vcluster-agent-managed-controller.log
+          path: /tmp/vcluster-agent-managed-controller.log
+        if: ${{ failure() }}

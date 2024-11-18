@@ -24,6 +24,19 @@ MOCKERY_V2_VERSION?=v2.43.0
 .PHONY: build
 build: agent principal
 
+.PHONY: setup-e2e2
+setup-e2e2:
+	test/e2e2/test-env/setup-vcluster-env.sh create
+
+.PHONY: start-argocd-agent
+start-e2e2:
+	test/e2e2/test-env/gen-creds.sh
+	goreman -f test/e2e2/test-env/Procfile start
+
+.PHONY: test-e2e2
+test-e2e2:
+	go test -count=1 -v -race -timeout 30m github.com/argoproj-labs/argocd-agent/test/e2e2
+
 .PHONY: test
 test:
 	mkdir -p test/out
