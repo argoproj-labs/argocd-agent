@@ -22,6 +22,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 /*
@@ -122,7 +123,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	// that are incoming.
 	if a.mode != types.AgentModeManaged {
 		logCtx.Trace("Discarding this event, because agent is not in managed mode")
-		return nil, fmt.Errorf("cannot create application: agent is not in managed mode")
+		return nil, event.NewEventDiscardedErr("cannot create application: agent is not in managed mode")
 	}
 
 	// If we receive a new app event for an app we already manage, it usually
@@ -131,7 +132,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	// TODO(jannfis): Handle this situation properly instead of throwing an error.
 	if a.appManager.IsManaged(incoming.QualifiedName()) {
 		logCtx.Trace("Discarding this event, because application is already managed on this agent")
-		return nil, fmt.Errorf("application %s is already managed", incoming.QualifiedName())
+		return nil, event.NewEventDiscardedErr("application %s is already managed", incoming.QualifiedName())
 	}
 
 	logCtx.Infof("Creating a new application on behalf of an incoming event")
@@ -143,6 +144,11 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	}
 
 	created, err := a.appManager.Create(a.context, incoming)
+	if apierrors.IsAlreadyExists(err) {
+		logCtx.Debug("application already exists")
+		return created, nil
+	}
+
 	return created, err
 }
 
@@ -156,7 +162,7 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	})
 	if a.appManager.IsChangeIgnored(incoming.QualifiedName(), incoming.ResourceVersion) {
 		logCtx.Tracef("Discarding this event, because agent has seen this version %s already", incoming.ResourceVersion)
-		return nil, fmt.Errorf("the version %s has already been seen by this agent", incoming.ResourceVersion)
+		return nil, event.NewEventDiscardedErr("the version %s has already been seen by this agent", incoming.ResourceVersion)
 	} else {
 		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
 	}
@@ -197,6 +203,10 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	deletionPropagation := backend.DeletePropagationBackground
 	err := a.appManager.Delete(a.context, a.namespace, app, &deletionPropagation)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logCtx.Debug("application is not found, perhaps it is already deleted")
+			return nil
+		}
 		return err
 	}
 	err = a.appManager.Unmanage(app.QualifiedName())
@@ -219,14 +229,14 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	// that are incoming.
 	if a.mode != types.AgentModeManaged {
 		logCtx.Trace("Discarding this event, because agent is not in managed mode")
-		return nil, fmt.Errorf("cannot create appproject: agent is not in managed mode")
+		return nil, event.NewEventDiscardedErr("cannot create appproject: agent is not in managed mode")
 	}
 
 	// If we receive a new AppProject event for an AppProject we already manage, it usually
 	// means that we're out-of-sync from the control plane.
 	if a.appManager.IsManaged(incoming.Name) {
 		logCtx.Trace("Discarding this event, because AppProject is already managed on this agent")
-		return nil, fmt.Errorf("appproject %s is already managed", incoming.Name)
+		return nil, event.NewEventDiscardedErr("appproject %s is already managed", incoming.Name)
 	}
 
 	logCtx.Infof("Creating a new AppProject on behalf of an incoming event")
@@ -238,6 +248,9 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	}
 
 	created, err := a.projectManager.Create(a.context, incoming)
+	if apierrors.IsAlreadyExists(err) {
+		logCtx.Debug("appProject already exists")
+	}
 	return created, err
 }
 
@@ -251,7 +264,7 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	})
 	if a.appManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
 		logCtx.Tracef("Discarding this event, because agent has seen this version %s already", incoming.ResourceVersion)
-		return nil, fmt.Errorf("the version %s has already been seen by this agent", incoming.ResourceVersion)
+		return nil, event.NewEventDiscardedErr("the version %s has already been seen by this agent", incoming.ResourceVersion)
 	} else {
 		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
 	}
@@ -283,6 +296,10 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 	deletionPropagation := backend.DeletePropagationBackground
 	err := a.projectManager.Delete(a.context, a.namespace, project, &deletionPropagation)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logCtx.Debug("appProject not found, perhaps it is already deleted")
+			return nil
+		}
 		return err
 	}
 	err = a.projectManager.Unmanage(project.Name)

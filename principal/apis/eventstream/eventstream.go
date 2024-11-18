@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -46,6 +47,8 @@ type Server struct {
 
 	options *ServerOptions
 	queues  queue.QueuePair
+
+	eventWriter *event.EventWriter
 }
 
 type ServerOptions struct {
@@ -152,7 +155,7 @@ func (s *Server) onDisconnect(c *client) {
 func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeServer) error {
 	logCtx := c.logCtx.WithField("direction", "recv")
 	logCtx.Tracef("Waiting to receive from channel")
-	event, err := subs.Recv()
+	streamEvent, err := subs.Recv()
 	if err != nil {
 		if err == io.EOF {
 			logCtx.Tracef("Remote end hung up")
@@ -170,11 +173,11 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		}
 		return err
 	}
-	if event == nil || event.Event == nil {
+	if streamEvent == nil || streamEvent.Event == nil {
 		return fmt.Errorf("invalid wire transmission")
 	}
 	app := &v1alpha1.Application{}
-	incomingEvent, err := format.FromProto(event.Event)
+	incomingEvent, err := format.FromProto(streamEvent.Event)
 	if err != nil {
 		return fmt.Errorf("could not unserialize event from wire: %w", err)
 	}
@@ -186,6 +189,13 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	q := s.queues.RecvQ(c.agentName)
 	if q == nil {
 		return fmt.Errorf("panic: no recvq for agent %s", c.agentName)
+	}
+
+	if event.Target(incomingEvent) == event.TargetEventAck {
+		logCtx.Trace("Received an ACK event", "resourceID", event.ResourceID(incomingEvent), "eventID", event.EventID(incomingEvent))
+		s.eventWriter.Remove(incomingEvent)
+		logCtx.Trace("Removed the ACK from the EventWriter")
+		return nil
 	}
 
 	q.Add(incomingEvent)
@@ -219,26 +229,10 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: nil item in queue")
 	}
 
-	prEv, err := format.ToProto(ev)
-	if err != nil {
-		return fmt.Errorf("panic: could not serialize event to wire format: %v", err)
-	}
+	logCtx.Trace("Adding an item to the event writer", "resourceID", event.ResourceID(ev), "eventID", event.EventID(ev))
+	s.eventWriter.Add(ev)
 
 	q.Done(ev)
-
-	logCtx.Tracef("Sending an item to the event stream")
-
-	// A Send() on the stream is actually not blocking.
-	err = subs.Send(&eventstreamapi.Event{Event: prEv})
-	if err != nil {
-		status, ok := status.FromError(err)
-		if !ok && err != io.EOF {
-			return fmt.Errorf("error sending data to stream: %w", err)
-		}
-		if err == io.EOF || status.Code() == codes.Unavailable {
-			return fmt.Errorf("remote hung up while sending data to stream: %w", err)
-		}
-	}
 
 	return nil
 }
@@ -255,6 +249,9 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	if err != nil {
 		return err
 	}
+
+	s.eventWriter = event.NewEventWriter(subs)
+	go s.eventWriter.SendWaitingEvents(c.ctx)
 
 	// We receive events in a dedicated go routine
 	c.wg.Add(1)

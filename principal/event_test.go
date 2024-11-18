@@ -26,7 +26,6 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -39,8 +38,9 @@ func Test_InvalidEvents(t *testing.T) {
 		wq.On("Done", &ev)
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
-		err = s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "unable to process event with unknown target")
+		assert.Equal(t, ev, *got)
 	})
 
 	t.Run("Unknown event type", func(t *testing.T) {
@@ -52,8 +52,9 @@ func Test_InvalidEvents(t *testing.T) {
 		wq.On("Done", &ev)
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
-		err = s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "unable to process event of type application")
+		assert.Equal(t, ev, *got)
 	})
 
 	t.Run("Invalid data in event", func(t *testing.T) {
@@ -66,8 +67,9 @@ func Test_InvalidEvents(t *testing.T) {
 		wq.On("Done", &ev)
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
-		err = s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "failed to unmarshal")
+		assert.Equal(t, ev, *got)
 	})
 }
 
@@ -81,8 +83,9 @@ func Test_CreateEvents(t *testing.T) {
 		wq.On("Done", &ev)
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
-		err = s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorIs(t, err, event.ErrEventDiscarded)
+		assert.Equal(t, ev, *got)
 	})
 
 	t.Run("Create application in autonomous mode", func(t *testing.T) {
@@ -118,7 +121,8 @@ func Test_CreateEvents(t *testing.T) {
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil))
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeAutonomous)
-		err = s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(context.Background(), "foo", wq)
+		assert.Equal(t, ev, *got)
 		assert.NoError(t, err)
 		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
 		assert.NoError(t, err)
@@ -165,8 +169,9 @@ func Test_CreateEvents(t *testing.T) {
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeAutonomous)
-		err = s.processRecvQueue(context.Background(), "foo", wq)
-		assert.True(t, errors.IsAlreadyExists(err))
+		got, err := s.processRecvQueue(context.Background(), "foo", wq)
+		assert.Nil(t, err)
+		require.Equal(t, ev, *got)
 	})
 
 }
@@ -226,7 +231,8 @@ func Test_UpdateEvents(t *testing.T) {
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeAutonomous)
-		err = s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(context.Background(), "foo", wq)
+		require.Equal(t, ev, *got)
 		assert.NoError(t, err)
 		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
 		assert.NoError(t, err)
@@ -269,7 +275,8 @@ func Test_UpdateEvents(t *testing.T) {
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeManaged)
-		err = s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(context.Background(), "foo", wq)
+		require.Equal(t, ev, *got)
 		assert.ErrorContains(t, err, "event type not allowed")
 	})
 
@@ -324,7 +331,8 @@ func Test_processAppProjectEvent(t *testing.T) {
 		wq.On("Done", &ev)
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
-		err = s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(context.Background(), "foo", wq)
+		require.Equal(t, ev, *got)
 		assert.ErrorIs(t, err, event.ErrEventDiscarded)
 	})
 
@@ -349,7 +357,8 @@ func Test_processAppProjectEvent(t *testing.T) {
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeManaged)
-		err = s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(context.Background(), "foo", wq)
+		require.Equal(t, ev, *got)
 		assert.ErrorContains(t, err, "event type not allowed")
 	})
 }

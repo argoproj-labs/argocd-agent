@@ -16,14 +16,12 @@ package principal
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
-	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
@@ -38,7 +36,7 @@ import (
 // processRecvQueue processes an entry from the receiver queue, which holds the
 // events received by agents. It will trigger updates of resources in the
 // server's backend.
-func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) error {
+func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) (*cloudevents.Event, error) {
 	ev, _ := q.Get()
 	agentMode := s.agentMode(agentName)
 	incoming := &v1alpha1.Application{}
@@ -62,7 +60,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		err = fmt.Errorf("unable to process event with unknown target %s", target)
 	}
 	q.Done(ev)
-	return err
+	return ev, err
 }
 
 func (s *Server) processApplicationEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
@@ -95,50 +93,53 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 
 	// App creation event will only be processed in autonomous mode
 	case event.Create.String():
-		if agentMode.IsAutonomous() {
-			incoming.SetNamespace(agentName)
-			_, err := s.appManager.Create(ctx, incoming)
-			if err != nil {
-				return fmt.Errorf("could not create application %s: %w", incoming.QualifiedName(), err)
-			}
-		} else {
-			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
+		if !agentMode.IsAutonomous() {
+			logCtx.Debug("Discarding event, because agent is not in autonomous mode")
 			return event.ErrEventDiscarded
+		}
+
+		incoming.SetNamespace(agentName)
+		_, err := s.appManager.Create(ctx, incoming)
+		if err != nil && !kerrors.IsAlreadyExists(err) {
+			return fmt.Errorf("could not create application %s: %w", incoming.QualifiedName(), err)
 		}
 	// Spec updates are only allowed in autonomous mode
 	case event.SpecUpdate.String():
-		var err error
-		if agentMode == types.AgentModeAutonomous {
-			_, err = s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
-		} else {
-			err = fmt.Errorf("event type not allowed when mode is not autonomous")
+		if !agentMode.IsAutonomous() {
+			logCtx.Debug("Discarding event, because agent is not in autonomous mode")
+			return event.NewEventNotAllowedErr("event type not allowed when mode is not autonomous")
 		}
+
+		_, err := s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
 		if err != nil {
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Updated application status %s", incoming.QualifiedName())
 	// Status updates are only allowed in managed mode
 	case event.StatusUpdate.String():
-		var err error
-		if agentMode == types.AgentModeManaged {
-			_, err = s.appManager.UpdateStatus(ctx, agentName, incoming)
-		} else {
-			err = fmt.Errorf("event type not allowed when mode is not managed")
+		if !agentMode.IsManaged() {
+			logCtx.Debug("Discarding event, because agent is not in managed mode")
+			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
 		}
+
+		_, err := s.appManager.UpdateStatus(ctx, agentName, incoming)
 		if err != nil {
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Updated application spec %s", incoming.QualifiedName())
 	// App deletion
 	case event.Delete.String():
-		var err error
-		if agentMode.IsManaged() {
-			err = errors.New("event type not allowed when mode is not autonomous")
-		} else {
-			deletionPropagation := backend.DeletePropagationForeground
-			err = s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
+		if !agentMode.IsAutonomous() {
+			logCtx.Debug("Discarding event, because agent is not in autonomous mode")
+			return event.NewEventNotAllowedErr("event type not allowed when mode is not autonomous")
 		}
+
+		deletionPropagation := backend.DeletePropagationForeground
+		err := s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
 		if err != nil {
+			if kerrors.IsNotFound(err) {
+				return nil
+			}
 			return fmt.Errorf("could not delete application %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Deleted application %s", incoming.QualifiedName())
@@ -181,13 +182,12 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 		}
 	// AppProject deletion
 	case event.Delete.String():
-		var err error
-		if agentMode.IsManaged() {
-			err = errors.New("event type not allowed when mode is not autonomous")
-		} else {
-			deletionPropagation := backend.DeletePropagationForeground
-			err = s.projectManager.Delete(ctx, agentName, incoming, &deletionPropagation)
+		if !agentMode.IsAutonomous() {
+			return event.NewEventNotAllowedErr("event type not allowed when mode is not autonomous")
 		}
+
+		deletionPropagation := backend.DeletePropagationForeground
+		err := s.projectManager.Delete(ctx, agentName, incoming, &deletionPropagation)
 		if err != nil {
 			return fmt.Errorf("could not delete app-project %s: %w", incoming.Name, err)
 		}
@@ -259,10 +259,21 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 						sem.Release(1)
 						queueLock.Unlock(agentName)
 					}()
-					err := s.processRecvQueue(ctx, agentName, q)
-					if err != nil {
+
+					ev, err := s.processRecvQueue(ctx, agentName, q)
+					if err != nil && !event.IsEventDiscarded(err) && !event.IsEventNotAllowed(err) {
 						logCtx.WithField("client", agentName).WithError(err).Errorf("Could not process agent recveiver queue")
+						return
 					}
+
+					// Send an ACK if the event is processed successfully.
+					sendQ := s.queues.SendQ(queueName)
+					if sendQ == nil {
+						logCtx.Debugf("Queue disappeared -- client probably has disconnected")
+						return
+					}
+					logCtx.Trace("sending an ACK", "resourceID", event.ResourceID(ev), "eventID", event.EventID(ev))
+					sendQ.Add(s.events.ProcessedEvent(event.EventProcessed, event.New(ev, event.TargetEventAck)))
 				}(queueName, q)
 			}
 		}
