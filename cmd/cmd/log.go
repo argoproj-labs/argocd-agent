@@ -71,6 +71,7 @@ func InitLogging() {
 		LogLevels: []logrus.Level{
 			logrus.InfoLevel,
 			logrus.DebugLevel,
+			logrus.TraceLevel,
 		},
 	})
 }
