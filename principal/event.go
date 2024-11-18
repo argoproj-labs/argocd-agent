@@ -272,7 +272,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 						logCtx.Debugf("Queue disappeared -- client probably has disconnected")
 						return
 					}
-					logCtx.Trace("sending an ACK", "resourceID", event.ResourceID(ev), "eventID", event.EventID(ev))
+					logCtx.Tracef("sending an ACK: resourceID %s eventID %s", event.ResourceID(ev), event.EventID(ev))
 					sendQ.Add(s.events.ProcessedEvent(event.EventProcessed, event.New(ev, event.TargetEventAck)))
 				}(queueName, q)
 			}

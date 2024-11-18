@@ -79,7 +79,7 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 		return nil
 	}
 
-	logCtx.Trace("Adding an item to the event writer", "resourceID", event.ResourceID(ev), "eventID", event.EventID(ev))
+	logCtx.Tracef("Adding an item to the event writer: resourceID %s eventID %s", event.ResourceID(ev), event.EventID(ev))
 	a.eventWriter.Add(ev)
 
 	return nil
@@ -110,13 +110,13 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 	logCtx.Debugf("Received a new event from stream")
 
 	if ev.Target() == event.TargetEventAck {
-		logCtx.Trace("Received an ACK for an event", "resourceID", ev.ResourceID(), "eventID", ev.EventID())
+		logCtx.Tracef("Received an ACK for an event: resourceID %s eventID %s", ev.ResourceID(), ev.EventID())
 		rawEvent, err := format.FromProto(rcvd.Event)
 		if err != nil {
 			return err
 		}
 		a.eventWriter.Remove(rawEvent)
-		logCtx.Trace("Removed an event from the EventWriter", "resourceID", ev.ResourceID(), "eventID", ev.EventID())
+		logCtx.Tracef("Removed an event from the EventWriter: resourceID %s eventID %s", ev.ResourceID(), ev.EventID())
 		return nil
 	}
 
@@ -130,7 +130,7 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 			return fmt.Errorf("no send queue found for the remote principal")
 		}
 		sendQ.Add(a.emitter.ProcessedEvent(event.EventProcessed, ev))
-		logCtx.Info("Sent an ACK for an event", "resourceID", ev.ResourceID(), "eventID", ev.EventID())
+		logCtx.Tracef("Sent an ACK for an event: resourceID %s eventID %s", ev.ResourceID(), ev.EventID())
 	}
 	return nil
 }

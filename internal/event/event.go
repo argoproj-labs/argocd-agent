@@ -307,6 +307,7 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 			event:   ev,
 			backoff: &defaultBackoff,
 		}
+		ew.log.Tracef("added a new event resourceID %s eventID %s", resID, EventID(ev))
 		return
 	}
 
@@ -316,6 +317,7 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	eventMsg.backoff = &defaultBackoff
 	eventMsg.retryAfter = nil
 	eventMsg.mu.Unlock()
+	ew.log.Tracef("updated an existing event: resourceID %s eventID %s", resID, EventID(ev))
 }
 
 func (ew *EventWriter) Get(resID string) *eventMessage {
@@ -367,7 +369,7 @@ func (ew *EventWriter) sendEvent(resID string) {
 	// Check if the event is already ACK'd.
 	eventMsg := ew.Get(resID)
 	if eventMsg == nil {
-		ew.log.Trace("event is not found, perhaps it is already ACK'd", "resourceID", resID)
+		ew.log.Tracef("event is not found, perhaps it is already ACK'd: resourceID %s", resID)
 		return
 	}
 
@@ -375,8 +377,11 @@ func (ew *EventWriter) sendEvent(resID string) {
 	defer eventMsg.mu.Unlock()
 
 	// Check if it is time to resend the event.
-	if eventMsg.retryAfter != nil && eventMsg.retryAfter.After(time.Now()) {
-		return
+	if eventMsg.retryAfter != nil {
+		if eventMsg.retryAfter.After(time.Now()) {
+			return
+		}
+		ew.log.Tracef("resending an event: resourceID %s eventID %s", resID, EventID(eventMsg.event))
 	}
 
 	defer func() {
@@ -398,11 +403,11 @@ func (ew *EventWriter) sendEvent(resID string) {
 		return
 	}
 
-	ew.log.Trace("event sent to target", "resourceID", resID, "type", eventMsg.event.Type())
+	ew.log.Tracef("event sent to target: resourceID %s eventID %s", resID, EventID(eventMsg.event))
 
 	// We don't have to wait for an ACK if the current event is ACK. So, remove it from the EventWriter.
 	if Target(eventMsg.event) == TargetEventAck {
 		ew.Remove(eventMsg.event)
-		ew.log.Trace("ACK is removed from the EventWriter", "resourceID", resID, "eventID", EventID(eventMsg.event))
+		ew.log.Tracef("ACK is removed from the EventWriter: resourceID: %s eventID: %s", resID, EventID(eventMsg.event))
 	}
 }

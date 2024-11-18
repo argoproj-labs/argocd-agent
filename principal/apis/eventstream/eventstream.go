@@ -192,7 +192,7 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	}
 
 	if event.Target(incomingEvent) == event.TargetEventAck {
-		logCtx.Trace("Received an ACK event", "resourceID", event.ResourceID(incomingEvent), "eventID", event.EventID(incomingEvent))
+		logCtx.Tracef("Received an ACK: resourceID %s eventID %s", event.ResourceID(incomingEvent), event.EventID(incomingEvent))
 		s.eventWriter.Remove(incomingEvent)
 		logCtx.Trace("Removed the ACK from the EventWriter")
 		return nil
@@ -229,7 +229,7 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: nil item in queue")
 	}
 
-	logCtx.Trace("Adding an item to the event writer", "resourceID", event.ResourceID(ev), "eventID", event.EventID(ev))
+	logCtx.Tracef("Adding an item to the event writer: resourceID %s eventID %s", event.ResourceID(ev), event.EventID(ev))
 	s.eventWriter.Add(ev)
 
 	q.Done(ev)
