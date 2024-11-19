@@ -47,6 +47,13 @@ A loose and incomplete collection of current limitations that you should be awar
   * Resource manipulation
 * Other Argo CD UI/API features such as resource diffing, live manifests, etc only work within specific topologies.
 
+## Prerequisites
+
+- openssl v3.3.1
+- kubectl v1.29.1+
+- curl 8.7.1+
+- kustomize v5.0.0+
+
 ## Installing the principal
 
 To install the principal, we will need the following things:
@@ -64,7 +71,7 @@ The principal installation will come with a ClusterRole and ClusterRoleBinding, 
 
 The JWT signing key will be stored in a secret in the principal's namespace. We will first need to create the key:
 
-```
+```shell
 openssl genrsa -out /tmp/jwt.key 2048
 ```
 
@@ -72,7 +79,7 @@ If you want a keysize different than 2048, just specify it.
 
 Then, create the secret named `argocd-agent-principal-jwt` with the RSA key as field `jwt.key`:
 
-```
+```shell
 kubectl create -n argocd secret generic --from-file=jwt.key=/tmp/jwt.key argocd-agent-jwt
 ```
 
@@ -84,7 +91,7 @@ A much better idea is to use certificates issued by an existing CA or to set up 
 
 Once you have the server's certificate and key (in this example, stored in files named `server.crt` and `server.key` respectively) as well as the certificate of the CA (stored in a file named `ca.crt`), create a new secret with the contents of these files:
 
-```
+```shell
 kubectl create -n argocd secret generic --from-file=tls.crt=server.crt --from-file=tls.key=server.key --from-file=ca.crt=ca.crt argocd-agent-tls
 ```
 
@@ -94,21 +101,21 @@ Keep the `ca.crt` file, as you will need it for the installation of agents, too.
 
 Create the principal user password secret; replace `<PASSWORD>` with the password of your choice:
 
-```
+```shell
 kubectl create -n argocd secret generic argocd-agent-principal-userpass --from-literal=passwd='<PASSWORD>'
 ```
 
 Now that the required secrets exist, it's time to apply the installation manifests and install the principal into the cluster:
 
-```
-kubectl apply -n argocd -k install/kubernetes/principal
+```shell
+kubectl apply -n argocd -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/principal?ref=main'
 ```
 
 This should create all required manifests in the cluster and spin up a deployment with a single pod.
 
 To check its status:
 
-```
+```shell
 kubectl get -n argocd deployments argocd-agent-principal
 kubectl get -n argocd pods
 ```
@@ -120,7 +127,7 @@ You can configure the principal by editing the `argocd-agent-params` ConfigMap i
 
 After a change to the `argocd-agent-params` ConfigMap, the principal needs to be restarted to pick up the changes:
 
-```
+```shell
 kubectl rollout -n argocd restart deployment argocd-agent-principal
 ```
 
@@ -137,14 +144,14 @@ we will use the `argocd` namespace to install all required resources into the cl
 
 Create the agent user password secret; replace `<CREDENTIALS>` with the credentials of your choice:
 
-```
+```shell
 kubectl create -n argocd secret generic argocd-agent-agent-userpass --from-literal=credentials='<CREDENTIALS>'
 ```
 
 Now that the required secrets exist, it's time to apply the installation manifests and install the agent into the cluster:
 
 ```shell 
-kubectl apply -n argocd -k install/kubernetes/agent
+kubectl apply -n argocd -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main'
 ```
 This should create all the required agent related resources.
 
