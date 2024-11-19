@@ -1,8 +1,6 @@
 module github.com/argoproj-labs/argocd-agent
 
-go 1.22.0
-
-toolchain go1.22.3
+go 1.23.0
 
 require (
 	github.com/argoproj/argo-cd/v2 v2.12.3
