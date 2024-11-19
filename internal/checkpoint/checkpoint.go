@@ -94,7 +94,7 @@ func (cp *Checkpoint) NumSteps() int {
 func (cp *Checkpoint) Steps() []Step {
 	cp.mutex.RLock()
 	defer cp.mutex.RUnlock()
-	return cp.steps
+	return append([]Step{}, cp.steps...)
 }
 
 // String returns a string representation of the checkpoint's timing data.
