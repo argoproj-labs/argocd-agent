@@ -12,6 +12,15 @@ while the Argo CD agent agents will be deployed to the managed clusters as OCM a
 
 ## Set up OCM
 
+### Prerequisites
+
+- vcluster v0.21.0
+- kubectl v1.29.1+
+- curl 8.7.1+
+- kustomize v5.0.0+
+- clusteradm v0.15.1+
+
+
 ### Install clusteradm CLI tool
 
 Run the following command to download and install the latest OCM `clusteradm` tool:
@@ -89,13 +98,13 @@ Deploy the agent component:
 kubectl config use-context vcluster-agent-managed
 kubectl create -n agent-managed  secret generic argocd-agent-managed-userpass --from-literal=credentials="$(cat hack/demo-env/creds/creds.agent-managed)"
 kubectl config use-context vcluster-control-plane
-kubectl apply -k hack/demo-env/ocm/agent-managed
+kubectl apply -k 'https://github.com/argoproj-labs/argocd-agent/hack/demo-env/ocm/agent-managed?ref=main'
 
 kubectl config use-context vcluster-agent-autonomous
 kubectl create ns agent-autonomous
 kubectl create -n agent-autonomous  secret generic argocd-agent-auto-userpass --from-literal=credentials="$(cat hack/demo-env/creds/creds.agent-autonomous)"
 kubectl config use-context vcluster-control-plane
-kubectl apply -k hack/demo-env/ocm/agent-autonomous
+kubectl apply -k 'https://github.com/argoproj-labs/argocd-agent/hack/demo-env/ocm/agent-autonomous?ref=main'
 ```
 
 Verify the agents deployment:
