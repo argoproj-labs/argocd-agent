@@ -48,7 +48,9 @@ type Server struct {
 	options *ServerOptions
 	queues  queue.QueuePair
 
-	eventWriter *event.EventWriter
+	// key: AgentName
+	// value: EventWriter for that agent
+	eventWriters map[string]*event.EventWriter
 }
 
 type ServerOptions struct {
@@ -82,8 +84,9 @@ func NewServer(queues queue.QueuePair, opts ...ServerOption) *Server {
 		o(options)
 	}
 	return &Server{
-		queues:  queues,
-		options: options,
+		queues:       queues,
+		options:      options,
+		eventWriters: make(map[string]*event.EventWriter),
 	}
 }
 
@@ -193,7 +196,11 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 
 	if event.Target(incomingEvent) == event.TargetEventAck {
 		logCtx.Tracef("Received an ACK: resourceID %s eventID %s", event.ResourceID(incomingEvent), event.EventID(incomingEvent))
-		s.eventWriter.Remove(incomingEvent)
+		eventWriter, exists := s.eventWriters[c.agentName]
+		if !exists {
+			return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
+		}
+		eventWriter.Remove(incomingEvent)
 		logCtx.Trace("Removed the ACK from the EventWriter")
 		return nil
 	}
@@ -229,8 +236,13 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: nil item in queue")
 	}
 
+	eventWriter, exists := s.eventWriters[c.agentName]
+	if !exists {
+		return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
+	}
+
 	logCtx.Tracef("Adding an item to the event writer: resourceID %s eventID %s", event.ResourceID(ev), event.EventID(ev))
-	s.eventWriter.Add(ev)
+	eventWriter.Add(ev)
 
 	q.Done(ev)
 
@@ -250,8 +262,8 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		return err
 	}
 
-	s.eventWriter = event.NewEventWriter(subs)
-	go s.eventWriter.SendWaitingEvents(c.ctx)
+	s.eventWriters[c.agentName] = event.NewEventWriter(subs)
+	go s.eventWriters[c.agentName].SendWaitingEvents(c.ctx)
 
 	// We receive events in a dedicated go routine
 	c.wg.Add(1)
