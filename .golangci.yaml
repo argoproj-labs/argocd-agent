@@ -9,3 +9,5 @@ linters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude:
+  - SA1019 # temporarily ignore deprecation warnings
