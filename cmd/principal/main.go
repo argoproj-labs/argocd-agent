@@ -72,7 +72,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				logrus.SetLevel(lvl)
 			}
 			if formatter, err := cmd.LogFormatter(logFormat); err != nil {
-				cmd.Fatal(err.Error())
+				cmd.Fatal("%s", err.Error())
 			} else {
 				logrus.SetFormatter(formatter)
 			}
