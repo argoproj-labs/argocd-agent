@@ -115,8 +115,7 @@ func (be *KubernetesBackend) SupportsPatch() bool {
 }
 
 func (be *KubernetesBackend) StartInformer(ctx context.Context) error {
-	be.appProjectInformer.Start(ctx)
-	return nil
+	return be.appProjectInformer.Start(ctx)
 }
 
 func (be *KubernetesBackend) EnsureSynced(timeout time.Duration) error {
