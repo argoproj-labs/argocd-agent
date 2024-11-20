@@ -37,34 +37,38 @@ type seededClock struct {
 	now time.Time
 }
 
-func StandardClock() standardClock {
-	return standardClock{}
+func StandardClock() *standardClock {
+	return &standardClock{}
 }
 
-func (c standardClock) Now() time.Time {
+func (c *standardClock) Now() time.Time {
 	return time.Now()
 }
 
-func (c standardClock) Until(t time.Time) time.Duration {
+func (c *standardClock) Until(t time.Time) time.Duration {
 	return time.Until(t)
 }
 
-func (c standardClock) Since(t time.Time) time.Duration {
+func (c *standardClock) Since(t time.Time) time.Duration {
 	return time.Since(t)
 }
 
-func SeededClock(now time.Time) seededClock {
-	return seededClock{now: now}
+func SeededClock(now time.Time) *seededClock {
+	return &seededClock{now: now}
 }
 
-func (c seededClock) Now() time.Time {
+func (c *seededClock) Now() time.Time {
 	return c.now
 }
 
-func (c seededClock) Until(t time.Time) time.Duration {
+func (c *seededClock) Until(t time.Time) time.Duration {
 	return t.Sub(c.now)
 }
 
-func (c seededClock) Since(t time.Time) time.Duration {
+func (c *seededClock) Since(t time.Time) time.Duration {
 	return c.now.Sub(t)
+}
+
+func (c *seededClock) At(seed time.Time) {
+	c.now = seed
 }
