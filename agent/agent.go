@@ -216,7 +216,7 @@ func (a *Agent) Start(ctx context.Context) error {
 	// Start the AppProject backend in the background
 	go func() {
 		if err := a.projectManager.StartBackend(a.context); err != nil {
-			log().WithError(err).Error("Application backend has exited non-successfully")
+			log().WithError(err).Error("AppProject backend has exited non-successfully")
 		} else {
 			log().Info("AppProject backend has exited")
 		}
