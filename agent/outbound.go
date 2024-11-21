@@ -20,25 +20,6 @@ import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 )
 
-// listAppCallback
-// func (a *Agent) listAppCallback(apps []v1alpha1.Application) []v1alpha1.Application {
-// 	logCtx := log().WithField("event", "ListApps")
-// 	logCtx.Debugf("List apps event")
-
-// 	// Every time we're relisting, we are clearing the managed apps list
-// 	// and re-add all apps returned by the lister.
-// 	a.appManager.ClearManaged()
-// 	for _, app := range apps {
-// 		if err := a.appManager.Manage(app.QualifiedName()); err != nil {
-// 			log().Warnf("Could not manage app %s: %v", app.QualifiedName(), err)
-// 		}
-// 		if err := a.appManager.IgnoreChange(app.QualifiedName(), app.ResourceVersion); err != nil {
-// 			log().Warnf("Could not ignore change %s for app %s: %v", app.ResourceVersion, app.QualifiedName(), err)
-// 		}
-// 	}
-// 	return apps
-// }
-
 // addAppCreationToQueue processes a new application event originating from the
 // AppInformer and puts it in the send queue.
 func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
