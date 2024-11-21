@@ -177,7 +177,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	if s.options.metricsPort > 0 {
 		appInformerOpts = append(appInformerOpts, informer.WithMetrics[*v1alpha1.Application](prometheus.NewRegistry(), metrics.NewInformerMetrics("applications")))
 		appManagerOpts = append(appManagerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
-		projInformerOpts = append(projInformerOpts, informer.WithMetrics[*v1alpha1.AppProject](prometheus.NewRegistry(), metrics.NewInformerMetrics("applications")))
+		projInformerOpts = append(projInformerOpts, informer.WithMetrics[*v1alpha1.AppProject](prometheus.NewRegistry(), metrics.NewInformerMetrics("appprojects")))
 		projManagerOpts = append(projManagerOpts, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
 	}
 
