@@ -30,7 +30,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 var _ eventstreamapi.EventStreamServer = &Server{}
@@ -211,18 +210,13 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	// Get() is blocking until there is at least one item in the
 	// queue.
 	logCtx.Tracef("Waiting to grab an item from the queue")
-	item, shutdown := q.Get()
+	ev, shutdown := q.Get()
 	if shutdown {
 		return fmt.Errorf("sendq shutdown in progress")
 	}
 	logCtx.Tracef("Grabbed an item")
-	if item == nil {
+	if ev == nil {
 		return fmt.Errorf("panic: nil item in queue")
-	}
-
-	ev, ok := item.(*cloudevents.Event)
-	if !ok {
-		return fmt.Errorf("panic: invalid data in sendqueue: want: %T, have %T", cloudevents.Event{}, item)
 	}
 
 	prEv, err := format.ToProto(ev)
@@ -230,7 +224,7 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: could not serialize event to wire format: %v", err)
 	}
 
-	q.Done(item)
+	q.Done(ev)
 
 	logCtx.Tracef("Sending an item to the event stream")
 
