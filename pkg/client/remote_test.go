@@ -36,6 +36,7 @@ func Test_Connect(t *testing.T) {
 	tempDir := t.TempDir()
 	basePath := path.Join(tempDir, "certs")
 	testcerts.WriteSelfSignedCert(t, "rsa", basePath, x509.Certificate{SerialNumber: big.NewInt(1)})
+
 	s, err := principal.NewServer(context.TODO(), kube.NewKubernetesFakeClient(), "default",
 		principal.WithGRPC(true),
 		principal.WithListenerPort(0),
@@ -46,7 +47,6 @@ func Test_Connect(t *testing.T) {
 	am := userpass.NewUserPassAuthentication("")
 	am.UpsertUser("default", "password")
 	s.AuthMethodsForE2EOnly().RegisterMethod("userpass", am)
-
 	require.NoError(t, err)
 	errch := make(chan error)
 	err = s.Start(context.Background(), errch)

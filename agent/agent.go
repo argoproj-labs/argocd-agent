@@ -24,8 +24,7 @@ import (
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
-	appinformer "github.com/argoproj-labs/argocd-agent/internal/informer/application"
-	appprojectinformer "github.com/argoproj-labs/argocd-agent/internal/informer/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
@@ -34,7 +33,11 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 )
 
@@ -120,20 +123,33 @@ func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace s
 		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
-	appInformer := appinformer.NewAppInformer(ctx, appclient, a.namespace,
-		appinformer.WithListAppCallback(a.listAppCallback),
-		appinformer.WithNewAppCallback(a.addAppCreationToQueue),
-		appinformer.WithUpdateAppCallback(a.addAppUpdateToQueue),
-		appinformer.WithDeleteAppCallback(a.addAppDeletionToQueue),
-		appinformer.WithFilterChain(a.DefaultFilterChain()),
-	)
+	// appListFunc and watchFunc are anonymous functions for the informer
+	appListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+		return appclient.ArgoprojV1alpha1().Applications(a.namespace).List(ctx, opts)
+	}
+	appWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+		return appclient.ArgoprojV1alpha1().Applications(a.namespace).Watch(ctx, opts)
+	}
+
+	appInformerOptions := []informer.InformerOption[*v1alpha1.Application]{
+		informer.WithListHandler[*v1alpha1.Application](appListFunc),
+		informer.WithWatchHandler[*v1alpha1.Application](appWatchFunc),
+		informer.WithAddHandler[*v1alpha1.Application](a.addAppCreationToQueue),
+		informer.WithUpdateHandler[*v1alpha1.Application](a.addAppUpdateToQueue),
+		informer.WithDeleteHandler[*v1alpha1.Application](a.addAppDeletionToQueue),
+		informer.WithFilters[*v1alpha1.Application](a.DefaultAppFilterChain()),
+		informer.WithNamespaceScope[*v1alpha1.Application](a.namespace),
+	}
+
+	appInformer, err := informer.NewInformer(ctx, appInformerOptions...)
+	if err != nil {
+		return nil, fmt.Errorf("could not instantiate application informer: %w", err)
+	}
 
 	allowUpsert := false
 	if a.mode == types.AgentModeManaged {
 		allowUpsert = true
 	}
-
-	var err error
 
 	appProjectManagerOption := []appproject.AppProjectManagerOption{
 		appproject.WithAllowUpsert(true),
@@ -141,9 +157,21 @@ func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace s
 		appproject.WithMode(managerMode),
 	}
 
-	projectInformer, err := appprojectinformer.NewAppProjectInformer(ctx, appclient, a.namespace)
+	projListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+		return appclient.ArgoprojV1alpha1().AppProjects(a.namespace).List(ctx, opts)
+	}
+	projWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+		return appclient.ArgoprojV1alpha1().AppProjects(a.namespace).Watch(ctx, opts)
+	}
+
+	projInformerOptions := []informer.InformerOption[*v1alpha1.AppProject]{
+		informer.WithListHandler[*v1alpha1.AppProject](projListFunc),
+		informer.WithWatchHandler[*v1alpha1.AppProject](projWatchFunc),
+	}
+
+	projInformer, err := informer.NewInformer(ctx, projInformerOptions...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not instantiate project informer: %w", err)
 	}
 
 	// The agent only supports Kubernetes as application backend
@@ -154,12 +182,14 @@ func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace s
 		application.WithRole(manager.ManagerRoleAgent),
 		application.WithMode(managerMode),
 	)
-
 	if err != nil {
 		return nil, err
 	}
 
-	a.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(appclient, a.namespace, projectInformer, true), a.namespace, appProjectManagerOption...)
+	a.projectManager, err = appproject.NewAppProjectManager(
+		kubeappproject.NewKubernetesBackend(appclient, a.namespace, projInformer, true),
+		a.namespace,
+		appProjectManagerOption...)
 	if err != nil {
 		return nil, err
 	}
@@ -173,14 +203,25 @@ func (a *Agent) Start(ctx context.Context) error {
 	log().Infof("Starting %s (agent) v%s (ns=%s, allowed_namespaces=%v, mode=%s)", a.version.Name(), a.version.Version(), a.namespace, a.options.namespaces, a.mode)
 	a.context = infCtx
 	a.cancelFn = cancelFn
+
+	// Start the Application backend in the background
 	go func() {
-		a.appManager.StartBackend(a.context)
-		log().Warnf("App Informer has exited")
+		if err := a.appManager.StartBackend(a.context); err != nil {
+			log().WithError(err).Error("Application backend has exited non-successfully")
+		} else {
+			log().Info("Application backend has exited")
+		}
 	}()
+
+	// Start the AppProject backend in the background
 	go func() {
-		a.projectManager.StartBackend(a.context)
-		log().Warnf("Project Informer has exited")
+		if err := a.projectManager.StartBackend(a.context); err != nil {
+			log().WithError(err).Error("AppProject backend has exited non-successfully")
+		} else {
+			log().Info("AppProject backend has exited")
+		}
 	}()
+
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
 		// TODO: Right now, maintainConnection always returns nil. Revisit

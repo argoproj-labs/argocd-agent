@@ -9,6 +9,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	time "time"
+
 	v1alpha1 "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 )
 
@@ -129,6 +131,52 @@ func (_c *AppProject_Delete_Call) Return(_a0 error) *AppProject_Delete_Call {
 }
 
 func (_c *AppProject_Delete_Call) RunAndReturn(run func(context.Context, string, string, *backend.DeletionPropagation) error) *AppProject_Delete_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// EnsureSynced provides a mock function with given fields: duration
+func (_m *AppProject) EnsureSynced(duration time.Duration) error {
+	ret := _m.Called(duration)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EnsureSynced")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(time.Duration) error); ok {
+		r0 = rf(duration)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// AppProject_EnsureSynced_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnsureSynced'
+type AppProject_EnsureSynced_Call struct {
+	*mock.Call
+}
+
+// EnsureSynced is a helper method to define mock.On call
+//   - duration time.Duration
+func (_e *AppProject_Expecter) EnsureSynced(duration interface{}) *AppProject_EnsureSynced_Call {
+	return &AppProject_EnsureSynced_Call{Call: _e.mock.On("EnsureSynced", duration)}
+}
+
+func (_c *AppProject_EnsureSynced_Call) Run(run func(duration time.Duration)) *AppProject_EnsureSynced_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(time.Duration))
+	})
+	return _c
+}
+
+func (_c *AppProject_EnsureSynced_Call) Return(_a0 error) *AppProject_EnsureSynced_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *AppProject_EnsureSynced_Call) RunAndReturn(run func(time.Duration) error) *AppProject_EnsureSynced_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -314,8 +362,21 @@ func (_c *AppProject_Patch_Call) RunAndReturn(run func(context.Context, string, 
 }
 
 // StartInformer provides a mock function with given fields: ctx
-func (_m *AppProject) StartInformer(ctx context.Context) {
-	_m.Called(ctx)
+func (_m *AppProject) StartInformer(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StartInformer")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // AppProject_StartInformer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StartInformer'
@@ -336,12 +397,12 @@ func (_c *AppProject_StartInformer_Call) Run(run func(ctx context.Context)) *App
 	return _c
 }
 
-func (_c *AppProject_StartInformer_Call) Return() *AppProject_StartInformer_Call {
-	_c.Call.Return()
+func (_c *AppProject_StartInformer_Call) Return(_a0 error) *AppProject_StartInformer_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *AppProject_StartInformer_Call) RunAndReturn(run func(context.Context)) *AppProject_StartInformer_Call {
+func (_c *AppProject_StartInformer_Call) RunAndReturn(run func(context.Context) error) *AppProject_StartInformer_Call {
 	_c.Call.Return(run)
 	return _c
 }

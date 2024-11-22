@@ -30,6 +30,14 @@ type AppProjectMetrics struct {
 	AppProjectWatcherMetrics
 }
 
+type InformerMetrics struct {
+	ResourcesListed *prometheus.GaugeVec
+	ListDuration    *prometheus.GaugeVec
+	AddDuration     *prometheus.GaugeVec
+	UpdateDuration  *prometheus.GaugeVec
+	DeleteDuration  *prometheus.GaugeVec
+}
+
 // ApplicationWatcherMetrics holds metrics about Applications watched by the agent
 type ApplicationWatcherMetrics struct {
 	AppsWatched      prometheus.Gauge
@@ -59,6 +67,20 @@ type AppProjectClientMetrics struct {
 	AppProjectsUpdated  *prometheus.CounterVec
 	AppProjectsDeleted  *prometheus.CounterVec
 	ProjectClientErrors prometheus.Counter
+}
+
+func NewInformerMetrics(label string) *InformerMetrics {
+	im := &InformerMetrics{
+		ResourcesListed: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "argocd_agent_informer_list_num_resources",
+			Help: "The number of resources seen by this informer",
+		}, []string{label}),
+		ListDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "argocd_agent_informer_list_duration",
+			Help: "The time it took to list resources (in seconds)",
+		}, []string{label}),
+	}
+	return im
 }
 
 // NewApplicationWatcherMetrics returns a new instance of ApplicationMetrics

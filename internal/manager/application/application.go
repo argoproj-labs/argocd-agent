@@ -116,8 +116,8 @@ func NewApplicationManager(be backend.Application, namespace string, opts ...App
 
 // StartBackend informs the backend to run startup logic, which usually means beginning to listen for events.
 // For example, in the case of the Kubernetes backend, the shared informer is started, which will listen for Application events from the watch api of the K8s cluster.
-func (m *ApplicationManager) StartBackend(ctx context.Context) {
-	m.applicationBackend.StartInformer(ctx)
+func (m *ApplicationManager) StartBackend(ctx context.Context) error {
+	return m.applicationBackend.StartInformer(ctx)
 }
 
 // EnsureSynced waits until either the backend indicates it has fully synced, or the

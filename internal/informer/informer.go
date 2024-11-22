@@ -16,204 +16,144 @@ package informer
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/filter"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/api/meta"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
 
-type GenericInformer struct {
-	listFunc     ListFunc
-	watchFunc    WatchFunc
-	addFunc      AddFunc
-	updateFunc   UpdateFunc
-	deleteFunc   DeleteFunc
-	filterFunc   FilterFunc
-	synced       atomic.Bool
-	running      atomic.Bool
+// Informer is a generic informer, suitable for all Kubernetes types.
+//
+// T specifies the type of the resource this informer should handle.
+//
+// The informer must be supplied with at least a lister and a watcher
+// function.
+type Informer[T runtime.Object] struct {
+	informer cache.SharedIndexInformer
+
+	listFunc  ListFunc
+	watchFunc WatchFunc
+
 	resyncPeriod time.Duration
-	informer     cache.SharedIndexInformer
-	runch        chan struct{}
-	logger       *logrus.Entry
-	// mutex prevents unsynchronized access to namespaces, and ensures that Start/Stop logic is only called once.
+
+	// onAdd is a function that is called when a resource is added
+	onAdd AddHandler[T]
+	// onUpdate is a function that is called when a resource is updated
+	onUpdate UpdateHandler[T]
+	// onDelete is a function that is called when a resource is deleted
+	onDelete DeleteHandler[T]
+
+	evHandler cache.ResourceEventHandlerRegistration
+
+	resType reflect.Type
+
+	// logger is this informer's logger.
+	logger *logrus.Entry
+
+	// ctlCh is a control channel for the underlying shared informer
+	ctlCh chan struct{}
+
+	// running indicates whether the informer is currently running
+	running atomic.Bool
+
+	// mutex is a mutex for parallel operations
 	mutex sync.RWMutex
-	// labelSelector is not currently implemented
-	labelSelector string
-	// fieldSelector is not currently implemented
-	fieldSelector string
-	// mutex should be owned before accessing namespaces
-	namespaces map[string]interface{}
-	// metrics is the metrics provider for this informer
-	metrics metrics
+
+	// namespace is non-empty if the informer is in namespaced-scope
+	namespace string
+
+	// metrics holds informer metrics
+	metrics *metrics.InformerMetrics
+
+	// filters is a filter chain to be used by this informer
+	filters *filter.Chain[T]
 }
 
-// metrics is a simplified and specialized metrics provider for the informer
-type metrics struct {
-	added   metricsCounter
-	updated metricsCounter
-	removed metricsCounter
-	watched metricsGauge
+// InformerInterface defines the interface for the informer
+type InformerInterface interface {
+	Start(ctx context.Context) error
+	Stop() error
+	HasSynced() bool
+	WaitForSync(ctx context.Context) error
 }
 
-// metricsCounter is an interface for a metrics implementation of type counter.
-// The reason we use an oversimplified abstraction is for testing purposes.
-type metricsCounter interface {
-	Inc()
-}
+var _ InformerInterface = &Informer[runtime.Object]{}
 
-// metricsGauge is an interface for a metrics implementation of type gauge.
-// The reason we use an oversimplified abstraction is for testing purposes.
-type metricsGauge interface {
-	Inc()
-	Dec()
-	Set(float64)
-}
+type AddHandler[Res runtime.Object] func(obj Res)
+type UpdateHandler[Res runtime.Object] func(old Res, new Res)
+type DeleteHandler[Res runtime.Object] func(obj Res)
 
-type InformerOption func(i *GenericInformer) error
+var ErrRunning = errors.New("informer is running")
+var ErrNotRunning = errors.New("informer is not running")
+var ErrNoListFunc = errors.New("no list func defined")
+var ErrNoWatchFunc = errors.New("no watch func defined")
 
-type ListFunc func(options v1.ListOptions, namespace string) (runtime.Object, error)
-type WatchFunc func(options v1.ListOptions, namespace string) (watch.Interface, error)
-type AddFunc func(obj interface{})
-type UpdateFunc func(newObj interface{}, oldObj interface{})
-type DeleteFunc func(obj interface{})
-type FilterFunc func(obj interface{}) bool
-
-func WithListCallback(f ListFunc) InformerOption {
-	return func(i *GenericInformer) error {
-		i.listFunc = f
-		return nil
-	}
-}
-
-func WithWatchCallback(f WatchFunc) InformerOption {
-	return func(i *GenericInformer) error {
-		i.watchFunc = f
-		return nil
-	}
-}
-
-func WithAddCallback(f AddFunc) InformerOption {
-	return func(i *GenericInformer) error {
-		i.addFunc = f
-		return nil
-	}
-}
-
-func WithUpdateCallback(f UpdateFunc) InformerOption {
-	return func(i *GenericInformer) error {
-		i.updateFunc = f
-		return nil
-	}
-}
-
-func WithDeleteCallback(f DeleteFunc) InformerOption {
-	return func(i *GenericInformer) error {
-		i.deleteFunc = f
-		return nil
-	}
-}
-
-func WithFilterFunc(f FilterFunc) InformerOption {
-	return func(i *GenericInformer) error {
-		i.filterFunc = f
-		return nil
-	}
-}
-
-func WithResyncPeriod(t time.Duration) InformerOption {
-	return func(i *GenericInformer) error {
-		i.resyncPeriod = t
-		return nil
-	}
-}
-
-func WithLabelSelector(sel string) InformerOption {
-	return func(i *GenericInformer) error {
-		i.labelSelector = sel
-		return nil
-	}
-}
-
-func WithFieldSelector(sel string) InformerOption {
-	return func(i *GenericInformer) error {
-		i.fieldSelector = sel
-		return nil
-	}
-}
-
-// WithMetrics sets the metrics functions to use with this informer.
-func WithMetrics(added, updated, removed metricsCounter, watched metricsGauge) InformerOption {
-	return func(i *GenericInformer) error {
-		i.metrics.added = added
-		i.metrics.updated = updated
-		i.metrics.removed = removed
-		i.metrics.watched = watched
-		return nil
-	}
-}
-
-// WithNamespaces sets the namespaces for which the informer will process any
-// event. If an event is seen for an object in a namespace that is not in this
-// list, the event will be ignored. If either zero or multiple namespaces are
-// set, the informer will require cluster-wide permissions to list and watch
-// the kind of resource to be handled by this informer.
-func WithNamespaces(namespaces ...string) InformerOption {
-	return func(i *GenericInformer) error {
-		for _, ns := range namespaces {
-			i.namespaces[ns] = true
-		}
-		return nil
-	}
-}
-
-// NewGenericInformer returns a new instance of a GenericInformer for the given
-// object type and with the given objects.
-func NewGenericInformer(objType runtime.Object, options ...InformerOption) (*GenericInformer, error) {
-	i := &GenericInformer{
-		namespaces: make(map[string]interface{}),
-	}
-	i.logger = log().WithFields(logrus.Fields{
-		"resource": fmt.Sprintf("%T", objType),
+// NewInformer instantiates a new informer for resource type T.
+//
+// You must supply at least a list and a watch function using WithLisHandler and
+// WithWatchHandler.
+//
+// Resource callbacks can be provided at the time of instantiation
+// using WithAddHandler, WithUpdateHandler and WithDeleteHandler options.
+func NewInformer[T runtime.Object](ctx context.Context, opts ...InformerOption[T]) (*Informer[T], error) {
+	i := &Informer[T]{}
+	var r T
+	var err error
+	i.resType = reflect.TypeOf(r)
+	i.logger = logrus.NewEntry(logrus.StandardLogger()).WithFields(logrus.Fields{
+		"type":   i.resType,
+		"module": "Informer",
 	})
-	i.runch = make(chan struct{})
-	i.setSynced(false)
-	for _, o := range options {
+	for _, o := range opts {
 		err := o(i)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("could not set option: %w", err)
 		}
 	}
 	if i.listFunc == nil {
-		return nil, fmt.Errorf("unable to create an informer without list function")
+		return nil, ErrNoListFunc
 	}
 	if i.watchFunc == nil {
-		return nil, fmt.Errorf("unable to create an informer without watch function")
+		return nil, ErrNoWatchFunc
 	}
-	logCtx := i.logger
 	i.informer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
-				logCtx.Trace("Executing list")
-				if i.metrics.watched != nil {
-					i.metrics.watched.Set(0)
+				if i.listFunc == nil {
+					panic("no list func defined")
 				}
-				return i.listFunc(options, i.watchAndListNamespace())
+				i.logger.Trace("Starting to list resources")
+				objs, err := i.listFunc(ctx, options)
+				if err != nil {
+					i.logger.WithError(err).Error("Could not list resources")
+				}
+				i.logger.Trace("Done listing resources")
+				return objs, err
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
-				i.setSynced(false)
-				defer i.setSynced(true)
-				logCtx.Trace("Starting watcher")
-				return i.watchFunc(options, i.watchAndListNamespace())
+				if i.watchFunc == nil {
+					panic("no watch func defined")
+				}
+				i.logger.Info("Starting watcher")
+				wif, err := i.watchFunc(ctx, options)
+				if err != nil {
+					i.logger.WithError(err).Error("Could not start watcher")
+				}
+				i.logger.Trace("Done starting watcher")
+				return wif, err
 			},
 		},
-		objType,
+		r,
 		i.resyncPeriod,
 		cache.Indexers{
 			cache.NamespaceIndex: func(obj interface{}) ([]string, error) {
@@ -221,192 +161,112 @@ func NewGenericInformer(objType runtime.Object, options ...InformerOption) (*Gen
 			},
 		},
 	)
-	_, err := i.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			mobj, err := meta.Accessor(obj)
-			if err != nil {
-				i.logger.WithError(err).Errorf("Could not convert type %T to unstructured", obj)
-				return
+	i.evHandler, err = i.informer.AddEventHandler(cache.FilteringResourceEventHandler{
+		FilterFunc: func(obj interface{}) bool {
+			if i.filters == nil {
+				return true
 			}
-			if !i.isNamespaceAllowed(mobj) {
-				i.logger.Tracef("Namespace %s not allowed", mobj.GetNamespace())
-				return
+			res, ok := obj.(T)
+			if !ok {
+				i.logger.Errorf("Could not type convert %T to %s", obj, i.resType)
+				return false
 			}
-			if i.filterFunc != nil {
-				if !i.filterFunc(obj) {
-					return
-				}
-			}
-			if i.addFunc != nil {
-				i.addFunc(obj)
-			}
-			if i.metrics.added != nil && i.metrics.watched != nil {
-				i.metrics.added.Inc()
-				i.metrics.watched.Inc()
-			}
+			return i.filters.Admit(res)
 		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			mobj, err := meta.Accessor(newObj)
-			if err != nil {
-				i.logger.WithError(err).Errorf("Could not convert type %T to unstructured", newObj)
-				return
-			}
-			if !i.isNamespaceAllowed(mobj) {
-				i.logger.Tracef("Namespace %s not allowed", mobj.GetNamespace())
-				return
-			}
-			if i.filterFunc != nil {
-				if !i.filterFunc(newObj) {
+		Handler: cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				res, ok := obj.(T)
+				if !ok {
 					return
 				}
-			}
-			if i.updateFunc != nil {
-				i.updateFunc(oldObj, newObj)
-			}
-			if i.metrics.updated != nil {
-				i.metrics.updated.Inc()
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			mobj, err := meta.Accessor(obj)
-			if err != nil {
-				i.logger.WithError(err).Errorf("Could not convert type %T to unstructured", obj)
-				return
-			}
-			if !i.isNamespaceAllowed(mobj) {
-				i.logger.Tracef("Namespace %s not allowed", mobj.GetNamespace())
-				return
-			}
-			if i.filterFunc != nil {
-				if !i.filterFunc(obj) {
+				if i.onAdd != nil {
+					i.onAdd(res)
+				}
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				oldRes, oldOk := oldObj.(T)
+				newRes, newOk := newObj.(T)
+				if !oldOk || !newOk {
 					return
 				}
-			}
-			if i.deleteFunc != nil {
-				i.deleteFunc(obj)
-			}
-			if i.metrics.removed != nil && i.metrics.watched != nil {
-				i.metrics.removed.Inc()
-				i.metrics.watched.Dec()
-			}
+				if i.onUpdate != nil {
+					i.onUpdate(oldRes, newRes)
+				}
+			},
+			DeleteFunc: func(obj interface{}) {
+				res, ok := obj.(T)
+				if !ok {
+					return
+				}
+				if i.onDelete != nil {
+					i.onDelete(res)
+				}
+			},
 		},
 	})
 	if err != nil {
 		return nil, err
 	}
-	// SetWatchErrorHandler only returns error when informer already started,
-	// so it should be safe to not handle the error.
-	// TODO: Do we need a unique error handler?
-	_ = i.informer.SetWatchErrorHandler(cache.DefaultWatchErrorHandler)
+	i.ctlCh = make(chan struct{})
 	return i, nil
 }
 
-// IsSynced returns whether the informer is considered to be in sync or not
-func (i *GenericInformer) IsSynced() bool {
-	return i.synced.Load()
-}
-
-// setSynced sets the sync state to either true or false
-func (i *GenericInformer) setSynced(synced bool) {
-	i.logger.Tracef("Setting informer sync state to %v", synced)
-	i.synced.Store(synced)
-}
-
-// IsRunning returns whether the GenericInformer is running or not
-func (i *GenericInformer) IsRunning() bool {
-	return i.running.Load()
-}
-
-// setRunning sets whether this informer is running to either true or false
-func (i *GenericInformer) setRunning(running bool) {
-	i.logger.Tracef("Setting informer run state to %v", running)
-	i.running.Store(running)
-}
-
-// Start starts the GenericInformer with its current options in a goroutine.
-// If this method does not return an error, you can use Stop to stop the
-// informer and terminate the goroutine it has created. If Start returns an
-// error, no goroutine will have been created.
-func (i *GenericInformer) Start(ctx context.Context) error {
+// Start starts the informer until the informer's control channel is closed.
+// Note that this method will block, so it should be executed in a dedicated
+// go routine.
+func (i *Informer[T]) Start(ctx context.Context) error {
+	// We can't use defer to unlock the mutex because the underlying informer's
+	// Start function does not return until the control channel is closed.
+	// Make sure that the mutex is released before exiting the function.
 	i.mutex.Lock()
-	defer i.mutex.Unlock()
-	if i.IsRunning() {
-		return fmt.Errorf("cannot start informer: already running")
+	i.logger.Debug("Starting informer")
+	if i.running.Load() {
+		i.mutex.Unlock()
+		return ErrRunning
 	}
-	i.setRunning(true)
-	i.logger.Info("Starting informer goroutine")
-	go i.informer.Run(i.runch)
+
+	// We need to make a new channel, as the previous might be closed already
+	i.ctlCh = make(chan struct{})
+
+	i.running.Store(true)
+	i.mutex.Unlock()
+
+	// Unlock the mutex as we hand over control to the underlying informer
+	// As soon as the informer exits, we acquire the mutex again.
+	i.informer.Run(i.ctlCh)
+	i.running.Store(false)
 	return nil
 }
 
-// Stop stops the GenericInformer and terminates the associated goroutine.
-func (i *GenericInformer) Stop() error {
+// Stop stops the running informer
+func (i *Informer[T]) Stop() error {
+	i.logger.Infof("Stopping informer")
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	if !i.IsRunning() {
-		return fmt.Errorf("cannot stop informer: informer not running")
+	if !i.running.Load() {
+		return ErrNotRunning
 	}
-	i.logger.Debug("Stopping informer")
-	close(i.runch)
-	i.setRunning(false)
+	close(i.ctlCh)
+	i.running.Store(false)
 	return nil
 }
 
-// AddNamespace adds a namespace to the list of allowed namespaces.
-func (i *GenericInformer) AddNamespace(namespace string) error {
-	i.mutex.Lock()
-	defer i.mutex.Unlock()
-	if _, ok := i.namespaces[namespace]; ok {
-		return fmt.Errorf("namespace %s already included", namespace)
-	}
-	i.namespaces[namespace] = true
-	return nil
+// HasSynced returns true if the informer is synced
+func (i *Informer[T]) HasSynced() bool {
+	return i.evHandler.HasSynced()
 }
 
-// RemoveNamespace removes a namespace from the list of allowed namespaces
-func (i *GenericInformer) RemoveNamespace(namespace string) error {
-	i.mutex.Lock()
-	defer i.mutex.Unlock()
-	if _, ok := i.namespaces[namespace]; !ok {
-		return fmt.Errorf("namespace %s not included", namespace)
-	}
-	delete(i.namespaces, namespace)
-	return nil
-}
-
-// watchAndListNamespace returns a string to be passed as namespace argument
-// to the List() and Watch() functions of the AppProject client.
-func (i *GenericInformer) watchAndListNamespace() string {
-	i.mutex.RLock()
-	defer i.mutex.RUnlock()
-	if len(i.namespaces) == 1 {
-		for k := range i.namespaces {
-			return k
+// WaitForSync blocks until either the informer has synced, or the context ctx
+// is done. If the informer has synced, returns nil. Otherwise, the reason why
+// the context was aborted is returned.
+func (i *Informer[T]) WaitForSync(ctx context.Context) error {
+	for !i.HasSynced() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	// Zero or multiple namespaces mean we need cluster-scoped operations
-	return ""
-}
-
-// isNamespaceAllowed returns whether the namespace of an event's object is
-// permitted.
-func (i *GenericInformer) isNamespaceAllowed(obj v1.Object) bool {
-	i.mutex.RLock()
-	defer i.mutex.RUnlock()
-	if len(i.namespaces) == 0 {
-		return true
-	}
-	_, ok := i.namespaces[obj.GetNamespace()]
-	return ok
-}
-
-// Indexer returns the underlying shared informer's indexer
-func (i *GenericInformer) Indexer() cache.Indexer {
-	return i.informer.GetIndexer()
-}
-
-func log() *logrus.Entry {
-	return logrus.WithFields(logrus.Fields{
-		"module": "Informer",
-	})
+	return nil
 }
