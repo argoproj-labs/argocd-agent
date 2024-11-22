@@ -24,7 +24,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 func (a *Agent) maintainConnection() error {
@@ -69,20 +68,14 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 	// Get() is blocking until there is at least one item in the
 	// queue.
 	logCtx.Tracef("Waiting to grab an item from queue as it appears")
-	item, shutdown := q.Get()
+	ev, shutdown := q.Get()
 	if shutdown {
 		logCtx.Tracef("Queue shutdown in progress")
 		return nil
 	}
 	logCtx.Tracef("Grabbed an item")
-	if item == nil {
+	if ev == nil {
 		// TODO: Is this really the right thing to do?
-		return nil
-	}
-
-	ev, ok := item.(*cloudevents.Event)
-	if !ok {
-		logCtx.Warnf("invalid data in sendqueue")
 		return nil
 	}
 

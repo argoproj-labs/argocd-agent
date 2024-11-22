@@ -3,6 +3,7 @@
 package mocks
 
 import (
+	event "github.com/cloudevents/sdk-go/v2/event"
 	mock "github.com/stretchr/testify/mock"
 
 	workqueue "k8s.io/client-go/util/workqueue"
@@ -253,19 +254,19 @@ func (_c *QueuePair_Names_Call) RunAndReturn(run func() []string) *QueuePair_Nam
 }
 
 // RecvQ provides a mock function with given fields: name
-func (_m *QueuePair) RecvQ(name string) workqueue.RateLimitingInterface {
+func (_m *QueuePair) RecvQ(name string) workqueue.TypedRateLimitingInterface[*event.Event] {
 	ret := _m.Called(name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RecvQ")
 	}
 
-	var r0 workqueue.RateLimitingInterface
-	if rf, ok := ret.Get(0).(func(string) workqueue.RateLimitingInterface); ok {
+	var r0 workqueue.TypedRateLimitingInterface[*event.Event]
+	if rf, ok := ret.Get(0).(func(string) workqueue.TypedRateLimitingInterface[*event.Event]); ok {
 		r0 = rf(name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(workqueue.RateLimitingInterface)
+			r0 = ret.Get(0).(workqueue.TypedRateLimitingInterface[*event.Event])
 		}
 	}
 
@@ -290,30 +291,30 @@ func (_c *QueuePair_RecvQ_Call) Run(run func(name string)) *QueuePair_RecvQ_Call
 	return _c
 }
 
-func (_c *QueuePair_RecvQ_Call) Return(_a0 workqueue.RateLimitingInterface) *QueuePair_RecvQ_Call {
+func (_c *QueuePair_RecvQ_Call) Return(_a0 workqueue.TypedRateLimitingInterface[*event.Event]) *QueuePair_RecvQ_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *QueuePair_RecvQ_Call) RunAndReturn(run func(string) workqueue.RateLimitingInterface) *QueuePair_RecvQ_Call {
+func (_c *QueuePair_RecvQ_Call) RunAndReturn(run func(string) workqueue.TypedRateLimitingInterface[*event.Event]) *QueuePair_RecvQ_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // SendQ provides a mock function with given fields: name
-func (_m *QueuePair) SendQ(name string) workqueue.RateLimitingInterface {
+func (_m *QueuePair) SendQ(name string) workqueue.TypedRateLimitingInterface[*event.Event] {
 	ret := _m.Called(name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SendQ")
 	}
 
-	var r0 workqueue.RateLimitingInterface
-	if rf, ok := ret.Get(0).(func(string) workqueue.RateLimitingInterface); ok {
+	var r0 workqueue.TypedRateLimitingInterface[*event.Event]
+	if rf, ok := ret.Get(0).(func(string) workqueue.TypedRateLimitingInterface[*event.Event]); ok {
 		r0 = rf(name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(workqueue.RateLimitingInterface)
+			r0 = ret.Get(0).(workqueue.TypedRateLimitingInterface[*event.Event])
 		}
 	}
 
@@ -338,12 +339,12 @@ func (_c *QueuePair_SendQ_Call) Run(run func(name string)) *QueuePair_SendQ_Call
 	return _c
 }
 
-func (_c *QueuePair_SendQ_Call) Return(_a0 workqueue.RateLimitingInterface) *QueuePair_SendQ_Call {
+func (_c *QueuePair_SendQ_Call) Return(_a0 workqueue.TypedRateLimitingInterface[*event.Event]) *QueuePair_SendQ_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *QueuePair_SendQ_Call) RunAndReturn(run func(string) workqueue.RateLimitingInterface) *QueuePair_SendQ_Call {
+func (_c *QueuePair_SendQ_Call) RunAndReturn(run func(string) workqueue.TypedRateLimitingInterface[*event.Event]) *QueuePair_SendQ_Call {
 	_c.Call.Return(run)
 	return _c
 }

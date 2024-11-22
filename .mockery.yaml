@@ -14,4 +14,4 @@ packages:
       dir: "test/mocks/k8s-workqueue"
       all: false
     interfaces:
-      RateLimitingInterface:
+      TypedRateLimitingInterface:

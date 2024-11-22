@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cloudevents/sdk-go/v2/event"
 	"k8s.io/client-go/util/workqueue"
 )
 
@@ -28,15 +29,15 @@ type QueuePair interface {
 	Names() []string
 	HasQueuePair(name string) bool
 	Len() int
-	SendQ(name string) workqueue.RateLimitingInterface
-	RecvQ(name string) workqueue.RateLimitingInterface
+	SendQ(name string) workqueue.TypedRateLimitingInterface[*event.Event]
+	RecvQ(name string) workqueue.TypedRateLimitingInterface[*event.Event]
 	Create(name string) error
 	Delete(name string, shutdown bool) error
 }
 
 type queuepair struct {
-	recvq workqueue.RateLimitingInterface
-	sendq workqueue.RateLimitingInterface
+	recvq workqueue.TypedRateLimitingInterface[*event.Event]
+	sendq workqueue.TypedRateLimitingInterface[*event.Event]
 }
 
 type SendRecvQueues struct {
@@ -81,7 +82,7 @@ func (q *SendRecvQueues) Len() int {
 
 // SendQ will return the send queue from the queue pair named name. If no such
 // queue pair exists, returns nil
-func (q *SendRecvQueues) SendQ(name string) workqueue.RateLimitingInterface {
+func (q *SendRecvQueues) SendQ(name string) workqueue.TypedRateLimitingInterface[*event.Event] {
 	q.queuelock.RLock()
 	defer q.queuelock.RUnlock()
 	qp, ok := q.queues[name]
@@ -93,7 +94,7 @@ func (q *SendRecvQueues) SendQ(name string) workqueue.RateLimitingInterface {
 
 // RecvQ will return the receive queue from the queue pair named name. If no
 // such queue pair exists, returns nil
-func (q *SendRecvQueues) RecvQ(name string) workqueue.RateLimitingInterface {
+func (q *SendRecvQueues) RecvQ(name string) workqueue.TypedRateLimitingInterface[*event.Event] {
 	q.queuelock.RLock()
 	defer q.queuelock.RUnlock()
 	qp, ok := q.queues[name]
@@ -114,8 +115,8 @@ func (q *SendRecvQueues) Create(name string) error {
 		return fmt.Errorf("cannot initialize queue for %s: queue already exists", name)
 	}
 	qp := &queuepair{}
-	qp.sendq = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "sendqueue")
-	qp.recvq = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "recvqueue")
+	qp.sendq = workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[*event.Event]())
+	qp.recvq = workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[*event.Event]())
 	q.queues[name] = qp
 
 	return nil

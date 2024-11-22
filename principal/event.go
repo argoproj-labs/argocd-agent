@@ -38,13 +38,8 @@ import (
 // processRecvQueue processes an entry from the receiver queue, which holds the
 // events received by agents. It will trigger updates of resources in the
 // server's backend.
-func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workqueue.RateLimitingInterface) error {
-	i, _ := q.Get()
-	ev, ok := i.(*cloudevents.Event)
-	if !ok {
-		q.Done(i)
-		return fmt.Errorf("invalid data in queue: have:%T want:%T", i, ev)
-	}
+func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) error {
+	ev, _ := q.Get()
 	agentMode := s.agentMode(agentName)
 	incoming := &v1alpha1.Application{}
 	logCtx := log().WithFields(logrus.Fields{
@@ -66,7 +61,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	default:
 		err = fmt.Errorf("unable to process event with unknown target %s", target)
 	}
-	q.Done(i)
+	q.Done(ev)
 	return err
 }
 
@@ -259,7 +254,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 
 				logCtx.Trace("Acquired semaphore")
 
-				go func(agentName string, q workqueue.RateLimitingInterface) {
+				go func(agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) {
 					defer func() {
 						sem.Release(1)
 						queueLock.Unlock(agentName)
