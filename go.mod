@@ -12,7 +12,7 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.8.1
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	github.com/wI2L/jsondiff v0.6.1
 	golang.org/x/crypto v0.29.0
 	golang.org/x/net v0.31.0
