@@ -341,7 +341,11 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 		return
 	}
 
-	if EventID(latestEvent.event) == EventID(ev) {
+	latestEvent.mu.RLock()
+	latestEventID := EventID(latestEvent.event)
+	latestEvent.mu.RUnlock()
+
+	if latestEventID == EventID(ev) {
 		delete(ew.latestEvents, resourceID)
 	}
 }
