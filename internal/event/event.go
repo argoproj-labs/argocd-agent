@@ -290,6 +290,10 @@ func NewEventWriter(target streamWriter) *EventWriter {
 
 func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	resID := ResourceID(ev)
+	logCtx := ew.log.WithFields(logrus.Fields{
+		"resource_id": ResourceID(ev),
+		"event_id":    EventID(ev),
+	})
 
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
@@ -307,7 +311,7 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 			event:   ev,
 			backoff: &defaultBackoff,
 		}
-		ew.log.Tracef("added a new event resourceID %s eventID %s", resID, EventID(ev))
+		logCtx.Trace("added a new event to the event writer")
 		return
 	}
 
@@ -317,7 +321,7 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	eventMsg.backoff = &defaultBackoff
 	eventMsg.retryAfter = nil
 	eventMsg.mu.Unlock()
-	ew.log.Tracef("updated an existing event: resourceID %s eventID %s", resID, EventID(ev))
+	logCtx.Trace("updated an existing event in the event writer")
 }
 
 func (ew *EventWriter) Get(resID string) *eventMessage {
@@ -369,19 +373,24 @@ func (ew *EventWriter) sendEvent(resID string) {
 	// Check if the event is already ACK'd.
 	eventMsg := ew.Get(resID)
 	if eventMsg == nil {
-		ew.log.Tracef("event is not found, perhaps it is already ACK'd: resourceID %s", resID)
+		ew.log.WithField("resource_id", resID).Trace("event is not found, perhaps it is already ACK'd")
 		return
 	}
 
 	eventMsg.mu.Lock()
 	defer eventMsg.mu.Unlock()
 
+	logCtx := ew.log.WithFields(logrus.Fields{
+		"resource_id": resID,
+		"event_id":    EventID(eventMsg.event),
+	})
+
 	// Check if it is time to resend the event.
 	if eventMsg.retryAfter != nil {
 		if eventMsg.retryAfter.After(time.Now()) {
 			return
 		}
-		ew.log.Tracef("resending an event: resourceID %s eventID %s", resID, EventID(eventMsg.event))
+		logCtx.Trace("resending an event")
 	}
 
 	defer func() {
@@ -393,21 +402,21 @@ func (ew *EventWriter) sendEvent(resID string) {
 	// Resend the event since it is not ACK'd.
 	pev, err := format.ToProto(eventMsg.event)
 	if err != nil {
-		ew.log.Errorf("Could not wire event: %v\n", err)
+		logCtx.Errorf("Could not wire event: %v\n", err)
 		return
 	}
 
 	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
 	if err != nil {
-		ew.log.Errorf("Error while sending: %v\n", err)
+		logCtx.Errorf("Error while sending: %v\n", err)
 		return
 	}
 
-	ew.log.Tracef("event sent to target: resourceID %s eventID %s", resID, EventID(eventMsg.event))
+	logCtx.Trace("event sent to target")
 
 	// We don't have to wait for an ACK if the current event is ACK. So, remove it from the EventWriter.
 	if Target(eventMsg.event) == TargetEventAck {
 		ew.Remove(eventMsg.event)
-		ew.log.Tracef("ACK is removed from the EventWriter: resourceID: %s eventID: %s", resID, EventID(eventMsg.event))
+		logCtx.Trace("ACK is removed from the event writer")
 	}
 }

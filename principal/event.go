@@ -72,11 +72,13 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	agentMode := s.agentMode(agentName)
 
 	logCtx := log().WithFields(logrus.Fields{
-		"module":   "QueueProcessor",
-		"client":   agentName,
-		"mode":     agentMode.String(),
-		"event":    ev.Type(),
-		"incoming": incoming.QualifiedName(),
+		"module":      "QueueProcessor",
+		"client":      agentName,
+		"mode":        agentMode.String(),
+		"event":       ev.Type(),
+		"incoming":    incoming.QualifiedName(),
+		"resource_id": event.ResourceID(ev),
+		"event_id":    event.EventID(ev),
 	})
 
 	// For autonomous agents, we may have to create the appropriate namespace
@@ -159,11 +161,13 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 	agentMode := s.agentMode(agentName)
 
 	logCtx := log().WithFields(logrus.Fields{
-		"module":   "QueueProcessor",
-		"client":   agentName,
-		"mode":     agentMode.String(),
-		"event":    ev.Type(),
-		"incoming": incoming.Name,
+		"module":      "QueueProcessor",
+		"client":      agentName,
+		"mode":        agentMode.String(),
+		"event":       ev.Type(),
+		"incoming":    incoming.Name,
+		"resource_id": event.ResourceID(ev),
+		"event_id":    event.EventID(ev),
 	})
 
 	switch ev.Type() {
@@ -272,7 +276,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 						logCtx.Debugf("Queue disappeared -- client probably has disconnected")
 						return
 					}
-					logCtx.Tracef("sending an ACK: resourceID %s eventID %s", event.ResourceID(ev), event.EventID(ev))
+					logCtx.WithField("resource_id", event.ResourceID(ev)).WithField("event_id", event.EventID(ev)).Trace("sending an ACK for an event")
 					sendQ.Add(s.events.ProcessedEvent(event.EventProcessed, event.New(ev, event.TargetEventAck)))
 				}(queueName, q)
 			}

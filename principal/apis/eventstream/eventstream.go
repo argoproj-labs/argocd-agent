@@ -184,6 +184,12 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	if err != nil {
 		return fmt.Errorf("could not unserialize event from wire: %w", err)
 	}
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"resource_id": event.ResourceID(incomingEvent),
+		"event_id":    event.EventID(incomingEvent),
+	})
+
 	err = incomingEvent.DataAs(app)
 	if err != nil {
 		return fmt.Errorf("could not unserialize app data from wire: %w", err)
@@ -195,13 +201,13 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	}
 
 	if event.Target(incomingEvent) == event.TargetEventAck {
-		logCtx.Tracef("Received an ACK: resourceID %s eventID %s", event.ResourceID(incomingEvent), event.EventID(incomingEvent))
+		logCtx.Trace("Received an ACK")
 		eventWriter, exists := s.eventWriters[c.agentName]
 		if !exists {
 			return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
 		}
 		eventWriter.Remove(incomingEvent)
-		logCtx.Trace("Removed the ACK from the EventWriter")
+		logCtx.Trace("Removed the ACK from the event writer")
 		return nil
 	}
 
@@ -241,7 +247,7 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
 	}
 
-	logCtx.Tracef("Adding an item to the event writer: resourceID %s eventID %s", event.ResourceID(ev), event.EventID(ev))
+	logCtx.WithField("resource_id", event.ResourceID(ev)).WithField("event_id", event.EventID(ev)).Trace("Adding an event to the event writer")
 	eventWriter.Add(ev)
 
 	q.Done(ev)
