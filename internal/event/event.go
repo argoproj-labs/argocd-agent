@@ -346,6 +346,9 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 	}
 }
 
+// SendWaitingEvents will periodically send the events waiting in the EventWriter.
+// Note: This function will never return unless the context is done, and therefore
+// should be started in a separate goroutine.
 func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 	ew.log.Info("Starting event writer")
 	for {
@@ -406,6 +409,7 @@ func (ew *EventWriter) sendEvent(resID string) {
 		return
 	}
 
+	// A Send() on the stream is actually not blocking.
 	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
 	if err != nil {
 		logCtx.Errorf("Error while sending: %v\n", err)
