@@ -384,8 +384,15 @@ func (ew *EventWriter) sendEvent(resID string) {
 		return
 	}
 
+	isACKRemoved := false
+
 	eventMsg.mu.Lock()
-	defer eventMsg.mu.Unlock()
+	defer func() {
+		// Check if the mu is already unlocked while removing the ACK.
+		if !isACKRemoved {
+			eventMsg.mu.Unlock()
+		}
+	}()
 
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"resource_id": resID,
@@ -424,7 +431,9 @@ func (ew *EventWriter) sendEvent(resID string) {
 
 	// We don't have to wait for an ACK if the current event is ACK. So, remove it from the EventWriter.
 	if Target(eventMsg.event) == TargetEventAck {
+		eventMsg.mu.Unlock()
 		ew.Remove(eventMsg.event)
 		logCtx.Trace("ACK is removed from the event writer")
+		isACKRemoved = true
 	}
 }
