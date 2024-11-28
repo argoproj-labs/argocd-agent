@@ -24,11 +24,11 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	_ "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -41,7 +41,8 @@ type EventTarget string
 
 const TypePrefix = "io.argoproj.argocd-agent.event"
 
-// Supported EventTypes that are sent agent <-> principal
+// Supported EventTypes that are sent agent <-> principal. Note that not every
+// EventType is supported by every EventTarget.
 const (
 	Ping            EventType = TypePrefix + ".ping"
 	Pong            EventType = TypePrefix + ".pong"
@@ -52,6 +53,8 @@ const (
 	StatusUpdate    EventType = TypePrefix + ".status-update"
 	OperationUpdate EventType = TypePrefix + ".operation-update"
 	EventProcessed  EventType = TypePrefix + ".processed"
+	GetRequest      EventType = TypePrefix + ".get"
+	GetResponse     EventType = TypePrefix + ".response"
 )
 
 const (
@@ -59,6 +62,7 @@ const (
 	TargetApplication EventTarget = "application"
 	TargetAppProject  EventTarget = "appproject"
 	TargetEventAck    EventTarget = "eventProcessed"
+	TargetResource    EventTarget = "resource"
 )
 
 const (
@@ -67,8 +71,10 @@ const (
 )
 
 var (
-	ErrEventDiscarded  error = errors.New("event discarded")
-	ErrEventNotAllowed error = errors.New("event not allowed in this agent mode")
+	ErrEventDiscarded    error = errors.New("event discarded")
+	ErrEventNotAllowed   error = errors.New("event not allowed in this agent mode")
+	ErrEventNotSupported error = errors.New("event not supported by target")
+	ErrEventUnknown      error = errors.New("unknown event")
 )
 
 func (t EventType) String() string {
@@ -153,6 +159,64 @@ func (evs EventSource) AppProjectEvent(evType EventType, appProject *v1alpha1.Ap
 	return &cev
 }
 
+type ResourceRequest struct {
+	UUID      string `json:"uuid"`
+	Namespace string `json:"namespace,omitempty"`
+	Name      string `json:"name"`
+	v1.GroupVersionResource
+}
+
+type ResourceResponse struct {
+	UUID     string `json:"uuid"`
+	Status   string `json:"status"`
+	Resource string `json:"resource,omitempty"`
+}
+
+// NewResourceRequestEvent creates a cloud event for requesting a resource from
+// an agent. The resource will be specified by the GroupVersionResource id in
+// gvr, and its name and namespace. If namespace is empty, the request will
+// be for a cluster-scoped resource.
+//
+// The event's resource ID and event ID will be set to a randomly generated
+// UUID, because we'll have
+func (evs EventSource) NewResourceRequestEvent(gvr v1.GroupVersionResource, namespace string, name string) (*cloudevents.Event, error) {
+	reqUUID := uuid.NewString()
+	rr := &ResourceRequest{
+		UUID:                 reqUUID,
+		Namespace:            namespace,
+		Name:                 name,
+		GroupVersionResource: gvr,
+	}
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(GetRequest.String())
+	cev.SetDataSchema(TargetResource.String())
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetExtension(eventID, reqUUID)
+	_ = cev.SetData(cloudevents.ApplicationJSON, rr)
+	return &cev, nil
+}
+
+func (evs EventSource) NewResourceResponseEvent(reqUUID string, status string, data string) *cloudevents.Event {
+	resUUID := uuid.NewString()
+	rr := &ResourceResponse{
+		UUID:     reqUUID,
+		Status:   status,
+		Resource: data,
+	}
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(GetResponse.String())
+	cev.SetDataSchema(TargetResource.String())
+	cev.SetExtension(resourceID, resUUID)
+	// eventid must be set to the requested resource's uuid
+	cev.SetExtension(eventID, reqUUID)
+	_ = cev.SetData(cloudevents.ApplicationJSON, rr)
+	return &cev
+}
+
 func (evs EventSource) ProcessedEvent(evType EventType, ev *Event) *cloudevents.Event {
 	cev := cloudevents.NewEvent()
 	cev.SetSource(evs.source)
@@ -190,6 +254,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetApplication
 	case TargetAppProject.String():
 		return TargetAppProject
+	case TargetResource.String():
+		return TargetResource
 	case TargetEventAck.String():
 		return TargetEventAck
 	}
@@ -240,6 +306,20 @@ func (ev Event) AppProject() (*v1alpha1.AppProject, error) {
 	proj := &v1alpha1.AppProject{}
 	err := ev.event.DataAs(proj)
 	return proj, err
+}
+
+// ResourceRequest gets the resource request payload from an event
+func (ev Event) ResourceRequest() (*ResourceRequest, error) {
+	req := &ResourceRequest{}
+	err := ev.event.DataAs(req)
+	return req, err
+}
+
+// ResourceResponse gets the resource response payload from an event
+func (ev Event) ResourceResponse() (*ResourceResponse, error) {
+	resp := &ResourceResponse{}
+	err := ev.event.DataAs(resp)
+	return resp, err
 }
 
 type streamWriter interface {
@@ -395,8 +475,10 @@ func (ew *EventWriter) sendEvent(resID string) {
 	}()
 
 	logCtx := ew.log.WithFields(logrus.Fields{
-		"resource_id": resID,
-		"event_id":    EventID(eventMsg.event),
+		"resource_id":  resID,
+		"event_id":     EventID(eventMsg.event),
+		"event_target": eventMsg.event.DataSchema(),
+		"event_type":   eventMsg.event.Type(),
 	})
 
 	// Check if it is time to resend the event.

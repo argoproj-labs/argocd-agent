@@ -15,7 +15,10 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -23,6 +26,10 @@ import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 )
 
 /*
@@ -32,6 +39,8 @@ Inbound events are those coming through our gRPC interface, e.g. those that
 were received from a server.
 */
 
+const defaultResourceRequestTimeout = 5 * time.Second
+
 func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	var err error
 	switch ev.Target() {
@@ -39,11 +48,88 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 		err = a.processIncomingApplication(ev)
 	case event.TargetAppProject:
 		err = a.processIncomingAppProject(ev)
+	case event.TargetResource:
+		err = a.processIncomingResourceRequest(ev)
 	default:
 		err = fmt.Errorf("unknown event target: %s", ev.Target())
 	}
 
 	return err
+}
+
+// processIncomingResourceRequest processes an incoming event that requests
+// to retrieve information from the Kubernetes API.
+//
+// There can be multiple forms of requests. Currently supported are:
+//
+// - Request for a particular resource, both namespace and cluster scoped
+// - Request for a list of resources of a particular kind (e.g. configmaps,
+//   pods, etc), both namespace and custer scoped
+// - Request for a list of available APIs and
+
+func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
+	rreq, err := ev.ResourceRequest()
+	if err != nil {
+		return err
+	}
+	logCtx := log().WithFields(logrus.Fields{
+		"method": "processIncomingEvents",
+		"uuid":   rreq.UUID,
+	})
+	logCtx.Tracef("Start processing %v", rreq)
+
+	// Create a dynamic kubernetes client and retrieve the resource from the
+	// cluster.
+	dynClient, err := dynamic.NewForConfig(a.kubeClient.RestConfig)
+	if err != nil {
+		return fmt.Errorf("could not create a dynamic client: %w", err)
+	}
+
+	// Some of GVR may be empty, that's ok
+	gvk := schema.GroupVersionResource{Group: rreq.Group, Version: rreq.Version, Resource: rreq.Resource}
+	rif := dynClient.Resource(gvk)
+
+	ctx, cancel := context.WithTimeout(a.context, defaultResourceRequestTimeout)
+	defer cancel()
+
+	var jsonres []byte
+	var unres *unstructured.Unstructured
+	var unlist *unstructured.UnstructuredList
+	status := ""
+	if rreq.Name != "" {
+		if rreq.Namespace != "" {
+			unres, err = rif.Namespace(rreq.Namespace).Get(ctx, rreq.Name, v1.GetOptions{})
+		} else {
+			unres, err = rif.Get(ctx, rreq.Name, v1.GetOptions{})
+		}
+	} else {
+		if rreq.Namespace != "" {
+			unlist, err = rif.Namespace(rreq.Namespace).List(ctx, v1.ListOptions{})
+		} else {
+			unlist, err = rif.List(ctx, v1.ListOptions{})
+		}
+	}
+	if err != nil {
+		logCtx.Errorf("could not request resource: %v", err)
+		status = "failure"
+	} else {
+		// Marshal the unstructured resource to JSON for submission
+		if unres != nil {
+			jsonres, err = json.Marshal(unres)
+		} else if unlist != nil {
+			jsonres, err = json.Marshal(unlist)
+		}
+		if err != nil {
+			return fmt.Errorf("could not marshal resource to json: %w", err)
+		}
+		logCtx.Tracef("marshaled resource")
+	}
+
+	q := a.queues.SendQ(a.remote.ClientID())
+	q.Add(a.emitter.NewResourceResponseEvent(rreq.UUID, status, string(jsonres)))
+	logCtx.Tracef("Emitted resource response")
+
+	return nil
 }
 
 func (a *Agent) processIncomingApplication(ev *event.Event) error {
@@ -172,7 +258,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	// In modes other than "managed", we don't process new application events
 	// that are incoming.
 	if a.mode != types.AgentModeManaged {
-		logCtx.Trace("Discarding this event, because agent is not in managed mode")
+		logCtx.Info("Discarding this event, because agent is not in managed mode")
 		return nil, event.NewEventDiscardedErr("cannot create application: agent is not in managed mode")
 	}
 
@@ -181,7 +267,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	//
 	// TODO(jannfis): Handle this situation properly instead of throwing an error.
 	if a.appManager.IsManaged(incoming.QualifiedName()) {
-		logCtx.Trace("Discarding this event, because application is already managed on this agent")
+		logCtx.Info("Discarding this event, because application is already managed on this agent")
 		return nil, event.NewEventDiscardedErr("application %s is already managed", incoming.QualifiedName())
 	}
 
@@ -192,6 +278,10 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	if incoming.Annotations != nil {
 		delete(incoming.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 	}
+
+	// Set target cluster to a sensible value
+	incoming.Spec.Destination.Server = ""
+	incoming.Spec.Destination.Name = "in-cluster"
 
 	created, err := a.appManager.Create(a.context, incoming)
 	if apierrors.IsAlreadyExists(err) {
@@ -216,6 +306,10 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	} else {
 		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
 	}
+
+	// Set target cluster to a sensible value
+	incoming.Spec.Destination.Server = ""
+	incoming.Spec.Destination.Name = "in-cluster"
 
 	logCtx.Infof("Updating application")
 

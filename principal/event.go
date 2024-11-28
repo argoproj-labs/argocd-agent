@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
@@ -38,17 +39,19 @@ import (
 // server's backend.
 func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) (*cloudevents.Event, error) {
 	ev, _ := q.Get()
-	agentMode := s.agentMode(agentName)
-	incoming := &v1alpha1.Application{}
+
 	logCtx := log().WithFields(logrus.Fields{
-		"module":   "QueueProcessor",
-		"client":   agentName,
-		"mode":     agentMode.String(),
-		"event":    ev.Type(),
-		"incoming": incoming.QualifiedName(),
+		"module":       "QueueProcessor",
+		"client":       agentName,
+		"event_target": ev.DataSchema(),
+		"event_type":   ev.Type(),
 	})
 
 	logCtx.Debugf("Processing event")
+
+	// Start measuring time for event processing
+	cp := checkpoint.NewCheckpoint("process_recv_queue")
+
 	var err error
 	target := event.Target(ev)
 	switch target {
@@ -56,13 +59,24 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		err = s.processApplicationEvent(ctx, agentName, ev)
 	case event.TargetAppProject:
 		err = s.processAppProjectEvent(ctx, agentName, ev)
+	case event.TargetResource:
+		err = s.processResourceEvent(ctx, agentName, ev)
 	default:
-		err = fmt.Errorf("unable to process event with unknown target %s", target)
+		err = fmt.Errorf("unknown target: '%s'", target)
 	}
+
+	// Mark event as processed
 	q.Done(ev)
+
+	// Stop and log checkpoint information
+	cp.End()
+	logCtx.Debug(cp.String())
+
 	return ev, err
 }
 
+// processApplicationEvent processes an incoming event that has an application
+// target.
 func (s *Server) processApplicationEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
 	incoming := &v1alpha1.Application{}
 	err := ev.DataAs(incoming)
@@ -201,6 +215,39 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 	}
 
 	return nil
+}
+
+// processResourceEvent will process a response to a resource request event.
+func (s *Server) processResourceEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
+	UUID := event.EventID(ev)
+	// We need to make sure that a) the event is tracked at all, and b) the
+	// event is for the currently procesed agent.
+	trAgent, evChan := s.resourceProxy.Tracked(UUID)
+	if evChan == nil {
+		return fmt.Errorf("resource response not tracked")
+	}
+	if trAgent != agentName {
+		return fmt.Errorf("agent mismap between event and tracking")
+	}
+
+	// Get the resource response body from the event
+	resReq := &event.ResourceResponse{}
+	err := ev.DataAs(resReq)
+	if err != nil {
+		return err
+	}
+
+	// There should be someone at the receiving end of the channel to read and
+	// process the event. Typically, this will be the resource proxy. However,
+	// we will not wait forever for the response to be read.
+	select {
+	case evChan <- ev:
+		err = nil
+	case <-ctx.Done():
+		err = fmt.Errorf("error waiting for response to be read: %w", ctx.Err())
+	}
+
+	return err
 }
 
 // eventProcessor is the main loop to process event from the receiver queue,

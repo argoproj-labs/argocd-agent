@@ -270,3 +270,6 @@ func (i *Informer[T]) WaitForSync(ctx context.Context) error {
 	}
 	return nil
 }
+
+func (i *Informer[T]) Get() {
+}

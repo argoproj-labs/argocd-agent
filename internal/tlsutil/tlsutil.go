@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/*
+Package tlsutil provides some convenience functions for working with various
+sources of TLS certificates.
+*/
 package tlsutil
 
 import (
@@ -87,10 +91,24 @@ func TlsCertFromX509(cert *x509.Certificate, key crypto.PrivateKey) (tls.Certifi
 	return tlsCert, nil
 }
 
-// func X509CertFromFile(path string) (*x509.Certificate, error) {
-// 	b, err := os.ReadFile(path)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func EncodeCertToPem(cert []byte) ([]byte, error) {
+	return encodeToPem(cert, "CERTIFICATE")
+}
 
-// }
+func EncodePrivateKeyToPem(key []byte) ([]byte, error) {
+	return encodeToPem(key, "RSA PRIVATE KEY")
+}
+
+func encodeToPem(b []byte, bType string) ([]byte, error) {
+	pemBytes := bytes.Buffer{}
+	pemBlock := &pem.Block{
+		Type:  bType,
+		Bytes: b,
+	}
+	err := pem.Encode(&pemBytes, pemBlock)
+	if err != nil {
+		return nil, err
+	} else {
+		return pemBytes.Bytes(), nil
+	}
+}

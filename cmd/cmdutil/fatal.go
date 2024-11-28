@@ -12,13 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cmd
+package cmdutil
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
-func ValidPort(num int) error {
-	if num < 0 || num > 65536 {
-		return fmt.Errorf("%d: not a valid port number", num)
-	}
-	return nil
+func Error(msg string, args ...interface{}) {
+}
+
+func Fatal(msg string, args ...interface{}) {
+	FatalWithExitCode(1, msg, args...)
+}
+
+func FatalWithExitCode(code int, msg string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, "[FATAL]: ")
+	fmt.Fprintf(os.Stderr, msg, args...)
+	fmt.Fprintf(os.Stderr, "\n")
+	os.Exit(code)
 }
