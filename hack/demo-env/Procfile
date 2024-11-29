@@ -1,0 +1,2 @@
+principal: ./start-principal.sh
+agent: sleep 15s && if [ "$AUTONOMOUS_MODE" = "true" ]; then ./start-agent-autonomous.sh; else ./start-agent-managed.sh; fi
