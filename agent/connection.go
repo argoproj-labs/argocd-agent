@@ -79,23 +79,8 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 		return nil
 	}
 
-	logCtx.Tracef("Sending an item to the event stream")
-
-	pev, err := format.ToProto(ev)
-	if err != nil {
-		logCtx.Warnf("Could not wire event: %v", err)
-		return nil
-	}
-
-	err = stream.Send(&eventstreamapi.Event{Event: pev})
-	if err != nil {
-		if grpcutil.NeedReconnectOnError(err) {
-			return err
-		} else {
-			logCtx.Errorf("Error while sending: %v", err)
-			return nil
-		}
-	}
+	logCtx.WithField("resource_id", event.ResourceID(ev)).WithField("event_id", event.EventID(ev)).Trace("Adding an event to the event writer")
+	a.eventWriter.Add(ev)
 
 	return nil
 }
@@ -122,10 +107,36 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 		logCtx.Errorf("Could not unwrap event: %v", err)
 		return nil
 	}
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"resource_id": ev.ResourceID(),
+		"event_id":    ev.EventID(),
+	})
+
 	logCtx.Debugf("Received a new event from stream")
+
+	if ev.Target() == event.TargetEventAck {
+		logCtx.Trace("Received an ACK for an event")
+		rawEvent, err := format.FromProto(rcvd.Event)
+		if err != nil {
+			return err
+		}
+		a.eventWriter.Remove(rawEvent)
+		logCtx.Trace("Removed an event from the event writer")
+		return nil
+	}
+
 	err = a.processIncomingEvent(ev)
-	if err != nil {
+	if err != nil && !event.IsEventDiscarded(err) && !event.IsEventNotAllowed(err) {
 		logCtx.WithError(err).Errorf("Unable to process incoming event")
+	} else {
+		// Send an ACK if the event is processed successfully.
+		sendQ := a.queues.SendQ(a.remote.ClientID())
+		if sendQ == nil {
+			return fmt.Errorf("no send queue found for the remote principal")
+		}
+		sendQ.Add(a.emitter.ProcessedEvent(event.EventProcessed, ev))
+		logCtx.Trace("Sent an ACK for an event")
 	}
 	return nil
 }
@@ -137,6 +148,10 @@ func (a *Agent) handleStreamEvents() error {
 	if err != nil {
 		return err
 	}
+
+	a.eventWriter = event.NewEventWriter(stream)
+	go a.eventWriter.SendWaitingEvents(a.context)
+
 	logCtx := log().WithFields(logrus.Fields{
 		"module":      "StreamEvent",
 		"server_addr": grpcutil.AddressFromContext(stream.Context()),

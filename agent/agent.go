@@ -67,6 +67,8 @@ type Agent struct {
 	// At present, 'watchLock' is only acquired on calls to 'addAppUpdateToQueue'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
 	watchLock sync.RWMutex
 	version   *version.Version
+
+	eventWriter *event.EventWriter
 }
 
 const defaultQueueName = "default"

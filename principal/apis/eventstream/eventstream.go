@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -46,6 +47,50 @@ type Server struct {
 
 	options *ServerOptions
 	queues  queue.QueuePair
+
+	eventWriters *eventWritersMap
+}
+
+// eventWritersMap provides a thread-safe way to manage event writers.
+type eventWritersMap struct {
+	mu sync.RWMutex
+
+	// key: AgentName
+	// value: EventWriter for that agent
+	// - acquire 'lock' before accessing
+	eventWriters map[string]*event.EventWriter
+}
+
+func newEventWritersMap() *eventWritersMap {
+	return &eventWritersMap{
+		eventWriters: make(map[string]*event.EventWriter),
+	}
+}
+
+func (ewm *eventWritersMap) Get(agentName string) *event.EventWriter {
+	ewm.mu.RLock()
+	defer ewm.mu.RUnlock()
+
+	eventWriter, exists := ewm.eventWriters[agentName]
+	if exists {
+		return eventWriter
+	}
+
+	return nil
+}
+
+func (ewm *eventWritersMap) Add(agentName string, eventWriter *event.EventWriter) {
+	ewm.mu.Lock()
+	defer ewm.mu.Unlock()
+
+	ewm.eventWriters[agentName] = eventWriter
+}
+
+func (ewm *eventWritersMap) Remove(agentName string) {
+	ewm.mu.Lock()
+	defer ewm.mu.Unlock()
+
+	delete(ewm.eventWriters, agentName)
 }
 
 type ServerOptions struct {
@@ -79,8 +124,9 @@ func NewServer(queues queue.QueuePair, opts ...ServerOption) *Server {
 		o(options)
 	}
 	return &Server{
-		queues:  queues,
-		options: options,
+		queues:       queues,
+		options:      options,
+		eventWriters: newEventWritersMap(),
 	}
 }
 
@@ -152,7 +198,7 @@ func (s *Server) onDisconnect(c *client) {
 func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeServer) error {
 	logCtx := c.logCtx.WithField("direction", "recv")
 	logCtx.Tracef("Waiting to receive from channel")
-	event, err := subs.Recv()
+	streamEvent, err := subs.Recv()
 	if err != nil {
 		if err == io.EOF {
 			logCtx.Tracef("Remote end hung up")
@@ -170,14 +216,20 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		}
 		return err
 	}
-	if event == nil || event.Event == nil {
+	if streamEvent == nil || streamEvent.Event == nil {
 		return fmt.Errorf("invalid wire transmission")
 	}
 	app := &v1alpha1.Application{}
-	incomingEvent, err := format.FromProto(event.Event)
+	incomingEvent, err := format.FromProto(streamEvent.Event)
 	if err != nil {
 		return fmt.Errorf("could not unserialize event from wire: %w", err)
 	}
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"resource_id": event.ResourceID(incomingEvent),
+		"event_id":    event.EventID(incomingEvent),
+	})
+
 	err = incomingEvent.DataAs(app)
 	if err != nil {
 		return fmt.Errorf("could not unserialize app data from wire: %w", err)
@@ -186,6 +238,17 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	q := s.queues.RecvQ(c.agentName)
 	if q == nil {
 		return fmt.Errorf("panic: no recvq for agent %s", c.agentName)
+	}
+
+	if event.Target(incomingEvent) == event.TargetEventAck {
+		logCtx.Trace("Received an ACK")
+		eventWriter := s.eventWriters.Get(c.agentName)
+		if eventWriter == nil {
+			return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
+		}
+		eventWriter.Remove(incomingEvent)
+		logCtx.Trace("Removed the ACK from the event writer")
+		return nil
 	}
 
 	q.Add(incomingEvent)
@@ -219,26 +282,15 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: nil item in queue")
 	}
 
-	prEv, err := format.ToProto(ev)
-	if err != nil {
-		return fmt.Errorf("panic: could not serialize event to wire format: %v", err)
+	eventWriter := s.eventWriters.Get(c.agentName)
+	if eventWriter == nil {
+		return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
 	}
+
+	logCtx.WithField("resource_id", event.ResourceID(ev)).WithField("event_id", event.EventID(ev)).Trace("Adding an event to the event writer")
+	eventWriter.Add(ev)
 
 	q.Done(ev)
-
-	logCtx.Tracef("Sending an item to the event stream")
-
-	// A Send() on the stream is actually not blocking.
-	err = subs.Send(&eventstreamapi.Event{Event: prEv})
-	if err != nil {
-		status, ok := status.FromError(err)
-		if !ok && err != io.EOF {
-			return fmt.Errorf("error sending data to stream: %w", err)
-		}
-		if err == io.EOF || status.Code() == codes.Unavailable {
-			return fmt.Errorf("remote hung up while sending data to stream: %w", err)
-		}
-	}
 
 	return nil
 }
@@ -255,6 +307,14 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	if err != nil {
 		return err
 	}
+
+	s.eventWriters.Add(c.agentName, event.NewEventWriter(subs))
+	eventWriter := s.eventWriters.Get(c.agentName)
+	if eventWriter == nil {
+		return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
+	}
+
+	go eventWriter.SendWaitingEvents(c.ctx)
 
 	// We receive events in a dedicated go routine
 	c.wg.Add(1)
@@ -299,6 +359,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 
 	c.wg.Wait()
 	c.logCtx.Info("Closing EventStream")
+	s.eventWriters.Remove(c.agentName)
 	return nil
 }
 
