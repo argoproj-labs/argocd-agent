@@ -91,7 +91,15 @@ apply() {
 	echo "-> TMP_DIR is $TMP_DIR"
 	cp -r ${SCRIPTPATH}/* $TMP_DIR
 
-  # Comment out 'loadBalancerIP:' lines on OpenShift
+	mkdir -p ${TMP_DIR}/argo-cd
+	cd ${TMP_DIR}/argo-cd
+	git init
+	git remote add origin https://github.com/argoproj/argo-cd
+	git fetch --depth=1 origin stable
+	git checkout FETCH_HEAD
+	cd -
+
+    # Comment out 'loadBalancerIP:' lines on OpenShift
 	if [[ "$OPENSHIFT" != "" ]]; then
 		sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/redis-service.yaml
 		sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/repo-server-service.yaml
