@@ -27,6 +27,7 @@ import (
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
@@ -256,6 +257,7 @@ func TestCreateAppProject(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test",
 				Namespace: "default",
+				UID:       "new_uid",
 			},
 		}
 		mockedBackend := appmock.NewAppProject(t)
@@ -265,6 +267,59 @@ func TestCreateAppProject(t *testing.T) {
 		rapp, err := m.Create(context.TODO(), app)
 		assert.NoError(t, err)
 		assert.Equal(t, "test", rapp.Name)
+		assert.Equal(t, string(app.UID), rapp.Annotations[manager.SourceUIDAnnotation])
+	})
+}
+
+func Test_CompareSourceUIDForAppProject(t *testing.T) {
+	oldAppProject := &v1alpha1.AppProject{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "argocd",
+			Annotations: map[string]string{
+				manager.SourceUIDAnnotation: "old_uid",
+			},
+		},
+	}
+
+	mockedBackend := appmock.NewAppProject(t)
+	mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldAppProject, nil)
+	m, err := NewAppProjectManager(mockedBackend, "")
+	require.Nil(t, err)
+	ctx := context.Background()
+
+	t.Run("should return true if the UID matches", func(t *testing.T) {
+		incoming := oldAppProject.DeepCopy()
+		incoming.UID = ktypes.UID("old_uid")
+
+		uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.Nil(t, err)
+		require.True(t, uidMatch)
+	})
+
+	t.Run("should return false if the UID doesn't match", func(t *testing.T) {
+		incoming := oldAppProject.DeepCopy()
+		incoming.UID = ktypes.UID("new_uid")
+
+		uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.Nil(t, err)
+		require.False(t, uidMatch)
+	})
+
+	t.Run("should return an error if there is no UID annotation", func(t *testing.T) {
+		oldAppProject.Annotations = map[string]string{}
+		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldAppProject, nil)
+		m, err := NewAppProjectManager(mockedBackend, "")
+		require.Nil(t, err)
+		ctx := context.Background()
+
+		incoming := oldAppProject.DeepCopy()
+		incoming.UID = ktypes.UID("new_uid")
+
+		uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.NotNil(t, err)
+		require.EqualError(t, err, "source UID Annotation is not found for appProject: test")
+		require.False(t, uidMatch)
 	})
 }
 

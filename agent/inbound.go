@@ -55,13 +55,36 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		return err
 	}
 
+	sourceUIDMatch, err := a.appManager.CompareSourceUID(a.context, incomingApp)
+	if err != nil {
+		return fmt.Errorf("failed to compare the source UID of app: %w", err)
+	}
+
 	switch ev.Type() {
 	case event.Create:
+		if !sourceUIDMatch {
+			logCtx.Debug("An app already exists with a different source UID. Deleting the existing app")
+			if err := a.deleteApplication(incomingApp); err != nil {
+				return err
+			}
+		}
+
 		_, err = a.createApplication(incomingApp)
 		if err != nil {
 			logCtx.Errorf("Error creating application: %v", err)
 		}
 	case event.SpecUpdate:
+		if !sourceUIDMatch {
+			logCtx.Debug("Source UID mismatch between the incoming app and existing app. Deleting the existing app")
+			if err := a.deleteApplication(incomingApp); err != nil {
+				return err
+			}
+
+			logCtx.Debug("Creating the incoming app after deleting the existing app")
+			_, err := a.createApplication(incomingApp)
+			return err
+		}
+
 		_, err = a.updateApplication(incomingApp)
 		if err != nil {
 			logCtx.Errorf("Error updating application: %v", err)
@@ -87,13 +110,36 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 		return err
 	}
 
+	sourceUIDMatch, err := a.projectManager.CompareSourceUID(a.context, incomingAppProject)
+	if err != nil {
+		return fmt.Errorf("failed to validate source UID of appProject: %w", err)
+	}
+
 	switch ev.Type() {
 	case event.Create:
+		if !sourceUIDMatch {
+			logCtx.Debug("An appProject already exists with a different source UID. Deleting the existing appProject")
+			if err := a.deleteAppProject(incomingAppProject); err != nil {
+				return err
+			}
+		}
+
 		_, err = a.createAppProject(incomingAppProject)
 		if err != nil {
 			logCtx.Errorf("Error creating appproject: %v", err)
 		}
 	case event.SpecUpdate:
+		if !sourceUIDMatch {
+			logCtx.Debug("Source UID mismatch between the incoming and existing appProject. Deleting the existing appProject")
+			if err := a.deleteAppProject(incomingAppProject); err != nil {
+				return err
+			}
+
+			logCtx.Debug("Creating the incoming appProject after deleting the existing appProject")
+			_, err := a.createAppProject(incomingAppProject)
+			return err
+		}
+
 		_, err = a.updateAppProject(incomingAppProject)
 		if err != nil {
 			logCtx.Errorf("Error updating appproject: %v", err)
@@ -153,13 +199,13 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 }
 
 func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
-	//
 	incoming.ObjectMeta.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
 		"method":          "UpdateApplication",
 		"app":             incoming.QualifiedName(),
 		"resourceVersion": incoming.ResourceVersion,
 	})
+
 	if a.appManager.IsChangeIgnored(incoming.QualifiedName(), incoming.ResourceVersion) {
 		logCtx.Tracef("Discarding this event, because agent has seen this version %s already", incoming.ResourceVersion)
 		return nil, event.NewEventDiscardedErr("the version %s has already been seen by this agent", incoming.ResourceVersion)
@@ -262,6 +308,7 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		"app":             incoming.Name,
 		"resourceVersion": incoming.ResourceVersion,
 	})
+
 	if a.appManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
 		logCtx.Tracef("Discarding this event, because agent has seen this version %s already", incoming.ResourceVersion)
 		return nil, event.NewEventDiscardedErr("the version %s has already been seen by this agent", incoming.ResourceVersion)
@@ -287,7 +334,7 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 	// means that we're out-of-sync from the control plane.
 	//
 	// TODO(jannfis): Handle this situation properly instead of throwing an error.
-	if !a.appManager.IsManaged(project.Name) {
+	if !a.projectManager.IsManaged(project.Name) {
 		return fmt.Errorf("appProject %s is not managed", project.Name)
 	}
 

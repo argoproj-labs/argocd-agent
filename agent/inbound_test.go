@@ -24,10 +24,12 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
+	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	ktypes "k8s.io/apimachinery/pkg/types"
 )
 
 func Test_CreateApplication(t *testing.T) {
@@ -66,6 +68,270 @@ func Test_CreateApplication(t *testing.T) {
 		require.NotNil(t, napp)
 	})
 
+}
+
+func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
+	a := newAgent(t)
+	a.mode = types.AgentModeManaged
+	evs := event.NewEventSource("test")
+	var be *backend_mocks.Application
+	var getMock, createMock, deleteMock *mock.Call
+
+	// incomingApp is the app sent by the principal
+	incomingApp := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{
+		Name:      "test",
+		Namespace: "argocd",
+	}}
+
+	// oldApp is the app that is already present on the agent
+	oldApp := incomingApp.DeepCopy()
+	oldApp.Annotations = map[string]string{
+		manager.SourceUIDAnnotation: "old_uid",
+	}
+	a.appManager.Manage(oldApp.QualifiedName())
+	defer a.appManager.ClearManaged()
+
+	incomingApp.UID = ktypes.UID("new_uid")
+
+	// createdApp is the app that is finally created on the cluster.
+	createdApp := incomingApp.DeepCopy()
+	createdApp.UID = ktypes.UID("random_uid")
+	createdApp.Annotations = map[string]string{
+		// the final version of the app should have the source UID from the incomingApp
+		manager.SourceUIDAnnotation: string(incomingApp.UID),
+	}
+
+	configureManager := func(t *testing.T) {
+		t.Helper()
+		be = backend_mocks.NewApplication(t)
+		var err error
+		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true))
+		require.NoError(t, err)
+		require.NotNil(t, a)
+
+		// Get is used to retrieve the oldApp and compare its UID annotation.
+		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
+
+		// Create is used to create the latest version of the app on the agent.
+		createMock = be.On("Create", mock.Anything, mock.Anything).Return(createdApp, nil)
+
+		// Delete is used to delete the oldApp from the agent.
+		deleteMock = be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil)
+	}
+
+	unsetMocks := func(t *testing.T) {
+		t.Helper()
+		getMock.Unset()
+		createMock.Unset()
+		deleteMock.Unset()
+	}
+
+	t.Run("Create: Old app with diff UID must be deleted before creating the incoming app", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), event.TargetApplication)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID, delete old app, and create a new app.
+		expectedCalls := []string{"Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new app has the updated source UID annotation.
+		appInterface := be.Calls[2].ReturnArguments[0]
+		latestApp, ok := appInterface.(*v1alpha1.Application)
+		require.True(t, ok)
+		require.Equal(t, string(incomingApp.UID), latestApp.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Update: Old app with diff UID must be deleted and a new app must be created", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		// Create an Update event for the new app
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, incomingApp), event.TargetApplication)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID, delete old app, and create a new app.
+		expectedCalls := []string{"Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new app has the updated source UID annotation.
+		appInterface := be.Calls[2].ReturnArguments[0]
+
+		latestApp, ok := appInterface.(*v1alpha1.Application)
+		require.True(t, ok)
+		require.Equal(t, string(incomingApp.UID), latestApp.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Delete: Old app with diff UID must be deleted", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		// Create a delete event for the new app
+		ev := event.New(evs.ApplicationEvent(event.Delete, incomingApp), event.TargetApplication)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID and delete old app
+		expectedCalls := []string{"Get", "Delete"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+		require.False(t, a.appManager.IsManaged(incomingApp.QualifiedName()))
+	})
+}
+
+func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
+	a := newAgent(t)
+	a.mode = types.AgentModeManaged
+	evs := event.NewEventSource("test")
+	var be *backend_mocks.AppProject
+	var getMock, createMock, deleteMock *mock.Call
+
+	// incomingAppProject is the appProject sent by the principal
+	incomingAppProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{
+		Name:      "test",
+		Namespace: "argocd",
+	}}
+
+	// oldAppProject is the appProject that is already present on the agent
+	oldAppProject := incomingAppProject.DeepCopy()
+	oldAppProject.Annotations = map[string]string{
+		manager.SourceUIDAnnotation: "old_uid",
+	}
+
+	incomingAppProject.UID = ktypes.UID("new_uid")
+
+	// createdAppProject is the final version of appProject created on the cluster.
+	createdAppProject := incomingAppProject.DeepCopy()
+	createdAppProject.UID = ktypes.UID("random_uid")
+	createdAppProject.Annotations = map[string]string{
+		manager.SourceUIDAnnotation: string(incomingAppProject.UID),
+	}
+
+	configureManager := func(t *testing.T) {
+		t.Helper()
+		be = backend_mocks.NewAppProject(t)
+		var err error
+		a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true))
+		require.NoError(t, err)
+		require.NotNil(t, a)
+
+		// Get is used to retrieve the oldAppProject and compare its UID annotation.
+		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldAppProject, nil)
+
+		// Create is used to create the latest version of the appProject on the agent.
+		createMock = be.On("Create", mock.Anything, mock.Anything).Return(createdAppProject, nil)
+
+		// Delete is used to delete the oldAppProject from the agent.
+		deleteMock = be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil)
+	}
+
+	unsetMocks := func(t *testing.T) {
+		t.Helper()
+		getMock.Unset()
+		createMock.Unset()
+		deleteMock.Unset()
+	}
+
+	t.Run("Create: Old appProject with diff UID must be deleted before creating the incoming appProject", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.projectManager.Manage(oldAppProject.Name)
+		defer a.projectManager.ClearManaged()
+		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), event.TargetAppProject)
+		err := a.processIncomingAppProject(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID, delete old appProject, and create a new appProject.
+		expectedCalls := []string{"Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new app has the updated source UID annotation.
+		appInterface := be.Calls[2].ReturnArguments[0]
+		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
+		require.True(t, ok)
+		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Update: Old appProject with diff UID must be deleted and a new appProject must be created", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.projectManager.Manage(oldAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		// Create an Update event for the new appProject
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), event.TargetAppProject)
+		err := a.processIncomingAppProject(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID, delete old appProject, and create a new appProject.
+		expectedCalls := []string{"Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new appProject has the updated source UID annotation.
+		appInterface := be.Calls[2].ReturnArguments[0]
+
+		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
+		require.True(t, ok)
+		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Delete: Old appProject with the same UID must be deleted", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.projectManager.Manage(oldAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		// Create a delete event for the new appProject
+		ev := event.New(evs.AppProjectEvent(event.Delete, incomingAppProject), event.TargetAppProject)
+		err := a.processIncomingAppProject(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID and delete old appProject
+		expectedCalls := []string{"Get", "Delete"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+		require.False(t, a.appManager.IsManaged(incomingAppProject.Name))
+	})
 }
 
 func Test_UpdateApplication(t *testing.T) {
