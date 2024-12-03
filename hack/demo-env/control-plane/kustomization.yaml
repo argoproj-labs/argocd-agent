@@ -1,12 +1,12 @@
 resources:
-- https://github.com/argoproj/argo-cd/manifests/crds?ref=stable
-- https://github.com/argoproj/argo-cd/manifests/base/config?ref=stable
-- https://github.com/argoproj/argo-cd/manifests/base/dex?ref=stable
-- https://github.com/argoproj/argo-cd/manifests/base/redis?ref=stable
-- https://github.com/argoproj/argo-cd/manifests/base/repo-server?ref=stable
-- https://github.com/argoproj/argo-cd/manifests/base/server?ref=stable
-- https://github.com/argoproj/argo-cd/manifests/cluster-rbac/server?ref=stable
-- https://github.com/argoproj/argo-cd/examples/k8s-rbac/argocd-server-applications?ref=stable
+- ../argo-cd/manifests/crds
+- ../argo-cd/manifests/base/config
+- ../argo-cd/manifests/base/dex
+- ../argo-cd/manifests/base/redis
+- ../argo-cd/manifests/base/repo-server
+- ../argo-cd/manifests/base/server
+- ../argo-cd/manifests/cluster-rbac/server
+- ../argo-cd/examples/k8s-rbac/argocd-server-applications
 - ../common
 
 images:
