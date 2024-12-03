@@ -29,6 +29,12 @@ const (
 	ManagerModeManaged
 )
 
+const (
+	// SourceUIDAnnotation is an annotation that represents the UID of the source resource.
+	// It is added to the resources managed on the target.
+	SourceUIDAnnotation = "argocd.argoproj.io/source-uid"
+)
+
 type Manager interface {
 	SetRole(role ManagerRole)
 	SetMode(role ManagerRole)
