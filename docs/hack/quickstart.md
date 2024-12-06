@@ -4,6 +4,10 @@ This is **not** a guide to set-up argocd-agent for a production environment. It 
 
 Please note that some resource names might be out-of-date (e.g. have changed names, or were removed and replaced by something else). If you notice something, please figure it out and submit a PR to this guide. Thanks!
 
+If you want to use [Open Cluster Management (OCM)](https://open-cluster-management.io/)
+to bootstrap the Argo CD Agent environment,
+follow the guide provided [here](https://github.com/open-cluster-management-io/ocm/tree/main/solutions/argocd-agent).
+
 ## Terminology and concepts
 
 ### Terminology used throughout this doc
