@@ -39,6 +39,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	ktypes "k8s.io/apimachinery/pkg/types"
 )
 
 var appExistsError = errors.NewAlreadyExists(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
@@ -114,6 +115,7 @@ func Test_ManagerCreate(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test",
 				Namespace: "default",
+				UID:       ktypes.UID("sample"),
 			},
 		}
 		mockedBackend := appmock.NewApplication(t)
@@ -123,6 +125,7 @@ func Test_ManagerCreate(t *testing.T) {
 		rapp, err := m.Create(context.TODO(), app)
 		assert.NoError(t, err)
 		assert.Equal(t, "test", rapp.Name)
+		assert.Equal(t, string(app.UID), rapp.Annotations[manager.SourceUIDAnnotation])
 	})
 }
 
@@ -144,7 +147,8 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 					"foo": "bar",
 				},
 				Annotations: map[string]string{
-					"bar": "foo",
+					"bar":                       "foo",
+					manager.SourceUIDAnnotation: "random_uid",
 				},
 			},
 			Spec: v1alpha1.ApplicationSpec{
@@ -178,6 +182,7 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 				Annotations: map[string]string{
 					"bar":                        "bar",
 					"argocd.argoproj.io/refresh": "normal",
+					manager.SourceUIDAnnotation:  "old_uid",
 				},
 			},
 			Spec: v1alpha1.ApplicationSpec{
@@ -219,6 +224,10 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		// Refresh annotation should only be overwritten by the controller, not
 		// by the incoming app
 		require.Contains(t, updated.Annotations, "argocd.argoproj.io/refresh")
+
+		// Source UID annotation should not be overwritten by the incoming app
+		require.Equal(t, existing.Annotations[manager.SourceUIDAnnotation], updated.Annotations[manager.SourceUIDAnnotation])
+
 		// Labels and annotations must be in sync with incoming
 		require.Equal(t, incoming.Labels, updated.Labels)
 		// Non-refresh annotations must be in sync with incoming
@@ -623,6 +632,58 @@ func Test_stampLastUpdated(t *testing.T) {
 		stampLastUpdated(app)
 		assert.Contains(t, app.Annotations, LastUpdatedAnnotation)
 		assert.Len(t, app.Annotations, 3)
+	})
+}
+
+func Test_CompareSourceUIDForApp(t *testing.T) {
+	oldApp := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "argocd",
+			Annotations: map[string]string{
+				manager.SourceUIDAnnotation: "old_uid",
+			},
+		},
+	}
+
+	mockedBackend := appmock.NewApplication(t)
+	mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
+	m, err := NewApplicationManager(mockedBackend, "")
+	require.Nil(t, err)
+	ctx := context.Background()
+
+	t.Run("should return true if the UID matches", func(t *testing.T) {
+		incoming := oldApp.DeepCopy()
+		incoming.UID = ktypes.UID("old_uid")
+
+		uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.Nil(t, err)
+		require.True(t, uidMatch)
+	})
+
+	t.Run("should return false if the UID doesn't match", func(t *testing.T) {
+		incoming := oldApp.DeepCopy()
+		incoming.UID = ktypes.UID("new_uid")
+
+		uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.Nil(t, err)
+		require.False(t, uidMatch)
+	})
+
+	t.Run("should return an error if there is no UID annotation", func(t *testing.T) {
+		oldApp.Annotations = map[string]string{}
+		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
+		m, err := NewApplicationManager(mockedBackend, "")
+		require.Nil(t, err)
+		ctx := context.Background()
+
+		incoming := oldApp.DeepCopy()
+		incoming.UID = ktypes.UID("new_uid")
+
+		uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.NotNil(t, err)
+		require.EqualError(t, err, "source UID Annotation is not found for app: test")
+		require.False(t, uidMatch)
 	})
 }
 
