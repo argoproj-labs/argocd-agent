@@ -1,0 +1,3 @@
+principal: hack/dev-env/start-principal.sh
+agent-managed: hack/dev-env/start-agent-managed.sh
+agent-autonomous: hack/dev-env/start-agent-autonomous.sh
