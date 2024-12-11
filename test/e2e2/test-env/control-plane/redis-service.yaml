@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Service
-metadata:
-  name: argocd-redis
-spec:
-  type: LoadBalancer
-  loadBalancerIP: 192.168.56.221
