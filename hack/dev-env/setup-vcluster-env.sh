@@ -131,19 +131,23 @@ apply() {
     if ! pwmake=$(which pwmake); then
         pwmake=$(which pwgen)
     fi
+    base64=$(which base64)
+    if [[ "$OSTYPE" != "darwin"* ]]; then
+        base64="$(which base64) -w0"
+    fi
     echo "data:" >> $TMP_DIR/agent-managed/argocd-secret.yaml
-    echo "  server.secretkey: $($pwmake 56 | base64)" >> $TMP_DIR/agent-managed/argocd-secret.yaml
+    echo "  server.secretkey: $($pwmake 56 | $base64)" >> $TMP_DIR/agent-managed/argocd-secret.yaml
     echo "data:" >> $TMP_DIR/agent-autonomous/argocd-secret.yaml
-    echo "  server.secretkey: $($pwmake 56 | base64)" >> $TMP_DIR/agent-autonomous/argocd-secret.yaml
+    echo "  server.secretkey: $($pwmake 56 | $base64)" >> $TMP_DIR/agent-autonomous/argocd-secret.yaml
 
     # Generate the argocd admin password for the control plane
     if [[ "$gen_admin_pwd" == "true" ]]; then
         echo "-> Generate admin password for the control plane"
-        ADMIN_PASSWORD=$($pwmake 16)
+        ADMIN_PASSWORD=$($pwmake 56)
         password=$(htpasswd -nb -B a $ADMIN_PASSWORD | cut -c 3-)
         echo "data:" >> $TMP_DIR/control-plane/argocd-secret.yaml
-        echo "  admin.password: $(echo $password | base64)" >> $TMP_DIR/control-plane/argocd-secret.yaml
-        echo "  admin.passwordMtime: $(date +%FT%T%Z | base64)" >> $TMP_DIR/control-plane/argocd-secret.yaml
+        echo "  admin.password: $(echo $password | $base64)" >> $TMP_DIR/control-plane/argocd-secret.yaml
+        echo "  admin.passwordMtime: $(date +%FT%T%Z | $base64)" >> $TMP_DIR/control-plane/argocd-secret.yaml
     fi
 
     echo "-> Create Argo CD on control plane"
