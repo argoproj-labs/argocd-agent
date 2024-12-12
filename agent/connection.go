@@ -20,6 +20,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/sirupsen/logrus"
 
@@ -127,17 +128,23 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 	}
 
 	err = a.processIncomingEvent(ev)
-	if err != nil && !event.IsEventDiscarded(err) && !event.IsEventNotAllowed(err) {
+	if err != nil {
 		logCtx.WithError(err).Errorf("Unable to process incoming event")
-	} else {
-		// Send an ACK if the event is processed successfully.
-		sendQ := a.queues.SendQ(a.remote.ClientID())
-		if sendQ == nil {
-			return fmt.Errorf("no send queue found for the remote principal")
+		// Don't send an ACK if it is a retryable error.
+		if kube.IsRetryableError(err) {
+			logCtx.Trace("Skipping ACK for retryable errors")
+			return nil
 		}
-		sendQ.Add(a.emitter.ProcessedEvent(event.EventProcessed, ev))
-		logCtx.Trace("Sent an ACK for an event")
 	}
+
+	// Send an ACK if the event is processed successfully.
+	sendQ := a.queues.SendQ(a.remote.ClientID())
+	if sendQ == nil {
+		return fmt.Errorf("no send queue found for the remote principal")
+	}
+	sendQ.Add(a.emitter.ProcessedEvent(event.EventProcessed, ev))
+	logCtx.Trace("Sent an ACK for an event")
+
 	return nil
 }
 
