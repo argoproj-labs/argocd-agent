@@ -65,7 +65,7 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		if !sourceUIDMatch {
 			logCtx.Debug("An app already exists with a different source UID. Deleting the existing app")
 			if err := a.deleteApplication(incomingApp); err != nil {
-				return err
+				return fmt.Errorf("could not delete existing app prior to creation: %w", err)
 			}
 		}
 
@@ -77,12 +77,14 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		if !sourceUIDMatch {
 			logCtx.Debug("Source UID mismatch between the incoming app and existing app. Deleting the existing app")
 			if err := a.deleteApplication(incomingApp); err != nil {
-				return err
+				return fmt.Errorf("could not delete existing app prior to creation: %w", err)
 			}
 
 			logCtx.Debug("Creating the incoming app after deleting the existing app")
-			_, err := a.createApplication(incomingApp)
-			return err
+			if _, err := a.createApplication(incomingApp); err != nil {
+				return fmt.Errorf("could not create incoming app after deleting existing app: %w", err)
+			}
+			return nil
 		}
 
 		_, err = a.updateApplication(incomingApp)
@@ -120,7 +122,7 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 		if !sourceUIDMatch {
 			logCtx.Debug("An appProject already exists with a different source UID. Deleting the existing appProject")
 			if err := a.deleteAppProject(incomingAppProject); err != nil {
-				return err
+				return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
 			}
 		}
 
@@ -132,12 +134,14 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 		if !sourceUIDMatch {
 			logCtx.Debug("Source UID mismatch between the incoming and existing appProject. Deleting the existing appProject")
 			if err := a.deleteAppProject(incomingAppProject); err != nil {
-				return err
+				return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
 			}
 
 			logCtx.Debug("Creating the incoming appProject after deleting the existing appProject")
-			_, err := a.createAppProject(incomingAppProject)
-			return err
+			if _, err := a.createAppProject(incomingAppProject); err != nil {
+				return fmt.Errorf("could not create incoming appProject after deleting existing appProject: %w", err)
+			}
+			return nil
 		}
 
 		_, err = a.updateAppProject(incomingAppProject)
