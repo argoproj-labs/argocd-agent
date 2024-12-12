@@ -138,6 +138,11 @@ func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppPro
 		stampLastUpdated(project)
 	}
 
+	if project.Annotations == nil {
+		project.Annotations = make(map[string]string)
+	}
+	project.Annotations[manager.SourceUIDAnnotation] = string(project.UID)
+
 	// If the AppProject has a source namespace, we only allow the agent to manage the AppProject
 	// if the source namespace matches the agent's namespace
 	if m.role == manager.ManagerRoleAgent {
@@ -202,12 +207,26 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 	incoming.SetNamespace(m.namespace)
 
 	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.AppProject) {
+		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
+			if incoming.Annotations == nil {
+				incoming.Annotations = make(map[string]string)
+			}
+			incoming.Annotations[manager.SourceUIDAnnotation] = v
+		}
+
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
 		existing.ObjectMeta.Finalizers = incoming.ObjectMeta.Finalizers
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Status = *incoming.Status.DeepCopy()
 	}, func(existing, incoming *v1alpha1.AppProject) (jsondiff.Patch, error) {
+		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
+			if incoming.Annotations == nil {
+				incoming.Annotations = make(map[string]string)
+			}
+			incoming.Annotations[manager.SourceUIDAnnotation] = v
+		}
+
 		target := &v1alpha1.AppProject{
 			ObjectMeta: v1.ObjectMeta{
 				Annotations: incoming.Annotations,
@@ -356,6 +375,25 @@ func (m *AppProjectManager) RemoveFinalizers(ctx context.Context, incoming *v1al
 // timeout has been reached (which will return an error)
 func (m *AppProjectManager) EnsureSynced(duration time.Duration) error {
 	return m.appprojectBackend.EnsureSynced(duration)
+}
+
+// CompareSourceUID checks for an existing appProject with the same name/namespace and compare its source UID with the incoming appProject.
+func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1alpha1.AppProject) (bool, error) {
+	existing, err := m.appprojectBackend.Get(ctx, incoming.Name, incoming.Namespace)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, err
+	}
+
+	// If there is an existing appProject with the same name/namespace, compare its source UID with the incoming appProject.
+	sourceUID, ok := existing.Annotations[manager.SourceUIDAnnotation]
+	if !ok {
+		return false, fmt.Errorf("source UID Annotation is not found for appProject: %s", incoming.Name)
+	}
+
+	return string(incoming.UID) == sourceUID, nil
 }
 
 func log() *logrus.Entry {
