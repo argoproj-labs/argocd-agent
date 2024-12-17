@@ -21,6 +21,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
@@ -265,9 +266,13 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					}()
 
 					ev, err := s.processRecvQueue(ctx, agentName, q)
-					if err != nil && !event.IsEventDiscarded(err) && !event.IsEventNotAllowed(err) {
+					if err != nil {
 						logCtx.WithField("client", agentName).WithError(err).Errorf("Could not process agent recveiver queue")
-						return
+						// Don't send an ACK if it is a retryable error.
+						if kube.IsRetryableError(err) {
+							logCtx.Trace("Skipping ACK for retryable errors")
+							return
+						}
 					}
 
 					// Send an ACK if the event is processed successfully.

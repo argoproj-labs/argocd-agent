@@ -16,11 +16,20 @@ package kube
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"os/exec"
+	"strings"
+	"syscall"
 
 	"github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 type KubernetesClient struct {
@@ -75,4 +84,70 @@ func NewKubernetesClientFromConfig(ctx context.Context, namespace string, kubeco
 	}
 
 	return NewKubernetesClient(ctx, clientset, applicationsClientset, namespace), nil
+}
+
+// IsRetryableError is a helper method to see whether an error returned from the dynamic client
+// is potentially retryable. If the error is retryable we could retry again with exponential backoff.
+// This code is directly copied from: https://github.com/argoproj/argo-cd/controller/cache/cache.go
+func IsRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return kerrors.IsInternalError(err) ||
+		kerrors.IsInvalid(err) ||
+		kerrors.IsTooManyRequests(err) ||
+		kerrors.IsServerTimeout(err) ||
+		kerrors.IsServiceUnavailable(err) ||
+		kerrors.IsTimeout(err) ||
+		kerrors.IsUnexpectedObjectError(err) ||
+		kerrors.IsUnexpectedServerError(err) ||
+		isResourceQuotaConflictErr(err) ||
+		isTransientNetworkErr(err) ||
+		isExceededQuotaErr(err) ||
+		isHTTP2GoawayErr(err) ||
+		errors.Is(err, syscall.ECONNRESET)
+}
+
+func isHTTP2GoawayErr(err error) bool {
+	return strings.Contains(err.Error(), "http2: server sent GOAWAY and closed the connection")
+}
+
+func isExceededQuotaErr(err error) bool {
+	return kerrors.IsForbidden(err) && strings.Contains(err.Error(), "exceeded quota")
+}
+
+func isResourceQuotaConflictErr(err error) bool {
+	return kerrors.IsConflict(err) && strings.Contains(err.Error(), "Operation cannot be fulfilled on resourcequota")
+}
+
+func isTransientNetworkErr(err error) bool {
+	var netErr net.Error
+	switch {
+	case errors.As(err, &netErr):
+		var dnsErr *net.DNSError
+		var opErr *net.OpError
+		var unknownNetworkErr net.UnknownNetworkError
+		var urlErr *url.Error
+		switch {
+		case errors.As(err, &dnsErr), errors.As(err, &opErr), errors.As(err, &unknownNetworkErr):
+			return true
+		case errors.As(err, &urlErr):
+			// For a URL error, where it replies "connection closed"
+			// retry again.
+			return strings.Contains(err.Error(), "Connection closed by foreign host")
+		}
+	}
+
+	errorString := err.Error()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		errorString = fmt.Sprintf("%s %s", errorString, exitErr.Stderr)
+	}
+	if strings.Contains(errorString, "net/http: TLS handshake timeout") ||
+		strings.Contains(errorString, "i/o timeout") ||
+		strings.Contains(errorString, "connection timed out") ||
+		strings.Contains(errorString, "connection reset by peer") {
+		return true
+	}
+	return false
 }
