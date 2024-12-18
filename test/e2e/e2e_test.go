@@ -240,13 +240,13 @@ func Test_AgentServer(t *testing.T) {
 	}
 	sctx, scancel := context.WithTimeout(context.Background(), 20*time.Second)
 	actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
-	fakeAppcServer := fakeappclient.NewSimpleClientset()
+	fakeAppcServer := fakekube.NewKubernetesFakeClient()
 	am := auth.NewMethods()
 	up := userpass.NewUserPassAuthentication("")
 	err := am.RegisterMethod("userpass", up)
 	require.NoError(t, err)
 	up.UpsertUser("client", "insecure")
-	s, err := principal.NewServer(sctx, fakekube.NewKubernetesFakeClient(), "server",
+	s, err := principal.NewServer(sctx, fakeAppcServer, "server",
 		principal.WithGRPC(true),
 		principal.WithListenerPort(0),
 		principal.WithServerName("control-plane"),
@@ -267,7 +267,7 @@ func Test_AgentServer(t *testing.T) {
 		client.WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "client", userpass.ClientSecretField: "insecure"}),
 	)
 	require.NoError(t, err)
-	fakeAppcAgent := fakeappclient.NewSimpleClientset()
+	fakeAppcAgent := fakekube.NewKubernetesFakeClient()
 	a, err := agent.NewAgent(actx, fakeAppcAgent, "client",
 		agent.WithRemote(remote),
 		agent.WithMode(types.AgentModeManaged.String()),
@@ -280,10 +280,10 @@ func Test_AgentServer(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	log().Infof("Creating application")
-	_, err = fakeAppcServer.ArgoprojV1alpha1().Applications("client").Create(sctx, app, v1.CreateOptions{})
+	_, err = fakeAppcServer.ApplicationsClientset.ArgoprojV1alpha1().Applications("client").Create(sctx, app, v1.CreateOptions{})
 	require.NoError(t, err)
 	for i := 0; i < 5; i += 1 {
-		app, err = fakeAppcServer.ArgoprojV1alpha1().Applications("client").Get(actx, "testapp", v1.GetOptions{})
+		app, err = fakeAppcServer.ApplicationsClientset.ArgoprojV1alpha1().Applications("client").Get(actx, "testapp", v1.GetOptions{})
 		if err == nil {
 			break
 		}
@@ -293,7 +293,7 @@ func Test_AgentServer(t *testing.T) {
 	require.NotNil(t, app)
 	app.Spec.Project = "hulahup"
 	time.Sleep(1 * time.Second)
-	_, err = fakeAppcServer.ArgoprojV1alpha1().Applications("client").Update(actx, app, v1.UpdateOptions{})
+	_, err = fakeAppcServer.ApplicationsClientset.ArgoprojV1alpha1().Applications("client").Update(actx, app, v1.UpdateOptions{})
 	require.NoError(t, err)
 
 	<-sctx.Done()
@@ -363,7 +363,7 @@ func Test_WithHTTP1WebSocket(t *testing.T) {
 	startAgent := func(t *testing.T, ctx context.Context, remote *client.Remote) (*client.Remote, *agent.Agent) {
 		t.Helper()
 
-		fakeAppcAgent := fakeappclient.NewSimpleClientset()
+		fakeAppcAgent := fakekube.NewKubernetesFakeClient()
 		a, err := agent.NewAgent(ctx, fakeAppcAgent, "client",
 			agent.WithRemote(remote),
 			agent.WithMode(types.AgentModeManaged.String()),

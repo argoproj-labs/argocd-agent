@@ -39,7 +39,7 @@ func Test_InvalidEvents(t *testing.T) {
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
-		assert.ErrorContains(t, err, "unable to process event with unknown target")
+		assert.ErrorContains(t, err, "unknown target")
 		assert.Equal(t, ev, *got)
 	})
 

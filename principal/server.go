@@ -17,12 +17,15 @@ package principal
 import (
 	context "context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
+	goruntime "runtime"
 	"sync"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
@@ -36,6 +39,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/internal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -44,7 +48,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -92,6 +96,18 @@ type Server struct {
 	// The Principal will rely on gRPC over WebSocket for bi-directional streaming. This option could be enabled
 	// when there is an intermediate component that is HTTP/2 incompatible and downgrades the incoming request to HTTP/1.1
 	enableWebSocket bool
+
+	// resourceProxyEnabled indicates whether the resource proxy should be enabled
+	resourceProxyEnabled bool
+	// resourceProxy intercepts requests to the agent Kubernetes APIs
+	resourceProxy *resourceproxy.ResourceProxy
+	// resourceProxyListenAddr is the listener address for the resource proxy
+	resourceProxyListenAddr string
+	// resourceProxyTlsConfig is the TLS configuration for the resource proxy
+	resourceProxyTlsConfig *tls.Config
+
+	// clusterManager manages Argo CD cluster secrets and their mappings to agents
+	clusterMgr *cluster.Manager
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
@@ -102,6 +118,9 @@ var noAuthEndpoints = map[string]bool{
 }
 
 const waitForSyncedDuration = 60 * time.Second
+
+// defaultKubeProxyListenerAddr is the default listener address for kube-proxy
+const defaultKubeProxyListenerAddr = "0.0.0.0:9090"
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
@@ -140,10 +159,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	appFilters := s.defaultAppFilterChain()
 
 	appInformerOpts := []informer.InformerOption[*v1alpha1.Application]{
-		informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+		informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, opts)
 		}),
-		informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+		informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, opts)
 		}),
 		informer.WithAddHandler[*v1alpha1.Application](s.newAppCallback),
@@ -158,10 +177,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
-		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("").List(ctx, opts)
 		}),
-		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("").Watch(ctx, opts)
 		}),
 		informer.WithAddHandler[*v1alpha1.AppProject](s.newAppProjectCallback),
@@ -212,7 +231,79 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		"argocd": types.AgentModeAutonomous,
 	}
 
+	if s.resourceProxyListenAddr == "" {
+		s.resourceProxyListenAddr = defaultKubeProxyListenerAddr
+	}
+
+	// Instantiate our KubeProxy to intercept Kubernetes requests from Argo CD's
+	// API server.
+	if s.resourceProxyEnabled {
+		// TODO(jannfis): Enable fetching APIs and resource counts
+		s.resourceProxy, err = resourceproxy.New(s.resourceProxyListenAddr,
+			// For matching resource requests from the Argo CD API
+			resourceproxy.WithRequestMatcher(
+				resourceRequestRegexp,
+				[]string{"get"},
+				s.resourceRequester,
+			),
+			// Fake version output
+			resourceproxy.WithRequestMatcher(
+				`^/version$`,
+				[]string{"get"},
+				s.proxyVersion,
+			),
+			resourceproxy.WithTLSConfig(s.resourceProxyTlsConfig),
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Instantiate the cluster manager to handle Argo CD cluster secrets for
+	// agents.
+	s.clusterMgr, err = cluster.NewManager(s.ctx, s.namespace, s.kubeClient)
+	if err != nil {
+		return nil, err
+	}
+
 	return s, nil
+}
+
+func (s *Server) proxyVersion(w http.ResponseWriter, r *http.Request, params resourceproxy.Params) {
+	var kubeVersion = struct {
+		Major        string
+		Minor        string
+		GitVersion   string
+		GitCommit    string
+		GitTreeState string
+		BuildDate    string
+		GoVersion    string
+		Compiler     string
+		Platform     string
+	}{
+		Major:        "1",
+		Minor:        "28",
+		GitVersion:   "1.28.5+argocd-agent",
+		GitCommit:    "841856557ef0f6a399096c42635d114d6f2cf7f4",
+		GitTreeState: "clean",
+		BuildDate:    "n/a",
+		GoVersion:    goruntime.Version(),
+		Compiler:     goruntime.Compiler,
+		Platform:     fmt.Sprintf("%s/%s", goruntime.GOOS, goruntime.GOARCH),
+	}
+
+	version, err := json.MarshalIndent(kubeVersion, "", "  ")
+	if err != nil {
+		log().Errorf("Could not marshal JSON: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Header().Add("Content-type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(version)
+	if err != nil {
+		log().Errorf("Could not write K8s version to client: %v", err)
+	}
 }
 
 // Start starts the Server s and its listeners in their own go routines. Any
@@ -271,6 +362,22 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 	log().Infof("AppProject informer synced and ready")
 
+	// Start resource proxy if it is enabled
+	if s.resourceProxy != nil {
+		_, err = s.resourceProxy.Start(s.ctx)
+		if err != nil {
+			return fmt.Errorf("unable to start KubeProxy: %w", err)
+		}
+		log().Infof("Resource proxy started")
+	} else {
+		log().Infof("Resource proxy is disabled")
+	}
+
+	err = s.clusterMgr.Start()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -278,6 +385,16 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 // results in an error, an error is returned.
 func (s *Server) Shutdown() error {
 	var err error
+
+	if s.resourceProxy != nil {
+		if err = s.resourceProxy.Stop(s.ctx); err != nil {
+			return err
+		}
+	}
+
+	if err = s.clusterMgr.Stop(); err != nil {
+		return err
+	}
 
 	log().Debugf("Shutdown requested")
 	// Cancel server-wide context
