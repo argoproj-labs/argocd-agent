@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"k8s.io/apimachinery/pkg/api/validation"
 )
 
 /*
@@ -26,11 +27,31 @@ Package session contains various functions to access and manipulate session
 data.
 */
 
+// ClientIdFromContext returns the client ID stored in context ctx. If there
+// is no client ID in the context, or the client ID is invalid, returns an
+// error.
 func ClientIdFromContext(ctx context.Context) (string, error) {
 	val := ctx.Value(types.ContextAgentIdentifier)
-	if clientId, ok := val.(string); !ok {
+	clientId, ok := val.(string)
+	if !ok {
 		return "", fmt.Errorf("no client identifier found in context")
-	} else {
-		return clientId, nil
 	}
+	if !IsValidClientId(clientId) {
+		return "", fmt.Errorf("invalid client identifier: %s", clientId)
+	}
+	return clientId, nil
+}
+
+// ClientIdToContext returns a copy of context ctx with the clientId stored
+func ClientIdToContext(ctx context.Context, clientId string) context.Context {
+	return context.WithValue(ctx, types.ContextAgentIdentifier, clientId)
+}
+
+// IsValidClientId returns true if the string s is considered a valid client
+// identifier.
+func IsValidClientId(s string) bool {
+	if errs := validation.NameIsDNSSubdomain(s, false); len(errs) > 0 {
+		return false
+	}
+	return true
 }

@@ -23,8 +23,8 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
-	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
@@ -136,7 +136,7 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 	c := &client{}
 	c.wg = &sync.WaitGroup{}
 
-	agentName, err := agentName(ctx)
+	agentName, err := session.ClientIdFromContext(ctx)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -158,17 +158,6 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 	c.start = time.Now()
 	c.logCtx.Info("An agent connected to the subscription stream")
 	return c, nil
-}
-
-// agentName gets the agent name from the context ctx. If no agent identifier
-// could be found in the context, returns an error.
-func agentName(ctx context.Context) (string, error) {
-	agentName, ok := ctx.Value(types.ContextAgentIdentifier).(string)
-	if !ok {
-		return "", fmt.Errorf("invalid context: no agent name")
-	}
-	// TODO: check agentName for validity
-	return agentName, nil
 }
 
 // onDisconnect must be called whenever client c disconnects from the stream
@@ -379,7 +368,7 @@ func (s *Server) Push(pushs eventstreamapi.EventStream_PushServer) error {
 	}
 	defer cancel()
 
-	agentName, err := agentName(ctx)
+	agentName, err := session.ClientIdFromContext(ctx)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
