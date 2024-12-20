@@ -21,6 +21,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
+	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
 	"google.golang.org/grpc"
@@ -117,7 +118,7 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 
 	// claims at this point is validated and we can propagate values to the
 	// context.
-	authCtx := context.WithValue(ctx, types.ContextAgentIdentifier, agentInfo.ClientID)
+	authCtx := session.ClientIdToContext(ctx, agentInfo.ClientID)
 	if !s.queues.HasQueuePair(agentInfo.ClientID) {
 		logCtx.Tracef("Creating a new queue pair for client %s", agentInfo.ClientID)
 		if err := s.queues.Create(agentInfo.ClientID); err != nil {
