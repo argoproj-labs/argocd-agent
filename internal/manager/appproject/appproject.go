@@ -378,22 +378,22 @@ func (m *AppProjectManager) EnsureSynced(duration time.Duration) error {
 }
 
 // CompareSourceUID checks for an existing appProject with the same name/namespace and compare its source UID with the incoming appProject.
-func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1alpha1.AppProject) (bool, error) {
+func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1alpha1.AppProject) (bool, bool, error) {
 	existing, err := m.appprojectBackend.Get(ctx, incoming.Name, incoming.Namespace)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return true, nil
+			return false, false, nil
 		}
-		return false, err
+		return false, false, err
 	}
 
 	// If there is an existing appProject with the same name/namespace, compare its source UID with the incoming appProject.
 	sourceUID, ok := existing.Annotations[manager.SourceUIDAnnotation]
 	if !ok {
-		return false, fmt.Errorf("source UID Annotation is not found for appProject: %s", incoming.Name)
+		return true, false, fmt.Errorf("source UID Annotation is not found for appProject: %s", incoming.Name)
 	}
 
-	return string(incoming.UID) == sourceUID, nil
+	return true, string(incoming.UID) == sourceUID, nil
 }
 
 func log() *logrus.Entry {

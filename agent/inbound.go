@@ -55,17 +55,27 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		return err
 	}
 
-	sourceUIDMatch, err := a.appManager.CompareSourceUID(a.context, incomingApp)
+	exists, sourceUIDMatch, err := a.appManager.CompareSourceUID(a.context, incomingApp)
 	if err != nil {
 		return fmt.Errorf("failed to compare the source UID of app: %w", err)
 	}
 
 	switch ev.Type() {
 	case event.Create:
-		if !sourceUIDMatch {
-			logCtx.Debug("An app already exists with a different source UID. Deleting the existing app")
-			if err := a.deleteApplication(incomingApp); err != nil {
-				return fmt.Errorf("could not delete existing app prior to creation: %w", err)
+		if exists {
+			if sourceUIDMatch {
+				logCtx.Debug("Received a Create event for an existing app. Updating the existing app")
+				_, err := a.updateApplication(incomingApp)
+				if err != nil {
+					return fmt.Errorf("could not update the existing app: %w", err)
+				}
+				return nil
+			} else {
+				logCtx.Debug("An app already exists with a different source UID. Deleting the existing app")
+				if err := a.deleteApplication(incomingApp); err != nil {
+					return fmt.Errorf("could not delete existing app prior to creation: %w", err)
+				}
+
 			}
 		}
 
@@ -112,17 +122,26 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 		return err
 	}
 
-	sourceUIDMatch, err := a.projectManager.CompareSourceUID(a.context, incomingAppProject)
+	exists, sourceUIDMatch, err := a.projectManager.CompareSourceUID(a.context, incomingAppProject)
 	if err != nil {
 		return fmt.Errorf("failed to validate source UID of appProject: %w", err)
 	}
 
 	switch ev.Type() {
 	case event.Create:
-		if !sourceUIDMatch {
-			logCtx.Debug("An appProject already exists with a different source UID. Deleting the existing appProject")
-			if err := a.deleteAppProject(incomingAppProject); err != nil {
-				return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
+		if exists {
+			if sourceUIDMatch {
+				logCtx.Debug("Received a Create event for an existing appProject. Updating the existing appProject")
+				_, err := a.updateAppProject(incomingAppProject)
+				if err != nil {
+					return fmt.Errorf("could not update the existing appProject: %w", err)
+				}
+				return nil
+			} else {
+				logCtx.Debug("An appProject already exists with a different source UID. Deleting the existing appProject")
+				if err := a.deleteAppProject(incomingAppProject); err != nil {
+					return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
+				}
 			}
 		}
 

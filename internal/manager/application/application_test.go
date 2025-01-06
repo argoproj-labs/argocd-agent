@@ -647,16 +647,21 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 	}
 
 	mockedBackend := appmock.NewApplication(t)
-	mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
+	getMock := mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
 	m, err := NewApplicationManager(mockedBackend, "")
 	require.Nil(t, err)
 	ctx := context.Background()
+
+	t.Cleanup(func() {
+		getMock.Unset()
+	})
 
 	t.Run("should return true if the UID matches", func(t *testing.T) {
 		incoming := oldApp.DeepCopy()
 		incoming.UID = ktypes.UID("old_uid")
 
-		uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.True(t, exists)
 		require.Nil(t, err)
 		require.True(t, uidMatch)
 	})
@@ -665,7 +670,8 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 		incoming := oldApp.DeepCopy()
 		incoming.UID = ktypes.UID("new_uid")
 
-		uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.True(t, exists)
 		require.Nil(t, err)
 		require.False(t, uidMatch)
 	})
@@ -680,10 +686,32 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 		incoming := oldApp.DeepCopy()
 		incoming.UID = ktypes.UID("new_uid")
 
-		uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.True(t, exists)
 		require.NotNil(t, err)
 		require.EqualError(t, err, "source UID Annotation is not found for app: test")
 		require.False(t, uidMatch)
+	})
+
+	t.Run("should return False if the app doesn't exist", func(t *testing.T) {
+		expectedErr := errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"},
+			oldApp.Name)
+		getMock.Unset()
+		getMock = mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, expectedErr)
+		m, err := NewApplicationManager(mockedBackend, "")
+		require.Nil(t, err)
+		ctx := context.Background()
+
+		app, err := m.applicationBackend.Get(ctx, oldApp.Name, oldApp.Namespace)
+		require.Nil(t, app)
+		require.True(t, errors.IsNotFound(err))
+
+		incoming := oldApp.DeepCopy()
+		incoming.UID = ktypes.UID("new_uid")
+		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.False(t, exists)
+		require.False(t, uidMatch)
+		require.Nil(t, err)
 	})
 }
 
