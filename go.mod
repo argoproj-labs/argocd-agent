@@ -14,8 +14,8 @@ require (
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.10.0
 	github.com/wI2L/jsondiff v0.6.1
-	golang.org/x/crypto v0.31.0
-	golang.org/x/net v0.33.0
+	golang.org/x/crypto v0.32.0
+	golang.org/x/net v0.34.0
 	golang.org/x/sync v0.10.0
 	golang.stackrox.io/grpc-http1 v0.3.13
 	google.golang.org/genproto/googleapis/api v0.0.0-20241015192408-796eee8c2d53
@@ -132,8 +132,8 @@ require (
 	go.uber.org/zap v1.26.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/oauth2 v0.23.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/term v0.27.0 // indirect
+	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/term v0.28.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 	golang.org/x/time v0.6.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
