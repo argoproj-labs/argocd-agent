@@ -268,22 +268,22 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 }
 
 // CompareSourceUID checks for an existing app with the same name/namespace and compare its source UID with the incoming app.
-func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1alpha1.Application) (bool, error) {
+func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1alpha1.Application) (bool, bool, error) {
 	existing, err := m.applicationBackend.Get(ctx, incoming.Name, incoming.Namespace)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return true, nil
+			return false, false, nil
 		}
-		return false, err
+		return false, false, err
 	}
 
 	// If there is an existing app with the same name/namespace, compare its source UID with the incoming app.
 	sourceUID, exists := existing.Annotations[manager.SourceUIDAnnotation]
 	if !exists {
-		return false, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
+		return true, false, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
 	}
 
-	return string(incoming.UID) == sourceUID, nil
+	return true, string(incoming.UID) == sourceUID, nil
 }
 
 // UpdateAutonomousApp updates the Application resource on the control plane side
