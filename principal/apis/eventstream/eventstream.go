@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
@@ -160,6 +161,17 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 	return c, nil
 }
 
+// agentMode gets the agent mode from the context ctx. Returns an error
+// if no agent mode is found in the context
+func agentMode(ctx context.Context) (string, error) {
+	agentMode, ok := ctx.Value(types.ContextAgentMode).(string)
+	if !ok {
+		return "", fmt.Errorf("invalid context: no agent mode")
+	}
+
+	return agentMode, nil
+}
+
 // onDisconnect must be called whenever client c disconnects from the stream
 func (s *Server) onDisconnect(c *client) {
 	c.lock.Lock()
@@ -269,6 +281,19 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	logCtx.Tracef("Grabbed an item")
 	if ev == nil {
 		return fmt.Errorf("panic: nil item in queue")
+	}
+
+	mode, err := agentMode(c.ctx)
+	if err != nil {
+		return fmt.Errorf("unable to extract the agent mode from context")
+	}
+
+	if types.AgentModeFromString(mode) != types.AgentModeManaged {
+		// Only Update events are valid for unmanaged agents
+		if ev.Type() != event.Update.String() {
+			logCtx.WithField("type", ev.Type()).Debug("Discarding event for unmanaged agent")
+			return nil
+		}
 	}
 
 	eventWriter := s.eventWriters.Get(c.agentName)

@@ -26,13 +26,6 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 	logCtx := log().WithField("event", "NewApp").WithField("application", app.QualifiedName())
 	logCtx.Debugf("New app event")
 
-	// If the agent is not connected, we ignore this event. It just makes no
-	// sense to fill up the send queue when we can't send.
-	if !a.IsConnected() {
-		logCtx.Trace("Agent is not connected, ignoring this event")
-		return
-	}
-
 	// Update events trigger a new event sometimes, too. If we've already seen
 	// the app, we just ignore the request then.
 	if a.appManager.IsManaged(app.QualifiedName()) {
@@ -63,13 +56,6 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	defer a.watchLock.Unlock()
 	if a.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
 		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
-		return
-	}
-
-	// If the agent is not connected, we ignore this event. It just makes no
-	// sense to fill up the send queue when we can't send.
-	if !a.IsConnected() {
-		logCtx.Trace("Agent is not connected, ignoring this event")
 		return
 	}
 
@@ -108,13 +94,6 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	logCtx := log().WithField("event", "DeleteApp").WithField("application", app.QualifiedName())
 	logCtx.Debugf("Delete app event")
-
-	// If the agent is not connected, we ignore this event. It just makes no
-	// sense to fill up the send queue when we can't send.
-	if !a.IsConnected() {
-		logCtx.Trace("Agent is not connected, ignoring this event")
-		return
-	}
 
 	if !a.appManager.IsManaged(app.QualifiedName()) {
 		logCtx.Tracef("App is not managed")

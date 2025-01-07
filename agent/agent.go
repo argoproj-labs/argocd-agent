@@ -224,6 +224,12 @@ func (a *Agent) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Wait for the app informer to be synced
+	err := a.appManager.EnsureSynced(waitForSyncedDuration)
+	if err != nil {
+		return fmt.Errorf("failed to sync applications: %w", err)
+	}
+
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
 		// TODO: Right now, maintainConnection always returns nil. Revisit
@@ -232,12 +238,6 @@ func (a *Agent) Start(ctx context.Context) error {
 	}
 
 	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"))
-
-	// Wait for the app informer to be synced
-	err := a.appManager.EnsureSynced(waitForSyncedDuration)
-	if err != nil {
-		return fmt.Errorf("failed to sync applications: %w", err)
-	}
 
 	return err
 }

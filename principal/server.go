@@ -44,6 +44,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -259,6 +260,8 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}()
 
+	go s.removeUnusedQueues(s.ctx)
+
 	s.events = event.NewEventSource(s.options.serverName)
 
 	if err := s.appManager.EnsureSynced(waitForSyncedDuration); err != nil {
@@ -272,6 +275,37 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	log().Infof("AppProject informer synced and ready")
 
 	return nil
+}
+
+// removeUnusedQueues removes the queues that are not associated with any namespace/agent.
+func (s *Server) removeUnusedQueues(ctx context.Context) {
+	ticker := time.NewTimer(10 * time.Minute)
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			queues := s.queues.Names()
+			for _, queueName := range queues {
+				s.removeQueueIfUnused(ctx, queueName)
+			}
+		}
+	}
+}
+
+func (s *Server) removeQueueIfUnused(ctx context.Context, agentName string) {
+	logCtx := log().WithField("agent", agentName)
+	_, err := s.kubeClient.CoreV1().Namespaces().Get(ctx, agentName, v1.GetOptions{})
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			logCtx.Trace("Agent namespace not found. Removing the queue")
+			if err := s.queues.Delete(agentName, true); err != nil {
+				logCtx.WithError(err).Error("failed to delete the unused queue")
+			}
+			return
+		}
+		logCtx.WithError(err).Error("failed to get namespace while inspecting for unused queues")
+	}
 }
 
 // Shutdown shuts down the server s. If no server is running, or shutting down
