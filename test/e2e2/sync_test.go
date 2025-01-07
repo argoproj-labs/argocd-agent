@@ -95,7 +95,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 	// Create a managed application in the principal's cluster
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "guestbook",
+			Name:      "guestbook-managed",
 			Namespace: "agent-managed",
 		},
 		Spec: argoapp.ApplicationSpec{
@@ -107,7 +107,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 			},
 			Destination: argoapp.ApplicationDestination{
 				Server:    "https://kubernetes.default.svc",
-				Namespace: "guestbook",
+				Namespace: "guestbook-managed",
 			},
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{
@@ -202,7 +202,7 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 	// Create an autonomous application on the autonomous-agent's cluster
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "guestbook",
+			Name:      "guestbook-autonomous",
 			Namespace: "argocd",
 			Finalizers: []string{
 				"resources-finalizer.argocd.argoproj.io",
@@ -217,7 +217,7 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 			},
 			Destination: argoapp.ApplicationDestination{
 				Server:    "https://kubernetes.default.svc",
-				Namespace: "guestbook",
+				Namespace: "guestbook-autonomous",
 			},
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{
