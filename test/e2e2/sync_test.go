@@ -15,6 +15,7 @@
 package e2e2
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -253,6 +254,7 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
+		fmt.Printf("%v\n%s\n", err, app.Status.Sync.Status)
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
 	}, 60*time.Second, 1*time.Second)
 
