@@ -38,6 +38,7 @@ type MockEventServer struct {
 	grpc.ServerStream
 
 	AgentName   string
+	AgentMode   string
 	NumSent     atomic.Uint32
 	NumRecv     atomic.Uint32
 	Application v1alpha1.Application
@@ -58,11 +59,17 @@ func (s *MockEventServer) AddRecvHook(hook RecvHook) {
 }
 
 func (s *MockEventServer) Context() context.Context {
+	ctx := context.TODO()
+
 	if s.AgentName != "" {
-		return context.WithValue(context.TODO(), types.ContextAgentIdentifier, s.AgentName)
-	} else {
-		return context.TODO()
+		ctx = context.WithValue(ctx, types.ContextAgentIdentifier, s.AgentName)
 	}
+
+	if s.AgentMode != "" {
+		ctx = context.WithValue(ctx, types.ContextAgentMode, s.AgentMode)
+	}
+
+	return ctx
 }
 
 func (s *MockEventServer) Send(sub *eventstreamapi.Event) error {

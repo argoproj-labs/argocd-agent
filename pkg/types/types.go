@@ -66,4 +66,7 @@ func (k EventContextKey) String() string {
 	return string(k)
 }
 
-const ContextAgentIdentifier EventContextKey = "agent_name"
+const (
+	ContextAgentIdentifier EventContextKey = "agent_name"
+	ContextAgentMode       EventContextKey = "agent_mode"
+)
