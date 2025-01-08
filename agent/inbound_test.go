@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -29,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
 )
 
@@ -218,6 +220,43 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		require.Equal(t, string(incomingApp.UID), latestApp.Annotations[manager.SourceUIDAnnotation])
 	})
 
+	t.Run("Update: incoming app must be created if it doesn't exist while handling update event", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		newApp := incomingApp.DeepCopy()
+		newApp.Name = "new-app"
+
+		getMock.Unset()
+		notFoundError := kerrors.NewNotFound(schema.GroupResource{
+			Group: "argoproj.io", Resource: "application"}, newApp.Name)
+		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
+
+		createMock.Unset()
+		createMock = be.On("Create", mock.Anything, mock.Anything).Return(newApp, nil)
+
+		// Create an Update event for the new app
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, newApp), event.TargetApplication)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		expectedCalls := []string{"Get", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new app has been created.
+		appInterface := be.Calls[1].ReturnArguments[0]
+		latestApp, ok := appInterface.(*v1alpha1.Application)
+		require.True(t, ok)
+		require.Equal(t, newApp, latestApp)
+	})
+
 	t.Run("Delete: Old app with diff UID must be deleted", func(t *testing.T) {
 		configureManager(t)
 		defer unsetMocks(t)
@@ -382,6 +421,43 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
 		require.True(t, ok)
 		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Update: incoming appProject must be created if it doesn't exist while handling update event", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.projectManager.Manage(oldAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		newAppProject := incomingAppProject.DeepCopy()
+		newAppProject.Name = "new-app-project"
+
+		getMock.Unset()
+		notFoundError := kerrors.NewNotFound(schema.GroupResource{
+			Group: "argoproj.io", Resource: "appproject"}, newAppProject.Name)
+		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
+
+		createMock.Unset()
+		createMock = be.On("Create", mock.Anything, mock.Anything).Return(newAppProject, nil)
+
+		// Create an Update event for the new appProject
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, newAppProject), event.TargetAppProject)
+		err := a.processIncomingAppProject(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		expectedCalls := []string{"Get", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new app has been created.
+		appInterface := be.Calls[1].ReturnArguments[0]
+		latestApp, ok := appInterface.(*v1alpha1.AppProject)
+		require.True(t, ok)
+		require.Equal(t, newAppProject, latestApp)
 	})
 
 	t.Run("Delete: Old appProject with the same UID must be deleted", func(t *testing.T) {
