@@ -84,6 +84,14 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 			logCtx.Errorf("Error creating application: %v", err)
 		}
 	case event.SpecUpdate:
+		if !exists {
+			logCtx.Debug("Received an Update event for an app that doesn't exist. Creating the incoming app")
+			if _, err := a.createApplication(incomingApp); err != nil {
+				return fmt.Errorf("could not create incoming app: %w", err)
+			}
+			return nil
+		}
+
 		if !sourceUIDMatch {
 			logCtx.Debug("Source UID mismatch between the incoming app and existing app. Deleting the existing app")
 			if err := a.deleteApplication(incomingApp); err != nil {
@@ -150,6 +158,14 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 			logCtx.Errorf("Error creating appproject: %v", err)
 		}
 	case event.SpecUpdate:
+		if !exists {
+			logCtx.Debug("Received an Update event for an appProject that doesn't exist. Creating the incoming appProject")
+			if _, err := a.createAppProject(incomingAppProject); err != nil {
+				return fmt.Errorf("could not create incoming appProject: %w", err)
+			}
+			return nil
+		}
+
 		if !sourceUIDMatch {
 			logCtx.Debug("Source UID mismatch between the incoming and existing appProject. Deleting the existing appProject")
 			if err := a.deleteAppProject(incomingAppProject); err != nil {
