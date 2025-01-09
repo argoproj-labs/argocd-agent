@@ -66,7 +66,7 @@ func (p *ResourceProxy) Track(eventId string, agentName string) (<-chan *cloudev
 
 // StopTracking will stop tracking a particular resource and close any event
 // channel that may still be open.
-func (p *ResourceProxy) StopTracking(eventId string) {
+func (p *ResourceProxy) StopTracking(eventId string) error {
 	p.statemap.mutex.Lock()
 	defer p.statemap.mutex.Unlock()
 	r, ok := p.statemap.requests[eventId]
@@ -78,7 +78,9 @@ func (p *ResourceProxy) StopTracking(eventId string) {
 		})
 		logCtx.Trace("Finished tracking request")
 		delete(p.statemap.requests, eventId)
+		return nil
 	} else {
 		log().WithField("event_id", eventId).Warn("Resource not tracked -- is this a bug?")
+		return fmt.Errorf("resource request %s not tracked", eventId)
 	}
 }

@@ -105,7 +105,12 @@ func (s *Server) resourceRequester(w http.ResponseWriter, r *http.Request, param
 	if err != nil {
 		logCtx.Errorf("Could not track event %s: %v", sentUuid, err)
 	}
-	defer s.resourceProxy.StopTracking(sentUuid)
+	defer func() {
+		err := s.resourceProxy.StopTracking(sentUuid)
+		if err != nil {
+			logCtx.Warnf("Could not untrack %s: %v", sentUuid, err)
+		}
+	}()
 
 	// Submit the event to the queue
 	logCtx.Tracef("Submitting event: %v", sentEv)
