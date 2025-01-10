@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"github.com/argoproj/argo-cd/v2/common"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v2/util/db"
 	v1 "k8s.io/api/core/v1"
@@ -20,15 +21,20 @@ func (m *Manager) onClusterAdded(res *v1.Secret) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	// This should not happen, because our filter already ensures this. But we
-	// check again just to be sure.
+	// The informer filter should have already ensured that the following
+	// labels are set. But we check again just to be sure.
 	agent, ok := res.Labels[LabelKeyClusterAgentMapping]
 	if !ok || agent == "" {
+		log().Warnf("Processing invalid cluster secret (missing labels): %s", res.Name)
+		return
+	}
+	if v, ok := res.Labels[common.LabelKeySecretType]; !ok || v != common.LabelValueSecretTypeCluster {
+		log().Warnf("Processing invalid cluster secret (missing labels): %s", res.Name)
 		return
 	}
 
 	// Check if we already have a mapping for the requested agent
-	existing := m.mapping("agent")
+	existing := m.mapping(agent)
 	if existing != nil {
 		log().Errorf("Agent %s is already mapped to cluster %s", agent, existing.Name)
 		return
@@ -39,6 +45,8 @@ func (m *Manager) onClusterAdded(res *v1.Secret) {
 	if err != nil {
 		log().WithError(err).Error("Not a cluster secret or malformed data")
 	}
+
+	// TODO(jannfis): Do we want to validate cluster configuration here?
 
 	// Map the cluster to the agent
 	err = m.mapCluster(agent, cluster)
