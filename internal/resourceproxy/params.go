@@ -1,6 +1,8 @@
 package resourceproxy
 
-// Params is a typed map for storing interceptor parameters in
+// Params is a typed map for storing interceptor parameters.
+// Note that the same restrictions apply as for standard maps, i.e. Params
+// do not provide thread safety and should not be accessed concurrently.
 type Params map[string]string
 
 // Set sets param key to the given value

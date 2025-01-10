@@ -1,6 +1,7 @@
 package resourceproxy
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,5 +81,24 @@ func Test_proxyHandler(t *testing.T) {
 		assert.True(t, proxied)
 		assert.False(t, intercepted)
 
+	})
+}
+
+func Test_Start(t *testing.T) {
+	t.Run("Start IPv4", func(t *testing.T) {
+		r, err := New("127.0.0.1:0")
+		require.NoError(t, err)
+		errch, err := r.Start(context.TODO())
+		assert.NoError(t, err)
+		r.Stop(context.TODO())
+		assert.ErrorIs(t, <-errch, http.ErrServerClosed)
+	})
+	t.Run("Start IPv6", func(t *testing.T) {
+		r, err := New("[::1]:0")
+		require.NoError(t, err)
+		errch, err := r.Start(context.TODO())
+		assert.NoError(t, err)
+		r.Stop(context.TODO())
+		assert.ErrorIs(t, <-errch, http.ErrServerClosed)
 	})
 }

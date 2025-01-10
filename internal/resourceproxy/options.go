@@ -28,15 +28,6 @@ import (
 // ResourceProxyOption is an option setting callback function
 type ResourceProxyOption func(p *ResourceProxy) error
 
-// podMatcher is the regular expression used to match a request path for pods
-const podMatcher = `^/api/v1/namespaces/([^\/]+)/pods/([^\/]+)$`
-
-// logMatcher is the regular expression used to match a request path for logs
-const logMatcher = `^/api/v1/namespaces/([^\/]+)/pods/([^\/]+)/log$`
-
-// execMatcher is the regular expression used to match a request path for exec
-const execMatcher = `^/api/v1/namespaces/([^\/]+)/pods/([^\/]+)/exec$`
-
 // WithRestConfig configures the proxy to use information from the given REST
 // config for connecting to upstream.
 func WithRestConfig(config *rest.Config) ResourceProxyOption {
@@ -50,12 +41,16 @@ func WithRestConfig(config *rest.Config) ResourceProxyOption {
 		if err != nil {
 			return fmt.Errorf("error parsing upstream server: %w", err)
 		}
+		if u.Scheme != "https" || u.Host == "" || u.Port() == "" {
+			return fmt.Errorf("invalid upstream server '%s'", config.Host)
+		}
 		p.upstreamAddr = fmt.Sprintf("%s:%s", u.Hostname(), u.Port())
 		p.upstreamScheme = u.Scheme
 		return nil
 	}
 }
 
+// WithTLSConfig sets the TLS configuration used for the proxy's listener
 func WithTLSConfig(t *tls.Config) ResourceProxyOption {
 	return func(p *ResourceProxy) error {
 		p.tlsConfig = t
@@ -86,42 +81,6 @@ func WithUpstreamAddress(host string, scheme string) ResourceProxyOption {
 func WithRequestMatcher(pattern string, methods []string, fn HandlerFunc) ResourceProxyOption {
 	return func(p *ResourceProxy) error {
 		rm, err := matcher(pattern, methods, fn)
-		if err != nil {
-			return err
-		}
-		p.interceptors = append(p.interceptors, rm)
-		return nil
-	}
-}
-
-// WithPodMatcher registers a handler for calls to pods
-func WithPodMatcher(fn HandlerFunc) ResourceProxyOption {
-	return func(p *ResourceProxy) error {
-		rm, err := matcher(podMatcher, []string{"namespace", "podname"}, fn)
-		if err != nil {
-			return err
-		}
-		p.interceptors = append(p.interceptors, rm)
-		return nil
-	}
-}
-
-// WithLogMatcher registers a handler for calls to pod logs
-func WithLogMatcher(fn HandlerFunc) ResourceProxyOption {
-	return func(p *ResourceProxy) error {
-		rm, err := matcher(logMatcher, []string{"namespace", "podname"}, fn)
-		if err != nil {
-			return err
-		}
-		p.interceptors = append(p.interceptors, rm)
-		return nil
-	}
-}
-
-// WithExecMatcher registers a handler for calls to pod exec
-func WithExecMatcher(fn HandlerFunc) ResourceProxyOption {
-	return func(p *ResourceProxy) error {
-		rm, err := matcher(execMatcher, []string{"namespace", "podname"}, fn)
 		if err != nil {
 			return err
 		}
