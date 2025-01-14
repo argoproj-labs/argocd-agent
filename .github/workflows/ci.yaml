@@ -114,6 +114,16 @@ jobs:
       - name: Compile all packages
         run: make build
 
+  build-docs:
+    name: Build the documentation
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Build the documentation
+        run: |
+          make build-docs
+
   test:
     name: Run unit tests
     if: ${{ needs.changes.outputs.code == 'true' }}

@@ -1,0 +1,39 @@
+site_name: argocd-agent
+repo_url: https://github.com/argoproj-labs/argocd-agent
+strict: true
+theme: 
+  name: material
+  palette:
+    primary: teal
+  logo: assets/logo.png
+markdown_extensions: 
+- codehilite
+- admonition
+- tables
+- toc:
+    permalink: true
+nav:
+  - Overview: index.md
+  - Concepts: 
+    - Components & terminology: concepts/components-terminology.md
+    - General architecture: concepts/architecture.md
+    - Integration with Argo CD: concepts/argocd-integration.md
+    - Agent modes:
+      - Overview: concepts/agent-modes/index.md
+      - Managed mode: concepts/agent-modes/managed.md
+      - Autonomous mode: concepts/agent-modes/autonomous.md
+  - Getting started:
+    - Overview: getting-started/index.md
+    - Kubernetes: getting-started/kubernetes/index.md
+    - OpenShift: getting-started/openshift/index.md
+    - OCM.io: getting-started/ocm-io/index.md
+  - Configuration:
+    - Principal: configuration/principal/index.md
+    - Agent: configuration/agent/index.md
+  - Contributing:
+    - Overview: contributing/index.md
+    - Coding guidelines: contributing/code.md 
+    - Documentation guidelines: contributing/docs.md 
+    - Submitting PRs: contributing/prs.md
+    - Code reviewing guide: contributing/review.md
+  - FAQ: faq/index.md
