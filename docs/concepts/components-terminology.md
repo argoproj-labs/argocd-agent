@@ -4,7 +4,7 @@ This chapter introduces the reader to the components and terminology of *argocd-
 
 ## Control plane cluster
 
-The *control plane* or *control plane cluster* is the heart of the architecture. It holds all configuration, is responsible for distributing the configuration among agents and hosts all central components used for observability and management. At the minimum, this cluster will host the *argocd-agent*'s [principal](#principal) component and the Argo CD API server, including the Argo CD web UI.
+The *control plane* or *control plane cluster* is the heart of the architecture. It holds all configuration, is responsible for distributing the configuration among [agents](#agent) and it hosts all central components used for observability and management. At the minimum, this cluster will host the *argocd-agent*'s [principal](#principal) component and the Argo CD API server, including the Argo CD web UI.
 
 The control plane cluster itself will not perform reconciliation of Argo CD `Applications` to any cluster, including itself.
 
