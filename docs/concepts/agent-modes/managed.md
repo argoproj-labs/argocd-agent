@@ -23,6 +23,7 @@ Changes to `Application` resources on the workload cluster that are not originat
 
 * Provides the classical Argo CD experience
 * Create and manage applications from the Argo CD UI, CLI or API
+* It has the lowest footprint on the workload cluster
 * Allows use of ApplicationSet generators that span over multiple clusters, such as cluster or cluster-decision generators
 
 ## Why not chose this mode
