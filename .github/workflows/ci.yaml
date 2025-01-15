@@ -46,7 +46,7 @@ jobs:
       - name: Download all Go modules
         run: |
           go mod download
-      - name: Check for tidyness of go.mod and go.sum
+      - name: Check for tidiness of go.mod and go.sum
         run: |
           go mod tidy
           git diff --exit-code -- .

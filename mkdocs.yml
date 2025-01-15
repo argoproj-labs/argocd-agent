@@ -14,6 +14,8 @@ markdown_extensions:
     permalink: true
 nav:
   - Overview: index.md
+  - Features:
+    - Overview: features/index.md
   - Concepts: 
     - Components & terminology: concepts/components-terminology.md
     - General architecture: concepts/architecture.md
