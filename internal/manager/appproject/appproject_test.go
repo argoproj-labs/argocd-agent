@@ -23,7 +23,6 @@ import (
 	appmock "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
-	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -65,13 +64,6 @@ func Test_ManagerOptions(t *testing.T) {
 		m, err := NewAppProjectManager(nil, "")
 		require.NoError(t, err)
 		assert.Equal(t, false, m.allowUpsert)
-		assert.Nil(t, m.metrics)
-	})
-
-	t.Run("NewManager with metrics", func(t *testing.T) {
-		m, err := NewAppProjectManager(nil, "", WithMetrics(&metrics.AppProjectClientMetrics{}))
-		require.NoError(t, err)
-		assert.NotNil(t, m.metrics)
 	})
 
 	t.Run("NewManager with upsert enabled", func(t *testing.T) {

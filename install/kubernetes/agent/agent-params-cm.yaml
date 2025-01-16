@@ -42,3 +42,6 @@ data:
   # agent.server.port: The remote port of the principal to connect to.
   # Default: "443"
   agent.server.port: "443"
+  # agent.metrics.port: The port the metrics server should listen on.
+  # Default: 8181
+  agent.metrics.port: "8181"

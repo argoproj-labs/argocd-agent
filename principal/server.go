@@ -112,6 +112,9 @@ type Server struct {
 
 	// clusterManager manages Argo CD cluster secrets and their mappings to agents
 	clusterMgr *cluster.Manager
+
+	// metrics holds principal side metrics
+	metrics *metrics.PrincipalMetrics
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
@@ -199,10 +202,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	if s.options.metricsPort > 0 {
+		s.metrics = metrics.NewPrincipalMetrics()
+
 		appInformerOpts = append(appInformerOpts, informer.WithMetrics[*v1alpha1.Application](prometheus.NewRegistry(), metrics.NewInformerMetrics("applications")))
-		appManagerOpts = append(appManagerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
 		projInformerOpts = append(projInformerOpts, informer.WithMetrics[*v1alpha1.AppProject](prometheus.NewRegistry(), metrics.NewInformerMetrics("appprojects")))
-		projManagerOpts = append(projManagerOpts, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
 	}
 
 	appInformer, err := informer.NewInformer(ctx, appInformerOpts...)
@@ -339,13 +342,22 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 
 	if s.options.serveGRPC {
-		if err := s.serveGRPC(ctx, errch); err != nil {
+		if err := s.serveGRPC(ctx, s.metrics, errch); err != nil {
 			return err
 		}
 	}
 
 	if s.options.metricsPort > 0 {
 		metrics.StartMetricsServer(metrics.WithListener("", s.options.metricsPort))
+
+		// A goroutine is started which calculates average connection time of all agents
+		// to export in metrics after every 3 minutes
+		go func() {
+			for {
+				metrics.GetAvgAgentConnectionTime(s.metrics)
+				time.Sleep(metrics.AvgCalculationInterval)
+			}
+		}()
 	}
 
 	err := s.StartEventProcessor(s.ctx)

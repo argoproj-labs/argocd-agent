@@ -23,7 +23,6 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
-	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v2/util/glob"
 	"github.com/sirupsen/logrus"
@@ -46,7 +45,6 @@ const LastUpdatedAnnotation = "argocd-agent.argoproj.io/last-updated"
 type AppProjectManager struct {
 	allowUpsert       bool
 	appprojectBackend backend.AppProject
-	metrics           *metrics.AppProjectClientMetrics
 	role              manager.ManagerRole
 	// mode is only set when Role is ManagerRoleAgent
 	mode manager.ManagerMode
@@ -82,13 +80,6 @@ func NewAppProjectManager(be backend.AppProject, namespace string, opts ...AppPr
 	}
 
 	return m, nil
-}
-
-// WithMetrics sets the metrics provider for the Manager
-func WithMetrics(m *metrics.AppProjectClientMetrics) AppProjectManagerOption {
-	return func(mgr *AppProjectManager) {
-		mgr.metrics = m
-	}
 }
 
 // WithAllowUpsert sets the upsert operations allowed flag
@@ -178,14 +169,7 @@ func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alph
 		if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
 			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
 		}
-		if m.metrics != nil {
-			m.metrics.AppProjectsCreated.WithLabelValues(project.Namespace).Inc()
-		}
 		return created, nil
-	} else {
-		if m.metrics != nil {
-			m.metrics.ProjectClientErrors.Inc()
-		}
 	}
 	return nil, nil
 }
@@ -257,13 +241,6 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 		}
 		if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Couldn't unignore change %s for AppProject %s: %v", updated.ResourceVersion, updated.Name, err)
-		}
-		if m.metrics != nil {
-			m.metrics.AppProjectsUpdated.WithLabelValues(incoming.Namespace).Inc()
-		}
-	} else {
-		if m.metrics != nil {
-			m.metrics.ProjectClientErrors.Inc()
 		}
 	}
 	return updated, err
@@ -343,9 +320,7 @@ func (m *AppProjectManager) Delete(ctx context.Context, namespace string, incomi
 		}
 	}
 
-	err = m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
-
-	return err
+	return m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
 }
 
 // RemoveFinalizers will remove finalizers on an existing app project.

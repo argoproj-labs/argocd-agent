@@ -38,7 +38,7 @@ func fetchMetricsOutput(t *testing.T) string {
 func Test_MetricsServer(t *testing.T) {
 	t.Run("Start metrics server", func(t *testing.T) {
 		errCh := StartMetricsServer(WithListener("127.0.0.1", 31337))
-		NewApplicationWatcherMetrics()
+		NewPrincipalMetrics()
 		ticker := time.NewTicker(time.Second)
 		select {
 		case err := <-errCh:
