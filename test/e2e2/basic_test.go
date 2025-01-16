@@ -73,6 +73,9 @@ func (suite *BasicTestSuite) Test_AgentManaged() {
 	// principal
 	app = argoapp.Application{}
 	err = suite.PrincipalClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+	// The destination on the agent will be set to in-cluster
+	app.Spec.Destination.Name = "in-cluster"
+	app.Spec.Destination.Server = ""
 	requires.NoError(err)
 	mapp := argoapp.Application{}
 	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &mapp, metav1.GetOptions{})

@@ -74,13 +74,18 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 		logCtx.Tracef("Queue shutdown in progress")
 		return nil
 	}
-	logCtx.Tracef("Grabbed an item")
+	logCtx.Trace("Grabbed an item")
 	if ev == nil {
 		// TODO: Is this really the right thing to do?
 		return nil
 	}
-
-	logCtx.WithField("resource_id", event.ResourceID(ev)).WithField("event_id", event.EventID(ev)).Trace("Adding an event to the event writer")
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"event_target": ev.DataSchema(),
+		"event_type":   ev.Type(),
+		"resource_id":  event.ResourceID(ev),
+		"event_id":     event.EventID(ev),
+	})
+	logCtx.Trace("Adding an event to the event writer")
 	a.eventWriter.Add(ev)
 
 	return nil

@@ -363,3 +363,17 @@ func WithWebSocket(enableWebSocket bool) ServerOption {
 		return nil
 	}
 }
+
+func WithKubeProxyEnabled(enabled bool) ServerOption {
+	return func(o *Server) error {
+		o.resourceProxyEnabled = enabled
+		return nil
+	}
+}
+
+func WithKubeProxyTLS(tlsConfig *tls.Config) ServerOption {
+	return func(o *Server) error {
+		o.resourceProxyTlsConfig = tlsConfig
+		return nil
+	}
+}

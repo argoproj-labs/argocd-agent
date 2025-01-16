@@ -20,4 +20,14 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
     exit 1
 fi
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
-go run github.com/argoproj-labs/argocd-agent/cmd/principal --allowed-namespaces '*' --insecure-tls-generate --insecure-jwt-generate --kubecontext vcluster-control-plane --log-level trace --passwd ${SCRIPTPATH}/creds/users.control-plane $ARGS
+go run github.com/argoproj-labs/argocd-agent/cmd/principal \
+	--allowed-namespaces '*' \
+	--insecure-tls-generate \
+	--insecure-jwt-generate \
+	--kubecontext vcluster-control-plane \
+	--log-level trace \
+	--namespace argocd \
+	--passwd ${SCRIPTPATH}/creds/users.control-plane $ARGS
+	#--resource-proxy-ca-path ${SCRIPTPATH}/creds/ca.crt \
+	#--resource-proxy-cert-path ${SCRIPTPATH}/creds/rp.crt \
+	#--resource-proxy-key-path ${SCRIPTPATH}/creds/rp.key \
