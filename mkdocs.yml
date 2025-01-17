@@ -34,6 +34,7 @@ nav:
     - Agent: configuration/agent/index.md
   - Contributing:
     - Overview: contributing/index.md
+    - Local development: contributing/local.md
     - Coding guidelines: contributing/code.md 
     - Documentation guidelines: contributing/docs.md 
     - Submitting PRs: contributing/prs.md
