@@ -25,13 +25,13 @@ This integration pattern requires some of the core components of Argo CD, specif
 
 As can be seen, the only component installed and running on the *workload cluster* is the *application-controller* (and the *applicationset-controller*, in case the agent runs in autonomous mode), and the *application-controller* is talking to a *repository-server* and a *redis-server* on the control plane cluster.
 
-**Advantages of this scenario**
+**Advantages of this pattern**
 
 * Less compute requirements on the workload clusters, as some of the heavy lifting is done on the control plane
 * Since the *repository-server* runs on the control plane cluster, the workload clusters don't need access to Git. They will only need to talk to the control plane cluster.
 * Since more of the important state (such as, rendered manifests) is stored on the control plane cluster's *redis-server*, it is cheaper for the Argo CD API on the control plane cluster to actually access the state. However, it should be noted that most of the traffic to *redis-server* stems from the *application-controller* as well as the *repository-server*.
 
-**Disadvantages of this scenario**
+**Disadvantages of this pattern**
 
 * The control plane cluster and its components become a single point of failure (SPoF) for the whole setup. If the workload cluster cannot reach the control plane cluster, or the components become unavailable, the *application-controller* on the workload clusters cannot render manifests anymore, or store important information in the cache. Reconciliation will stop working on the workload clusters.
 * The network traffic flowing between the workload cluster and the control plane cluster increases, potentially significantly. This might become a bottleneck, or result in higher bills depending on how your traffic is charged.
@@ -40,4 +40,15 @@ As can be seen, the only component installed and running on the *workload cluste
 
 ### Pattern 2: Fully autonomous workload clusters
 
-![Integration scenario 1: Autonomous spokes](../assets/02-integration-autonomous.png)
+This integration pattern also outsources the Argo CD *repository-server* and *redis-server* components in addition to the *application-controller* to the workload clusters. This pattern makes each workload cluster effectively an autonomous Argo CD installation, minus the configuration and observability aspects - which are provided on the central control plane.
+
+![Integration pattern 2: Autonomous spokes](../assets/02-integration-autonomous.png)
+
+**Advantages of this pattern**
+
+* Workload clusters become truly autonomous in their operations, while only configuration and observability will be affected when the control plane cluster becomes unavailable or has problems. With agents also operating in [autonomous mode](./agent-modes/autonomous.md), only observability will be affected by an outage of the control plane cluster.
+* (Much) less traffic has to flow between
+* Scaling of all Argo CD workloads per-cluster becomes possible
+* Single point of ingress in the control plane cluster (the principal)
+
+**Disadvantages of this pattern**

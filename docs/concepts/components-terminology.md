@@ -1,6 +1,6 @@
 # Components and terminology
 
-This chapter introduces the reader to the components and terminology of *argocd-agent*.
+This chapter introduces the reader to the components of *argocd-agent* and its terminology.
 
 ## Control plane cluster
 
