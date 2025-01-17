@@ -10,11 +10,15 @@ The control plane cluster itself will not perform reconciliation of Argo CD `App
 
 Typically, there exists only one control plane cluster in any given setup.
 
+The control plane cluster is sometimes called the *hub*.
+
 ## Workload cluster
 
 A *workload cluster* is a cluster that is the target for applications. In the classical Argo CD architecture, a workload cluster is one that you connect your Argo CD installation to, i.e. using `argocd cluster add` or its declarative equivalent. 
 
 In the case of *argocd-agent*, the workload cluster will host at least the *argocd-agent*'s [agent](#agent) component and Argo CD's application controller for local reconciliation. In a nutshell, each workload cluster needs to have a low footprint version of Argo CD installed to it.
+
+The workload cluster is sometimes called a *spoke*.
 
 ## Principal
 
@@ -33,3 +37,11 @@ The *agent* is a component that gets installed to each workload cluster. It will
 Depending on the features an *agent* should provide, it will require limited to extended set of privileges on the workload cluster.
 
 Each *agent* can run in one of the following modes: *managed* or *autonomous*. For more information, refer to the chapter about [agent modes](./agent-modes/index.md).
+
+## Hub
+
+See [control plane cluster](#control-plane-cluster)
+
+## Spoke
+
+See [workload cluster](#workload-cluster)

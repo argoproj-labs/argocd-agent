@@ -2,6 +2,12 @@
 
 This section of the documentation gives a broad overview about *argocd-agent*'s architecture, the terminology used and how things will fit together. In order to get started, and to understand the functionality and limitations of *argocd-agent*, it is important to get familiar with the architecture and the components that make up the project.
 
+## Problem statement
+
+In the classical Argo CD multi-cluster architecture, scaling out can become a tedious and difficult task. Usually, scaling out comes with a couple of generic challenges, as well as environment specific ones.
+
+**TODO**: Describe the problem in more detail here.
+
 ## Architectural diagram
 
 The following diagram shows a very simplified overview of *argocd-agent*'s architecture. In this particular example, there are three [workload clusters](./components-terminology.md#workload-cluster) connected to a single [control plane cluster](./components-terminology.md#control-plane-cluster). The light blue boxes are existing Argo CD components and assets, while the light green boxes are components added by *argocd-agent*.
@@ -14,7 +20,6 @@ As can be seen in the diagram, there is no connection between the central contro
 
 ## Scope and function
 
-In the classical Argo CD architecture, the central *application controller* establishes and maintains connections to each remote workload cluster. For being able to do so, the *application controller* will need a highly privileged service account on the remote cluster, and must maintain the credentials for this as well. Also, connecting a workload cluster to Argo CD is one of the most expensive operations. The *application controller* will watch and cache all resources, on all remote clusters. This process takes a significant amount of time and compute resources. The advantage in the classical model is that nothing special is required or needs to be maintained on the workload cluster, except for a service account that the *application-controller* on the control plane cluster can use to establish its connections.
 
 The agent-based architecture is a major shift from that classical architecture. It outsources some of the compute requirements to the workload clusters and synchronizes configuration between the control plane cluster and the workload clusters using a component on the control plane cluster, the [principal](./components-terminology.md#principal), and an [agent](./components-terminology.md#agent) on the workload cluster.
 
