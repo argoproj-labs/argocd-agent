@@ -178,9 +178,11 @@ func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alph
 		if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
 			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
 		}
+
 		if m.metrics != nil {
 			m.metrics.AppProjectsCreated.WithLabelValues(project.Namespace).Inc()
 		}
+
 		return created, nil
 	} else {
 		if m.metrics != nil {
@@ -343,9 +345,17 @@ func (m *AppProjectManager) Delete(ctx context.Context, namespace string, incomi
 		}
 	}
 
-	err = m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	if err := m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation); err != nil {
+		if m.metrics != nil {
+			m.metrics.ProjectClientErrors.Inc()
+		}
+		return err
+	}
 
-	return err
+	if m.metrics != nil {
+		m.metrics.AppProjectsDeleted.WithLabelValues(incoming.Namespace).Inc()
+	}
+	return nil
 }
 
 // RemoveFinalizers will remove finalizers on an existing app project.

@@ -92,6 +92,9 @@ type Server struct {
 	// The Principal will rely on gRPC over WebSocket for bi-directional streaming. This option could be enabled
 	// when there is an intermediate component that is HTTP/2 incompatible and downgrades the incoming request to HTTP/1.1
 	enableWebSocket bool
+
+	// metrics holds server side metrics
+	metrics *metrics.ServerMetrics
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
@@ -179,6 +182,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		appManagerOpts = append(appManagerOpts, application.WithMetrics(metrics.NewApplicationClientMetrics()))
 		projInformerOpts = append(projInformerOpts, informer.WithMetrics[*v1alpha1.AppProject](prometheus.NewRegistry(), metrics.NewInformerMetrics("appprojects")))
 		projManagerOpts = append(projManagerOpts, appproject.WithMetrics(metrics.NewAppProjectClientMetrics()))
+		s.metrics = metrics.NewServerMetricsMetrics()
 	}
 
 	appInformer, err := informer.NewInformer(ctx, appInformerOpts...)
@@ -227,13 +231,37 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 
 	if s.options.serveGRPC {
-		if err := s.serveGRPC(ctx, errch); err != nil {
+		if err := s.serveGRPC(ctx, s.metrics, errch); err != nil {
 			return err
 		}
 	}
 
 	if s.options.metricsPort > 0 {
 		metrics.StartMetricsServer(metrics.WithListener("", s.options.metricsPort))
+
+		// A goroutine is started which calculates average connection time of all agents
+		// to export in metrics after every 5 minutes
+		go func() {
+			for {
+				var totalTime time.Duration
+
+				// get SUM of time differences between current time and agent start time for all connected agents
+				for _, t := range metrics.ConnectionTimeMap {
+					totalTime = totalTime + time.Since(t).Round(time.Minute)
+				}
+
+				if totalTime != 0 {
+					// calculate average connection time
+					avg := int(totalTime.Minutes()) / len(metrics.ConnectionTimeMap)
+					s.metrics.AvgAgentConnectionTime.Set(float64(avg))
+				} else {
+					// Set metrics to zero if no agents are connected
+					s.metrics.AvgAgentConnectionTime.Set(float64(0))
+				}
+
+				time.Sleep(time.Minute * 5)
+			}
+		}()
 	}
 
 	err := s.StartEventProcessor(s.ctx)

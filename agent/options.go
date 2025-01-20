@@ -49,3 +49,14 @@ func WithMode(mode string) AgentOption {
 		return nil
 	}
 }
+
+func WithMetricsPort(port int) AgentOption {
+	return func(o *Agent) error {
+		if port > 0 && port < 32768 {
+			o.options.metricsPort = port
+			return nil
+		} else {
+			return fmt.Errorf("invalid port: %d", port)
+		}
+	}
+}

@@ -160,6 +160,7 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 		if err := m.IgnoreChange(created.QualifiedName(), created.ResourceVersion); err != nil {
 			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.QualifiedName(), err)
 		}
+
 		if m.metrics != nil {
 			m.metrics.AppsCreated.WithLabelValues(app.Namespace).Inc()
 		}
@@ -256,6 +257,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Couldn't unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
+
 		if m.metrics != nil {
 			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
 		}
@@ -441,8 +443,9 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
+
 		if m.metrics != nil {
-			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
+			m.metrics.AppsStatusUpdated.WithLabelValues(incoming.Namespace).Inc()
 		}
 	} else {
 		if m.metrics != nil {
@@ -506,7 +509,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
 		if m.metrics != nil {
-			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
+			m.metrics.AppsOperationUpdated.WithLabelValues(incoming.Namespace).Inc()
 		}
 	} else {
 		if m.metrics != nil {
@@ -543,9 +546,17 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 		}
 	}
 
-	err = m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	if err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation); err != nil {
+		if m.metrics != nil {
+			m.metrics.AppClientErrors.Inc()
+		}
+		return err
+	}
 
-	return err
+	if m.metrics != nil {
+		m.metrics.AppsDeleted.WithLabelValues(incoming.Namespace).Inc()
+	}
+	return nil
 }
 
 // update updates an existing Application resource on the Manager m's backend

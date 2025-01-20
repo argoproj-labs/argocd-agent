@@ -20,10 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream/mock"
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -32,10 +33,11 @@ import (
 )
 
 func Test_Subscribe(t *testing.T) {
+	metric := metrics.NewServerMetricsMetrics()
 	t.Run("Test send to subcription stream", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
-		s := NewServer(qs)
+		s := NewServer(qs, metric)
 		st := &mock.MockEventServer{AgentName: "default"}
 		st.AddRecvHook(func(s *mock.MockEventServer) error {
 			log().WithField("component", "RecvHook").Tracef("Entry")
@@ -65,7 +67,7 @@ func Test_Subscribe(t *testing.T) {
 	t.Run("Test recv from subscription stream", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
-		s := NewServer(qs)
+		s := NewServer(qs, metric)
 		st := &mock.MockEventServer{AgentName: "default", Application: v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "foo",
@@ -90,7 +92,7 @@ func Test_Subscribe(t *testing.T) {
 	t.Run("Test connection closed by peer", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
-		s := NewServer(qs)
+		s := NewServer(qs, metric)
 		st := &mock.MockEventServer{AgentName: "default"}
 		st.AddRecvHook(func(s *mock.MockEventServer) error {
 			return fmt.Errorf("some error")
@@ -104,7 +106,7 @@ func Test_Subscribe(t *testing.T) {
 	t.Run("Test no agent information in context", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
-		s := NewServer(qs)
+		s := NewServer(qs, metric)
 		st := &mock.MockEventServer{AgentName: ""}
 		err := s.Subscribe(st)
 		assert.Error(t, err)

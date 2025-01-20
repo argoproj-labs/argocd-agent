@@ -15,10 +15,15 @@
 package metrics
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	// "github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// ConnectionTimeMap is an utility for AvgAgentConnectionTime
+var ConnectionTimeMap = make(map[string]time.Time)
 
 type ApplicationMetrics struct {
 	ApplicationWatcherMetrics
@@ -38,6 +43,12 @@ type InformerMetrics struct {
 	DeleteDuration  *prometheus.GaugeVec
 }
 
+// ServerMetrics holds metrics about connected Agent at Principal side
+type ServerMetrics struct {
+	AgentConnected         prometheus.Gauge
+	AvgAgentConnectionTime prometheus.Gauge
+}
+
 // ApplicationWatcherMetrics holds metrics about Applications watched by the agent
 type ApplicationWatcherMetrics struct {
 	AppsWatched      prometheus.Gauge
@@ -48,10 +59,12 @@ type ApplicationWatcherMetrics struct {
 }
 
 type ApplicationClientMetrics struct {
-	AppsCreated     *prometheus.CounterVec
-	AppsUpdated     *prometheus.CounterVec
-	AppsDeleted     *prometheus.CounterVec
-	AppClientErrors prometheus.Counter
+	AppsCreated          *prometheus.CounterVec
+	AppsUpdated          *prometheus.CounterVec
+	AppsStatusUpdated    *prometheus.CounterVec
+	AppsOperationUpdated *prometheus.CounterVec
+	AppsDeleted          *prometheus.CounterVec
+	AppClientErrors      prometheus.Counter
 }
 
 type AppProjectWatcherMetrics struct {
@@ -63,10 +76,12 @@ type AppProjectWatcherMetrics struct {
 }
 
 type AppProjectClientMetrics struct {
-	AppProjectsCreated  *prometheus.CounterVec
-	AppProjectsUpdated  *prometheus.CounterVec
-	AppProjectsDeleted  *prometheus.CounterVec
-	ProjectClientErrors prometheus.Counter
+	AppProjectsCreated          *prometheus.CounterVec
+	AppProjectsUpdated          *prometheus.CounterVec
+	AppProjectsStatusUpdated    *prometheus.CounterVec
+	AppProjectsOperationUpdated *prometheus.CounterVec
+	AppProjectsDeleted          *prometheus.CounterVec
+	ProjectClientErrors         prometheus.Counter
 }
 
 func NewInformerMetrics(label string) *InformerMetrics {
@@ -106,23 +121,15 @@ func NewApplicationWatcherMetrics() *ApplicationWatcherMetrics {
 	return am
 }
 
-func NewApplicationClientMetrics() *ApplicationClientMetrics {
-	return &ApplicationClientMetrics{
-		AppsCreated: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "argocd_agent_client_applications_created",
-			Help: "The total number of applications created by the application client",
-		}, []string{"namespace"}),
-		AppsUpdated: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "argocd_agent_client_applications_updated",
-			Help: "The total number of applications updated by the application client",
-		}, []string{"namespace"}),
-		AppsDeleted: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "argocd_agent_client_applications_deleted",
-			Help: "The total number of applications deleted by the application client",
-		}, []string{"namespace"}),
-		AppClientErrors: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_client_applications_errors",
-			Help: "The total number of applications deleted by the application client",
+func NewServerMetricsMetrics() *ServerMetrics {
+	return &ServerMetrics{
+		AgentConnected: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "argocd_agent_connected_with_principal",
+			Help: "The total number of agents connected with principal",
+		}),
+		AvgAgentConnectionTime: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "argocd_agent_avg_connection_time",
+			Help: "The average time all agents are connected for",
 		}),
 	}
 }
@@ -137,13 +144,21 @@ func NewAppProjectClientMetrics() *AppProjectClientMetrics {
 			Name: "argocd_agent_client_appprojects_updated",
 			Help: "The total number of appprojects updated by the appproject client",
 		}, []string{"namespace"}),
+		AppProjectsStatusUpdated: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_appprojects_status_updated",
+			Help: "The total number of appprojects status updated by the appproject client",
+		}, []string{"namespace"}),
+		AppProjectsOperationUpdated: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_appprojects_operation_updated",
+			Help: "The total number of appprojects operation updated by the appproject client",
+		}, []string{"namespace"}),
 		AppProjectsDeleted: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "argocd_agent_client_appprojects_deleted",
 			Help: "The total number of appprojects deleted by the appproject client",
 		}, []string{"namespace"}),
 		ProjectClientErrors: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "argocd_agent_client_appprojects_errors",
-			Help: "The total number of appprojects deleted by the appproject client",
+			Help: "The total number of appproject errors reported by the appproject client",
 		}),
 	}
 }
@@ -168,6 +183,35 @@ func NewAppProjectWatcherMetrics() *AppProjectWatcherMetrics {
 		}),
 	}
 	return am
+}
+
+func NewApplicationClientMetrics() *ApplicationClientMetrics {
+	return &ApplicationClientMetrics{
+		AppsCreated: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_applications_created",
+			Help: "The total number of applications created by the application client",
+		}, []string{"namespace"}),
+		AppsUpdated: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_applications_updated",
+			Help: "The total number of applications updated by the application client",
+		}, []string{"namespace"}),
+		AppsStatusUpdated: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_applications_status_updated",
+			Help: "The total number of applications status updated by the application client",
+		}, []string{"namespace"}),
+		AppsOperationUpdated: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_applications_operation_updated",
+			Help: "The total number of applications operation updated by the application client",
+		}, []string{"namespace"}),
+		AppsDeleted: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_client_applications_deleted",
+			Help: "The total number of applications deleted by the application client",
+		}, []string{"namespace"}),
+		AppClientErrors: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "argocd_agent_client_applications_errors",
+			Help: "The total number of application errors reported by the application client",
+		}),
+	}
 }
 
 // func (am *ApplicationWatcherMetrics) SetWatched(num int64) {

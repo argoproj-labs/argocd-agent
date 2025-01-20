@@ -51,6 +51,8 @@ func NewAgentRunCommand() *cobra.Command {
 		tlsClientCrt    string
 		tlsClientKey    string
 		enableWebSocket bool
+		disableMetrics  bool
+		metricsPort     int
 	)
 	command := &cobra.Command{
 		Short: "Run the argocd-agent agent component",
@@ -119,10 +121,16 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 			agentOpts = append(agentOpts, agent.WithRemote(remote))
 			agentOpts = append(agentOpts, agent.WithMode(agentMode))
+
+			if !disableMetrics {
+				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
+			}
+
 			ag, err := agent.NewAgent(ctx, kubeConfig.ApplicationsClientset, namespace, agentOpts...)
 			if err != nil {
 				cmd.Fatal("Could not create a new agent instance: %v", err)
 			}
+
 			if err := ag.Start(ctx); err != nil {
 				cmd.Fatal("Could not start agent: %v", err)
 			}
@@ -166,6 +174,12 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&enableWebSocket, "enable-websocket",
 		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_WEBSOCKET", false),
 		"Agent will rely on gRPC over WebSocket to stream events to the Principal")
+	command.Flags().IntVar(&metricsPort, "metrics-port",
+		env.NumWithDefault("ARGOCD_AGENT_METRICS_PORT", cmd.ValidPort, 8181),
+		"Port the metrics server will listen on")
+	command.Flags().BoolVar(&disableMetrics, "disable-metrics",
+		env.BoolWithDefault("ARGOCD_AGENT_DISABLE_METRICS", false),
+		"Disable metrics collection and metrics server")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
