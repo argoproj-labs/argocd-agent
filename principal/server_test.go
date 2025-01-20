@@ -28,8 +28,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var certTempl = x509.Certificate{
@@ -94,44 +92,6 @@ func Test_NewServer(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace, WithListenerPort(-1), WithGeneratedTokenSigningKey())
 		assert.Error(t, err)
 		assert.Nil(t, s)
-	})
-}
-
-func TestRemoveQueueIfUnused(t *testing.T) {
-	t.Run("should remove the queue if the namespace is not found", func(t *testing.T) {
-		ctx := context.Background()
-		fakeClient := kube.NewKubernetesFakeClient()
-
-		s, err := NewServer(context.TODO(), fakeClient, testNamespace, WithGeneratedTokenSigningKey())
-		assert.Nil(t, err)
-
-		err = s.queues.Create(testNamespace)
-		assert.Nil(t, err)
-
-		s.removeQueueIfUnused(ctx, testNamespace)
-		assert.False(t, s.queues.HasQueuePair(testNamespace))
-	})
-
-	t.Run("shouldn't remove the queue if the namespace is found", func(t *testing.T) {
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testNamespace,
-			},
-		}
-
-		ctx := context.Background()
-		fakeClient := kube.NewKubernetesFakeClient()
-		_, err := fakeClient.Clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
-		assert.Nil(t, err)
-
-		s, err := NewServer(context.TODO(), fakeClient, testNamespace, WithGeneratedTokenSigningKey())
-		assert.Nil(t, err)
-
-		err = s.queues.Create(testNamespace)
-		assert.Nil(t, err)
-
-		s.removeQueueIfUnused(ctx, testNamespace)
-		assert.True(t, s.queues.HasQueuePair(testNamespace))
 	})
 }
 

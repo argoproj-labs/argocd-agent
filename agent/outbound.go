@@ -18,6 +18,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // addAppCreationToQueue processes a new application event originating from the
@@ -106,4 +107,21 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	}
 	q.Add(a.emitter.ApplicationEvent(event.Delete, app))
 	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app delete event to send queue")
+}
+
+// deleteNamespaceCallback is called when the user deletes the agent namespace.
+// Since there is no namespace we can remove the queue associated with this agent.
+func (a *Agent) deleteNamespaceCallback(outbound *corev1.Namespace) {
+	logCtx := log().WithField("event", "DeleteNamespace").WithField("agent", outbound.Name)
+
+	if !a.queues.HasQueuePair(outbound.Name) {
+		return
+	}
+
+	if err := a.queues.Delete(outbound.Name, true); err != nil {
+		logCtx.WithError(err).Error("failed to remove the queue pair for a deleted agent namespace")
+		return
+	}
+
+	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
 }
