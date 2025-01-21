@@ -17,8 +17,10 @@ package principal
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	wqmock "github.com/argoproj-labs/argocd-agent/test/mocks/k8s-workqueue"
@@ -360,5 +362,64 @@ func Test_processAppProjectEvent(t *testing.T) {
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		require.Equal(t, ev, *got)
 		assert.ErrorContains(t, err, "event type not allowed")
+	})
+}
+
+func Test_processResourceEventResponse(t *testing.T) {
+	t.Run("Successful processing of event", func(t *testing.T) {
+		rp, err := resourceproxy.New("127.0.0.1:0")
+		require.NoError(t, err)
+		s := &Server{resourceProxy: rp}
+		rch, err := s.resourceProxy.Track("123", "agent")
+		require.NoError(t, err)
+		require.NotNil(t, rch)
+		go func() {
+			<-rch
+		}()
+		evs := event.NewEventSource("agent")
+		sentEv := evs.NewResourceResponseEvent("123", 200, "OK")
+		err = s.processResourceEventResponse(context.TODO(), "agent", sentEv)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Timeout waiting for event", func(t *testing.T) {
+		rp, err := resourceproxy.New("127.0.0.1:0")
+		require.NoError(t, err)
+		s := &Server{resourceProxy: rp}
+		rch, err := s.resourceProxy.Track("123", "agent")
+		require.NoError(t, err)
+		require.NotNil(t, rch)
+		evs := event.NewEventSource("agent")
+		sentEv := evs.NewResourceResponseEvent("123", 200, "OK")
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+		err = s.processResourceEventResponse(ctx, "agent", sentEv)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("Response for untracked resource", func(t *testing.T) {
+		rp, err := resourceproxy.New("127.0.0.1:0")
+		require.NoError(t, err)
+		s := &Server{resourceProxy: rp}
+		rch, err := s.resourceProxy.Track("123", "agent")
+		require.NoError(t, err)
+		require.NotNil(t, rch)
+		evs := event.NewEventSource("agent")
+		sentEv := evs.NewResourceResponseEvent("124", 200, "OK")
+		err = s.processResourceEventResponse(context.TODO(), "agent", sentEv)
+		assert.ErrorContains(t, err, "response not tracked")
+	})
+
+	t.Run("Response for wrong agent", func(t *testing.T) {
+		rp, err := resourceproxy.New("127.0.0.1:0")
+		require.NoError(t, err)
+		s := &Server{resourceProxy: rp}
+		rch, err := s.resourceProxy.Track("123", "other")
+		require.NoError(t, err)
+		require.NotNil(t, rch)
+		evs := event.NewEventSource("agent")
+		sentEv := evs.NewResourceResponseEvent("123", 200, "OK")
+		err = s.processResourceEventResponse(context.TODO(), "agent", sentEv)
+		assert.ErrorContains(t, err, "agent mismap")
 	})
 }

@@ -61,7 +61,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	case event.TargetAppProject:
 		err = s.processAppProjectEvent(ctx, agentName, ev)
 	case event.TargetResource:
-		err = s.processResourceEvent(ctx, agentName, ev)
+		err = s.processResourceEventResponse(ctx, agentName, ev)
 	default:
 		err = fmt.Errorf("unknown target: '%s'", target)
 	}
@@ -218,8 +218,9 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 	return nil
 }
 
-// processResourceEvent will process a response to a resource request event.
-func (s *Server) processResourceEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
+// processResourceEventResponse will process a response to a resource request
+// event.
+func (s *Server) processResourceEventResponse(ctx context.Context, agentName string, ev *cloudevents.Event) error {
 	UUID := event.EventID(ev)
 	// We need to make sure that a) the event is tracked at all, and b) the
 	// event is for the currently processed agent.

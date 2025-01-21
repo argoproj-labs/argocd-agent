@@ -59,7 +59,7 @@ func (p *ResourceProxy) Track(eventId string, agentName string) (<-chan *cloudev
 	if ok {
 		return nil, fmt.Errorf("resource with ID %s already tracked", eventId)
 	}
-	ch := make(chan *cloudevents.Event, 1)
+	ch := make(chan *cloudevents.Event)
 	p.statemap.requests[eventId] = &requestWrapper{agentName: agentName, evCh: ch}
 	return ch, nil
 }
