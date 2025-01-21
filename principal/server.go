@@ -119,8 +119,9 @@ var noAuthEndpoints = map[string]bool{
 
 const waitForSyncedDuration = 60 * time.Second
 
-// defaultKubeProxyListenerAddr is the default listener address for kube-proxy
-const defaultKubeProxyListenerAddr = "0.0.0.0:9090"
+// defaultResourceProxyListenerAddr is the default listener address for the
+// resource proxy.
+const defaultResourceProxyListenerAddr = "0.0.0.0:9090"
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
@@ -232,11 +233,11 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	if s.resourceProxyListenAddr == "" {
-		s.resourceProxyListenAddr = defaultKubeProxyListenerAddr
+		s.resourceProxyListenAddr = defaultResourceProxyListenerAddr
 	}
 
-	// Instantiate our KubeProxy to intercept Kubernetes requests from Argo CD's
-	// API server.
+	// Instantiate our ResourceProxy to intercept Kubernetes requests from Argo
+	// CD's API server.
 	if s.resourceProxyEnabled {
 		// TODO(jannfis): Enable fetching APIs and resource counts
 		s.resourceProxy, err = resourceproxy.New(s.resourceProxyListenAddr,
@@ -366,7 +367,7 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	if s.resourceProxy != nil {
 		_, err = s.resourceProxy.Start(s.ctx)
 		if err != nil {
-			return fmt.Errorf("unable to start KubeProxy: %w", err)
+			return fmt.Errorf("unable to start ResourceProxy: %w", err)
 		}
 		log().Infof("Resource proxy started")
 	} else {

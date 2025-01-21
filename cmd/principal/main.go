@@ -139,17 +139,17 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			var proxyTls *tls.Config
 			if resourceProxyCertPath != "" && resourceProxyKeyPath != "" && resourceProxyCAPath != "" {
-				proxyTls, err = getKubeProxyTLSConfigFromFiles(resourceProxyCertPath, resourceProxyKeyPath, resourceProxyCAPath)
+				proxyTls, err = getResourceProxyTLSConfigFromFiles(resourceProxyCertPath, resourceProxyKeyPath, resourceProxyCAPath)
 			} else {
-				proxyTls, err = getKubeProxyTLSConfigFromKube(kubeConfig, namespace)
+				proxyTls, err = getResourceProxyTLSConfigFromKube(kubeConfig, namespace)
 			}
 			if err != nil {
 				cmdutil.Fatal("Error reading TLS config for resource proxy: %v", err)
 			}
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
 			opts = append(opts, principal.WithClientCertSubjectMatch(clientCertSubjectMatch))
-			opts = append(opts, principal.WithKubeProxyEnabled(enableResourceProxy))
-			opts = append(opts, principal.WithKubeProxyTLS(proxyTls))
+			opts = append(opts, principal.WithResourceProxyEnabled(enableResourceProxy))
+			opts = append(opts, principal.WithResourceProxyTLS(proxyTls))
 
 			if jwtKey != "" {
 				opts = append(opts, principal.WithTokenSigningKeyFromFile(jwtKey))
@@ -304,12 +304,12 @@ func observer(interval time.Duration) {
 	}()
 }
 
-// getKubeProxyTLSConfigFromKube reads the kubeproxy TLS configuration from the
+// getResourceProxyTLSConfigFromKube reads the kubeproxy TLS configuration from the
 // cluster and returns it.
 //
 // The secret names where the certificates are stored in are hard-coded at the
 // moment.
-func getKubeProxyTLSConfigFromKube(kubeClient *kube.KubernetesClient, namespace string) (*tls.Config, error) {
+func getResourceProxyTLSConfigFromKube(kubeClient *kube.KubernetesClient, namespace string) (*tls.Config, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	proxyCert, err := tlsutil.TLSCertFromSecret(ctx, kubeClient.Clientset, namespace, config.SecretNameProxyTls)
@@ -333,9 +333,9 @@ func getKubeProxyTLSConfigFromKube(kubeClient *kube.KubernetesClient, namespace 
 	return proxyTls, nil
 }
 
-// getKubeProxyTLSConfigFromFile reads the kubeproxy TLS configuration from
+// getResourceProxyTLSConfigFromFiles reads the kubeproxy TLS configuration from
 // given files and returns it.
-func getKubeProxyTLSConfigFromFiles(certPath, keyPath, caPath string) (*tls.Config, error) {
+func getResourceProxyTLSConfigFromFiles(certPath, keyPath, caPath string) (*tls.Config, error) {
 	proxyCert, err := tlsutil.TlsCertFromFile(certPath, keyPath, false)
 	if err != nil {
 		return nil, err
