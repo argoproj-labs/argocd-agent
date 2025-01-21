@@ -16,8 +16,8 @@
 Package cluster implements various functions for working with Argo CD cluster
 configuration.
 
-Its main component is the ClusterManager, which essentially manages Argo CD
-cluster secrets and maps them to agents.
+Its main component is the cluster manager Manager, which essentially manages
+Argo CD cluster secrets and maps them to agents.
 */
 package cluster
 
@@ -50,11 +50,14 @@ const syncTimeout = 30 * time.Second
 type Manager struct {
 	mutex      sync.RWMutex
 	ctx        context.Context
-	clusters   map[string]*v1alpha1.Cluster
 	informer   *informer.Informer[*v1.Secret]
 	namespace  string
 	kubeclient kubernetes.Interface
-	filters    *filter.Chain[*v1.Secret]
+	// clusters is a map of clusters to agent names.
+	clusters map[string]*v1alpha1.Cluster
+	// filters is a filter chain for the secret informer used by the cluster
+	// manager
+	filters *filter.Chain[*v1.Secret]
 }
 
 // NewManager instantiates and initializes a new Manager.
