@@ -119,32 +119,32 @@ func New(addr string, options ...ResourceProxyOption) (*ResourceProxy, error) {
 	}
 
 	// If not upstream host was set, we use the default
-	if p.upstreamAddr == "" {
-		p.upstreamAddr = defaultUpstreamHost
-	}
+	// if p.upstreamAddr == "" {
+	// 	p.upstreamAddr = defaultUpstreamHost
+	// }
 
 	// If not upstream scheme was set, we use the default
-	if p.upstreamScheme == "" {
-		p.upstreamScheme = defaultUpstreamScheme
-	}
+	// if p.upstreamScheme == "" {
+	// 	p.upstreamScheme = defaultUpstreamScheme
+	// }
 
 	p.mux = http.NewServeMux()
 
 	// Configure the reverse proxy that proxies most of the requests to our
 	// upstream Kube API. Anything that's not explicitly handled otherwise
 	// will be routed to the upstream as-is.
-	p.proxy = &httputil.ReverseProxy{
-		ErrorLog: nil,
-		Director: func(r *http.Request) {
-			r.URL.Host = p.upstreamAddr
-			r.URL.Scheme = p.upstreamScheme
-		},
-		Transport: p.upstreamTransport,
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log().WithError(err).Errorf("Could not connect to upstream '%s://%s'", p.upstreamScheme, p.upstreamAddr)
-			w.WriteHeader(http.StatusBadGateway)
-		},
-	}
+	// p.proxy = &httputil.ReverseProxy{
+	// 	ErrorLog: nil,
+	// 	Director: func(r *http.Request) {
+	// 		r.URL.Host = p.upstreamAddr
+	// 		r.URL.Scheme = p.upstreamScheme
+	// 	},
+	// 	Transport: p.upstreamTransport,
+	// 	ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+	// 		log().WithError(err).Errorf("Could not connect to upstream '%s://%s'", p.upstreamScheme, p.upstreamAddr)
+	// 		w.WriteHeader(http.StatusBadGateway)
+	// 	},
+	// }
 
 	// proxyHandler is the main HTTP handler, used to process every request
 	p.mux.HandleFunc("/", p.proxyHandler)
@@ -257,15 +257,9 @@ func (p *ResourceProxy) proxyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Finally, if we had no handler match, push the request through the proxy
-	// so that it ends up at the real Kubernetes API server.
-	if p.upstreamTransport != nil {
-		log().Debugf("No interceptor matched %s %s - proxying to upstream", r.Method, r.RequestURI)
-		p.proxy.ServeHTTP(w, r)
-	} else {
-		log().Debugf("No interceptor matched %s %s - no upstream configured", r.Method, r.RequestURI)
-		w.WriteHeader(http.StatusForbidden)
-	}
+	// Finally, if we had no handler match, we don't handle it
+	log().Debugf("No interceptor matched %s %s", r.Method, r.RequestURI)
+	w.WriteHeader(http.StatusBadRequest)
 }
 
 func log() *logrus.Entry {

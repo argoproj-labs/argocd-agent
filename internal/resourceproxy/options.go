@@ -16,62 +16,16 @@ package resourceproxy
 
 import (
 	"crypto/tls"
-	"fmt"
-	"net/http"
-	"net/url"
 	"regexp"
-
-	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
-	"k8s.io/client-go/rest"
 )
 
 // ResourceProxyOption is an option setting callback function
 type ResourceProxyOption func(p *ResourceProxy) error
 
-// WithRestConfig configures the proxy to use information from the given REST
-// config for connecting to upstream.
-func WithRestConfig(config *rest.Config) ResourceProxyOption {
-	return func(p *ResourceProxy) error {
-		tr, err := tlsutil.TransportFromConfig(config)
-		if err != nil {
-			return err
-		}
-		p.upstreamTransport = tr
-		u, err := url.Parse(config.Host)
-		if err != nil {
-			return fmt.Errorf("error parsing upstream server: %w", err)
-		}
-		if u.Scheme != "https" || u.Host == "" || u.Port() == "" {
-			return fmt.Errorf("invalid upstream server '%s'", config.Host)
-		}
-		p.upstreamAddr = fmt.Sprintf("%s:%s", u.Hostname(), u.Port())
-		p.upstreamScheme = u.Scheme
-		return nil
-	}
-}
-
 // WithTLSConfig sets the TLS configuration used for the proxy's listener
 func WithTLSConfig(t *tls.Config) ResourceProxyOption {
 	return func(p *ResourceProxy) error {
 		p.tlsConfig = t
-		return nil
-	}
-}
-
-// WithUpstreamTransport sets the transport to use when connecting to the
-// upstream API server.
-func WithUpstreamTransport(t *http.Transport) ResourceProxyOption {
-	return func(p *ResourceProxy) error {
-		p.upstreamTransport = t
-		return nil
-	}
-}
-
-// WithUpstreamAddress sets the address for our upstream Kube API
-func WithUpstreamAddress(host string, scheme string) ResourceProxyOption {
-	return func(p *ResourceProxy) error {
-		p.upstreamAddr = host
-		p.upstreamScheme = scheme
 		return nil
 	}
 }

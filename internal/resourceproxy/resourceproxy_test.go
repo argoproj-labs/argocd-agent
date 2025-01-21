@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,10 +16,6 @@ func Test_NewProxy(t *testing.T) {
 		p, err := New("127.0.0.1:8080")
 		assert.NoError(t, err)
 		assert.NotNil(t, p)
-
-		// Assert some defaults
-		assert.Equal(t, defaultUpstreamHost, p.upstreamAddr)
-		assert.Equal(t, defaultUpstreamScheme, p.upstreamScheme)
 
 		// Interceptors should be empty
 		assert.Len(t, p.interceptors, 0)
@@ -33,34 +30,21 @@ func Test_NewProxy(t *testing.T) {
 
 func Test_proxyHandler(t *testing.T) {
 	t.Run("It routes to the proxy", func(t *testing.T) {
-		proxied := false
-		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			proxied = true
-		}))
-		defer s.Close()
-		p, err := New("127.0.0.1:8080",
-			WithUpstreamAddress(s.Listener.Addr().String(), "http"),
-			WithUpstreamTransport(&http.Transport{}),
-		)
+		p, err := New("127.0.0.1:8080")
 		require.NoError(t, err)
 		require.NotNil(t, p)
 		rec := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/test", nil)
 		p.proxyHandler(rec, r)
-		assert.True(t, proxied)
+		assert.Equal(t, http.StatusBadRequest, rec.Result().StatusCode)
 	})
 	t.Run("It intercepts correctly", func(t *testing.T) {
-		proxied := false
-		intercepted := true
-		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			proxied = true
-		}))
-		defer s.Close()
+		intercepted := false
 		p, err := New("127.0.0.1:8080",
-			WithUpstreamAddress(s.Listener.Addr().String(), "http"),
-			WithUpstreamTransport(&http.Transport{}),
-			WithRequestMatcher("^/test/foo$", nil, func(w http.ResponseWriter, r *http.Request, params Params) {
+			WithRequestMatcher("^/test/foo$", []string{"get"}, func(w http.ResponseWriter, r *http.Request, params Params) {
 				intercepted = true
+				log().Tracef("Writing OK")
+				w.WriteHeader(http.StatusOK)
 			}),
 		)
 		require.NoError(t, err)
@@ -68,18 +52,18 @@ func Test_proxyHandler(t *testing.T) {
 		rec := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/test", nil)
 		p.proxyHandler(rec, r)
-		assert.True(t, proxied)
-		proxied = false
+		assert.Equal(t, http.StatusBadRequest, rec.Result().StatusCode)
 
+		rec = httptest.NewRecorder()
 		r = httptest.NewRequest(http.MethodGet, "/test/foo", nil)
 		p.proxyHandler(rec, r)
-		assert.False(t, proxied)
 		assert.True(t, intercepted)
-		intercepted = false
+		assert.Equal(t, http.StatusOK, rec.Result().StatusCode)
+
+		rec = httptest.NewRecorder()
 		r = httptest.NewRequest(http.MethodGet, "/test/foo/bar", nil)
 		p.proxyHandler(rec, r)
-		assert.True(t, proxied)
-		assert.False(t, intercepted)
+		assert.Equal(t, http.StatusBadRequest, rec.Result().StatusCode)
 
 	})
 }
@@ -101,4 +85,8 @@ func Test_Start(t *testing.T) {
 		r.Stop(context.TODO())
 		assert.ErrorIs(t, <-errch, http.ErrServerClosed)
 	})
+}
+
+func init() {
+	logrus.SetLevel(logrus.TraceLevel)
 }
