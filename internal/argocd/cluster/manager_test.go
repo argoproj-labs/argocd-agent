@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
-	"github.com/argoproj-labs/argocd-agent/test/testutil"
 	"github.com/argoproj/argo-cd/v2/common"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
@@ -14,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const secretName = "cluster-123"
@@ -63,10 +63,11 @@ func Test_onClusterAdd(t *testing.T) {
 		_, err := clt.CoreV1().Secrets("argocd").Create(context.TODO(), s, metav1.CreateOptions{})
 		require.NoError(t, err)
 		var nc *v1alpha1.Cluster
-		testutil.WaitForChange(t, 1*time.Second, func() bool {
+		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
 			nc = m.Mapping("agent-1")
-			return nc != nil
+			return nc != nil, nil
 		})
+		assert.NoError(t, err)
 		assert.NotNil(t, nc)
 		assert.Equal(t, c.Name, nc.Name)
 		assert.Equal(t, c.Server, nc.Server)
@@ -83,12 +84,13 @@ func Test_onClusterAdd(t *testing.T) {
 		s.Labels[LabelKeyClusterAgentMapping] = "agent-2"
 		_, err = clt.CoreV1().Secrets("argocd").Update(context.TODO(), s, metav1.UpdateOptions{})
 		require.NoError(t, err)
-		testutil.WaitForChange(t, 1*time.Second, func() bool {
+		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
 			if m.HasMapping("agent-2") {
-				return m.Mapping("agent-2").Server == c.Server
+				return m.Mapping("agent-2").Server == c.Server, nil
 			}
-			return false
+			return false, nil
 		})
+		assert.NoError(t, err)
 	})
 
 	t.Run("Cluster is remapped when agent label changes", func(t *testing.T) {
@@ -100,9 +102,10 @@ func Test_onClusterAdd(t *testing.T) {
 		s.Labels[LabelKeyClusterAgentMapping] = "agent-3"
 		_, err = clt.CoreV1().Secrets("argocd").Update(context.TODO(), s, metav1.UpdateOptions{})
 		require.NoError(t, err)
-		testutil.WaitForChange(t, 1*time.Second, func() bool {
-			return !m.HasMapping("agent-2") && m.HasMapping("agent-3")
+		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
+			return !m.HasMapping("agent-2") && m.HasMapping("agent-3"), nil
 		})
+		assert.NoError(t, err)
 	})
 
 	t.Run("Cluster mapping is updated when secret is updated", func(t *testing.T) {
@@ -111,13 +114,14 @@ func Test_onClusterAdd(t *testing.T) {
 		s.Data["server"] = []byte("127.0.0.1:8081")
 		_, err = clt.CoreV1().Secrets("argocd").Update(context.TODO(), s, metav1.UpdateOptions{})
 		assert.NoError(t, err)
-		testutil.WaitForChange(t, 1*time.Second, func() bool {
+		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
 			c := m.Mapping("agent-1")
 			if c == nil {
-				return false
+				return false, nil
 			}
-			return c.Server == "127.0.0.1:8081"
+			return c.Server == "127.0.0.1:8081", nil
 		})
+		assert.NoError(t, err)
 	})
 
 	t.Run("Cluster mapping is deleted when label is removed", func(t *testing.T) {
@@ -127,9 +131,10 @@ func Test_onClusterAdd(t *testing.T) {
 		_, err = clt.CoreV1().Secrets("argocd").Update(context.TODO(), s, metav1.UpdateOptions{})
 		assert.NoError(t, err)
 		// Cluster should be unmapped
-		testutil.WaitForChange(t, 1*time.Second, func() bool {
-			return !m.HasMapping("agent-1")
+		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
+			return !m.HasMapping("agent-1"), nil
 		})
+		assert.NoError(t, err)
 	})
 
 	t.Run("Cluster mapping is deleted when secret is deleted", func(t *testing.T) {
@@ -138,9 +143,10 @@ func Test_onClusterAdd(t *testing.T) {
 		require.True(t, m.HasMapping("agent-3"))
 		err = clt.CoreV1().Secrets("argocd").Delete(context.TODO(), "test-234", metav1.DeleteOptions{})
 		require.NoError(t, err)
-		testutil.WaitForChange(t, 1*time.Second, func() bool {
-			return !m.HasMapping("agent-3")
+		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
+			return !m.HasMapping("agent-3"), nil
 		})
+		assert.NoError(t, err)
 	})
 
 }
