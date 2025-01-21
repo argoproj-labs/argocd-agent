@@ -46,7 +46,7 @@ func Test_resourceRequester(t *testing.T) {
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
 		go func() {
-			s.resourceRequester(w, r, resourceproxy.NewParams())
+			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
 		}()
 
@@ -77,7 +77,7 @@ func Test_resourceRequester(t *testing.T) {
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
 		go func() {
-			s.resourceRequester(w, r, resourceproxy.NewParams())
+			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
 		}()
 		<-ch
@@ -100,7 +100,7 @@ func Test_resourceRequester(t *testing.T) {
 		}
 		ch := make(chan interface{})
 		go func() {
-			s.resourceRequester(w, r, resourceproxy.NewParams())
+			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
 		}()
 		<-ch
@@ -126,7 +126,7 @@ func Test_resourceRequester(t *testing.T) {
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
 		go func() {
-			s.resourceRequester(w, r, resourceproxy.NewParams())
+			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
 		}()
 		<-ch
@@ -147,7 +147,7 @@ func Test_resourceRequester(t *testing.T) {
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
 		go func() {
-			s.resourceRequester(w, r, resourceproxy.NewParams())
+			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
 		}()
 
@@ -182,7 +182,7 @@ func Test_resourceRequester(t *testing.T) {
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
 		go func() {
-			s.resourceRequester(w, r, resourceproxy.NewParams())
+			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
 		}()
 

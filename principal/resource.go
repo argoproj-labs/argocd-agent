@@ -36,11 +36,11 @@ const resourceRequestRegexp = `^/(?:api|apis/(?P<group>[^\/]+))/(?P<version>v[^\
 // TODO(jannfis): Make the timeout configurable
 const requestTimeout = 10 * time.Second
 
-// resourceRequester is being executed by the resource proxy once it received a
-// request for a specific resource. It will encapsulate this request into an
-// event and add this event to the target agent's event queue. It will then
-// wait for a response from the agent, which comes in asynchronously.
-func (s *Server) resourceRequester(w http.ResponseWriter, r *http.Request, params resourceproxy.Params) {
+// processResourceRequest is being executed by the resource proxy once it
+// received a request for a specific resource. It will encapsulate this request
+// into an event and add this event to the target agent's event queue. It will
+// then wait for a response from the agent, which comes in asynchronously.
+func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, params resourceproxy.Params) {
 	logCtx := log().WithField("function", "resourceRequester")
 
 	// Make sure our request carries a client certificate

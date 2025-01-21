@@ -245,7 +245,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 			resourceproxy.WithRequestMatcher(
 				resourceRequestRegexp,
 				[]string{"get"},
-				s.resourceRequester,
+				s.processResourceRequest,
 			),
 			// Fake version output
 			resourceproxy.WithRequestMatcher(
