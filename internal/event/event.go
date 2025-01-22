@@ -167,7 +167,7 @@ func (evs EventSource) AppProjectEvent(evType EventType, appProject *v1alpha1.Ap
 type ResourceRequest struct {
 	// A unique UUID for this resource request. This unique ID will also be
 	// used in the request response, so we can map responses to requests.
-	// Note that this does correlate to either event ID nor the Kubernetes
+	// Note that this does neither correlate to event ID nor the Kubernetes
 	// resource's ID.
 	UUID string `json:"uuid"`
 	// Namespace of the requested resource
