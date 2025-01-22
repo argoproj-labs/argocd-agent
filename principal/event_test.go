@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
-	"github.com/argoproj-labs/argocd-agent/internal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	wqmock "github.com/argoproj-labs/argocd-agent/test/mocks/k8s-workqueue"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
