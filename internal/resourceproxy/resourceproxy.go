@@ -28,7 +28,6 @@ import (
 	golog "log"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"net/netip"
 	"regexp"
 	"runtime"
@@ -37,12 +36,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 )
-
-// defaultUpstreamHost is the default upstream host to use
-const defaultUpstreamHost = "kubernetes.default.svc:6443"
-
-// defaultUpstreamScheme is the default scheme to use with upstream
-const defaultUpstreamScheme = "https"
 
 const defaultIdleTimeout = 5 * time.Second
 const defaultReadTimeout = 5 * time.Second
@@ -56,13 +49,6 @@ type ResourceProxy struct {
 	// tlsConfig is the TLS configuration for the proxy's listener
 	tlsConfig *tls.Config
 
-	// upstreamAddr is the address of our upstream
-	upstreamAddr string
-	// upstreamScheme is the protocol scheme to use for talking to the upstream
-	upstreamScheme string
-	// upstreamTransport is the transport to use when talking to the upstream
-	upstreamTransport *http.Transport
-
 	idleTimeout time.Duration
 	readTimeout time.Duration
 
@@ -71,9 +57,6 @@ type ResourceProxy struct {
 
 	// server is the proxy's HTTP server
 	server *http.Server
-
-	// proxy is the proxy's reverse proxy configuration
-	proxy *httputil.ReverseProxy
 
 	// interceptors is a list of interceptors for intercepting requests
 	interceptors []requestMatcher
@@ -169,7 +152,7 @@ func New(addr string, options ...ResourceProxyOption) (*ResourceProxy, error) {
 // may read an error from the returned channel. The channel will only be
 // written to in case of a start-up error, or when the proxy has shut down.
 func (p *ResourceProxy) Start(ctx context.Context) (<-chan error, error) {
-	log().Infof("Starting ResourceProxy on %s (upstream=%s)", p.addr, p.upstreamAddr)
+	log().Infof("Starting ResourceProxy on %s", p.addr)
 	errCh := make(chan error)
 	var l net.Listener
 	var err error
