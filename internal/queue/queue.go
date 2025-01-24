@@ -59,12 +59,10 @@ func newBoundedQueue(maxSize int) *boundedQueue {
 }
 
 func (bq *boundedQueue) Add(item *event.Event) {
-	// We empty the queue if the size is going to exceed maxSize.
+	// We pop the oldest item if the size is going to exceed maxSize.
 	if bq.Len() == bq.maxSize {
-		for bq.Len() != 0 {
-			old, _ := bq.Get()
-			bq.Done(old)
-		}
+		old, _ := bq.Get()
+		bq.Done(old)
 	}
 
 	bq.TypedRateLimitingInterface.Add(item)

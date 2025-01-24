@@ -15,6 +15,7 @@
 package queue
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/cloudevents/sdk-go/v2/event"
@@ -66,11 +67,16 @@ func Test_Queue(t *testing.T) {
 
 		for i := 1; i <= defaultMaxQueueSize; i++ {
 			ev := event.New()
+			ev.SetID(strconv.Itoa(i))
 			queue.Add(&ev)
 		}
 
-		// Since the queue is full, check if it is emptied before adding a new item.
-		queue.Add(&event.Event{})
-		assert.Equal(t, 1, queue.Len())
+		// Since the queue is full, check if the oldest item is popped before adding a new item.
+		ev := event.New()
+		ev.SetID("1001")
+		queue.Add(&ev)
+		assert.Equal(t, defaultMaxQueueSize, queue.Len())
+		front, _ := queue.Get()
+		assert.Equal(t, "2", front.ID())
 	})
 }
