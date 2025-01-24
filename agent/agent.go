@@ -105,8 +105,6 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		}
 	}
 
-	appclient := client.ApplicationsClientset
-
 	if a.remote == nil {
 		return nil, fmt.Errorf("remote not defined")
 	}
