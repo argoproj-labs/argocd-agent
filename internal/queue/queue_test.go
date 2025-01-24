@@ -64,11 +64,13 @@ func Test_Queue(t *testing.T) {
 		assert.NoError(t, err)
 		queue := q.RecvQ("agent1")
 
-		for i := 1; i <= defaultMaxQueueSize+1; i++ {
+		for i := 1; i <= defaultMaxQueueSize; i++ {
 			ev := event.New()
 			queue.Add(&ev)
 		}
 
+		// Since the queue is full, check if it is emptied before adding a new item.
+		queue.Add(&event.Event{})
 		assert.Equal(t, 1, queue.Len())
 	})
 }

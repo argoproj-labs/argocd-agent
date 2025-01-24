@@ -161,17 +161,6 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 	return c, nil
 }
 
-// agentMode gets the agent mode from the context ctx. Returns an error
-// if no agent mode is found in the context
-func agentMode(ctx context.Context) (string, error) {
-	agentMode, ok := ctx.Value(types.ContextAgentMode).(string)
-	if !ok {
-		return "", fmt.Errorf("invalid context: no agent mode")
-	}
-
-	return agentMode, nil
-}
-
 // onDisconnect must be called whenever client c disconnects from the stream
 func (s *Server) onDisconnect(c *client) {
 	c.lock.Lock()
@@ -283,9 +272,9 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: nil item in queue")
 	}
 
-	mode, err := agentMode(c.ctx)
+	mode, err := session.ClientModeFromContext(c.ctx)
 	if err != nil {
-		return fmt.Errorf("unable to extract the agent mode from context")
+		return fmt.Errorf("unable to determine agent mode: %w", err)
 	}
 
 	if types.AgentModeFromString(mode) != types.AgentModeManaged {

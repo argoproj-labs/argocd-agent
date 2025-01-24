@@ -59,7 +59,7 @@ func newBoundedQueue(maxSize int) *boundedQueue {
 }
 
 func (bq *boundedQueue) Add(item *event.Event) {
-	// We empty the queue if the size is going to exceeded maxSize.
+	// We empty the queue if the size is going to exceed maxSize.
 	if bq.Len() == bq.maxSize {
 		for bq.Len() != 0 {
 			old, _ := bq.Get()
