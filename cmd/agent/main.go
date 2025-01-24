@@ -119,7 +119,7 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 			agentOpts = append(agentOpts, agent.WithRemote(remote))
 			agentOpts = append(agentOpts, agent.WithMode(agentMode))
-			ag, err := agent.NewAgent(ctx, kubeConfig.ApplicationsClientset, namespace, agentOpts...)
+			ag, err := agent.NewAgent(ctx, kubeConfig, namespace, agentOpts...)
 			if err != nil {
 				cmd.Fatal("Could not create a new agent instance: %v", err)
 			}

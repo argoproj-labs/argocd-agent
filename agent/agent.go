@@ -23,8 +23,10 @@ import (
 
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
+	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
@@ -33,12 +35,12 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	appclientset "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 )
 
 const waitForSyncedDuration = 10 * time.Second
@@ -56,11 +58,12 @@ type Agent struct {
 	infStopCh chan struct{}
 	connected atomic.Bool
 	// syncCh is not currently used
-	syncCh         chan bool
-	remote         *client.Remote
-	appManager     *application.ApplicationManager
-	projectManager *appproject.AppProjectManager
-	mode           types.AgentMode
+	syncCh           chan bool
+	remote           *client.Remote
+	appManager       *application.ApplicationManager
+	projectManager   *appproject.AppProjectManager
+	namespaceManager *kubenamespace.KubernetesBackend
+	mode             types.AgentMode
 	// queues is a queue of create/update/delete events to send to the principal
 	queues  *queue.SendRecvQueues
 	emitter *event.EventSource
@@ -86,7 +89,7 @@ type AgentOption func(*Agent) error
 
 // NewAgent creates a new agent instance, using the given client interfaces and
 // options.
-func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace string, opts ...AgentOption) (*Agent, error) {
+func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace string, opts ...AgentOption) (*Agent, error) {
 	a := &Agent{
 		version: version.New("argocd-agent", "agent"),
 	}
@@ -100,6 +103,8 @@ func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace s
 			return nil, err
 		}
 	}
+
+	appclient := client.ApplicationsClientset
 
 	if a.remote == nil {
 		return nil, fmt.Errorf("remote not defined")
@@ -196,6 +201,22 @@ func NewAgent(ctx context.Context, appclient appclientset.Interface, namespace s
 		return nil, err
 	}
 
+	nsInformerOpts := []informer.InformerOption[*corev1.Namespace]{
+		informer.WithListHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return client.Clientset.CoreV1().Namespaces().List(ctx, opts)
+		}),
+		informer.WithWatchHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return client.Clientset.CoreV1().Namespaces().Watch(ctx, opts)
+		}),
+		informer.WithDeleteHandler[*corev1.Namespace](a.deleteNamespaceCallback),
+	}
+
+	nsInformer, err := informer.NewInformer(ctx, nsInformerOpts...)
+	if err != nil {
+		return nil, err
+	}
+	a.namespaceManager = kubenamespace.NewKubernetesBackend(nsInformer)
+
 	a.syncCh = make(chan bool, 1)
 	return a, nil
 }
@@ -224,6 +245,26 @@ func (a *Agent) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Wait for the app informer to be synced
+	err := a.appManager.EnsureSynced(waitForSyncedDuration)
+	if err != nil {
+		return fmt.Errorf("failed to sync applications: %w", err)
+	}
+
+	// The namespace informer lives in its own go routine
+	go func() {
+		if err := a.namespaceManager.StartInformer(a.context); err != nil {
+			log().WithError(err).Error("Namespace informer has exited non-successfully")
+		} else {
+			log().Info("Namespace informer has exited")
+		}
+	}()
+
+	if err := a.namespaceManager.EnsureSynced(waitForSyncedDuration); err != nil {
+		return fmt.Errorf("unable to sync Namespace informer: %w", err)
+	}
+	log().Infof("Namespace informer synced and ready")
+
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
 		// TODO: Right now, maintainConnection always returns nil. Revisit
@@ -232,12 +273,6 @@ func (a *Agent) Start(ctx context.Context) error {
 	}
 
 	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"))
-
-	// Wait for the app informer to be synced
-	err := a.appManager.EnsureSynced(waitForSyncedDuration)
-	if err != nil {
-		return fmt.Errorf("failed to sync applications: %w", err)
-	}
 
 	return err
 }

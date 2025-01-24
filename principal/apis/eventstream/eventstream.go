@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
@@ -269,6 +270,19 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	logCtx.Tracef("Grabbed an item")
 	if ev == nil {
 		return fmt.Errorf("panic: nil item in queue")
+	}
+
+	mode, err := session.ClientModeFromContext(c.ctx)
+	if err != nil {
+		return fmt.Errorf("unable to determine agent mode: %w", err)
+	}
+
+	if types.AgentModeFromString(mode) != types.AgentModeManaged {
+		// Only Update events are valid for unmanaged agents
+		if ev.Type() != event.Update.String() {
+			logCtx.WithField("type", ev.Type()).Debug("Discarding event for unmanaged agent")
+			return nil
+		}
 	}
 
 	eventWriter := s.eventWriters.Get(c.agentName)

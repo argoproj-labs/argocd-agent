@@ -18,26 +18,26 @@ import (
 	"context"
 	"testing"
 
-	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	"github.com/sirupsen/logrus"
 
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
+	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/stretchr/testify/require"
 )
 
 func newAgent(t *testing.T) *Agent {
 	t.Helper()
-	appc := fakeappclient.NewSimpleClientset()
+	kubec := kube.NewKubernetesFakeClient()
 	remote, err := client.NewRemote("127.0.0.1", 8080)
 	require.NoError(t, err)
-	agent, err := NewAgent(context.TODO(), appc, "argocd", WithRemote(remote))
+	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote))
 	require.NoError(t, err)
 	return agent
 }
 
 func Test_NewAgent(t *testing.T) {
-	appc := fakeappclient.NewSimpleClientset()
-	agent, err := NewAgent(context.TODO(), appc, "agent", WithRemote(&client.Remote{}))
+	kubec := kube.NewKubernetesFakeClient()
+	agent, err := NewAgent(context.TODO(), kubec, "agent", WithRemote(&client.Remote{}))
 	require.NotNil(t, agent)
 	require.NoError(t, err)
 }

@@ -42,9 +42,21 @@ func ClientIdFromContext(ctx context.Context) (string, error) {
 	return clientId, nil
 }
 
-// ClientIdToContext returns a copy of context ctx with the clientId stored
-func ClientIdToContext(ctx context.Context, clientId string) context.Context {
-	return context.WithValue(ctx, types.ContextAgentIdentifier, clientId)
+// ClientModeFromContext returns the client mode stored in context ctx. Returns an
+// error if there is no client mode in the ctx.
+func ClientModeFromContext(ctx context.Context) (string, error) {
+	val := ctx.Value(types.ContextAgentMode)
+	clientMode, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("no client mode found in context")
+	}
+	return clientMode, nil
+}
+
+// ClientInfoToContext returns a copy of context ctx with the clientId and clientMode stored
+func ClientInfoToContext(ctx context.Context, clientId, clientMode string) context.Context {
+	clientCtx := context.WithValue(ctx, types.ContextAgentIdentifier, clientId)
+	return context.WithValue(clientCtx, types.ContextAgentMode, clientMode)
 }
 
 // IsValidClientId returns true if the string s is considered a valid client
