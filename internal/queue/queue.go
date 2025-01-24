@@ -35,9 +35,37 @@ type QueuePair interface {
 	Delete(name string, shutdown bool) error
 }
 
+const (
+	// defaultMaxQueueSize is the max number of items that the workqueue can hold.
+	defaultMaxQueueSize int = 1000
+)
+
 type queuepair struct {
-	recvq workqueue.TypedRateLimitingInterface[*event.Event]
-	sendq workqueue.TypedRateLimitingInterface[*event.Event]
+	recvq *boundedQueue
+	sendq *boundedQueue
+}
+
+type boundedQueue struct {
+	workqueue.TypedRateLimitingInterface[*event.Event]
+	maxSize int
+}
+
+func newBoundedQueue(maxSize int) *boundedQueue {
+	rateLimiter := workqueue.DefaultTypedControllerRateLimiter[*event.Event]()
+	return &boundedQueue{
+		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueue(rateLimiter),
+		maxSize:                    maxSize,
+	}
+}
+
+func (bq *boundedQueue) Add(item *event.Event) {
+	// We pop the oldest item if the size is going to exceed maxSize.
+	if bq.Len() == bq.maxSize {
+		old, _ := bq.Get()
+		bq.Done(old)
+	}
+
+	bq.TypedRateLimitingInterface.Add(item)
 }
 
 type SendRecvQueues struct {
@@ -115,8 +143,8 @@ func (q *SendRecvQueues) Create(name string) error {
 		return fmt.Errorf("cannot initialize queue for %s: queue already exists", name)
 	}
 	qp := &queuepair{}
-	qp.sendq = workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[*event.Event]())
-	qp.recvq = workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[*event.Event]())
+	qp.sendq = newBoundedQueue(defaultMaxQueueSize)
+	qp.recvq = newBoundedQueue(defaultMaxQueueSize)
 	q.queues[name] = qp
 
 	return nil

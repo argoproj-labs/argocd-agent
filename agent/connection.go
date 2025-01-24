@@ -36,12 +36,14 @@ func (a *Agent) maintainConnection() error {
 				if err != nil {
 					log().Warnf("Could not connect to %s: %v", a.remote.Addr(), err)
 				} else {
-					err = a.queues.Create(a.remote.ClientID())
-					if err != nil {
-						log().Warnf("Could not create agent queue pair: %v", err)
-					} else {
-						a.SetConnected(true)
+					if !a.queues.HasQueuePair(a.remote.ClientID()) {
+						err = a.queues.Create(a.remote.ClientID())
+						if err != nil {
+							log().Warnf("Could not create agent queue pair: %v", err)
+							continue
+						}
 					}
+					a.SetConnected(true)
 				}
 			} else {
 				err = a.handleStreamEvents()
@@ -219,10 +221,6 @@ func (a *Agent) handleStreamEvents() error {
 	}
 
 	log().WithField("component", "EventHandler").Info("Stream closed")
-	err = a.queues.Delete(a.remote.ClientID(), true)
-	if err != nil {
-		log().Errorf("Could not remove agent queue: %v", err)
-	}
 
 	return nil
 }

@@ -118,7 +118,8 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 
 	// claims at this point is validated and we can propagate values to the
 	// context.
-	authCtx := session.ClientIdToContext(ctx, agentInfo.ClientID)
+	authCtx := session.ClientInfoToContext(ctx, agentInfo.ClientID, agentInfo.Mode)
+
 	if !s.queues.HasQueuePair(agentInfo.ClientID) {
 		logCtx.Tracef("Creating a new queue pair for client %s", agentInfo.ClientID)
 		if err := s.queues.Create(agentInfo.ClientID); err != nil {

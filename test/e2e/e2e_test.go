@@ -267,8 +267,8 @@ func Test_AgentServer(t *testing.T) {
 		client.WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "client", userpass.ClientSecretField: "insecure"}),
 	)
 	require.NoError(t, err)
-	fakeAppcAgent := fakekube.NewKubernetesFakeClient()
-	a, err := agent.NewAgent(actx, fakeAppcAgent, "client",
+	fakeKubeClient := fakekube.NewKubernetesFakeClient()
+	a, err := agent.NewAgent(actx, fakeKubeClient, "client",
 		agent.WithRemote(remote),
 		agent.WithMode(types.AgentModeManaged.String()),
 	)
@@ -363,8 +363,8 @@ func Test_WithHTTP1WebSocket(t *testing.T) {
 	startAgent := func(t *testing.T, ctx context.Context, remote *client.Remote) (*client.Remote, *agent.Agent) {
 		t.Helper()
 
-		fakeAppcAgent := fakekube.NewKubernetesFakeClient()
-		a, err := agent.NewAgent(ctx, fakeAppcAgent, "client",
+		fakeKubeClient := fakekube.NewKubernetesFakeClient()
+		a, err := agent.NewAgent(ctx, fakeKubeClient, "client",
 			agent.WithRemote(remote),
 			agent.WithMode(types.AgentModeManaged.String()),
 		)

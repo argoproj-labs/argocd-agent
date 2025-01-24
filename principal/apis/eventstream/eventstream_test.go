@@ -20,10 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream/mock"
+	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -36,7 +37,10 @@ func Test_Subscribe(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
 		s := NewServer(qs)
-		st := &mock.MockEventServer{AgentName: "default"}
+		st := &mock.MockEventServer{
+			AgentName: "default",
+			AgentMode: string(types.AgentModeManaged),
+		}
 		st.AddRecvHook(func(s *mock.MockEventServer) error {
 			log().WithField("component", "RecvHook").Tracef("Entry")
 			ticker := time.NewTicker(500 * time.Millisecond)
@@ -108,6 +112,41 @@ func Test_Subscribe(t *testing.T) {
 		st := &mock.MockEventServer{AgentName: ""}
 		err := s.Subscribe(st)
 		assert.Error(t, err)
+	})
+
+	t.Run("Test events being discarded for unmanaged agent", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("default")
+		s := NewServer(qs)
+		st := &mock.MockEventServer{
+			AgentName: "default",
+			AgentMode: string(types.AgentModeAutonomous),
+		}
+		st.AddRecvHook(func(s *mock.MockEventServer) error {
+			log().WithField("component", "RecvHook").Tracef("Entry")
+			ticker := time.NewTicker(500 * time.Millisecond)
+			<-ticker.C
+			ticker.Stop()
+			log().WithField("component", "RecvHook").Tracef("Exit")
+			return io.EOF
+		})
+		emitter := event.NewEventSource("test")
+		qs.SendQ("default").Add(emitter.ApplicationEvent(
+			event.Create,
+			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
+		))
+		qs.SendQ("default").Add(emitter.ApplicationEvent(
+			event.Update,
+			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
+		))
+		qs.SendQ("default").Add(emitter.ApplicationEvent(
+			event.Delete,
+			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
+		))
+		err := s.Subscribe(st)
+		assert.Nil(t, err)
+		assert.Equal(t, 0, int(st.NumRecv.Load()))
+		assert.Equal(t, 1, int(st.NumSent.Load()))
 	})
 
 }

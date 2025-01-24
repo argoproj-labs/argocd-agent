@@ -29,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
+	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
@@ -48,7 +49,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -74,6 +76,8 @@ type Server struct {
 	ctxCancel      context.CancelFunc
 	appManager     *application.ApplicationManager
 	projectManager *appproject.AppProjectManager
+
+	namespaceManager *kubenamespace.KubernetesBackend
 	// At present, 'watchLock' is only acquired on calls to 'updateAppCallback'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
 	watchLock sync.RWMutex
 	// clientMap is not currently used
@@ -160,10 +164,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	appFilters := s.defaultAppFilterChain()
 
 	appInformerOpts := []informer.InformerOption[*v1alpha1.Application]{
-		informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, opts)
 		}),
-		informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+		informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, opts)
 		}),
 		informer.WithAddHandler[*v1alpha1.Application](s.newAppCallback),
@@ -178,10 +182,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
-		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("").List(ctx, opts)
 		}),
-		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("").Watch(ctx, opts)
 		}),
 		informer.WithAddHandler[*v1alpha1.AppProject](s.newAppProjectCallback),
@@ -224,6 +228,22 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	if err != nil {
 		return nil, err
 	}
+
+	nsInformerOpts := []informer.InformerOption[*corev1.Namespace]{
+		informer.WithListHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return kubeClient.Clientset.CoreV1().Namespaces().List(ctx, opts)
+		}),
+		informer.WithWatchHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return kubeClient.Clientset.CoreV1().Namespaces().Watch(ctx, opts)
+		}),
+		informer.WithDeleteHandler[*corev1.Namespace](s.deleteNamespaceCallback),
+	}
+
+	nsInformer, err := informer.NewInformer(ctx, nsInformerOpts...)
+	if err != nil {
+		return nil, err
+	}
+	s.namespaceManager = kubenamespace.NewKubernetesBackend(nsInformer)
 
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
@@ -351,6 +371,15 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}()
 
+	// The namespace informer lives in its own go routine
+	go func() {
+		if err := s.namespaceManager.StartInformer(s.ctx); err != nil {
+			log().WithError(err).Error("Namespace informer has exited non-successfully")
+		} else {
+			log().Info("Namespace informer has exited")
+		}
+	}()
+
 	s.events = event.NewEventSource(s.options.serverName)
 
 	if err := s.appManager.EnsureSynced(waitForSyncedDuration); err != nil {
@@ -378,6 +407,10 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	if err != nil {
 		return err
 	}
+	if err := s.namespaceManager.EnsureSynced(waitForSyncedDuration); err != nil {
+		return fmt.Errorf("unable to sync Namespace informer: %w", err)
+	}
+	log().Infof("Namespace informer synced and ready")
 
 	return nil
 }

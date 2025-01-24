@@ -19,6 +19,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // newAppCallback is executed when a new application event was emitted from
@@ -32,17 +33,12 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		"application_name": outbound.Name,
 	})
 
-	// Return early if no interested agent is connected
 	if !s.queues.HasQueuePair(outbound.Namespace) {
-		logCtx.Debug("No agent is connected to this queue, discarding event")
-		return
-	}
-
-	// New app events are only relevant for managed agents
-	mode := s.agentMode(outbound.Namespace)
-	if mode != types.AgentModeManaged {
-		logCtx.Tracef("Discarding event for unmanaged agent")
-		return
+		if err := s.queues.Create(outbound.Namespace); err != nil {
+			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
+			return
+		}
+		logCtx.Trace("Created a new queue pair for the existing namespace")
 	}
 	q := s.queues.SendQ(outbound.Namespace)
 	if q == nil {
@@ -77,8 +73,11 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 	if !s.queues.HasQueuePair(old.Namespace) {
-		logCtx.Tracef("No agent is connected to this queue, discarding event")
-		return
+		if err := s.queues.Create(old.Namespace); err != nil {
+			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
+			return
+		}
+		logCtx.Trace("Created a new queue pair for the existing agent namespace")
 	}
 	q := s.queues.SendQ(old.Namespace)
 	if q == nil {
@@ -98,13 +97,11 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 		"application_name": outbound.Name,
 	})
 	if !s.queues.HasQueuePair(outbound.Namespace) {
-		logCtx.Tracef("No agent is connected to this queue, discarding event")
-		return
-	}
-	mode := s.agentMode(outbound.Namespace)
-	if !mode.IsManaged() {
-		logCtx.Tracef("Discarding event for unmanaged agent")
-		return
+		if err := s.queues.Create(outbound.Namespace); err != nil {
+			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
+			return
+		}
+		logCtx.Trace("Created a new queue pair for the existing agent namespace")
 	}
 	q := s.queues.SendQ(outbound.Namespace)
 	if q == nil {
@@ -129,8 +126,11 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 	// Return early if no interested agent is connected
 	if !s.queues.HasQueuePair(outbound.Namespace) {
-		logCtx.Debug("No agent is connected to this queue, discarding event")
-		return
+		if err := s.queues.Create(outbound.Namespace); err != nil {
+			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
+			return
+		}
+		logCtx.Trace("Created a new queue pair for the existing namespace")
 	}
 
 	// New appproject events are only relevant for managed agents
@@ -172,8 +172,11 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		return
 	}
 	if !s.queues.HasQueuePair(old.Namespace) {
-		logCtx.Tracef("No agent is connected to this queue, discarding event")
-		return
+		if err := s.queues.Create(old.Namespace); err != nil {
+			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
+			return
+		}
+		logCtx.Trace("Created a new queue pair for the existing agent namespace")
 	}
 	q := s.queues.SendQ(old.Namespace)
 	if q == nil {
@@ -193,13 +196,11 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 		"appproject_name": outbound.Name,
 	})
 	if !s.queues.HasQueuePair(outbound.Namespace) {
-		logCtx.Tracef("No agent is connected to this queue, discarding event")
-		return
-	}
-	mode := s.agentMode(outbound.Namespace)
-	if !mode.IsManaged() {
-		logCtx.Tracef("Discarding event for unmanaged agent")
-		return
+		if err := s.queues.Create(outbound.Namespace); err != nil {
+			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
+			return
+		}
+		logCtx.Trace("Created a new queue pair for the existing agent namespace")
 	}
 	q := s.queues.SendQ(outbound.Namespace)
 	if q == nil {
@@ -209,4 +210,26 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	ev := s.events.AppProjectEvent(event.Delete, outbound)
 	logCtx.WithField("event", "DeleteAppProject").WithField("sendq_len", q.Len()+1).Tracef("Added event to send queue")
 	q.Add(ev)
+}
+
+// deleteNamespaceCallback is called when the user deletes the agent namespace.
+// Since there is no namespace we can remove the queue associated with this agent.
+func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {
+	logCtx := log().WithFields(logrus.Fields{
+		"component":      "EventCallback",
+		"queue":          outbound.Name,
+		"event":          "namespace_delete",
+		"namespace_name": outbound.Name,
+	})
+
+	if !s.queues.HasQueuePair(outbound.Name) {
+		return
+	}
+
+	if err := s.queues.Delete(outbound.Name, true); err != nil {
+		logCtx.WithError(err).Error("failed to remove the queue pair for a deleted agent namespace")
+		return
+	}
+
+	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
 }
