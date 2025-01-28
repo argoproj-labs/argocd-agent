@@ -587,16 +587,16 @@ func Test_CreateAppProject(t *testing.T) {
 	})
 
 	t.Run("Discard event because appproject is already managed", func(t *testing.T) {
-		defer a.appManager.Unmanage(project.Name)
+		defer a.projectManager.Unmanage(project.Name)
 		a.mode = types.AgentModeManaged
-		a.appManager.Manage(project.Name)
+		a.projectManager.Manage(project.Name)
 		napp, err := a.createAppProject(project)
 		require.ErrorContains(t, err, "is already managed")
 		require.Nil(t, napp)
 	})
 
 	t.Run("Create appproject", func(t *testing.T) {
-		defer a.appManager.Unmanage(project.Name)
+		defer a.projectManager.Unmanage(project.Name)
 		a.mode = types.AgentModeManaged
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(&v1alpha1.AppProject{}, nil)
 		defer createMock.Unset()

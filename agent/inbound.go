@@ -319,7 +319,7 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 
 	// If we receive a new AppProject event for an AppProject we already manage, it usually
 	// means that we're out-of-sync from the control plane.
-	if a.appManager.IsManaged(incoming.Name) {
+	if a.projectManager.IsManaged(incoming.Name) {
 		logCtx.Trace("Discarding this event, because AppProject is already managed on this agent")
 		return nil, event.NewEventDiscardedErr("appproject %s is already managed", incoming.Name)
 	}
@@ -348,7 +348,7 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
-	if a.appManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
+	if a.projectManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
 		logCtx.Tracef("Discarding this event, because agent has seen this version %s already", incoming.ResourceVersion)
 		return nil, event.NewEventDiscardedErr("the version %s has already been seen by this agent", incoming.ResourceVersion)
 	} else {
