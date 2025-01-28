@@ -27,6 +27,7 @@ import (
 
 	"github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -37,6 +38,7 @@ type KubernetesClient struct {
 	ApplicationsClientset versioned.Interface
 	Context               context.Context
 	Namespace             string
+	RestConfig            *rest.Config
 }
 
 func NewKubernetesClient(ctx context.Context, client kubernetes.Interface, applicationsClientset versioned.Interface, namespace string) *KubernetesClient {
@@ -83,7 +85,27 @@ func NewKubernetesClientFromConfig(ctx context.Context, namespace string, kubeco
 		return nil, err
 	}
 
-	return NewKubernetesClient(ctx, clientset, applicationsClientset, namespace), nil
+	cl := NewKubernetesClient(ctx, clientset, applicationsClientset, namespace)
+	cl.RestConfig = config
+	return cl, nil
+}
+
+func NewRestConfig(config string, context string) (*rest.Config, error) {
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	loadingRules.DefaultClientConfig = &clientcmd.DefaultClientConfig
+	loadingRules.ExplicitPath = config
+	overrides := clientcmd.ConfigOverrides{}
+	if context != "" {
+		overrides.CurrentContext = context
+	}
+	clientConfig := clientcmd.NewInteractiveDeferredLoadingClientConfig(loadingRules, &overrides, os.Stdin)
+
+	restCfg, err := clientConfig.ClientConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	return restCfg, nil
 }
 
 // IsRetryableError is a helper method to see whether an error returned from the dynamic client

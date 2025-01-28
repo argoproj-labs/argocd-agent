@@ -69,9 +69,10 @@ type Agent struct {
 	emitter *event.EventSource
 	// At present, 'watchLock' is only acquired on calls to 'addAppUpdateToQueue'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
 	watchLock sync.RWMutex
-	version   *version.Version
 
 	eventWriter *event.EventWriter
+	version     *version.Version
+	kubeClient  *kube.KubernetesClient
 }
 
 const defaultQueueName = "default"
@@ -104,11 +105,11 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		}
 	}
 
-	appclient := client.ApplicationsClientset
-
 	if a.remote == nil {
 		return nil, fmt.Errorf("remote not defined")
 	}
+
+	a.kubeClient = client
 
 	// Initial state of the agent is disconnected
 	a.connected.Store(false)
@@ -132,10 +133,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 
 	// appListFunc and watchFunc are anonymous functions for the informer
 	appListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-		return appclient.ArgoprojV1alpha1().Applications(a.namespace).List(ctx, opts)
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(a.namespace).List(ctx, opts)
 	}
 	appWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-		return appclient.ArgoprojV1alpha1().Applications(a.namespace).Watch(ctx, opts)
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(a.namespace).Watch(ctx, opts)
 	}
 
 	appInformerOptions := []informer.InformerOption[*v1alpha1.Application]{
@@ -165,10 +166,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	}
 
 	projListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-		return appclient.ArgoprojV1alpha1().AppProjects(a.namespace).List(ctx, opts)
+		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).List(ctx, opts)
 	}
 	projWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-		return appclient.ArgoprojV1alpha1().AppProjects(a.namespace).Watch(ctx, opts)
+		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).Watch(ctx, opts)
 	}
 
 	projInformerOptions := []informer.InformerOption[*v1alpha1.AppProject]{
@@ -183,7 +184,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 
 	// The agent only supports Kubernetes as application backend
 	a.appManager, err = application.NewApplicationManager(
-		kubeapp.NewKubernetesBackend(appclient, a.namespace, appInformer, true),
+		kubeapp.NewKubernetesBackend(client.ApplicationsClientset, a.namespace, appInformer, true),
 		a.namespace,
 		application.WithAllowUpsert(allowUpsert),
 		application.WithRole(manager.ManagerRoleAgent),
@@ -194,7 +195,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	}
 
 	a.projectManager, err = appproject.NewAppProjectManager(
-		kubeappproject.NewKubernetesBackend(appclient, a.namespace, projInformer, true),
+		kubeappproject.NewKubernetesBackend(client.ApplicationsClientset, a.namespace, projInformer, true),
 		a.namespace,
 		appProjectManagerOption...)
 	if err != nil {

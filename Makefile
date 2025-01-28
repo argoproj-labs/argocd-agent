@@ -31,6 +31,7 @@ setup-e2e2:
 .PHONY: start-e2e2
 start-e2e2:
 	hack/dev-env/gen-creds.sh
+	hack/dev-env/gen-tls.sh
 	goreman -f hack/dev-env/Procfile.e2e start
 
 .PHONY: test-e2e2

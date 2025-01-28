@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/agent"
-	"github.com/argoproj-labs/argocd-agent/cmd/cmd"
+	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
@@ -56,7 +56,7 @@ func NewAgentRunCommand() *cobra.Command {
 		Short: "Run the argocd-agent agent component",
 		Run: func(c *cobra.Command, args []string) {
 			if showVersion {
-				cmd.PrintVersion(version.New("argocd-agent", "agent"), versionFormat)
+				cmdutil.PrintVersion(version.New("argocd-agent", "agent"), versionFormat)
 				os.Exit(0)
 			}
 			ctx, cancelFn := context.WithCancel(context.Background())
@@ -69,21 +69,21 @@ func NewAgentRunCommand() *cobra.Command {
 				logLevel = "info"
 			}
 			if logLevel != "" {
-				lvl, err := cmd.StringToLoglevel(logLevel)
+				lvl, err := cmdutil.StringToLoglevel(logLevel)
 				if err != nil {
-					cmd.Fatal("invalid log level: %s. Available levels are: %s", logLevel, cmd.AvailableLogLevels())
+					cmdutil.Fatal("invalid log level: %s. Available levels are: %s", logLevel, cmdutil.AvailableLogLevels())
 				}
 				logrus.SetLevel(lvl)
 			}
-			if formatter, err := cmd.LogFormatter(logFormat); err != nil {
-				cmd.Fatal("%s", err.Error())
+			if formatter, err := cmdutil.LogFormatter(logFormat); err != nil {
+				cmdutil.Fatal("%s", err.Error())
 			} else {
 				logrus.SetFormatter(formatter)
 			}
 			if creds != "" {
 				authMethod, authCreds, err := parseCreds(creds)
 				if err != nil {
-					cmd.Fatal("Error setting up creds: %v", err)
+					cmdutil.Fatal("Error setting up creds: %v", err)
 				}
 				remoteOpts = append(remoteOpts, client.WithAuth(authMethod, authCreds))
 			}
@@ -102,29 +102,29 @@ func NewAgentRunCommand() *cobra.Command {
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
 				remote, err = client.NewRemote(serverAddress, serverPort, remoteOpts...)
 				if err != nil {
-					cmd.Fatal("Error creating remote: %v", err)
+					cmdutil.Fatal("Error creating remote: %v", err)
 				}
 			}
 			if remote == nil {
-				cmd.Fatal("No remote specified")
+				cmdutil.Fatal("No remote specified")
 			}
 
 			if namespace == "" {
-				cmd.Fatal("namespace value is empty and must be specified")
+				cmdutil.Fatal("namespace value is empty and must be specified")
 			}
 
-			kubeConfig, err := cmd.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
+			kubeConfig, err := cmdutil.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
 			if err != nil {
-				cmd.Fatal("Could not load Kubernetes config: %v", err)
+				cmdutil.Fatal("Could not load Kubernetes config: %v", err)
 			}
 			agentOpts = append(agentOpts, agent.WithRemote(remote))
 			agentOpts = append(agentOpts, agent.WithMode(agentMode))
 			ag, err := agent.NewAgent(ctx, kubeConfig, namespace, agentOpts...)
 			if err != nil {
-				cmd.Fatal("Could not create a new agent instance: %v", err)
+				cmdutil.Fatal("Could not create a new agent instance: %v", err)
 			}
 			if err := ag.Start(ctx); err != nil {
-				cmd.Fatal("Could not start agent: %v", err)
+				cmdutil.Fatal("Could not start agent: %v", err)
 			}
 			<-ctx.Done()
 		},
@@ -215,10 +215,10 @@ func loadCreds(path string) (auth.Credentials, error) {
 }
 
 func main() {
-	cmd.InitLogging()
+	cmdutil.InitLogging()
 	c := NewAgentRunCommand()
 	err := c.Execute()
 	if err != nil {
-		cmd.Fatal("ERROR: %v", err)
+		cmdutil.Fatal("ERROR: %v", err)
 	}
 }

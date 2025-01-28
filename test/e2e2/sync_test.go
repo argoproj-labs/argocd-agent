@@ -156,6 +156,8 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 	// principal
 	app = argoapp.Application{}
 	err = suite.PrincipalClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+	app.Spec.Destination.Name = "in-cluster"
+	app.Spec.Destination.Server = ""
 	requires.NoError(err)
 	mapp := argoapp.Application{}
 	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &mapp, metav1.GetOptions{})

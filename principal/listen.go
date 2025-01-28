@@ -85,6 +85,7 @@ func addrToListener(l net.Listener) (*Listener, error) {
 	return &Listener{host: host, port: port, l: l}, nil
 }
 
+// Listen configures and starts the server's TCP listener.
 func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 	var c net.Listener
 	var err error
@@ -98,13 +99,14 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 		if try == 1 {
 			log().Debugf("Starting TCP listener on %s", bind)
 		}
-		// Even though we load TLS configuration here, we will not use create
+		// Even though we load TLS configuration here, we will not yet create
 		// a TLS listener. TLS will be setup using the appropriate grpc-go API
 		// functions.
 		s.tlsConfig, lerr = s.loadTLSConfig()
 		if lerr != nil {
 			return false, lerr
 		}
+		// Start the TCP listener and bail out on errors.
 		c, lerr = net.Listen("tcp", bind)
 		if lerr != nil {
 			log().WithError(err).Debugf("Retrying to start TCP listener on %s (retry %d/%d)", bind, try, listenerRetries)
@@ -136,34 +138,31 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 		return fmt.Errorf("could not start listener: %w", err)
 	}
 
-	s.grpcServer = grpc.NewServer(
+	grpcOpts := []grpc.ServerOption{
+		// Global interceptors for gRPC streams
 		grpc.ChainStreamInterceptor(
-			streamRequestLogger(),
-			// logging.StreamServerInterceptor(InterceptorLogger(logrus.New()),
-			// 	logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
-			// ),
-			s.streamAuthInterceptor,
-			// grpc_auth.StreamServerInterceptor(func(ctx context.Context) (context.Context, error) {
-			// 	return s.authenticate(ctx)
-			// }),
+			streamRequestLogger(),   // logging
+			s.streamAuthInterceptor, // auth
 		),
+		// Global interceptors for gRPC unary calls
 		grpc.ChainUnaryInterceptor(
-			unaryRequestLogger(),
-			// logging.UnaryServerInterceptor(InterceptorLogger(logrus.New()),
-			// 	logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
-			// ),
-			s.unaryAuthInterceptor,
+			unaryRequestLogger(),   // logging
+			s.unaryAuthInterceptor, // auth
 		),
+		// TLS credentials
 		grpc.Creds(credentials.NewTLS(s.tlsConfig)),
-	)
-	authSrv, err := auth.NewServer(s.queues, s.authMethods, s.issuer)
-	if err != nil {
-		return fmt.Errorf("could not create new auth server: %w", err)
 	}
-	authapi.RegisterAuthenticationServer(s.grpcServer, authSrv)
-	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer(s.authenticate))
-	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues))
 
+	// Instantiate server with given opts
+	s.grpcServer = grpc.NewServer(grpcOpts...)
+
+	// Register all gRPC services with the server
+	if err := s.registerGrpcServices(); err != nil {
+		return fmt.Errorf("could not register gRPC services: %w", err)
+	}
+
+	// If the server is configured with HTTP/1 support enabled, configured and
+	// start the downgrading proxy. Otherwise, start the gRPC server.
 	if s.enableWebSocket {
 		opts := []grpchttp1server.Option{grpchttp1server.PreferGRPCWeb(true)}
 
@@ -188,31 +187,6 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 	return nil
 }
 
-// func (s *Server) ServeHTTP(ctx context.Context, errch chan error) error {
-// 	err := s.Listen(ctx, listenerBackoff)
-// 	if err != nil {
-// 		return fmt.Errorf("could not start listener: %w", err)
-// 	}
-// 	mux := http.NewServeMux()
-// 	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
-// 		w.WriteHeader(200)
-// 		w.Write([]byte("hello workd"))
-// 	})
-// 	s.server = &http.Server{
-// 		BaseContext: func(l net.Listener) context.Context {
-// 			return s.listener.ctx
-// 		},
-// 		TLSConfig: s.tlsConfig,
-// 		ErrorLog:  golog.New(log.New().WriterLevel(log.WarnLevel), "", 0),
-// 		Handler:   mux,
-// 	}
-// 	go func() {
-// 		err = s.server.Serve(s.listener.l)
-// 		errch <- err
-// 	}()
-// 	return nil
-// }
-
 func (l *Listener) Host() string {
 	return l.host
 }
@@ -223,4 +197,18 @@ func (l *Listener) Port() int {
 
 func (l *Listener) Address() string {
 	return fmt.Sprintf("%s:%d", l.host, l.port)
+}
+
+// registerGrpcServices registers all required gRPC services to the server s.
+// This method should be called after the server is configured, and has all
+// required configuration properties set.
+func (s *Server) registerGrpcServices() error {
+	authSrv, err := auth.NewServer(s.queues, s.authMethods, s.issuer)
+	if err != nil {
+		return fmt.Errorf("could not create new auth server: %w", err)
+	}
+	authapi.RegisterAuthenticationServer(s.grpcServer, authSrv)
+	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer(s.authenticate))
+	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues))
+	return nil
 }
