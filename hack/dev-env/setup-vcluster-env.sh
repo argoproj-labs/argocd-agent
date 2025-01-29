@@ -227,6 +227,8 @@ apply() {
     if [[ "$ADMIN_PASSWORD" != "" ]]; then
         echo
         echo "Argo CD Admin Password: $ADMIN_PASSWORD"
+        kubectl --context vcluster-control-plane delete --ignore-not-found -n argocd secret argocd-initial-admin-secret
+        kubectl --context vcluster-control-plane create -n argocd secret generic argocd-initial-admin-secret --from-literal="password=${ADMIN_PASSWORD}"
         echo
     fi
 }
