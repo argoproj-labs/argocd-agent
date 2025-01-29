@@ -162,7 +162,6 @@ require (
 )
 
 replace (
-
 	github.com/golang/glog => github.com/golang/glog v1.2.4
 	k8s.io/api => k8s.io/api v0.31.0
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.31.0
