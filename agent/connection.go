@@ -36,12 +36,14 @@ func (a *Agent) maintainConnection() error {
 				if err != nil {
 					log().Warnf("Could not connect to %s: %v", a.remote.Addr(), err)
 				} else {
-					err = a.queues.Create(a.remote.ClientID())
-					if err != nil {
-						log().Warnf("Could not create agent queue pair: %v", err)
-					} else {
-						a.SetConnected(true)
+					if !a.queues.HasQueuePair(a.remote.ClientID()) {
+						err = a.queues.Create(a.remote.ClientID())
+						if err != nil {
+							log().Warnf("Could not create agent queue pair: %v", err)
+							continue
+						}
 					}
+					a.SetConnected(true)
 				}
 			} else {
 				err = a.handleStreamEvents()
@@ -74,13 +76,18 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 		logCtx.Tracef("Queue shutdown in progress")
 		return nil
 	}
-	logCtx.Tracef("Grabbed an item")
+	logCtx.Trace("Grabbed an item")
 	if ev == nil {
 		// TODO: Is this really the right thing to do?
 		return nil
 	}
-
-	logCtx.WithField("resource_id", event.ResourceID(ev)).WithField("event_id", event.EventID(ev)).Trace("Adding an event to the event writer")
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"event_target": ev.DataSchema(),
+		"event_type":   ev.Type(),
+		"resource_id":  event.ResourceID(ev),
+		"event_id":     event.EventID(ev),
+	})
+	logCtx.Trace("Adding an event to the event writer")
 	a.eventWriter.Add(ev)
 
 	return nil
@@ -214,10 +221,6 @@ func (a *Agent) handleStreamEvents() error {
 	}
 
 	log().WithField("component", "EventHandler").Info("Stream closed")
-	err = a.queues.Delete(a.remote.ClientID(), true)
-	if err != nil {
-		log().Errorf("Could not remove agent queue: %v", err)
-	}
 
 	return nil
 }

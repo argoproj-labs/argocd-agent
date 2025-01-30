@@ -363,3 +363,17 @@ func WithWebSocket(enableWebSocket bool) ServerOption {
 		return nil
 	}
 }
+
+func WithResourceProxyEnabled(enabled bool) ServerOption {
+	return func(o *Server) error {
+		o.resourceProxyEnabled = enabled
+		return nil
+	}
+}
+
+func WithResourceProxyTLS(tlsConfig *tls.Config) ServerOption {
+	return func(o *Server) error {
+		o.resourceProxyTlsConfig = tlsConfig
+		return nil
+	}
+}

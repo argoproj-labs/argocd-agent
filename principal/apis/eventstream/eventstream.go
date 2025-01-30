@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
@@ -208,18 +209,30 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	if streamEvent == nil || streamEvent.Event == nil {
 		return fmt.Errorf("invalid wire transmission")
 	}
+
 	app := &v1alpha1.Application{}
+	proj := &v1alpha1.AppProject{}
+	resResp := &event.ResourceResponse{}
 	incomingEvent, err := format.FromProto(streamEvent.Event)
 	if err != nil {
 		return fmt.Errorf("could not unserialize event from wire: %w", err)
 	}
 
 	logCtx = logCtx.WithFields(logrus.Fields{
-		"resource_id": event.ResourceID(incomingEvent),
-		"event_id":    event.EventID(incomingEvent),
+		"resource_id":  event.ResourceID(incomingEvent),
+		"event_id":     event.EventID(incomingEvent),
+		"event_target": incomingEvent.DataSchema(),
+		"event_type":   incomingEvent.Type(),
 	})
 
-	err = incomingEvent.DataAs(app)
+	switch event.Target(incomingEvent) {
+	case event.TargetApplication:
+		err = incomingEvent.DataAs(app)
+	case event.TargetAppProject:
+		err = incomingEvent.DataAs(proj)
+	case event.TargetResource:
+		err = incomingEvent.DataAs(resResp)
+	}
 	if err != nil {
 		return fmt.Errorf("could not unserialize app data from wire: %w", err)
 	}
@@ -266,9 +279,22 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	if shutdown {
 		return fmt.Errorf("sendq shutdown in progress")
 	}
-	logCtx.Tracef("Grabbed an item")
 	if ev == nil {
 		return fmt.Errorf("panic: nil item in queue")
+	}
+	logCtx.WithField("event_target", ev.DataSchema()).WithField("event_type", ev.Type()).Trace("Grabbed an item")
+
+	mode, err := session.ClientModeFromContext(c.ctx)
+	if err != nil {
+		return fmt.Errorf("unable to determine agent mode: %w", err)
+	}
+
+	if types.AgentModeFromString(mode) != types.AgentModeManaged {
+		// Only Update events are valid for unmanaged agents
+		if ev.Type() != event.Update.String() {
+			logCtx.WithField("type", ev.Type()).Debug("Discarding event for unmanaged agent")
+			return nil
+		}
 	}
 
 	eventWriter := s.eventWriters.Get(c.agentName)

@@ -17,15 +17,19 @@ package principal
 import (
 	context "context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
+	goruntime "runtime"
 	"sync"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
+	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
@@ -39,11 +43,13 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v2/util/glob"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -70,6 +76,8 @@ type Server struct {
 	ctxCancel      context.CancelFunc
 	appManager     *application.ApplicationManager
 	projectManager *appproject.AppProjectManager
+
+	namespaceManager *kubenamespace.KubernetesBackend
 	// At present, 'watchLock' is only acquired on calls to 'updateAppCallback'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
 	watchLock sync.RWMutex
 	// clientMap is not currently used
@@ -92,6 +100,18 @@ type Server struct {
 	// The Principal will rely on gRPC over WebSocket for bi-directional streaming. This option could be enabled
 	// when there is an intermediate component that is HTTP/2 incompatible and downgrades the incoming request to HTTP/1.1
 	enableWebSocket bool
+
+	// resourceProxyEnabled indicates whether the resource proxy should be enabled
+	resourceProxyEnabled bool
+	// resourceProxy intercepts requests to the agent Kubernetes APIs
+	resourceProxy *resourceproxy.ResourceProxy
+	// resourceProxyListenAddr is the listener address for the resource proxy
+	resourceProxyListenAddr string
+	// resourceProxyTlsConfig is the TLS configuration for the resource proxy
+	resourceProxyTlsConfig *tls.Config
+
+	// clusterManager manages Argo CD cluster secrets and their mappings to agents
+	clusterMgr *cluster.Manager
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need
@@ -102,6 +122,10 @@ var noAuthEndpoints = map[string]bool{
 }
 
 const waitForSyncedDuration = 60 * time.Second
+
+// defaultResourceProxyListenerAddr is the default listener address for the
+// resource proxy.
+const defaultResourceProxyListenerAddr = "0.0.0.0:9090"
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
@@ -205,6 +229,22 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
+	nsInformerOpts := []informer.InformerOption[*corev1.Namespace]{
+		informer.WithListHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return kubeClient.Clientset.CoreV1().Namespaces().List(ctx, opts)
+		}),
+		informer.WithWatchHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return kubeClient.Clientset.CoreV1().Namespaces().Watch(ctx, opts)
+		}),
+		informer.WithDeleteHandler[*corev1.Namespace](s.deleteNamespaceCallback),
+	}
+
+	nsInformer, err := informer.NewInformer(ctx, nsInformerOpts...)
+	if err != nil {
+		return nil, err
+	}
+	s.namespaceManager = kubenamespace.NewKubernetesBackend(nsInformer)
+
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
 	}
@@ -212,7 +252,79 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		"argocd": types.AgentModeAutonomous,
 	}
 
+	if s.resourceProxyListenAddr == "" {
+		s.resourceProxyListenAddr = defaultResourceProxyListenerAddr
+	}
+
+	// Instantiate our ResourceProxy to intercept Kubernetes requests from Argo
+	// CD's API server.
+	if s.resourceProxyEnabled {
+		// TODO(jannfis): Enable fetching APIs and resource counts
+		s.resourceProxy, err = resourceproxy.New(s.resourceProxyListenAddr,
+			// For matching resource requests from the Argo CD API
+			resourceproxy.WithRequestMatcher(
+				resourceRequestRegexp,
+				[]string{"get"},
+				s.processResourceRequest,
+			),
+			// Fake version output
+			resourceproxy.WithRequestMatcher(
+				`^/version$`,
+				[]string{"get"},
+				s.proxyVersion,
+			),
+			resourceproxy.WithTLSConfig(s.resourceProxyTlsConfig),
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Instantiate the cluster manager to handle Argo CD cluster secrets for
+	// agents.
+	s.clusterMgr, err = cluster.NewManager(s.ctx, s.namespace, s.kubeClient)
+	if err != nil {
+		return nil, err
+	}
+
 	return s, nil
+}
+
+func (s *Server) proxyVersion(w http.ResponseWriter, r *http.Request, params resourceproxy.Params) {
+	var kubeVersion = struct {
+		Major        string
+		Minor        string
+		GitVersion   string
+		GitCommit    string
+		GitTreeState string
+		BuildDate    string
+		GoVersion    string
+		Compiler     string
+		Platform     string
+	}{
+		Major:        "1",
+		Minor:        "28",
+		GitVersion:   "1.28.5+argocd-agent",
+		GitCommit:    "841856557ef0f6a399096c42635d114d6f2cf7f4",
+		GitTreeState: "clean",
+		BuildDate:    "n/a",
+		GoVersion:    goruntime.Version(),
+		Compiler:     goruntime.Compiler,
+		Platform:     fmt.Sprintf("%s/%s", goruntime.GOOS, goruntime.GOARCH),
+	}
+
+	version, err := json.MarshalIndent(kubeVersion, "", "  ")
+	if err != nil {
+		log().Errorf("Could not marshal JSON: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Header().Add("Content-type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(version)
+	if err != nil {
+		log().Errorf("Could not write K8s version to client: %v", err)
+	}
 }
 
 // Start starts the Server s and its listeners in their own go routines. Any
@@ -259,6 +371,15 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}()
 
+	// The namespace informer lives in its own go routine
+	go func() {
+		if err := s.namespaceManager.StartInformer(s.ctx); err != nil {
+			log().WithError(err).Error("Namespace informer has exited non-successfully")
+		} else {
+			log().Info("Namespace informer has exited")
+		}
+	}()
+
 	s.events = event.NewEventSource(s.options.serverName)
 
 	if err := s.appManager.EnsureSynced(waitForSyncedDuration); err != nil {
@@ -271,6 +392,26 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 	log().Infof("AppProject informer synced and ready")
 
+	// Start resource proxy if it is enabled
+	if s.resourceProxy != nil {
+		_, err = s.resourceProxy.Start(s.ctx)
+		if err != nil {
+			return fmt.Errorf("unable to start ResourceProxy: %w", err)
+		}
+		log().Infof("Resource proxy started")
+	} else {
+		log().Infof("Resource proxy is disabled")
+	}
+
+	err = s.clusterMgr.Start()
+	if err != nil {
+		return err
+	}
+	if err := s.namespaceManager.EnsureSynced(waitForSyncedDuration); err != nil {
+		return fmt.Errorf("unable to sync Namespace informer: %w", err)
+	}
+	log().Infof("Namespace informer synced and ready")
+
 	return nil
 }
 
@@ -278,6 +419,16 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 // results in an error, an error is returned.
 func (s *Server) Shutdown() error {
 	var err error
+
+	if s.resourceProxy != nil {
+		if err = s.resourceProxy.Stop(s.ctx); err != nil {
+			return err
+		}
+	}
+
+	if err = s.clusterMgr.Stop(); err != nil {
+		return err
+	}
 
 	log().Debugf("Shutdown requested")
 	// Cancel server-wide context

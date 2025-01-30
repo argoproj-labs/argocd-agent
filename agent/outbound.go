@@ -18,6 +18,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // addAppCreationToQueue processes a new application event originating from the
@@ -25,13 +26,6 @@ import (
 func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 	logCtx := log().WithField("event", "NewApp").WithField("application", app.QualifiedName())
 	logCtx.Debugf("New app event")
-
-	// If the agent is not connected, we ignore this event. It just makes no
-	// sense to fill up the send queue when we can't send.
-	if !a.IsConnected() {
-		logCtx.Trace("Agent is not connected, ignoring this event")
-		return
-	}
 
 	// Update events trigger a new event sometimes, too. If we've already seen
 	// the app, we just ignore the request then.
@@ -63,13 +57,6 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	defer a.watchLock.Unlock()
 	if a.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
 		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
-		return
-	}
-
-	// If the agent is not connected, we ignore this event. It just makes no
-	// sense to fill up the send queue when we can't send.
-	if !a.IsConnected() {
-		logCtx.Trace("Agent is not connected, ignoring this event")
 		return
 	}
 
@@ -109,13 +96,6 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	logCtx := log().WithField("event", "DeleteApp").WithField("application", app.QualifiedName())
 	logCtx.Debugf("Delete app event")
 
-	// If the agent is not connected, we ignore this event. It just makes no
-	// sense to fill up the send queue when we can't send.
-	if !a.IsConnected() {
-		logCtx.Trace("Agent is not connected, ignoring this event")
-		return
-	}
-
 	if !a.appManager.IsManaged(app.QualifiedName()) {
 		logCtx.Tracef("App is not managed")
 	}
@@ -127,4 +107,21 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	}
 	q.Add(a.emitter.ApplicationEvent(event.Delete, app))
 	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app delete event to send queue")
+}
+
+// deleteNamespaceCallback is called when the user deletes the agent namespace.
+// Since there is no namespace we can remove the queue associated with this agent.
+func (a *Agent) deleteNamespaceCallback(outbound *corev1.Namespace) {
+	logCtx := log().WithField("event", "DeleteNamespace").WithField("agent", outbound.Name)
+
+	if !a.queues.HasQueuePair(outbound.Name) {
+		return
+	}
+
+	if err := a.queues.Delete(outbound.Name, true); err != nil {
+		logCtx.WithError(err).Error("failed to remove the queue pair for a deleted agent namespace")
+		return
+	}
+
+	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
 }

@@ -25,6 +25,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -87,10 +88,43 @@ func TlsCertFromX509(cert *x509.Certificate, key crypto.PrivateKey) (tls.Certifi
 	return tlsCert, nil
 }
 
-// func X509CertFromFile(path string) (*x509.Certificate, error) {
-// 	b, err := os.ReadFile(path)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func X509CertPoolFromFile(path string) (*x509.CertPool, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	ok := pool.AppendCertsFromPEM(b)
+	if !ok {
+		return nil, fmt.Errorf("%s: invalid PEM data", path)
+	}
 
-// }
+	return pool, nil
+}
+
+func CertDataToPEM(b []byte) (string, error) {
+	certPem := new(bytes.Buffer)
+	err := pem.Encode(certPem, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: b,
+	})
+	return certPem.String(), err
+}
+
+func KeyDataToPEM(k crypto.PrivateKey) (string, error) {
+	keyPem := new(bytes.Buffer)
+	var keyBytes []byte
+	var err error
+
+	if keyBytes, err = x509.MarshalPKCS8PrivateKey(k); err != nil {
+		return "", err
+	}
+
+	err = pem.Encode(keyPem, &pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: keyBytes,
+	})
+
+	return keyPem.String(), err
+
+}
