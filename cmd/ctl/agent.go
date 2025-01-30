@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
@@ -230,10 +232,10 @@ func NewAgentInspectCommand() *cobra.Command {
 				os.Exit(1)
 			}
 			type clusterOut struct {
-				ServerAddr     string    `yaml:"server" json:"server"`
-				Name           string    `yaml:"name" json:"name"`
-				NotValidAfter  time.Time `yaml:"notValidAfter" json:"notValidAfter"`
-				NotValidBefore time.Time `yaml:"notValidBefore" json:"notValidBefore"`
+				ServerAddr     string    `yaml:"server" json:"server" text:"Server address"`
+				Name           string    `yaml:"name" json:"name" text:"Server name"`
+				NotValidBefore time.Time `yaml:"notValidBefore" json:"notValidBefore" text:"Not valid before"`
+				NotValidAfter  time.Time `yaml:"notValidAfter" json:"notValidAfter" text:"Not valid after"`
 			}
 			ctx := context.TODO()
 			agentName := args[0]
@@ -263,16 +265,22 @@ func NewAgentInspectCommand() *cobra.Command {
 			switch strings.ToLower(outputFormat) {
 			case "json":
 				out, err = json.MarshalIndent(cluster, "", " ")
+				out = append(out, '\n')
 			case "yaml":
 				out, err = yaml.Marshal(cluster)
 			case "text":
+				bb := &bytes.Buffer{}
+				tw := tabwriter.NewWriter(bb, 0, 0, 2, ' ', 0)
+				err = cmdutil.StructToTabwriter(cluster, tw)
+				tw.Flush()
+				out = bb.Bytes()
 			default:
 				cmdutil.Fatal("Unknown output format: %s", outputFormat)
 			}
 			if err != nil {
 				cmdutil.Fatal("%v", err)
 			}
-			fmt.Println(string(out))
+			fmt.Print(string(out))
 		},
 	}
 	command.Flags().StringVarP(&outputFormat, "output", "o", "json", "Output format (json, yaml or text)")

@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
+	"text/tabwriter"
 )
 
 // ReadFromTerm displays a prompt and reads user input from the terminal
@@ -46,4 +48,42 @@ func ReadFromTerm(prompt string, maxRetries int, isValid func(s string) (valid b
 			return val, nil
 		}
 	}
+}
+
+func parseTag(tag string) map[string]string {
+	m := make(map[string]string)
+	tt := strings.Split(tag, ",")
+	m["name"] = tt[0]
+	for i := 1; i < len(tt); i++ {
+		if tt[i] == "omitempty" {
+			m["omitempty"] = "omitempty"
+		}
+	}
+	return m
+}
+
+func StructToTabwriter(s any, tw *tabwriter.Writer) error {
+	t := reflect.TypeOf(s)
+	v := reflect.ValueOf(s)
+	if t.Kind() == reflect.Pointer {
+		t = v.Elem().Type()
+		v = v.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return fmt.Errorf("expected struct, got %s", t.Kind())
+	}
+	for i := 0; i < t.NumField(); i++ {
+		if !t.Field(i).IsExported() {
+			fmt.Println("Oh")
+			continue
+		}
+		s := t.Field(i).Tag.Get("text")
+		if s == "" {
+			fmt.Println("Uh")
+			continue
+		}
+		tag := parseTag(s)
+		fmt.Fprintf(tw, "%s:\t%v\n", tag["name"], v.Field(i).Interface())
+	}
+	return nil
 }

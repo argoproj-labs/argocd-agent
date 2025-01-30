@@ -6,12 +6,10 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
@@ -20,7 +18,6 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj/argo-cd/v2/util/glob"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -126,13 +123,13 @@ func NewCAInspectCommand() *cobra.Command {
 		outFormat string
 	)
 	type summary struct {
-		Subject   string   `json:"subject" yaml:"subject"`
-		KeyType   string   `json:"keyType" yaml:"keyType"`
-		Keylength int      `json:"keyLength" yaml:"keyLength"`
-		NotBefore string   `json:"notBefore" yaml:"notBefore"`
-		NotAfter  string   `json:"notAfter" yaml:"notAfter"`
-		Checksum  string   `json:"sha256" yaml:"sha256"`
-		Warnings  []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+		Subject   string   `json:"subject" yaml:"subject" text:"Subject"`
+		KeyType   string   `json:"keyType" yaml:"keyType" text:"Key type"`
+		KeyLength int      `json:"keyLength" yaml:"keyLength" text:"Key length"`
+		NotBefore string   `json:"notBefore" yaml:"notBefore" text:"Not valid before"`
+		NotAfter  string   `json:"notAfter" yaml:"notAfter" text:"Not valid after"`
+		Checksum  string   `json:"sha256" yaml:"sha256" text:"Checksum"`
+		Warnings  []string `json:"warnings,omitempty" yaml:"warnings,omitempty" text:"Warnings,omitempty"`
 	}
 	command := &cobra.Command{
 		Short: "NON-PROD!! Inspect the configured CA",
@@ -171,38 +168,18 @@ func NewCAInspectCommand() *cobra.Command {
 			sum := summary{
 				Subject:   cert.Subject.String(),
 				KeyType:   "RSA",
-				Keylength: key.Size() * 8,
+				KeyLength: key.Size() * 8,
 				NotBefore: cert.NotBefore.Format(time.RFC1123Z),
 				NotAfter:  cert.NotAfter.Format(time.RFC1123Z),
 				Checksum:  fmt.Sprintf("%x", sha256.Sum256(cert.Raw)),
 				Warnings:  warnings,
 			}
 
-			if outFormat == "json" {
-				jsonOut, err := json.MarshalIndent(sum, "", "  ")
-				if err != nil {
-					cmdutil.Fatal("Could not marshal summary to JSON: %v", err)
-				}
-				fmt.Println(string(jsonOut))
-			} else if outFormat == "yaml" {
-				yamlOut, err := yaml.Marshal(sum)
-				if err != nil {
-					cmdutil.Fatal("Could not marshal summary: %v", err)
-				}
-				fmt.Print(string(yamlOut))
-			} else if outFormat == "text" {
-				tw := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
-				fmt.Fprintf(tw, "Subject:\t%s\n", sum.Subject)
-				fmt.Fprintf(tw, "Key type:\t%s\n", sum.KeyType)
-				fmt.Fprintf(tw, "Key length:\t%d\n", sum.Keylength)
-				fmt.Fprintf(tw, "Not valid before:\t%s\n", sum.NotBefore)
-				fmt.Fprintf(tw, "Not valid after:\t%s\n", sum.NotAfter)
-				fmt.Fprintf(tw, "Checksum:\t%s\n", sum.Checksum)
-				tw.Flush()
-			} else {
-				_ = cmd.Help()
-				cmdutil.Fatal("Unknown output format: %s", outFormat)
+			out, err := cmdutil.MarshalStruct(sum, outFormat)
+			if err != nil {
+				cmdutil.Fatal("Could not marshal summary: %v", err)
 			}
+			fmt.Print(string(out))
 		},
 	}
 
