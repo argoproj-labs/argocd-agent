@@ -4,11 +4,63 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"text/tabwriter"
 
 	"gopkg.in/yaml.v2"
 )
+
+// parseTag parses a struct field's tag and returns it tokens in a map.
+// The returned map will contain at least the key "name". If the tag is
+// empty, its value will be fieldName.
+func parseTag(fieldName string, tag string) map[string]string {
+	m := make(map[string]string)
+	if tag == "" {
+		m["name"] = fieldName
+		return m
+	}
+	tt := strings.Split(tag, ",")
+	m["name"] = tt[0]
+	for i := 1; i < len(tt); i++ {
+		if tt[i] == "omitempty" {
+			m["omitempty"] = "omitempty"
+		}
+	}
+	return m
+}
+
+// StructToTabwriter takes any struct s and produces a formatted text output
+// using the tabwriter tw. The fields in struct s to render must be tagged
+// properly with a "text" tag, and they must be exported.
+//
+// This function will not flush the tabwriter's writer, so the caller is
+// expected to do that after this function returns.
+//
+// An error will be returned if the data type passed as s was unexpected.
+func StructToTabwriter(s any, tw *tabwriter.Writer) error {
+	t := reflect.TypeOf(s)
+	v := reflect.ValueOf(s)
+	if t.Kind() == reflect.Pointer {
+		t = v.Elem().Type()
+		v = v.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return fmt.Errorf("expected struct, got %s", t.Kind())
+	}
+	for i := 0; i < t.NumField(); i++ {
+		if !t.Field(i).IsExported() {
+			continue
+		}
+		s := t.Field(i).Tag.Get("text")
+		if s == "" {
+			continue
+		}
+		tag := parseTag(t.Field(i).Name, s)
+		fmt.Fprintf(tw, "%s:\t%v\n", tag["name"], v.Field(i).Interface())
+	}
+	return nil
+}
 
 // MarshalStruct marshals any tagged struct in the output format given.
 // Formats supported are json, yaml and text. Struct fields to be
