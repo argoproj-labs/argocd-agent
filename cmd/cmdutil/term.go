@@ -12,7 +12,7 @@ import (
 // ReadFromTerm displays a prompt and reads user input from the terminal
 //
 // It writes prompt to stdout and then reads user input from stdin.
-
+//
 // If isValid is nil, the string entered by the user will be immediately
 // returned. Otherwise, if isValid is non-nil, it will determine the
 // validity of the user's input.
@@ -62,6 +62,14 @@ func parseTag(tag string) map[string]string {
 	return m
 }
 
+// StructToTabwriter takes any struct s and produces a formatted text output
+// using the tabwriter tw. The fields in struct s to render must be tagged
+// properly with a "text" tag, and they must be exported.
+//
+// This function will not flush the tabwriter's writer, so the caller is
+// expected to do that after this function returns.
+//
+// An error will be returned if the data type passed as s was unexpected.
 func StructToTabwriter(s any, tw *tabwriter.Writer) error {
 	t := reflect.TypeOf(s)
 	v := reflect.ValueOf(s)
@@ -74,12 +82,10 @@ func StructToTabwriter(s any, tw *tabwriter.Writer) error {
 	}
 	for i := 0; i < t.NumField(); i++ {
 		if !t.Field(i).IsExported() {
-			fmt.Println("Oh")
 			continue
 		}
 		s := t.Field(i).Tag.Get("text")
 		if s == "" {
-			fmt.Println("Uh")
 			continue
 		}
 		tag := parseTag(s)
