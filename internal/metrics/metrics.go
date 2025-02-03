@@ -166,8 +166,7 @@ func NewAgentMetrics() *AgentMetrics {
 // AvgCalculationInterval is time interval for agent connection time calculation
 var AvgCalculationInterval = 3 * time.Minute
 
-// ConnectionTimeMap is an utility for AvgAgentConnectionTime
-// var ConnectionTimeMap = make(map[string]time.Time)
+// AgentConnectionTime is an utility for AvgAgentConnectionTime
 type AgentConnectionTime struct {
 	Lock sync.RWMutex
 
@@ -183,16 +182,16 @@ var agentConnectionTime = &AgentConnectionTime{
 
 // SetAgentConnectionTime inserts connection time of new agent
 func SetAgentConnectionTime(agentName string, start time.Time) {
-	agentConnectionTime.Lock.RLock()
-	defer agentConnectionTime.Lock.RUnlock()
+	agentConnectionTime.Lock.Lock()
+	defer agentConnectionTime.Lock.Unlock()
 
 	agentConnectionTime.ConnectionTimeMap[agentName] = start
 }
 
 // DeleteAgentConnectionTime removed connection time of existing agent
 func DeleteAgentConnectionTime(agentName string) {
-	agentConnectionTime.Lock.RLock()
-	defer agentConnectionTime.Lock.RUnlock()
+	agentConnectionTime.Lock.Lock()
+	defer agentConnectionTime.Lock.Unlock()
 
 	delete(agentConnectionTime.ConnectionTimeMap, agentName)
 }
