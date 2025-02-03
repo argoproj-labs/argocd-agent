@@ -84,7 +84,11 @@ func GenerateCaCertificate(commonName string) (string, string, error) {
 	return certPem.String(), keyPem.String(), nil
 }
 
-// GenerateClientCertificate generates a
+// GenerateClientCertificate generates a TLS certificate, signed with the
+// given signer cert and signer key, that is suitable for client side
+// authentication.
+//
+// It will return the certificate and its private key as PEM encoded strings.
 func GenerateClientCertificate(name string, signerCert *x509.Certificate, signerKey crypto.PrivateKey) (string, string, error) {
 	cert := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -103,6 +107,11 @@ func GenerateClientCertificate(name string, signerCert *x509.Certificate, signer
 	return GenerateCertificate(cert, signerCert, signerKey)
 }
 
+// GenerateServerCertificate generates a TLS certificate, signed with the
+// given signer cert and signer key, that is suitable for server side
+// authentication.
+//
+// It will return the certificate and its private key as PEM encoded strings.
 func GenerateServerCertificate(name string, signerCert *x509.Certificate, signerKey crypto.PrivateKey, san []string) (string, string, error) {
 	var err error
 	dnsNames := []string{}
@@ -154,6 +163,10 @@ func GenerateServerCertificate(name string, signerCert *x509.Certificate, signer
 	return GenerateCertificate(cert, signerCert, signerKey)
 }
 
+// GenerateCertificate generates a certificate from template cert and signs it
+// using signerCert and signerKey.
+//
+// It will return the certificate and its private key as PEM encoded strings.
 func GenerateCertificate(cert *x509.Certificate, signerCert *x509.Certificate, signerKey crypto.PrivateKey) (string, string, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
