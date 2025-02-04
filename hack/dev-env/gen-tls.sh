@@ -39,6 +39,7 @@ if test "x${kubectl}" = "x"; then
     echo "No kubectl or oc found in \$PATH" >&2
     exit 1
 fi
+
 generate_rp_ca() {
 	echo "Generating CA"
 	openssl genrsa -out ${creds_path}/ca.key
@@ -55,7 +56,10 @@ generate_rp_cert() {
 	    -config <(cat /etc/ssl/openssl.cnf \
 		<(printf "\n[SAN]\nsubjectAltName=DNS:localhost,IP:127.0.0.1")) \
 	    -out ${creds_path}/rp.csr
-	openssl x509 -req -in ${creds_path}/rp.csr -CA ${creds_path}/ca.crt -CAkey ${creds_path}/ca.key -CAcreateserial -out ${creds_path}/rp.crt -days ${days} -sha256
+	openssl x509 -req -in ${creds_path}/rp.csr \
+	    -extfile <(cat /etc/ssl/openssl.cnf <(printf "[SAN]\nsubjectAltName=DNS:localhost,IP:127.0.0.1")) \
+	    -extensions SAN \
+	    -CA ${creds_path}/ca.crt -CAkey ${creds_path}/ca.key -CAcreateserial -out ${creds_path}/rp.crt -days ${days} -sha256
 }
 
 generate_rp_ca
@@ -65,4 +69,4 @@ echo "Generating secrets..."
 kubectl --context=${cp_context} delete secret -n argocd ${rp_tls_secret} --ignore-not-found
 kubectl --context=${cp_context} delete secret -n argocd ${rp_ca_secret} --ignore-not-found
 kubectl --context=${cp_context} create secret -n argocd tls ${rp_tls_secret} --key=${creds_path}/rp.key --cert=${creds_path}/rp.crt
-kubectl --context=${cp_context} create secret -n argocd generic ${rp_ca_secret} --from-file=ca.crt=${creds_path}/ca.crt
+kubectl --context=${cp_context} create secret -n argocd tls ${rp_ca_secret} --cert=${creds_path}/ca.crt --key=${creds_path}/ca.key

@@ -28,6 +28,3 @@ go run github.com/argoproj-labs/argocd-agent/cmd/principal \
 	--log-level trace \
 	--namespace argocd \
 	--passwd ${SCRIPTPATH}/creds/users.control-plane $ARGS
-	#--resource-proxy-ca-path ${SCRIPTPATH}/creds/ca.crt \
-	#--resource-proxy-cert-path ${SCRIPTPATH}/creds/rp.crt \
-	#--resource-proxy-key-path ${SCRIPTPATH}/creds/rp.key \

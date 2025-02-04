@@ -64,7 +64,7 @@ func ToNamespacedName(object KubeObject) types.NamespacedName {
 }
 
 type KubeClient struct {
-	config         *rest.Config
+	Config         *rest.Config
 	scheme         *runtime.Scheme
 	dclient        *dynamic.DynamicClient
 	mapper         meta.RESTMapper
