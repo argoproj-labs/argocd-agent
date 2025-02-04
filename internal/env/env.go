@@ -20,6 +20,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // BoolWithDefault parses the contents of the environment variable referred by
@@ -138,4 +139,39 @@ func StringSlice(key string, validator func(string) error) ([]string, error) {
 		ret = append(ret, s)
 	}
 	return ret, nil
+}
+
+func Duration(key string, validator func(time.Duration) error) (time.Duration, error) {
+	ev, ok := os.LookupEnv(key)
+	if !ok {
+		return 0, os.ErrNotExist
+	}
+
+	d, err := time.ParseDuration(ev)
+	if err != nil {
+		return 0, fmt.Errorf("error parsing duration '%s': %v", key, err)
+	}
+
+	if validator != nil {
+		if err := validator(d); err != nil {
+			return 0, fmt.Errorf("error validating environment '%s': %v", key, err)
+		}
+	}
+	return d, nil
+}
+
+// DurationWithDefault gets the contents of the environment variable referred to
+// by key. If the validator function is non-nil, it will be called with the
+// environment's value as argument. If the validator returns an error or if
+// the environment variable is not set, the default value will be returned.
+// Otherwise, the verbatim value of the environment variable will be returned.
+func DurationWithDefault(key string, validator func(time.Duration) error, def time.Duration) time.Duration {
+	d, err := Duration(key, validator)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Print(err)
+		}
+		return def
+	}
+	return d
 }

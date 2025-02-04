@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -78,6 +79,9 @@ type Remote struct {
 	clientMode      types.AgentMode
 	timeouts        timeouts
 	enableWebSocket bool
+
+	// Time interval for agent to principal ping
+	keepAlivePingInterval time.Duration
 }
 
 type RemoteOption func(r *Remote) error
@@ -207,6 +211,13 @@ func WithClientMode(mode types.AgentMode) RemoteOption {
 	}
 }
 
+func WithKeepAlivePingInterval(interval time.Duration) RemoteOption {
+	return func(r *Remote) error {
+		r.keepAlivePingInterval = interval
+		return nil
+	}
+}
+
 func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error) {
 	r := &Remote{
 		hostname:  hostname,
@@ -319,6 +330,12 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		}
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(creds))
+
+		if r.keepAlivePingInterval != 0 {
+			logrus.Debugf("Agent ping to principal is enabled, agent will send a ping event after every %s.", r.keepAlivePingInterval)
+			opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: r.keepAlivePingInterval}))
+		}
+
 		conn, err = grpc.NewClient(r.Addr(), opts...)
 		if err != nil {
 			return err

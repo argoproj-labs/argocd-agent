@@ -115,6 +115,10 @@ type Server struct {
 
 	// metrics holds principal side metrics
 	metrics *metrics.PrincipalMetrics
+
+	// Minimum time duration for agent to wait before sending next keepalive ping to principal
+	// if agent sends ping more often than specified interval then connection will be dropped
+	keepAliveMinimumInterval time.Duration
 }
 
 // noAuthEndpoints is a list of endpoints that are available without the need

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/agent"
 	"github.com/argoproj-labs/argocd-agent/cmd/cmd"
@@ -53,6 +54,10 @@ func NewAgentRunCommand() *cobra.Command {
 		tlsClientKey    string
 		enableWebSocket bool
 		metricsPort     int
+
+		// Time interval for agent to principal ping
+		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
+		keepAlivePingInterval time.Duration
 	)
 	command := &cobra.Command{
 		Short: "Run the argocd-agent agent component",
@@ -101,6 +106,8 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 			remoteOpts = append(remoteOpts, client.WithWebSocket(enableWebSocket))
 			remoteOpts = append(remoteOpts, client.WithClientMode(types.AgentModeFromString(agentMode)))
+			remoteOpts = append(remoteOpts, client.WithKeepAlivePingInterval(keepAlivePingInterval))
+
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
 				remote, err = client.NewRemote(serverAddress, serverPort, remoteOpts...)
 				if err != nil {
@@ -176,6 +183,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().IntVar(&metricsPort, "metrics-port",
 		env.NumWithDefault("ARGOCD_AGENT_METRICS_PORT", cmd.ValidPort, 8181),
 		"Port the metrics server will listen on")
+	command.Flags().DurationVar(&keepAlivePingInterval, "keep-alive-ping-interval",
+		env.DurationWithDefault("ARGOCD_AGENT_KEEP_ALIVE_PING_INTERVAL", nil, 0),
+		"Ping interval to keep connection alive with Principal")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
