@@ -106,7 +106,7 @@ func Test_DeleteAppProject(t *testing.T) {
 		assert.NoError(t, err)
 		app, err = appC.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
 		assert.True(t, errors.IsNotFound(err))
-		assert.Nil(t, app)
+		assert.Equal(t, &v1alpha1.AppProject{}, app)
 	})
 	t.Run("Remove finalizers", func(t *testing.T) {
 		existing := &v1alpha1.AppProject{
