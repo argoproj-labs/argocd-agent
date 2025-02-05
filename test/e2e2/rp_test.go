@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/test/e2e2/fixture"
 	"github.com/stretchr/testify/suite"
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -53,25 +57,51 @@ func (suite *ResourceProxyTestSuite) getHttpClient(agentName string) *http.Clien
 	return &client
 }
 
-func (suite *ResourceProxyTestSuite) Test_GetResource() {
+func (suite *ResourceProxyTestSuite) Test_ResourceProxy() {
 	requires := suite.Require()
 
 	client := suite.getHttpClient("agent-managed")
-	// Request a resource from the managed agent
+
+	// Managed agents should respond swiftly
 	resp, err := client.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-repo-server")
 	requires.NoError(err)
 	requires.NotNil(resp)
 	requires.Equal(http.StatusOK, resp.StatusCode)
 
-	client = suite.getHttpClient("agent-autonomou")
+	// Check whether we have a "good" resource
+	resource, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	requires.NoError(err)
+	depl := &appsv1.Deployment{}
+	err = json.Unmarshal(resource, depl)
+	requires.NoError(err)
+	requires.Equal("argocd-repo-server", depl.Name)
+	requires.Equal("argocd", depl.Namespace)
+
+	// argocd-server should not exist on the agent
+	resp, err = client.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-server")
+	requires.NoError(err)
+	requires.NotNil(resp)
+	requires.Equal(http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+
+	// Other methods should be forbidden as of now
+	for _, m := range []string{http.MethodConnect, http.MethodDelete, http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut} {
+		resp, err = client.Do(&http.Request{
+			Method: m,
+			URL:    &url.URL{Scheme: "https", Host: "127.0.0.1:9090", Path: "/apis/apps/v1/namespaces/argocd/deployments/argocd-server"},
+		})
+		requires.NoError(err)
+		requires.NotNil(resp)
+		requires.Equal(http.StatusForbidden, resp.StatusCode)
+	}
+
+	// Unknown agent
+	client = suite.getHttpClient("unknown-agent")
 	resp, err = client.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-repo-server")
 	requires.NoError(err)
 	requires.NotNil(resp)
-	requires.Equal(http.StatusOK, resp.StatusCode)
-
-}
-
-func (suite *ResourceProxyTestSuite) Test_DeleteResource() {
+	requires.Equal(http.StatusBadGateway, resp.StatusCode)
 
 }
 
