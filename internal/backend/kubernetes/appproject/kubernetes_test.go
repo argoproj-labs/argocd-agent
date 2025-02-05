@@ -73,7 +73,7 @@ func Test_Create(t *testing.T) {
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		project, err := k.Create(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app-project", Namespace: "ns1"}})
 		assert.ErrorContains(t, err, "exists")
-		assert.Nil(t, project)
+		assert.Equal(t, &v1alpha1.AppProject{}, project)
 	})
 }
 
@@ -91,7 +91,7 @@ func Test_Get(t *testing.T) {
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		project, err := k.Get(context.TODO(), "foo", "ns1")
 		assert.ErrorContains(t, err, "not found")
-		assert.Nil(t, project)
+		assert.Equal(t, &v1alpha1.AppProject{}, project)
 	})
 }
 
@@ -127,7 +127,7 @@ func Test_Update(t *testing.T) {
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		project, err := k.Update(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app-project", Namespace: "ns10"}})
 		assert.ErrorContains(t, err, "not found")
-		assert.Nil(t, project)
+		assert.Equal(t, &v1alpha1.AppProject{}, project)
 	})
 }
 
@@ -148,7 +148,7 @@ func Test_Patch(t *testing.T) {
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		project, err := k.Update(context.TODO(), &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "app-project", Namespace: "ns10"}})
 		assert.ErrorContains(t, err, "not found")
-		assert.Nil(t, project)
+		assert.Equal(t, &v1alpha1.AppProject{}, project)
 	})
 }
 

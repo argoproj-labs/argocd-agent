@@ -104,7 +104,7 @@ func Test_Create(t *testing.T) {
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		app, err := k.Create(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns1"}})
 		assert.ErrorContains(t, err, "exists")
-		assert.Nil(t, app)
+		assert.Equal(t, &v1alpha1.Application{}, app)
 	})
 }
 
@@ -122,7 +122,7 @@ func Test_Get(t *testing.T) {
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		app, err := k.Get(context.TODO(), "foo", "ns1")
 		assert.ErrorContains(t, err, "not found")
-		assert.Nil(t, app)
+		assert.Equal(t, &v1alpha1.Application{}, app)
 	})
 }
 
@@ -149,16 +149,15 @@ func Test_Update(t *testing.T) {
 	t.Run("Update existing app", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Update(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns1"}})
+		_, err := k.Update(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns1"}})
 		assert.NoError(t, err)
-		assert.NotNil(t, app)
 	})
 	t.Run("Update non-existing app", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		app, err := k.Update(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns10"}})
 		assert.ErrorContains(t, err, "not found")
-		assert.Nil(t, app)
+		assert.Equal(t, &v1alpha1.Application{}, app)
 	})
 }
 
@@ -179,6 +178,6 @@ func Test_Patch(t *testing.T) {
 		k := NewKubernetesBackend(fakeAppC, "", nil, true)
 		app, err := k.Update(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns10"}})
 		assert.ErrorContains(t, err, "not found")
-		assert.Nil(t, app)
+		assert.Equal(t, &v1alpha1.Application{}, app)
 	})
 }
