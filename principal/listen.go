@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"k8s.io/apimachinery/pkg/util/wait"
 
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
@@ -132,7 +133,7 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 	return err
 }
 
-func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
+func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetrics, errch chan error) error {
 	err := s.Listen(ctx, listenerBackoff)
 	if err != nil {
 		return fmt.Errorf("could not start listener: %w", err)
@@ -157,7 +158,7 @@ func (s *Server) serveGRPC(ctx context.Context, errch chan error) error {
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 
 	// Register all gRPC services with the server
-	if err := s.registerGrpcServices(); err != nil {
+	if err := s.registerGrpcServices(metrics); err != nil {
 		return fmt.Errorf("could not register gRPC services: %w", err)
 	}
 
@@ -202,13 +203,13 @@ func (l *Listener) Address() string {
 // registerGrpcServices registers all required gRPC services to the server s.
 // This method should be called after the server is configured, and has all
 // required configuration properties set.
-func (s *Server) registerGrpcServices() error {
+func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
 	authSrv, err := auth.NewServer(s.queues, s.authMethods, s.issuer)
 	if err != nil {
 		return fmt.Errorf("could not create new auth server: %w", err)
 	}
 	authapi.RegisterAuthenticationServer(s.grpcServer, authSrv)
 	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer(s.authenticate))
-	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues))
+	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues, metrics))
 	return nil
 }

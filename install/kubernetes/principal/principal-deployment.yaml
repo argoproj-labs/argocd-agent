@@ -45,12 +45,6 @@ spec:
                 name: argocd-agent-params
                 key: principal.metrics.port
                 optional: true
-          - name: ARGOCD_PRINCIPAL_METRICS_ENABLED
-            valueFrom:
-              configMapKeyRef:
-                name: argocd-agent-params
-                key: principal.metrics.enabled
-                optional: true
           - name: ARGOCD_PRINCIPAL_NAMESPACE
             valueFrom:
               configMapKeyRef:

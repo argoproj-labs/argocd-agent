@@ -23,22 +23,23 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/workqueue"
-
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // processRecvQueue processes an entry from the receiver queue, which holds the
 // events received by agents. It will trigger updates of resources in the
 // server's backend.
 func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) (*cloudevents.Event, error) {
+	status := metrics.EventProcessingSuccess
 	ev, _ := q.Get()
 
 	logCtx := log().WithFields(logrus.Fields{
@@ -55,6 +56,10 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 
 	var err error
 	target := event.Target(ev)
+
+	// Start checkpoint step
+	cp.Start(target.String())
+
 	switch target {
 	case event.TargetApplication:
 		err = s.processApplicationEvent(ctx, agentName, ev)
@@ -72,6 +77,21 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	// Stop and log checkpoint information
 	cp.End()
 	logCtx.Debug(cp.String())
+
+	if s.metrics != nil {
+		// ignore EventNotAllowed errors for metrics
+		if err != nil {
+			if event.IsEventNotAllowed(err) {
+				status = metrics.EventProcessingNotAllowed
+			} else {
+				status = metrics.EventProcessingFail
+				s.metrics.PrincipalErrors.WithLabelValues(target.String()).Inc()
+			}
+		}
+
+		// store time taken by principal to process event in metrics
+		s.metrics.EventProcessingTime.WithLabelValues(string(status), agentName, target.String()).Observe(cp.Duration().Seconds())
+	}
 
 	return ev, err
 }

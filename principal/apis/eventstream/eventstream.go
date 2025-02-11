@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
@@ -50,6 +51,8 @@ type Server struct {
 	queues  queue.QueuePair
 
 	eventWriters *eventWritersMap
+
+	metrics *metrics.PrincipalMetrics
 }
 
 // eventWritersMap provides a thread-safe way to manage event writers.
@@ -119,7 +122,7 @@ func WithMaxStreamDuration(d time.Duration) ServerOption {
 }
 
 // NewServer returns a new AppStream server instance with the given options
-func NewServer(queues queue.QueuePair, opts ...ServerOption) *Server {
+func NewServer(queues queue.QueuePair, metrics *metrics.PrincipalMetrics, opts ...ServerOption) *Server {
 	options := &ServerOptions{}
 	for _, o := range opts {
 		o(options)
@@ -128,6 +131,7 @@ func NewServer(queues queue.QueuePair, opts ...ServerOption) *Server {
 		queues:       queues,
 		options:      options,
 		eventWriters: newEventWritersMap(),
+		metrics:      metrics,
 	}
 }
 
@@ -324,6 +328,15 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}
 
 	s.eventWriters.Add(c.agentName, event.NewEventWriter(subs))
+
+	if s.metrics != nil {
+		// increase counter when an agent is connected with principal
+		s.metrics.AgentConnected.Inc()
+
+		// store connection time to find average connection time of all agents
+		metrics.SetAgentConnectionTime(c.agentName, c.start)
+	}
+
 	eventWriter := s.eventWriters.Get(c.agentName)
 	if eventWriter == nil {
 		return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
@@ -347,6 +360,11 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 					c.logCtx.Infof("Receiver disconnected: %v", err)
 					c.cancelFn()
 				}
+
+				if s.metrics != nil {
+					// count no of events received from agent
+					s.metrics.EventReceived.Inc()
+				}
 			}
 		}
 	}()
@@ -368,6 +386,10 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 					c.cancelFn()
 				}
 
+				if s.metrics != nil {
+					// count no of events sent to agent
+					s.metrics.EventSent.Inc()
+				}
 			}
 		}
 	}()
@@ -375,6 +397,15 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	c.wg.Wait()
 	c.logCtx.Info("Closing EventStream")
 	s.eventWriters.Remove(c.agentName)
+
+	if s.metrics != nil {
+		// decrease counter when an agent is disconnected with principal
+		s.metrics.AgentConnected.Dec()
+
+		// remove connection time of agent
+		metrics.DeleteAgentConnectionTime(c.agentName)
+	}
+
 	return nil
 }
 

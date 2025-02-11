@@ -28,7 +28,6 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
-	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
@@ -47,7 +46,6 @@ const LastUpdatedAnnotation = "argocd-agent.argoproj.io/last-updated"
 type ApplicationManager struct {
 	allowUpsert        bool
 	applicationBackend backend.Application
-	metrics            *metrics.ApplicationClientMetrics
 	role               manager.ManagerRole
 	// mode is only set when Role is ManagerRoleAgent
 	mode manager.ManagerMode
@@ -66,13 +64,6 @@ type ApplicationManager struct {
 // ApplicationManagerOption is a callback function to set an option to the Application
 // manager
 type ApplicationManagerOption func(*ApplicationManager)
-
-// WithMetrics sets the metrics provider for the Manager
-func WithMetrics(m *metrics.ApplicationClientMetrics) ApplicationManagerOption {
-	return func(mgr *ApplicationManager) {
-		mgr.metrics = m
-	}
-}
 
 // WithAllowUpsert sets the upsert operations allowed flag
 func WithAllowUpsert(upsert bool) ApplicationManagerOption {
@@ -159,13 +150,6 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 		}
 		if err := m.IgnoreChange(created.QualifiedName(), created.ResourceVersion); err != nil {
 			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.QualifiedName(), err)
-		}
-		if m.metrics != nil {
-			m.metrics.AppsCreated.WithLabelValues(app.Namespace).Inc()
-		}
-	} else {
-		if m.metrics != nil {
-			m.metrics.AppClientErrors.Inc()
 		}
 	}
 
@@ -255,13 +239,6 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		}
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Couldn't unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
-		}
-		if m.metrics != nil {
-			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
-		}
-	} else {
-		if m.metrics != nil {
-			m.metrics.AppClientErrors.Inc()
 		}
 	}
 	return updated, err
@@ -360,13 +337,6 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 			logCtx.Warnf("Could not unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
-		if m.metrics != nil {
-			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
-		}
-	} else {
-		if m.metrics != nil {
-			m.metrics.AppClientErrors.Inc()
-		}
 	}
 	return updated, err
 }
@@ -441,13 +411,6 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
-		if m.metrics != nil {
-			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
-		}
-	} else {
-		if m.metrics != nil {
-			m.metrics.AppClientErrors.Inc()
-		}
 	}
 	return updated, err
 }
@@ -505,13 +468,6 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
 		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
-		if m.metrics != nil {
-			m.metrics.AppsUpdated.WithLabelValues(incoming.Namespace).Inc()
-		}
-	} else {
-		if m.metrics != nil {
-			m.metrics.AppClientErrors.Inc()
-		}
 	}
 	return updated, err
 }
@@ -543,9 +499,7 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 		}
 	}
 
-	err = m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
-
-	return err
+	return m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
 }
 
 // update updates an existing Application resource on the Manager m's backend

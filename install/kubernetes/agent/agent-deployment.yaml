@@ -81,7 +81,12 @@ spec:
                 name: argocd-agent-params
                 key: agent.creds.userpass.path
                 optional: true
-
+          - name: ARGOCD_AGENT_METRICS_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.metrics.port
+                optional: true
           image: ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent:latest
           imagePullPolicy: Always
           name: argocd-agent-agent

@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/agent"
+	"github.com/argoproj-labs/argocd-agent/cmd/cmd"
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
@@ -51,6 +52,7 @@ func NewAgentRunCommand() *cobra.Command {
 		tlsClientCrt    string
 		tlsClientKey    string
 		enableWebSocket bool
+		metricsPort     int
 	)
 	command := &cobra.Command{
 		Short: "Run the argocd-agent agent component",
@@ -119,6 +121,11 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 			agentOpts = append(agentOpts, agent.WithRemote(remote))
 			agentOpts = append(agentOpts, agent.WithMode(agentMode))
+
+			if metricsPort > 0 {
+				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
+			}
+
 			ag, err := agent.NewAgent(ctx, kubeConfig, namespace, agentOpts...)
 			if err != nil {
 				cmdutil.Fatal("Could not create a new agent instance: %v", err)
@@ -166,6 +173,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&enableWebSocket, "enable-websocket",
 		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_WEBSOCKET", false),
 		"Agent will rely on gRPC over WebSocket to stream events to the Principal")
+	command.Flags().IntVar(&metricsPort, "metrics-port",
+		env.NumWithDefault("ARGOCD_AGENT_METRICS_PORT", cmd.ValidPort, 8181),
+		"Port the metrics server will listen on")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

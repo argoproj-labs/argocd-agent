@@ -15,20 +15,21 @@
 package metrics
 
 import (
+	"sync"
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	// "github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-type ApplicationMetrics struct {
-	ApplicationWatcherMetrics
-	ApplicationClientMetrics
-}
+type EventProcessingStatus string
 
-type AppProjectMetrics struct {
-	AppProjectClientMetrics
-	AppProjectWatcherMetrics
-}
+const (
+	EventProcessingFail       EventProcessingStatus = "failure"
+	EventProcessingSuccess    EventProcessingStatus = "success"
+	EventProcessingDiscarded  EventProcessingStatus = "discarded"
+	EventProcessingNotAllowed EventProcessingStatus = "not-allowed"
+)
 
 type InformerMetrics struct {
 	ResourcesListed *prometheus.GaugeVec
@@ -38,42 +39,40 @@ type InformerMetrics struct {
 	DeleteDuration  *prometheus.GaugeVec
 }
 
-// ApplicationWatcherMetrics holds metrics about Applications watched by the agent
-type ApplicationWatcherMetrics struct {
-	AppsWatched      prometheus.Gauge
-	AppsAdded        prometheus.Counter
-	AppsUpdated      prometheus.Counter
-	AppsRemoved      prometheus.Counter
-	AppWatcherErrors prometheus.Counter
+// PrincipalMetrics holds metrics of principal
+type PrincipalMetrics struct {
+	AgentConnected         prometheus.Gauge
+	AvgAgentConnectionTime prometheus.Gauge
+
+	ApplicationCreated prometheus.Counter
+	ApplicationUpdated prometheus.Counter
+	ApplicationDeleted prometheus.Counter
+
+	AppProjectCreated prometheus.Counter
+	AppProjectUpdated prometheus.Counter
+	AppProjectDeleted prometheus.Counter
+
+	EventReceived prometheus.Counter
+	EventSent     prometheus.Counter
+
+	EventProcessingTime *prometheus.HistogramVec
+
+	PrincipalErrors *prometheus.CounterVec
 }
 
-type ApplicationClientMetrics struct {
-	AppsCreated     *prometheus.CounterVec
-	AppsUpdated     *prometheus.CounterVec
-	AppsDeleted     *prometheus.CounterVec
-	AppClientErrors prometheus.Counter
-}
-
-type AppProjectWatcherMetrics struct {
-	ProjectsWatched prometheus.Gauge
-	ProjectsAdded   prometheus.Counter
-	ProjectsUpdated prometheus.Counter
-	ProjectsRemoved prometheus.Counter
-	ProjectErrors   prometheus.Counter
-}
-
-type AppProjectClientMetrics struct {
-	AppProjectsCreated  *prometheus.CounterVec
-	AppProjectsUpdated  *prometheus.CounterVec
-	AppProjectsDeleted  *prometheus.CounterVec
-	ProjectClientErrors prometheus.Counter
+// AgentMetrics holds metrics of agent
+type AgentMetrics struct {
+	EventReceived       prometheus.Counter
+	EventSent           prometheus.Counter
+	EventProcessingTime *prometheus.HistogramVec
+	AgentErrors         *prometheus.CounterVec
 }
 
 func NewInformerMetrics(label string) *InformerMetrics {
 	im := &InformerMetrics{
 		ResourcesListed: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "argocd_agent_informer_list_num_resources",
-			Help: "The number of resources seen by this informer",
+			Help: "The number of resources seen by the informer",
 		}, []string{label}),
 		ListDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "argocd_agent_informer_list_duration",
@@ -83,111 +82,138 @@ func NewInformerMetrics(label string) *InformerMetrics {
 	return im
 }
 
-// NewApplicationWatcherMetrics returns a new instance of ApplicationMetrics
-func NewApplicationWatcherMetrics() *ApplicationWatcherMetrics {
-	am := &ApplicationWatcherMetrics{
-		AppsWatched: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "argocd_agent_watcher_applications_watched",
-			Help: "The total number of applications watched by the agent",
+func NewPrincipalMetrics() *PrincipalMetrics {
+	return &PrincipalMetrics{
+		AgentConnected: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "agent_connected_with_principal",
+			Help: "The total number of agents connected with principal",
 		}),
-		AppsAdded: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_watcher_applications_added",
-			Help: "The number of applications that have been added to the agent",
+		AvgAgentConnectionTime: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "principal_agent_avg_connection_time",
+			Help: "The average time all agents are connected for (in minutes)",
 		}),
-		AppsUpdated: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_watcher_applications_updated",
-			Help: "The number of applications that have been updated",
-		}),
-		AppsRemoved: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_watcher_applications_removed",
-			Help: "The number of applications that have been removed from the agent",
-		}),
-	}
-	return am
-}
 
-func NewApplicationClientMetrics() *ApplicationClientMetrics {
-	return &ApplicationClientMetrics{
-		AppsCreated: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "argocd_agent_client_applications_created",
-			Help: "The total number of applications created by the application client",
-		}, []string{"namespace"}),
-		AppsUpdated: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "argocd_agent_client_applications_updated",
-			Help: "The total number of applications updated by the application client",
-		}, []string{"namespace"}),
-		AppsDeleted: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "argocd_agent_client_applications_deleted",
-			Help: "The total number of applications deleted by the application client",
-		}, []string{"namespace"}),
-		AppClientErrors: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_client_applications_errors",
-			Help: "The total number of applications deleted by the application client",
+		ApplicationCreated: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_applications_created",
+			Help: "The total number of applications created by agents",
 		}),
-	}
-}
+		ApplicationUpdated: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_applications_updated",
+			Help: "The total number of applications updated by agents",
+		}),
+		ApplicationDeleted: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_applications_deleted",
+			Help: "The total number of applications deleted by agents",
+		}),
 
-func NewAppProjectClientMetrics() *AppProjectClientMetrics {
-	return &AppProjectClientMetrics{
-		AppProjectsCreated: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "argocd_agent_client_appprojects_created",
-			Help: "The total number of appprojects created by the appproject client",
-		}, []string{"namespace"}),
-		AppProjectsUpdated: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "argocd_agent_client_appprojects_updated",
-			Help: "The total number of appprojects updated by the appproject client",
-		}, []string{"namespace"}),
-		AppProjectsDeleted: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "argocd_agent_client_appprojects_deleted",
-			Help: "The total number of appprojects deleted by the appproject client",
-		}, []string{"namespace"}),
-		ProjectClientErrors: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_client_appprojects_errors",
-			Help: "The total number of appprojects deleted by the appproject client",
+		AppProjectCreated: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_app_projects_created",
+			Help: "The total number of app project created by agents",
 		}),
+		AppProjectUpdated: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_app_projects_updated",
+			Help: "The total number of app project updated by agents",
+		}),
+		AppProjectDeleted: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_app_projects_deleted",
+			Help: "The total number of app project deleted by agents",
+		}),
+
+		EventReceived: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_events_received",
+			Help: "The total number of events received by principal",
+		}),
+		EventSent: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_events_sent",
+			Help: "The total number of events sent by principal",
+		}),
+
+		EventProcessingTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "principal_event_processing_time",
+			Help: "Histogram of time taken to process events (in seconds)",
+		}, []string{"status", "agent_name", "resource_type"}),
+
+		PrincipalErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "principal_errors",
+			Help: "The total number of errors occurred in principal",
+		}, []string{"resource_type"}),
 	}
 }
 
-func NewAppProjectWatcherMetrics() *AppProjectWatcherMetrics {
-	am := &AppProjectWatcherMetrics{
-		ProjectsWatched: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "argocd_agent_watcher_appprojects_watched",
-			Help: "The total number of AppProjects watched by the agent",
+func NewAgentMetrics() *AgentMetrics {
+	return &AgentMetrics{
+		EventReceived: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "agent_events_received",
+			Help: "The total number of events received by agent",
 		}),
-		ProjectsAdded: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_watcher_appprojects_added",
-			Help: "The number of AppProjects that have been added to the agent",
+		EventSent: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "agent_events_sent",
+			Help: "The total number of events sent by agent",
 		}),
-		ProjectsUpdated: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_watcher_appprojects_updated",
-			Help: "The number of AppProjects that have been updated",
-		}),
-		ProjectsRemoved: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "argocd_agent_watcher_appprojects_removed",
-			Help: "The number of AppProjects that have been removed from the agent",
-		}),
+
+		EventProcessingTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "agent_event_processing_time",
+			Help: "Histogram of time taken to process events (in seconds)",
+		}, []string{"status", "agent_mode", "resource_type"}),
+
+		AgentErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "agent_errors",
+			Help: "The total number of errors occurred in agent",
+		}, []string{"resource_type"}),
 	}
-	return am
 }
 
-// func (am *ApplicationWatcherMetrics) SetWatched(num int64) {
-// 	am.AppsWatched.Set(float64(num))
-// }
+// AvgCalculationInterval is time interval for agent connection time calculation
+var AvgCalculationInterval = 3 * time.Minute
 
-// func (am *ApplicationWatcherMetrics) AppAdded() {
-// 	am.AppsWatched.Inc()
-// 	am.AppsAdded.Inc()
-// }
+// AgentConnectionTime is an utility for AvgAgentConnectionTime
+type AgentConnectionTime struct {
+	Lock sync.RWMutex
 
-// func (am *ApplicationWatcherMetrics) AppRemoved() {
-// 	am.AppsWatched.Dec()
-// 	am.AppsRemoved.Inc()
-// }
+	// key: AgentName
+	// value: connection time of agent
+	// - acquire 'lock' before accessing
+	ConnectionTimeMap map[string]time.Time
+}
 
-// func (am *ApplicationWatcherMetrics) AppUpdated() {
-// 	am.AppsUpdated.Inc()
-// }
+var agentConnectionTime = &AgentConnectionTime{
+	ConnectionTimeMap: make(map[string]time.Time),
+}
 
-// func (am *ApplicationWatcherMetrics) Error() {
-// 	am.Errors.Inc()
-// }
+// SetAgentConnectionTime inserts connection time of new agent
+func SetAgentConnectionTime(agentName string, start time.Time) {
+	agentConnectionTime.Lock.Lock()
+	defer agentConnectionTime.Lock.Unlock()
+
+	agentConnectionTime.ConnectionTimeMap[agentName] = start
+}
+
+// DeleteAgentConnectionTime removed connection time of existing agent
+func DeleteAgentConnectionTime(agentName string) {
+	agentConnectionTime.Lock.Lock()
+	defer agentConnectionTime.Lock.Unlock()
+
+	delete(agentConnectionTime.ConnectionTimeMap, agentName)
+}
+
+// GetAvgAgentConnectionTime calculates average connection time of all connected agents
+func GetAvgAgentConnectionTime(metrics *PrincipalMetrics) {
+	agentConnectionTime.Lock.RLock()
+	defer agentConnectionTime.Lock.RUnlock()
+
+	var totalTime time.Duration
+
+	// get SUM of time differences between current time and agent start time for all connected agents
+	for _, t := range agentConnectionTime.ConnectionTimeMap {
+		totalTime = totalTime + time.Since(t).Round(time.Minute)
+	}
+
+	if totalTime != 0 {
+		// calculate average connection time
+		avg := int(totalTime.Minutes()) / len(agentConnectionTime.ConnectionTimeMap)
+		metrics.AvgAgentConnectionTime.Set(float64(avg))
+	} else {
+		// Set metrics to zero if there are no agents are connected
+		metrics.AvgAgentConnectionTime.Set(float64(0))
+	}
+}
