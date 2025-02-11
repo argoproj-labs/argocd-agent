@@ -302,6 +302,7 @@ func NewCAIssueCommand() *cobra.Command {
 	var (
 		component string
 		san       []string
+		upsert    bool
 	)
 	command := &cobra.Command{
 		Short:   "NON-PROD!! Issue TLS certificates signed by the CA",
@@ -364,12 +365,25 @@ func NewCAIssueCommand() *cobra.Command {
 
 			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Create(ctx, secret, v1.CreateOptions{})
 			if err != nil {
-				cmdutil.Fatal("Could not create secret: %v", err)
+				if !errors.IsAlreadyExists(err) {
+					cmdutil.Fatal("Could not create secret: %v", err)
+				} else if !upsert {
+					cmdutil.Fatal("Certificate exists, please use --upsert to reissue.")
+				} else {
+					_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Update(ctx, secret, v1.UpdateOptions{})
+					if err != nil {
+						cmdutil.Fatal("Could not update secret: %v", err)
+					} else {
+						fmt.Printf("Secret updated.\n")
+					}
+				}
+			} else {
+				fmt.Printf("Secret %s/%s created\n", globalOpts.namespace, fmt.Sprintf("%s-tls", component))
 			}
-			fmt.Printf("Secret %s/%s created\n", globalOpts.namespace, fmt.Sprintf("%s-tls", component))
 		},
 	}
 
 	command.Flags().StringSliceVarP(&san, "san", "N", []string{"IP:127.0.0.1"}, "Subject Alternative Names (SAN) for the cert")
+	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Update existing certificate if it exists")
 	return command
 }

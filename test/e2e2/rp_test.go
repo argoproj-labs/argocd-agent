@@ -29,11 +29,15 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/test/e2e2/fixture"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/stretchr/testify/suite"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -142,12 +146,61 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 		types.NamespacedName{Namespace: "argocd", Name: "argocd-initial-admin-secret"}, pwdSecret, v1.GetOptions{})
 	requires.NoError(err)
 
+	// Create a managed application in the principal's cluster
+	app := v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "guestbook",
+			Namespace: "agent-managed",
+		},
+		Spec: v1alpha1.ApplicationSpec{
+			Project: "default",
+			Source: &v1alpha1.ApplicationSource{
+				RepoURL:        "https://github.com/argoproj/argocd-example-apps",
+				TargetRevision: "HEAD",
+				Path:           "kustomize-guestbook",
+			},
+			Destination: v1alpha1.ApplicationDestination{
+				Name:      "agent-managed",
+				Namespace: "guestbook",
+			},
+			SyncPolicy: &v1alpha1.SyncPolicy{
+				Automated: &v1alpha1.SyncPolicyAutomated{},
+				SyncOptions: v1alpha1.SyncOptions{
+					"CreateNamespace=true",
+				},
+			},
+		},
+	}
+
+	err = suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	err = wait.PollUntilContextTimeout(suite.Ctx, 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
+		app := &v1alpha1.Application{}
+		err = suite.PrincipalClient.Get(ctx, types.NamespacedName{Namespace: "agent-managed", Name: "guestbook"}, app, v1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				return false, nil
+			} else {
+				return true, err
+			}
+		}
+		suite.T().Logf("%s %s %v", app.Namespace, app.Name, app.Status)
+		if app.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && app.Status.Health.Status == health.HealthStatusHealthy {
+			return true, nil
+		}
+		return false, nil
+	})
+	requires.NoError(err)
+
+	// time.Sleep(600 * time.Second)
+
 	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", string(pwdSecret.Data["password"]))
 	err = argoClient.Login()
 	requires.NoError(err)
 
-	resource, err := argoClient.GetResource(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "argocd"}},
-		"ks-guestbook-demo", "apps", "v1", "deployment")
+	resource, err := argoClient.GetResource(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent-managed"}},
+		"kustomize-guestbook-ui", "apps", "v1", "deployment")
 	requires.NoError(err)
 	suite.T().Log(resource)
 }

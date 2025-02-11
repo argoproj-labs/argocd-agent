@@ -16,10 +16,14 @@
 
 set -eo pipefail
 
+RECREATE="$1"
+
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 BASEPATH="$( cd -- "$(dirname "$0")/../.." >/dev/null 2>&1 ; pwd -P )"
 AGENTCTL=${BASEPATH}/dist/argocd-agentctl
-ARGOCD_AGENT_CONTEXT=vcluster-control-plane
+export ARGOCD_AGENT_CONTEXT=vcluster-control-plane
+
+IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
 
 if ! test -x ${AGENTCTL}; then
 	echo "Please build argocd-agentctl first by running 'make cli'" >&2
@@ -32,12 +36,18 @@ else
 	echo "Reusing existing agent CA"
 fi
 
+${AGENTCTL} ca issue --upsert -N "IP:127.0.0.1,IP:${IPADDR}" resource-proxy
+
 AGENTS="agent-managed agent-autonomous"
 for agent in ${AGENTS}; do
+	if test "$RECREATE" = "--recreate"; then
+		kubectl --context ${ARGOCD_AGENT_CONTEXT} -n argocd delete --ignore-not-found secret cluster-${agent}
+	fi
 	if ! ${AGENTCTL} agent inspect ${agent} >/dev/null 2>&1; then
 		${AGENTCTL} agent create ${agent} \
 			--resource-proxy-username ${agent} \
-			--resource-proxy-password ${agent}
+			--resource-proxy-password ${agent} \
+			--resource-proxy-server ${IPADDR}:9090
 	else
 		echo "Reusing existing agent configuration for ${agent}"
 	fi
