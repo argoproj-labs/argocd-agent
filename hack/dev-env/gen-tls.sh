@@ -66,7 +66,9 @@ generate_rp_ca
 generate_rp_cert
 
 echo "Generating secrets..."
-kubectl --context=${cp_context} delete secret -n argocd ${rp_tls_secret} --ignore-not-found
-kubectl --context=${cp_context} delete secret -n argocd ${rp_ca_secret} --ignore-not-found
-kubectl --context=${cp_context} create secret -n argocd tls ${rp_tls_secret} --key=${creds_path}/rp.key --cert=${creds_path}/rp.crt
-kubectl --context=${cp_context} create secret -n argocd tls ${rp_ca_secret} --cert=${creds_path}/ca.crt --key=${creds_path}/ca.key
+export ARGOCD_AGENT_CONTEXT=vcluster-control-plane
+#${SCRIPTPATH}/../../dist/argocd-agentctl ca generate
+#kubectl --context=${cp_context} delete secret -n argocd ${rp_tls_secret} --ignore-not-found
+#kubectl --context=${cp_context} delete secret -n argocd ${rp_ca_secret} --ignore-not-found
+#kubectl --context=${cp_context} create secret -n argocd tls ${rp_tls_secret} --key=${creds_path}/rp.key --cert=${creds_path}/rp.crt
+#kubectl --context=${cp_context} create secret -n argocd tls ${rp_ca_secret} --cert=${creds_path}/ca.crt --key=${creds_path}/ca.key

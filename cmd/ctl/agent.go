@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"os"
 	"strings"
 	"syscall"
@@ -18,6 +19,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v2/util/db"
@@ -44,15 +46,16 @@ func NewAgentCommand() *cobra.Command {
 	command.AddCommand(NewAgentListCommand())
 	command.AddCommand(NewAgentInspectCommand())
 	command.AddCommand(NewAgentPrintTLSCommand())
+	command.AddCommand(NewAgentReconfigureCommand())
 	return command
 }
 
 func NewAgentCreateCommand() *cobra.Command {
 	var (
-		kubeProxyServer   string
-		kubeProxyUsername string
-		kubeProxyPassword string
-		addLabels         []string
+		rpServer   string
+		rpUsername string
+		rpPassword string
+		addLabels  []string
 	)
 	command := &cobra.Command{
 		Short: "Create a new agent configuration",
@@ -78,6 +81,11 @@ func NewAgentCreateCommand() *cobra.Command {
 			// The agent's name will be persisted as a label
 			labels[cluster.LabelKeyClusterAgentMapping] = agentName
 
+			serverUrl, err := serverURL(rpServer, agentName)
+			if err != nil {
+				cmdutil.Fatal("%v", err)
+			}
+
 			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
 			if err != nil {
 				cmdutil.Fatal("Could not create Kubernetes client: %v", err)
@@ -92,16 +100,16 @@ func NewAgentCreateCommand() *cobra.Command {
 			}
 
 			// Get desired credentials from the user
-			if kubeProxyUsername == "" {
+			if rpUsername == "" {
 				var err error
 				reader := bufio.NewReader(os.Stdin)
 				fmt.Print("Username: ")
-				kubeProxyUsername, err = reader.ReadString('\n')
+				rpUsername, err = reader.ReadString('\n')
 				if err != nil {
 					cmdutil.Fatal("%v", err)
 				}
 			}
-			if kubeProxyUsername != "" && kubeProxyPassword == "" {
+			if rpUsername != "" && rpPassword == "" {
 				fmt.Print("Password: ")
 				pass1, err := term.ReadPassword(int(syscall.Stdin))
 				fmt.Println()
@@ -117,7 +125,7 @@ func NewAgentCreateCommand() *cobra.Command {
 				if string(pass1) != string(pass2) {
 					cmdutil.Fatal("Passwords don't match.")
 				}
-				kubeProxyPassword = string(pass1)
+				rpPassword = string(pass1)
 			}
 
 			// Our CA certificate is stored in a secret
@@ -146,7 +154,7 @@ func NewAgentCreateCommand() *cobra.Command {
 
 			// Construct Argo CD cluster configuration
 			clus := &v1alpha1.Cluster{
-				Server: fmt.Sprintf("https://%s?agentName=%s", kubeProxyServer, agentName),
+				Server: serverUrl,
 				Name:   agentName,
 				Labels: labels,
 				Config: v1alpha1.ClusterConfig{
@@ -155,8 +163,8 @@ func NewAgentCreateCommand() *cobra.Command {
 						KeyData:  []byte(clientKey),
 						CAData:   []byte(caData),
 					},
-					Username: kubeProxyUsername,
-					Password: kubeProxyPassword,
+					Username: rpUsername,
+					Password: rpPassword,
 				},
 			}
 
@@ -178,9 +186,9 @@ func NewAgentCreateCommand() *cobra.Command {
 			fmt.Printf("Agent %s created\n", agentName)
 		},
 	}
-	command.Flags().StringVar(&kubeProxyServer, "kube-proxy-server", "192.168.56.2:9090", "Location of principal's kube-proxy")
-	command.Flags().StringVar(&kubeProxyUsername, "kube-proxy-username", "", "The username for the kube-proxy")
-	command.Flags().StringVar(&kubeProxyPassword, "kube-proxy-password", "", "The password for the kube-proxy")
+	command.Flags().StringVar(&rpServer, "resource-proxy-server", "192.168.56.2:9090", "Address of principal's resource-proxy")
+	command.Flags().StringVar(&rpUsername, "resource-proxy-username", "", "The username for the resource-proxy")
+	command.Flags().StringVar(&rpPassword, "resource-proxy-password", "", "The password for the resource-proxy")
 	command.Flags().StringSliceVarP(&addLabels, "label", "l", []string{}, "Additional labels for the agent")
 	return command
 }
@@ -237,19 +245,13 @@ func NewAgentInspectCommand() *cobra.Command {
 				NotValidBefore time.Time `yaml:"notValidBefore" json:"notValidBefore" text:"Not valid before"`
 				NotValidAfter  time.Time `yaml:"notValidAfter" json:"notValidAfter" text:"Not valid after"`
 			}
-			ctx := context.TODO()
 			agentName := args[0]
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+			argoCluster, err := loadClusterSecret(agentName)
 			if err != nil {
-				cmdutil.Fatal("Could not create Kubernetes client: %v", err)
-			}
-			agent, err := clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
-			if err != nil {
-				cmdutil.Fatal("Could not get agent configuration: %v", err)
-			}
-			argoCluster, err := db.SecretToCluster(agent)
-			if err != nil {
-				cmdutil.Fatal("Not a valid cluster configuration: %v", err)
+				cmdutil.Fatal("Unable to load agent configuration: %v", err)
+			} else if argoCluster == nil {
+				cmd.PrintErrf("No such agent configured: %s\n", agentName)
+				os.Exit(1)
 			}
 			cert, err := tls.X509KeyPair(argoCluster.Config.TLSClientConfig.CertData, argoCluster.Config.TLSClientConfig.KeyData)
 			if err != nil {
@@ -301,22 +303,12 @@ func NewAgentPrintTLSCommand() *cobra.Command {
 				os.Exit(1)
 			}
 			agentName := args[0]
-			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+			clus, err := loadClusterSecret(agentName)
 			if err != nil {
-				cmdutil.Fatal("%v", err)
-			}
-			sec, err := clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
-			if err != nil {
-				if errors.IsNotFound(err) {
-					cmdutil.Fatal("No such agent: %s", agentName)
-				} else {
-					cmdutil.Fatal("Error fetching agent details: %v", err)
-				}
-			}
-			clus, err := db.SecretToCluster(sec)
-			if err != nil {
-				cmdutil.Fatal("Invalid cluster secret: %v", err)
+				cmdutil.Fatal("Error loading cluster: %v", err)
+			} else if clus == nil {
+				cmd.Printf("Agent '%s' is not configured.\n", agentName)
+				os.Exit(1)
 			}
 			switch printWhat {
 			case "cert":
@@ -333,8 +325,77 @@ func NewAgentPrintTLSCommand() *cobra.Command {
 	return command
 }
 
+func NewAgentReconfigureCommand() *cobra.Command {
+	var (
+		rpServerAddr      string
+		rpUsername        string
+		rpPassword        string
+		reissueClientCert bool
+	)
+	command := &cobra.Command{
+		Short: "Reconfigures an agent's properties",
+		Use:   "reconfigure <agent-name>",
+		Run: func(cmd *cobra.Command, args []string) {
+			changed := false
+			if len(args) != 1 {
+				cmd.Help()
+				cmdutil.Fatal("Not enough arguments given")
+			}
+			agentName := args[0]
+			cluster, err := loadClusterSecret(agentName)
+			if err != nil {
+				cmdutil.Fatal("Unable to load agent configuration: %v", err)
+			} else if cluster == nil {
+				cmd.PrintErrf("No configuration found for agent %s\n", agentName)
+				os.Exit(1)
+			}
+
+			if rpServerAddr != "" && rpServerAddr != cluster.Server {
+				cmd.Println("Setting new server address")
+				cluster.Server = rpServerAddr
+				changed = true
+			}
+			if rpUsername != "" && rpUsername != cluster.Config.Username {
+				cmd.Println("Setting new username")
+				cluster.Config.Username = rpUsername
+				changed = true
+			}
+			if rpPassword != "" && rpPassword != cluster.Config.Password {
+				cmd.Println("Setting new password")
+				cluster.Config.Password = rpPassword
+				changed = true
+			}
+
+			if changed {
+				err = saveClusterSecret(agentName, cluster)
+				if err != nil {
+					cmdutil.Fatal("Unable to save cluster secret: %v", err)
+				}
+				cmd.Println("Cluster configuration saved")
+			}
+		},
+	}
+
+	command.Flags().StringVar(&rpServerAddr, "resource-proxy-server", "", "Address of principal's resource-proxy")
+	command.Flags().StringVar(&rpUsername, "resource-proxy-username", "", "The username for the resource-proxy")
+	command.Flags().StringVar(&rpPassword, "resource-proxy-password", "", "The password for the resource-proxy")
+	command.Flags().BoolVar(&reissueClientCert, "reissue-client-cert", false, "Reissue the agent's client cert")
+	return command
+}
+
 func clusterSecretName(agentName string) string {
 	return "cluster-" + agentName
+}
+
+func serverURL(address, agentName string) (string, error) {
+	_, err := netip.ParseAddrPort(address)
+	if err != nil {
+		return "", err
+	}
+	if !session.IsValidClientId(agentName) {
+		return "", fmt.Errorf("invalid agent name")
+	}
+	return fmt.Sprintf("https://%s?agentName=%s", address, agentName), nil
 }
 
 func labelSliceToMap(labels []string) (map[string]string, error) {
@@ -350,4 +411,44 @@ func labelSliceToMap(labels []string) (map[string]string, error) {
 		m[l[0]] = l[1]
 	}
 	return m, nil
+}
+
+func loadClusterSecret(agentName string) (*v1alpha1.Cluster, error) {
+	ctx := context.TODO()
+	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+	if err != nil {
+		return nil, err
+	}
+	sec, err := clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil, nil
+		} else {
+			return nil, err
+		}
+	}
+	clus, err := db.SecretToCluster(sec)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cluster secret: %v", err)
+	}
+	return clus, nil
+}
+
+func saveClusterSecret(agentName string, clstr *v1alpha1.Cluster) error {
+	ctx := context.TODO()
+	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+	if err != nil {
+		return err
+	}
+	sec, err := clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Create(ctx, sec, metav1.CreateOptions{})
+	} else if err == nil {
+		err = cluster.ClusterToSecret(clstr, sec)
+		if err != nil {
+			cmdutil.Fatal("Could not convert cluster to secret: %v", err)
+		}
+		_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Update(ctx, sec, metav1.UpdateOptions{})
+	}
+	return err
 }
