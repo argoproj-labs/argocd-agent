@@ -17,8 +17,6 @@ data:
   # principal.metrics.port: The port the metrics server should listen on.
   # Default: 8000
   principal.metrics.port: "8000"
-  # principal.metrics.enabled: Whether the metrics server should be started.
-  principal.metrics.enabled: "true"
   # principal.namespace: The namespace the principal will operate in. If left
   # blank, the namespace where the pod is running in will be used.
   # Default: ""

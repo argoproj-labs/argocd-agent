@@ -5,9 +5,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -206,4 +208,52 @@ func Test_resourceRequester(t *testing.T) {
 		defer w.Result().Body.Close()
 	})
 
+}
+
+func Test_resourceRegexp(t *testing.T) {
+	tc := []struct {
+		url       string
+		expMatch  bool
+		expParams []string // in order: group, version, resource, namespace, name
+	}{
+		// API requests
+		{"/api", true, []string{"", "", "", "", ""}},
+		{"/apis", true, []string{"", "", "", "", ""}},
+
+		{"/api/v1/namespaces/foo/secrets/bar", true, []string{"", "v1", "secrets", "foo", "bar"}},
+		{"/api/v1/secrets/bar", true, []string{"", "v1", "secrets", "", "bar"}},
+		{"/apis/apps/v1/namespaces/foo/secrets/bar", true, []string{"apps", "v1", "secrets", "foo", "bar"}},
+		{"/apis/apps/v1/secrets/bar", true, []string{"apps", "v1", "secrets", "", "bar"}},
+		{"/apis/apps/v1", true, []string{"apps", "v1", "", "", ""}},
+
+		// There are no namespace scoped kinds
+		{"/apis/apps/v1/namespaces/foo", true, []string{"apps", "v1", "namespaces", "", "foo"}},
+		{"/api/v1/namespaces/foo", true, []string{"", "v1", "namespaces", "", "foo"}},
+
+		// The /apis endpoint needs a group qualifier
+		{"/apis/v1/namespaces/foo/secrets/bar", false, []string{"", "v1", "secrets", "foo", "bar"}},
+		{"/apis/v1/secrets/bar", false, []string{"", "v1", "secrets", "foo", "bar"}},
+
+		// The /api endpoint must not have a group qualifier
+		{"/api/apps/v1/namespaces/foo/deployments/bar", false, []string{"", "v1", "secrets", "foo", "bar"}},
+		{"/api/apps/v1/deployments/bar", false, []string{"", "v1", "secrets", "foo", "bar"}},
+	}
+
+	for i, tt := range tc {
+		t.Run(fmt.Sprintf("TC %d", i+1), func(t *testing.T) {
+			re := regexp.MustCompile(resourceRequestRegexp)
+			matches := re.FindStringSubmatch(tt.url)
+			if tt.expMatch {
+				require.NotEmpty(t, matches)
+			} else {
+				require.Empty(t, matches)
+				return
+			}
+			for i, n := range []string{"group", "version", "resource", "namespace", "name"} {
+				idx := re.SubexpIndex(n)
+				require.NotEqual(t, -1, idx) // all groups must be set, even when empty
+				assert.Equal(t, tt.expParams[i], matches[idx], "%s: expecting %s to be set to %s, but is %s", tt.url, n, tt.expParams[i], matches[idx])
+			}
+		})
+	}
 }

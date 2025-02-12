@@ -188,6 +188,11 @@ func (a *Agent) handleStreamEvents() error {
 					logCtx.Errorf("Error while sending to stream: %v", err)
 				}
 			}
+
+			if a.metrics != nil {
+				// count no of events received from principal
+				a.metrics.EventReceived.Inc()
+			}
 		}
 	}()
 
@@ -207,6 +212,11 @@ func (a *Agent) handleStreamEvents() error {
 				} else {
 					logCtx.Errorf("Error while sending to stream: %v", err)
 				}
+			}
+
+			if a.metrics != nil {
+				// count no of events sent to principal
+				a.metrics.EventSent.Inc()
 			}
 		}
 	}()

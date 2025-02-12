@@ -48,6 +48,10 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 	ev := s.events.ApplicationEvent(event.Create, outbound)
 	q.Add(ev)
 	logCtx.Tracef("Added app %s to send queue, total length now %d", outbound.QualifiedName(), q.Len())
+
+	if s.metrics != nil {
+		s.metrics.ApplicationCreated.Inc()
+	}
 }
 
 func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Application) {
@@ -87,6 +91,10 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 	ev := s.events.ApplicationEvent(event.SpecUpdate, new)
 	q.Add(ev)
 	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
+
+	if s.metrics != nil {
+		s.metrics.ApplicationUpdated.Inc()
+	}
 }
 
 func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
@@ -111,6 +119,10 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 	ev := s.events.ApplicationEvent(event.Delete, outbound)
 	logCtx.WithField("event", "DeleteApp").WithField("sendq_len", q.Len()+1).Tracef("Added event to send queue")
 	q.Add(ev)
+
+	if s.metrics != nil {
+		s.metrics.ApplicationDeleted.Inc()
+	}
 }
 
 // newAppProjectCallback is executed when a new AppProject event was emitted from
@@ -131,6 +143,10 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 			return
 		}
 		logCtx.Trace("Created a new queue pair for the existing namespace")
+	}
+
+	if s.metrics != nil {
+		s.metrics.AppProjectCreated.Inc()
 	}
 
 	// New appproject events are only relevant for managed agents
@@ -186,6 +202,10 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 	ev := s.events.AppProjectEvent(event.SpecUpdate, new)
 	q.Add(ev)
 	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
+
+	if s.metrics != nil {
+		s.metrics.AppProjectUpdated.Inc()
+	}
 }
 
 func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
@@ -210,6 +230,10 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	ev := s.events.AppProjectEvent(event.Delete, outbound)
 	logCtx.WithField("event", "DeleteAppProject").WithField("sendq_len", q.Len()+1).Tracef("Added event to send queue")
 	q.Add(ev)
+
+	if s.metrics != nil {
+		s.metrics.AppProjectDeleted.Inc()
+	}
 }
 
 // deleteNamespaceCallback is called when the user deletes the agent namespace.

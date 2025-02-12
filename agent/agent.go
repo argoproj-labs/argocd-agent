@@ -30,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
@@ -73,6 +74,9 @@ type Agent struct {
 	eventWriter *event.EventWriter
 	version     *version.Version
 	kubeClient  *kube.KubernetesClient
+
+	// metrics holds agent side metrics
+	metrics *metrics.AgentMetrics
 }
 
 const defaultQueueName = "default"
@@ -84,6 +88,8 @@ type AgentOptions struct {
 	//
 	// However, as of this writing, this feature is not available.
 	namespaces []string
+
+	metricsPort int
 }
 
 type AgentOption func(*Agent) error
@@ -113,8 +119,6 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 
 	// Initial state of the agent is disconnected
 	a.connected.Store(false)
-
-	// a.managedApps = NewManagedApps()
 
 	// We have one queue in the agent, named default
 	a.queues = queue.NewSendRecvQueues()
@@ -149,6 +153,23 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		informer.WithNamespaceScope[*v1alpha1.Application](a.namespace),
 	}
 
+	appProjectManagerOption := []appproject.AppProjectManagerOption{
+		appproject.WithAllowUpsert(true),
+		appproject.WithRole(manager.ManagerRoleAgent),
+		appproject.WithMode(managerMode),
+	}
+
+	appManagerOpts := []application.ApplicationManagerOption{
+		application.WithRole(manager.ManagerRoleAgent),
+		application.WithMode(managerMode),
+	}
+
+	var projInformerOptions []informer.InformerOption[*v1alpha1.AppProject]
+
+	if a.options.metricsPort > 0 {
+		a.metrics = metrics.NewAgentMetrics()
+	}
+
 	appInformer, err := informer.NewInformer(ctx, appInformerOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("could not instantiate application informer: %w", err)
@@ -159,23 +180,18 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		allowUpsert = true
 	}
 
-	appProjectManagerOption := []appproject.AppProjectManagerOption{
-		appproject.WithAllowUpsert(true),
-		appproject.WithRole(manager.ManagerRoleAgent),
-		appproject.WithMode(managerMode),
-	}
+	appManagerOpts = append(appManagerOpts, application.WithAllowUpsert(allowUpsert))
 
 	projListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).List(ctx, opts)
 	}
+
+	projInformerOptions = append(projInformerOptions, informer.WithListHandler[*v1alpha1.AppProject](projListFunc))
+
 	projWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).Watch(ctx, opts)
 	}
-
-	projInformerOptions := []informer.InformerOption[*v1alpha1.AppProject]{
-		informer.WithListHandler[*v1alpha1.AppProject](projListFunc),
-		informer.WithWatchHandler[*v1alpha1.AppProject](projWatchFunc),
-	}
+	projInformerOptions = append(projInformerOptions, informer.WithWatchHandler[*v1alpha1.AppProject](projWatchFunc))
 
 	projInformer, err := informer.NewInformer(ctx, projInformerOptions...)
 	if err != nil {
@@ -186,9 +202,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.appManager, err = application.NewApplicationManager(
 		kubeapp.NewKubernetesBackend(client.ApplicationsClientset, a.namespace, appInformer, true),
 		a.namespace,
-		application.WithAllowUpsert(allowUpsert),
-		application.WithRole(manager.ManagerRoleAgent),
-		application.WithMode(managerMode),
+		appManagerOpts...,
 	)
 	if err != nil {
 		return nil, err
@@ -227,6 +241,10 @@ func (a *Agent) Start(ctx context.Context) error {
 	log().Infof("Starting %s (agent) v%s (ns=%s, allowed_namespaces=%v, mode=%s)", a.version.Name(), a.version.Version(), a.namespace, a.options.namespaces, a.mode)
 	a.context = infCtx
 	a.cancelFn = cancelFn
+
+	if a.options.metricsPort > 0 {
+		metrics.StartMetricsServer(metrics.WithListener("", a.options.metricsPort))
+	}
 
 	// Start the Application backend in the background
 	go func() {

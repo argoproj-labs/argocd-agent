@@ -46,7 +46,7 @@ jobs:
       - name: Download all Go modules
         run: |
           go mod download
-      - name: Check for tidyness of go.mod and go.sum
+      - name: Check for tidiness of go.mod and go.sum
         run: |
           go mod tidy
           git diff --exit-code -- .
@@ -113,6 +113,16 @@ jobs:
           go mod download
       - name: Compile all packages
         run: make build
+
+  build-docs:
+    name: Build the documentation
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Build the documentation
+        run: |
+          make build-docs
 
   test:
     name: Run unit tests

@@ -45,7 +45,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 		logLevel               string
 		logFormat              string
 		metricsPort            int
-		disableMetrics         bool
 		namespace              string
 		allowedNamespaces      []string
 		kubeConfig             string
@@ -117,7 +116,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 			opts = append(opts, principal.WithAutoNamespaceCreate(autoNamespaceAllow, autoNamespacePattern, nsLabels))
 
-			if !disableMetrics {
+			if metricsPort > 0 {
 				opts = append(opts, principal.WithMetricsPort(metricsPort))
 			}
 
@@ -212,9 +211,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().IntVar(&metricsPort, "metrics-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_METRICS_PORT", cmdutil.ValidPort, 8000),
 		"Port the metrics server will listen on")
-	command.Flags().BoolVar(&disableMetrics, "disable-metrics",
-		env.BoolWithDefault("ARGOCD_PRINCIPAL_DISABLE_METRICS", false),
-		"Disable metrics collection and metrics server")
 
 	command.Flags().StringVarP(&namespace, "namespace", "n",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_NAMESPACE", nil, ""),

@@ -21,7 +21,9 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
@@ -42,6 +44,15 @@ were received from a server.
 const defaultResourceRequestTimeout = 5 * time.Second
 
 func (a *Agent) processIncomingEvent(ev *event.Event) error {
+
+	// Start measuring time for event processing
+	cp := checkpoint.NewCheckpoint("process_recv_queue")
+
+	status := metrics.EventProcessingSuccess
+
+	// Start checkpoint step
+	cp.Start(ev.Target().String())
+
 	var err error
 	switch ev.Target() {
 	case event.TargetApplication:
@@ -52,6 +63,23 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 		err = a.processIncomingResourceRequest(ev)
 	default:
 		err = fmt.Errorf("unknown event target: %s", ev.Target())
+	}
+
+	cp.End()
+
+	if a.metrics != nil {
+		if err != nil {
+			// ignore EventDiscarded errors for metrics
+			if event.IsEventDiscarded(err) {
+				status = metrics.EventProcessingDiscarded
+			} else {
+				status = metrics.EventProcessingFail
+				a.metrics.AgentErrors.WithLabelValues(ev.Target().String()).Inc()
+			}
+		}
+
+		// store time taken by agent to process event in metrics
+		a.metrics.EventProcessingTime.WithLabelValues(string(status), string(a.mode), ev.Target().String()).Observe(cp.Duration().Seconds())
 	}
 
 	return err
