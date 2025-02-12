@@ -50,6 +50,41 @@ func NewAgentCommand() *cobra.Command {
 	return command
 }
 
+func generateAgentClientCert(agentName string, clt *kube.KubernetesClient) (clientCert string, clientKey string, caData string, err error) {
+	ctx := context.Background()
+
+	// Our CA certificate is stored in a secret
+	tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
+	if err != nil {
+		err = fmt.Errorf("could not read CA secret: %w", err)
+		return
+	}
+
+	signerCert, err := x509.ParseCertificate(tlsCert.Certificate[0])
+	if err != nil {
+		err = fmt.Errorf("could not parse CA certificate: %w", err)
+		return
+	}
+
+	// Generate a client cert and sign it using the CA's cert and key
+	clientCert, clientKey, err = tlsutil.GenerateClientCertificate(agentName, signerCert, tlsCert.PrivateKey)
+	if err != nil {
+		err = fmt.Errorf("could not create client cert: %w", err)
+		return
+	}
+
+	// We need to re-encode the CA's public certificate back to PEM.
+	// It's a little stupid, because it is stored in the secret as
+	// PEM already, but the tls.Certificate contains only RAW byte.
+	caData, err = tlsutil.CertDataToPEM([]byte(tlsCert.Certificate[0]))
+	if err != nil {
+		err = fmt.Errorf("could not encode CA cert to PEM: %v", err)
+		return
+	}
+
+	return
+}
+
 func NewAgentCreateCommand() *cobra.Command {
 	var (
 		rpServer   string
@@ -128,28 +163,32 @@ func NewAgentCreateCommand() *cobra.Command {
 				rpPassword = string(pass1)
 			}
 
-			// Our CA certificate is stored in a secret
-			tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
-			if err != nil {
-				cmdutil.Fatal("Could not read CA secret: %v", err)
-			}
-			signerCert, err := x509.ParseCertificate(tlsCert.Certificate[0])
-			if err != nil {
-				cmdutil.Fatal("Could not parse CA certificate: %v", err)
-			}
+			// // Our CA certificate is stored in a secret
+			// tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
+			// if err != nil {
+			// 	cmdutil.Fatal("Could not read CA secret: %v", err)
+			// }
+			// signerCert, err := x509.ParseCertificate(tlsCert.Certificate[0])
+			// if err != nil {
+			// 	cmdutil.Fatal("Could not parse CA certificate: %v", err)
+			// }
 
-			// Generate a client cert and sign it using the CA's cert and key
-			clientCert, clientKey, err := tlsutil.GenerateClientCertificate(agentName, signerCert, tlsCert.PrivateKey)
-			if err != nil {
-				cmdutil.Fatal("Could not create client cert: %v", err)
-			}
+			// // Generate a client cert and sign it using the CA's cert and key
+			// clientCert, clientKey, err := tlsutil.GenerateClientCertificate(agentName, signerCert, tlsCert.PrivateKey)
+			// if err != nil {
+			// 	cmdutil.Fatal("Could not create client cert: %v", err)
+			// }
 
-			// We need to re-encode the CA's public certificate back to PEM.
-			// It's a little stupid, because it is stored in the secret as
-			// PEM already, but the tls.Certificate contains only RAW byte.
-			caData, err := tlsutil.CertDataToPEM([]byte(tlsCert.Certificate[0]))
+			// // We need to re-encode the CA's public certificate back to PEM.
+			// // It's a little stupid, because it is stored in the secret as
+			// // PEM already, but the tls.Certificate contains only RAW byte.
+			// caData, err := tlsutil.CertDataToPEM([]byte(tlsCert.Certificate[0]))
+			// if err != nil {
+			// 	cmdutil.Fatal("Could not encode CA cert to PEM: %v", err)
+			// }
+			clientCert, clientKey, caData, err := generateAgentClientCert(agentName, clt)
 			if err != nil {
-				cmdutil.Fatal("Could not encode CA cert to PEM: %v", err)
+				cmdutil.Fatal("%v", err)
 			}
 
 			// Construct Argo CD cluster configuration
@@ -338,7 +377,7 @@ func NewAgentReconfigureCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			changed := false
 			if len(args) != 1 {
-				cmd.Help()
+				_ = cmd.Help()
 				cmdutil.Fatal("Not enough arguments given")
 			}
 			agentName := args[0]
@@ -363,6 +402,20 @@ func NewAgentReconfigureCommand() *cobra.Command {
 			if rpPassword != "" && rpPassword != cluster.Config.Password {
 				cmd.Println("Setting new password")
 				cluster.Config.Password = rpPassword
+				changed = true
+			}
+			if reissueClientCert {
+				clt, err := kube.NewKubernetesClientFromConfig(context.Background(), globalOpts.namespace, "", globalOpts.context)
+				if err != nil {
+					cmdutil.Fatal("Could not create Kubernetes client: %v", err)
+				}
+				clientCert, clientKey, caData, err := generateAgentClientCert(agentName, clt)
+				if err != nil {
+					cmdutil.Fatal("%v", err)
+				}
+				cluster.Config.TLSClientConfig.CAData = []byte(caData)
+				cluster.Config.TLSClientConfig.CertData = []byte(clientCert)
+				cluster.Config.TLSClientConfig.KeyData = []byte(clientKey)
 				changed = true
 			}
 

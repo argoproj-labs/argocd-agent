@@ -45,6 +45,7 @@ type ResourceProxyTestSuite struct {
 	fixture.BaseSuite
 }
 
+// getRpClient returns a http.Client suitable to access the resource proxy
 func (suite *ResourceProxyTestSuite) getRpClient(agentName string) *http.Client {
 	requires := suite.Require()
 
@@ -181,8 +182,6 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 		return false, nil
 	})
 	requires.NoError(err)
-
-	// time.Sleep(600 * time.Second)
 
 	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", string(pwdSecret.Data["password"]))
 	err = argoClient.Login()
