@@ -199,7 +199,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	err = argoClient.Login()
 	requires.NoError(err)
 
-	resource, err := argoClient.GetResource(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent-managed"}},
+	resource, err := argoClient.GetResource(&app,
 		"kustomize-guestbook-ui", "apps", "v1", "deployment")
 	requires.NoError(err)
 	suite.T().Log(resource)
