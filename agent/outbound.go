@@ -97,7 +97,9 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	logCtx.Debugf("Delete app event")
 
 	if !a.appManager.IsManaged(app.QualifiedName()) {
-		logCtx.Tracef("App is not managed")
+		logCtx.Tracef("App is not managed, proceeding anyways")
+	} else {
+		_ = a.appManager.Unmanage(app.QualifiedName())
 	}
 
 	q := a.queues.SendQ(a.remote.ClientID())
