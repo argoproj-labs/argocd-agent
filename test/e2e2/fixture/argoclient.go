@@ -29,7 +29,8 @@ import (
 
 /*
 The code in this file provides an HTTP client to Argo CD's REST API, without
-the need for the full blown gRPC client.
+the need for the full blown gRPC client. It does not support all Argo CD APIs,
+only those currently needed in end-to-end tests.
 
 Only to be used in tests.
 */
@@ -42,6 +43,7 @@ type ArgoRestClient struct {
 	client   *http.Client
 }
 
+// NewArgoClient returns a new client for Argo CD's REST API
 func NewArgoClient(endpoint, username, password string) *ArgoRestClient {
 	ac := &ArgoRestClient{
 		endpoint: endpoint,
@@ -58,6 +60,13 @@ func NewArgoClient(endpoint, username, password string) *ArgoRestClient {
 	return ac
 }
 
+// SetAuthToken can be used to manually set an authentication token. If an
+// authentication token is set, there's no need to call Login() anymore.
+func (c *ArgoRestClient) SetAuthToken(token string) {
+	c.token = token
+}
+
+// Login creates a new Argo CD session
 func (c *ArgoRestClient) Login() error {
 	// Get session token from API
 	authStr := fmt.Sprintf(`{"username": "%s", "password": "%s"}`, c.username, c.password)
@@ -98,10 +107,12 @@ func (c *ArgoRestClient) Login() error {
 	return nil
 }
 
-func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, name, group, version, kind string) (string, error) {
+// GetResource requests a resource managed through an Application from Argo CD
+func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, kind, namespace, name string) (string, error) {
 	reqUrl := c.url(
 		"appNamespace", app.Namespace,
 		"project", app.Spec.Project,
+		"namespace", namespace,
 		"resourceName", name,
 		"group", group,
 		"version", version,
@@ -131,6 +142,7 @@ func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, name, group, ver
 	return manifest.Manifest, nil
 }
 
+// url constructs a URL for hitting an Argo CD API endpoint.
 func (c *ArgoRestClient) url(params ...string) *url.URL {
 	u := &url.URL{Scheme: "https", Host: c.endpoint}
 	if len(params)%2 == 0 {
@@ -139,20 +151,10 @@ func (c *ArgoRestClient) url(params ...string) *url.URL {
 			q.Add(params[i], params[i+1])
 		}
 		u.RawQuery = q.Encode()
+	} else if len(params) != 0 {
+		panic("params must be given in pairs")
 	}
 	return u
-}
-
-func buildQuery(rUrl *url.URL, params ...string) error {
-	if len(params)%2 != 0 {
-		return errors.New("unexpected number of params given")
-	}
-	query := make(url.Values)
-	for i := 0; i < len(params)-1; i += 2 {
-		query.Add(params[i], params[i+1])
-	}
-	rUrl.RawQuery = query.Encode()
-	return nil
 }
 
 // Do sends a request to the Argo CD API. It uses the client's TLS config and
@@ -164,7 +166,5 @@ func (c *ArgoRestClient) Do(req *http.Request) (*http.Response, error) {
 		}
 	}
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", c.token))
-	fmt.Printf("-> TOK: %s\n", c.token)
-	fmt.Printf("-> URL: %s\n", req.URL.String())
 	return c.client.Do(req)
 }

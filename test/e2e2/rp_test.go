@@ -79,16 +79,6 @@ func (suite *ResourceProxyTestSuite) getRpClient(agentName string) *http.Client 
 	return &client
 }
 
-func (suite *ResourceProxyTestSuite) getArgoClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-	}
-}
-
 func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	requires := suite.Require()
 
@@ -185,7 +175,6 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 				return true, err
 			}
 		}
-		suite.T().Logf("%s %s %v", app.Namespace, app.Name, app.Status)
 		if app.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && app.Status.Health.Status == health.HealthStatusHealthy {
 			return true, nil
 		}
@@ -200,9 +189,12 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	requires.NoError(err)
 
 	resource, err := argoClient.GetResource(&app,
-		"kustomize-guestbook-ui", "apps", "v1", "deployment")
+		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
 	requires.NoError(err)
-	suite.T().Log(resource)
+	napp := &v1alpha1.Application{}
+	err = json.Unmarshal([]byte(resource), napp)
+	requires.NoError(err)
+	requires.Equal("kustomize-guestbook-ui", napp.Name)
 }
 
 func TestResourceProxyTestSuite(t *testing.T) {

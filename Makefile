@@ -26,6 +26,8 @@ PROTOC_GEN_GO_GRPC_VERSION=v1.2
 GOLANG_CI_LINT_VERSION=v1.62.0
 MOCKERY_V2_VERSION?=v2.43.0
 
+all: build
+
 .PHONY: fmt
 fmt:
 	go fmt ./...
