@@ -7,6 +7,10 @@ IMAGE_NAME_PRINCIPAL=argocd-agent-principal
 IMAGE_PLATFORMS?=linux/amd64
 IMAGE_TAG?=latest
 
+# mkdocs related configuration
+MKDOCS_DOCKER_IMAGE?=squidfunk/mkdocs-material:9
+MKDOCS_RUN_ARGS?=
+
 # Binary names
 BIN_NAME_AGENT=argocd-agent-agent
 BIN_NAME_PRINCIPAL=argocd-agent-principal
@@ -143,9 +147,19 @@ image-agent:
 image-principal:
 	$(DOCKER_BIN) build -f Dockerfile.principal --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_PRINCIPAL):$(IMAGE_TAG) .
 
+.PHONY: push-images
 push-images:
 	$(DOCKER_BIN) push $(IMAGE_REPOSITORY)/$(IMAGE_NAME_AGENT):$(IMAGE_TAG)
 	$(DOCKER_BIN) push $(IMAGE_REPOSITORY)/$(IMAGE_NAME_PRINCIPAL):$(IMAGE_TAG)
+
+.PHONY: serve-docs
+serve-docs:
+	${DOCKER_BIN} run ${MKDOCS_RUN_ARGS} --rm -it -p 8000:8000 -v ${current_dir}:/docs ${MKDOCS_DOCKER_IMAGE} serve -a 0.0.0.0:8000
+
+.PHONY: build-docs
+build-docs:
+	${DOCKER_BIN} run ${MKDOCS_RUN_ARGS} --rm -v ${current_dir}:/docs ${MKDOCS_DOCKER_IMAGE} build
+
 
 .PHONY: help
 help:
