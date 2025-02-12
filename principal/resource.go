@@ -28,7 +28,7 @@ import (
 // resourceRequestRegexp is the regexp used to match requests for retrieving a
 // resource or a list of resources from the server. It makes use of named
 // capture groups.
-const resourceRequestRegexp = `^/(?:api|apis/(?P<group>[^\/]+))/(?P<version>v[^\/]+)(?:/(?:namespaces/(?P<namespace>[^\/]+)/)?)?(?:(?P<resource>[^\/]+)(?:/(?P<name>[^\/]+))?)?$`
+const resourceRequestRegexp = `^/(?:api|apis|(?:api|apis/(?P<group>[^\/]+))/(?P<version>v[^\/]+)(?:/(?:namespaces/(?P<namespace>[^\/]+)/)?)?(?:(?P<resource>[^\/]+)(?:/(?P<name>[^\/]+))?)?)$`
 
 // requestTimeout is the timeout that's being applied to requests for any live
 // resource.
