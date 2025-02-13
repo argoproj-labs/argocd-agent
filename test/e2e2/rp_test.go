@@ -130,7 +130,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	argoEndpoint := "192.168.56.220"
 	requires := suite.Require()
-
+	appName := "guestbook-rp"
 	// Read admin secret from principal's cluster
 	pwdSecret := &corev1.Secret{}
 	err := suite.PrincipalClient.Get(context.Background(),
@@ -140,7 +140,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	// Create a managed application in the principal's cluster
 	app := v1alpha1.Application{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      "guestbook",
+			Name:      appName,
 			Namespace: "agent-managed",
 		},
 		Spec: v1alpha1.ApplicationSpec{
@@ -168,7 +168,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 
 	err = wait.PollUntilContextTimeout(suite.Ctx, 1*time.Second, 10*time.Second, true, func(ctx context.Context) (done bool, err error) {
 		app := &v1alpha1.Application{}
-		err = suite.PrincipalClient.Get(ctx, types.NamespacedName{Namespace: "agent-managed", Name: "guestbook"}, app, v1.GetOptions{})
+		err = suite.PrincipalClient.Get(ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, app, v1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
 				return false, nil
