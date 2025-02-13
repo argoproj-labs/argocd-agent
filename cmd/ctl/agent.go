@@ -177,29 +177,6 @@ func NewAgentCreateCommand() *cobra.Command {
 				rpPassword = string(pass1)
 			}
 
-			// // Our CA certificate is stored in a secret
-			// tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
-			// if err != nil {
-			// 	cmdutil.Fatal("Could not read CA secret: %v", err)
-			// }
-			// signerCert, err := x509.ParseCertificate(tlsCert.Certificate[0])
-			// if err != nil {
-			// 	cmdutil.Fatal("Could not parse CA certificate: %v", err)
-			// }
-
-			// // Generate a client cert and sign it using the CA's cert and key
-			// clientCert, clientKey, err := tlsutil.GenerateClientCertificate(agentName, signerCert, tlsCert.PrivateKey)
-			// if err != nil {
-			// 	cmdutil.Fatal("Could not create client cert: %v", err)
-			// }
-
-			// // We need to re-encode the CA's public certificate back to PEM.
-			// // It's a little stupid, because it is stored in the secret as
-			// // PEM already, but the tls.Certificate contains only RAW byte.
-			// caData, err := tlsutil.CertDataToPEM([]byte(tlsCert.Certificate[0]))
-			// if err != nil {
-			// 	cmdutil.Fatal("Could not encode CA cert to PEM: %v", err)
-			// }
 			clientCert, clientKey, caData, err := generateAgentClientCert(agentName, clt)
 			if err != nil {
 				cmdutil.Fatal("%v", err)
