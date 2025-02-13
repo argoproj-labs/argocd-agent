@@ -66,6 +66,16 @@ func (c *ArgoRestClient) SetAuthToken(token string) {
 	c.token = token
 }
 
+func post(url *url.URL, data string) *http.Request {
+	return &http.Request{
+		Method:        http.MethodPost,
+		URL:           url,
+		Body:          io.NopCloser(bytes.NewReader([]byte(data))),
+		Header:        http.Header{"Content-Type": []string{"application/json"}},
+		ContentLength: int64(len(data)),
+	}
+}
+
 // Login creates a new Argo CD session
 func (c *ArgoRestClient) Login() error {
 	// Get session token from API
@@ -104,6 +114,22 @@ func (c *ArgoRestClient) Login() error {
 		return errors.New("empty token received")
 	}
 	c.token = token.Token
+	return nil
+}
+
+func (c *ArgoRestClient) Sync(app *v1alpha1.Application) error {
+	payload := fmt.Sprintf(`{"name": "%s", "appNamespace": "%s" }`, app.Name, app.Namespace)
+	reqUrl := c.url()
+	reqUrl.Path = fmt.Sprintf("/api/v1/applications/%s/sync", app.Name)
+	req := post(reqUrl, payload)
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("expected HTTP 200, got %d", resp.StatusCode)
+	}
 	return nil
 }
 
