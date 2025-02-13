@@ -209,6 +209,7 @@ jobs:
       - name: Run the e2e tests
         run: |
           set -o pipefail
+          make all
           make test-e2e2 2>&1 | tee /tmp/test-e2e.log
           goreman run stop-all || echo "goreman trouble"
           sleep 30
