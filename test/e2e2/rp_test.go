@@ -126,9 +126,11 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 }
 
 func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
-	argoEndpoint := "192.168.56.220"
 	requires := suite.Require()
+
+	argoEndpoint := "192.168.56.220"
 	appName := "guestbook-rp"
+
 	// Read admin secret from principal's cluster
 	pwdSecret := &corev1.Secret{}
 	err := suite.PrincipalClient.Get(context.Background(),
@@ -164,6 +166,12 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	err = suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
 	requires.NoError(err)
 
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", string(pwdSecret.Data["password"]))
+	err = argoClient.Login()
+	requires.NoError(err)
+
+	// Wait until the app is synced and healthy
+	retries := 0
 	requires.Eventually(func() bool {
 		app := &v1alpha1.Application{}
 		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, app, v1.GetOptions{})
@@ -172,22 +180,38 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 		}
 		if app.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && app.Status.Health.Status == health.HealthStatusHealthy {
 			return true
+		} else {
+			suite.T().Logf("Waiting. Status is %s/%s", app.Status.Sync.Status, app.Status.Health.Status)
+			// Sometimes, the sync hangs on the workload cluster. We trigger
+			// a sync every 5th or so retry.
+			if retries > 0 && retries%5 == 0 {
+				suite.T().Logf("Triggering re-sync")
+				err = argoClient.Sync(app)
+				if err != nil {
+					return true
+				}
+			}
+			retries += 1
 		}
 		return false
 	}, 60*time.Second, 1*time.Second)
 	requires.NoError(err)
 
-	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", string(pwdSecret.Data["password"]))
-	err = argoClient.Login()
-	requires.NoError(err)
-
+	// Getting an existing resource belonging to the synced app through Argo's
+	// API must result in success.
 	resource, err := argoClient.GetResource(&app,
 		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
 	requires.NoError(err)
 	napp := &v1alpha1.Application{}
 	err = json.Unmarshal([]byte(resource), napp)
 	requires.NoError(err)
+	requires.Equal("Deployment", napp.Kind)
 	requires.Equal("kustomize-guestbook-ui", napp.Name)
+
+	// Getting a non-existing resource must result in failure
+	_, err = argoClient.GetResource(&app,
+		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-backend")
+	requires.Error(err)
 }
 
 func TestResourceProxyTestSuite(t *testing.T) {
