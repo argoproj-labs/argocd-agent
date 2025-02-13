@@ -398,6 +398,12 @@ func (r *Remote) SetClientMode(mode types.AgentMode) {
 	r.clientMode = mode
 }
 
+// SetClientID sets the client ID for this remote
+// The only use case for this is to be used in unit testing.
+func (r *Remote) SetClientID(id string) {
+	r.clientID = id
+}
+
 func log() *logrus.Entry {
 	return logrus.WithField("module", "Connector")
 }
