@@ -19,11 +19,13 @@ func Test_addAppCreationToQueue(t *testing.T) {
 	err := a.queues.Create("agent")
 	require.NoError(t, err)
 
-	t.Run("Add some application", func(t *testing.T) {
+	t.Run("Add some application in autonomous mode", func(t *testing.T) {
 		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
 		a.addAppCreationToQueue(app)
+		defer a.appManager.ClearManaged()
 
 		// Should have an event in queue
+		require.Equal(t, 1, a.queues.SendQ("agent").Len())
 		ev, _ := a.queues.SendQ("agent").Get()
 		assert.NotNil(t, ev)
 		// Queue should be empty after get
@@ -33,8 +35,25 @@ func Test_addAppCreationToQueue(t *testing.T) {
 		assert.True(t, a.appManager.IsManaged("agent/guestbook"))
 	})
 
+	t.Run("Add some application in managed mode", func(t *testing.T) {
+		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
+		a.mode = types.AgentModeManaged
+		defer func() {
+			a.mode = types.AgentModeAutonomous
+			a.appManager.ClearManaged()
+		}()
+		a.addAppCreationToQueue(app)
+
+		// Should not have an event in queue
+		require.Equal(t, 0, a.queues.SendQ("agent").Len())
+
+		// App should be managed by now
+		assert.True(t, a.appManager.IsManaged("agent/guestbook"))
+	})
+
 	t.Run("Add some application that is already managed", func(t *testing.T) {
 		a.appManager.Manage("agent/guestbook")
+		defer a.appManager.ClearManaged()
 		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
 		a.addAppCreationToQueue(app)
 
@@ -47,6 +66,7 @@ func Test_addAppCreationToQueue(t *testing.T) {
 	})
 
 	t.Run("Missing queue", func(t *testing.T) {
+		defer a.appManager.ClearManaged()
 		a.remote.SetClientID("notexisting")
 		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "testapp", Namespace: "agent"}}
 		a.addAppCreationToQueue(app)
@@ -109,13 +129,25 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 	err := a.queues.Create("agent")
 	require.NoError(t, err)
 
-	t.Run("Deletion event for managed application", func(t *testing.T) {
+	t.Run("Deletion event for managed application on autonomous agent", func(t *testing.T) {
 		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
 		// App must be already managed for event to be generated
 		_ = a.appManager.Manage("agent/guestbook")
 		a.addAppDeletionToQueue(app)
 		ev, _ := a.queues.SendQ("agent").Get()
 		assert.Equal(t, event.Delete.String(), ev.Type())
+		require.False(t, a.appManager.IsManaged("agent/guestbook"))
+	})
+	t.Run("Deletion event for managed application on managed agent", func(t *testing.T) {
+		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
+		a.mode = types.AgentModeManaged
+		defer func() {
+			a.mode = types.AgentModeAutonomous
+		}()
+		// App must be already managed for event to be generated
+		_ = a.appManager.Manage("agent/guestbook")
+		a.addAppDeletionToQueue(app)
+		require.Equal(t, 0, a.queues.SendQ("agent").Len())
 		require.False(t, a.appManager.IsManaged("agent/guestbook"))
 	})
 	t.Run("Deletion event for unmanaged application", func(t *testing.T) {

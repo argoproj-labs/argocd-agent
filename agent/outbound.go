@@ -30,12 +30,17 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 	// Update events trigger a new event sometimes, too. If we've already seen
 	// the app, we just ignore the request then.
 	if a.appManager.IsManaged(app.QualifiedName()) {
-		logCtx.Trace("App is already managed")
+		logCtx.Error("Cannot manage app that is already managed")
 		return
 	}
 
 	if err := a.appManager.Manage(app.QualifiedName()); err != nil {
-		logCtx.Tracef("Could not manage app: %v", err)
+		logCtx.Errorf("Could not manage app: %v", err)
+		return
+	}
+
+	// Only send the creation event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
 		return
 	}
 
@@ -62,7 +67,7 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 
 	// If the app is not managed, we ignore this event.
 	if !a.appManager.IsManaged(new.QualifiedName()) {
-		logCtx.Tracef("App is not managed")
+		logCtx.Errorf("Received update event for unmanaged app")
 		return
 	}
 
@@ -97,7 +102,7 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	logCtx.Debugf("Delete app event")
 
 	if !a.appManager.IsManaged(app.QualifiedName()) {
-		logCtx.Tracef("App is not managed, proceeding anyways")
+		logCtx.Warn("App is not managed, proceeding anyways")
 	} else {
 		_ = a.appManager.Unmanage(app.QualifiedName())
 	}
@@ -107,6 +112,12 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 		logCtx.Error("Default queue disappeared!")
 		return
 	}
+
+	// Only send the deletion event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
+		return
+	}
+
 	q.Add(a.emitter.ApplicationEvent(event.Delete, app))
 	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app delete event to send queue")
 }
