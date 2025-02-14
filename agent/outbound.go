@@ -67,7 +67,7 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 
 	// If the app is not managed, we ignore this event.
 	if !a.appManager.IsManaged(new.QualifiedName()) {
-		logCtx.Errorf("Received update even for unmanaged app")
+		logCtx.Errorf("Received update event for unmanaged app")
 		return
 	}
 
