@@ -201,10 +201,11 @@ jobs:
           go install github.com/mattn/goreman@latest
       - name: Set up the test environment
         run: |
-          ARGOCD_AGENT_GEN_ADMIN_PWD=false make setup-e2e2
+          make setup-e2e2
       - name: Run the principal and agents
         run: |
-          make start-e2e2 2>&1 | sed -r "s/[[:cntrl:]]\[[0-9]{1,3}m//g" > /tmp/e2e-argocd-agent.log &
+          make all
+          make start-e2e2 2>&1 | sed -r "s/[[:cntrl:]]\[[0-9]{1,3}m//g" | tee /tmp/e2e-argocd-agent.log &
           sleep 10
       - name: Run the e2e tests
         run: |

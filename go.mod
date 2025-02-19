@@ -4,6 +4,7 @@ go 1.23.0
 
 require (
 	github.com/argoproj/argo-cd/v2 v2.14.2
+	github.com/argoproj/gitops-engine v0.7.1-0.20250129155113-c19f8cfa4d27
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.15.2
 	github.com/cloudevents/sdk-go/v2 v2.15.2
 	github.com/golang-jwt/jwt/v5 v5.2.1
@@ -17,10 +18,12 @@ require (
 	golang.org/x/crypto v0.33.0
 	golang.org/x/net v0.35.0
 	golang.org/x/sync v0.11.0
+	golang.org/x/term v0.29.0
 	golang.stackrox.io/grpc-http1 v0.4.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20241202173237-19429a94021a
 	google.golang.org/grpc v1.70.0
 	google.golang.org/protobuf v1.36.5
+	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.31.0
 	k8s.io/apimachinery v0.31.0
@@ -35,7 +38,6 @@ require (
 	github.com/Masterminds/semver/v3 v3.3.1 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/ProtonMail/go-crypto v1.1.3 // indirect
-	github.com/argoproj/gitops-engine v0.7.1-0.20250129155113-c19f8cfa4d27 // indirect
 	github.com/argoproj/pkg v0.13.7-0.20230626144333-d56162821bd1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
@@ -133,7 +135,6 @@ require (
 	golang.org/x/mod v0.22.0 // indirect
 	golang.org/x/oauth2 v0.24.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/term v0.29.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
 	golang.org/x/tools v0.27.0 // indirect
@@ -141,7 +142,6 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 	k8s.io/apiextensions-apiserver v0.31.2 // indirect
 	k8s.io/apiserver v0.31.0 // indirect
 	k8s.io/cli-runtime v0.31.0 // indirect

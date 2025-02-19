@@ -224,6 +224,9 @@ apply() {
     wait_for_pods vcluster-agent-autonomous 4
     wait_for_pods vcluster-agent-managed 4
 
+    echo "-> Service configuration on control plane"
+    kubectl --context vcluster-control-plane -n argocd get services
+
     if [[ "$ADMIN_PASSWORD" != "" ]]; then
         echo
         echo "Argo CD Admin Password: $ADMIN_PASSWORD"

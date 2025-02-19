@@ -57,37 +57,6 @@ func (suite *SyncTestSuite) SetupTest() {
 	requires.NoError(err)
 }
 
-func (suite *SyncTestSuite) TearDownTest() {
-	suite.BaseSuite.TearDownTest()
-	requires := suite.Require()
-
-	var err error
-
-	// Delete the "guestbook" namespace from the managed agent and autonomous agent clusters
-	namespace := corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "guestbook",
-		},
-	}
-	err = suite.ManagedAgentClient.Delete(suite.Ctx, &namespace, metav1.DeleteOptions{})
-	requires.NoError(err)
-	err = suite.AutonomousAgentClient.Delete(suite.Ctx, &namespace, metav1.DeleteOptions{})
-	requires.NoError(err)
-
-	// Wait until the namespaces are actually gone from the clusters
-	requires.Eventually(func() bool {
-		namespace := corev1.Namespace{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{Name: "guestbook"}, &namespace, metav1.GetOptions{})
-		return errors.IsNotFound(err)
-	}, 30*time.Second, 1*time.Second)
-	requires.Eventually(func() bool {
-		namespace := corev1.Namespace{}
-		err := suite.AutonomousAgentClient.Get(suite.Ctx, types.NamespacedName{Name: "guestbook"}, &namespace, metav1.GetOptions{})
-		return errors.IsNotFound(err)
-	}, 30*time.Second, 1*time.Second)
-
-}
-
 func (suite *SyncTestSuite) Test_SyncManaged() {
 	requires := suite.Require()
 

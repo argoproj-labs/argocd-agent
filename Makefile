@@ -14,6 +14,7 @@ MKDOCS_RUN_ARGS?=
 # Binary names
 BIN_NAME_AGENT=argocd-agent-agent
 BIN_NAME_PRINCIPAL=argocd-agent-principal
+BIN_NAME_CLI=argocd-agentctl
 BIN_ARCH?=$(shell go env GOARCH)
 BIN_OS?=$(shell go env GOOS)
 
@@ -25,21 +26,23 @@ PROTOC_GEN_GO_GRPC_VERSION=v1.2
 GOLANG_CI_LINT_VERSION=v1.62.0
 MOCKERY_V2_VERSION?=v2.43.0
 
+all: build
+
 .PHONY: fmt
 fmt:
 	go fmt ./...
 
 .PHONY: build
-build: agent principal
+build: agent principal cli
 
 .PHONY: setup-e2e2
 setup-e2e2:
-	hack/dev-env/setup-vcluster-env.sh create
+	./hack/dev-env/setup-vcluster-env.sh create
 
 .PHONY: start-e2e2
-start-e2e2:
-	hack/dev-env/gen-creds.sh
-	hack/dev-env/gen-tls.sh
+start-e2e2: cli
+	./hack/dev-env/gen-creds.sh
+	./hack/dev-env/create-agent-config.sh
 	goreman -f hack/dev-env/Procfile.e2e start
 
 .PHONY: test-e2e2
@@ -130,11 +133,15 @@ lint: install-lint-toolchain
 
 .PHONY: agent
 agent:
-	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_AGENT) -ldflags="-extldflags=-static" cmd/agent/main.go
+	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_AGENT) -ldflags="-extldflags=-static" ./cmd/agent
 
 .PHONY: principal
 principal:
-	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_PRINCIPAL) -ldflags="-extldflags=-static" cmd/principal/main.go
+	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_PRINCIPAL) -ldflags="-extldflags=-static" ./cmd/principal
+
+.PHONY: cli
+cli:
+	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_CLI) -ldflags="-extldflags=-static" ./cmd/ctl
 
 .PHONY: images
 images: image-agent image-principal
