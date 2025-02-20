@@ -542,6 +542,15 @@ func (suite *FixtureTestSuite) Test_SyncApplication() {
 	requires.NoError(err)
 }
 
+func (suite *FixtureTestSuite) Test_Goreman_StartStopStatus_Sanity() {
+	const process = "principal"
+	requires := suite.Require()
+	requires.True(fixture.IsProcessRunning(process))
+	requires.NoError(fixture.StopProcess(process))
+	requires.False(fixture.IsProcessRunning(process))
+	requires.NoError(fixture.StartProcess(process))
+}
+
 func XTestFixtureTestSuite(t *testing.T) {
 	suite.Run(t, new(FixtureTestSuite))
 }
