@@ -531,8 +531,6 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 	if agent.Mode() == types.AgentModeAutonomous.String() {
 		checksum := s.resources.Checksum(agent.Name())
 
-		fmt.Println("Checksum for agent", agent.Name(), checksum)
-
 		// send the checksum to the principal
 		ev, err := s.events.RequestBasicEntityListEvent(checksum)
 		if err != nil {

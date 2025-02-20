@@ -101,226 +101,6 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	return ev, err
 }
 
-// processIncomingResourceResyncEvent will handle the incoming resync events from the agent
-func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
-	agentMode := s.agentMode(agentName)
-	logCtx := log().WithFields(logrus.Fields{
-		"module":      "QueueProcessor",
-		"client":      agentName,
-		"mode":        agentMode.String(),
-		"event":       ev.Type(),
-		"resource_id": event.ResourceID(ev),
-		"event_id":    event.EventID(ev),
-	})
-
-	dynClient, err := dynamic.NewForConfig(s.kubeClient.RestConfig)
-	if err != nil {
-		return err
-	}
-
-	sendQ := s.queues.SendQ(agentName)
-	if sendQ == nil {
-		return fmt.Errorf("queue not found for agent: %s", agentName)
-	}
-
-	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx)
-
-	switch ev.Type() {
-	case event.RequestBasicEntity.String():
-		if agentMode != types.AgentModeManaged {
-			return fmt.Errorf("principal can only handle basic entity list in the managed mode")
-		}
-
-		incoming := &event.RequestBasicEntityList{}
-		if err := ev.DataAs(incoming); err != nil {
-			return err
-		}
-
-		return resyncHandler.ProcessBasicEntityListRequest(agentName, incoming)
-	case event.ResponseBasicEntity.String():
-		if agentMode != types.AgentModeAutonomous {
-			return fmt.Errorf("principal can only handle basic entity in autonomous mode")
-		}
-
-		incoming := &event.BasicEntity{}
-		if err := ev.DataAs(incoming); err != nil {
-			return err
-		}
-
-		// Using agentName as the namespace
-		incoming.Namespace = agentName
-
-		return resyncHandler.ProcessIncomingBasicEntity(ctx, incoming, agentName)
-	case event.EventRequestUpdate.String():
-		if agentMode != types.AgentModeManaged {
-			return fmt.Errorf("principal can only handle request update in the managed mode")
-		}
-
-		incoming := &event.RequestUpdate{}
-		if err := ev.DataAs(incoming); err != nil {
-			return err
-		}
-
-		return resyncHandler.ProcessRequestUpdateEvent(ctx, agentName, incoming)
-	case event.EventRequestEntityResync.String():
-		if agentMode != types.AgentModeAutonomous {
-			return fmt.Errorf("principal can only handle request entity resync in autonomous mode")
-		}
-
-		incoming := &event.RequestEntityResync{}
-		if err := ev.DataAs(incoming); err != nil {
-			return err
-		}
-
-		return resyncHandler.ProcessIncomingRequestEntityResync(ctx, agentName)
-	default:
-		return fmt.Errorf("invalid type of resource resync: %s", ev.Type())
-	}
-}
-
-// func (s *Server) processIncomingBasicEntityList(agentName string, ev *cloudevents.Event) error {
-// 	agentMode := s.agentMode(agentName)
-// 	if agentMode != types.AgentModeManaged {
-// 		return fmt.Errorf("invalid mode %s: principal can only handle basic entity list in the managed mode", agentMode.String())
-// 	}
-
-// 	incoming := &event.RequestBasicEntityList{}
-// 	if err := ev.DataAs(incoming); err != nil {
-// 		return err
-// 	}
-
-// 	logCtx := log().WithFields(logrus.Fields{
-// 		"module":      "QueueProcessor",
-// 		"client":      agentName,
-// 		"mode":        agentMode.String(),
-// 		"event":       ev.Type(),
-// 		"resource_id": event.ResourceID(ev),
-// 		"event_id":    event.EventID(ev),
-// 	})
-
-// 	dynClient, err := dynamic.NewForConfig(s.kubeClient.RestConfig)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	sendQ := s.queues.SendQ(agentName)
-// 	if sendQ == nil {
-// 		return fmt.Errorf("Remote queue disappeared")
-// 	}
-
-// 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx)
-
-// 	return resyncHandler.ProcessBasicEntityListRequest(agentName, incoming)
-// }
-
-// func (s *Server) processIncomingBasicEntity(ctx context.Context, agentName string, ev *cloudevents.Event) error {
-// 	agentMode := s.agentMode(agentName)
-// 	if agentMode != types.AgentModeAutonomous {
-// 		return fmt.Errorf("invalid mode %s: principal can only handle basic entity in autonomous mode", agentMode.String())
-// 	}
-
-// 	incoming := &event.BasicEntity{}
-// 	if err := ev.DataAs(incoming); err != nil {
-// 		return err
-// 	}
-
-// 	// Using agentName as the namespace
-// 	incoming.Namespace = agentName
-
-// 	logCtx := log().WithFields(logrus.Fields{
-// 		"module":      "QueueProcessor",
-// 		"client":      agentName,
-// 		"mode":        agentMode.String(),
-// 		"event":       ev.Type(),
-// 		"resource_id": event.ResourceID(ev),
-// 		"event_id":    event.EventID(ev),
-// 	})
-
-// 	dynClient, err := dynamic.NewForConfig(s.kubeClient.RestConfig)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	sendQ := s.queues.SendQ(agentName)
-// 	if sendQ == nil {
-// 		return fmt.Errorf("Remote queue disappeared")
-// 	}
-
-// 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx)
-
-// 	return resyncHandler.ProcessIncomingBasicEntity(ctx, incoming, agentName)
-// }
-
-// func (s *Server) processIncomingRequestEntityResync(ctx context.Context, agentName string, ev *cloudevents.Event) error {
-// 	agentMode := s.agentMode(agentName)
-// 	if agentMode != types.AgentModeAutonomous {
-// 		return fmt.Errorf("invalid mode %s: principal can only handle request entity resync in autonomous mode", agentMode.String())
-// 	}
-
-// 	incoming := &event.RequestEntityResync{}
-// 	if err := ev.DataAs(incoming); err != nil {
-// 		return err
-// 	}
-
-// 	logCtx := log().WithFields(logrus.Fields{
-// 		"module":      "QueueProcessor",
-// 		"client":      agentName,
-// 		"mode":        agentMode.String(),
-// 		"event":       ev.Type(),
-// 		"resource_id": event.ResourceID(ev),
-// 		"event_id":    event.EventID(ev),
-// 	})
-
-// 	dynClient, err := dynamic.NewForConfig(s.kubeClient.RestConfig)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	sendQ := s.queues.SendQ(agentName)
-// 	if sendQ == nil {
-// 		return fmt.Errorf("Remote queue disappeared")
-// 	}
-
-// 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx)
-
-// 	return resyncHandler.ProcessIncomingRequestEntityResync(ctx, agentName)
-// }
-
-// func (s *Server) processIncomingRequestUpdate(ctx context.Context, agentName string, ev *cloudevents.Event) error {
-// 	agentMode := s.agentMode(agentName)
-// 	if agentMode != types.AgentModeManaged {
-// 		return fmt.Errorf("invalid mode %s: principal can only handle request update in the managed mode", agentMode.String())
-// 	}
-
-// 	incoming := &event.RequestUpdate{}
-// 	if err := ev.DataAs(incoming); err != nil {
-// 		return err
-// 	}
-
-// 	logCtx := log().WithFields(logrus.Fields{
-// 		"module":      "QueueProcessor",
-// 		"client":      agentName,
-// 		"mode":        agentMode.String(),
-// 		"event":       ev.Type(),
-// 		"resource_id": event.ResourceID(ev),
-// 		"event_id":    event.EventID(ev),
-// 	})
-
-// 	dynClient, err := dynamic.NewForConfig(s.kubeClient.RestConfig)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	sendQ := s.queues.SendQ(agentName)
-// 	if sendQ == nil {
-// 		return fmt.Errorf("Remote queue disappeared")
-// 	}
-
-// 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx)
-
-// 	return resyncHandler.ProcessRequestUpdateEvent(ctx, agentName, incoming)
-// }
-
 // processApplicationEvent processes an incoming event that has an application
 // target.
 func (s *Server) processApplicationEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
@@ -495,6 +275,83 @@ func (s *Server) processResourceEventResponse(ctx context.Context, agentName str
 	}
 
 	return err
+}
+
+// processIncomingResourceResyncEvent will handle the incoming resync events from the agent
+func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
+	agentMode := s.agentMode(agentName)
+	logCtx := log().WithFields(logrus.Fields{
+		"module":      "QueueProcessor",
+		"client":      agentName,
+		"mode":        agentMode.String(),
+		"event":       ev.Type(),
+		"resource_id": event.ResourceID(ev),
+		"event_id":    event.EventID(ev),
+	})
+
+	dynClient, err := dynamic.NewForConfig(s.kubeClient.RestConfig)
+	if err != nil {
+		return err
+	}
+
+	sendQ := s.queues.SendQ(agentName)
+	if sendQ == nil {
+		return fmt.Errorf("queue not found for agent: %s", agentName)
+	}
+
+	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx)
+
+	switch ev.Type() {
+	case event.RequestBasicEntity.String():
+		if agentMode != types.AgentModeManaged {
+			return fmt.Errorf("principal can only handle basic entity list in the managed mode")
+		}
+
+		incoming := &event.RequestBasicEntityList{}
+		if err := ev.DataAs(incoming); err != nil {
+			return err
+		}
+
+		return resyncHandler.ProcessBasicEntityListRequest(agentName, incoming)
+	case event.ResponseBasicEntity.String():
+		if agentMode != types.AgentModeAutonomous {
+			return fmt.Errorf("principal can only handle basic entity in autonomous mode")
+		}
+
+		incoming := &event.BasicEntity{}
+		if err := ev.DataAs(incoming); err != nil {
+			return err
+		}
+
+		// Using agentName as the namespace
+		incoming.Namespace = agentName
+
+		return resyncHandler.ProcessIncomingBasicEntity(ctx, incoming, agentName)
+	case event.EventRequestUpdate.String():
+		if agentMode != types.AgentModeManaged {
+			return fmt.Errorf("principal can only handle request update in the managed mode")
+		}
+
+		incoming := &event.RequestUpdate{}
+		if err := ev.DataAs(incoming); err != nil {
+			return err
+		}
+
+		return resyncHandler.ProcessRequestUpdateEvent(ctx, agentName, incoming)
+	case event.EventRequestEntityResync.String():
+		if agentMode != types.AgentModeAutonomous {
+			return fmt.Errorf("principal can only handle request entity resync in autonomous mode")
+		}
+
+		incoming := &event.RequestEntityResync{}
+		if err := ev.DataAs(incoming); err != nil {
+			return err
+		}
+
+		return resyncHandler.ProcessIncomingRequestEntityResync(ctx, agentName)
+	default:
+		return fmt.Errorf("invalid type of resource resync: %s", ev.Type())
+	}
 }
 
 // eventProcessor is the main loop to process event from the receiver queue,
