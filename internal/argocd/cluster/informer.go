@@ -88,20 +88,20 @@ func (m *Manager) onClusterUpdated(old *v1.Secret, new *v1.Secret) {
 			log().Errorf("Remapping secret from %s to %s not possible", oldAgent, newAgent)
 			return
 		}
-	}
 
-	// Unmap cluster from old agent
-	log().Tracef("Unmapping cluster %s from agent %s", c.Name, oldAgent)
-	if err = m.unmapCluster(oldAgent); err != nil {
-		log().WithError(err).Errorf("Could not unmap cluster %s from agent %s", c.Name, oldAgent)
-		return
-	}
+		// Unmap cluster from old agent
+		log().Tracef("Unmapping cluster %s from agent %s", c.Name, oldAgent)
+		if err = m.unmapCluster(oldAgent); err != nil {
+			log().WithError(err).Errorf("Could not unmap cluster %s from agent %s", c.Name, oldAgent)
+			return
+		}
 
-	// Map cluster to new agent
-	log().Tracef("Mapping cluster %s to agent %s", c.Name, newAgent)
-	if err = m.mapCluster(newAgent, c); err != nil {
-		log().WithError(err).Errorf("Could not map cluster %s to agent %s", c.Name, newAgent)
-		return
+		// Map cluster to new agent
+		log().Tracef("Mapping cluster %s to agent %s", c.Name, newAgent)
+		if err = m.mapCluster(newAgent, c); err != nil {
+			log().WithError(err).Errorf("Could not map cluster %s to agent %s", c.Name, newAgent)
+			return
+		}
 	}
 
 	log().Infof("Updated cluster mapping for agent %s", newAgent)
