@@ -16,7 +16,7 @@ package principal
 
 import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
-	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +32,8 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		"event":            "application_new",
 		"application_name": outbound.Name,
 	})
+
+	s.resources.Add(outbound.Namespace, resources.NewResourceKeyFromApp(outbound))
 
 	if !s.queues.HasQueuePair(outbound.Namespace) {
 		if err := s.queues.Create(outbound.Namespace); err != nil {
@@ -104,6 +106,9 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 		"event":            "application_delete",
 		"application_name": outbound.Name,
 	})
+
+	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromApp(outbound))
+
 	if !s.queues.HasQueuePair(outbound.Namespace) {
 		if err := s.queues.Create(outbound.Namespace); err != nil {
 			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
@@ -136,6 +141,8 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 		"appproject_name": outbound.Name,
 	})
 
+	s.resources.Add(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
+
 	// Return early if no interested agent is connected
 	if !s.queues.HasQueuePair(outbound.Namespace) {
 		if err := s.queues.Create(outbound.Namespace); err != nil {
@@ -149,12 +156,6 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 		s.metrics.AppProjectCreated.Inc()
 	}
 
-	// New appproject events are only relevant for managed agents
-	mode := s.agentMode(outbound.Namespace)
-	if mode != types.AgentModeManaged {
-		logCtx.Tracef("Discarding event for unmanaged agent")
-		return
-	}
 	q := s.queues.SendQ(outbound.Namespace)
 	if q == nil {
 		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", outbound.Namespace)
@@ -215,6 +216,9 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 		"event":           "appproject_delete",
 		"appproject_name": outbound.Name,
 	})
+
+	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
+
 	if !s.queues.HasQueuePair(outbound.Namespace) {
 		if err := s.queues.Create(outbound.Namespace); err != nil {
 			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")

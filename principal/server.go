@@ -40,6 +40,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -53,7 +54,6 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes"
 )
 
 type Server struct {
@@ -91,7 +91,7 @@ type Server struct {
 	// events is used to construct events to pass on the wire to connected agents.
 	events     *event.EventSource
 	version    *version.Version
-	kubeClient kubernetes.Interface
+	kubeClient *kube.KubernetesClient
 
 	autoNamespaceAllow   bool
 	autoNamespacePattern *regexp.Regexp
@@ -119,7 +119,17 @@ type Server struct {
 	// Minimum time duration for agent to wait before sending next keepalive ping to principal
 	// if agent sends ping more often than specified interval then connection will be dropped
 	keepAliveMinimumInterval time.Duration
+	// resources is a map of all resource keys for each agent
+	resources *resources.AgentResources
+	// resyncStatus indicates whether an agent has been resyned after the principal restarts
+	resyncStatus *resyncStatus
+	// notifyOnConnect will notify to run the handlers when an agent connects to the principal
+	notifyOnConnect chan types.Agent
+	// handlers to run when an agent connects to the principal
+	handlersOnConnect []handlersOnConnect
 }
+
+type handlersOnConnect func(agent types.Agent) error
 
 // noAuthEndpoints is a list of endpoints that are available without the need
 // for the request to be authenticated.
@@ -136,12 +146,15 @@ const defaultResourceProxyListenerAddr = "0.0.0.0:9090"
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
-		options:    defaultOptions(),
-		queues:     queue.NewSendRecvQueues(),
-		namespace:  namespace,
-		noauth:     noAuthEndpoints,
-		version:    version.New("argocd-agent", "principal"),
-		kubeClient: kubeClient.Clientset,
+		options:         defaultOptions(),
+		queues:          queue.NewSendRecvQueues(),
+		namespace:       namespace,
+		noauth:          noAuthEndpoints,
+		version:         version.New("argocd-agent", "principal"),
+		kubeClient:      kubeClient,
+		resyncStatus:    newResyncStatus(),
+		resources:       resources.NewAgentResources(),
+		notifyOnConnect: make(chan types.Agent),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
@@ -151,6 +164,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	s.handlersOnConnect = []handlersOnConnect{
+		s.handleResyncOnConnect,
 	}
 
 	if s.authMethods == nil {
@@ -289,10 +306,12 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	// Instantiate the cluster manager to handle Argo CD cluster secrets for
 	// agents.
-	s.clusterMgr, err = cluster.NewManager(s.ctx, s.namespace, s.kubeClient)
+	s.clusterMgr, err = cluster.NewManager(s.ctx, s.namespace, s.kubeClient.Clientset)
 	if err != nil {
 		return nil, err
 	}
+
+	s.resources = resources.NewAgentResources()
 
 	return s, nil
 }
@@ -364,6 +383,8 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}()
 	}
 
+	go s.RunHandlersOnConnect(s.ctx)
+
 	err := s.StartEventProcessor(s.ctx)
 	if err != nil {
 		return nil
@@ -428,6 +449,110 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 	log().Infof("Namespace informer synced and ready")
 
+	return nil
+}
+
+// When the principal process restarts, the agent could be out of sync with the principal.
+// resyncStatus indicates whether we need to inform the agent that the principal has been restarted.
+type resyncStatus struct {
+	mu sync.RWMutex
+	// key: agent name
+	resync map[string]bool
+}
+
+func newResyncStatus() *resyncStatus {
+	return &resyncStatus{
+		resync: map[string]bool{},
+	}
+}
+
+func (rs *resyncStatus) isResynced(agentName string) bool {
+	rs.mu.RLock()
+	defer rs.mu.RUnlock()
+
+	_, ok := rs.resync[agentName]
+	return ok
+}
+
+func (rs *resyncStatus) resynced(agentName string) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+
+	rs.resync[agentName] = true
+}
+
+// RunHandlersOnConnect runs the registered handlers when an agent connects to the principal
+func (s *Server) RunHandlersOnConnect(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			log().Errorf("stop running handlers: %v", ctx.Err())
+			return
+		case agent := <-s.notifyOnConnect:
+			logCtx := log().WithFields(logrus.Fields{
+				"agent": agent.Name(),
+				"mode":  agent.Mode(),
+			})
+
+			logCtx.Trace("Running handlers on a newly connected agent")
+			for _, handler := range s.handlersOnConnect {
+				if err := handler(agent); err != nil {
+					logCtx.Errorf("failed to run handler: %v", err)
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// handleResyncOnConnect is called whenever an agent connects and it determines if an agent needs to be
+// resynced with the principal. We use resyncStatus to differentiate if the principal has restarted (resync required)
+// or the agent has just reconnected after a network issue (no resync). When the process restarts, we lose the
+// resync status and thereby trigger the resync mechanism whenever the agent connects back.
+func (s *Server) handleResyncOnConnect(agent types.Agent) error {
+	logCtx := log().WithFields(logrus.Fields{
+		"agent": agent.Name(),
+		"mode":  agent.Mode(),
+	})
+
+	if s.resyncStatus.isResynced(agent.Name()) {
+		logCtx.Trace("Skipping resync messages since the principal has synced with this agent before")
+		return nil
+	}
+
+	logCtx.Trace("Checking if the principal is out of sync with the agent")
+
+	sendQ := s.queues.SendQ(agent.Name())
+	if sendQ == nil {
+		return fmt.Errorf("no send queue found for agent: %s", agent.Name())
+	}
+
+	// In autonomous mode, principal acts as peer and it should request the basic entity list from the agent.
+	if agent.Mode() == types.AgentModeAutonomous.String() {
+		checksum := s.resources.Checksum(agent.Name())
+
+		fmt.Println("Checksum for agent", agent.Name(), checksum)
+
+		// send the checksum to the principal
+		ev, err := s.events.RequestBasicEntityListEvent(checksum)
+		if err != nil {
+			return fmt.Errorf("failed to create basic entity list event: %v", err)
+		}
+
+		sendQ.Add(ev)
+		logCtx.Trace("Sent a request for basic entity list")
+	} else {
+		// In managed mode, principal is the source of truth and the it should request entity resync
+		ev, err := s.events.RequestEntityResyncEvent()
+		if err != nil {
+			return fmt.Errorf("failed to create request entity resync event: %v", err)
+		}
+
+		sendQ.Add(ev)
+		logCtx.Trace("Sent a request for entity resync")
+	}
+
+	s.resyncStatus.resynced(agent.Name())
 	return nil
 }
 
