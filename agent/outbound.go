@@ -16,6 +16,7 @@ package agent
 
 import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +27,8 @@ import (
 func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 	logCtx := log().WithField("event", "NewApp").WithField("application", app.QualifiedName())
 	logCtx.Debugf("New app event")
+
+	a.resources.Add(resources.NewResourceKeyFromApp(app))
 
 	// Update events trigger a new event sometimes, too. If we've already seen
 	// the app, we just ignore the request then.
@@ -100,6 +103,8 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	logCtx := log().WithField("event", "DeleteApp").WithField("application", app.QualifiedName())
 	logCtx.Debugf("Delete app event")
+
+	a.resources.Remove(resources.NewResourceKeyFromApp(app))
 
 	if !a.appManager.IsManaged(app.QualifiedName()) {
 		logCtx.Warn("App is not managed, proceeding anyways")

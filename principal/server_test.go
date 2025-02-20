@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/sirupsen/logrus"
@@ -93,6 +95,84 @@ func Test_NewServer(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, s)
 	})
+}
+
+func Test_handleResyncOnConnect(t *testing.T) {
+	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
+		WithGeneratedTokenSigningKey(),
+	)
+	require.NoError(t, err)
+	s.events = event.NewEventSource("test")
+
+	agent := types.NewAgent("test", types.AgentModeAutonomous.String())
+	err = s.queues.Create(agent.Name())
+	assert.Nil(t, err)
+
+	t.Run("return if the agent is already synced", func(t *testing.T) {
+		s.resyncStatus.resynced(agent.Name())
+
+		err = s.handleResyncOnConnect(agent)
+		assert.Nil(t, err)
+
+		sendQ := s.queues.SendQ(agent.Name())
+		assert.Zero(t, sendQ.Len())
+	})
+
+	t.Run("request basic entity list in autonomous mode", func(t *testing.T) {
+		s.resyncStatus = newResyncStatus()
+
+		err = s.handleResyncOnConnect(agent)
+		assert.Nil(t, err)
+
+		sendQ := s.queues.SendQ(agent.Name())
+		assert.Equal(t, 1, sendQ.Len())
+
+		ev, shutdown := sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.RequestBasicEntity.String(), ev.Type())
+	})
+
+	t.Run("request entity resync in managed mode", func(t *testing.T) {
+		agent = types.NewAgent("test", types.AgentModeManaged.String())
+		s.resyncStatus = newResyncStatus()
+
+		err = s.handleResyncOnConnect(agent)
+		assert.Nil(t, err)
+
+		sendQ := s.queues.SendQ(agent.Name())
+		assert.Equal(t, 1, sendQ.Len())
+
+		ev, shutdown := sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestEntityResync.String(), ev.Type())
+	})
+}
+
+func Test_RunHandlersOnConnect(t *testing.T) {
+	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
+		WithGeneratedTokenSigningKey(),
+	)
+	require.NoError(t, err)
+	s.events = event.NewEventSource("test")
+
+	expected := types.NewAgent("test", types.AgentModeAutonomous.String())
+
+	output := make(chan types.Agent)
+
+	s.handlersOnConnect = []handlersOnConnect{func(agent types.Agent) error {
+		output <- types.NewAgent(agent.Name(), agent.Mode())
+		return nil
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go s.RunHandlersOnConnect(ctx)
+
+	s.notifyOnConnect <- expected
+
+	got := <-output
+	assert.Equal(t, expected, got)
 }
 
 func init() {
