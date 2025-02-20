@@ -174,6 +174,10 @@ func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alph
 	return nil, nil
 }
 
+func (m *AppProjectManager) Get(ctx context.Context, name, namespace string) (*v1alpha1.AppProject, error) {
+	return m.appprojectBackend.Get(ctx, name, namespace)
+}
+
 // UpdateAppProject updates the AppProject resource on the agent's backend.
 //
 // The AppProject on the agent will inherit labels and annotations as well as the spec
