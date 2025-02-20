@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
+	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
@@ -61,6 +62,8 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 		err = a.processIncomingAppProject(ev)
 	case event.TargetResource:
 		err = a.processIncomingResourceRequest(ev)
+	case event.TargetResourceResync:
+		err = a.processIncomingResourceResyncEvent(ev)
 	default:
 		err = fmt.Errorf("unknown event target: %s", ev.Target())
 	}
@@ -83,6 +86,74 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	}
 
 	return err
+}
+
+func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
+	logCtx := log().WithFields(logrus.Fields{
+		"method":      "processIncomingEvents",
+		"agent":       a.remote.ClientID(),
+		"mode":        a.mode,
+		"event":       ev.Type(),
+		"resource_id": ev.ResourceID(),
+	})
+
+	dynClient, err := dynamic.NewForConfig(a.kubeClient.RestConfig)
+	if err != nil {
+		return err
+	}
+
+	sendQ := a.queues.SendQ(a.remote.ClientID())
+	if sendQ == nil {
+		return fmt.Errorf("remote queue disappeared for agent: %s", a.remote.ClientID())
+	}
+
+	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
+
+	switch ev.Type() {
+	case event.RequestBasicEntity:
+		if a.mode != types.AgentModeAutonomous {
+			return fmt.Errorf("agent can only handle basic entity list request in the autonomous mode")
+		}
+
+		req, err := ev.RequestBasicEntityListRequest()
+		if err != nil {
+			return err
+		}
+
+		return resyncHandler.ProcessBasicEntityListRequest(a.remote.ClientID(), req)
+	case event.ResponseBasicEntity:
+		if a.mode != types.AgentModeManaged {
+			return fmt.Errorf("agent can only handle basic entity request in the managed mode")
+		}
+
+		req, err := ev.BasicEntity()
+		if err != nil {
+			return err
+		}
+
+		return resyncHandler.ProcessIncomingBasicEntity(a.context, req, a.remote.ClientID())
+	case event.EventRequestUpdate:
+		if a.mode != types.AgentModeAutonomous {
+			return fmt.Errorf("agent can only handle request update in the autonomous mode")
+		}
+
+		incoming, err := ev.RequestUpdate()
+		if err != nil {
+			return err
+		}
+
+		incoming.Namespace = a.namespace
+
+		return resyncHandler.ProcessRequestUpdateEvent(a.context, a.remote.ClientID(), incoming)
+	case event.EventRequestEntityResync:
+		if a.mode != types.AgentModeManaged {
+			return fmt.Errorf("agent can only handle request entity resync in the managed mode")
+		}
+
+		return resyncHandler.ProcessIncomingRequestEntityResync(a.context, a.remote.ClientID())
+	default:
+		return fmt.Errorf("invalid type of resource resync: %s", ev.Type())
+	}
 }
 
 // processIncomingResourceRequest processes an incoming event that requests
@@ -318,6 +389,133 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 
 	return err
 }
+
+// func (a *Agent) processIncomingBasicEntityList(ev *event.Event) error {
+// 	if a.mode != types.AgentModeAutonomous {
+// 		return fmt.Errorf("agent can only handle basic entity list request in the autonomous mode")
+// 	}
+
+// 	req, err := ev.RequestBasicEntityListRequest()
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	logCtx := log().WithFields(logrus.Fields{
+// 		"method":      "processIncomingEvents",
+// 		"agent":       a.remote.ClientID(),
+// 		"mode":        a.mode,
+// 		"event":       ev.Type(),
+// 		"resource_id": ev.ResourceID(),
+// 	})
+
+// 	dynClient, err := dynamic.NewForConfig(a.kubeClient.RestConfig)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	sendQ := a.queues.SendQ(a.remote.ClientID())
+// 	if sendQ == nil {
+// 		return fmt.Errorf("remote queue disappeared for agent: %s", a.remote.ClientID())
+// 	}
+
+// 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
+
+// 	return resyncHandler.ProcessBasicEntityListRequest(a.remote.ClientID(), req)
+// }
+
+// func (a *Agent) processIncomingBasicEntity(ev *event.Event) error {
+// 	if a.mode != types.AgentModeManaged {
+// 		return fmt.Errorf("agent can only handle basic entity request in the managed mode")
+// 	}
+
+// 	req, err := ev.BasicEntity()
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	logCtx := log().WithFields(logrus.Fields{
+// 		"method":      "processIncomingEvents",
+// 		"agent":       a.remote.ClientID(),
+// 		"mode":        a.mode,
+// 		"event":       ev.Type(),
+// 		"resource_id": ev.ResourceID(),
+// 	})
+
+// 	dynClient, err := dynamic.NewForConfig(a.kubeClient.RestConfig)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	sendQ := a.queues.SendQ(a.remote.ClientID())
+// 	if sendQ == nil {
+// 		return fmt.Errorf("remote queue disappeared for agent: %s", a.remote.ClientID())
+// 	}
+
+// 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
+
+// 	return resyncHandler.ProcessIncomingBasicEntity(a.context, req, a.remote.ClientID())
+// }
+
+// func (a *Agent) processIncomingRequestEntityResync() error {
+// 	if a.mode != types.AgentModeManaged {
+// 		return fmt.Errorf("agent can only handle request entity resync in the managed mode")
+// 	}
+
+// 	logCtx := log().WithFields(logrus.Fields{
+// 		"method": "processIncomingEvents",
+// 		"agent":  a.remote.ClientID(),
+// 		"mode":   a.mode,
+// 	})
+
+// 	dynClient, err := dynamic.NewForConfig(a.kubeClient.RestConfig)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	sendQ := a.queues.SendQ(a.remote.ClientID())
+// 	if sendQ == nil {
+// 		return fmt.Errorf("remote queue disappeared for agent: %s", a.remote.ClientID())
+// 	}
+
+// 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
+
+// 	return resyncHandler.ProcessIncomingRequestEntityResync(a.context, a.remote.ClientID())
+// }
+
+// func (a *Agent) processIncomingRequestUpdate(ev *event.Event) error {
+// 	if a.mode != types.AgentModeAutonomous {
+// 		return fmt.Errorf("agent can only handle request update in the autonomous mode")
+// 	}
+
+// 	incoming, err := ev.RequestUpdate()
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	incoming.Namespace = a.namespace
+
+// 	logCtx := log().WithFields(logrus.Fields{
+// 		"method":      "processIncomingEvents",
+// 		"agent":       a.remote.ClientID(),
+// 		"mode":        a.mode,
+// 		"event":       ev.Type(),
+// 		"resource_id": ev.ResourceID(),
+// 	})
+
+// 	dynClient, err := dynamic.NewForConfig(a.kubeClient.RestConfig)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	sendQ := a.queues.SendQ(a.remote.ClientID())
+// 	if sendQ == nil {
+// 		return fmt.Errorf("remote queue disappeared for agent: %s", a.remote.ClientID())
+// 	}
+
+// 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
+
+// 	return resyncHandler.ProcessRequestUpdateEvent(a.context, a.remote.ClientID(), incoming)
+// }
 
 // createApplication creates an Application upon an event in the agent's work
 // queue.
