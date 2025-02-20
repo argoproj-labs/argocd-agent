@@ -35,7 +35,7 @@ See the [quickstart guide](docs/hack/quickstart.md) for more information.
 
 ## Hacking, testing, demoing
 
-For a development and demo environment, we provide [some scripts and docs](https://github.com/argoproj-labs/argocd-agent/tree/main/hack/demo-env). 
+For a development and demo environment, we provide [some scripts and docs](https://github.com/argoproj-labs/argocd-agent/tree/main/hack/dev-env).
 
 Please refer to the [Contributing](#contributing) section below for information on how to contribute.
 
