@@ -22,6 +22,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
@@ -119,6 +120,7 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 	logCtx = logCtx.WithFields(logrus.Fields{
 		"resource_id": ev.ResourceID(),
 		"event_id":    ev.EventID(),
+		"type":        ev.Type(),
 	})
 
 	logCtx.Debugf("Received a new event from stream")
@@ -170,6 +172,10 @@ func (a *Agent) handleStreamEvents() error {
 		"module":      "StreamEvent",
 		"server_addr": grpcutil.AddressFromContext(stream.Context()),
 	})
+
+	if err := a.resyncOnStart(logCtx); err != nil {
+		logCtx.Errorf("failed to resync the agent on startup: %v", err)
+	}
 
 	// Receive events from the subscription stream
 	go func() {
@@ -232,5 +238,45 @@ func (a *Agent) handleStreamEvents() error {
 
 	log().WithField("component", "EventHandler").Info("Stream closed")
 
+	return nil
+}
+
+func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
+	if a.resyncedOnStart {
+		return nil
+	}
+
+	sendQ := a.queues.SendQ(a.remote.ClientID())
+	if sendQ == nil {
+		return fmt.Errorf("no send queue found for the remote: %s", a.remote.ClientID())
+	}
+
+	// Agent is the source of truth in autonomous mode. So, the agent must request entity
+	// resync with the principal
+	if a.mode == types.AgentModeAutonomous {
+		ev, err := a.emitter.RequestEntityResyncEvent()
+		if err != nil {
+			return fmt.Errorf("failed to create request entity resync event: %w", err)
+		}
+
+		sendQ.Add(ev)
+		logCtx.Trace("Sent a request for entity resync")
+	} else {
+		// Principal is the source of truth in the managed mode. Agent should request basic
+		// entity list from the principal.
+		logCtx.Trace("Checking if the agent is out of sync with the principal")
+
+		checksum := a.resources.Checksum()
+
+		// send the checksum to the principal
+		ev, err := a.emitter.RequestBasicEntityListEvent(checksum)
+		if err != nil {
+			return fmt.Errorf("failed to create basic entity list event: %v", err)
+		}
+
+		sendQ.Add(ev)
+		logCtx.Trace("Sent a request for basic entity list")
+	}
+	a.resyncedOnStart = true
 	return nil
 }

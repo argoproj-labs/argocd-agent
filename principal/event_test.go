@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
@@ -29,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 )
 
 func Test_InvalidEvents(t *testing.T) {
@@ -421,5 +423,113 @@ func Test_processResourceEventResponse(t *testing.T) {
 		sentEv := evs.NewResourceResponseEvent("123", 200, "OK")
 		err = s.processResourceEventResponse(context.TODO(), "agent", sentEv)
 		assert.ErrorContains(t, err, "agent mismap")
+	})
+}
+
+func Test_processIncomingResourceResyncEvent(t *testing.T) {
+	ctx := context.Background()
+	agentName := "test"
+
+	fakeClient := kube.NewKubernetesFakeClient()
+	fakeClient.RestConfig = &rest.Config{}
+
+	s, err := NewServer(ctx, fakeClient, agentName, WithGeneratedTokenSigningKey())
+	assert.Nil(t, err)
+
+	err = s.queues.Create(agentName)
+	assert.Nil(t, err)
+	s.events = event.NewEventSource("test")
+
+	t.Run("discard basic entity list in autonomous mode", func(t *testing.T) {
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		ev, err := s.events.RequestBasicEntityListEvent([]byte{})
+		assert.Nil(t, err)
+
+		expected := "principal can only handle basic entity list in the managed mode"
+		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
+		assert.Equal(t, expected, err.Error())
+	})
+
+	t.Run("process basic entity list in managed mode", func(t *testing.T) {
+		s.setAgentMode(agentName, types.AgentModeManaged)
+
+		ev, err := s.events.RequestBasicEntityListEvent([]byte{})
+		assert.Nil(t, err)
+
+		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
+		assert.Nil(t, err)
+	})
+
+	t.Run("process basic entity in autonomous mode", func(t *testing.T) {
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		res := resources.ResourceKey{
+			Name: "sample",
+			Kind: "Application",
+		}
+		ev, err := s.events.BasicEntityEvent(res)
+		assert.Nil(t, err)
+
+		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("discard basic entity in managed mode", func(t *testing.T) {
+		s.setAgentMode(agentName, types.AgentModeManaged)
+
+		ev, err := s.events.BasicEntityEvent(resources.ResourceKey{})
+		assert.Nil(t, err)
+
+		expected := "principal can only handle basic entity in autonomous mode"
+		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
+		assert.Equal(t, expected, err.Error())
+	})
+
+	t.Run("process request update in managed mode", func(t *testing.T) {
+		s.setAgentMode(agentName, types.AgentModeManaged)
+
+		update := &event.RequestUpdate{
+			Name: "test",
+			Kind: "Application",
+		}
+		ev, err := s.events.RequestUpdateEvent(update)
+		assert.Nil(t, err)
+
+		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("discard request update in autonomous mode", func(t *testing.T) {
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		update := &event.RequestUpdate{}
+		ev, err := s.events.RequestUpdateEvent(update)
+		assert.Nil(t, err)
+
+		expected := "principal can only handle request update in the managed mode"
+		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
+		assert.Equal(t, expected, err.Error())
+	})
+
+	t.Run("process request entity resync in autonomous mode", func(t *testing.T) {
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		ev, err := s.events.RequestEntityResyncEvent()
+		assert.Nil(t, err)
+
+		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
+		assert.Nil(t, err)
+	})
+
+	t.Run("discard request entity resync in managed mode", func(t *testing.T) {
+		s.setAgentMode(agentName, types.AgentModeManaged)
+
+		ev, err := s.events.RequestEntityResyncEvent()
+		assert.Nil(t, err)
+
+		expected := "principal can only handle request entity resync in autonomous mode"
+		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
+		assert.Equal(t, expected, err.Error())
 	})
 }
