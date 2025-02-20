@@ -172,7 +172,7 @@ jobs:
       - name: Install microk8s
         run: |
           set -x
-          sudo snap install --classic microk8s
+          sudo snap install --classic --channel 1.31/stable microk8s
           sudo microk8s enable metallb:192.168.56.100-192.168.56.254
           sudo microk8s enable hostpath-storage
           mkdir -p $HOME/.kube
