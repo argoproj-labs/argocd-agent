@@ -27,6 +27,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -152,6 +153,11 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 		),
 		// TLS credentials
 		grpc.Creds(credentials.NewTLS(s.tlsConfig)),
+	}
+
+	if s.keepAliveMinimumInterval != 0 {
+		log().Debugf("Agent ping to principal is enabled, agent should wait at least %s before sending next ping event to principal", s.keepAliveMinimumInterval)
+		grpcOpts = append(grpcOpts, grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: s.keepAliveMinimumInterval}))
 	}
 
 	// Instantiate server with given opts

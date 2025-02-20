@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -151,5 +152,74 @@ func Test_StringSlice(t *testing.T) {
 		t.Setenv("FOO", "foo, bar, baz")
 		_, err = StringSlice("FOO", v)
 		assert.ErrorContains(t, err, "invalid")
+	})
+}
+
+func Test_Duration(t *testing.T) {
+	t.Run("Test duration value from env", func(t *testing.T) {
+		t.Setenv("FOO", "45s")
+		n, err := Duration("FOO", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, time.Duration(45*time.Second), n)
+
+		t.Setenv("FOO", "2m")
+		n, err = Duration("FOO", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, time.Duration(2*time.Minute), n)
+
+		t.Setenv("FOO", "1h")
+		n, err = Duration("FOO", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, time.Duration(1*time.Hour), n)
+
+		t.Setenv("FOO", "20m5s")
+		n, err = Duration("FOO", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, time.Duration(20*time.Minute+5*time.Second), n)
+
+		t.Setenv("FOO", "10m")
+		n = DurationWithDefault("FOO", nil, time.Duration(5*time.Minute))
+		assert.Equal(t, time.Duration(10*time.Minute), n)
+	})
+
+	t.Run("Test validated duration value from env", func(t *testing.T) {
+		v := func(dur time.Duration) error {
+			if dur < 0 {
+				return fmt.Errorf("invalid duration")
+			}
+			return nil
+		}
+
+		t.Setenv("FOO", "-30s")
+		n, err := Duration("FOO", v)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "error validating environment 'FOO': invalid duration")
+		assert.Equal(t, time.Duration(0), n)
+
+		t.Setenv("FOO", "30m")
+		n, err = Duration("FOO", v)
+		assert.NoError(t, err)
+		assert.Equal(t, time.Duration(30*time.Minute), n)
+
+		t.Setenv("FOO", "-10m")
+		n = DurationWithDefault("FOO", v, time.Duration(5*time.Minute))
+		assert.Equal(t, time.Duration(5*time.Minute), n)
+	})
+
+	t.Run("Test invalid duration value", func(t *testing.T) {
+
+		t.Setenv("FOO", "30")
+		n, err := Duration("FOO", nil)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "missing unit in duration")
+		assert.Equal(t, time.Duration(0), n)
+
+		n, err = Duration("FOO_1", nil)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, os.ErrNotExist)
+		assert.Equal(t, time.Duration(0), n)
+
+		n = DurationWithDefault("FOO_1", nil, time.Duration(5*time.Minute))
+		assert.Equal(t, time.Duration(5*time.Minute), n)
 	})
 }

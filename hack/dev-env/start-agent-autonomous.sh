@@ -20,4 +20,14 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
     exit 1
 fi
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
-go run github.com/argoproj-labs/argocd-agent/cmd/agent --agent-mode autonomous --creds userpass:${SCRIPTPATH}/creds/creds.agent-autonomous --server-address 127.0.0.1 --server-port 8443 --insecure-tls --kubecontext vcluster-agent-autonomous --namespace argocd --log-level trace $ARGS --metrics-port 8182
+go run github.com/argoproj-labs/argocd-agent/cmd/agent \
+    --agent-mode autonomous \
+    --creds userpass:${SCRIPTPATH}/creds/creds.agent-autonomous \
+    --server-address 127.0.0.1 \
+    --server-port 8443 \
+    --insecure-tls \
+    --kubecontext vcluster-agent-autonomous \
+    --namespace argocd \
+    --log-level trace $ARGS \
+    --metrics-port 8182 \
+    #--keep-alive-ping-interval 15m
