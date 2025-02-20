@@ -357,8 +357,7 @@ func (evs EventSource) RequestUpdateEvent(reqUpdate *RequestUpdate) (*cloudevent
 }
 
 // RequestEntityResync is sent by the source to a peer when the source process restarts.
-// It informs the peer that the source process restarted and it might be out of sync with the
-// source.
+// It informs the peer that the source process restarted and it might be out of sync with the source.
 type RequestEntityResync struct {
 }
 
