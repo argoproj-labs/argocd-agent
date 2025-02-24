@@ -181,7 +181,6 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 		if app.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && app.Status.Health.Status == health.HealthStatusHealthy {
 			return true
 		} else {
-			suite.T().Logf("Waiting. Status is %s/%s", app.Status.Sync.Status, app.Status.Health.Status)
 			// Sometimes, the sync hangs on the workload cluster. We trigger
 			// a sync every 5th or so retry.
 			if retries > 0 && retries%5 == 0 {
