@@ -99,6 +99,7 @@ func (ewm *eventWritersMap) Remove(agentName string) {
 
 type ServerOptions struct {
 	MaxStreamDuration time.Duration
+	notifyOnConnect   chan types.Agent
 }
 
 type ServerOption func(o *ServerOptions)
@@ -118,6 +119,12 @@ type client struct {
 func WithMaxStreamDuration(d time.Duration) ServerOption {
 	return func(o *ServerOptions) {
 		o.MaxStreamDuration = d
+	}
+}
+
+func WithNotifyOnConnect(notify chan types.Agent) ServerOption {
+	return func(o *ServerOptions) {
+		o.notifyOnConnect = notify
 	}
 }
 
@@ -295,7 +302,7 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 
 	if types.AgentModeFromString(mode) != types.AgentModeManaged {
 		// Only Update events are valid for unmanaged agents
-		if ev.Type() != event.Update.String() {
+		if ev.Type() == event.Create.String() || ev.Type() == event.Delete.String() {
 			logCtx.WithField("type", ev.Type()).Debug("Discarding event for unmanaged agent")
 			return nil
 		}
@@ -306,7 +313,11 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
 	}
 
-	logCtx.WithField("resource_id", event.ResourceID(ev)).WithField("event_id", event.EventID(ev)).Trace("Adding an event to the event writer")
+	logCtx.WithFields(logrus.Fields{
+		"resource_id": event.ResourceID(ev),
+		"event_id":    event.EventID(ev),
+		"type":        ev.Type(),
+	}).Trace("Adding an event to the event writer")
 	eventWriter.Add(ev)
 
 	q.Done(ev)
@@ -343,6 +354,15 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}
 
 	go eventWriter.SendWaitingEvents(c.ctx)
+
+	// Notify to run handlers for the newly connected agent
+	if s.options.notifyOnConnect != nil {
+		mode, err := session.ClientModeFromContext(c.ctx)
+		if err != nil {
+			return err
+		}
+		s.options.notifyOnConnect <- types.NewAgent(c.agentName, mode)
+	}
 
 	// We receive events in a dedicated go routine
 	c.wg.Add(1)

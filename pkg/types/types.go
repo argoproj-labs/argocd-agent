@@ -70,3 +70,23 @@ const (
 	ContextAgentIdentifier EventContextKey = "agent_name"
 	ContextAgentMode       EventContextKey = "agent_mode"
 )
+
+type Agent struct {
+	name string
+	mode string
+}
+
+func (a Agent) Name() string {
+	return a.name
+}
+
+func (a Agent) Mode() string {
+	return a.mode
+}
+
+func NewAgent(name, mode string) Agent {
+	return Agent{
+		name: name,
+		mode: mode,
+	}
+}
