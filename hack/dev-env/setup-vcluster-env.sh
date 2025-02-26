@@ -25,6 +25,11 @@ VCLUSTERS_AGENTS="agent-managed:argocd agent-autonomous:argocd"
 gen_admin_pwd="${ARGOCD_AGENT_GEN_ADMIN_PWD:-true}"
 action="$1"
 
+required_binaries="kubectl jq htpasswd kustomize vcluster git"
+for bin in $required_binaries; do
+	which $bin >/dev/null 2>&1 || (echo "Required binary $bin not found in \$PATH" >&2; exit 1)
+done
+
 # Kubectl context to restore
 initial_context=$(kubectl config current-context)
 
