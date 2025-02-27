@@ -33,6 +33,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/principal"
+	cacheutil "github.com/argoproj/argo-cd/v2/util/cache"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -72,6 +73,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 		// if agent sends ping more often than specified interval then connection will be dropped
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
 		keepAliveMinimumInterval time.Duration
+
+		redisAddress         string
+		redisCompressionType string
 	)
 	var command = &cobra.Command{
 		Short: "Run the argocd-agent principal component",
@@ -190,6 +194,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			opts = append(opts, principal.WithWebSocket(enableWebSocket))
 			opts = append(opts, principal.WithKeepAliveMinimumInterval(keepAliveMinimumInterval))
+			opts = append(opts, principal.WithRedis(redisAddress, redisCompressionType))
 
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
@@ -287,6 +292,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&keepAliveMinimumInterval, "keepalive-min-interval",
 		env.DurationWithDefault("ARGOCD_PRINCIPAL_KEEP_ALIVE_MIN_INTERVAL", nil, 0),
 		"Drop agent connections that send keepalive pings more often than the specified interval") // It should be less than "keep-alive-ping-interval" of agent
+	command.Flags().StringVar(&redisAddress, "redis-server-address",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS", nil, ""),
+		"Redis server hostname and port (e.g. argocd-redis:6379).")
+	command.Flags().StringVar(&redisCompressionType, "redis-compression-type",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),
+		"Compression algorithm required by Redis. (possible values: gzip, none. Default value: gzip)")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

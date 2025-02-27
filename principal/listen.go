@@ -216,6 +216,6 @@ func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
 	}
 	authapi.RegisterAuthenticationServer(s.grpcServer, authSrv)
 	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer(s.authenticate))
-	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues, metrics, eventstream.WithNotifyOnConnect(s.notifyOnConnect)))
+	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues, metrics, s.clusterMgr, eventstream.WithNotifyOnConnect(s.notifyOnConnect)))
 	return nil
 }

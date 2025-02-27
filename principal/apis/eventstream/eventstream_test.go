@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
@@ -35,10 +36,12 @@ import (
 
 func Test_Subscribe(t *testing.T) {
 	metric := metrics.NewPrincipalMetrics()
+	cluster := &cluster.Manager{}
+
 	t.Run("Test send to subcription stream", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
-		s := NewServer(qs, metric)
+		s := NewServer(qs, metric, cluster)
 		st := &mock.MockEventServer{
 			AgentName: "default",
 			AgentMode: string(types.AgentModeManaged),
@@ -71,7 +74,7 @@ func Test_Subscribe(t *testing.T) {
 	t.Run("Test recv from subscription stream", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
-		s := NewServer(qs, metric)
+		s := NewServer(qs, metric, cluster)
 		st := &mock.MockEventServer{AgentName: "default", Application: v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "foo",
@@ -96,7 +99,7 @@ func Test_Subscribe(t *testing.T) {
 	t.Run("Test connection closed by peer", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
-		s := NewServer(qs, metric)
+		s := NewServer(qs, metric, cluster)
 		st := &mock.MockEventServer{AgentName: "default"}
 		st.AddRecvHook(func(s *mock.MockEventServer) error {
 			return fmt.Errorf("some error")
@@ -110,7 +113,7 @@ func Test_Subscribe(t *testing.T) {
 	t.Run("Test no agent information in context", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
-		s := NewServer(qs, metric)
+		s := NewServer(qs, metric, cluster)
 		st := &mock.MockEventServer{AgentName: ""}
 		err := s.Subscribe(st)
 		assert.Error(t, err)
@@ -119,7 +122,7 @@ func Test_Subscribe(t *testing.T) {
 	t.Run("Test events being discarded for unmanaged agent", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")
-		s := NewServer(qs, metric)
+		s := NewServer(qs, metric, cluster)
 		st := &mock.MockEventServer{
 			AgentName: "default",
 			AgentMode: string(types.AgentModeAutonomous),
