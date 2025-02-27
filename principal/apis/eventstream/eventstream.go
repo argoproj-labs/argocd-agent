@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
@@ -52,7 +53,8 @@ type Server struct {
 
 	eventWriters *eventWritersMap
 
-	metrics *metrics.PrincipalMetrics
+	metrics    *metrics.PrincipalMetrics
+	clusterMgr *cluster.Manager
 }
 
 // eventWritersMap provides a thread-safe way to manage event writers.
@@ -122,7 +124,7 @@ func WithMaxStreamDuration(d time.Duration) ServerOption {
 }
 
 // NewServer returns a new AppStream server instance with the given options
-func NewServer(queues queue.QueuePair, metrics *metrics.PrincipalMetrics, opts ...ServerOption) *Server {
+func NewServer(queues queue.QueuePair, metrics *metrics.PrincipalMetrics, clusterMgr *cluster.Manager, opts ...ServerOption) *Server {
 	options := &ServerOptions{}
 	for _, o := range opts {
 		o(options)
@@ -132,6 +134,7 @@ func NewServer(queues queue.QueuePair, metrics *metrics.PrincipalMetrics, opts .
 		options:      options,
 		eventWriters: newEventWritersMap(),
 		metrics:      metrics,
+		clusterMgr:   clusterMgr,
 	}
 }
 
@@ -161,6 +164,9 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 		c.ctx, c.cancelFn = context.WithCancel(ctx)
 	}
 	c.start = time.Now()
+
+	s.clusterMgr.UpdateClusterConnectionInfo(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
+
 	c.logCtx.Info("An agent connected to the subscription stream")
 	return c, nil
 }
@@ -176,6 +182,9 @@ func (s *Server) onDisconnect(c *client) {
 			log().Warnf("Could not delete agent queue %s: %v", c.agentName, err)
 		}
 	}
+
+	s.clusterMgr.UpdateClusterConnectionInfo(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
+
 	c.wg.Done()
 }
 

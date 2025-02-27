@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	cacheutil "github.com/argoproj/argo-cd/v2/util/cache"
 )
 
 // supportedTLSVersion is a list of TLS versions we support
@@ -67,6 +68,8 @@ type ServerOptions struct {
 	requireClientCerts     bool
 	rootCa                 *x509.CertPool
 	clientCertSubjectMatch bool
+	redisAddress           string
+	redisCompressionType   cacheutil.RedisCompressionType
 }
 
 type ServerOption func(o *Server) error
@@ -381,6 +384,19 @@ func WithResourceProxyTLS(tlsConfig *tls.Config) ServerOption {
 func WithKeepAliveMinimumInterval(interval time.Duration) ServerOption {
 	return func(o *Server) error {
 		o.keepAliveMinimumInterval = interval
+		return nil
+	}
+}
+
+func WithRedis(redisAddress, redisCompressionTypeStr string) ServerOption {
+	return func(o *Server) error {
+		redisCompressionType, err := cacheutil.CompressionTypeFromString(redisCompressionTypeStr)
+		if err != nil {
+			return err
+		}
+		o.options.redisCompressionType = redisCompressionType
+		o.options.redisAddress = redisAddress
+
 		return nil
 	}
 }
