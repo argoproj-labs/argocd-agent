@@ -141,19 +141,22 @@ func NewPrincipalRunCommand() *cobra.Command {
 				opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
 			}
 
-			var proxyTls *tls.Config
-			if resourceProxyCertPath != "" && resourceProxyKeyPath != "" && resourceProxyCAPath != "" {
-				proxyTls, err = getResourceProxyTLSConfigFromFiles(resourceProxyCertPath, resourceProxyKeyPath, resourceProxyCAPath)
-			} else {
-				proxyTls, err = getResourceProxyTLSConfigFromKube(kubeConfig, namespace)
-			}
-			if err != nil {
-				cmdutil.Fatal("Error reading TLS config for resource proxy: %v", err)
-			}
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
 			opts = append(opts, principal.WithClientCertSubjectMatch(clientCertSubjectMatch))
 			opts = append(opts, principal.WithResourceProxyEnabled(enableResourceProxy))
-			opts = append(opts, principal.WithResourceProxyTLS(proxyTls))
+
+			if enableResourceProxy {
+				var proxyTls *tls.Config
+				if resourceProxyCertPath != "" && resourceProxyKeyPath != "" && resourceProxyCAPath != "" {
+					proxyTls, err = getResourceProxyTLSConfigFromFiles(resourceProxyCertPath, resourceProxyKeyPath, resourceProxyCAPath)
+				} else {
+					proxyTls, err = getResourceProxyTLSConfigFromKube(kubeConfig, namespace)
+				}
+				if err != nil {
+					cmdutil.Fatal("Error reading TLS config for resource proxy: %v", err)
+				}
+				opts = append(opts, principal.WithResourceProxyTLS(proxyTls))
+			}
 
 			if jwtKey != "" {
 				opts = append(opts, principal.WithTokenSigningKeyFromFile(jwtKey))
