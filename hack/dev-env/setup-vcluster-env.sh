@@ -25,6 +25,8 @@ VCLUSTERS_AGENTS="agent-managed:argocd agent-autonomous:argocd"
 gen_admin_pwd="${ARGOCD_AGENT_GEN_ADMIN_PWD:-true}"
 action="$1"
 
+LB_NETWORK=${LB_NETWORK:-192.168.56}
+
 required_binaries="kubectl jq htpasswd kustomize vcluster git"
 for bin in $required_binaries; do
 	which $bin >/dev/null 2>&1 || (echo "Required binary $bin not found in \$PATH" >&2; exit 1)
@@ -124,6 +126,10 @@ apply() {
         sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/redis-service.yaml
         sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/repo-server-service.yaml
         sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/server-service.yaml
+    else
+        sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/redis-service.yaml
+        sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/repo-server-service.yaml
+        sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/server-service.yaml
     fi
 
     LATEST_RELEASE_TAG=`curl -s "https://api.github.com/repos/argoproj/argo-cd/releases/latest" | jq -r .tag_name`
@@ -197,8 +203,8 @@ apply() {
 
     else
         # For all other cases, use hardcoded values
-        REPO_SERVER_ADDR="192.168.56.222"
-        REDIS_ADDR="192.168.56.221"
+        REPO_SERVER_ADDR="${LB_NETWORK}.222"
+        REDIS_ADDR="${LB_NETWORK}.221"
     fi
 
     echo "Redis on control plane: $REDIS_ADDR"
