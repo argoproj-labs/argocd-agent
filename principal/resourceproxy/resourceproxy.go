@@ -17,7 +17,9 @@ Package resourceproxy implements a very specific, non-general purpose HTTP
 proxy server for intercepting a configurable list of calls to the Kubernetes
 API.
 
-If a requests matches any of the configured patterns,
+If a requests matches any of the configured patterns, named fields in the
+regexp will be mapped to a params structure and passed to a handler for
+further processing.
 */
 package resourceproxy
 
@@ -101,33 +103,7 @@ func New(addr string, options ...ResourceProxyOption) (*ResourceProxy, error) {
 		}
 	}
 
-	// If not upstream host was set, we use the default
-	// if p.upstreamAddr == "" {
-	// 	p.upstreamAddr = defaultUpstreamHost
-	// }
-
-	// If not upstream scheme was set, we use the default
-	// if p.upstreamScheme == "" {
-	// 	p.upstreamScheme = defaultUpstreamScheme
-	// }
-
 	p.mux = http.NewServeMux()
-
-	// Configure the reverse proxy that proxies most of the requests to our
-	// upstream Kube API. Anything that's not explicitly handled otherwise
-	// will be routed to the upstream as-is.
-	// p.proxy = &httputil.ReverseProxy{
-	// 	ErrorLog: nil,
-	// 	Director: func(r *http.Request) {
-	// 		r.URL.Host = p.upstreamAddr
-	// 		r.URL.Scheme = p.upstreamScheme
-	// 	},
-	// 	Transport: p.upstreamTransport,
-	// 	ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-	// 		log().WithError(err).Errorf("Could not connect to upstream '%s://%s'", p.upstreamScheme, p.upstreamAddr)
-	// 		w.WriteHeader(http.StatusBadGateway)
-	// 	},
-	// }
 
 	// proxyHandler is the main HTTP handler, used to process every request
 	p.mux.HandleFunc("/", p.proxyHandler)
