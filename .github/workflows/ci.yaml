@@ -198,7 +198,6 @@ jobs:
       - name: Download Go dependencies
         run: |
           go mod download
-          go install github.com/mattn/goreman@latest
       - name: Set up the test environment
         run: |
           make setup-e2e2

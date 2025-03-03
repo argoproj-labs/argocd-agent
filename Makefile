@@ -26,6 +26,8 @@ PROTOC_GEN_GO_GRPC_VERSION=v1.2
 GOLANG_CI_LINT_VERSION=v1.62.0
 MOCKERY_V2_VERSION?=v2.43.0
 
+GO_BIN_DIR=$(shell go env GOPATH)/bin
+
 all: build
 
 .PHONY: fmt
@@ -40,7 +42,7 @@ setup-e2e2:
 	./hack/dev-env/setup-vcluster-env.sh create
 
 .PHONY: start-e2e2
-start-e2e2: cli
+start-e2e2: cli install-goreman
 	./hack/dev-env/gen-creds.sh
 	./hack/dev-env/create-agent-config.sh
 	goreman -f hack/dev-env/Procfile.e2e start
@@ -89,6 +91,9 @@ clean-all: clean
 ./build/bin/mockery: ./build/bin
 	GOBIN=$(current_dir)/build/bin go install github.com/vektra/mockery/v2@$(MOCKERY_V2_VERSION)
 
+$(GO_BIN_DIR)/goreman:
+	go install github.com/mattn/goreman@latest
+
 .PHONY: install-mockery
 install-mockery: ./build/bin/mockery
 
@@ -115,6 +120,10 @@ install-lint-toolchain: install-golangci-lint
 .PHONY: install-build-deps
 install-build-deps: install-lint-toolchain install-proto-toolchain
 	@echo "Build dependencies installed"
+
+.PHONY: install-goreman
+install-goreman: $(GO_BIN_DIR)/goreman
+	@echo "goreman installed to $(GO_BIN_DIR)"
 
 .PHONY: protogen
 protogen: mod-vendor install-proto-toolchain
