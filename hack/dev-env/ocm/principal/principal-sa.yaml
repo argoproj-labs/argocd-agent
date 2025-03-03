@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  labels:
-    app.kubernetes.io/name: argocd-agent-principal
-    app.kubernetes.io/part-of: argocd-agent
-    app.kubernetes.io/component: principal
-  name: argocd-agent-principal

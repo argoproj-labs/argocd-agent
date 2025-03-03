@@ -113,4 +113,4 @@ To be written.
 ### Running in a cluster using Open Cluster Management
 
 For running in a cluster using [Open Cluster Management (OCM)](https://open-cluster-management.io/),
-see the [demo environment with OCM](./ocm/README.md) for more information.
+see [here](https://github.com/open-cluster-management-io/ocm/tree/main/solutions/argocd-agent) for more information.

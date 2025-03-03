@@ -1,4 +1,0 @@
-resources:
-- ocm-agent-auto-addontemplate.yaml
-- ocm-agent-auto-cmaddon.yaml
-- ocm-agent-auto-maddon.yaml
