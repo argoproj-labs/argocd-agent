@@ -41,6 +41,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -54,6 +55,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/dynamic"
 )
 
 type Server struct {
@@ -527,8 +529,18 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 		return fmt.Errorf("no send queue found for agent: %s", agent.Name())
 	}
 
-	// In autonomous mode, principal acts as peer and it should request the basic entity list from the agent.
+	// In autonomous mode, principal acts as peer and it should resync with the agent.
 	if agent.Mode() == types.AgentModeAutonomous.String() {
+		// Principal should request updates from the Agent to revert any changes on the Principal side.
+		dynClient, err := dynamic.NewForConfig(s.kubeClient.RestConfig)
+		if err != nil {
+			return err
+		}
+
+		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx)
+		go resyncHandler.SendRequestUpdates(s.ctx)
+
+		// Principal should send basic entity list to revert any deletions on the Principal side.
 		checksum := s.resources.Checksum(agent.Name())
 
 		// send the checksum to the principal
