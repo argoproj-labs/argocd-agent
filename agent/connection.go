@@ -21,9 +21,11 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
+	"k8s.io/client-go/dynamic"
 
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 )
@@ -262,10 +264,20 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 		sendQ.Add(ev)
 		logCtx.Trace("Sent a request for entity resync")
 	} else {
-		// Principal is the source of truth in the managed mode. Agent should request basic
-		// entity list from the principal.
 		logCtx.Trace("Checking if the agent is out of sync with the principal")
 
+		// Principal is the source of truth in the managed mode. Agent should request the latest content
+		// from the Principal to detect any updates on the agent side.
+		dynClient, err := dynamic.NewForConfig(a.kubeClient.RestConfig)
+		if err != nil {
+			return err
+		}
+
+		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
+		go resyncHandler.SendRequestUpdates(a.context)
+
+		// Agent should request basic entity list from the principal to detect deleted
+		// resources on the agent side.
 		checksum := a.resources.Checksum()
 
 		// send the checksum to the principal

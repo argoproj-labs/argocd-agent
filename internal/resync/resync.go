@@ -142,34 +142,49 @@ func (r *RequestHandler) ProcessIncomingRequestEntityResync(ctx context.Context,
 
 	resources := r.resources.GetAll()
 	for _, resource := range resources {
-		gvr, err := getGroupVersionResource(resource.Kind)
-		if err != nil {
-			return err
-		}
-
-		resClient := r.dynClient.Resource(gvr)
-		res, err := resClient.Namespace(resource.Namespace).Get(ctx, resource.Name, v1.GetOptions{})
-		if err != nil {
-			r.log.Errorf("failed to get resource: %v", err)
+		if err := r.sendRequestUpdate(ctx, resource); err != nil {
+			r.log.Errorf("failed to send request update for resource %s: %v", resource.Name, err)
 			continue
 		}
-
-		reqUpdate, err := newRequestUpdateFromObject(res)
-		if err != nil {
-			r.log.Errorf("failed to construct a request update from resource: %s", resource.Name)
-			continue
-		}
-
-		ev, err := r.events.RequestUpdateEvent(reqUpdate)
-		if err != nil {
-			r.log.Errorf("failed to create request update event: %v", err)
-			continue
-		}
-
-		r.sendQ.Add(ev)
-		r.log.WithField("kind", resource.Kind).WithField("name", resource.Name).Trace("Sent a request update event after processing the entity resync")
 	}
 
+	return nil
+}
+
+func (r *RequestHandler) SendRequestUpdates(ctx context.Context) {
+	resources := r.resources.GetAll()
+	for _, resource := range resources {
+		if err := r.sendRequestUpdate(ctx, resource); err != nil {
+			r.log.Errorf("failed to send request update for resource %s: %v", resource.Name, err)
+			continue
+		}
+	}
+}
+
+func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resources.ResourceKey) error {
+	gvr, err := getGroupVersionResource(resource.Kind)
+	if err != nil {
+		return err
+	}
+
+	resClient := r.dynClient.Resource(gvr)
+	res, err := resClient.Namespace(resource.Namespace).Get(ctx, resource.Name, v1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get resource: %v", err)
+	}
+
+	reqUpdate, err := newRequestUpdateFromObject(res)
+	if err != nil {
+		return fmt.Errorf("failed to construct a request update from resource %s: %w", resource.Name, err)
+	}
+
+	ev, err := r.events.RequestUpdateEvent(reqUpdate)
+	if err != nil {
+		return fmt.Errorf("failed to create request update event: %w", err)
+	}
+
+	r.sendQ.Add(ev)
+	r.log.WithField("kind", resource.Kind).WithField("name", resource.Name).Trace("Sent a request update event")
 	return nil
 }
 

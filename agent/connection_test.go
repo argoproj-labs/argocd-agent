@@ -20,11 +20,13 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/client-go/rest"
 )
 
 func TestResyncOnStart(t *testing.T) {
 	a := newAgent(t)
 	a.emitter = event.NewEventSource("test")
+	a.kubeClient.RestConfig = &rest.Config{}
 	logCtx := log()
 
 	err := a.queues.Create(a.remote.ClientID())

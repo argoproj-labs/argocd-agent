@@ -166,6 +166,44 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupManaged() {
 	}, 60*time.Second, 1*time.Second)
 }
 
+// Managed Mode: update the app on the workload cluster when the agent process is down and
+// ensure that the app is resynced when the agent process is restarted
+func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupManaged() {
+	requires := suite.Require()
+
+	app := suite.createManagedApp()
+	key := fixture.ToNamespacedName(app)
+
+	// Stop the agent and update the app on the workload cluster
+	err := fixture.StopProcess("agent-managed")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("agent-managed")
+	}, 30*time.Second, 1*time.Second)
+
+	err = suite.ManagedAgentClient.EnsureApplicationUpdate(suite.Ctx, key, func(a *argoapp.Application) error {
+		a.Spec.Source.Path = "guestbook"
+		return nil
+	}, metav1.UpdateOptions{})
+	requires.NoError(err)
+
+	// Start the agent and ensure that the app is updated back on the agent side
+	err = fixture.StartProcess("agent-managed")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return fixture.IsProcessRunning("agent-managed")
+	}, 30*time.Second, 1*time.Second)
+
+	// updates to the app on the agent side should be reverted since principal is the source of truth
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		return err == nil && app.Spec.Source.Path == "kustomize-guestbook"
+	}, 60*time.Second, 1*time.Second)
+}
+
 // Autonomous Mode: delete the app when the agent process is down and ensure that the app is
 // deleted on the principal side when the agent process is restarted
 func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupAutonomous() {
@@ -221,7 +259,6 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupAutonomous() {
 		return !fixture.IsProcessRunning("agent-autonomous")
 	}, 30*time.Second, 1*time.Second)
 
-	app.Spec.Source.Path = "guestbook"
 	err = suite.AutonomousAgentClient.EnsureApplicationUpdate(suite.Ctx, agentKey, func(a *argoapp.Application) error {
 		a.Spec.Source.Path = "guestbook"
 		return nil
@@ -286,6 +323,47 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnPrincipalStartupAutonomous() 
 	requires.Eventually(func() bool {
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, principalApp, metav1.GetOptions{})
 		return err == nil
+	}, 60*time.Second, 1*time.Second)
+}
+
+// Autonomous Mode: update the app on the control-plane when the principal process is down and
+// ensure that the app is resynced back on the control-plane when the principal process is restarted
+func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupAutonomous() {
+	requires := suite.Require()
+
+	app := suite.createAutonomousApp()
+	principalKey := types.NamespacedName{Name: app.Name, Namespace: "agent-autonomous"}
+
+	// Stop the principal process and update the app on the principal side
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	principalApp := app.DeepCopy()
+	principalApp.Namespace = "agent-autonomous"
+
+	err = suite.PrincipalClient.EnsureApplicationUpdate(suite.Ctx, principalKey, func(a *argoapp.Application) error {
+		a.Spec.Source.Path = "guestbook"
+		return nil
+	}, metav1.UpdateOptions{})
+	requires.NoError(err)
+
+	// Start the principal process and ensure that the app is updated back on the principal
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// updates to the app on the principal side should be reverted since agent is the source of truth in autonomous mode
+	requires.Eventually(func() bool {
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, principalApp, metav1.GetOptions{})
+		return err == nil &&
+			principalApp.Spec.Source.Path == "kustomize-guestbook"
 	}, 60*time.Second, 1*time.Second)
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/rest"
 )
 
 var certTempl = x509.Certificate{
@@ -101,6 +102,7 @@ func Test_handleResyncOnConnect(t *testing.T) {
 	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
 		WithGeneratedTokenSigningKey(),
 	)
+	s.kubeClient.RestConfig = &rest.Config{}
 	require.NoError(t, err)
 	s.events = event.NewEventSource("test")
 
