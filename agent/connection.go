@@ -253,16 +253,16 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 		return fmt.Errorf("no send queue found for the remote: %s", a.remote.ClientID())
 	}
 
-	// Agent is the source of truth in autonomous mode. So, the agent must request entity
+	// Agent is the source of truth in autonomous mode. So, the agent must request resource
 	// resync with the principal
 	if a.mode == types.AgentModeAutonomous {
-		ev, err := a.emitter.RequestEntityResyncEvent()
+		ev, err := a.emitter.RequestResourceResyncEvent()
 		if err != nil {
-			return fmt.Errorf("failed to create request entity resync event: %w", err)
+			return fmt.Errorf("failed to create RequestResourceResync event: %w", err)
 		}
 
 		sendQ.Add(ev)
-		logCtx.Trace("Sent a request for entity resync")
+		logCtx.Trace("Sent a request for resource resync")
 	} else {
 		logCtx.Trace("Checking if the agent is out of sync with the principal")
 
@@ -276,18 +276,18 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
 		go resyncHandler.SendRequestUpdates(a.context)
 
-		// Agent should request basic entity list from the principal to detect deleted
+		// Agent should request SyncedResourceList from the principal to detect deleted
 		// resources on the agent side.
 		checksum := a.resources.Checksum()
 
 		// send the checksum to the principal
-		ev, err := a.emitter.RequestBasicEntityListEvent(checksum)
+		ev, err := a.emitter.RequestSyncedResourceListEvent(checksum)
 		if err != nil {
-			return fmt.Errorf("failed to create basic entity list event: %v", err)
+			return fmt.Errorf("failed to create synced resource list event: %v", err)
 		}
 
 		sendQ.Add(ev)
-		logCtx.Trace("Sent a request for basic entity list")
+		logCtx.Trace("Sent a request for SyncedResourceList")
 	}
 	a.resyncedOnStart = true
 	return nil

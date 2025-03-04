@@ -36,16 +36,16 @@ const (
 	testAgentName = "test"
 )
 
-func Test_ProcessIncomingBasicEntityList(t *testing.T) {
+func Test_ProcessIncomingSyncedResourceList(t *testing.T) {
 	resNum := 10
 	handler := createFakeHandler(t)
 
 	t.Run("return nil if there are no resources", func(t *testing.T) {
-		incoming := &event.RequestBasicEntityList{
+		incoming := &event.RequestSyncedResourceList{
 			Checksum: []byte("test"),
 		}
 
-		err := handler.ProcessBasicEntityListRequest(testAgentName, incoming)
+		err := handler.ProcessSyncedResourceListRequest(testAgentName, incoming)
 		assert.Nil(t, err)
 	})
 
@@ -63,17 +63,17 @@ func Test_ProcessIncomingBasicEntityList(t *testing.T) {
 
 		expChecksum := handler.resources.Checksum()
 
-		incoming := &event.RequestBasicEntityList{
+		incoming := &event.RequestSyncedResourceList{
 			Checksum: expChecksum,
 		}
 
-		err := handler.ProcessBasicEntityListRequest(testAgentName, incoming)
+		err := handler.ProcessSyncedResourceListRequest(testAgentName, incoming)
 		assert.Nil(t, err)
 
 		assert.Zero(t, handler.sendQ.Len())
 	})
 
-	t.Run("send basic entity event for all resources if the checksum doesn't match", func(t *testing.T) {
+	t.Run("send SyncedResource event for all resources if the checksum doesn't match", func(t *testing.T) {
 		testResources := make([]resources.ResourceKey, resNum)
 		for i := 0; i < resNum; i++ {
 			name := fmt.Sprintf("test-%d", i)
@@ -87,11 +87,11 @@ func Test_ProcessIncomingBasicEntityList(t *testing.T) {
 			testResources[i] = testResource
 		}
 
-		incoming := &event.RequestBasicEntityList{
+		incoming := &event.RequestSyncedResourceList{
 			Checksum: []byte("random"),
 		}
 
-		err := handler.ProcessBasicEntityListRequest(testAgentName, incoming)
+		err := handler.ProcessSyncedResourceListRequest(testAgentName, incoming)
 		assert.Nil(t, err)
 
 		assert.Equal(t, handler.sendQ.Len(), resNum)
@@ -99,23 +99,23 @@ func Test_ProcessIncomingBasicEntityList(t *testing.T) {
 		for i := 0; i < resNum; i++ {
 			ev, shutdown := handler.sendQ.Get()
 			assert.False(t, shutdown)
-			assert.Equal(t, event.ResponseBasicEntity.String(), ev.Type())
+			assert.Equal(t, event.ResponseSyncedResource.String(), ev.Type())
 		}
 	})
 }
 
-func Test_ProcessIncomingBasicEntity(t *testing.T) {
+func Test_ProcessIncomingSyncedResource(t *testing.T) {
 	handler := createFakeHandler(t)
 
 	t.Run("create request update without checksum if resource not found", func(t *testing.T) {
-		incoming := &event.BasicEntity{
+		incoming := &event.SyncedResource{
 			Name:      "test-app",
 			Namespace: "default",
 			Kind:      "Application",
 			UID:       "test-uid",
 		}
 
-		err := handler.ProcessIncomingBasicEntity(context.Background(), incoming, testAgentName)
+		err := handler.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
 		assert.Nil(t, err)
 
 		ev, shutdown := handler.sendQ.Get()
@@ -141,14 +141,14 @@ func Test_ProcessIncomingBasicEntity(t *testing.T) {
 			Create(context.Background(), resource, v1.CreateOptions{})
 		assert.Nil(t, err)
 
-		incoming := &event.BasicEntity{
+		incoming := &event.SyncedResource{
 			Name:      "test-app",
 			Namespace: "default",
 			Kind:      "Application",
 			UID:       "test-uid",
 		}
 
-		err = handler.ProcessIncomingBasicEntity(context.Background(), incoming, testAgentName)
+		err = handler.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
 		assert.Nil(t, err)
 
 		ev, shutdown := handler.sendQ.Get()
@@ -164,7 +164,7 @@ func Test_ProcessIncomingBasicEntity(t *testing.T) {
 	})
 }
 
-func Test_ProcessIncomingRequestEntityResync(t *testing.T) {
+func Test_ProcessIncomingResourceResyncRequest(t *testing.T) {
 	handler := createFakeHandler(t)
 
 	t.Run("send request updates for all resources", func(t *testing.T) {
@@ -187,7 +187,7 @@ func Test_ProcessIncomingRequestEntityResync(t *testing.T) {
 			UID:       "test-uid",
 		})
 
-		err = handler.ProcessIncomingRequestEntityResync(context.Background(), testAgentName)
+		err = handler.ProcessIncomingResourceResyncRequest(context.Background(), testAgentName)
 		assert.Nil(t, err)
 
 		assert.Equal(t, 1, handler.sendQ.Len())

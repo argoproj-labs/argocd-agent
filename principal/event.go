@@ -302,23 +302,23 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx)
 
 	switch ev.Type() {
-	case event.RequestBasicEntity.String():
+	case event.SyncedResourceList.String():
 		if agentMode != types.AgentModeManaged {
-			return fmt.Errorf("principal can only handle basic entity list in the managed mode")
+			return fmt.Errorf("principal can only handle SyncedResourceList request in the managed mode")
 		}
 
-		incoming := &event.RequestBasicEntityList{}
+		incoming := &event.RequestSyncedResourceList{}
 		if err := ev.DataAs(incoming); err != nil {
 			return err
 		}
 
-		return resyncHandler.ProcessBasicEntityListRequest(agentName, incoming)
-	case event.ResponseBasicEntity.String():
+		return resyncHandler.ProcessSyncedResourceListRequest(agentName, incoming)
+	case event.ResponseSyncedResource.String():
 		if agentMode != types.AgentModeAutonomous {
-			return fmt.Errorf("principal can only handle basic entity in autonomous mode")
+			return fmt.Errorf("principal can only handle SyncedResource request in autonomous mode")
 		}
 
-		incoming := &event.BasicEntity{}
+		incoming := &event.SyncedResource{}
 		if err := ev.DataAs(incoming); err != nil {
 			return err
 		}
@@ -326,7 +326,7 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 		// Using agentName as the namespace
 		incoming.Namespace = agentName
 
-		return resyncHandler.ProcessIncomingBasicEntity(ctx, incoming, agentName)
+		return resyncHandler.ProcessIncomingSyncedResource(ctx, incoming, agentName)
 	case event.EventRequestUpdate.String():
 		if agentMode != types.AgentModeManaged {
 			return fmt.Errorf("principal can only handle request update in the managed mode")
@@ -338,17 +338,17 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 		}
 
 		return resyncHandler.ProcessRequestUpdateEvent(ctx, agentName, incoming)
-	case event.EventRequestEntityResync.String():
+	case event.EventRequestResourceResync.String():
 		if agentMode != types.AgentModeAutonomous {
-			return fmt.Errorf("principal can only handle request entity resync in autonomous mode")
+			return fmt.Errorf("principal can only handle ResourceResync request in autonomous mode")
 		}
 
-		incoming := &event.RequestEntityResync{}
+		incoming := &event.RequestResourceResync{}
 		if err := ev.DataAs(incoming); err != nil {
 			return err
 		}
 
-		return resyncHandler.ProcessIncomingRequestEntityResync(ctx, agentName)
+		return resyncHandler.ProcessIncomingResourceResyncRequest(ctx, agentName)
 	default:
 		return fmt.Errorf("invalid type of resource resync: %s", ev.Type())
 	}

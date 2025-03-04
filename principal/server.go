@@ -540,26 +540,26 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx)
 		go resyncHandler.SendRequestUpdates(s.ctx)
 
-		// Principal should send basic entity list to revert any deletions on the Principal side.
+		// Principal should request SyncedResourceList to revert any deletions on the Principal side.
 		checksum := s.resources.Checksum(agent.Name())
 
 		// send the checksum to the principal
-		ev, err := s.events.RequestBasicEntityListEvent(checksum)
+		ev, err := s.events.RequestSyncedResourceListEvent(checksum)
 		if err != nil {
-			return fmt.Errorf("failed to create basic entity list event: %v", err)
+			return fmt.Errorf("failed to create SyncedResourceList event: %v", err)
 		}
 
 		sendQ.Add(ev)
-		logCtx.Trace("Sent a request for basic entity list")
+		logCtx.Trace("Sent a request for SyncedResourceList")
 	} else {
-		// In managed mode, principal is the source of truth and the it should request entity resync
-		ev, err := s.events.RequestEntityResyncEvent()
+		// In managed mode, principal is the source of truth and the it should request resource resync
+		ev, err := s.events.RequestResourceResyncEvent()
 		if err != nil {
-			return fmt.Errorf("failed to create request entity resync event: %v", err)
+			return fmt.Errorf("failed to create ResourceResync event: %v", err)
 		}
 
 		sendQ.Add(ev)
-		logCtx.Trace("Sent a request for entity resync")
+		logCtx.Trace("Sent a request for ResourceResync")
 	}
 
 	s.resyncStatus.resynced(agent.Name())

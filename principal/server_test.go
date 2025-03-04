@@ -120,7 +120,7 @@ func Test_handleResyncOnConnect(t *testing.T) {
 		assert.Zero(t, sendQ.Len())
 	})
 
-	t.Run("request basic entity list in autonomous mode", func(t *testing.T) {
+	t.Run("request SyncedResourceList in autonomous mode", func(t *testing.T) {
 		s.resyncStatus = newResyncStatus()
 
 		err = s.handleResyncOnConnect(agent)
@@ -131,10 +131,10 @@ func Test_handleResyncOnConnect(t *testing.T) {
 
 		ev, shutdown := sendQ.Get()
 		assert.False(t, shutdown)
-		assert.Equal(t, event.RequestBasicEntity.String(), ev.Type())
+		assert.Equal(t, event.SyncedResourceList.String(), ev.Type())
 	})
 
-	t.Run("request entity resync in managed mode", func(t *testing.T) {
+	t.Run("request resource resync in managed mode", func(t *testing.T) {
 		agent = types.NewAgent("test", types.AgentModeManaged.String())
 		s.resyncStatus = newResyncStatus()
 
@@ -146,7 +146,7 @@ func Test_handleResyncOnConnect(t *testing.T) {
 
 		ev, shutdown := sendQ.Get()
 		assert.False(t, shutdown)
-		assert.Equal(t, event.EventRequestEntityResync.String(), ev.Type())
+		assert.Equal(t, event.EventRequestResourceResync.String(), ev.Type())
 	})
 }
 

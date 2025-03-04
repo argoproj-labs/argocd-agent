@@ -47,21 +47,21 @@ const TypePrefix = "io.argoproj.argocd-agent.event"
 // Supported EventTypes that are sent agent <-> principal. Note that not every
 // EventType is supported by every EventTarget.
 const (
-	Ping                     EventType = TypePrefix + ".ping"
-	Pong                     EventType = TypePrefix + ".pong"
-	Create                   EventType = TypePrefix + ".create"
-	Delete                   EventType = TypePrefix + ".delete"
-	Update                   EventType = TypePrefix + ".update"
-	SpecUpdate               EventType = TypePrefix + ".spec-update"
-	StatusUpdate             EventType = TypePrefix + ".status-update"
-	OperationUpdate          EventType = TypePrefix + ".operation-update"
-	EventProcessed           EventType = TypePrefix + ".processed"
-	GetRequest               EventType = TypePrefix + ".get"
-	GetResponse              EventType = TypePrefix + ".response"
-	RequestBasicEntity       EventType = TypePrefix + ".request-basic-entity-list"
-	ResponseBasicEntity      EventType = TypePrefix + ".response-basic-entity"
-	EventRequestUpdate       EventType = TypePrefix + ".request-update"
-	EventRequestEntityResync EventType = TypePrefix + ".request-entity-resync"
+	Ping                       EventType = TypePrefix + ".ping"
+	Pong                       EventType = TypePrefix + ".pong"
+	Create                     EventType = TypePrefix + ".create"
+	Delete                     EventType = TypePrefix + ".delete"
+	Update                     EventType = TypePrefix + ".update"
+	SpecUpdate                 EventType = TypePrefix + ".spec-update"
+	StatusUpdate               EventType = TypePrefix + ".status-update"
+	OperationUpdate            EventType = TypePrefix + ".operation-update"
+	EventProcessed             EventType = TypePrefix + ".processed"
+	GetRequest                 EventType = TypePrefix + ".get"
+	GetResponse                EventType = TypePrefix + ".response"
+	SyncedResourceList         EventType = TypePrefix + ".request-synced-resource-list"
+	ResponseSyncedResource     EventType = TypePrefix + ".response-synced-resource"
+	EventRequestUpdate         EventType = TypePrefix + ".request-update"
+	EventRequestResourceResync EventType = TypePrefix + ".request-resource-resync"
 )
 
 const (
@@ -262,25 +262,25 @@ func (evs EventSource) ProcessedEvent(evType EventType, ev *Event) *cloudevents.
 	return &cev
 }
 
-// RequestBasicEntityList is sent by a peer to the source when the peer process restarts.
+// RequestSyncedResourceList is sent by a peer to the source when the peer process restarts.
 // Peer sends a checksum of all the resource keys to the source to detect orphaned resources.
 // Managed mode: Sent from Agent to Principal
 // Autonomous mode: Sent from Principal to Agent
-type RequestBasicEntityList struct {
+type RequestSyncedResourceList struct {
 	// checksum of all the resource keys managed by that component
 	Checksum []byte `json:"checksum"`
 }
 
-func (evs EventSource) RequestBasicEntityListEvent(checksum []byte) (*cloudevents.Event, error) {
+func (evs EventSource) RequestSyncedResourceListEvent(checksum []byte) (*cloudevents.Event, error) {
 	reqUUID := uuid.NewString()
-	req := &RequestBasicEntityList{
+	req := &RequestSyncedResourceList{
 		Checksum: checksum,
 	}
 
 	cev := cloudevents.NewEvent()
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
-	cev.SetType(RequestBasicEntity.String())
+	cev.SetType(SyncedResourceList.String())
 	cev.SetDataSchema(TargetResourceResync.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
@@ -289,19 +289,19 @@ func (evs EventSource) RequestBasicEntityListEvent(checksum []byte) (*cloudevent
 	return &cev, err
 }
 
-// BasicEntity is a response to the BasicEntityList request and is sent for each resource managed by the source.
-// On receiving the BasicEntityList request, the source will calculate the checksum of all its resource keys.
-// If the checksum doesn't match, the source will send the BasicEntity event for each resource.
-type BasicEntity struct {
+// SyncedResource is a response to the SyncedResourceList request and is sent for each resource managed by the source.
+// On receiving the SyncedResourceList request, the source will calculate the checksum of all its resource keys.
+// If the checksum doesn't match, the source will send the SyncedResource event for each resource.
+type SyncedResource struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
 	UID       string `json:"uid"`
 	Kind      string `json:"kind"`
 }
 
-func (evs EventSource) BasicEntityEvent(resourceKey resources.ResourceKey) (*cloudevents.Event, error) {
+func (evs EventSource) SyncedResourceEvent(resourceKey resources.ResourceKey) (*cloudevents.Event, error) {
 	reqUUID := uuid.NewString()
-	basicEntity := BasicEntity{
+	syncedResource := SyncedResource{
 		Name:      resourceKey.Name,
 		Namespace: resourceKey.Namespace,
 		UID:       resourceKey.UID,
@@ -311,12 +311,12 @@ func (evs EventSource) BasicEntityEvent(resourceKey resources.ResourceKey) (*clo
 	cev := cloudevents.NewEvent()
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
-	cev.SetType(ResponseBasicEntity.String())
+	cev.SetType(ResponseSyncedResource.String())
 	cev.SetDataSchema(TargetResourceResync.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
 
-	err := cev.SetData(cloudevents.ApplicationJSON, basicEntity)
+	err := cev.SetData(cloudevents.ApplicationJSON, syncedResource)
 	return &cev, err
 }
 
@@ -356,19 +356,19 @@ func (evs EventSource) RequestUpdateEvent(reqUpdate *RequestUpdate) (*cloudevent
 	return &cev, err
 }
 
-// RequestEntityResync is sent by the source to a peer when the source process restarts.
+// RequestResourceResync is sent by the source to a peer when the source process restarts.
 // It informs the peer that the source process restarted and it might be out of sync with the source.
-type RequestEntityResync struct {
+type RequestResourceResync struct {
 }
 
-func (evs EventSource) RequestEntityResyncEvent() (*cloudevents.Event, error) {
+func (evs EventSource) RequestResourceResyncEvent() (*cloudevents.Event, error) {
 	reqUUID := uuid.NewString()
-	req := &RequestEntityResync{}
+	req := &RequestResourceResync{}
 
 	cev := cloudevents.NewEvent()
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
-	cev.SetType(EventRequestEntityResync.String())
+	cev.SetType(EventRequestResourceResync.String())
 	cev.SetDataSchema(TargetResourceResync.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
@@ -470,22 +470,22 @@ func (ev Event) ResourceResponse() (*ResourceResponse, error) {
 	return resp, err
 }
 
-func (ev Event) RequestBasicEntityListRequest() (*RequestBasicEntityList, error) {
-	basicEntityList := &RequestBasicEntityList{}
-	err := ev.event.DataAs(basicEntityList)
-	return basicEntityList, err
+func (ev Event) RequestSyncedResourceList() (*RequestSyncedResourceList, error) {
+	syncedResourceList := &RequestSyncedResourceList{}
+	err := ev.event.DataAs(syncedResourceList)
+	return syncedResourceList, err
 }
 
-func (ev Event) BasicEntity() (*BasicEntity, error) {
-	basicEntity := &BasicEntity{}
-	err := ev.event.DataAs(basicEntity)
-	return basicEntity, err
+func (ev Event) SyncedResource() (*SyncedResource, error) {
+	syncedResource := &SyncedResource{}
+	err := ev.event.DataAs(syncedResource)
+	return syncedResource, err
 }
 
-func (ev Event) RequestEntityResync() (*RequestEntityResync, error) {
-	reqEntity := &RequestEntityResync{}
-	err := ev.event.DataAs(reqEntity)
-	return reqEntity, err
+func (ev Event) RequestResourceResync() (*RequestResourceResync, error) {
+	resResync := &RequestResourceResync{}
+	err := ev.event.DataAs(resResync)
+	return resResync, err
 }
 
 func (ev Event) RequestUpdate() (*RequestUpdate, error) {

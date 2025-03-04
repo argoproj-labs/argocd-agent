@@ -59,40 +59,40 @@ func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLim
 	}
 }
 
-func (r *RequestHandler) ProcessBasicEntityListRequest(agentName string, req *event.RequestBasicEntityList) error {
-	r.log.Trace("Received a request for basic entity list")
+func (r *RequestHandler) ProcessSyncedResourceListRequest(agentName string, req *event.RequestSyncedResourceList) error {
+	r.log.Trace("Received a request for synced resource list event")
 
 	if r.resources == nil || r.resources.Len() == 0 {
-		r.log.Trace("No resources found for this agent. Skipping basic entity.")
+		r.log.Trace("No resources found for this agent. Skip sending synced resources")
 		return nil
 	}
 
 	checksum := r.resources.Checksum()
 	if bytes.Equal(req.Checksum, checksum) {
-		r.log.Info("Agent and Principal checksums match. Skipping basic entity")
+		r.log.Info("Agent and Principal checksums match. Skip sending synced resources")
 		return nil
 	}
 
 	// At this stage we know that the agent and the principal are out of sync.
-	// We need to send the basic entity for each resource to the agent.
+	// We need to send synced resources to the agent.
 
-	r.log.Info("Agent and Principal checksums do not match, sending the basic entity of all resources")
+	r.log.Info("Agent and Principal checksums don't match, sending synced resource event for each resource")
 
 	resources := r.resources.GetAll()
 	for _, res := range resources {
-		ev, err := r.events.BasicEntityEvent(res)
+		ev, err := r.events.SyncedResourceEvent(res)
 		if err != nil {
-			return fmt.Errorf("failed to create basic entity event: %w", err)
+			return fmt.Errorf("failed to create synced resource event: %w", err)
 		}
 
-		r.log.WithField("name", res.Name).WithField("kind", res.Kind).Trace("Sent basic entity")
+		r.log.WithField("name", res.Name).WithField("kind", res.Kind).Trace("Sent synced resource event")
 		r.sendQ.Add(ev)
 	}
 
 	return nil
 }
 
-func (r *RequestHandler) ProcessIncomingBasicEntity(ctx context.Context, incoming *event.BasicEntity, agentID string) error {
+func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, incoming *event.SyncedResource, agentID string) error {
 	logCtx := r.log.WithFields(logrus.Fields{
 		"kind":      incoming.Kind,
 		"namespace": incoming.Namespace,
@@ -100,7 +100,7 @@ func (r *RequestHandler) ProcessIncomingBasicEntity(ctx context.Context, incomin
 		"uid":       incoming.UID,
 	})
 
-	logCtx.Trace("Received a basic entity event")
+	logCtx.Trace("Received a synced resource event")
 
 	var reqUpdate *event.RequestUpdate
 
@@ -132,13 +132,13 @@ func (r *RequestHandler) ProcessIncomingBasicEntity(ctx context.Context, incomin
 	}
 
 	r.sendQ.Add(reqUpdateEvent)
-	logCtx.Trace("Sent a request update event after processing the basic entity request")
+	logCtx.Trace("Sent a request update event after processing the synced resource request")
 
 	return nil
 }
 
-func (r *RequestHandler) ProcessIncomingRequestEntityResync(ctx context.Context, queueID string) error {
-	r.log.Trace("Received a request for entity resync")
+func (r *RequestHandler) ProcessIncomingResourceResyncRequest(ctx context.Context, queueID string) error {
+	r.log.Trace("Received a request for resource resync")
 
 	resources := r.resources.GetAll()
 	for _, resource := range resources {

@@ -346,31 +346,31 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
 
 	switch ev.Type() {
-	case event.RequestBasicEntity:
+	case event.SyncedResourceList:
 		if a.mode != types.AgentModeAutonomous {
-			return fmt.Errorf("agent can only handle basic entity list request in the autonomous mode")
+			return fmt.Errorf("agent can only handle SyncedResourceList request in the autonomous mode")
 		}
 
-		req, err := ev.RequestBasicEntityListRequest()
+		req, err := ev.RequestSyncedResourceList()
 		if err != nil {
 			return err
 		}
 
-		return resyncHandler.ProcessBasicEntityListRequest(a.remote.ClientID(), req)
-	case event.ResponseBasicEntity:
+		return resyncHandler.ProcessSyncedResourceListRequest(a.remote.ClientID(), req)
+	case event.ResponseSyncedResource:
 		if a.mode != types.AgentModeManaged {
-			return fmt.Errorf("agent can only handle basic entity request in the managed mode")
+			return fmt.Errorf("agent can only handle SyncedResource request in the managed mode")
 		}
 
-		req, err := ev.BasicEntity()
+		req, err := ev.SyncedResource()
 		if err != nil {
 			return err
 		}
 
-		return resyncHandler.ProcessIncomingBasicEntity(a.context, req, a.remote.ClientID())
+		return resyncHandler.ProcessIncomingSyncedResource(a.context, req, a.remote.ClientID())
 	case event.EventRequestUpdate:
 		if a.mode != types.AgentModeAutonomous {
-			return fmt.Errorf("agent can only handle request update in the autonomous mode")
+			return fmt.Errorf("agent can only handle RequestUpdate in the autonomous mode")
 		}
 
 		incoming, err := ev.RequestUpdate()
@@ -381,12 +381,12 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 		incoming.Namespace = a.namespace
 
 		return resyncHandler.ProcessRequestUpdateEvent(a.context, a.remote.ClientID(), incoming)
-	case event.EventRequestEntityResync:
+	case event.EventRequestResourceResync:
 		if a.mode != types.AgentModeManaged {
-			return fmt.Errorf("agent can only handle request entity resync in the managed mode")
+			return fmt.Errorf("agent can only handle ResourceResync request in the managed mode")
 		}
 
-		return resyncHandler.ProcessIncomingRequestEntityResync(a.context, a.remote.ClientID())
+		return resyncHandler.ProcessIncomingResourceResyncRequest(a.context, a.remote.ClientID())
 	default:
 		return fmt.Errorf("invalid type of resource resync: %s", ev.Type())
 	}
