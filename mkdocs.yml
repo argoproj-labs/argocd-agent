@@ -6,6 +6,7 @@ theme:
   palette:
     primary: teal
   logo: assets/logo.png
+  favicon: "assets/favicon.png"
 markdown_extensions: 
 - codehilite
 - admonition
@@ -28,7 +29,7 @@ nav:
     - Overview: getting-started/index.md
     - Kubernetes: getting-started/kubernetes/index.md
     - OpenShift: getting-started/openshift/index.md
-    - OCM.io: getting-started/ocm-io/index.md
+    - OCM-io: getting-started/ocm-io/index.md
   - Configuration:
     - Principal: configuration/principal/index.md
     - Agent: configuration/agent/index.md
