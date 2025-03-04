@@ -440,48 +440,48 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 	assert.Nil(t, err)
 	s.events = event.NewEventSource("test")
 
-	t.Run("discard basic entity list in autonomous mode", func(t *testing.T) {
+	t.Run("discard SyncedResourceList in autonomous mode", func(t *testing.T) {
 		s.setAgentMode(agentName, types.AgentModeAutonomous)
 
-		ev, err := s.events.RequestBasicEntityListEvent([]byte{})
+		ev, err := s.events.RequestSyncedResourceListEvent([]byte{})
 		assert.Nil(t, err)
 
-		expected := "principal can only handle basic entity list in the managed mode"
+		expected := "principal can only handle SyncedResourceList request in the managed mode"
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 		assert.Equal(t, expected, err.Error())
 	})
 
-	t.Run("process basic entity list in managed mode", func(t *testing.T) {
+	t.Run("process SyncedResourceList in managed mode", func(t *testing.T) {
 		s.setAgentMode(agentName, types.AgentModeManaged)
 
-		ev, err := s.events.RequestBasicEntityListEvent([]byte{})
+		ev, err := s.events.RequestSyncedResourceListEvent([]byte{})
 		assert.Nil(t, err)
 
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 		assert.Nil(t, err)
 	})
 
-	t.Run("process basic entity in autonomous mode", func(t *testing.T) {
+	t.Run("process SyncedResource in autonomous mode", func(t *testing.T) {
 		s.setAgentMode(agentName, types.AgentModeAutonomous)
 
 		res := resources.ResourceKey{
 			Name: "sample",
 			Kind: "Application",
 		}
-		ev, err := s.events.BasicEntityEvent(res)
+		ev, err := s.events.SyncedResourceEvent(res)
 		assert.Nil(t, err)
 
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 		assert.NotNil(t, err)
 	})
 
-	t.Run("discard basic entity in managed mode", func(t *testing.T) {
+	t.Run("discard SyncedResource in managed mode", func(t *testing.T) {
 		s.setAgentMode(agentName, types.AgentModeManaged)
 
-		ev, err := s.events.BasicEntityEvent(resources.ResourceKey{})
+		ev, err := s.events.SyncedResourceEvent(resources.ResourceKey{})
 		assert.Nil(t, err)
 
-		expected := "principal can only handle basic entity in autonomous mode"
+		expected := "principal can only handle SyncedResource request in autonomous mode"
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 		assert.Equal(t, expected, err.Error())
 	})
@@ -512,23 +512,23 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		assert.Equal(t, expected, err.Error())
 	})
 
-	t.Run("process request entity resync in autonomous mode", func(t *testing.T) {
+	t.Run("process ResourceResync in autonomous mode", func(t *testing.T) {
 		s.setAgentMode(agentName, types.AgentModeAutonomous)
 
-		ev, err := s.events.RequestEntityResyncEvent()
+		ev, err := s.events.RequestResourceResyncEvent()
 		assert.Nil(t, err)
 
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 		assert.Nil(t, err)
 	})
 
-	t.Run("discard request entity resync in managed mode", func(t *testing.T) {
+	t.Run("discard ResourceResync in managed mode", func(t *testing.T) {
 		s.setAgentMode(agentName, types.AgentModeManaged)
 
-		ev, err := s.events.RequestEntityResyncEvent()
+		ev, err := s.events.RequestResourceResyncEvent()
 		assert.Nil(t, err)
 
-		expected := "principal can only handle request entity resync in autonomous mode"
+		expected := "principal can only handle ResourceResync request in autonomous mode"
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 		assert.Equal(t, expected, err.Error())
 	})
