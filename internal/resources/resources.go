@@ -1,4 +1,4 @@
-// Copyright 2024 The argocd-agent Authors
+// Copyright 2025 The argocd-agent Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -151,9 +151,9 @@ func (r *AgentResources) Checksum(agent string) []byte {
 	return agentResources.Checksum()
 }
 
-// Resources is a map of all the resources that are currently in the cluster.
-// It is dynamically populated when handling informer events and is used to quickly generate the
-// checksum and send resync messages without having to query the API server.
+// Resources is a map of all the resources(apps,appProjects,etc) that are managed by the agent/principal.
+// It is dynamically populated by the agent/principal while handling informer events and is used
+// to quickly generate the checksum and send resync messages without having to query the API server.
 type Resources struct {
 	// key: ResourceKey of the resource
 	resources map[ResourceKey]bool
