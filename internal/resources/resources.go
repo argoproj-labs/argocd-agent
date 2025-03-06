@@ -15,7 +15,7 @@
 package resources
 
 import (
-	"crypto/sha256"
+	"crypto/md5"
 	"fmt"
 	"sort"
 	"strings"
@@ -217,18 +217,18 @@ func (r *Resources) Checksum() []byte {
 	}
 
 	if len(resources) != 0 {
-		return calculateSHA256(resources)
+		return calculateChecksum(resources)
 	}
 
 	return nil
 }
 
-func calculateSHA256(item []string) []byte {
+func calculateChecksum(item []string) []byte {
 	// sort the items to ensure a consistent hash
 	sort.Strings(item)
 
 	joinedItems := strings.Join(item, "")
-	hash := sha256.Sum256([]byte(joinedItems))
+	hash := md5.Sum([]byte(joinedItems))
 
 	return hash[:]
 }
