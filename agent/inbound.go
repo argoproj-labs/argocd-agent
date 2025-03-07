@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
+	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
@@ -61,6 +62,8 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 		err = a.processIncomingAppProject(ev)
 	case event.TargetResource:
 		err = a.processIncomingResourceRequest(ev)
+	case event.TargetResourceResync:
+		err = a.processIncomingResourceResyncEvent(ev)
 	default:
 		err = fmt.Errorf("unknown event target: %s", ev.Target())
 	}
@@ -317,6 +320,76 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 	}
 
 	return err
+}
+
+// processIncomingResourceResyncEvent handles all the resync events that are
+// exchanged with the agent/principal restarts
+func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
+	logCtx := log().WithFields(logrus.Fields{
+		"method":      "processIncomingEvents",
+		"agent":       a.remote.ClientID(),
+		"mode":        a.mode,
+		"event":       ev.Type(),
+		"resource_id": ev.ResourceID(),
+	})
+
+	dynClient, err := dynamic.NewForConfig(a.kubeClient.RestConfig)
+	if err != nil {
+		return err
+	}
+
+	sendQ := a.queues.SendQ(a.remote.ClientID())
+	if sendQ == nil {
+		return fmt.Errorf("remote queue disappeared for agent: %s", a.remote.ClientID())
+	}
+
+	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
+
+	switch ev.Type() {
+	case event.SyncedResourceList:
+		if a.mode != types.AgentModeAutonomous {
+			return fmt.Errorf("agent can only handle SyncedResourceList request in the autonomous mode")
+		}
+
+		req, err := ev.RequestSyncedResourceList()
+		if err != nil {
+			return err
+		}
+
+		return resyncHandler.ProcessSyncedResourceListRequest(a.remote.ClientID(), req)
+	case event.ResponseSyncedResource:
+		if a.mode != types.AgentModeManaged {
+			return fmt.Errorf("agent can only handle SyncedResource request in the managed mode")
+		}
+
+		req, err := ev.SyncedResource()
+		if err != nil {
+			return err
+		}
+
+		return resyncHandler.ProcessIncomingSyncedResource(a.context, req, a.remote.ClientID())
+	case event.EventRequestUpdate:
+		if a.mode != types.AgentModeAutonomous {
+			return fmt.Errorf("agent can only handle RequestUpdate in the autonomous mode")
+		}
+
+		incoming, err := ev.RequestUpdate()
+		if err != nil {
+			return err
+		}
+
+		incoming.Namespace = a.namespace
+
+		return resyncHandler.ProcessRequestUpdateEvent(a.context, a.remote.ClientID(), incoming)
+	case event.EventRequestResourceResync:
+		if a.mode != types.AgentModeManaged {
+			return fmt.Errorf("agent can only handle ResourceResync request in the managed mode")
+		}
+
+		return resyncHandler.ProcessIncomingResourceResyncRequest(a.context, a.remote.ClientID())
+	default:
+		return fmt.Errorf("invalid type of resource resync: %s", ev.Type())
+	}
 }
 
 // createApplication creates an Application upon an event in the agent's work

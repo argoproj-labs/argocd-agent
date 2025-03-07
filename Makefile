@@ -45,7 +45,7 @@ setup-e2e2:
 start-e2e2: cli install-goreman
 	./hack/dev-env/gen-creds.sh
 	./hack/dev-env/create-agent-config.sh
-	goreman -f hack/dev-env/Procfile.e2e start
+	goreman -exit-on-stop=false -f hack/dev-env/Procfile.e2e start
 
 .PHONY: test-e2e2
 test-e2e2:
