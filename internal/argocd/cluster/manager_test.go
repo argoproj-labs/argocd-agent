@@ -41,7 +41,7 @@ func newClusterSecret(t *testing.T, agentName string) (*v1alpha1.Cluster, *v1.Se
 
 func Test_StartStop(t *testing.T) {
 	clt := kube.NewFakeClientsetWithResources()
-	m, err := NewManager(context.TODO(), "argocd", clt)
+	m, err := NewManager(context.TODO(), "argocd", "", "", clt)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	err = m.Start()
@@ -52,7 +52,7 @@ func Test_StartStop(t *testing.T) {
 
 func Test_onClusterAdd(t *testing.T) {
 	clt := kube.NewFakeClientsetWithResources()
-	m, err := NewManager(context.TODO(), "argocd", clt)
+	m, err := NewManager(context.TODO(), "argocd", "", "", clt)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	err = m.Start()

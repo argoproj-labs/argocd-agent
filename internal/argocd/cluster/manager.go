@@ -36,6 +36,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v2/common"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v2/util/cache"
 	"github.com/sirupsen/logrus"
 )
 
@@ -58,17 +59,22 @@ type Manager struct {
 	// filters is a filter chain for the secret informer used by the cluster
 	// manager
 	filters *filter.Chain[*v1.Secret]
+
+	redisAddress         string
+	redisCompressionType cacheutil.RedisCompressionType
 }
 
 // NewManager instantiates and initializes a new Manager.
-func NewManager(ctx context.Context, namespace string, kubeclient kubernetes.Interface) (*Manager, error) {
+func NewManager(ctx context.Context, namespace, redisAddress string, redisCompressionType cacheutil.RedisCompressionType, kubeclient kubernetes.Interface) (*Manager, error) {
 	var err error
 	m := &Manager{
-		clusters:   make(map[string]*v1alpha1.Cluster),
-		namespace:  namespace,
-		kubeclient: kubeclient,
-		ctx:        ctx,
-		filters:    filter.NewFilterChain[*v1.Secret](),
+		clusters:             make(map[string]*v1alpha1.Cluster),
+		namespace:            namespace,
+		kubeclient:           kubeclient,
+		ctx:                  ctx,
+		filters:              filter.NewFilterChain[*v1.Secret](),
+		redisAddress:         redisAddress,
+		redisCompressionType: redisCompressionType,
 	}
 
 	// We are only interested in secrets that have both, Argo CD's label for
@@ -118,6 +124,19 @@ func (m *Manager) Start() error {
 	}()
 	ctx, cancel := context.WithTimeout(m.ctx, syncTimeout)
 	defer cancel()
+
+	// This goroutine is to refresh/maintain connection status of agents in cluster.
+	// This is required because argocd cache expiration time is set to 10 minutes, which is not configurable.
+	// Here is upstream implementation https://github.com/argoproj/argo-cd/blob/master/util/cache/appstate/cache.go#L124,
+	// because of this info updated by principal are deleted after 10 minutes.
+	// To avoid this we need to re-save same info before cache is expired.
+	go func() {
+		for {
+			go m.refreshClusterConnectionInfo()
+			time.Sleep(3 * time.Minute)
+		}
+	}()
+
 	return m.informer.WaitForSync(ctx)
 }
 
