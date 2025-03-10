@@ -17,7 +17,7 @@ package resync
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 
@@ -355,7 +355,7 @@ func generateSpecChecksum(resObj *unstructured.Unstructured) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal application spec: %v", err)
 	}
 
-	checksum := md5.Sum(specBytes)
+	checksum := sha256.Sum256(specBytes)
 
 	return checksum[:], nil
 }
