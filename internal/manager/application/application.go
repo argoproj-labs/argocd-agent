@@ -156,6 +156,10 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 	return created, err
 }
 
+func (m *ApplicationManager) Get(ctx context.Context, name, namespace string) (*v1alpha1.Application, error) {
+	return m.applicationBackend.Get(ctx, name, namespace)
+}
+
 // UpdateManagedApp updates the Application resource on the agent when it is in
 // managed mode.
 //
@@ -289,6 +293,13 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 	}
 
 	updated, err = m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
+		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
+			if incoming.Annotations == nil {
+				incoming.Annotations = make(map[string]string)
+			}
+			incoming.Annotations[manager.SourceUIDAnnotation] = v
+		}
+
 		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
 		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
 		existing.ObjectMeta.DeletionTimestamp = incoming.DeletionTimestamp
@@ -299,6 +310,13 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		existing.Operation = nil
 		logCtx.Infof("Updating")
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
+		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
+			if incoming.Annotations == nil {
+				incoming.Annotations = make(map[string]string)
+			}
+			incoming.Annotations[manager.SourceUIDAnnotation] = v
+		}
+
 		target := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Labels:                     incoming.Labels,

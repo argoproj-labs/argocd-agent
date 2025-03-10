@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/google/uuid"
@@ -46,25 +47,30 @@ const TypePrefix = "io.argoproj.argocd-agent.event"
 // Supported EventTypes that are sent agent <-> principal. Note that not every
 // EventType is supported by every EventTarget.
 const (
-	Ping            EventType = TypePrefix + ".ping"
-	Pong            EventType = TypePrefix + ".pong"
-	Create          EventType = TypePrefix + ".create"
-	Delete          EventType = TypePrefix + ".delete"
-	Update          EventType = TypePrefix + ".update"
-	SpecUpdate      EventType = TypePrefix + ".spec-update"
-	StatusUpdate    EventType = TypePrefix + ".status-update"
-	OperationUpdate EventType = TypePrefix + ".operation-update"
-	EventProcessed  EventType = TypePrefix + ".processed"
-	GetRequest      EventType = TypePrefix + ".get"
-	GetResponse     EventType = TypePrefix + ".response"
+	Ping                       EventType = TypePrefix + ".ping"
+	Pong                       EventType = TypePrefix + ".pong"
+	Create                     EventType = TypePrefix + ".create"
+	Delete                     EventType = TypePrefix + ".delete"
+	Update                     EventType = TypePrefix + ".update"
+	SpecUpdate                 EventType = TypePrefix + ".spec-update"
+	StatusUpdate               EventType = TypePrefix + ".status-update"
+	OperationUpdate            EventType = TypePrefix + ".operation-update"
+	EventProcessed             EventType = TypePrefix + ".processed"
+	GetRequest                 EventType = TypePrefix + ".get"
+	GetResponse                EventType = TypePrefix + ".response"
+	SyncedResourceList         EventType = TypePrefix + ".request-synced-resource-list"
+	ResponseSyncedResource     EventType = TypePrefix + ".response-synced-resource"
+	EventRequestUpdate         EventType = TypePrefix + ".request-update"
+	EventRequestResourceResync EventType = TypePrefix + ".request-resource-resync"
 )
 
 const (
-	TargetUnknown     EventTarget = "unknown"
-	TargetApplication EventTarget = "application"
-	TargetAppProject  EventTarget = "appproject"
-	TargetEventAck    EventTarget = "eventProcessed"
-	TargetResource    EventTarget = "resource"
+	TargetUnknown        EventTarget = "unknown"
+	TargetApplication    EventTarget = "application"
+	TargetAppProject     EventTarget = "appproject"
+	TargetEventAck       EventTarget = "eventProcessed"
+	TargetResource       EventTarget = "resource"
+	TargetResourceResync EventTarget = "resourceResync"
 )
 
 const (
@@ -256,6 +262,121 @@ func (evs EventSource) ProcessedEvent(evType EventType, ev *Event) *cloudevents.
 	return &cev
 }
 
+// RequestSyncedResourceList is sent by a peer to the source when the peer process restarts.
+// Peer sends a checksum of all the resource keys to the source to detect orphaned resources.
+// Managed mode: Sent from Agent to Principal
+// Autonomous mode: Sent from Principal to Agent
+type RequestSyncedResourceList struct {
+	// checksum of all the resource keys managed by that component
+	Checksum []byte `json:"checksum"`
+}
+
+func (evs EventSource) RequestSyncedResourceListEvent(checksum []byte) (*cloudevents.Event, error) {
+	reqUUID := uuid.NewString()
+	req := &RequestSyncedResourceList{
+		Checksum: checksum,
+	}
+
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(SyncedResourceList.String())
+	cev.SetDataSchema(TargetResourceResync.String())
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetExtension(eventID, reqUUID)
+
+	err := cev.SetData(cloudevents.ApplicationJSON, req)
+	return &cev, err
+}
+
+// SyncedResource is a response to the SyncedResourceList request and is sent for each resource managed by the source.
+// On receiving the SyncedResourceList request, the source will calculate the checksum of all its resource keys.
+// If the checksum doesn't match, the source will send the SyncedResource event for each resource.
+type SyncedResource struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	UID       string `json:"uid"`
+	Kind      string `json:"kind"`
+}
+
+func (evs EventSource) SyncedResourceEvent(resourceKey resources.ResourceKey) (*cloudevents.Event, error) {
+	reqUUID := uuid.NewString()
+	syncedResource := SyncedResource{
+		Name:      resourceKey.Name,
+		Namespace: resourceKey.Namespace,
+		UID:       resourceKey.UID,
+		Kind:      resourceKey.Kind,
+	}
+
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(ResponseSyncedResource.String())
+	cev.SetDataSchema(TargetResourceResync.String())
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetExtension(eventID, reqUUID)
+
+	err := cev.SetData(cloudevents.ApplicationJSON, syncedResource)
+	return &cev, err
+}
+
+// RequestUpdate is used to request the latest content of a resource and is
+// sent from a peer to the source of truth. The peer calculates the spec checksum
+// of a resource and sends it in the RequestUpdate event. The source will calculate
+// the spec checksum on its side and sends a SpecUpdate event if the checksums don't match.
+type RequestUpdate struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	UID       string `json:"uid"`
+	Kind      string `json:"kind"`
+	Checksum  []byte `json:"checksum"`
+}
+
+func NewRequestUpdate(name, namespace, kind, uid string, checksum []byte) *RequestUpdate {
+	return &RequestUpdate{
+		Name:      name,
+		Namespace: namespace,
+		UID:       uid,
+		Kind:      kind,
+		Checksum:  checksum,
+	}
+}
+
+func (evs EventSource) RequestUpdateEvent(reqUpdate *RequestUpdate) (*cloudevents.Event, error) {
+	reqUUID := uuid.NewString()
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(EventRequestUpdate.String())
+	cev.SetDataSchema(TargetResourceResync.String())
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetExtension(eventID, reqUUID)
+
+	err := cev.SetData(cloudevents.ApplicationJSON, reqUpdate)
+	return &cev, err
+}
+
+// RequestResourceResync is sent by the source to a peer when the source process restarts.
+// It informs the peer that the source process restarted and it might be out of sync with the source.
+type RequestResourceResync struct {
+}
+
+func (evs EventSource) RequestResourceResyncEvent() (*cloudevents.Event, error) {
+	reqUUID := uuid.NewString()
+	req := &RequestResourceResync{}
+
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(EventRequestResourceResync.String())
+	cev.SetDataSchema(TargetResourceResync.String())
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetExtension(eventID, reqUUID)
+
+	err := cev.SetData(cloudevents.ApplicationJSON, req)
+	return &cev, err
+}
+
 // FromWire validates an event from the wire in protobuf format, converts it
 // into an Event object and returns it. If the event on the wire is invalid,
 // or could not be converted for another reason, FromWire returns an error.
@@ -283,6 +404,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetResource
 	case TargetEventAck.String():
 		return TargetEventAck
+	case TargetResourceResync.String():
+		return TargetResourceResync
 	}
 	return ""
 }
@@ -347,6 +470,30 @@ func (ev Event) ResourceResponse() (*ResourceResponse, error) {
 	return resp, err
 }
 
+func (ev Event) RequestSyncedResourceList() (*RequestSyncedResourceList, error) {
+	syncedResourceList := &RequestSyncedResourceList{}
+	err := ev.event.DataAs(syncedResourceList)
+	return syncedResourceList, err
+}
+
+func (ev Event) SyncedResource() (*SyncedResource, error) {
+	syncedResource := &SyncedResource{}
+	err := ev.event.DataAs(syncedResource)
+	return syncedResource, err
+}
+
+func (ev Event) RequestResourceResync() (*RequestResourceResync, error) {
+	resResync := &RequestResourceResync{}
+	err := ev.event.DataAs(resResync)
+	return resResync, err
+}
+
+func (ev Event) RequestUpdate() (*RequestUpdate, error) {
+	reqUpdate := &RequestUpdate{}
+	err := ev.event.DataAs(reqUpdate)
+	return reqUpdate, err
+}
+
 type streamWriter interface {
 	Send(*eventstreamapi.Event) error
 	Context() context.Context
@@ -398,6 +545,7 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"resource_id": ResourceID(ev),
 		"event_id":    EventID(ev),
+		"type":        ev.Type(),
 	})
 
 	ew.mu.Lock()

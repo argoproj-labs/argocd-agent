@@ -32,6 +32,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -77,6 +78,11 @@ type Agent struct {
 
 	// metrics holds agent side metrics
 	metrics *metrics.AgentMetrics
+
+	// determines if a resync check is done with the principal when the agent restarts.
+	resyncedOnStart bool
+	// resources is a list of all the resources that are currently being managed by the agent
+	resources *resources.Resources
 }
 
 const defaultQueueName = "default"
@@ -231,6 +237,8 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, err
 	}
 	a.namespaceManager = kubenamespace.NewKubernetesBackend(nsInformer)
+
+	a.resources = resources.NewResources()
 
 	a.syncCh = make(chan bool, 1)
 	return a, nil

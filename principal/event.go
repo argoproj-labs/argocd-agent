@@ -25,6 +25,8 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
+	"github.com/argoproj-labs/argocd-agent/internal/resync"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
@@ -32,6 +34,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/workqueue"
 )
 
@@ -67,6 +70,8 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		err = s.processAppProjectEvent(ctx, agentName, ev)
 	case event.TargetResource:
 		err = s.processResourceEventResponse(ctx, agentName, ev)
+	case event.TargetResourceResync:
+		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 	default:
 		err = fmt.Errorf("unknown target: '%s'", target)
 	}
@@ -151,7 +156,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		if err != nil {
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
-		logCtx.Infof("Updated application status %s", incoming.QualifiedName())
+		logCtx.Infof("Updated application spec %s", incoming.QualifiedName())
 	// Status updates are only allowed in managed mode
 	case event.StatusUpdate.String():
 		if !agentMode.IsManaged() {
@@ -272,6 +277,83 @@ func (s *Server) processResourceEventResponse(ctx context.Context, agentName str
 	return err
 }
 
+// processIncomingResourceResyncEvent will handle the incoming resync events from the agent
+func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
+	agentMode := s.agentMode(agentName)
+	logCtx := log().WithFields(logrus.Fields{
+		"module":      "QueueProcessor",
+		"client":      agentName,
+		"mode":        agentMode.String(),
+		"event":       ev.Type(),
+		"resource_id": event.ResourceID(ev),
+		"event_id":    event.EventID(ev),
+	})
+
+	dynClient, err := dynamic.NewForConfig(s.kubeClient.RestConfig)
+	if err != nil {
+		return err
+	}
+
+	sendQ := s.queues.SendQ(agentName)
+	if sendQ == nil {
+		return fmt.Errorf("queue not found for agent: %s", agentName)
+	}
+
+	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx)
+
+	switch ev.Type() {
+	case event.SyncedResourceList.String():
+		if agentMode != types.AgentModeManaged {
+			return fmt.Errorf("principal can only handle SyncedResourceList request in the managed mode")
+		}
+
+		incoming := &event.RequestSyncedResourceList{}
+		if err := ev.DataAs(incoming); err != nil {
+			return err
+		}
+
+		return resyncHandler.ProcessSyncedResourceListRequest(agentName, incoming)
+	case event.ResponseSyncedResource.String():
+		if agentMode != types.AgentModeAutonomous {
+			return fmt.Errorf("principal can only handle SyncedResource request in autonomous mode")
+		}
+
+		incoming := &event.SyncedResource{}
+		if err := ev.DataAs(incoming); err != nil {
+			return err
+		}
+
+		// Using agentName as the namespace
+		incoming.Namespace = agentName
+
+		return resyncHandler.ProcessIncomingSyncedResource(ctx, incoming, agentName)
+	case event.EventRequestUpdate.String():
+		if agentMode != types.AgentModeManaged {
+			return fmt.Errorf("principal can only handle request update in the managed mode")
+		}
+
+		incoming := &event.RequestUpdate{}
+		if err := ev.DataAs(incoming); err != nil {
+			return err
+		}
+
+		return resyncHandler.ProcessRequestUpdateEvent(ctx, agentName, incoming)
+	case event.EventRequestResourceResync.String():
+		if agentMode != types.AgentModeAutonomous {
+			return fmt.Errorf("principal can only handle ResourceResync request in autonomous mode")
+		}
+
+		incoming := &event.RequestResourceResync{}
+		if err := ev.DataAs(incoming); err != nil {
+			return err
+		}
+
+		return resyncHandler.ProcessIncomingResourceResyncRequest(ctx, agentName)
+	default:
+		return fmt.Errorf("invalid type of resource resync: %s", ev.Type())
+	}
+}
+
 // eventProcessor is the main loop to process event from the receiver queue,
 // i.e. events coming from the connect agents. It will process events from
 // different agents in parallel, but it will not parallelize processing of
@@ -349,7 +431,13 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 						logCtx.Debugf("Queue disappeared -- client probably has disconnected")
 						return
 					}
-					logCtx.WithField("resource_id", event.ResourceID(ev)).WithField("event_id", event.EventID(ev)).Trace("sending an ACK for an event")
+					logCtx = logCtx.WithFields(logrus.Fields{
+						"resource_id": event.ResourceID(ev),
+						"event_id":    event.EventID(ev),
+						"type":        ev.Type(),
+					})
+
+					logCtx.Trace("sending an ACK for an event")
 					sendQ.Add(s.events.ProcessedEvent(event.EventProcessed, event.New(ev, event.TargetEventAck)))
 				}(queueName, q)
 			}
@@ -388,12 +476,12 @@ func (s *Server) createNamespaceIfNotExist(ctx context.Context, name string) (bo
 	}
 	// TODO: Handle namespaces that are currently being deleted in a graceful
 	// way.
-	_, err := s.kubeClient.CoreV1().Namespaces().Get(ctx, name, v1.GetOptions{})
+	_, err := s.kubeClient.Clientset.CoreV1().Namespaces().Get(ctx, name, v1.GetOptions{})
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return false, err
 		} else {
-			_, err = s.kubeClient.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+			_, err = s.kubeClient.Clientset.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
 				ObjectMeta: v1.ObjectMeta{
 					Name:   name,
 					Labels: s.autoNamespaceLabels,

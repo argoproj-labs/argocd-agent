@@ -15,20 +15,24 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
 
 	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -638,4 +642,109 @@ func Test_UpdateAppProject(t *testing.T) {
 		require.NotNil(t, napp)
 	})
 
+}
+
+func Test_processIncomingResourceResyncEvent(t *testing.T) {
+	a := newAgent(t)
+	a.kubeClient.RestConfig = &rest.Config{}
+	a.namespace = "test"
+	a.context = context.Background()
+
+	err := a.queues.Create(a.remote.ClientID())
+	assert.Nil(t, err)
+	a.emitter = event.NewEventSource("test")
+
+	t.Run("discard SyncedResourceList request in managed mode", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		ev, err := a.emitter.RequestSyncedResourceListEvent([]byte{})
+		assert.Nil(t, err)
+
+		expected := "agent can only handle SyncedResourceList request in the autonomous mode"
+		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		assert.Equal(t, expected, err.Error())
+	})
+
+	t.Run("process SyncedResourceList request in autonomous mode", func(t *testing.T) {
+		a.mode = types.AgentModeAutonomous
+
+		ev, err := a.emitter.RequestSyncedResourceListEvent([]byte{})
+		assert.Nil(t, err)
+
+		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		assert.Nil(t, err)
+	})
+
+	t.Run("process SyncedResources in managed mode", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		res := resources.ResourceKey{
+			Name:      "sample",
+			Namespace: "test",
+			Kind:      "Application",
+		}
+		ev, err := a.emitter.SyncedResourceEvent(res)
+		assert.Nil(t, err)
+
+		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		assert.NotNil(t, err)
+	})
+
+	t.Run("discard SyncedResources in autonomous mode", func(t *testing.T) {
+		a.mode = types.AgentModeAutonomous
+
+		ev, err := a.emitter.SyncedResourceEvent(resources.ResourceKey{})
+		assert.Nil(t, err)
+
+		expected := "agent can only handle SyncedResource request in the managed mode"
+		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		assert.Equal(t, expected, err.Error())
+	})
+
+	t.Run("process request update in autonomous mode", func(t *testing.T) {
+		a.mode = types.AgentModeAutonomous
+
+		update := &event.RequestUpdate{
+			Name: "test",
+			Kind: "Application",
+		}
+		ev, err := a.emitter.RequestUpdateEvent(update)
+		assert.Nil(t, err)
+
+		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		assert.NotNil(t, err)
+	})
+
+	t.Run("discard request update in managed mode", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		update := &event.RequestUpdate{}
+		ev, err := a.emitter.RequestUpdateEvent(update)
+		assert.Nil(t, err)
+
+		expected := "agent can only handle RequestUpdate in the autonomous mode"
+		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		assert.Equal(t, expected, err.Error())
+	})
+
+	t.Run("process RequestResourceResync in managed mode", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		ev, err := a.emitter.RequestResourceResyncEvent()
+		assert.Nil(t, err)
+
+		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		assert.Nil(t, err)
+	})
+
+	t.Run("discard RequestResourceResync in autonomous mode", func(t *testing.T) {
+		a.mode = types.AgentModeAutonomous
+
+		ev, err := a.emitter.RequestResourceResyncEvent()
+		assert.Nil(t, err)
+
+		expected := "agent can only handle ResourceResync request in the managed mode"
+		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		assert.Equal(t, expected, err.Error())
+	})
 }
