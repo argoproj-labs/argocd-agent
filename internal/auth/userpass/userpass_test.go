@@ -15,6 +15,7 @@
 package userpass
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -59,7 +60,7 @@ func Test_Authenticate(t *testing.T) {
 		creds := make(auth.Credentials)
 		creds[ClientIDField] = "user1"
 		creds[ClientSecretField] = "password"
-		clientID, err := a.Authenticate(creds)
+		clientID, err := a.Authenticate(context.TODO(), creds)
 		assert.Equal(t, "user1", clientID)
 		assert.NoError(t, err)
 	})
@@ -69,7 +70,7 @@ func Test_Authenticate(t *testing.T) {
 		creds := make(auth.Credentials)
 		creds[ClientIDField] = "user2"
 		creds[ClientSecretField] = "password"
-		clientID, err := a.Authenticate(creds)
+		clientID, err := a.Authenticate(context.TODO(), creds)
 		assert.Empty(t, clientID)
 		assert.Error(t, err)
 	})
@@ -78,7 +79,7 @@ func Test_Authenticate(t *testing.T) {
 		creds := make(auth.Credentials)
 		creds[ClientIDField] = "user1"
 		creds[ClientSecretField] = "wordpass"
-		clientID, err := a.Authenticate(creds)
+		clientID, err := a.Authenticate(context.TODO(), creds)
 		assert.Empty(t, clientID)
 		assert.Error(t, err)
 	})
@@ -86,7 +87,7 @@ func Test_Authenticate(t *testing.T) {
 	t.Run("Missing password", func(t *testing.T) {
 		creds := make(auth.Credentials)
 		creds[ClientIDField] = "user1"
-		clientID, err := a.Authenticate(creds)
+		clientID, err := a.Authenticate(context.TODO(), creds)
 		assert.Empty(t, clientID)
 		assert.Error(t, err)
 	})
@@ -94,7 +95,7 @@ func Test_Authenticate(t *testing.T) {
 	t.Run("Missing username", func(t *testing.T) {
 		creds := make(auth.Credentials)
 		creds[ClientSecretField] = "password"
-		clientID, err := a.Authenticate(creds)
+		clientID, err := a.Authenticate(context.TODO(), creds)
 		assert.Empty(t, clientID)
 		assert.Error(t, err)
 	})

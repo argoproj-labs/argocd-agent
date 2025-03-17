@@ -97,7 +97,13 @@ spec:
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: principal.tls.client-cert.match-subject
+                key: principal.tls.client-cert.require
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.tls.server.root-ca-path
                 optional: true
           - name: ARGOCD_PRINCIPAL_TLS_CLIENT_CERT_MATCH_SUBJECT
             valueFrom:
@@ -117,11 +123,11 @@ spec:
                 name: argocd-agent-params
                 key: principal.jwt.key-path
                 optional: true
-          - name: ARGOCD_PRINCIPAL_USER_DB_PATH
+          - name: ARGOCD_PRINCIPAL_AUTH
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: principal.user-db.path
+                key: principal.auth
                 optional: true
 
           image: ghcr.io/argoproj-labs/argocd-agent/argocd-agent-principal:latest

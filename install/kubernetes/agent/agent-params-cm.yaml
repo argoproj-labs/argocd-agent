@@ -8,9 +8,13 @@ data:
   # Default: "autonomous"
   agent.mode: "autonomous"
   # agent.creds: Valid credential identifier for this agent. Must be in the
-  # format <method>:<configuration>.
+  # format <method>:<configuration>. Valid values are:
+  # - "userpass:_path_to_encrypted_creds_" where _path_to_encrypted_creds_ is
+  #   the path to the file containing encrypted credential for authenticatiion.
+  # - "mtls:_agent_id_regex_" where _agent_id_regex_ is the regex pattern for
+  #   extracting the agent ID from client cert subject.
   # Default: ""
-  agent.creds.userpass.path: "userpass:/app/config/creds/userpass.creds"
+  agent.creds: "userpass:/app/config/creds/userpass.creds"
   # agent.tls.client.insecure: Whether to skip the validation of the remote TLS
   # credentials. Insecure. Do only use for development purposes.
   # Default: false

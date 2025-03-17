@@ -79,7 +79,7 @@ spec:
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: agent.creds.userpass.path
+                key: agent.creds
                 optional: true
           - name: ARGOCD_AGENT_METRICS_PORT
             valueFrom:
