@@ -16,6 +16,7 @@ package userpass
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -73,7 +74,7 @@ func NewUserPassAuthentication(path string) *UserPassAuthentication {
 }
 
 // Authenticate takes the credentials in creds and tries to authenticate them.
-func (a *UserPassAuthentication) Authenticate(creds auth.Credentials) (clientID string, autherr error) {
+func (a *UserPassAuthentication) Authenticate(ctx context.Context, creds auth.Credentials) (clientID string, autherr error) {
 	incomingUsername, ok := creds[ClientIDField]
 	if !ok {
 		return "", fmt.Errorf("username is missing from credentials")

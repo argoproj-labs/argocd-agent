@@ -48,7 +48,7 @@ func Test_Authenticate(t *testing.T) {
 	t.Run("Authentication successful", func(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
-		am.On("Authenticate", mock.Anything).Return("user1", nil)
+		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
 		ams.RegisterMethod("userpass", am)
 
 		iss := issuermock.NewIssuer(t)
@@ -71,7 +71,7 @@ func Test_Authenticate(t *testing.T) {
 	t.Run("Wrong credentials", func(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
-		am.On("Authenticate", mock.Anything).Return("", errAuthenticationFailed)
+		am.On("Authenticate", mock.Anything, mock.Anything).Return("", errAuthenticationFailed)
 		ams.RegisterMethod("userpass", am)
 		auths, err := NewServer(queues, ams, nil)
 		require.NoError(t, err)
@@ -86,7 +86,7 @@ func Test_Authenticate(t *testing.T) {
 	t.Run("Error issuing an access token", func(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
-		am.On("Authenticate", mock.Anything).Return("user1", nil)
+		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
 		ams.RegisterMethod("userpass", am)
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("", fmt.Errorf("oops"))
@@ -103,7 +103,7 @@ func Test_Authenticate(t *testing.T) {
 	t.Run("Error issuing an refresh token", func(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
-		am.On("Authenticate", mock.Anything).Return("user1", nil)
+		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
 		ams.RegisterMethod("userpass", am)
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
