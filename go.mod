@@ -3,7 +3,7 @@ module github.com/argoproj-labs/argocd-agent
 go 1.23.0
 
 require (
-	github.com/argoproj/argo-cd/v2 v2.14.5
+	github.com/argoproj/argo-cd/v2 v2.14.6
 	github.com/argoproj/gitops-engine v0.7.1-0.20250304190342-43fce7ce19f1
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.15.2
 	github.com/cloudevents/sdk-go/v2 v2.15.2
