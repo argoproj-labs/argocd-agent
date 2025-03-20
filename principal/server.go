@@ -308,7 +308,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	// Instantiate the cluster manager to handle Argo CD cluster secrets for
 	// agents.
-	s.clusterMgr, err = cluster.NewManager(s.ctx, s.namespace, s.kubeClient.Clientset)
+	s.clusterMgr, err = cluster.NewManager(s.ctx, s.namespace, s.options.redisAddress, s.options.redisCompressionType, s.kubeClient.Clientset)
 	if err != nil {
 		return nil, err
 	}

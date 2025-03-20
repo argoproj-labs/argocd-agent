@@ -16,9 +16,25 @@
 set -ex -o pipefail
 ARGS=$*
 if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^vcluster-control-plane$'; then
-    echo "kube context vcluster-agent-autonomous is not configured; missing setup?" >&2
+    echo "kube context vcluster-control-plane is not configured; missing setup?" >&2
     exit 1
 fi
+
+if test "${ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS}" = ""; then
+       ipaddr=$(kubectl --context vcluster-control-plane -n argocd get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+       hostname=$(kubectl --context vcluster-control-plane -n argocd get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+       if test "$ipaddr" != ""; then
+               ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS=$ipaddr:6379
+       elif test "$hostname" != ""; then
+               ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS=$hostname:6379
+       else
+               echo "Could not determine Redis server address." >&2
+               echo "Please set ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS manually" >&2
+               exit 1
+       fi
+       export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS
+fi
+
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 go run github.com/argoproj-labs/argocd-agent/cmd/principal \
 	--allowed-namespaces '*' \

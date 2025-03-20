@@ -16,7 +16,7 @@
 set -ex -o pipefail
 ARGS=$*
 if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^vcluster-agent-managed$'; then
-    echo "kube context vcluster-agent-autonomous is not configured; missing setup?" >&2
+    echo "kube context vcluster-agent-managed is not configured; missing setup?" >&2
     exit 1
 fi
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"

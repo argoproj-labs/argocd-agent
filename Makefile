@@ -49,7 +49,7 @@ start-e2e2: cli install-goreman
 
 .PHONY: test-e2e2
 test-e2e2:
-	go test -count=1 -v -race -timeout 30m github.com/argoproj-labs/argocd-agent/test/e2e2
+	./test/run-e2e.sh
 
 .PHONY: test
 test:
