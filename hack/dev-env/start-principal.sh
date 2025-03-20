@@ -43,4 +43,4 @@ go run github.com/argoproj-labs/argocd-agent/cmd/principal \
 	--kubecontext vcluster-control-plane \
 	--log-level trace \
 	--namespace argocd \
-	--passwd ${SCRIPTPATH}/creds/users.control-plane $ARGS
+	--auth "userpass:${SCRIPTPATH}/creds/users.control-plane" $ARGS

@@ -208,6 +208,8 @@ func parseCreds(credStr string) (string, auth.Credentials, error) {
 			return "", nil, err
 		}
 		return "userpass", creds, nil
+	case "mtls":
+		return "mtls", auth.Credentials{}, nil
 	default:
 		return "", nil, fmt.Errorf("unknown auth method: %s", p[0])
 	}
