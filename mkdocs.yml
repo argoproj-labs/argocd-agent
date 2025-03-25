@@ -7,12 +7,15 @@ theme:
     primary: teal
   logo: assets/logo.png
   favicon: "assets/favicon.png"
+  features:
+  - content.code.copy
 markdown_extensions: 
 - codehilite
 - admonition
 - tables
 - toc:
     permalink: true
+    toc_depth: 3
 nav:
   - Overview: index.md
   - Features:

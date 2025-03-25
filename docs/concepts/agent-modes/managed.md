@@ -29,6 +29,6 @@ Changes to `Application` resources on the workload cluster that are not originat
 ## Why not chose this mode
 
 * Very limited support for the app-of-apps pattern
-* In the case the control plane cluster is compromised, it will affect workload clusters in managed mode, too
+* In the case the control plane cluster is compromised, it may affect workload clusters in managed mode, too
 * As noted [previously](#architectural-considerations), the control plane cluster might become a SPoF
 
