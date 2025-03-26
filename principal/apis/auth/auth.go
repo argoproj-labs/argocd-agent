@@ -111,7 +111,7 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 		logCtx.Info("unknown authentication method")
 		return nil, errAuthenticationFailed
 	}
-	clientID, err := am.Authenticate(ar.Credentials)
+	clientID, err := am.Authenticate(ctx, ar.Credentials)
 	if clientID == "" || err != nil {
 		logCtx.WithError(err).WithField("client", clientID).Info("client authentication failed")
 		return nil, errAuthenticationFailed

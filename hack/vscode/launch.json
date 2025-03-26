@@ -14,7 +14,7 @@
                 "--insecure-jwt-generate",
                 "--kubecontext=vcluster-control-plane",
                 "--log-level=trace",
-                "--passwd=${workspaceFolder}/hack/demo-env/creds/users.control-plane"
+                "--auth=userpass:${workspaceFolder}/hack/demo-env/creds/users.control-plane"
             ]
         },
         {

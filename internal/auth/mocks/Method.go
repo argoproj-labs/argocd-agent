@@ -3,7 +3,10 @@
 package mocks
 
 import (
+	context "context"
+
 	auth "github.com/argoproj-labs/argocd-agent/internal/auth"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -20,9 +23,9 @@ func (_m *Method) EXPECT() *Method_Expecter {
 	return &Method_Expecter{mock: &_m.Mock}
 }
 
-// Authenticate provides a mock function with given fields: credentials
-func (_m *Method) Authenticate(credentials auth.Credentials) (string, error) {
-	ret := _m.Called(credentials)
+// Authenticate provides a mock function with given fields: ctx, credentials
+func (_m *Method) Authenticate(ctx context.Context, credentials auth.Credentials) (string, error) {
+	ret := _m.Called(ctx, credentials)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Authenticate")
@@ -30,17 +33,17 @@ func (_m *Method) Authenticate(credentials auth.Credentials) (string, error) {
 
 	var r0 string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(auth.Credentials) (string, error)); ok {
-		return rf(credentials)
+	if rf, ok := ret.Get(0).(func(context.Context, auth.Credentials) (string, error)); ok {
+		return rf(ctx, credentials)
 	}
-	if rf, ok := ret.Get(0).(func(auth.Credentials) string); ok {
-		r0 = rf(credentials)
+	if rf, ok := ret.Get(0).(func(context.Context, auth.Credentials) string); ok {
+		r0 = rf(ctx, credentials)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(auth.Credentials) error); ok {
-		r1 = rf(credentials)
+	if rf, ok := ret.Get(1).(func(context.Context, auth.Credentials) error); ok {
+		r1 = rf(ctx, credentials)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -54,14 +57,15 @@ type Method_Authenticate_Call struct {
 }
 
 // Authenticate is a helper method to define mock.On call
+//   - ctx context.Context
 //   - credentials auth.Credentials
-func (_e *Method_Expecter) Authenticate(credentials interface{}) *Method_Authenticate_Call {
-	return &Method_Authenticate_Call{Call: _e.mock.On("Authenticate", credentials)}
+func (_e *Method_Expecter) Authenticate(ctx interface{}, credentials interface{}) *Method_Authenticate_Call {
+	return &Method_Authenticate_Call{Call: _e.mock.On("Authenticate", ctx, credentials)}
 }
 
-func (_c *Method_Authenticate_Call) Run(run func(credentials auth.Credentials)) *Method_Authenticate_Call {
+func (_c *Method_Authenticate_Call) Run(run func(ctx context.Context, credentials auth.Credentials)) *Method_Authenticate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(auth.Credentials))
+		run(args[0].(context.Context), args[1].(auth.Credentials))
 	})
 	return _c
 }
@@ -71,7 +75,7 @@ func (_c *Method_Authenticate_Call) Return(_a0 string, _a1 error) *Method_Authen
 	return _c
 }
 
-func (_c *Method_Authenticate_Call) RunAndReturn(run func(auth.Credentials) (string, error)) *Method_Authenticate_Call {
+func (_c *Method_Authenticate_Call) RunAndReturn(run func(context.Context, auth.Credentials) (string, error)) *Method_Authenticate_Call {
 	_c.Call.Return(run)
 	return _c
 }

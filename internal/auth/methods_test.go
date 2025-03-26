@@ -15,6 +15,7 @@
 package auth
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,7 @@ import (
 
 type mockAuth struct{}
 
-func (a *mockAuth) Authenticate(creds Credentials) (string, error) {
+func (a *mockAuth) Authenticate(ctx context.Context, creds Credentials) (string, error) {
 	return "some", nil
 }
 

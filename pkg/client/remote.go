@@ -174,6 +174,8 @@ func WithRootAuthoritiesFromFile(caPath string) RemoteOption {
 			return fmt.Errorf("invalid PEM data in %s", caPath)
 		}
 		r.tlsConfig.RootCAs = pool
+		//nolint:staticcheck
+		log().Infof("Loaded %d cert(s) into the root CA pool", len(r.tlsConfig.RootCAs.Subjects()))
 		return nil
 	}
 }

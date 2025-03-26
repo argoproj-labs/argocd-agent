@@ -73,6 +73,12 @@ data:
   # principal.jwt.key-path: Path to the private key to be used for signing JWT
   # tokens.
   principal.jwt.key-path: "/app/config/jwt/jwt.key"
-  # principal.user-db.path: Path to the file containing encrypted credentials
-  # for authenticating agent connections.
-  principal.user-db.path: "/app/config/userpass/passwd"
+  # principal.auth: The authentication method. Must be in the
+  # format <method>:<configuration>. Valid values are:
+  # - "userpass:_path_to_encrypted_creds_" where _path_to_encrypted_creds_ is
+  #   the path to the file containing encrypted credentials for authenticating
+  #   agent connections.
+  # - "mtls:_agent_id_regex_" where _agent_id_regex_ is the regex pattern for
+  #   extracting the agent ID from client cert subject.
+  # Default: userpass:_path_to_encrypted_creds_
+  principal.auth: "userpass:/app/config/userpass/passwd"

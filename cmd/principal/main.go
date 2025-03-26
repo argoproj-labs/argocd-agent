@@ -21,11 +21,14 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"regexp"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/auth/mtls"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
@@ -55,7 +58,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		jwtKey                 string
 		allowTlsGenerate       bool
 		allowJwtGenerate       bool
-		userDB                 string
+		authMethod             string
 		rootCaPath             string
 		requireClientCerts     bool
 		clientCertSubjectMatch bool
@@ -171,16 +174,33 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			authMethods := auth.NewMethods()
-			userauth := userpass.NewUserPassAuthentication(userDB)
-
-			if userDB != "" {
-				err = userauth.LoadAuthDataFromFile(userDB)
+			authMethod, authConfig, err := parseAuth(authMethod)
+			if err != nil {
+				cmdutil.Fatal("Could not parse auth: %v", err)
+			}
+			if authMethod == "mtls" {
+				var regex *regexp.Regexp
+				if authConfig != "" {
+					regex, err = regexp.Compile(authConfig)
+					if err != nil {
+						cmdutil.Fatal("Error compiling mtls agent id regex: %v", err)
+					}
+				}
+				mtlsauth := mtls.NewMTLSAuthentication(regex)
+				err := authMethods.RegisterMethod("mtls", mtlsauth)
+				if err != nil {
+					cmdutil.Fatal("Could not register mtls auth method: %v", err)
+				}
+				opts = append(opts, principal.WithAuthMethods(authMethods))
+			} else {
+				userauth := userpass.NewUserPassAuthentication(authConfig)
+				err = userauth.LoadAuthDataFromFile(authConfig)
 				if err != nil {
 					cmdutil.Fatal("Could not load user database: %v", err)
 				}
 				err = authMethods.RegisterMethod("userpass", userauth)
 				if err != nil {
-					cmdutil.Fatal("Could not register userpass auth method")
+					cmdutil.Fatal("Could not register userpass auth method: %v", err)
 				}
 				opts = append(opts, principal.WithAuthMethods(authMethods))
 			}
@@ -278,9 +298,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_JWT_ALLOW_GENERATE", false),
 		"INSECURE: Generate and use temporary JWT signing key")
 
-	command.Flags().StringVar(&userDB, "passwd",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_USER_DB_PATH", nil, ""),
-		"Path to userpass passwd file")
+	command.Flags().StringVar(&authMethod, "auth",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_AUTH", nil, ""),
+		"Authentication method and the corresponding configuration")
 
 	command.Flags().BoolVar(&enableWebSocket, "enable-websocket",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET", false),
@@ -374,6 +394,23 @@ func getResourceProxyTLSConfigFromFiles(certPath, keyPath, caPath string) (*tls.
 	}
 
 	return proxyTls, nil
+}
+
+// parseAuth parses an authentication string and extracts the authentication method
+// and its associated configuration.
+func parseAuth(authStr string) (string, string, error) {
+	p := strings.SplitN(authStr, ":", 2)
+	if len(p) < 2 {
+		return "", "", fmt.Errorf("invalid auth string")
+	}
+	switch p[0] {
+	case "userpass":
+		return "userpass", p[1], nil
+	case "mtls":
+		return "mtls", p[1], nil
+	default:
+		return "", "", fmt.Errorf("unknown auth method: %s", p[0])
+	}
 }
 
 func main() {
