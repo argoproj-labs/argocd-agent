@@ -2,6 +2,8 @@ module github.com/argoproj-labs/argocd-agent
 
 go 1.23.0
 
+toolchain go1.24.1
+
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/argoproj/argo-cd/v2 v2.14.8
@@ -18,7 +20,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/wI2L/jsondiff v0.6.1
 	golang.org/x/crypto v0.36.0
-	golang.org/x/net v0.37.0
+	golang.org/x/net v0.38.0
 	golang.org/x/sync v0.12.0
 	golang.org/x/term v0.30.0
 	golang.stackrox.io/grpc-http1 v0.4.0
