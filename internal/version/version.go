@@ -21,9 +21,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const version = "99.9.9-unreleased"
-const gitRevision = "unknown"
-const gitStatus = "unknown"
+var version = "99.9.9-unreleased"
+var gitRevision = "unknown"
+var gitStatus = "unknown"
 
 type versionInformation struct {
 	Name        string `json:"name"`
