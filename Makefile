@@ -17,6 +17,7 @@ BIN_NAME_PRINCIPAL=argocd-agent-principal
 BIN_NAME_CLI=argocd-agentctl
 BIN_ARCH?=$(shell go env GOARCH)
 BIN_OS?=$(shell go env GOOS)
+LDFLAGS?=
 
 current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BIN_DIR := $(current_dir)/build/bin
@@ -27,6 +28,15 @@ GOLANG_CI_LINT_VERSION=v1.62.0
 MOCKERY_V2_VERSION?=v2.43.0
 
 GO_BIN_DIR=$(shell go env GOPATH)/bin
+
+GIT_COMMIT=$(shell git rev-parse HEAD)
+VERSION=$(shell cat VERSION)
+
+VERSION_PACKAGE=github.com/argoproj-labs/argocd-agent/internal/version
+override LDFLAGS += -extldflags "-static"
+override LDFLAGS += \
+        -X ${VERSION_PACKAGE}.version=${VERSION} \
+        -X ${VERSION_PACKAGE}.gitRevision=${GIT_COMMIT}
 
 all: build
 
@@ -142,15 +152,15 @@ lint: install-lint-toolchain
 
 .PHONY: agent
 agent:
-	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_AGENT) -ldflags="-extldflags=-static" ./cmd/agent
+	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_AGENT) -ldflags '$(LDFLAGS)' ./cmd/agent
 
 .PHONY: principal
 principal:
-	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_PRINCIPAL) -ldflags="-extldflags=-static" ./cmd/principal
+	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_PRINCIPAL) -ldflags '$(LDFLAGS)' ./cmd/principal
 
 .PHONY: cli
 cli:
-	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_CLI) -ldflags="-extldflags=-static" ./cmd/ctl
+	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_CLI) -ldflags '$(LDFLAGS)' ./cmd/ctl
 
 .PHONY: images
 images: image-agent image-principal
