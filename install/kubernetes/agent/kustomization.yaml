@@ -4,3 +4,9 @@ resources:
 - agent-rolebinding.yaml
 - agent-deployment.yaml
 - agent-params-cm.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+- name: ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent
+  newName: quay.io/argoprojlabs/argocd-agent-agent
+  newTag: v0.1.0

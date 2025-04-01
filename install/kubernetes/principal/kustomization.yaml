@@ -7,3 +7,9 @@ resources:
 - principal-deployment.yaml
 - principal-service.yaml
 - principal-params-cm.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+- name: ghcr.io/argoproj-labs/argocd-agent/argocd-agent-principal
+  newName: quay.io/argoprojlabs/argocd-agent-principal
+  newTag: v0.1.0
