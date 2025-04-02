@@ -2,6 +2,8 @@ module github.com/argoproj-labs/argocd-agent
 
 go 1.23.0
 
+toolchain go1.24.1
+
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/argoproj/argo-cd/v2 v2.14.8
@@ -23,7 +25,7 @@ require (
 	golang.org/x/term v0.30.0
 	golang.stackrox.io/grpc-http1 v0.4.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20250106144421-5f5ef82da422
-	google.golang.org/grpc v1.71.0
+	google.golang.org/grpc v1.71.1
 	google.golang.org/protobuf v1.36.6
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
