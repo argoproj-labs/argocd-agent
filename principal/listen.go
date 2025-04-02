@@ -38,6 +38,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/version"
 	grpchttp1server "golang.stackrox.io/grpc-http1/server"
+	_ "google.golang.org/grpc/encoding/gzip"
 )
 
 const listenerRetries = 5

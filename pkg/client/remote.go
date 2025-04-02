@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -66,19 +67,20 @@ func NewToken(tok string) (*token, error) {
 
 // Remote represents a remote argocd-agent server component. Remote is used only by the agent component, and not by principal.
 type Remote struct {
-	hostname        string
-	port            int
-	tlsConfig       *tls.Config
-	accessToken     *token
-	refreshToken    *token
-	authMethod      string
-	creds           auth.Credentials
-	backoff         wait.Backoff
-	conn            *grpc.ClientConn
-	clientID        string
-	clientMode      types.AgentMode
-	timeouts        timeouts
-	enableWebSocket bool
+	hostname          string
+	port              int
+	tlsConfig         *tls.Config
+	accessToken       *token
+	refreshToken      *token
+	authMethod        string
+	creds             auth.Credentials
+	backoff           wait.Backoff
+	conn              *grpc.ClientConn
+	clientID          string
+	clientMode        types.AgentMode
+	timeouts          timeouts
+	enableWebSocket   bool
+	enableCompression bool
 
 	// Time interval for agent to principal ping
 	keepAlivePingInterval time.Duration
@@ -220,6 +222,13 @@ func WithKeepAlivePingInterval(interval time.Duration) RemoteOption {
 	}
 }
 
+func WithCompression(flag bool) RemoteOption {
+	return func(r *Remote) error {
+		r.enableCompression = flag
+		return nil
+	}
+}
+
 func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error) {
 	r := &Remote{
 		hostname:  hostname,
@@ -316,6 +325,11 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		grpc.WithStreamInterceptor(r.streamAuthInterceptor),
 	}
 
+	if r.enableCompression {
+		log().Debug("gRPC compression is enabled.")
+		opts = append(opts, grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)))
+	}
+
 	var (
 		conn *grpc.ClientConn
 		err  error
@@ -334,7 +348,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		opts = append(opts, grpc.WithTransportCredentials(creds))
 
 		if r.keepAlivePingInterval != 0 {
-			logrus.Debugf("Agent ping to principal is enabled, agent will send a ping event after every %s.", r.keepAlivePingInterval)
+			log().Debugf("Agent ping to principal is enabled, agent will send a ping event after every %s.", r.keepAlivePingInterval)
 			opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: r.keepAlivePingInterval}))
 		}
 

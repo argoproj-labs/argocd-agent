@@ -30,4 +30,5 @@ go run github.com/argoproj-labs/argocd-agent/cmd/agent \
     --namespace argocd \
     --log-level trace $ARGS \
     --metrics-port 8182 \
+    #--enable-compression true
     #--keep-alive-ping-interval 15m
