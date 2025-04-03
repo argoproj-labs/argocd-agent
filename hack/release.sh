@@ -66,6 +66,8 @@ echo "*** generating new manifests"
 	kustomize edit set image ghcr.io/argoproj-labs/argocd-agent/argocd-agent-principal=quay.io/argoprojlabs/argocd-agent-principal:${TARGET_TAG}
 )
 
+echo "*** committing changes to release branch"
+
 git add VERSION install/kubernetes/{agent,principal}/kustomization.yaml
 git commit -S -s -m "release: Publish release ${TARGET_VERSION}"
 
