@@ -71,10 +71,14 @@ echo "*** committing changes to release branch"
 git add VERSION install/kubernetes/{agent,principal}/kustomization.yaml
 git commit -S -s -m "release: Publish release ${TARGET_VERSION}"
 
+echo "*** building release images"
+
 for component in agent principal; do
 	export IMAGE_REPOSITORY="quay.io/argoprojlabs"
 	make image-${component}
 done
+
+echo "*** creating release tag"
 
 git tag ${TARGET_TAG}
 
