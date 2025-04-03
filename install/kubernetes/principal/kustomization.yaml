@@ -12,4 +12,4 @@ kind: Kustomization
 images:
 - name: ghcr.io/argoproj-labs/argocd-agent/argocd-agent-principal
   newName: quay.io/argoprojlabs/argocd-agent-principal
-  newTag: v0.1.0
+  newTag: v0.1.1
