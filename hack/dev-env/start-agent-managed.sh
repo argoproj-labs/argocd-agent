@@ -29,4 +29,5 @@ go run github.com/argoproj-labs/argocd-agent/cmd/agent \
     --kubecontext vcluster-agent-managed \
     --namespace agent-managed \
     --log-level trace $ARGS \
+    #--enable-compression true
     #--keep-alive-ping-interval 15m

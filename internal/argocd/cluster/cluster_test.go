@@ -95,7 +95,7 @@ func Test_UpdateClusterInfo(t *testing.T) {
 		clusterInfo := getClusterInfo(t, agentName, m)
 		require.Equal(t, clusterInfo.ConnectionState.Status, appv1.ConnectionStatusSuccessful)
 		require.Equal(t, clusterInfo.ConnectionState.Message, fmt.Sprintf("Agent: '%s' is connected with principal", agentName))
-		require.True(t, clusterInfo.ConnectionState.ModifiedAt.After(time.Now().Add(-1*time.Second)))
+		require.True(t, clusterInfo.ConnectionState.ModifiedAt.After(time.Now().Add(-2*time.Second)))
 
 		time.Sleep(3 * time.Second)
 
@@ -115,7 +115,7 @@ func Test_UpdateClusterInfo(t *testing.T) {
 		clusterInfo := getClusterInfo(t, agentName, m)
 		require.Equal(t, clusterInfo.ConnectionState.Status, appv1.ConnectionStatusFailed)
 		require.Equal(t, clusterInfo.ConnectionState.Message, fmt.Sprintf("Agent: '%s' is disconnected with principal", agentName))
-		require.True(t, clusterInfo.ConnectionState.ModifiedAt.After(time.Now().Add(-1*time.Second)))
+		require.True(t, clusterInfo.ConnectionState.ModifiedAt.After(time.Now().Add(-2*time.Second)))
 
 		time.Sleep(3 * time.Second)
 

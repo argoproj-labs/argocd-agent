@@ -37,23 +37,24 @@ import (
 
 func NewAgentRunCommand() *cobra.Command {
 	var (
-		serverAddress   string
-		serverPort      int
-		logLevel        string
-		logFormat       string
-		insecure        bool
-		rootCAPath      string
-		kubeConfig      string
-		kubeContext     string
-		namespace       string
-		agentMode       string
-		creds           string
-		showVersion     bool
-		versionFormat   string
-		tlsClientCrt    string
-		tlsClientKey    string
-		enableWebSocket bool
-		metricsPort     int
+		serverAddress     string
+		serverPort        int
+		logLevel          string
+		logFormat         string
+		insecure          bool
+		rootCAPath        string
+		kubeConfig        string
+		kubeContext       string
+		namespace         string
+		agentMode         string
+		creds             string
+		showVersion       bool
+		versionFormat     string
+		tlsClientCrt      string
+		tlsClientKey      string
+		enableWebSocket   bool
+		metricsPort       int
+		enableCompression bool
 
 		// Time interval for agent to principal ping
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
@@ -107,6 +108,7 @@ func NewAgentRunCommand() *cobra.Command {
 			remoteOpts = append(remoteOpts, client.WithWebSocket(enableWebSocket))
 			remoteOpts = append(remoteOpts, client.WithClientMode(types.AgentModeFromString(agentMode)))
 			remoteOpts = append(remoteOpts, client.WithKeepAlivePingInterval(keepAlivePingInterval))
+			remoteOpts = append(remoteOpts, client.WithCompression(enableCompression))
 
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
 				remote, err = client.NewRemote(serverAddress, serverPort, remoteOpts...)
@@ -186,6 +188,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&keepAlivePingInterval, "keep-alive-ping-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_KEEP_ALIVE_PING_INTERVAL", nil, 0),
 		"Ping interval to keep connection alive with Principal")
+	command.Flags().BoolVar(&enableCompression, "enable-compression",
+		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_COMPRESSION", false),
+		"Use compression while sending data between Principal and Agent using gRPC")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
