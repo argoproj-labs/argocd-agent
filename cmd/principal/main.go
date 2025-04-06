@@ -35,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/principal"
 	cacheutil "github.com/argoproj/argo-cd/v2/util/cache"
 
@@ -71,6 +72,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		resourceProxyCertPath  string
 		resourceProxyKeyPath   string
 		resourceProxyCAPath    string
+		showVersion            bool
+		versionFormat          string
 
 		// Minimum time duration for agent to wait before sending next keepalive ping to principal
 		// if agent sends ping more often than specified interval then connection will be dropped
@@ -83,6 +86,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 	var command = &cobra.Command{
 		Short: "Run the argocd-agent principal component",
 		Run: func(c *cobra.Command, args []string) {
+			if showVersion {
+				cmdutil.PrintVersion(version.New("argocd-agent", "principal"), versionFormat)
+				os.Exit(0)
+			}
+
 			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
 
@@ -322,6 +330,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
 	command.Flags().BoolVar(&enablePprof, "enable-pprof", false, "Enable pprof server")
+	command.Flags().BoolVar(&showVersion, "version", false, "Display version information and exit")
+	command.Flags().StringVar(&versionFormat, "version-format", "text", "Output version information in format: text, json, json-indent")
 
 	return command
 
