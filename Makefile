@@ -48,7 +48,7 @@ fmt:
 build: agent principal cli
 
 .PHONY: setup-e2e2
-setup-e2e2:
+setup-e2e2: cli
 	./hack/dev-env/setup-vcluster-env.sh create
 	./hack/dev-env/gen-creds.sh
 	./hack/dev-env/create-agent-config.sh
