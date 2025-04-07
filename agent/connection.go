@@ -39,8 +39,8 @@ func (a *Agent) maintainConnection() error {
 				if err != nil {
 					log().Warnf("Could not connect to %s: %v", a.remote.Addr(), err)
 				} else {
-					if !a.queues.HasQueuePair(a.remote.ClientID()) {
-						err = a.queues.Create(a.remote.ClientID())
+					if !a.queues.HasQueuePair(defaultQueueName) {
+						err = a.queues.Create(defaultQueueName)
 						if err != nil {
 							log().Warnf("Could not create agent queue pair: %v", err)
 							continue
@@ -67,9 +67,9 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 		"client_addr": grpcutil.AddressFromContext(stream.Context()),
 	})
 
-	q := a.queues.SendQ(a.remote.ClientID())
+	q := a.queues.SendQ(defaultQueueName)
 	if q == nil {
-		return fmt.Errorf("no send queue found for the remote principal")
+		return fmt.Errorf("no send queue found for the default queue pair")
 	}
 	// Get() is blocking until there is at least one item in the
 	// queue.
@@ -149,9 +149,9 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 	}
 
 	// Send an ACK if the event is processed successfully.
-	sendQ := a.queues.SendQ(a.remote.ClientID())
+	sendQ := a.queues.SendQ(defaultQueueName)
 	if sendQ == nil {
-		return fmt.Errorf("no send queue found for the remote principal")
+		return fmt.Errorf("no send queue found for the default queue pair")
 	}
 	sendQ.Add(a.emitter.ProcessedEvent(event.EventProcessed, ev))
 	logCtx.Trace("Sent an ACK for an event")
@@ -248,9 +248,9 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 		return nil
 	}
 
-	sendQ := a.queues.SendQ(a.remote.ClientID())
+	sendQ := a.queues.SendQ(defaultQueueName)
 	if sendQ == nil {
-		return fmt.Errorf("no send queue found for the remote: %s", a.remote.ClientID())
+		return fmt.Errorf("no send queue found for the default queue pair")
 	}
 
 	// Agent is the source of truth in autonomous mode. So, the agent must request resource

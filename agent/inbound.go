@@ -162,7 +162,7 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 		logCtx.Tracef("marshaled resource")
 	}
 
-	q := a.queues.SendQ(a.remote.ClientID())
+	q := a.queues.SendQ(defaultQueueName)
 	if q == nil {
 		logCtx.Error("Remote queue disappeared")
 		return nil
@@ -338,9 +338,9 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 		return err
 	}
 
-	sendQ := a.queues.SendQ(a.remote.ClientID())
+	sendQ := a.queues.SendQ(defaultQueueName)
 	if sendQ == nil {
-		return fmt.Errorf("remote queue disappeared for agent: %s", a.remote.ClientID())
+		return fmt.Errorf("send queue not found for the default queue pair")
 	}
 
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
