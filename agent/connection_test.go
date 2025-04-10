@@ -29,15 +29,12 @@ func TestResyncOnStart(t *testing.T) {
 	a.kubeClient.RestConfig = &rest.Config{}
 	logCtx := log()
 
-	err := a.queues.Create(a.remote.ClientID())
-	assert.Nil(t, err)
-
 	t.Run("should return if the agent has already been synced", func(t *testing.T) {
 		a.resyncedOnStart = true
 		err := a.resyncOnStart(logCtx)
 		assert.Nil(t, err)
 
-		sendQ := a.queues.SendQ(a.remote.ClientID())
+		sendQ := a.queues.SendQ(defaultQueueName)
 		assert.Zero(t, sendQ.Len())
 	})
 
@@ -47,7 +44,7 @@ func TestResyncOnStart(t *testing.T) {
 		err := a.resyncOnStart(logCtx)
 		assert.Nil(t, err)
 
-		sendQ := a.queues.SendQ(a.remote.ClientID())
+		sendQ := a.queues.SendQ(defaultQueueName)
 		assert.Equal(t, 1, sendQ.Len())
 
 		ev, shutdown := sendQ.Get()
@@ -63,7 +60,7 @@ func TestResyncOnStart(t *testing.T) {
 		err := a.resyncOnStart(logCtx)
 		assert.Nil(t, err)
 
-		sendQ := a.queues.SendQ(a.remote.ClientID())
+		sendQ := a.queues.SendQ(defaultQueueName)
 		assert.Equal(t, 1, sendQ.Len())
 
 		ev, shutdown := sendQ.Get()
