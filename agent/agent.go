@@ -254,6 +254,8 @@ func (a *Agent) Start(ctx context.Context) error {
 		metrics.StartMetricsServer(metrics.WithListener("", a.options.metricsPort))
 	}
 
+	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"))
+
 	// Start the Application backend in the background
 	go func() {
 		if err := a.appManager.StartBackend(a.context); err != nil {
@@ -298,8 +300,6 @@ func (a *Agent) Start(ctx context.Context) error {
 		// this.
 		_ = a.maintainConnection()
 	}
-
-	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"))
 
 	return err
 }
