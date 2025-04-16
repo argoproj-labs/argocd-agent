@@ -540,6 +540,12 @@ func NewEventWriter(target streamWriter) *EventWriter {
 	}
 }
 
+func (ew *EventWriter) UpdateTarget(target streamWriter) {
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+	ew.target = target
+}
+
 func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	resID := ResourceID(ev)
 	logCtx := ew.log.WithFields(logrus.Fields{
@@ -691,4 +697,46 @@ func (ew *EventWriter) sendEvent(resID string) {
 		logCtx.Trace("ACK is removed from the event writer")
 		isACKRemoved = true
 	}
+}
+
+// eventWritersMap provides a thread-safe way to manage event writers.
+type EventWritersMap struct {
+	mu sync.RWMutex
+
+	// key: AgentName
+	// value: EventWriter for that agent
+	// - acquire 'lock' before accessing
+	eventWriters map[string]*EventWriter
+}
+
+func NewEventWritersMap() *EventWritersMap {
+	return &EventWritersMap{
+		eventWriters: make(map[string]*EventWriter),
+	}
+}
+
+func (ewm *EventWritersMap) Get(agentName string) *EventWriter {
+	ewm.mu.RLock()
+	defer ewm.mu.RUnlock()
+
+	eventWriter, exists := ewm.eventWriters[agentName]
+	if exists {
+		return eventWriter
+	}
+
+	return nil
+}
+
+func (ewm *EventWritersMap) Add(agentName string, eventWriter *EventWriter) {
+	ewm.mu.Lock()
+	defer ewm.mu.Unlock()
+
+	ewm.eventWriters[agentName] = eventWriter
+}
+
+func (ewm *EventWritersMap) Remove(agentName string) {
+	ewm.mu.Lock()
+	defer ewm.mu.Unlock()
+
+	delete(ewm.eventWriters, agentName)
 }
