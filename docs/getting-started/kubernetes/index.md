@@ -28,6 +28,14 @@ The following Argo CD components **must not** run on the control plane cluster. 
 * `argocd-application-controller`
 * `argocd-applicationset-controller` (not yet supported)
 
+We provide a Kustomize base to install Argo CD on the principal:
+
+```shell
+# Be sure that your active context points to your control plane cluster
+kubectl create namespace argocd
+kubectl apply -n argocd -k install/argo-cd/principal
+```
+
 ### Configuring Argo CD
 
 On the control plane, Argo CD must be configured to use the [apps-in-any-namespace](https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/) pattern. The Argo CD API server needs to be able to look for Application resources in all namespaces associated with agents. It is a good idea to find a nice naming pattern for your namespaces, such as prefixing them with `agent-`. This will allow you to use a simple pattern like `agent-*` for granting access to these namespaces.
