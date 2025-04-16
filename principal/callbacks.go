@@ -259,5 +259,8 @@ func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {
 		return
 	}
 
+	// Remove eventwriter associated with this agent
+	s.eventWriters.Remove(outbound.Name)
+
 	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
 }

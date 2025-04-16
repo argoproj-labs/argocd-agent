@@ -129,6 +129,8 @@ type Server struct {
 	notifyOnConnect chan types.Agent
 	// handlers to run when an agent connects to the principal
 	handlersOnConnect []handlersOnConnect
+
+	eventWriters *event.EventWritersMap
 }
 
 type handlersOnConnect func(agent types.Agent) error
@@ -157,6 +159,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		resyncStatus:    newResyncStatus(),
 		resources:       resources.NewAgentResources(),
 		notifyOnConnect: make(chan types.Agent),
+		eventWriters:    event.NewEventWritersMap(),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
