@@ -51,52 +51,10 @@ type Server struct {
 	options *ServerOptions
 	queues  queue.QueuePair
 
-	eventWriters *eventWritersMap
+	eventWriters *event.EventWritersMap
 
 	metrics    *metrics.PrincipalMetrics
 	clusterMgr *cluster.Manager
-}
-
-// eventWritersMap provides a thread-safe way to manage event writers.
-type eventWritersMap struct {
-	mu sync.RWMutex
-
-	// key: AgentName
-	// value: EventWriter for that agent
-	// - acquire 'lock' before accessing
-	eventWriters map[string]*event.EventWriter
-}
-
-func newEventWritersMap() *eventWritersMap {
-	return &eventWritersMap{
-		eventWriters: make(map[string]*event.EventWriter),
-	}
-}
-
-func (ewm *eventWritersMap) Get(agentName string) *event.EventWriter {
-	ewm.mu.RLock()
-	defer ewm.mu.RUnlock()
-
-	eventWriter, exists := ewm.eventWriters[agentName]
-	if exists {
-		return eventWriter
-	}
-
-	return nil
-}
-
-func (ewm *eventWritersMap) Add(agentName string, eventWriter *event.EventWriter) {
-	ewm.mu.Lock()
-	defer ewm.mu.Unlock()
-
-	ewm.eventWriters[agentName] = eventWriter
-}
-
-func (ewm *eventWritersMap) Remove(agentName string) {
-	ewm.mu.Lock()
-	defer ewm.mu.Unlock()
-
-	delete(ewm.eventWriters, agentName)
 }
 
 type ServerOptions struct {
@@ -131,7 +89,7 @@ func WithNotifyOnConnect(notify chan types.Agent) ServerOption {
 }
 
 // NewServer returns a new AppStream server instance with the given options
-func NewServer(queues queue.QueuePair, metrics *metrics.PrincipalMetrics, clusterMgr *cluster.Manager, opts ...ServerOption) *Server {
+func NewServer(queues queue.QueuePair, eventWriters *event.EventWritersMap, metrics *metrics.PrincipalMetrics, clusterMgr *cluster.Manager, opts ...ServerOption) *Server {
 	options := &ServerOptions{}
 	for _, o := range opts {
 		o(options)
@@ -139,7 +97,7 @@ func NewServer(queues queue.QueuePair, metrics *metrics.PrincipalMetrics, cluste
 	return &Server{
 		queues:       queues,
 		options:      options,
-		eventWriters: newEventWritersMap(),
+		eventWriters: eventWriters,
 		metrics:      metrics,
 		clusterMgr:   clusterMgr,
 	}
@@ -183,12 +141,6 @@ func (s *Server) onDisconnect(c *client) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.end = time.Now()
-	if s.queues.HasQueuePair(c.agentName) {
-		err := s.queues.Delete(c.agentName, true)
-		if err != nil {
-			log().Warnf("Could not delete agent queue %s: %v", c.agentName, err)
-		}
-	}
 
 	s.clusterMgr.UpdateClusterConnectionInfo(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
 
@@ -295,10 +247,14 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	// Get() is blocking until there is at least one item in the
 	// queue.
 	logCtx.Tracef("Waiting to grab an item from the queue")
-	ev, shutdown := q.Get()
+	ev, shutdown := queue.GetWithContext(q, c.ctx)
 	if shutdown {
 		return fmt.Errorf("sendq shutdown in progress")
 	}
+	if c.ctx.Err() != nil {
+		return c.ctx.Err()
+	}
+
 	if ev == nil {
 		return fmt.Errorf("panic: nil item in queue")
 	}
@@ -347,8 +303,6 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		return err
 	}
 
-	s.eventWriters.Add(c.agentName, event.NewEventWriter(subs))
-
 	if s.metrics != nil {
 		// increase counter when an agent is connected with principal
 		s.metrics.AgentConnected.Inc()
@@ -358,8 +312,11 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}
 
 	eventWriter := s.eventWriters.Get(c.agentName)
-	if eventWriter == nil {
-		return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
+	if eventWriter != nil {
+		eventWriter.UpdateTarget(subs)
+	} else {
+		eventWriter = event.NewEventWriter(subs)
+		s.eventWriters.Add(c.agentName, eventWriter)
 	}
 
 	go eventWriter.SendWaitingEvents(c.ctx)
@@ -425,7 +382,6 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 
 	c.wg.Wait()
 	c.logCtx.Info("Closing EventStream")
-	s.eventWriters.Remove(c.agentName)
 
 	if s.metrics != nil {
 		// decrease counter when an agent is disconnected with principal
