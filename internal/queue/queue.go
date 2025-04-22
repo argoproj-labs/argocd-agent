@@ -15,6 +15,7 @@
 package queue
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -48,6 +49,8 @@ type queuepair struct {
 type boundedQueue struct {
 	workqueue.TypedRateLimitingInterface[*event.Event]
 	maxSize int
+
+	notify chan struct{}
 }
 
 func newBoundedQueue(maxSize int) *boundedQueue {
@@ -55,6 +58,7 @@ func newBoundedQueue(maxSize int) *boundedQueue {
 	return &boundedQueue{
 		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueue(rateLimiter),
 		maxSize:                    maxSize,
+		notify:                     make(chan struct{}, 10),
 	}
 }
 
@@ -66,6 +70,14 @@ func (bq *boundedQueue) Add(item *event.Event) {
 	}
 
 	bq.TypedRateLimitingInterface.Add(item)
+
+	// Notify any waiting goroutines that an item has been added to the queue.
+	select {
+	case bq.notify <- struct{}{}:
+	default:
+		// We don't want to block the caller if the notify channel is full.
+		return
+	}
 }
 
 type SendRecvQueues struct {
@@ -167,4 +179,27 @@ func (q *SendRecvQueues) Delete(name string, shutdown bool) error {
 	}
 	delete(q.queues, name)
 	return nil
+}
+
+// GetWithContext is a wrapper around the workqueue's Get method.
+// It waits until an item is available in the queue or the context is Done
+func GetWithContext(q workqueue.TypedRateLimitingInterface[*event.Event], ctx context.Context) (*event.Event, bool) {
+	bq, ok := q.(*boundedQueue)
+	if !ok {
+		return nil, false
+	}
+
+	for {
+		if bq.Len() > 0 {
+			return bq.Get()
+		}
+
+		// Suspend until an item is available or context is cancelled
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-bq.notify:
+			// Wake up and re-check if an item is available
+		}
+	}
 }
