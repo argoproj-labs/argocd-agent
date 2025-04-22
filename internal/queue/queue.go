@@ -49,7 +49,8 @@ type queuepair struct {
 type boundedQueue struct {
 	workqueue.TypedRateLimitingInterface[*event.Event]
 	maxSize int
-	notify  *sync.Cond
+
+	notify chan struct{}
 }
 
 func newBoundedQueue(maxSize int) *boundedQueue {
@@ -57,7 +58,7 @@ func newBoundedQueue(maxSize int) *boundedQueue {
 	return &boundedQueue{
 		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueue(rateLimiter),
 		maxSize:                    maxSize,
-		notify:                     sync.NewCond(&sync.Mutex{}),
+		notify:                     make(chan struct{}, 10),
 	}
 }
 
@@ -71,9 +72,12 @@ func (bq *boundedQueue) Add(item *event.Event) {
 	bq.TypedRateLimitingInterface.Add(item)
 
 	// Notify any waiting goroutines that an item has been added to the queue.
-	bq.notify.L.Lock()
-	defer bq.notify.L.Unlock()
-	bq.notify.Broadcast()
+	select {
+	case bq.notify <- struct{}{}:
+	default:
+		// We don't want to block the caller if the notify channel is full.
+		return
+	}
 }
 
 type SendRecvQueues struct {
@@ -177,44 +181,25 @@ func (q *SendRecvQueues) Delete(name string, shutdown bool) error {
 	return nil
 }
 
-// GetWithContext is a wrapper around the workqueue's Get method, and it
-// uses a condition variable to wait for an item to be available. It also
-// handles the case where the context is cancelled while waiting for an
-// item to be available.
+// GetWithContext is a wrapper around the workqueue's Get method.
+// It waits until an item is available in the queue or the context is Done
 func GetWithContext(q workqueue.TypedRateLimitingInterface[*event.Event], ctx context.Context) (*event.Event, bool) {
 	bq, ok := q.(*boundedQueue)
 	if !ok {
 		return nil, false
 	}
 
-	done := make(chan struct{})
-	bq.notify.L.Lock()
-	defer func() {
-		bq.notify.L.Unlock()
-		close(done)
-	}()
+	for {
+		if bq.Len() > 0 {
+			return bq.Get()
+		}
 
-	// Goroutine to signal on context cancellation
-	go func() {
+		// Suspend until an item is available or context is cancelled
 		select {
 		case <-ctx.Done():
-			bq.notify.L.Lock()
-			bq.notify.Signal()
-			bq.notify.L.Unlock()
-		case <-done:
-			// If function exits early, prevent leak
+			return nil, false
+		case <-bq.notify:
+			// Wake up and re-check if an item is available
 		}
-	}()
-
-	// Suspend until an item is available or context is cancelled
-	for q.Len() == 0 && ctx.Err() == nil {
-		bq.notify.Wait()
 	}
-
-	if ctx.Err() != nil {
-		return nil, false
-	}
-
-	ev, shutdown := bq.Get()
-	return ev, shutdown
 }
