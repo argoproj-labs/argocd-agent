@@ -59,7 +59,7 @@ func SetupToxiproxy(t require.TestingT, agentName string, proxyAddress string) (
 		RestartAgent(t, agentName)
 
 		// Give some time for the agent to be ready
-		time.Sleep(3 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 
 	return proxy, cleanup, nil
