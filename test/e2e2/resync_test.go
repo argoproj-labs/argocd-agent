@@ -15,6 +15,7 @@
 package e2e2
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -33,6 +34,12 @@ type ResyncTestSuite struct {
 func (suite *ResyncTestSuite) TearDownTest() {
 	suite.BaseSuite.TearDownTest()
 	requires := suite.Require()
+
+	if _, err := os.Stat(fixture.EnvVariablesFromE2EFile); err == nil {
+		requires.NoError(os.Remove(fixture.EnvVariablesFromE2EFile))
+		fixture.RestartAgent(suite.T(), "agent-managed")
+		fixture.RestartAgent(suite.T(), "agent-autonomous")
+	}
 
 	// Ensure that all the components are running after runnings the tests
 	if !fixture.IsProcessRunning("process") {
@@ -365,6 +372,80 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupAutonomous() {
 		return err == nil &&
 			principalApp.Spec.Source.Path == "kustomize-guestbook"
 	}, 60*time.Second, 1*time.Second)
+}
+
+func (suite *ResyncTestSuite) Test_ResyncOnConnectionLostManagedMode() {
+	requires := suite.Require()
+
+	// Setup Toxiproxy
+	proxy, cleanup, err := fixture.SetupToxiproxy(suite.T(), "agent-managed", "127.0.0.1:8475")
+	requires.NoError(err)
+	defer cleanup()
+
+	// Restart the agent process so that the agent talks to the principal via Toxiproxy
+	fixture.RestartAgent(suite.T(), "agent-managed")
+
+	// Create a managed app
+	app := suite.createManagedApp()
+	requires.NotNil(app)
+	key := fixture.ToNamespacedName(app)
+
+	// Disable the connection between the agent and the principal
+	requires.NoError(proxy.Disable())
+
+	// Delete the app on the principal side
+	err = suite.PrincipalClient.Delete(suite.Ctx, app, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// App should still exist on the workload cluster since the agent is unaware of the deletion on the control plane
+	err = suite.ManagedAgentClient.Get(suite.Ctx, key, app, metav1.GetOptions{})
+	requires.NoError(err)
+
+	// Enable the connection and ensure that the app is deleted from the workload cluster
+	requires.NoError(proxy.Enable())
+
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		return errors.IsNotFound(err)
+	}, 30*time.Second, 1*time.Second)
+}
+
+func (suite *ResyncTestSuite) Test_ResyncOnConnectionLostAutonomousMode() {
+	requires := suite.Require()
+
+	// Setup Toxiproxy
+	proxy, cleanup, err := fixture.SetupToxiproxy(suite.T(), "agent-autonomous", "127.0.0.1:8475")
+	requires.NoError(err)
+	defer cleanup()
+
+	// Restart the agent process so that the agent talks to the principal via Toxiproxy
+	fixture.RestartAgent(suite.T(), "agent-autonomous")
+
+	// Create an autonomous app
+	app := suite.createAutonomousApp()
+	requires.NotNil(app)
+	principalKey := types.NamespacedName{Name: app.Name, Namespace: "agent-autonomous"}
+
+	// Disable the connection between the agent and the principal
+	requires.NoError(proxy.Disable())
+
+	// Delete the app on the agent side
+	err = suite.AutonomousAgentClient.Delete(suite.Ctx, app, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// App should still exist on the control plane since the principal is unaware of the deletion on the workload cluster
+	err = suite.PrincipalClient.Get(suite.Ctx, principalKey, app, metav1.GetOptions{})
+	requires.NoError(err)
+
+	// Enable the connection and ensure that the app is deleted from the control plane
+	requires.NoError(proxy.Enable())
+
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
+		return errors.IsNotFound(err)
+	}, 30*time.Second, 1*time.Second)
 }
 
 func (suite *ResyncTestSuite) createAutonomousApp() *argoapp.Application {
