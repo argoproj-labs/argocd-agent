@@ -36,7 +36,6 @@ func SetupToxiproxy(t require.TestingT, agentName string, proxyAddress string) (
 	client := toxiproxyClient.NewClient("127.0.0.1:8474")
 	proxy, err := client.CreateProxy("test", proxyAddress, "127.0.0.1:8443")
 	if err != nil {
-		proxyServer.Close()
 		return nil, nil, err
 	}
 
@@ -44,22 +43,28 @@ func SetupToxiproxy(t require.TestingT, agentName string, proxyAddress string) (
 	envVar := `ARGOCD_AGENT_REMOTE_PORT=8475`
 	err = os.WriteFile(EnvVariablesFromE2EFile, []byte(envVar+"\n"), 0644)
 	if err != nil {
-		proxyServer.Close()
-		proxy.Delete()
 		return nil, nil, err
 	}
 
 	// Cleanup function
 	cleanup := func() {
-		os.Remove(EnvVariablesFromE2EFile)
-		proxy.Delete()
-		proxyServer.Close()
+		if err := os.Remove(EnvVariablesFromE2EFile); err != nil {
+			t.Errorf("failed to remove env file: %v", err)
+		}
+
+		if err = proxy.Delete(); err != nil {
+			t.Errorf("failed to delete proxy: %v", err)
+		}
+
+		if err = proxyServer.Close(); err != nil {
+			t.Errorf("failed to close proxy server: %v", err)
+		}
 
 		// Restart the agent process
 		RestartAgent(t, agentName)
 
 		// Give some time for the agent to be ready
-		time.Sleep(5 * time.Second)
+		time.Sleep(10 * time.Second)
 	}
 
 	return proxy, cleanup, nil
@@ -79,6 +84,7 @@ func startToxiproxyServer(host, port string) (*http.Server, error) {
 		Handler: server.Routes(),
 	}
 
+	//nolint:errcheck
 	go proxyServer.Serve(l)
 
 	return proxyServer, nil
