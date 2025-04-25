@@ -64,7 +64,7 @@ func SetupToxiproxy(t require.TestingT, agentName string, proxyAddress string) (
 		RestartAgent(t, agentName)
 
 		// Give some time for the agent to be ready
-		time.Sleep(10 * time.Second)
+		WaitForAgent(t, agentName)
 	}
 
 	return proxy, cleanup, nil
@@ -103,5 +103,21 @@ func RestartAgent(t require.TestingT, agentName string) {
 
 	require.Eventually(t, func() bool {
 		return IsProcessRunning(agentName)
+	}, 30*time.Second, 1*time.Second)
+}
+
+func WaitForAgent(t require.TestingT, agentName string) {
+	healthzAddr := "http://localhost:8001/healthz"
+	if agentName == "agent-managed" {
+		healthzAddr = "http://localhost:8002/healthz"
+	}
+
+	require.Eventually(t, func() bool {
+		resp, err := http.Get(healthzAddr)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
 	}, 30*time.Second, 1*time.Second)
 }
