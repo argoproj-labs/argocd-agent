@@ -30,13 +30,13 @@ if ! test -x ${AGENTCTL}; then
 	exit 1
 fi
 
-if ! ${AGENTCTL} ca inspect >/dev/null 2>&1; then
-	${AGENTCTL} ca generate
+if ! ${AGENTCTL} pki inspect >/dev/null 2>&1; then
+	${AGENTCTL} pki init
 else
 	echo "Reusing existing agent CA"
 fi
 
-${AGENTCTL} ca issue --upsert -N "IP:127.0.0.1,IP:${IPADDR}" resource-proxy
+${AGENTCTL} pki issue --upsert -N "IP:127.0.0.1,IP:${IPADDR}" resource-proxy
 
 AGENTS="agent-managed agent-autonomous"
 for agent in ${AGENTS}; do

@@ -40,6 +40,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -148,6 +149,19 @@ func WithTLSClientCertFromFile(certPath, keyPath string) RemoteOption {
 	}
 }
 
+// WithTLSClientCertFromSecret configures the remote to present the client cert
+// loaded from the secret on every outbound connection.
+func WithTLSClientCertFromSecret(kube kubernetes.Interface, name, namespace string) RemoteOption {
+	return func(r *Remote) error {
+		c, err := tlsutil.TLSCertFromSecret(context.Background(), kube, namespace, name)
+		if err != nil {
+			return fmt.Errorf("unable to read TLS client from secret: %v", err)
+		}
+		r.tlsConfig.Certificates = append(r.tlsConfig.Certificates, c)
+		return nil
+	}
+}
+
 // WithRootAuthorities configures the Remote to use TLS certificate authorities
 // from PEM data in caData for verifying server certificates.
 func WithRootAuthorities(caData []byte) RemoteOption {
@@ -178,6 +192,23 @@ func WithRootAuthoritiesFromFile(caPath string) RemoteOption {
 		r.tlsConfig.RootCAs = pool
 		//nolint:staticcheck
 		log().Infof("Loaded %d cert(s) into the root CA pool", len(r.tlsConfig.RootCAs.Subjects()))
+		return nil
+	}
+}
+
+// WithRootAuthoritiesFromSecret configures the remote to use TLS certificate
+// authorities from the secret specified by name and namespace. If field is
+// non-empty, the root CA's certificate will be loaded only from the given
+// field. Otherwise, the ConfigMap is expected to contain one or more
+// certificates in each field of the ConfigMap, and all certificates will be
+// loaded into the certificate pool.
+func WithRootAuthoritiesFromSecret(kube kubernetes.Interface, name, namespace, field string) RemoteOption {
+	return func(r *Remote) error {
+		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, field)
+		if err != nil {
+			return err
+		}
+		r.tlsConfig.RootCAs = pool
 		return nil
 	}
 }

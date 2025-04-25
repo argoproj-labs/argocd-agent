@@ -21,7 +21,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/asn1"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -112,28 +111,16 @@ func GenerateClientCertificate(name string, signerCert *x509.Certificate, signer
 // authentication.
 //
 // It will return the certificate and its private key as PEM encoded strings.
-func GenerateServerCertificate(name string, signerCert *x509.Certificate, signerKey crypto.PrivateKey, san []string) (string, string, error) {
-	var err error
-	dnsNames := []string{}
+func GenerateServerCertificate(name string, signerCert *x509.Certificate, signerKey crypto.PrivateKey, ips []string, dns []string) (string, string, error) {
+	dnsNames := dns
 	ipAddresses := []net.IP{}
-	for _, sanEntry := range san {
-		sanTok := strings.SplitN(sanEntry, ":", 2)
-		if len(sanTok) != 2 {
-			return "", "", fmt.Errorf("invalid SAN entry: %s", sanEntry)
+	for _, ip := range ips {
+		sAddr := strings.TrimSpace(ip)
+		addr := net.ParseIP(sAddr)
+		if addr == nil {
+			return "", "", fmt.Errorf("invalid IP address: %s", sAddr)
 		}
-		switch strings.ToLower(sanTok[0]) {
-		case "ip":
-			sAddr := strings.TrimSpace(sanTok[1])
-			addr := net.ParseIP(sAddr)
-			if addr == nil {
-				return "", "", fmt.Errorf("invalid IP address: %s", sAddr)
-			}
-			ipAddresses = append(ipAddresses, addr)
-		case "dns":
-			dnsNames = append(dnsNames, strings.TrimSpace(sanTok[1]))
-		default:
-			return "", "", fmt.Errorf("unknown san specifier: %s", sanTok[1])
-		}
+		ipAddresses = append(ipAddresses, addr)
 	}
 	cert := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -150,15 +137,6 @@ func GenerateServerCertificate(name string, signerCert *x509.Certificate, signer
 		DNSNames:              dnsNames,
 		IPAddresses:           ipAddresses,
 	}
-
-	extSubjectAltName := pkix.Extension{}
-	extSubjectAltName.Id = asn1.ObjectIdentifier{2, 5, 29, 17}
-	extSubjectAltName.Critical = false
-	extSubjectAltName.Value, err = asn1.Marshal(san)
-	if err != nil {
-		return "", "", err
-	}
-	cert.Extensions = []pkix.Extension{extSubjectAltName}
 
 	return GenerateCertificate(cert, signerCert, signerKey)
 }

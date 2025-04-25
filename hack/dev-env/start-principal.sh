@@ -38,7 +38,6 @@ fi
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 go run github.com/argoproj-labs/argocd-agent/cmd/principal \
 	--allowed-namespaces '*' \
-	--insecure-tls-generate \
 	--insecure-jwt-generate \
 	--kubecontext vcluster-control-plane \
 	--log-level trace \

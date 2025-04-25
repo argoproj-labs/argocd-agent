@@ -15,6 +15,7 @@
 package principal
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -31,7 +32,9 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	cacheutil "github.com/argoproj/argo-cd/v2/util/cache"
+	"k8s.io/client-go/kubernetes"
 )
 
 // supportedTLSVersion is a list of TLS versions we support
@@ -220,6 +223,21 @@ func WithTLSKeyPairFromPath(certPath, keyPath string) ServerOption {
 	return func(o *Server) error {
 		o.options.tlsCertPath = certPath
 		o.options.tlsKeyPath = keyPath
+		return nil
+	}
+}
+
+// WithTLSKeyPairFromSecret configures the TLS certificate and private key to
+// be used by the server. The keypair will be loaded from the secret referred
+// to by name and namespace. The secret must be of type tls.
+func WithTLSKeyPairFromSecret(kube kubernetes.Interface, name, namespace string) ServerOption {
+	return func(o *Server) error {
+		c, err := tlsutil.TLSCertFromSecret(context.Background(), kube, namespace, name)
+		if err != nil {
+			return err
+		}
+		o.options.tlsCert = c.Leaf
+		o.options.tlsKey = c.PrivateKey
 		return nil
 	}
 }

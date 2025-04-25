@@ -135,7 +135,7 @@ func NewAgentCreateCommand() *cobra.Command {
 				cmdutil.Fatal("%v", err)
 			}
 
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 			}
@@ -233,7 +233,7 @@ func NewAgentListCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.TODO()
 			labelSelector = append(labelSelector, cluster.LabelKeyClusterAgentMapping)
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 			}
@@ -396,7 +396,7 @@ func NewAgentReconfigureCommand() *cobra.Command {
 				changed = true
 			}
 			if reissueClientCert {
-				clt, err := kube.NewKubernetesClientFromConfig(context.Background(), globalOpts.namespace, "", globalOpts.context)
+				clt, err := kube.NewKubernetesClientFromConfig(context.Background(), globalOpts.namespace, "", globalOpts.principalContext)
 				if err != nil {
 					cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 				}
@@ -459,7 +459,7 @@ func labelSliceToMap(labels []string) (map[string]string, error) {
 
 func loadClusterSecret(agentName string) (*v1alpha1.Cluster, error) {
 	ctx := context.TODO()
-	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +480,7 @@ func loadClusterSecret(agentName string) (*v1alpha1.Cluster, error) {
 
 func saveClusterSecret(agentName string, clstr *v1alpha1.Cluster) error {
 	ctx := context.TODO()
-	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
 	if err != nil {
 		return err
 	}

@@ -27,6 +27,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
@@ -88,6 +89,14 @@ func NewAgentRunCommand() *cobra.Command {
 			} else {
 				logrus.SetFormatter(formatter)
 			}
+			if namespace == "" {
+				cmdutil.Fatal("namespace value is empty and must be specified")
+			}
+
+			kubeConfig, err := cmdutil.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
+			if err != nil {
+				cmdutil.Fatal("Could not load Kubernetes config: %v", err)
+			}
 			if creds != "" {
 				authMethod, authCreds, err := parseCreds(creds)
 				if err != nil {
@@ -96,15 +105,29 @@ func NewAgentRunCommand() *cobra.Command {
 				remoteOpts = append(remoteOpts, client.WithAuth(authMethod, authCreds))
 			}
 			var remote *client.Remote
-			var err error
+
+			// The certificate pool for verifying TLS certificates can be
+			// loaded from a file if requested on the command line.
+			// Otherwise the pool will be loaded from a secret, unless the
+			// insecure option was given - in which case, certificates will
+			// not be verified.
 			if insecure {
 				remoteOpts = append(remoteOpts, client.WithInsecureSkipTLSVerify())
 			} else if rootCAPath != "" {
 				remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromFile(rootCAPath))
+			} else {
+				remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, config.SecretNamePrincipalCA, namespace, ""))
 			}
+
+			// If both a certificate and a key are specified on the command
+			// line, the agent will load the client cert from these files.
+			// Otherwise, it will try and load the TLS keypair from a secret.
 			if tlsClientCrt != "" && tlsClientKey != "" {
 				remoteOpts = append(remoteOpts, client.WithTLSClientCertFromFile(tlsClientCrt, tlsClientKey))
+			} else if tlsClientCrt == "" && tlsClientKey == "" {
+				remoteOpts = append(remoteOpts, client.WithTLSClientCertFromSecret(kubeConfig.Clientset, config.SecretNameAgentClientCert, namespace))
 			}
+
 			remoteOpts = append(remoteOpts, client.WithWebSocket(enableWebSocket))
 			remoteOpts = append(remoteOpts, client.WithClientMode(types.AgentModeFromString(agentMode)))
 			remoteOpts = append(remoteOpts, client.WithKeepAlivePingInterval(keepAlivePingInterval))
@@ -120,14 +143,6 @@ func NewAgentRunCommand() *cobra.Command {
 				cmdutil.Fatal("No remote specified")
 			}
 
-			if namespace == "" {
-				cmdutil.Fatal("namespace value is empty and must be specified")
-			}
-
-			kubeConfig, err := cmdutil.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
-			if err != nil {
-				cmdutil.Fatal("Could not load Kubernetes config: %v", err)
-			}
 			agentOpts = append(agentOpts, agent.WithRemote(remote))
 			agentOpts = append(agentOpts, agent.WithMode(agentMode))
 
