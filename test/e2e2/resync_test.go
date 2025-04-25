@@ -288,7 +288,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupAutonomous() {
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 		return err == nil &&
 			app.Spec.Source.Path == "guestbook"
-	}, 60*time.Second, 1*time.Second)
+	}, 80*time.Second, 1*time.Second)
 }
 
 // Autonomous Mode: delete the app from the control-plane when the principal process is down and

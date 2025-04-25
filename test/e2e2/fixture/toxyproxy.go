@@ -107,9 +107,9 @@ func RestartAgent(t require.TestingT, agentName string) {
 }
 
 func WaitForAgent(t require.TestingT, agentName string) {
-	healthzAddr := "http://localhost:8001/healthz"
+	healthzAddr := "http://localhost:8002/healthz"
 	if agentName == "agent-managed" {
-		healthzAddr = "http://localhost:8002/healthz"
+		healthzAddr = "http://localhost:8001/healthz"
 	}
 
 	require.Eventually(t, func() bool {
