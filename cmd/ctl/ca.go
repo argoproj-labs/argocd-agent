@@ -379,7 +379,7 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 		Short: "Issue a client certificate for an agent",
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
-				cmd.Help()
+				_ = cmd.Help()
 				fmt.Println("Agent name must be given.")
 				os.Exit(1)
 			}
