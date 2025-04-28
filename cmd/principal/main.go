@@ -68,7 +68,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		autoNamespaceLabels    []string
 		enableWebSocket        bool
 		enableResourceProxy    bool
-		enablePprof            bool
+		pprofPort              int
 		resourceProxyCertPath  string
 		resourceProxyKeyPath   string
 		resourceProxyCAPath    string
@@ -94,9 +94,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
 
-			if enablePprof {
+			if pprofPort > 0 {
+				logrus.Infof("Starting pprof server on 127.0.0.1:%d", pprofPort)
+
 				go func() {
-					err := http.ListenAndServe("127.0.0.1:6060", nil)
+					err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", pprofPort), nil)
 					if err != nil {
 						cmdutil.Fatal("Error starting pprof server: %v", err)
 					}
@@ -329,10 +331,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&redisCompressionType, "redis-compression-type",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),
 		"Compression algorithm required by Redis. (possible values: gzip, none. Default value: gzip)")
+	command.Flags().IntVar(&pprofPort, "pprof-port",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_PPROF_PORT", cmdutil.ValidPort, 0),
+		"Port the pprof server will listen on")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
-	command.Flags().BoolVar(&enablePprof, "enable-pprof", false, "Enable pprof server")
 	command.Flags().BoolVar(&showVersion, "version", false, "Display version information and exit")
 	command.Flags().StringVar(&versionFormat, "version-format", "text", "Output version information in format: text, json, json-indent")
 

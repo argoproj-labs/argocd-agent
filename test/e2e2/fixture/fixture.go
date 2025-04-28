@@ -17,6 +17,7 @@ package fixture
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	argoapp "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
@@ -25,6 +26,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+)
+
+const (
+	// EnvVariablesFromE2EFile holds the env variables that are configured from the e2e tests
+	EnvVariablesFromE2EFile = "/tmp/argocd-agent-e2e"
 )
 
 type BaseSuite struct {
@@ -96,6 +102,9 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 	var list argoapp.ApplicationList
 	var err error
+
+	// Remove any previously configured env variables from the config file
+	os.Remove(EnvVariablesFromE2EFile)
 
 	// Delete all managed applications from the principal
 	list = argoapp.ApplicationList{}

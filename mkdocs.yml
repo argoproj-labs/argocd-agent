@@ -33,6 +33,9 @@ nav:
   - Configuration:
     - Principal: configuration/principal/index.md
     - Agent: configuration/agent/index.md
+  - Operations:
+    - Metrics: operations/metrics.md
+    - Profiling: operations/profiling.md
   - Contributing:
     - Overview: contributing/index.md
     - Local development: contributing/local.md
