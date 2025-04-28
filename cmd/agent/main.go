@@ -54,6 +54,7 @@ func NewAgentRunCommand() *cobra.Command {
 		tlsClientKey      string
 		enableWebSocket   bool
 		metricsPort       int
+		healthzPort       int
 		enableCompression bool
 
 		// Time interval for agent to principal ping
@@ -130,6 +131,7 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 			agentOpts = append(agentOpts, agent.WithRemote(remote))
 			agentOpts = append(agentOpts, agent.WithMode(agentMode))
+			agentOpts = append(agentOpts, agent.WithHealthzPort(healthzPort))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
@@ -185,6 +187,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().IntVar(&metricsPort, "metrics-port",
 		env.NumWithDefault("ARGOCD_AGENT_METRICS_PORT", cmd.ValidPort, 8181),
 		"Port the metrics server will listen on")
+	command.Flags().IntVar(&healthzPort, "healthz-port",
+		env.NumWithDefault("ARGOCD_AGENT_HEALTH_CHECK_PORT", cmd.ValidPort, 8001),
+		"Port the health check server will listen on")
 	command.Flags().DurationVar(&keepAlivePingInterval, "keep-alive-ping-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_KEEP_ALIVE_PING_INTERVAL", nil, 0),
 		"Ping interval to keep connection alive with Principal")
