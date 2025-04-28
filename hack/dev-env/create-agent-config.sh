@@ -21,7 +21,9 @@ RECREATE="$1"
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 BASEPATH="$( cd -- "$(dirname "$0")/../.." >/dev/null 2>&1 ; pwd -P )"
 AGENTCTL=${BASEPATH}/dist/argocd-agentctl
-export ARGOCD_AGENT_CONTEXT=vcluster-control-plane
+
+export ARGOCD_AGENT_PRINCIPAL_CONTEXT=vcluster-control-plane
+export ARGOCD_AGENT_PRINCIPAL_NAMESPACE=argocd
 
 IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
 
@@ -36,12 +38,14 @@ else
 	echo "Reusing existing agent CA"
 fi
 
-${AGENTCTL} pki issue --upsert -N "IP:127.0.0.1,IP:${IPADDR}" resource-proxy
+${AGENTCTL} pki issue resource-proxy --upsert \
+	--principal-namespace argocd \
+	--ip "127.0.0.1,${IPADDR}"
 
 AGENTS="agent-managed agent-autonomous"
 for agent in ${AGENTS}; do
 	if test "$RECREATE" = "--recreate"; then
-		kubectl --context ${ARGOCD_AGENT_CONTEXT} -n argocd delete --ignore-not-found secret cluster-${agent}
+		kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n ${ARGOCD_AGENT_PRINCIPAL_NAMESPACE} delete --ignore-not-found secret cluster-${agent}
 	fi
 	if ! ${AGENTCTL} agent inspect ${agent} >/dev/null 2>&1; then
 		${AGENTCTL} agent create ${agent} \
@@ -51,4 +55,5 @@ for agent in ${AGENTS}; do
 	else
 		echo "Reusing existing agent configuration for ${agent}"
 	fi
+	${AGENTCTL} pki issue agent ${agent} --agent-context vcluster-${agent} --upsert
 done

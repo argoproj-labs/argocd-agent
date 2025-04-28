@@ -71,15 +71,17 @@ func NewVersionCommand() *cobra.Command {
 }
 
 type GlobalFlags struct {
-	principalContext string
-	agentContext     string
-	namespace        string
+	principalContext   string
+	principalNamespace string
+	agentContext       string
+	agentNamespace     string
 }
 
 func addGlobalFlags(command *cobra.Command, opts *GlobalFlags) {
-	command.PersistentFlags().StringVarP(&opts.principalContext, "principal-context", "P", env.StringWithDefault("ARGOCD_AGENT_PRINCIPAL_CONTEXT", nil, ""), "The Kubernetes context of the principal")
-	command.PersistentFlags().StringVarP(&opts.agentContext, "agent-context", "A", env.StringWithDefault("ARGOCD_AGENT_AGENT_CONTEXT", nil, ""), "The Kubernetes context of the agent")
-	command.PersistentFlags().StringVarP(&opts.namespace, "namespace", "n", "argocd", "The Kubernetes namespace to operate in")
+	command.PersistentFlags().StringVar(&opts.principalContext, "principal-context", env.StringWithDefault("ARGOCD_AGENT_PRINCIPAL_CONTEXT", nil, ""), "The Kubernetes context of the principal")
+	command.PersistentFlags().StringVar(&opts.principalNamespace, "principal-namespace", env.StringWithDefault("ARGOCD_AGENT_PRINCIPAL_NAMESPACE", nil, "argocd"), "The Kubernetes namespace the principal is installed in")
+	command.PersistentFlags().StringVar(&opts.agentContext, "agent-context", env.StringWithDefault("ARGOCD_AGENT_AGENT_CONTEXT", nil, ""), "The Kubernetes context of the agent")
+	command.PersistentFlags().StringVar(&opts.agentNamespace, "agent-namespace", env.StringWithDefault("ARGOCD_AGENT_AGENT_NAMESPACE", nil, "argocd"), "The Kubernetes namespace the agent is installed in")
 }
 
 func main() {

@@ -82,12 +82,12 @@ func NewPKIInitCommand() *cobra.Command {
 		Use:   "init",
 		Run: func(c *cobra.Command, args []string) {
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
 			exists := false
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
 			if !errors.IsNotFound(err) {
 				if err != nil {
 					cmdutil.Fatal("Error getting secret: %v", err)
@@ -105,7 +105,7 @@ func NewPKIInitCommand() *cobra.Command {
 			sec := &corev1.Secret{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      config.SecretNamePrincipalCA,
-					Namespace: globalOpts.namespace,
+					Namespace: globalOpts.principalNamespace,
 				},
 				Type: corev1.SecretTypeTLS,
 				Data: map[string][]byte{
@@ -115,14 +115,14 @@ func NewPKIInitCommand() *cobra.Command {
 			}
 
 			if !exists {
-				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Create(ctx, sec, v1.CreateOptions{})
+				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Create(ctx, sec, v1.CreateOptions{})
 			} else {
-				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Update(ctx, sec, v1.UpdateOptions{})
+				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Update(ctx, sec, v1.UpdateOptions{})
 			}
 			if err != nil {
 				cmdutil.Fatal("Could not write to secret: %v", err)
 			}
-			fmt.Printf("Success. CA data stored in secret %s/%s\n", globalOpts.namespace, config.SecretNamePrincipalCA)
+			fmt.Printf("Success. CA data stored in secret %s/%s\n", globalOpts.principalNamespace, config.SecretNamePrincipalCA)
 		},
 	}
 
@@ -149,11 +149,11 @@ func NewPKIInspectCommand() *cobra.Command {
 		Use:   "inspect",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
-			tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
+			tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
 			if err != nil {
 				cmdutil.Fatal("Could not read CA from secret: %v", err)
 			}
@@ -207,11 +207,11 @@ func NewPKIDeleteCommand() *cobra.Command {
 		Use:   "delete",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.Background()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("%v", err)
 			}
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) {
 					cmdutil.Fatal("CA not configured.")
@@ -224,7 +224,7 @@ func NewPKIDeleteCommand() *cobra.Command {
 				cmdutil.Fatal("%v", err)
 			}
 			if answer == "YES" {
-				err := clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Delete(ctx, config.SecretNamePrincipalCA, v1.DeleteOptions{})
+				err := clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Delete(ctx, config.SecretNamePrincipalCA, v1.DeleteOptions{})
 				if err != nil {
 					cmdutil.Fatal("Could not delete secret %s: %v", config.SecretNamePrincipalCA, err)
 				}
@@ -264,11 +264,11 @@ Only private keys of type RSA are currently supported.
 				_ = cmd.Help()
 				cmdutil.Fatal("One of --all, --key or --cert must be specified.")
 			}
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("%v", err)
 			}
-			cert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
+			cert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
 			if errors.IsNotFound(err) {
 				cmdutil.Fatal("CA not configured.")
 			}
@@ -371,8 +371,9 @@ func NewPKIIssueResourceProxyCommand() *cobra.Command {
 
 func NewPKIIssueAgentClientCert() *cobra.Command {
 	var (
-		upsert      bool
-		sameContext bool
+		upsert         bool
+		sameContext    bool
+		agentNamespace string
 	)
 	command := &cobra.Command{
 		Use:   "agent <name>",
@@ -390,7 +391,7 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 				fmt.Println("PKI and agent usually do not reside within the same context. Use --same-context if you really mean it.")
 				os.Exit(1)
 			}
-			issueAndSaveSecret(globalOpts.agentContext, config.SecretNameAgentClientCert, "argocd", upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+			issueAndSaveSecret(globalOpts.agentContext, config.SecretNameAgentClientCert, agentNamespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
 				return tlsutil.GenerateClientCertificate(agentName, c, pk)
 			})
 		},
@@ -398,6 +399,7 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 
 	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
 	command.Flags().BoolVar(&sameContext, "same-context", false, "Use when the PKI and agent use the same context")
+	command.Flags().StringVar(&agentNamespace, "agent-namespace", "argocd", "The namespace the agent is installed to")
 	return command
 }
 
@@ -406,7 +408,7 @@ func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, i
 	ctx := context.TODO()
 
 	// Client for principal's kube context - it has the CA
-	caClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
+	caClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 	if err != nil {
 		cmdutil.Fatal("%v", err)
 	}
@@ -416,14 +418,14 @@ func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, i
 	if outContext == globalOpts.principalContext || outContext == "" {
 		outClt = caClt
 	} else {
-		outClt, err = kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", outContext)
+		outClt, err = kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", outContext)
 		if err != nil {
 			cmdutil.Fatal("%v", err)
 		}
 	}
 
-	// Load CA keypair from a secret
-	caCert, err := tlsutil.TLSCertFromSecret(ctx, caClt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
+	// Load CA keypair from a secret on the principal
+	caCert, err := tlsutil.TLSCertFromSecret(ctx, caClt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			cmdutil.Fatal("CA is not initialized.")
@@ -456,14 +458,14 @@ func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, i
 		},
 	}
 
-	_, err = outClt.Clientset.CoreV1().Secrets(globalOpts.namespace).Create(ctx, secret, v1.CreateOptions{})
+	_, err = outClt.Clientset.CoreV1().Secrets(outNamespace).Create(ctx, secret, v1.CreateOptions{})
 	if err != nil {
 		if !errors.IsAlreadyExists(err) {
 			cmdutil.Fatal("Could not create secret: %v", err)
 		} else if !upsert {
 			cmdutil.Fatal("Certificate exists, please use --upsert to reissue.")
 		} else {
-			_, err = outClt.Clientset.CoreV1().Secrets(globalOpts.namespace).Update(ctx, secret, v1.UpdateOptions{})
+			_, err = outClt.Clientset.CoreV1().Secrets(outNamespace).Update(ctx, secret, v1.UpdateOptions{})
 			if err != nil {
 				cmdutil.Fatal("Could not update secret: %v", err)
 			} else {
@@ -471,7 +473,7 @@ func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, i
 			}
 		}
 	} else {
-		fmt.Printf("Secret %s/%s created\n", globalOpts.namespace, outName)
+		fmt.Printf("Secret %s/%s created\n", outNamespace, outName)
 	}
 
 }

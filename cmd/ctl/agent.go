@@ -68,7 +68,7 @@ func generateAgentClientCert(agentName string, clt *kube.KubernetesClient) (clie
 	ctx := context.Background()
 
 	// Our CA certificate is stored in a secret
-	tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
+	tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
 	if err != nil {
 		err = fmt.Errorf("could not read CA secret: %w", err)
 		return
@@ -135,13 +135,13 @@ func NewAgentCreateCommand() *cobra.Command {
 				cmdutil.Fatal("%v", err)
 			}
 
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 			}
 
 			// Make sure the cluster secret doesn't exist yet
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
 			if err != nil && !errors.IsNotFound(err) {
 				cmdutil.Fatal("Reading cluster secret: %s", err)
 			} else if err == nil {
@@ -202,14 +202,14 @@ func NewAgentCreateCommand() *cobra.Command {
 			sec := &v1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      clusterSecretName(agentName),
-					Namespace: globalOpts.namespace,
+					Namespace: globalOpts.principalNamespace,
 				},
 			}
 			err = cluster.ClusterToSecret(clus, sec)
 			if err != nil {
 				cmdutil.Fatal("Could not convert cluster to secret: %v", err)
 			}
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Create(ctx, sec, metav1.CreateOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Create(ctx, sec, metav1.CreateOptions{})
 			if err != nil {
 				cmdutil.Fatal("Could not create cluster secret: %v", err)
 			}
@@ -233,11 +233,11 @@ func NewAgentListCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.TODO()
 			labelSelector = append(labelSelector, cluster.LabelKeyClusterAgentMapping)
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 			}
-			agentList, err := clt.Clientset.CoreV1().Secrets(globalOpts.namespace).List(ctx, metav1.ListOptions{
+			agentList, err := clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).List(ctx, metav1.ListOptions{
 				LabelSelector: strings.Join(labelSelector, ","),
 			})
 			if err != nil {
@@ -396,7 +396,7 @@ func NewAgentReconfigureCommand() *cobra.Command {
 				changed = true
 			}
 			if reissueClientCert {
-				clt, err := kube.NewKubernetesClientFromConfig(context.Background(), globalOpts.namespace, "", globalOpts.principalContext)
+				clt, err := kube.NewKubernetesClientFromConfig(context.Background(), globalOpts.principalNamespace, "", globalOpts.principalContext)
 				if err != nil {
 					cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 				}
@@ -459,11 +459,11 @@ func labelSliceToMap(labels []string) (map[string]string, error) {
 
 func loadClusterSecret(agentName string) (*v1alpha1.Cluster, error) {
 	ctx := context.TODO()
-	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
+	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 	if err != nil {
 		return nil, err
 	}
-	sec, err := clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
+	sec, err := clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil, nil
@@ -480,19 +480,19 @@ func loadClusterSecret(agentName string) (*v1alpha1.Cluster, error) {
 
 func saveClusterSecret(agentName string, clstr *v1alpha1.Cluster) error {
 	ctx := context.TODO()
-	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.principalContext)
+	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 	if err != nil {
 		return err
 	}
-	sec, err := clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
+	sec, err := clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
 	if errors.IsNotFound(err) {
-		_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Create(ctx, sec, metav1.CreateOptions{})
+		_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Create(ctx, sec, metav1.CreateOptions{})
 	} else if err == nil {
 		err = cluster.ClusterToSecret(clstr, sec)
 		if err != nil {
 			cmdutil.Fatal("Could not convert cluster to secret: %v", err)
 		}
-		_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Update(ctx, sec, metav1.UpdateOptions{})
+		_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Update(ctx, sec, metav1.UpdateOptions{})
 	}
 	return err
 }
