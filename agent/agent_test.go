@@ -16,6 +16,8 @@ package agent
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -205,6 +207,40 @@ func Test_NewAgent(t *testing.T) {
 // 	})
 
 // }
+
+func Test_Healthz(t *testing.T) {
+	agent := newAgent(t)
+	require.NotNil(t, agent)
+
+	t.Run("Healthz when agent is connected", func(t *testing.T) {
+		agent.SetConnected(true)
+		testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			agent.healthzHandler(w, r)
+		}))
+		defer testServer.Close()
+
+		resp, err := http.Get(testServer.URL + "/healthz")
+		require.NoError(t, err)
+
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		defer resp.Body.Close()
+	})
+
+	t.Run("Healthz when agent is not connected", func(t *testing.T) {
+		agent.SetConnected(false)
+		testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			agent.healthzHandler(w, r)
+		}))
+		defer testServer.Close()
+
+		resp, err := http.Get(testServer.URL + "/healthz")
+		require.NoError(t, err)
+
+		require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+		defer resp.Body.Close()
+	})
+
+}
 
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)

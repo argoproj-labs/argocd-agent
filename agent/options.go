@@ -60,3 +60,14 @@ func WithMetricsPort(port int) AgentOption {
 		}
 	}
 }
+
+func WithHealthzPort(port int) AgentOption {
+	return func(o *Agent) error {
+		if port > 0 && port < 32768 {
+			o.options.healthzPort = port
+			return nil
+		} else {
+			return fmt.Errorf("invalid port: %d", port)
+		}
+	}
+}
