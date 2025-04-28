@@ -18,6 +18,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strings"
 	"time"
@@ -56,6 +58,7 @@ func NewAgentRunCommand() *cobra.Command {
 		metricsPort       int
 		healthzPort       int
 		enableCompression bool
+		pprofPort         int
 
 		// Time interval for agent to principal ping
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
@@ -70,6 +73,17 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
+
+			if pprofPort > 0 {
+				logrus.Infof("Starting pprof server on 127.0.0.1:%d", pprofPort)
+
+				go func() {
+					err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", pprofPort), nil)
+					if err != nil {
+						cmdutil.Fatal("Error starting pprof server: %v", err)
+					}
+				}()
+			}
 
 			agentOpts := []agent.AgentOption{}
 			remoteOpts := []client.RemoteOption{}
@@ -196,6 +210,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&enableCompression, "enable-compression",
 		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_COMPRESSION", false),
 		"Use compression while sending data between Principal and Agent using gRPC")
+	command.Flags().IntVar(&pprofPort, "pprof-port",
+		env.NumWithDefault("ARGOCD_AGENT_PPROF_PORT", cmdutil.ValidPort, 0),
+		"Port the pprof server will listen on")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
