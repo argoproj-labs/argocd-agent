@@ -3,6 +3,7 @@ module github.com/argoproj-labs/argocd-agent
 go 1.23.0
 
 require (
+	github.com/Shopify/toxiproxy/v2 v2.12.0
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/argoproj/argo-cd/v2 v2.14.11
 	github.com/argoproj/gitops-engine v0.7.1-0.20250328191959-6d3cf122b03f
@@ -13,6 +14,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.1
 	github.com/prometheus/client_golang v1.22.0
 	github.com/redis/go-redis/v9 v9.7.3
+	github.com/rs/zerolog v1.33.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
@@ -30,6 +32,14 @@ require (
 	k8s.io/api v0.31.0
 	k8s.io/apimachinery v0.31.0
 	k8s.io/client-go v0.31.0
+)
+
+require (
+	github.com/gorilla/mux v1.8.1 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/rs/xid v1.5.0 // indirect
+	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 )
 
 require (

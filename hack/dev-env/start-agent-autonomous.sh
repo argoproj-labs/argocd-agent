@@ -20,11 +20,20 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
     exit 1
 fi
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+
+echo $ARGOCD_AGENT_REMOTE_PORT
+export ARGOCD_AGENT_REMOTE_PORT=${ARGOCD_AGENT_REMOTE_PORT:-8443}
+
+# Point the agent to the toxiproxy server if it is configured from the e2e tests
+E2E_ENV_FILE="/tmp/argocd-agent-e2e"
+if [ -f "$E2E_ENV_FILE" ]; then
+    source "$E2E_ENV_FILE"
+fi
+
 go run github.com/argoproj-labs/argocd-agent/cmd/agent \
     --agent-mode autonomous \
     --creds userpass:${SCRIPTPATH}/creds/creds.agent-autonomous \
     --server-address 127.0.0.1 \
-    --server-port 8443 \
     --insecure-tls \
     --kubecontext vcluster-agent-autonomous \
     --namespace argocd \
