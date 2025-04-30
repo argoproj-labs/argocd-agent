@@ -458,6 +458,10 @@ func (r *Remote) ClientID() string {
 	return r.clientID
 }
 
+func (r *Remote) AuthMethod() string {
+	return r.authMethod
+}
+
 func (r *Remote) SetClientMode(mode types.AgentMode) {
 	r.clientMode = mode
 }

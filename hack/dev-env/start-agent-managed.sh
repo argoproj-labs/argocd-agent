@@ -31,7 +31,7 @@ fi
 
 go run github.com/argoproj-labs/argocd-agent/cmd/agent \
     --agent-mode managed \
-    --creds userpass:${SCRIPTPATH}/creds/creds.agent-managed \
+    --creds "mtls:any" \
     --server-address 127.0.0.1 \
     --insecure-tls \
     --kubecontext vcluster-agent-managed \

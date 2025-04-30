@@ -196,6 +196,18 @@ func WithTLSRootCaFromFile(caPath string) ServerOption {
 	}
 }
 
+func WithTLSRootCaFromSecret(kube kubernetes.Interface, name string, namespace string) ServerOption {
+	return func(o *Server) error {
+		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, "tls.crt")
+		if err != nil {
+			return err
+		}
+		o.options.rootCa = pool
+		log().Infof("Loaded %d cert(s) into the root CA pool", len(o.options.rootCa.Subjects()))
+		return nil
+	}
+}
+
 // WithRequireClientCerts sets whether all incoming agent connections must
 // present a valid client certificate before being accepted.
 func WithRequireClientCerts(require bool) ServerOption {

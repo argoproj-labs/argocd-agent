@@ -159,6 +159,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			if rootCaPath != "" {
 				opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
+			} else {
+				opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, config.SecretNamePrincipalCA, namespace))
 			}
 
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
@@ -191,7 +193,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not parse auth: %v", err)
 			}
-			if authMethod == "mtls" {
+			switch authMethod {
+			case "mtls":
 				var regex *regexp.Regexp
 				if authConfig != "" {
 					regex, err = regexp.Compile(authConfig)
@@ -204,8 +207,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if err != nil {
 					cmdutil.Fatal("Could not register mtls auth method: %v", err)
 				}
-				opts = append(opts, principal.WithAuthMethods(authMethods))
-			} else {
+				// The mtls authentication method requires the use of client
+				// certificates, so make them mandatory.
+				if !requireClientCerts {
+					opts = append(opts, principal.WithRequireClientCerts(true))
+				}
+			case "userpass":
 				userauth := userpass.NewUserPassAuthentication(authConfig)
 				err = userauth.LoadAuthDataFromFile(authConfig)
 				if err != nil {
@@ -215,8 +222,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if err != nil {
 					cmdutil.Fatal("Could not register userpass auth method: %v", err)
 				}
-				opts = append(opts, principal.WithAuthMethods(authMethods))
+			default:
+				cmdutil.Fatal("Unknown auth method: %s", authMethod)
 			}
+			opts = append(opts, principal.WithAuthMethods(authMethods))
 
 			// In debug or higher log level, we start a little observer routine
 			// to get some insights.
