@@ -144,14 +144,17 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			opts = append(opts, principal.WithNamespaces(allowedNamespaces...))
 
-			if tlsCert != "" && tlsKey != "" {
+			if allowTlsGenerate {
+				logrus.Info("Using one-time generated TLS certificate for gRPC")
+				opts = append(opts, principal.WithGeneratedTLS("argocd-agent-principal--generated"))
+			} else if tlsCert != "" && tlsKey != "" {
+				logrus.Infof("Loading gRPC TLS configuration from files cert=%s and key=%s", tlsCert, tlsKey)
 				opts = append(opts, principal.WithTLSKeyPairFromPath(tlsCert, tlsKey))
 			} else if (tlsCert != "" && tlsKey == "") || (tlsCert == "" && tlsKey != "") {
 				cmdutil.Fatal("Both --tls-cert and --tls-key have to be given")
-			} else if allowTlsGenerate {
-				opts = append(opts, principal.WithGeneratedTLS("argocd-agent"))
 			} else {
-				cmdutil.Fatal("No TLS configuration given and auto generation not allowed.")
+				logrus.Infof("Loading gRPC TLS certificate from secret %s/%s", namespace, config.SecretNamePrincipalCA)
+				opts = append(opts, principal.WithTLSKeyPairFromSecret(kubeConfig.Clientset, config.SecretNamePrincipalTls, namespace))
 			}
 
 			if rootCaPath != "" {

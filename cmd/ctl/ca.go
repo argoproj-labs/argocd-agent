@@ -17,20 +17,19 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
-	"github.com/argoproj/argo-cd/v2/util/glob"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -48,47 +47,47 @@ OR TO PROTECT ANY KIND OF DATA.
 You have been warned.
 */
 
-func NewCACommand() *cobra.Command {
+func NewPKICommand() *cobra.Command {
 	command := &cobra.Command{
-		Short: "!!NON-PROD!! Inspect and manage the principal's CA",
-		Long: `The ca command provides functions to inspect and manage a Certificate Authority
-for argocd-agent. Its whole purpose is to get you started without having to go
-through hoops with a real CA.
+		Short: "!!NON-PROD!! Inspect and manage the principal's PKI",
+		Long: `The pki command provides functions to inspect and manage a public key infrastructure
+(PKI) for argocd-agent. Its whole purpose is to get you started without having
+to go through hoops with a real CA.
 
-DO NOT USE THE CA OR THE CERTIFICATES ISSUED BY IT FOR ANY SERIOUS PURPOSE.
+DO NOT USE THE PKI OR THE CERTIFICATES ISSUED BY IT FOR ANY SERIOUS PURPOSE.
 DO NOT EVEN THINK ABOUT USING THEM SOMEWHERE IN A PRODUCTION ENVIRONMENT,
 OR TO PROTECT ANY KIND OF DATA.
 `,
-		Use: "ca",
+		Use: "pki",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 			os.Exit(1)
 		},
 		GroupID: "config",
 	}
-	command.AddCommand(NewCAGenerateCommand())
-	command.AddCommand(NewCAInspectCommand())
-	command.AddCommand(NewCADeleteCommand())
-	command.AddCommand(NewCAPrintCommand())
-	command.AddCommand(NewCAIssueCommand())
+	command.AddCommand(NewPKIInitCommand())
+	command.AddCommand(NewPKIInspectCommand())
+	command.AddCommand(NewPKIDeleteCommand())
+	command.AddCommand(NewPKIPrintCommand())
+	command.AddCommand(NewPKIIssueCommand())
 	return command
 }
 
-func NewCAGenerateCommand() *cobra.Command {
+func NewPKIInitCommand() *cobra.Command {
 	var (
 		force bool
 	)
 	command := &cobra.Command{
-		Short: "NON-PROD!! Generate a new Certificate Authority for argocd-agent",
-		Use:   "generate",
+		Short: "NON-PROD!! Initialize the PKI for use with argocd-agent",
+		Use:   "init",
 		Run: func(c *cobra.Command, args []string) {
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
 			exists := false
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
 			if !errors.IsNotFound(err) {
 				if err != nil {
 					cmdutil.Fatal("Error getting secret: %v", err)
@@ -106,7 +105,7 @@ func NewCAGenerateCommand() *cobra.Command {
 			sec := &corev1.Secret{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      config.SecretNamePrincipalCA,
-					Namespace: globalOpts.namespace,
+					Namespace: globalOpts.principalNamespace,
 				},
 				Type: corev1.SecretTypeTLS,
 				Data: map[string][]byte{
@@ -116,22 +115,22 @@ func NewCAGenerateCommand() *cobra.Command {
 			}
 
 			if !exists {
-				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Create(ctx, sec, v1.CreateOptions{})
+				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Create(ctx, sec, v1.CreateOptions{})
 			} else {
-				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Update(ctx, sec, v1.UpdateOptions{})
+				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Update(ctx, sec, v1.UpdateOptions{})
 			}
 			if err != nil {
 				cmdutil.Fatal("Could not write to secret: %v", err)
 			}
-			fmt.Printf("Success. CA data stored in secret %s/%s\n", globalOpts.namespace, config.SecretNamePrincipalCA)
+			fmt.Printf("Success. CA data stored in secret %s/%s\n", globalOpts.principalNamespace, config.SecretNamePrincipalCA)
 		},
 	}
 
-	command.Flags().BoolVarP(&force, "force", "f", false, "Force regeneration of CA if it exists")
+	command.Flags().BoolVarP(&force, "force", "f", false, "Force regeneration of PKI if it exists")
 	return command
 }
 
-func NewCAInspectCommand() *cobra.Command {
+func NewPKIInspectCommand() *cobra.Command {
 	var (
 		full      bool
 		outFormat string
@@ -146,15 +145,15 @@ func NewCAInspectCommand() *cobra.Command {
 		Warnings  []string `json:"warnings,omitempty" yaml:"warnings,omitempty" text:"Warnings,omitempty"`
 	}
 	command := &cobra.Command{
-		Short: "NON-PROD!! Inspect the configured CA",
+		Short: "NON-PROD!! Inspect the configured PKI",
 		Use:   "inspect",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
-			tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
+			tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
 			if err != nil {
 				cmdutil.Fatal("Could not read CA from secret: %v", err)
 			}
@@ -202,17 +201,17 @@ func NewCAInspectCommand() *cobra.Command {
 	return command
 }
 
-func NewCADeleteCommand() *cobra.Command {
+func NewPKIDeleteCommand() *cobra.Command {
 	command := &cobra.Command{
-		Short: "Delete the configured CA",
+		Short: "Delete the configured PKI",
 		Use:   "delete",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.Background()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("%v", err)
 			}
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) {
 					cmdutil.Fatal("CA not configured.")
@@ -225,7 +224,7 @@ func NewCADeleteCommand() *cobra.Command {
 				cmdutil.Fatal("%v", err)
 			}
 			if answer == "YES" {
-				err := clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Delete(ctx, config.SecretNamePrincipalCA, v1.DeleteOptions{})
+				err := clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Delete(ctx, config.SecretNamePrincipalCA, v1.DeleteOptions{})
 				if err != nil {
 					cmdutil.Fatal("Could not delete secret %s: %v", config.SecretNamePrincipalCA, err)
 				}
@@ -241,13 +240,13 @@ func NewCADeleteCommand() *cobra.Command {
 	return command
 }
 
-func NewCAPrintCommand() *cobra.Command {
+func NewPKIPrintCommand() *cobra.Command {
 	var (
 		printCert bool
 		printKey  bool
 	)
 	command := &cobra.Command{
-		Short: "Print CA data in PEM format to stdout",
+		Short: "Print PKI's CA data in PEM format to stdout",
 		Long: `
 Prints the RSA private key, the public cert or both from the CA to stdout.
 Output format is PEM.
@@ -265,11 +264,11 @@ Only private keys of type RSA are currently supported.
 				_ = cmd.Help()
 				cmdutil.Fatal("One of --all, --key or --cert must be specified.")
 			}
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
 			if err != nil {
 				cmdutil.Fatal("%v", err)
 			}
-			cert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
+			cert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
 			if errors.IsNotFound(err) {
 				cmdutil.Fatal("CA not configured.")
 			}
@@ -310,94 +309,176 @@ Only private keys of type RSA are currently supported.
 	return command
 }
 
-var validComponents = []string{"resource-proxy"}
-
-func NewCAIssueCommand() *cobra.Command {
-	var (
-		component string
-		san       []string
-		upsert    bool
-	)
+func NewPKIIssueCommand() *cobra.Command {
 	command := &cobra.Command{
-		Short:   "NON-PROD!! Issue TLS certificates signed by the CA",
+		Short:   "NON-PROD!! Issue TLS certificates signed by the PKI's CA",
 		Use:     "issue <component>",
 		Aliases: []string{"new-cert"},
+	}
+	command.AddCommand(NewPKIIssuePrincipalCommand())
+	command.AddCommand(NewPKIIssueResourceProxyCommand())
+	command.AddCommand(NewPKIIssueAgentClientCert())
+	return command
+}
+
+func NewPKIIssuePrincipalCommand() *cobra.Command {
+	var (
+		ips    []string
+		dns    []string
+		upsert bool
+	)
+	command := &cobra.Command{
+		Short: "Issue a TLS certificate for the principal",
+		Use:   "principal",
 		Run: func(cmd *cobra.Command, args []string) {
-			if len(args) != 1 {
+			issueAndSaveSecret(globalOpts.principalContext, "argocd-agent-principal-tls", "argocd", upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateServerCertificate("argocd-agent-principal", c, pk, ips, dns)
+			})
+		},
+	}
+	command.Flags().StringSliceVar(&ips, "ip", []string{"127.0.0.1"}, "The IP addresses this certificate is valid for")
+	command.Flags().StringSliceVar(&dns, "dns", []string{"localhost"}, "The DNS names this certificate is valid for")
+	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
+	return command
+}
+
+func NewPKIIssueResourceProxyCommand() *cobra.Command {
+	var (
+		ips    []string
+		dns    []string
+		upsert bool
+		noSAN  bool
+	)
+	command := &cobra.Command{
+		Short: "Issue a TLS certificate for the resource proxy",
+		Use:   "resource-proxy",
+		Run: func(cmd *cobra.Command, args []string) {
+			if len(ips) == 0 && len(dns) == 0 {
+				fmt.Println("Please pass at least one of --ips or --dns options or use --no-san to create certificate without SAN")
+				os.Exit(1)
+			}
+			issueAndSaveSecret(globalOpts.principalContext, "argocd-agent-resource-proxy-tls", "argocd", upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateServerCertificate("argocd-agent-resource-proxy", c, pk, ips, dns)
+			})
+		},
+	}
+	command.Flags().StringSliceVar(&ips, "ip", []string{}, "The IP addresses this certificate is valid for")
+	command.Flags().StringSliceVar(&dns, "dns", []string{}, "The DNS names this certificate is valid for")
+	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
+	command.Flags().BoolVar(&noSAN, "no-san", false, "Do not add SAN information to the certificate")
+	return command
+}
+
+func NewPKIIssueAgentClientCert() *cobra.Command {
+	var (
+		upsert         bool
+		sameContext    bool
+		agentNamespace string
+	)
+	command := &cobra.Command{
+		Use:   "agent <name>",
+		Short: "Issue a client certificate for an agent",
+		Run: func(cmd *cobra.Command, args []string) {
+			if len(args) == 0 {
 				_ = cmd.Help()
-				cmdutil.Fatal("Secret name not given.")
+				fmt.Println("Agent name must be given.")
+				os.Exit(1)
 			}
-			component = args[0]
-			if !glob.MatchStringInList(validComponents, component, glob.EXACT) {
-				cmdutil.Fatal("Component must be one of: %s", strings.Join(validComponents, ", "))
+			agentName := args[0]
+			if (globalOpts.principalContext == globalOpts.agentContext) ||
+				(globalOpts.principalContext != "" && globalOpts.agentContext == "") &&
+					!sameContext {
+				fmt.Println("PKI and agent usually do not reside within the same context. Use --same-context if you really mean it.")
+				os.Exit(1)
 			}
-			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.namespace, "", globalOpts.context)
-			if err != nil {
-				cmdutil.Fatal("%v", err)
-			}
-
-			// Check if secret already exists
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Get(ctx, component, v1.GetOptions{})
-			if err != nil {
-				if !errors.IsNotFound(err) {
-					cmdutil.Fatal("Error getting secret %s/%s: %v", globalOpts.namespace, component, err)
-				}
-			} else {
-				cmdutil.Fatal("Secret %s/%s already exist", globalOpts.namespace, component)
-			}
-
-			// Get CA certificate
-			caCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.namespace, config.SecretNamePrincipalCA)
-			if err != nil {
-				if errors.IsNotFound(err) {
-					cmdutil.Fatal("CA is not initialized.")
-				} else {
-					cmdutil.Fatal("Error getting CA certificate: %v", err)
-				}
-			}
-			signerCert, err := x509.ParseCertificate(caCert.Certificate[0])
-			if err != nil {
-				cmdutil.Fatal("Could not parse CA certificate: %v", err)
-			}
-			var secret *corev1.Secret
-			cert, key, err := tlsutil.GenerateServerCertificate("server", signerCert, caCert.PrivateKey, san)
-			if err != nil {
-				cmdutil.Fatal("Could not generate server cert: %v", err)
-			}
-			secret = &corev1.Secret{
-				ObjectMeta: v1.ObjectMeta{
-					Name:      fmt.Sprintf("%s-tls", component),
-					Namespace: globalOpts.namespace,
-				},
-				Type: "kubernetes.io/tls",
-				Data: map[string][]byte{
-					"tls.crt": []byte(cert),
-					"tls.key": []byte(key),
-				},
-			}
-
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Create(ctx, secret, v1.CreateOptions{})
-			if err != nil {
-				if !errors.IsAlreadyExists(err) {
-					cmdutil.Fatal("Could not create secret: %v", err)
-				} else if !upsert {
-					cmdutil.Fatal("Certificate exists, please use --upsert to reissue.")
-				} else {
-					_, err = clt.Clientset.CoreV1().Secrets(globalOpts.namespace).Update(ctx, secret, v1.UpdateOptions{})
-					if err != nil {
-						cmdutil.Fatal("Could not update secret: %v", err)
-					} else {
-						fmt.Printf("Secret updated.\n")
-					}
-				}
-			} else {
-				fmt.Printf("Secret %s/%s created\n", globalOpts.namespace, fmt.Sprintf("%s-tls", component))
-			}
+			issueAndSaveSecret(globalOpts.agentContext, config.SecretNameAgentClientCert, agentNamespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateClientCertificate(agentName, c, pk)
+			})
 		},
 	}
 
-	command.Flags().StringSliceVarP(&san, "san", "N", []string{"IP:127.0.0.1"}, "Subject Alternative Names (SAN) for the cert")
-	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Update existing certificate if it exists")
+	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
+	command.Flags().BoolVar(&sameContext, "same-context", false, "Use when the PKI and agent use the same context")
+	command.Flags().StringVar(&agentNamespace, "agent-namespace", "argocd", "The namespace the agent is installed to")
 	return command
+}
+
+// issueAndSaveSecret uses the issue callback to create a TLS certificate and
+// sign it using the principal's CA. The issue function will take the CA's
+// certificate and private key as argument, and will return the generated
+// secret's certificate and private key as PEM encoded string. The resulting
+// certificate will be saved to a secret referred to by outContext, outName and
+// outNamespace.
+func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, issue func(*x509.Certificate, crypto.PrivateKey) (string, string, error)) {
+	ctx := context.TODO()
+
+	// Client for principal's kube context - it has the CA
+	caClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+	if err != nil {
+		cmdutil.Fatal("%v", err)
+	}
+
+	// Client for the kube context to write the resulting secret to - might be different
+	var outClt *kube.KubernetesClient
+	if outContext == globalOpts.principalContext || outContext == "" {
+		outClt = caClt
+	} else {
+		outClt, err = kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", outContext)
+		if err != nil {
+			cmdutil.Fatal("%v", err)
+		}
+	}
+
+	// Load CA keypair from a secret on the principal
+	caCert, err := tlsutil.TLSCertFromSecret(ctx, caClt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			cmdutil.Fatal("CA is not initialized.")
+		} else {
+			cmdutil.Fatal("Error getting CA certificate: %v", err)
+		}
+	}
+
+	// Get signer certificate
+	signerCert, err := x509.ParseCertificate(caCert.Certificate[0])
+	if err != nil {
+		cmdutil.Fatal("Could not parse CA certificate: %v", err)
+	}
+
+	// Generate a new TLS keypair from the cert and private key
+	cert, key, err := issue(signerCert, caCert.PrivateKey)
+	if err != nil {
+		cmdutil.Fatal("Error generating certificate: %v", err)
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      outName,
+			Namespace: outNamespace,
+		},
+		Type: "kubernetes.io/tls",
+		Data: map[string][]byte{
+			"tls.crt": []byte(cert),
+			"tls.key": []byte(key),
+		},
+	}
+
+	_, err = outClt.Clientset.CoreV1().Secrets(outNamespace).Create(ctx, secret, v1.CreateOptions{})
+	if err != nil {
+		if !errors.IsAlreadyExists(err) {
+			cmdutil.Fatal("Could not create secret: %v", err)
+		} else if !upsert {
+			cmdutil.Fatal("Certificate exists, please use --upsert to reissue.")
+		} else {
+			_, err = outClt.Clientset.CoreV1().Secrets(outNamespace).Update(ctx, secret, v1.UpdateOptions{})
+			if err != nil {
+				cmdutil.Fatal("Could not update secret: %v", err)
+			} else {
+				fmt.Printf("Secret %s/%s updated.\n", outNamespace, outName)
+			}
+		}
+	} else {
+		fmt.Printf("Secret %s/%s created\n", outNamespace, outName)
+	}
+
 }

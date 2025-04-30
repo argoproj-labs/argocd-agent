@@ -49,7 +49,7 @@ func Test_GenerateCaCertificate(t *testing.T) {
 	})
 	t.Run("Generate server certificate", func(t *testing.T) {
 		certSubj := "abcdefg"
-		certData, keyData, err := GenerateServerCertificate(certSubj, cert.Leaf, cert.PrivateKey, []string{"IP:127.0.0.1"})
+		certData, keyData, err := GenerateServerCertificate(certSubj, cert.Leaf, cert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"})
 		require.NoError(t, err)
 		ccert, err := tls.X509KeyPair([]byte(certData), []byte(keyData))
 		require.NoError(t, err)
@@ -60,6 +60,7 @@ func Test_GenerateCaCertificate(t *testing.T) {
 		assert.Equal(t, "test", ccert.Leaf.Issuer.CommonName)
 		ip := net.ParseIP("127.0.0.1")
 		assert.Contains(t, ccert.Leaf.IPAddresses, ip[len(ip)-4:])
+		assert.Contains(t, ccert.Leaf.DNSNames, "localhost")
 	})
 
 }

@@ -21,7 +21,9 @@ RECREATE="$1"
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 BASEPATH="$( cd -- "$(dirname "$0")/../.." >/dev/null 2>&1 ; pwd -P )"
 AGENTCTL=${BASEPATH}/dist/argocd-agentctl
-export ARGOCD_AGENT_CONTEXT=vcluster-control-plane
+
+export ARGOCD_AGENT_PRINCIPAL_CONTEXT=vcluster-control-plane
+export ARGOCD_AGENT_PRINCIPAL_NAMESPACE=argocd
 
 IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
 
@@ -30,25 +32,48 @@ if ! test -x ${AGENTCTL}; then
 	exit 1
 fi
 
-if ! ${AGENTCTL} ca inspect >/dev/null 2>&1; then
-	${AGENTCTL} ca generate
+echo "[*] Initializing PKI"
+if ! ${AGENTCTL} pki inspect >/dev/null 2>&1; then
+	${AGENTCTL} pki init
+	echo "  -> PKI initialized."
 else
-	echo "Reusing existing agent CA"
+	echo "  -> Reusing existing agent PKI."
 fi
 
-${AGENTCTL} ca issue --upsert -N "IP:127.0.0.1,IP:${IPADDR}" resource-proxy
+echo "[*] Creating principal TLS configuration"
+${AGENTCTL} pki issue principal --upsert \
+	--principal-namespace argocd \
+	--ip "127.0.0.1,${IPADDR}"
+echo "  -> Principal TLS config created."
+
+echo "[*] Creating resouce proxy TLS configuration"
+${AGENTCTL} pki issue resource-proxy --upsert \
+	--principal-namespace argocd \
+	--ip "127.0.0.1,${IPADDR}"
+echo "  -> Resource proxy TLS config created."
 
 AGENTS="agent-managed agent-autonomous"
 for agent in ${AGENTS}; do
+	echo "[*] Creating configuration for agent ${agent}"
 	if test "$RECREATE" = "--recreate"; then
-		kubectl --context ${ARGOCD_AGENT_CONTEXT} -n argocd delete --ignore-not-found secret cluster-${agent}
+		echo "  -> Deleting existing cluster secret, if it exists"
+		kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n ${ARGOCD_AGENT_PRINCIPAL_NAMESPACE} delete --ignore-not-found secret cluster-${agent}
 	fi
 	if ! ${AGENTCTL} agent inspect ${agent} >/dev/null 2>&1; then
+		echo "  -> Creating cluster secret for agent configuration"
 		${AGENTCTL} agent create ${agent} \
 			--resource-proxy-username ${agent} \
 			--resource-proxy-password ${agent} \
 			--resource-proxy-server ${IPADDR}:9090
 	else
-		echo "Reusing existing agent configuration for ${agent}"
+		echo "  -> Reusing existing cluster secret for agent configuration"
 	fi
+	echo "  -> Creating mTLS client certificate and key"
+	# Current hack to have managed agent running out of a different namespace
+	if test "$agent" = "agent-managed"; then
+		namespace="agent-managed"
+	else
+		namespace="argocd"
+	fi
+	${AGENTCTL} pki issue agent ${agent} --agent-context vcluster-${agent} --agent-namespace ${namespace} --upsert
 done
