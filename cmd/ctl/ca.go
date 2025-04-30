@@ -403,7 +403,12 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 	return command
 }
 
-// issueAndSaveSecret issues
+// issueAndSaveSecret uses the issue callback to create a TLS certificate and
+// sign it using the principal's CA. The issue function will take the CA's
+// certificate and private key as argument, and will return the generated
+// secret's certificate and private key as PEM encoded string. The resulting
+// certificate will be saved to a secret refered to by outContext, outName and
+// outNamespace.
 func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, issue func(*x509.Certificate, crypto.PrivateKey) (string, string, error)) {
 	ctx := context.TODO()
 
@@ -469,7 +474,7 @@ func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, i
 			if err != nil {
 				cmdutil.Fatal("Could not update secret: %v", err)
 			} else {
-				fmt.Printf("Secret updated.\n")
+				fmt.Printf("Secret %s/%s updated.\n", outNamespace, outName)
 			}
 		}
 	} else {

@@ -60,6 +60,7 @@ func Test_GenerateCaCertificate(t *testing.T) {
 		assert.Equal(t, "test", ccert.Leaf.Issuer.CommonName)
 		ip := net.ParseIP("127.0.0.1")
 		assert.Contains(t, ccert.Leaf.IPAddresses, ip[len(ip)-4:])
+		assert.Contains(t, ccert.Leaf.DNSNames, "localhost")
 	})
 
 }
