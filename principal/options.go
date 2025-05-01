@@ -190,8 +190,6 @@ func WithTLSRootCaFromFile(caPath string) ServerOption {
 		if !ok {
 			return fmt.Errorf("invalid certificate data in %s", caPath)
 		}
-		//nolint:staticcheck
-		log().Infof("Loaded %d cert(s) into the root CA pool", len(o.options.rootCa.Subjects()))
 		return nil
 	}
 }
@@ -203,7 +201,6 @@ func WithTLSRootCaFromSecret(kube kubernetes.Interface, name string, namespace s
 			return err
 		}
 		o.options.rootCa = pool
-		log().Infof("Loaded %d cert(s) into the root CA pool", len(o.options.rootCa.Subjects()))
 		return nil
 	}
 }
