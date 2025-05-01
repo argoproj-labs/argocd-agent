@@ -194,9 +194,14 @@ func WithTLSRootCaFromFile(caPath string) ServerOption {
 	}
 }
 
-func WithTLSRootCaFromSecret(kube kubernetes.Interface, name string, namespace string) ServerOption {
+// WithTLSRootCaFromSecret loads the root CAs to be used to validate client
+// certificates from the Kubernetes Secret referred to by namespace and name.
+// If field is non-empty, only loads certificates stored in the named field.
+// Otherwise, if field is empty, loads certificates from all fields in the
+// Secret.
+func WithTLSRootCaFromSecret(kube kubernetes.Interface, name string, namespace, field string) ServerOption {
 	return func(o *Server) error {
-		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, "tls.crt")
+		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, field)
 		if err != nil {
 			return err
 		}

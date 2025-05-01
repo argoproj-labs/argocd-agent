@@ -160,7 +160,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if rootCaPath != "" {
 				opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
 			} else {
-				opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, config.SecretNamePrincipalCA, namespace))
+				opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, config.SecretNamePrincipalCA, namespace, "tls.crt"))
 			}
 
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))

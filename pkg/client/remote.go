@@ -450,18 +450,23 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 	return nil
 }
 
+// Conn returns this remote's underlying gRPC connection object. It should
+// be treated as read-only.
 func (r *Remote) Conn() *grpc.ClientConn {
 	return r.conn
 }
 
+// ClientID returns the client ID used by this remote
 func (r *Remote) ClientID() string {
 	return r.clientID
 }
 
+// AuthMethod returns the name of the auth method configured for this remote
 func (r *Remote) AuthMethod() string {
 	return r.authMethod
 }
 
+// SetClientMode sets the client mode to be used by this remote
 func (r *Remote) SetClientMode(mode types.AgentMode) {
 	r.clientMode = mode
 }
