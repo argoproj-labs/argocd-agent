@@ -108,7 +108,6 @@ var ErrNoWatchFunc = errors.New("no watch func defined")
 func NewInformer[T runtime.Object](ctx context.Context, opts ...InformerOption[T]) (*Informer[T], error) {
 	i := &Informer[T]{}
 	var r T
-	var err error
 	i.resType = reflect.TypeOf(r)
 	i.logger = logrus.NewEntry(logrus.StandardLogger()).WithFields(logrus.Fields{
 		"type":   i.resType,
@@ -120,12 +119,25 @@ func NewInformer[T runtime.Object](ctx context.Context, opts ...InformerOption[T
 			return nil, fmt.Errorf("could not set option: %w", err)
 		}
 	}
+	// Both, listFunc and watchFunc need to be set
 	if i.listFunc == nil {
 		return nil, ErrNoListFunc
 	}
 	if i.watchFunc == nil {
 		return nil, ErrNoWatchFunc
 	}
+	i.createSharedInformer(ctx)
+	if err := i.installEventHandlers(); err != nil {
+		return nil, err
+	}
+	i.ctlCh = make(chan struct{})
+	return i, nil
+}
+
+// createSharedInformer creates the underlying shared index informer for the
+// Informer i.
+func (i *Informer[T]) createSharedInformer(ctx context.Context) {
+	var r T
 	i.informer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
@@ -156,13 +168,19 @@ func NewInformer[T runtime.Object](ctx context.Context, opts ...InformerOption[T
 		r,
 		i.resyncPeriod,
 		cache.Indexers{
-			cache.NamespaceIndex: func(obj interface{}) ([]string, error) {
+			cache.NamespaceIndex: func(obj any) ([]string, error) {
 				return cache.MetaNamespaceIndexFunc(obj)
 			},
 		},
 	)
+}
+
+// installEventHandlers installs any event handlers for the underlying shared
+// index informer for Informer i.
+func (i *Informer[T]) installEventHandlers() error {
+	var err error
 	i.evHandler, err = i.informer.AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: func(obj interface{}) bool {
+		FilterFunc: func(obj any) bool {
 			if i.filters == nil {
 				return true
 			}
@@ -174,7 +192,7 @@ func NewInformer[T runtime.Object](ctx context.Context, opts ...InformerOption[T
 			return i.filters.Admit(res)
 		},
 		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
+			AddFunc: func(obj any) {
 				res, ok := obj.(T)
 				if !ok {
 					return
@@ -205,10 +223,9 @@ func NewInformer[T runtime.Object](ctx context.Context, opts ...InformerOption[T
 		},
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	i.ctlCh = make(chan struct{})
-	return i, nil
+	return nil
 }
 
 // Start starts the informer until the informer's control channel is closed.
