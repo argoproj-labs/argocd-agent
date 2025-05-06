@@ -142,8 +142,16 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 
 		incoming.SetNamespace(agentName)
 		_, err := s.appManager.Create(ctx, incoming)
-		if err != nil && !kerrors.IsAlreadyExists(err) {
-			return fmt.Errorf("could not create application %s: %w", incoming.QualifiedName(), err)
+		if err != nil {
+			if !kerrors.IsAlreadyExists(err) {
+				return fmt.Errorf("could not create application %s: %w", incoming.QualifiedName(), err)
+			}
+
+			// Update the application if it already exists
+			_, err := s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
+			if err != nil {
+				return fmt.Errorf("could not update application spec for %s: %w", incoming.QualifiedName(), err)
+			}
 		}
 	// Spec updates are only allowed in autonomous mode
 	case event.SpecUpdate.String():
@@ -154,7 +162,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 
 		_, err := s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
 		if err != nil {
-			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
+			return fmt.Errorf("could not update application spec for %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Updated application spec %s", incoming.QualifiedName())
 	// Status updates are only allowed in managed mode

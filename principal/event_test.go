@@ -92,6 +92,51 @@ func Test_CreateEvents(t *testing.T) {
 		assert.Equal(t, ev, *got)
 	})
 
+	t.Run("Update the application if it already exists", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "foo",
+					Path:           ".",
+					TargetRevision: "HEAD",
+				},
+			},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{
+					Revision: "abc",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
+			},
+		}
+		fac := kube.NewKubernetesFakeClient(app)
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("application")
+		ev.SetType(event.Create.String())
+		// Update the application before sending the event
+		app.Spec.Source.TargetRevision = "test"
+		ev.SetData(cloudevents.ApplicationJSON, app)
+		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq.On("Get").Return(&ev, false)
+		wq.On("Done", &ev)
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil))
+		require.NoError(t, err)
+		s.setAgentMode("argocd", types.AgentModeAutonomous)
+		got, err := s.processRecvQueue(context.Background(), "argocd", wq)
+		assert.Equal(t, ev, *got)
+		assert.NoError(t, err)
+		// Check if the application was updated
+		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("argocd").Get(context.TODO(), "test", v1.GetOptions{})
+		assert.NoError(t, err)
+		require.NotNil(t, napp)
+		require.Equal(t, app.Spec.Source.TargetRevision, napp.Spec.Source.TargetRevision)
+	})
+
 	t.Run("Create application in autonomous mode", func(t *testing.T) {
 		app := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
