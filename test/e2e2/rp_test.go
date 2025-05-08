@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -83,6 +84,15 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 
 	rpClient := suite.getRpClient("agent-managed")
 
+	depl := &appsv1.Deployment{}
+	err := suite.ManagedAgentClient.Get(context.TODO(), types.NamespacedName{Namespace: "argocd", Name: "argocd-repo-server"}, depl, v1.GetOptions{})
+	requires.NoError(err)
+	requires.Equal("argocd", depl.Namespace)
+	requires.Equal("argocd-repo-server", depl.Name)
+	depl.Labels["app.kubernetes.io/instance"] = "argocd-repo-server"
+	err = suite.ManagedAgentClient.Update(context.TODO(), depl, v1.UpdateOptions{})
+	requires.NoError(err)
+
 	// Managed agents should respond swiftly
 	resp, err := rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-repo-server")
 	requires.NoError(err)
@@ -93,11 +103,28 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	resource, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	requires.NoError(err)
-	depl := &appsv1.Deployment{}
+	depl = &appsv1.Deployment{}
 	err = json.Unmarshal(resource, depl)
 	requires.NoError(err)
 	requires.Equal("argocd-repo-server", depl.Name)
 	requires.Equal("argocd", depl.Namespace)
+
+	// Request an unmanaged resource
+	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-redis")
+	requires.NoError(err)
+	requires.NotNil(resp)
+	requires.NotEqual(http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+
+	// Request the API discovery endpoint
+	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1")
+	requires.NoError(err)
+	requires.NotNil(resp)
+	requires.NotEqual(http.StatusNotFound, resp.StatusCode)
+	resource, err = io.ReadAll(resp.Body)
+	requires.NoError(err)
+	fmt.Printf("%s", resource)
+	resp.Body.Close()
 
 	// argocd-server should not exist on the agent
 	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-server")
@@ -128,12 +155,18 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	requires := suite.Require()
 
-	argoEndpoint := "192.168.56.220"
+	// Get the Argo server endpoint to use
+	srvService := &corev1.Service{}
+	err := suite.PrincipalClient.Get(context.Background(),
+		types.NamespacedName{Namespace: "argocd", Name: "argocd-server"}, srvService, v1.GetOptions{})
+	requires.NoError(err)
+	argoEndpoint := srvService.Spec.LoadBalancerIP
+
 	appName := "guestbook-rp"
 
 	// Read admin secret from principal's cluster
 	pwdSecret := &corev1.Secret{}
-	err := suite.PrincipalClient.Get(context.Background(),
+	err = suite.PrincipalClient.Get(context.Background(),
 		types.NamespacedName{Namespace: "argocd", Name: "argocd-initial-admin-secret"}, pwdSecret, v1.GetOptions{})
 	requires.NoError(err)
 
