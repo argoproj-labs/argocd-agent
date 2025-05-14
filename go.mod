@@ -25,7 +25,7 @@ require (
 	golang.org/x/term v0.32.0
 	golang.stackrox.io/grpc-http1 v0.4.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20250218202821-56aae31c358a
-	google.golang.org/grpc v1.72.0
+	google.golang.org/grpc v1.72.1
 	google.golang.org/protobuf v1.36.6
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
