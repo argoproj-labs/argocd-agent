@@ -109,7 +109,7 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 	c := &client{}
 	c.wg = &sync.WaitGroup{}
 
-	agentName, err := session.ClientIdFromContext(ctx)
+	agentName, err := session.ClientIDFromContext(ctx)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -410,7 +410,7 @@ func (s *Server) Push(pushs eventstreamapi.EventStream_PushServer) error {
 	}
 	defer cancel()
 
-	agentName, err := session.ClientIdFromContext(ctx)
+	agentName, err := session.ClientIDFromContext(ctx)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
