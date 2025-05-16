@@ -24,7 +24,7 @@ BIN_DIR := $(current_dir)/build/bin
 
 PROTOC_GEN_GO_VERSION?=v1.28
 PROTOC_GEN_GO_GRPC_VERSION=v1.2
-GOLANG_CI_LINT_VERSION=v1.62.0
+GOLANG_CI_LINT_VERSION=v2.1.6
 MOCKERY_V2_VERSION?=v2.43.0
 
 GO_BIN_DIR=$(shell go env GOPATH)/bin
@@ -87,7 +87,7 @@ clean-all: clean
 	mkdir -p build/bin
 
 ./build/bin/golangci-lint: ./build/bin
-	GOBIN=$(BIN_DIR) go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANG_CI_LINT_VERSION)
+	GOBIN=$(BIN_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANG_CI_LINT_VERSION)
 
 ./build/bin/protoc-gen-go: ./build/bin
 	GOBIN=$(BIN_DIR) go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
