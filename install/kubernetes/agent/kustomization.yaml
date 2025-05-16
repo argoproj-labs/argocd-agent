@@ -4,3 +4,4 @@ resources:
 - agent-rolebinding.yaml
 - agent-deployment.yaml
 - agent-params-cm.yaml
+- agent-metrics-service.yaml
