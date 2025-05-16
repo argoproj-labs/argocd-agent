@@ -101,6 +101,8 @@ type AgentOptions struct {
 	healthzPort int
 }
 
+// AgentOption is a functional option type used to configure an Agent instance during initialization.
+// It takes a pointer to an Agent and returns an error if the configuration fails.
 type AgentOption func(*Agent) error
 
 // NewAgent creates a new agent instance, using the given client interfaces and

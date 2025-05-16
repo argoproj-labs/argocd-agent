@@ -49,7 +49,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 	t.Run("Valid TLS key pair", func(t *testing.T) {
 		templ := certTempl
 		fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
-		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithGeneratedTokenSigningKey(),
 		)
@@ -59,7 +59,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 		assert.NotNil(t, tlsConfig)
 	})
 	t.Run("Non-existing TLS key pair", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "other-cert.crt"), path.Join(tempDir, "other-cert.key")),
 			WithGeneratedTokenSigningKey(),
 		)
@@ -70,7 +70,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 	})
 
 	t.Run("Invalid TLS certificate", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), testNamespace,
 			WithTLSKeyPairFromPath("server_test.go", "server_test.go"),
 			WithGeneratedTokenSigningKey(),
 		)
@@ -84,7 +84,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 
 func Test_NewServer(t *testing.T) {
 	t.Run("Instantiate new server object with non-default options", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace, WithListenerAddress("0.0.0.0"), WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), testNamespace, WithListenerAddress("0.0.0.0"), WithGeneratedTokenSigningKey())
 		assert.NoError(t, err)
 		assert.NotNil(t, s)
 		assert.NotEqual(t, defaultOptions(), s.options)
@@ -92,14 +92,14 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("Instantiate new server object with invalid option", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace, WithListenerPort(-1), WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), testNamespace, WithListenerPort(-1), WithGeneratedTokenSigningKey())
 		assert.Error(t, err)
 		assert.Nil(t, s)
 	})
 }
 
 func Test_handleResyncOnConnect(t *testing.T) {
-	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
+	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), testNamespace,
 		WithGeneratedTokenSigningKey(),
 	)
 	s.kubeClient.RestConfig = &rest.Config{}
@@ -151,7 +151,7 @@ func Test_handleResyncOnConnect(t *testing.T) {
 }
 
 func Test_RunHandlersOnConnect(t *testing.T) {
-	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), testNamespace,
+	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), testNamespace,
 		WithGeneratedTokenSigningKey(),
 	)
 	require.NoError(t, err)

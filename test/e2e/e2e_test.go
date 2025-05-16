@@ -101,7 +101,7 @@ func Test_EndToEnd_Subscribe(t *testing.T) {
 	// require.NoError(t, err)
 
 	appC := fakeappclient.NewSimpleClientset()
-	conn, s := newConn(t, fakekube.NewKubernetesFakeClient())
+	conn, s := newConn(t, fakekube.NewKubernetesFakeClientWithApps())
 	defer conn.Close()
 
 	authC := authapi.NewAuthenticationClient(conn)
@@ -180,7 +180,7 @@ func Test_EndToEnd_Push(t *testing.T) {
 		objs[i] = runtime.Object(&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: fmt.Sprintf("test%d", i), Namespace: "default"}})
 	}
 	appC := fakeappclient.NewSimpleClientset(objs...)
-	conn, s := newConn(t, fakekube.NewKubernetesFakeClient())
+	conn, s := newConn(t, fakekube.NewKubernetesFakeClientWithApps())
 	defer conn.Close()
 	authC := authapi.NewAuthenticationClient(conn)
 	eventC := eventstreamapi.NewEventStreamClient(conn)
@@ -240,7 +240,7 @@ func Test_AgentServer(t *testing.T) {
 	}
 	sctx, scancel := context.WithTimeout(context.Background(), 20*time.Second)
 	actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
-	fakeAppcServer := fakekube.NewKubernetesFakeClient()
+	fakeAppcServer := fakekube.NewKubernetesFakeClientWithApps()
 	am := auth.NewMethods()
 	up := userpass.NewUserPassAuthentication("")
 	err := am.RegisterMethod("userpass", up)
@@ -267,7 +267,7 @@ func Test_AgentServer(t *testing.T) {
 		client.WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "client", userpass.ClientSecretField: "insecure"}),
 	)
 	require.NoError(t, err)
-	fakeKubeClient := fakekube.NewKubernetesFakeClient()
+	fakeKubeClient := fakekube.NewKubernetesFakeClientWithApps()
 	a, err := agent.NewAgent(actx, fakeKubeClient, "client",
 		agent.WithRemote(remote),
 		agent.WithMode(types.AgentModeManaged.String()),
@@ -332,7 +332,7 @@ func Test_WithHTTP1WebSocket(t *testing.T) {
 			serverOpts = append(serverOpts, principal.WithWebSocket(true))
 		}
 
-		s, err := principal.NewServer(ctx, fakekube.NewKubernetesFakeClient(), "server", serverOpts...)
+		s, err := principal.NewServer(ctx, fakekube.NewKubernetesFakeClientWithApps(), "server", serverOpts...)
 
 		require.NoError(t, err)
 		require.NotNil(t, s)
@@ -363,7 +363,7 @@ func Test_WithHTTP1WebSocket(t *testing.T) {
 	startAgent := func(t *testing.T, ctx context.Context, remote *client.Remote) (*client.Remote, *agent.Agent) {
 		t.Helper()
 
-		fakeKubeClient := fakekube.NewKubernetesFakeClient()
+		fakeKubeClient := fakekube.NewKubernetesFakeClientWithApps()
 		a, err := agent.NewAgent(ctx, fakeKubeClient, "client",
 			agent.WithRemote(remote),
 			agent.WithMode(types.AgentModeManaged.String()),

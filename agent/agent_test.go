@@ -29,7 +29,7 @@ import (
 
 func newAgent(t *testing.T) *Agent {
 	t.Helper()
-	kubec := kube.NewKubernetesFakeClient()
+	kubec := kube.NewKubernetesFakeClientWithApps()
 	remote, err := client.NewRemote("127.0.0.1", 8080)
 	require.NoError(t, err)
 	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote))
@@ -38,7 +38,7 @@ func newAgent(t *testing.T) *Agent {
 }
 
 func Test_NewAgent(t *testing.T) {
-	kubec := kube.NewKubernetesFakeClient()
+	kubec := kube.NewKubernetesFakeClientWithApps()
 	agent, err := NewAgent(context.TODO(), kubec, "agent", WithRemote(&client.Remote{}))
 	require.NotNil(t, agent)
 	require.NoError(t, err)
