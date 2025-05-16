@@ -143,7 +143,7 @@ func Test_TlsCertToSecret(t *testing.T) {
 
 	t.Run("Successfully create a secret", func(t *testing.T) {
 		kcl := kube.NewFakeClientsetWithResources()
-		cert, err := TlsCertFromFile("testdata/001_test_cert.pem", "testdata/001_test_key.pem", false)
+		cert, err := TLSCertFromFile("testdata/001_test_cert.pem", "testdata/001_test_key.pem", false)
 		require.NoError(t, err)
 		err = TLSCertToSecret(context.TODO(), kcl, "argocd", "tls-one", cert)
 		assert.NoError(t, err)
@@ -156,7 +156,7 @@ func Test_TlsCertToSecret(t *testing.T) {
 
 	t.Run("Incomplete certificate", func(t *testing.T) {
 		kcl := kube.NewFakeClientsetWithResources()
-		cert, err := TlsCertFromFile("testdata/001_test_cert.pem", "testdata/001_test_key.pem", false)
+		cert, err := TLSCertFromFile("testdata/001_test_cert.pem", "testdata/001_test_key.pem", false)
 		require.NoError(t, err)
 		cert.PrivateKey = nil
 		err = TLSCertToSecret(context.TODO(), kcl, "argocd", "tls-one", cert)

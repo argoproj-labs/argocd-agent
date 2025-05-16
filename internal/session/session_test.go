@@ -10,7 +10,7 @@ import (
 func Test_ClientInfoInContext(t *testing.T) {
 	t.Run("Successfully extract client ID and mode", func(t *testing.T) {
 		ctx := ClientInfoToContext(context.Background(), "agent", "managed")
-		a, err := ClientIdFromContext(ctx)
+		a, err := ClientIDFromContext(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, "agent", a)
 		m, err := ClientModeFromContext(ctx)
@@ -18,7 +18,7 @@ func Test_ClientInfoInContext(t *testing.T) {
 		assert.Equal(t, "managed", m)
 	})
 	t.Run("No client ID in context", func(t *testing.T) {
-		a, err := ClientIdFromContext(context.Background())
+		a, err := ClientIDFromContext(context.Background())
 		assert.ErrorContains(t, err, "no client identifier")
 		assert.Empty(t, a)
 	})
@@ -29,7 +29,7 @@ func Test_ClientInfoInContext(t *testing.T) {
 	})
 	t.Run("Invalid client ID in context", func(t *testing.T) {
 		ctx := ClientInfoToContext(context.Background(), "ag_ent", "managed")
-		a, err := ClientIdFromContext(ctx)
+		a, err := ClientIDFromContext(ctx)
 		assert.ErrorContains(t, err, "invalid client identifier")
 		assert.Empty(t, a)
 	})

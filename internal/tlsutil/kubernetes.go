@@ -149,7 +149,7 @@ func GetKubeConfigClientCert(conf *rest.Config) (*tls.Certificate, error) {
 	var cert tls.Certificate
 	var err error
 	if conf.CertFile != "" && conf.KeyFile != "" {
-		cert, err = TlsCertFromFile(conf.CertFile, conf.KeyFile, true)
+		cert, err = TLSCertFromFile(conf.CertFile, conf.KeyFile, true)
 	} else if len(conf.CertData) > 0 && len(conf.KeyData) > 0 {
 		cert, err = tls.X509KeyPair(conf.CertData, conf.KeyData)
 	} else {

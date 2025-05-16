@@ -119,9 +119,9 @@ func (c *ArgoRestClient) Login() error {
 
 func (c *ArgoRestClient) Sync(app *v1alpha1.Application) error {
 	payload := fmt.Sprintf(`{"name": "%s", "appNamespace": "%s" }`, app.Name, app.Namespace)
-	reqUrl := c.url()
-	reqUrl.Path = fmt.Sprintf("/api/v1/applications/%s/sync", app.Name)
-	req := post(reqUrl, payload)
+	reqURL := c.url()
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/sync", app.Name)
+	req := post(reqURL, payload)
 	resp, err := c.Do(req)
 	if err != nil {
 		return err
@@ -135,7 +135,7 @@ func (c *ArgoRestClient) Sync(app *v1alpha1.Application) error {
 
 // GetResource requests a resource managed through an Application from Argo CD
 func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, kind, namespace, name string) (string, error) {
-	reqUrl := c.url(
+	reqURL := c.url(
 		"appNamespace", app.Namespace,
 		"project", app.Spec.Project,
 		"namespace", namespace,
@@ -144,8 +144,8 @@ func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, 
 		"version", version,
 		"kind", kind,
 	)
-	reqUrl.Path = fmt.Sprintf("/api/v1/applications/%s/resource", app.Name)
-	resp, err := c.Do(&http.Request{Method: http.MethodGet, URL: reqUrl, Header: make(http.Header)})
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource", app.Name)
+	resp, err := c.Do(&http.Request{Method: http.MethodGet, URL: reqURL, Header: make(http.Header)})
 	if err != nil {
 		return "", err
 	}

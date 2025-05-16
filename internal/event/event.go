@@ -196,7 +196,7 @@ type ResourceResponse struct {
 	Resource string `json:"resource,omitempty"`
 }
 
-func HttpStatusFromError(err error) int {
+func HTTPStatusFromError(err error) int {
 	if status, ok := err.(apierrors.APIStatus); ok || errors.As(err, &status) {
 		return int(status.Status().Code)
 	}

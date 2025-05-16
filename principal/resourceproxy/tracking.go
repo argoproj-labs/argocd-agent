@@ -38,10 +38,10 @@ type requestState struct {
 }
 
 // Tracked returns the tracked event identified by resId
-func (p *ResourceProxy) Tracked(eventId string) (string, chan *cloudevents.Event) {
-	p.statemap.mutex.RLock()
-	defer p.statemap.mutex.RUnlock()
-	r, ok := p.statemap.requests[eventId]
+func (rp *ResourceProxy) Tracked(eventID string) (string, chan *cloudevents.Event) {
+	rp.statemap.mutex.RLock()
+	defer rp.statemap.mutex.RUnlock()
+	r, ok := rp.statemap.requests[eventID]
 	if !ok || r == nil {
 		return "", nil
 	}
@@ -51,36 +51,36 @@ func (p *ResourceProxy) Tracked(eventId string) (string, chan *cloudevents.Event
 // Track starts tracking a resource request identified by its UUID for an agent
 // with the given name. It will return a channel the caller can use to read the
 // response event from.
-func (p *ResourceProxy) Track(eventId string, agentName string) (<-chan *cloudevents.Event, error) {
-	p.statemap.mutex.Lock()
-	defer p.statemap.mutex.Unlock()
-	log().WithFields(logrus.Fields{"event_id": eventId, "agent": agentName}).Trace("Tracking new request")
-	_, ok := p.statemap.requests[eventId]
+func (rp *ResourceProxy) Track(eventID string, agentName string) (<-chan *cloudevents.Event, error) {
+	rp.statemap.mutex.Lock()
+	defer rp.statemap.mutex.Unlock()
+	log().WithFields(logrus.Fields{"event_id": eventID, "agent": agentName}).Trace("Tracking new request")
+	_, ok := rp.statemap.requests[eventID]
 	if ok {
-		return nil, fmt.Errorf("resource with ID %s already tracked", eventId)
+		return nil, fmt.Errorf("resource with ID %s already tracked", eventID)
 	}
 	ch := make(chan *cloudevents.Event)
-	p.statemap.requests[eventId] = &requestWrapper{agentName: agentName, evCh: ch}
+	rp.statemap.requests[eventID] = &requestWrapper{agentName: agentName, evCh: ch}
 	return ch, nil
 }
 
 // StopTracking will stop tracking a particular resource and close any event
 // channel that may still be open.
-func (p *ResourceProxy) StopTracking(eventId string) error {
-	p.statemap.mutex.Lock()
-	defer p.statemap.mutex.Unlock()
-	r, ok := p.statemap.requests[eventId]
+func (rp *ResourceProxy) StopTracking(eventID string) error {
+	rp.statemap.mutex.Lock()
+	defer rp.statemap.mutex.Unlock()
+	r, ok := rp.statemap.requests[eventID]
 	if ok {
 		close(r.evCh)
 		logCtx := log().WithFields(logrus.Fields{
-			"event_id": eventId,
+			"event_id": eventID,
 			"agent":    r.agentName,
 		})
 		logCtx.Trace("Finished tracking request")
-		delete(p.statemap.requests, eventId)
+		delete(rp.statemap.requests, eventID)
 		return nil
 	} else {
-		log().WithField("event_id", eventId).Warn("Resource not tracked -- is this a bug?")
-		return fmt.Errorf("resource request %s not tracked", eventId)
+		log().WithField("event_id", eventID).Warn("Resource not tracked -- is this a bug?")
+		return fmt.Errorf("resource request %s not tracked", eventID)
 	}
 }

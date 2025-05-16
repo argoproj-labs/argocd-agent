@@ -109,8 +109,8 @@ type Server struct {
 	resourceProxy *resourceproxy.ResourceProxy
 	// resourceProxyListenAddr is the listener address for the resource proxy
 	resourceProxyListenAddr string
-	// resourceProxyTlsConfig is the TLS configuration for the resource proxy
-	resourceProxyTlsConfig *tls.Config
+	// resourceProxyTLSConfig is the TLS configuration for the resource proxy
+	resourceProxyTLSConfig *tls.Config
 
 	// clusterManager manages Argo CD cluster secrets and their mappings to agents
 	clusterMgr *cluster.Manager
@@ -302,7 +302,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 				[]string{"get"},
 				s.proxyVersion,
 			),
-			resourceproxy.WithTLSConfig(s.resourceProxyTlsConfig),
+			resourceproxy.WithTLSConfig(s.resourceProxyTLSConfig),
 		)
 		if err != nil {
 			return nil, err
@@ -617,9 +617,9 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	var err error
 
 	if s.options.tlsCertPath != "" && s.options.tlsKeyPath != "" {
-		cert, err = tlsutil.TlsCertFromFile(s.options.tlsCertPath, s.options.tlsKeyPath, false)
+		cert, err = tlsutil.TLSCertFromFile(s.options.tlsCertPath, s.options.tlsKeyPath, false)
 	} else if s.options.tlsCert != nil && s.options.tlsKey != nil {
-		cert, err = tlsutil.TlsCertFromX509(s.options.tlsCert, s.options.tlsKey)
+		cert, err = tlsutil.TLSCertFromX509(s.options.tlsCert, s.options.tlsKey)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("unable to load TLS config: %w", err)
