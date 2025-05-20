@@ -24,9 +24,6 @@ linters:
         - '-QF1008'
         - '-QF1007'
         - '-QF1011'
-        - '-ST1003'
-        - '-ST1016'
-        - '-ST1023'
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

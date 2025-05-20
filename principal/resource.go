@@ -98,17 +98,17 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Remember the resource ID of the sent event
-	sentUuid := event.EventID(sentEv)
+	sentUUID := event.EventID(sentEv)
 
 	// Start tracking the event, so we can later get the response
-	eventCh, err := s.resourceProxy.Track(sentUuid, agentName)
+	eventCh, err := s.resourceProxy.Track(sentUUID, agentName)
 	if err != nil {
-		logCtx.Errorf("Could not track event %s: %v", sentUuid, err)
+		logCtx.Errorf("Could not track event %s: %v", sentUUID, err)
 	}
 	defer func() {
-		err := s.resourceProxy.StopTracking(sentUuid)
+		err := s.resourceProxy.StopTracking(sentUUID)
 		if err != nil {
-			logCtx.Warnf("Could not untrack %s: %v", sentUuid, err)
+			logCtx.Warnf("Could not untrack %s: %v", sentUUID, err)
 		}
 	}()
 
@@ -146,8 +146,8 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 			// Make sure that we have the right response event. This should
 			// usually not happen, because the resource proxy has a mapping
 			// of request to response, but we'll be vigilante.
-			rcvdUuid := event.EventID(rcvdEv)
-			if rcvdUuid != sentUuid {
+			rcvdUUID := event.EventID(rcvdEv)
+			if rcvdUUID != sentUUID {
 				log().Error("Received mismatching UUID in response")
 				w.WriteHeader(http.StatusForbidden)
 				return

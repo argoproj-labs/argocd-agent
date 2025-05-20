@@ -57,7 +57,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		tlsCert                string
 		tlsKey                 string
 		jwtKey                 string
-		allowTlsGenerate       bool
+		allowTLSGenerate       bool
 		allowJwtGenerate       bool
 		authMethod             string
 		rootCaPath             string
@@ -144,7 +144,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			opts = append(opts, principal.WithNamespaces(allowedNamespaces...))
 
-			if allowTlsGenerate {
+			if allowTLSGenerate {
 				logrus.Info("Using one-time generated TLS certificate for gRPC")
 				opts = append(opts, principal.WithGeneratedTLS("argocd-agent-principal--generated"))
 			} else if tlsCert != "" && tlsKey != "" {
@@ -154,7 +154,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				cmdutil.Fatal("Both --tls-cert and --tls-key have to be given")
 			} else {
 				logrus.Infof("Loading gRPC TLS certificate from secret %s/%s", namespace, config.SecretNamePrincipalCA)
-				opts = append(opts, principal.WithTLSKeyPairFromSecret(kubeConfig.Clientset, config.SecretNamePrincipalTls, namespace))
+				opts = append(opts, principal.WithTLSKeyPairFromSecret(kubeConfig.Clientset, config.SecretNamePrincipalTLS, namespace))
 			}
 
 			if rootCaPath != "" {
@@ -168,16 +168,16 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithResourceProxyEnabled(enableResourceProxy))
 
 			if enableResourceProxy {
-				var proxyTls *tls.Config
+				var proxyTLS *tls.Config
 				if resourceProxyCertPath != "" && resourceProxyKeyPath != "" && resourceProxyCAPath != "" {
-					proxyTls, err = getResourceProxyTLSConfigFromFiles(resourceProxyCertPath, resourceProxyKeyPath, resourceProxyCAPath)
+					proxyTLS, err = getResourceProxyTLSConfigFromFiles(resourceProxyCertPath, resourceProxyKeyPath, resourceProxyCAPath)
 				} else {
-					proxyTls, err = getResourceProxyTLSConfigFromKube(kubeConfig, namespace)
+					proxyTLS, err = getResourceProxyTLSConfigFromKube(kubeConfig, namespace)
 				}
 				if err != nil {
 					cmdutil.Fatal("Error reading TLS config for resource proxy: %v", err)
 				}
-				opts = append(opts, principal.WithResourceProxyTLS(proxyTls))
+				opts = append(opts, principal.WithResourceProxyTLS(proxyTLS))
 			}
 
 			if jwtKey != "" {
@@ -290,7 +290,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&tlsKey, "tls-key",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_KEY_PATH", nil, ""),
 		"Use TLS private key from path")
-	command.Flags().BoolVar(&allowTlsGenerate, "insecure-tls-generate",
+	command.Flags().BoolVar(&allowTLSGenerate, "insecure-tls-generate",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ALLOW_GENERATE", false),
 		"INSECURE: Generate and use temporary TLS cert and key")
 	command.Flags().StringVar(&rootCaPath, "root-ca-path",
@@ -377,7 +377,7 @@ func observer(interval time.Duration) {
 func getResourceProxyTLSConfigFromKube(kubeClient *kube.KubernetesClient, namespace string) (*tls.Config, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	proxyCert, err := tlsutil.TLSCertFromSecret(ctx, kubeClient.Clientset, namespace, config.SecretNameProxyTls)
+	proxyCert, err := tlsutil.TLSCertFromSecret(ctx, kubeClient.Clientset, namespace, config.SecretNameProxyTLS)
 	if err != nil {
 		return nil, fmt.Errorf("error getting proxy certificate: %w", err)
 	}
@@ -387,7 +387,7 @@ func getResourceProxyTLSConfigFromKube(kubeClient *kube.KubernetesClient, namesp
 		return nil, fmt.Errorf("error getting client CA certificate: %w", err)
 	}
 
-	proxyTls := &tls.Config{
+	proxyTLS := &tls.Config{
 		Certificates: []tls.Certificate{
 			proxyCert,
 		},
@@ -395,13 +395,13 @@ func getResourceProxyTLSConfigFromKube(kubeClient *kube.KubernetesClient, namesp
 		ClientCAs:  clientCA,
 	}
 
-	return proxyTls, nil
+	return proxyTLS, nil
 }
 
 // getResourceProxyTLSConfigFromFiles reads the kubeproxy TLS configuration from
 // given files and returns it.
 func getResourceProxyTLSConfigFromFiles(certPath, keyPath, caPath string) (*tls.Config, error) {
-	proxyCert, err := tlsutil.TlsCertFromFile(certPath, keyPath, false)
+	proxyCert, err := tlsutil.TLSCertFromFile(certPath, keyPath, false)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +411,7 @@ func getResourceProxyTLSConfigFromFiles(certPath, keyPath, caPath string) (*tls.
 		return nil, err
 	}
 
-	proxyTls := &tls.Config{
+	proxyTLS := &tls.Config{
 		Certificates: []tls.Certificate{
 			proxyCert,
 		},
@@ -419,7 +419,7 @@ func getResourceProxyTLSConfigFromFiles(certPath, keyPath, caPath string) (*tls.
 		ClientCAs:  clientCA,
 	}
 
-	return proxyTls, nil
+	return proxyTLS, nil
 }
 
 // parseAuth parses an authentication string and extracts the authentication method

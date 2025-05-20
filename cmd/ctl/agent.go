@@ -130,7 +130,7 @@ func NewAgentCreateCommand() *cobra.Command {
 			// The agent's name will be persisted as a label
 			labels[cluster.LabelKeyClusterAgentMapping] = agentName
 
-			serverUrl, err := serverURL(rpServer, agentName)
+			serverURL, err := serverURL(rpServer, agentName)
 			if err != nil {
 				cmdutil.Fatal("%v", err)
 			}
@@ -184,7 +184,7 @@ func NewAgentCreateCommand() *cobra.Command {
 
 			// Construct Argo CD cluster configuration
 			clus := &v1alpha1.Cluster{
-				Server: serverUrl,
+				Server: serverURL,
 				Name:   agentName,
 				Labels: labels,
 				Config: v1alpha1.ClusterConfig{
@@ -436,7 +436,7 @@ func serverURL(address, agentName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !session.IsValidClientId(agentName) {
+	if !session.IsValidClientID(agentName) {
 		return "", fmt.Errorf("invalid agent name")
 	}
 	return fmt.Sprintf("https://%s?agentName=%s", address, agentName), nil
