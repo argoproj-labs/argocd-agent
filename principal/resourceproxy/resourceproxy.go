@@ -127,13 +127,13 @@ func New(addr string, options ...ResourceProxyOption) (*ResourceProxy, error) {
 // Start starts the proxy in the background and immediately returns. The caller
 // may read an error from the returned channel. The channel will only be
 // written to in case of a start-up error, or when the proxy has shut down.
-func (p *ResourceProxy) Start(ctx context.Context) (<-chan error, error) {
-	log().Infof("Starting ResourceProxy on %s", p.addr)
+func (rp *ResourceProxy) Start(ctx context.Context) (<-chan error, error) {
+	log().Infof("Starting ResourceProxy on %s", rp.addr)
 	errCh := make(chan error)
 	var l net.Listener
 	var err error
 
-	addr, err := netip.ParseAddrPort(p.addr)
+	addr, err := netip.ParseAddrPort(rp.addr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid listener address: %w", err)
 	}
@@ -145,16 +145,16 @@ func (p *ResourceProxy) Start(ctx context.Context) (<-chan error, error) {
 	} else if addr.Addr().Is6() {
 		network = "tcp6"
 	} else {
-		return nil, fmt.Errorf("could not figure out address type for %s", p.addr)
+		return nil, fmt.Errorf("could not figure out address type for %s", rp.addr)
 	}
 
 	// Although we really should only support TLS, we do support plain text
 	// connections too. But at least, we print a fat warning in that case.
-	if p.tlsConfig != nil {
-		l, err = tls.Listen(network, p.addr, p.tlsConfig)
+	if rp.tlsConfig != nil {
+		l, err = tls.Listen(network, rp.addr, rp.tlsConfig)
 	} else {
 		log().Warn("INSECURE: kube-proxy is listening in non-TLS mode")
-		l, err = net.Listen(network, p.addr)
+		l, err = net.Listen(network, rp.addr)
 	}
 	if err != nil {
 		return nil, err
@@ -162,27 +162,27 @@ func (p *ResourceProxy) Start(ctx context.Context) (<-chan error, error) {
 
 	// Start the HTTP server in the background
 	go func() {
-		errCh <- p.server.Serve(l)
+		errCh <- rp.server.Serve(l)
 	}()
 
 	return errCh, nil
 }
 
 // Stop can be used to gracefully shut down the proxy server.
-func (p *ResourceProxy) Stop(ctx context.Context) error {
-	return p.server.Shutdown(ctx)
+func (rp *ResourceProxy) Stop(ctx context.Context) error {
+	return rp.server.Shutdown(ctx)
 }
 
 // proxyHandler is a HTTP request handler that inspects incoming requests. By
 // default, every request will be passed down to the reverse proxy.
-func (p *ResourceProxy) proxyHandler(w http.ResponseWriter, r *http.Request) {
+func (rp *ResourceProxy) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	log().Debugf("Processing URI %s %s (goroutines:%d)", r.Method, r.RequestURI, runtime.NumGoroutine())
 
 	// Loop through all registered matchers and match them against the request
 	// URI's path. First match wins. This is obviously not the most efficient
 	// nor performant way to do it, but we need regexp matching with submatch
 	// extraction.
-	for _, m := range p.interceptors {
+	for _, m := range rp.interceptors {
 		matches := m.matcher.FindStringSubmatch(r.URL.Path)
 		if matches == nil {
 			continue

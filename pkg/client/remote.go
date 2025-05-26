@@ -112,7 +112,7 @@ func (r *Remote) WithTLSHandShakeTimeout(t time.Duration) RemoteOption {
 
 func WithTLSClientCert(cert *x509.Certificate, key crypto.PrivateKey) RemoteOption {
 	return func(r *Remote) error {
-		c, err := tlsutil.TlsCertFromX509(cert, key)
+		c, err := tlsutil.TLSCertFromX509(cert, key)
 		if err != nil {
 			return err
 		}
@@ -140,7 +140,7 @@ func WithTLSClientCertFromBytes(certData []byte, keyData []byte) RemoteOption {
 // connection.
 func WithTLSClientCertFromFile(certPath, keyPath string) RemoteOption {
 	return func(r *Remote) error {
-		c, err := tlsutil.TlsCertFromFile(certPath, keyPath, true)
+		c, err := tlsutil.TLSCertFromFile(certPath, keyPath, true)
 		if err != nil {
 			return fmt.Errorf("unable to read TLS client cert: %v", err)
 		}
@@ -310,7 +310,7 @@ func (r *Remote) retriable(err error) bool {
 
 func (r *Remote) unaryAuthInterceptor(ctx context.Context, method string, req interface{}, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 	log().Infof("Outgoing unary call to %s", method)
-	var nCtx context.Context = ctx
+	nCtx := ctx
 	if r.accessToken != nil && r.accessToken.RawToken != "" {
 		nCtx = metadata.AppendToOutgoingContext(ctx, "authorization", r.accessToken.RawToken)
 	}
@@ -319,7 +319,7 @@ func (r *Remote) unaryAuthInterceptor(ctx context.Context, method string, req in
 
 func (r *Remote) streamAuthInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	log().Infof("Outgoing stream call to %s", method)
-	var nCtx context.Context = ctx
+	nCtx := ctx
 	if r.accessToken != nil && r.accessToken.RawToken != "" {
 		nCtx = metadata.AppendToOutgoingContext(ctx, "authorization", r.accessToken.RawToken)
 	}

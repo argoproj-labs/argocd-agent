@@ -29,10 +29,10 @@ import (
 	"time"
 )
 
-// TlsCertFromFile loads a TLS certificate and RSA private key from the
+// TLSCertFromFile loads a TLS certificate and RSA private key from the
 // files specified as certPath and keyPath, applying some basic validation
 // before returning the certificate.
-func TlsCertFromFile(certPath string, keyPath string, strict bool) (tls.Certificate, error) {
+func TLSCertFromFile(certPath string, keyPath string, strict bool) (tls.Certificate, error) {
 	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
 		return cert, err
@@ -52,10 +52,10 @@ func TlsCertFromFile(certPath string, keyPath string, strict bool) (tls.Certific
 	return cert, nil
 }
 
-// TlsCertFromX509 generates a TLS certificate for the x509 certificate cert
+// TLSCertFromX509 generates a TLS certificate for the x509 certificate cert
 // and the private key key.
 // This function supports RSA and EC types of private keys.
-func TlsCertFromX509(cert *x509.Certificate, key crypto.PrivateKey) (tls.Certificate, error) {
+func TLSCertFromX509(cert *x509.Certificate, key crypto.PrivateKey) (tls.Certificate, error) {
 	cBytes := &bytes.Buffer{}
 	kBytes := &bytes.Buffer{}
 	if cert == nil || key == nil {

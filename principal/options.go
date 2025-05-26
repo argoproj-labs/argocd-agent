@@ -408,7 +408,7 @@ func WithResourceProxyEnabled(enabled bool) ServerOption {
 
 func WithResourceProxyTLS(tlsConfig *tls.Config) ServerOption {
 	return func(o *Server) error {
-		o.resourceProxyTlsConfig = tlsConfig
+		o.resourceProxyTLSConfig = tlsConfig
 		return nil
 	}
 }
