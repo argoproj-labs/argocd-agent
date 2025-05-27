@@ -26,7 +26,6 @@ import (
 	"syscall"
 
 	"github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -38,7 +37,6 @@ import (
 type KubernetesClient struct {
 	Clientset             kubernetes.Interface
 	DynamicClient         dynamic.Interface
-	DiscoveryClient       discovery.DiscoveryInterface
 	ApplicationsClientset versioned.Interface
 	Context               context.Context
 	Namespace             string

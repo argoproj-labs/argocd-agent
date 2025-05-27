@@ -184,7 +184,7 @@ func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructur
 			return false, err
 		}
 
-		rif, err := kube.DiscoveryClient.ServerResourcesForGroupVersion(gv.String())
+		rif, err := kube.Clientset.Discovery().ServerResourcesForGroupVersion(gv.String())
 		if err != nil {
 			return false, err
 		}

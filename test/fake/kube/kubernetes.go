@@ -85,6 +85,5 @@ func NewDynamicFakeClient(objects ...runtime.Object) *kube.KubernetesClient {
 	fakeDyn := dynfake.NewSimpleDynamicClient(scheme, objects...)
 	c.DynamicClient = fakeDyn
 
-	c.DiscoveryClient = fakeDiscoveryClient
 	return c
 }
