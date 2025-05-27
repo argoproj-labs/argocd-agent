@@ -19,7 +19,6 @@ linters:
     staticcheck:
       checks:
         - all
-        - '-QF1001'
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

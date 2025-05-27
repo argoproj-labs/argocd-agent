@@ -179,7 +179,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 
 	incoming.SetNamespace(m.namespace)
 
-	if !(m.role == manager.ManagerRoleAgent && m.mode == manager.ManagerModeManaged) {
+	if m.role != manager.ManagerRoleAgent || m.mode != manager.ManagerModeManaged {
 		return nil, fmt.Errorf("updatedManagedApp should be called on a managed agent, only")
 	}
 
@@ -451,7 +451,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 	var updated *v1alpha1.Application
 	var err error
 
-	if !(m.role.IsAgent() && m.mode.IsAutonomous()) {
+	if !m.role.IsAgent() || !m.mode.IsAutonomous() {
 		return nil, fmt.Errorf("UpdateOperation should only be called by an agent in autonomous mode: %v %v", m.role, m.mode)
 	}
 
