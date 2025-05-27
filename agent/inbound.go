@@ -463,13 +463,14 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 	var err error
 	var napp *v1alpha1.Application
-	if a.mode == types.AgentModeManaged {
+	switch a.mode {
+	case types.AgentModeManaged:
 		logCtx.Tracef("Calling update spec for this event")
 		napp, err = a.appManager.UpdateManagedApp(a.context, incoming)
-	} else if a.mode == types.AgentModeAutonomous {
+	case types.AgentModeAutonomous:
 		logCtx.Tracef("Calling update operation for this event")
 		napp, err = a.appManager.UpdateOperation(a.context, incoming)
-	} else {
+	default:
 		err = fmt.Errorf("unknown operation mode: %s", a.mode)
 	}
 	return napp, err
