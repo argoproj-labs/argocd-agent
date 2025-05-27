@@ -230,10 +230,10 @@ type ResourceResponse struct {
 	Resource string `json:"resource,omitempty"`
 }
 
-// HttpStatusFromError tries to derive a HTTP status code from the error err.
+// HTTPStatusFromError tries to derive a HTTP status code from the error err.
 // If err is non-nil and the code cannot be derived, it will be set to HTTP 500
 // InternalServerError. If err is nil, HTTP 200 OK will be returned.
-func HttpStatusFromError(err error) int {
+func HTTPStatusFromError(err error) int {
 	if err != nil {
 		if status, ok := err.(apierrors.APIStatus); ok || errors.As(err, &status) {
 			return int(status.Status().Code)

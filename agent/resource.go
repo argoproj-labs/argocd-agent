@@ -81,7 +81,7 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 		logCtx.Error("Remote queue disappeared")
 		return nil
 	}
-	q.Add(a.emitter.NewResourceResponseEvent(rreq.UUID, event.HttpStatusFromError(status), string(jsonres)))
+	q.Add(a.emitter.NewResourceResponseEvent(rreq.UUID, event.HTTPStatusFromError(status), string(jsonres)))
 	logCtx.Tracef("Emitted resource response")
 
 	return nil
