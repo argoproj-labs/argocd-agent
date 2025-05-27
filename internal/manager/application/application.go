@@ -190,9 +190,9 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 			}
 			incoming.Annotations[manager.SourceUIDAnnotation] = v
 		}
-		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
-		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
-		existing.ObjectMeta.Finalizers = incoming.ObjectMeta.Finalizers
+		existing.Annotations = incoming.Annotations
+		existing.Labels = incoming.Labels
+		existing.Finalizers = incoming.Finalizers
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Operation = incoming.Operation.DeepCopy()
 		existing.Status = *incoming.Status.DeepCopy()
@@ -300,11 +300,11 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 			incoming.Annotations[manager.SourceUIDAnnotation] = v
 		}
 
-		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
-		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
-		existing.ObjectMeta.DeletionTimestamp = incoming.DeletionTimestamp
-		existing.ObjectMeta.DeletionGracePeriodSeconds = incoming.DeletionGracePeriodSeconds
-		existing.ObjectMeta.Finalizers = incoming.Finalizers
+		existing.Annotations = incoming.Annotations
+		existing.Labels = incoming.Labels
+		existing.DeletionTimestamp = incoming.DeletionTimestamp
+		existing.DeletionGracePeriodSeconds = incoming.DeletionGracePeriodSeconds
+		existing.Finalizers = incoming.Finalizers
 		existing.Spec = incoming.Spec
 		existing.Status = *incoming.Status.DeepCopy()
 		existing.Operation = nil
@@ -383,8 +383,8 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 	}
 
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
-		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
-		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
+		existing.Annotations = incoming.Annotations
+		existing.Labels = incoming.Labels
 		existing.Status = *incoming.Status.DeepCopy()
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		refresh, incomingRefresh := incoming.Annotations["argocd.argoproj.io/refresh"]
@@ -456,8 +456,8 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 	}
 
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
-		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
-		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
+		existing.Annotations = incoming.Annotations
+		existing.Labels = incoming.Labels
 		existing.Status = *incoming.Status.DeepCopy()
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		annotations := make(map[string]string)
@@ -570,7 +570,7 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 // RemoveFinalizers will remove finalizers on an existing application
 func (m *ApplicationManager) RemoveFinalizers(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	updated, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
-		existing.ObjectMeta.Finalizers = nil
+		existing.Finalizers = nil
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		var err error
 		var patch jsondiff.Patch

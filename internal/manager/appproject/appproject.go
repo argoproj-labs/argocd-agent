@@ -202,9 +202,9 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 			incoming.Annotations[manager.SourceUIDAnnotation] = v
 		}
 
-		existing.ObjectMeta.Annotations = incoming.ObjectMeta.Annotations
-		existing.ObjectMeta.Labels = incoming.ObjectMeta.Labels
-		existing.ObjectMeta.Finalizers = incoming.ObjectMeta.Finalizers
+		existing.Annotations = incoming.Annotations
+		existing.Labels = incoming.Labels
+		existing.Finalizers = incoming.Finalizers
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Status = *incoming.Status.DeepCopy()
 	}, func(existing, incoming *v1alpha1.AppProject) (jsondiff.Patch, error) {
@@ -330,7 +330,7 @@ func (m *AppProjectManager) Delete(ctx context.Context, namespace string, incomi
 // RemoveFinalizers will remove finalizers on an existing app project.
 func (m *AppProjectManager) RemoveFinalizers(ctx context.Context, incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
 	updated, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.AppProject) {
-		existing.ObjectMeta.Finalizers = nil
+		existing.Finalizers = nil
 	}, func(existing, incoming *v1alpha1.AppProject) (jsondiff.Patch, error) {
 		var err error
 		var patch jsondiff.Patch
