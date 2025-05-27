@@ -184,10 +184,8 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, fmt.Errorf("could not instantiate application informer: %w", err)
 	}
 
-	allowUpsert := false
-	if a.mode == types.AgentModeManaged {
-		allowUpsert = true
-	}
+	// Only allow upsert for managed agents
+	allowUpsert := a.mode == types.AgentModeManaged
 
 	appManagerOpts = append(appManagerOpts, application.WithAllowUpsert(allowUpsert))
 
