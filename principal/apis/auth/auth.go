@@ -169,10 +169,9 @@ func (s *Server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenReques
 		logCtx.WithError(err).Warnf("Could not get exp from refresh token")
 		return nil, errAuthenticationFailed
 	}
-	refresh := false
-	if time.Until(exp.Time) < refreshTokenAutoRefresh {
-		refresh = true
-	}
+
+	// Only issue a new refresh token when the old one is close to expiry
+	refresh := time.Until(exp.Time) < refreshTokenAutoRefresh
 
 	accessToken, refreshToken, err := s.issueTokens(subject, refresh)
 	if err != nil {

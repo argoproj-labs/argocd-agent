@@ -305,7 +305,7 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 // createApplication creates an Application upon an event in the agent's work
 // queue.
 func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
-	incoming.ObjectMeta.SetNamespace(a.namespace)
+	incoming.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
 		"method": "CreateApplication",
 		"app":    incoming.QualifiedName(),
@@ -350,7 +350,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 }
 
 func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
-	incoming.ObjectMeta.SetNamespace(a.namespace)
+	incoming.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
 		"method":          "UpdateApplication",
 		"app":             incoming.QualifiedName(),
@@ -373,20 +373,21 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 	var err error
 	var napp *v1alpha1.Application
-	if a.mode == types.AgentModeManaged {
+	switch a.mode {
+	case types.AgentModeManaged:
 		logCtx.Tracef("Calling update spec for this event")
 		napp, err = a.appManager.UpdateManagedApp(a.context, incoming)
-	} else if a.mode == types.AgentModeAutonomous {
+	case types.AgentModeAutonomous:
 		logCtx.Tracef("Calling update operation for this event")
 		napp, err = a.appManager.UpdateOperation(a.context, incoming)
-	} else {
+	default:
 		err = fmt.Errorf("unknown operation mode: %s", a.mode)
 	}
 	return napp, err
 }
 
 func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
-	app.ObjectMeta.SetNamespace(a.namespace)
+	app.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
 		"method": "DeleteApplication",
 		"app":    app.QualifiedName(),
@@ -421,7 +422,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 // createAppProject creates an AppProject upon an event in the agent's work
 // queue.
 func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
-	incoming.ObjectMeta.SetNamespace(a.namespace)
+	incoming.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
 		"method": "CreateAppProject",
 		"app":    incoming.Name,
@@ -458,7 +459,7 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 
 func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
 	//
-	incoming.ObjectMeta.SetNamespace(a.namespace)
+	incoming.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
 		"method":          "UpdateAppProject",
 		"app":             incoming.Name,
@@ -480,7 +481,7 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 }
 
 func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
-	project.ObjectMeta.SetNamespace(a.namespace)
+	project.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
 		"method": "DeleteAppProject",
 		"app":    project.Name,

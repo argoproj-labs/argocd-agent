@@ -138,11 +138,12 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	}
 
 	var managerMode manager.ManagerMode
-	if a.mode == types.AgentModeAutonomous {
+	switch a.mode {
+	case types.AgentModeAutonomous:
 		managerMode = manager.ManagerModeAutonomous
-	} else if a.mode == types.AgentModeManaged {
+	case types.AgentModeManaged:
 		managerMode = manager.ManagerModeManaged
-	} else {
+	default:
 		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
@@ -186,10 +187,8 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, fmt.Errorf("could not instantiate application informer: %w", err)
 	}
 
-	allowUpsert := false
-	if a.mode == types.AgentModeManaged {
-		allowUpsert = true
-	}
+	// Only allow upsert for managed agents
+	allowUpsert := a.mode == types.AgentModeManaged
 
 	appManagerOpts = append(appManagerOpts, application.WithAllowUpsert(allowUpsert))
 

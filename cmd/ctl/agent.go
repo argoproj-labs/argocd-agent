@@ -283,7 +283,7 @@ func NewAgentInspectCommand() *cobra.Command {
 				cmd.PrintErrf("No such agent configured: %s\n", agentName)
 				os.Exit(1)
 			}
-			cert, err := tls.X509KeyPair(argoCluster.Config.TLSClientConfig.CertData, argoCluster.Config.TLSClientConfig.KeyData)
+			cert, err := tls.X509KeyPair(argoCluster.Config.CertData, argoCluster.Config.KeyData)
 			if err != nil {
 				cmdutil.Fatal("Not a valid certificate: %v", err)
 			}
@@ -404,9 +404,9 @@ func NewAgentReconfigureCommand() *cobra.Command {
 				if err != nil {
 					cmdutil.Fatal("%v", err)
 				}
-				cluster.Config.TLSClientConfig.CAData = []byte(caData)
-				cluster.Config.TLSClientConfig.CertData = []byte(clientCert)
-				cluster.Config.TLSClientConfig.KeyData = []byte(clientKey)
+				cluster.Config.CAData = []byte(caData)
+				cluster.Config.CertData = []byte(clientCert)
+				cluster.Config.KeyData = []byte(clientKey)
 				changed = true
 			}
 
