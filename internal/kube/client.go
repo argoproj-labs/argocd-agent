@@ -26,6 +26,7 @@ import (
 	"syscall"
 
 	"github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -35,6 +36,7 @@ import (
 
 type KubernetesClient struct {
 	Clientset             kubernetes.Interface
+	DynamicClient         dynamic.Interface
 	ApplicationsClientset versioned.Interface
 	Context               context.Context
 	Namespace             string
@@ -87,6 +89,11 @@ func NewKubernetesClientFromConfig(ctx context.Context, namespace string, kubeco
 
 	cl := NewKubernetesClient(ctx, clientset, applicationsClientset, namespace)
 	cl.RestConfig = config
+	dyn, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	cl.DynamicClient = dyn
 	return cl, nil
 }
 

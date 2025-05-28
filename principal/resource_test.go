@@ -22,7 +22,7 @@ import (
 
 func newResourceTestServer(t *testing.T) *Server {
 	t.Helper()
-	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClient(), "argocd",
+	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), "argocd",
 		WithGeneratedTLS("principal"),
 		WithGeneratedTokenSigningKey())
 	require.NoError(t, err)

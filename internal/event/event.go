@@ -111,6 +111,10 @@ func New(ev *cloudevents.Event, target EventTarget) *Event {
 	}
 }
 
+func (ev *Event) SetEvent(e *cloudevents.Event) {
+	ev.event = e
+}
+
 func NewEventSource(source string) *EventSource {
 	ev := &EventSource{}
 	ev.source = source
@@ -184,6 +188,36 @@ type ResourceRequest struct {
 	v1.GroupVersionResource
 }
 
+// IsEmpty returns true if the resource request is empty
+func (r *ResourceRequest) IsEmpty() bool {
+	return r.Group == "" && r.Version == "" && r.Resource == "" && r.Name == "" && r.Namespace == ""
+}
+
+// IsList returns true if the resource request is a list request
+func (r *ResourceRequest) IsList() bool {
+	return r.Resource == "" && r.Name == ""
+}
+
+// IsResource returns true if the resource request is a resource request
+func (r *ResourceRequest) IsResource() bool {
+	return r.Resource != "" && r.Name != ""
+}
+
+// IsClusterScoped returns true if the resource request is a cluster-scoped request
+func (r *ResourceRequest) IsClusterScoped() bool {
+	return r.Namespace == ""
+}
+
+// IsNamespaced returns true if the resource request is a namespaced request
+func (r *ResourceRequest) IsNamespaced() bool {
+	return r.Namespace != ""
+}
+
+// IsValid returns true if the resource request is valid
+func (r *ResourceRequest) IsValid() bool {
+	return r.IsResource() || r.IsList()
+}
+
 // ResourceResponse is an event that holds the response to a resource request.
 // It is usually sent by an agent to the princiapl in response to a prior
 // resource request.
@@ -196,9 +230,16 @@ type ResourceResponse struct {
 	Resource string `json:"resource,omitempty"`
 }
 
+// HTTPStatusFromError tries to derive a HTTP status code from the error err.
+// If err is non-nil and the code cannot be derived, it will be set to HTTP 500
+// InternalServerError. If err is nil, HTTP 200 OK will be returned.
 func HTTPStatusFromError(err error) int {
-	if status, ok := err.(apierrors.APIStatus); ok || errors.As(err, &status) {
-		return int(status.Status().Code)
+	if err != nil {
+		if status, ok := err.(apierrors.APIStatus); ok || errors.As(err, &status) {
+			return int(status.Status().Code)
+		} else {
+			return http.StatusInternalServerError
+		}
 	}
 	return http.StatusOK
 }

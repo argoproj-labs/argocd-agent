@@ -40,7 +40,7 @@ func Test_InvalidEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "unknown target")
@@ -54,7 +54,7 @@ func Test_InvalidEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "unable to process event of type application")
@@ -69,7 +69,7 @@ func Test_InvalidEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "failed to unmarshal")
@@ -85,7 +85,7 @@ func Test_CreateEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorIs(t, err, event.ErrEventDiscarded)
@@ -114,7 +114,7 @@ func Test_CreateEvents(t *testing.T) {
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
 			},
 		}
-		fac := kube.NewKubernetesFakeClient(app)
+		fac := kube.NewKubernetesFakeClientWithApps(app)
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
@@ -159,7 +159,7 @@ func Test_CreateEvents(t *testing.T) {
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
 			},
 		}
-		fac := kube.NewKubernetesFakeClient(app)
+		fac := kube.NewKubernetesFakeClientWithApps(app)
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
@@ -207,7 +207,7 @@ func Test_CreateEvents(t *testing.T) {
 		}
 		exapp := app.DeepCopy()
 		exapp.Namespace = "foo"
-		fac := kube.NewKubernetesFakeClient(exapp)
+		fac := kube.NewKubernetesFakeClientWithApps(exapp)
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
@@ -269,7 +269,7 @@ func Test_UpdateEvents(t *testing.T) {
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
 			},
 		}
-		fac := kube.NewKubernetesFakeClient(exApp)
+		fac := kube.NewKubernetesFakeClientWithApps(exApp)
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.SpecUpdate.String())
@@ -313,7 +313,7 @@ func Test_UpdateEvents(t *testing.T) {
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
 			},
 		}
-		fac := kube.NewKubernetesFakeClient()
+		fac := kube.NewKubernetesFakeClientWithApps()
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.SpecUpdate.String())
@@ -333,7 +333,7 @@ func Test_UpdateEvents(t *testing.T) {
 
 func Test_createNamespaceIfNotExists(t *testing.T) {
 	t.Run("Namespace creation is not enabled", func(t *testing.T) {
-		fac := kube.NewKubernetesFakeClient()
+		fac := kube.NewKubernetesFakeClientWithApps()
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
@@ -341,7 +341,7 @@ func Test_createNamespaceIfNotExists(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("Pattern matches and namespace is created", func(t *testing.T) {
-		fac := kube.NewKubernetesFakeClient()
+		fac := kube.NewKubernetesFakeClientWithApps()
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a-z]+$", nil))
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
@@ -350,7 +350,7 @@ func Test_createNamespaceIfNotExists(t *testing.T) {
 	})
 
 	t.Run("Pattern does not match and namespace is not created", func(t *testing.T) {
-		fac := kube.NewKubernetesFakeClient()
+		fac := kube.NewKubernetesFakeClientWithApps()
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a]+$", nil))
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
@@ -359,7 +359,7 @@ func Test_createNamespaceIfNotExists(t *testing.T) {
 	})
 
 	t.Run("Namespace is created only once", func(t *testing.T) {
-		fac := kube.NewKubernetesFakeClient()
+		fac := kube.NewKubernetesFakeClientWithApps()
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil))
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
@@ -378,7 +378,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClient(), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps(), "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		require.Equal(t, ev, *got)
@@ -395,7 +395,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 				SourceRepos: []string{"foo"},
 			},
 		}
-		fac := kube.NewKubernetesFakeClient()
+		fac := kube.NewKubernetesFakeClientWithApps()
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("appproject")
 		ev.SetType(event.Delete.String())
@@ -475,7 +475,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 	ctx := context.Background()
 	agentName := "test"
 
-	fakeClient := kube.NewKubernetesFakeClient()
+	fakeClient := kube.NewKubernetesFakeClientWithApps()
 	fakeClient.RestConfig = &rest.Config{}
 
 	s, err := NewServer(ctx, fakeClient, agentName, WithGeneratedTokenSigningKey())

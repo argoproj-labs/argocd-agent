@@ -169,3 +169,346 @@ func (fs *fakeStream) Send(event *eventstreamapi.Event) error {
 func (fs *fakeStream) Context() context.Context {
 	return context.Background()
 }
+
+func TestResourceRequest_IsEmpty(t *testing.T) {
+	tests := []struct {
+		name     string
+		request  ResourceRequest
+		expected bool
+	}{
+		{
+			name:     "empty request",
+			request:  ResourceRequest{},
+			expected: true,
+		},
+		{
+			name: "request with only name",
+			request: ResourceRequest{
+				Name: "test-name",
+			},
+			expected: false,
+		},
+		{
+			name: "request with only namespace",
+			request: ResourceRequest{
+				Namespace: "test-namespace",
+			},
+			expected: false,
+		},
+		{
+			name: "request with only group",
+			request: ResourceRequest{
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group: "test-group",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "request with only version",
+			request: ResourceRequest{
+				GroupVersionResource: metav1.GroupVersionResource{
+					Version: "v1",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "request with only resource",
+			request: ResourceRequest{
+				GroupVersionResource: metav1.GroupVersionResource{
+					Resource: "test-resource",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "fully populated request",
+			request: ResourceRequest{
+				UUID:      "test-uuid",
+				Name:      "test-name",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "test-group",
+					Version:  "v1",
+					Resource: "test-resource",
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.request.IsEmpty()
+			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestResourceRequest_IsList(t *testing.T) {
+	tests := []struct {
+		name string
+		r    *ResourceRequest
+		want bool
+	}{
+		{
+			name: "list request - empty resource and name",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "",
+				},
+				Name: "",
+			},
+			want: true,
+		},
+		{
+			name: "not a list request - has resource and name",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "deployments",
+				},
+				Name: "test-deployment",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.r.IsList(); got != tt.want {
+				t.Errorf("ResourceRequest.IsList() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResourceRequest_IsResource(t *testing.T) {
+	tests := []struct {
+		name string
+		r    *ResourceRequest
+		want bool
+	}{
+		{
+			name: "is resource - has resource and name",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "deployments",
+				},
+				Name: "test-deployment",
+			},
+			want: true,
+		},
+		{
+			name: "not a resource - missing resource",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "",
+				},
+				Name: "test-deployment",
+			},
+			want: false,
+		},
+		{
+			name: "not a resource - missing name",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "deployments",
+				},
+				Name: "",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.r.IsResource(); got != tt.want {
+				t.Errorf("ResourceRequest.IsResource() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResourceRequest_IsClusterScoped(t *testing.T) {
+	tests := []struct {
+		name string
+		r    *ResourceRequest
+		want bool
+	}{
+		{
+			name: "cluster scoped - empty namespace",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "deployments",
+				},
+				Name: "test-deployment",
+			},
+			want: true,
+		},
+		{
+			name: "not cluster scoped - has namespace",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "deployments",
+				},
+				Name: "test-deployment",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.r.IsClusterScoped(); got != tt.want {
+				t.Errorf("ResourceRequest.IsClusterScoped() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResourceRequest_IsNamespaced(t *testing.T) {
+	tests := []struct {
+		name string
+		r    *ResourceRequest
+		want bool
+	}{
+		{
+			name: "namespaced - has namespace",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "deployments",
+				},
+				Name: "test-deployment",
+			},
+			want: true,
+		},
+		{
+			name: "not namespaced - empty namespace",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "deployments",
+				},
+				Name: "test-deployment",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.r.IsNamespaced(); got != tt.want {
+				t.Errorf("ResourceRequest.IsNamespaced() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResourceRequest_IsValid(t *testing.T) {
+	tests := []struct {
+		name string
+		r    *ResourceRequest
+		want bool
+	}{
+		{
+			name: "valid - is resource request",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "deployments",
+				},
+				Name: "test-deployment",
+			},
+			want: true,
+		},
+		{
+			name: "valid - is list request",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "",
+				},
+				Name: "",
+			},
+			want: true,
+		},
+		{
+			name: "invalid - has resource but no name",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "deployments",
+				},
+				Name: "",
+			},
+			want: false,
+		},
+		{
+			name: "invalid - has name but no resource",
+			r: &ResourceRequest{
+				UUID:      "test-uuid",
+				Namespace: "test-namespace",
+				GroupVersionResource: metav1.GroupVersionResource{
+					Group:    "apps",
+					Version:  "v1",
+					Resource: "",
+				},
+				Name: "test-deployment",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.r.IsValid(); got != tt.want {
+				t.Errorf("ResourceRequest.IsValid() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

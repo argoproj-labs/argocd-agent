@@ -15,8 +15,6 @@
 package agent
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -29,9 +27,6 @@ import (
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -86,91 +81,6 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	}
 
 	return err
-}
-
-// processIncomingResourceRequest processes an incoming event that requests
-// to retrieve information from the Kubernetes API.
-//
-// There can be multiple forms of requests. Currently supported are:
-//
-// - Request for a particular resource, both namespace and cluster scoped
-// - Request for a list of resources of a particular kind (e.g. configmaps,
-//   pods, etc), both namespace and custer scoped
-// - Request for a list of available APIs and
-
-func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
-	rreq, err := ev.ResourceRequest()
-	if err != nil {
-		return err
-	}
-	logCtx := log().WithFields(logrus.Fields{
-		"method": "processIncomingEvents",
-		"uuid":   rreq.UUID,
-	})
-	logCtx.Tracef("Start processing %v", rreq)
-
-	// TODO(jannfis): The connection to fetch resources should support some
-	// form of impersonation in the future.
-
-	// Create a dynamic kubernetes client and retrieve the resource from the
-	// cluster.
-	dynClient, err := dynamic.NewForConfig(a.kubeClient.RestConfig)
-	if err != nil {
-		return fmt.Errorf("could not create a dynamic client: %w", err)
-	}
-
-	// Some of GVR may be empty, and that is ok.
-	gvk := schema.GroupVersionResource{Group: rreq.Group, Version: rreq.Version, Resource: rreq.Resource}
-	rif := dynClient.Resource(gvk)
-
-	ctx, cancel := context.WithTimeout(a.context, defaultResourceRequestTimeout)
-	defer cancel()
-
-	var jsonres []byte
-	var unres *unstructured.Unstructured
-	var unlist *unstructured.UnstructuredList
-	var status error
-
-	// If we have a request for a named resource, we fetch that particular
-	// resource. If the name is empty, we fetch a list of resources instead.
-	if rreq.Name != "" {
-		if rreq.Namespace != "" {
-			unres, err = rif.Namespace(rreq.Namespace).Get(ctx, rreq.Name, v1.GetOptions{})
-		} else {
-			unres, err = rif.Get(ctx, rreq.Name, v1.GetOptions{})
-		}
-	} else {
-		if rreq.Namespace != "" {
-			unlist, err = rif.Namespace(rreq.Namespace).List(ctx, v1.ListOptions{})
-		} else {
-			unlist, err = rif.List(ctx, v1.ListOptions{})
-		}
-	}
-	if err != nil {
-		logCtx.Errorf("could not request resource: %v", err)
-		status = err
-	} else {
-		// Marshal the unstructured resource to JSON for submission
-		if unres != nil {
-			jsonres, err = json.Marshal(unres)
-		} else if unlist != nil {
-			jsonres, err = json.Marshal(unlist)
-		}
-		if err != nil {
-			return fmt.Errorf("could not marshal resource to json: %w", err)
-		}
-		logCtx.Tracef("marshaled resource")
-	}
-
-	q := a.queues.SendQ(defaultQueueName)
-	if q == nil {
-		logCtx.Error("Remote queue disappeared")
-		return nil
-	}
-	q.Add(a.emitter.NewResourceResponseEvent(rreq.UUID, event.HTTPStatusFromError(status), string(jsonres)))
-	logCtx.Tracef("Emitted resource response")
-
-	return nil
 }
 
 func (a *Agent) processIncomingApplication(ev *event.Event) error {
