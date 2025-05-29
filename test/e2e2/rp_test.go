@@ -162,6 +162,13 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	requires.NoError(err)
 	argoEndpoint := srvService.Spec.LoadBalancerIP
 
+	if len(srvService.Status.LoadBalancer.Ingress) > 0 {
+		hostname := srvService.Status.LoadBalancer.Ingress[0].Hostname
+		if hostname != "" {
+			argoEndpoint = hostname
+		}
+	}
+
 	appName := "guestbook-rp"
 
 	// Read admin secret from principal's cluster

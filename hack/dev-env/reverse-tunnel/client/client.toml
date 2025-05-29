@@ -1,0 +1,15 @@
+# client.toml
+[client]
+remote_addr = "EXTERNAL-HOSTNAME:2333" # The address of the server. The port must be the same with the port in `server.bind_addr`
+
+[client.services.one]
+token = "AUTHENTICATION_TOKEN" # Must be the same with the server to pass the validation
+local_addr = "127.0.0.1:9090" # The address of the service that needs to be forwarded
+
+# Client Side Configuration
+[client.transport]
+type = "noise"
+
+[client.transport.noise]
+remote_public_key = "REMOTE_PUBLIC_KEY"
+

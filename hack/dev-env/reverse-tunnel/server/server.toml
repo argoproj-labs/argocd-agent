@@ -1,0 +1,14 @@
+# server.toml
+[server]
+bind_addr = "0.0.0.0:2333" # `2333` specifies the port that rathole listens for clients
+
+[server.services.one]
+token = "AUTHENTICATION_TOKEN" # Token that is used to authenticate the client for the service. Change to a arbitrary value.
+bind_addr = "0.0.0.0:9090" # `9090` specifies the port that exposes `one` to the Internet
+
+# Server Side Configuration
+[server.transport]
+type = "noise"
+
+[server.transport.noise]
+local_private_key = "LOCAL_PRIVATE_KEY"

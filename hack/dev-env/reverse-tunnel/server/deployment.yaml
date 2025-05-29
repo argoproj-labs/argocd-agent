@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rathole-container
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: rathole-container
+  template:
+    metadata:
+      labels:
+        app: rathole-container
+    spec:
+      containers:
+        - image: 'quay.io/jgwest-redhat/rathole:latest@sha256:53999f80b69f9a5020e19e9c9be90fc34b973d9bd822d4fd44b968f2ebe0845f' # built by rathole-image directory
+          name: rathole-container
+          ports:
+            - containerPort: 2333
+              protocol: TCP
+            - containerPort: 9090
+              protocol: TCP
+          command:
+            - /app/rathole
+          args:
+            - '--server'
+            - /config/server.toml
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+      volumes:
+        - name: config-volume
+          secret:
+            secretName: rathole-container
