@@ -23,7 +23,7 @@ To enable the configuration:
 make setup-e2e2
 
 # Installs Rathole Deployment/Services on vcluster, update 'managed-agent' cluster Secret to point to Rathole Deployment, and start local rathole container
-hack/dev-env/reverse-tunnel/setup.sh
+./hack/dev-env/reverse-tunnel/setup.sh
 
 ```
 
