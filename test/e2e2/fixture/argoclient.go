@@ -169,7 +169,7 @@ func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, 
 }
 
 func (c *ArgoRestClient) RunResourceAction(app *v1alpha1.Application, action, group, version, kind, namespace, name string) error {
-	reqUrl := c.url(
+	reqURL := c.url(
 		"appNamespace", app.Namespace,
 		"project", app.Spec.Project,
 		"namespace", namespace,
@@ -178,14 +178,14 @@ func (c *ArgoRestClient) RunResourceAction(app *v1alpha1.Application, action, gr
 		"version", version,
 		"kind", kind,
 	)
-	reqUrl.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions", app.Name)
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions", app.Name)
 
 	reqBody, err := json.Marshal(action)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, reqUrl.String(), bytes.NewBuffer(reqBody))
+	req, err := http.NewRequest(http.MethodPost, reqURL.String(), bytes.NewBuffer(reqBody))
 	if err != nil {
 		return err
 	}
