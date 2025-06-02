@@ -185,6 +185,7 @@ func (rp *ResourceProxy) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	for _, m := range rp.interceptors {
 		matches := m.matcher.FindStringSubmatch(r.URL.Path)
 		if matches == nil {
+			log().Debugf("Request did not match %s %s", r.Method, r.RequestURI)
 			continue
 		} else {
 			validMethod := false
@@ -196,6 +197,7 @@ func (rp *ResourceProxy) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			// We must have a callback function defined. Also, method must be
 			// allowed.
 			if !validMethod || m.fn == nil {
+				log().Debugf("Method %s not allowed for URI %s", r.Method, r.RequestURI)
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}
