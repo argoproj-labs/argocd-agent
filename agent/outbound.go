@@ -74,6 +74,13 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 		return
 	}
 
+	// Revert any direct modifications done in application on managed-cluster
+	// because for managed-agent all changes should be done through principal
+	if reverted := a.appManager.RevertManagedAppChanges(a.context, new); reverted {
+		logCtx.Debugf("Modifications done in application: %s are reverted", new.Name)
+		return
+	}
+
 	q := a.queues.SendQ(defaultQueueName)
 	if q == nil {
 		logCtx.Error("Default queue disappeared!")
