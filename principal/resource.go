@@ -16,6 +16,7 @@ package principal
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"time"
 
@@ -89,8 +90,20 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 		Version:  params.Get("version"),
 	}
 
+	reqBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		logCtx.Errorf("Could not read request body: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	reqParams := map[string]string{}
+	for k, v := range r.URL.Query() {
+		reqParams[k] = v[0]
+	}
+
 	// Create the event
-	sentEv, err := s.events.NewResourceRequestEvent(gvr, params.Get("namespace"), params.Get("name"))
+	sentEv, err := s.events.NewResourceRequestEvent(gvr, params.Get("namespace"), params.Get("name"), r.Method, reqBody, reqParams)
 	if err != nil {
 		logCtx.Errorf("Could not create event: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)

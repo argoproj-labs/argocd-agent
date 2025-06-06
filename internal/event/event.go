@@ -184,6 +184,12 @@ type ResourceRequest struct {
 	Namespace string `json:"namespace,omitempty"`
 	// Name of the requested resource
 	Name string `json:"name"`
+	// HTTP method of the request
+	Method string `json:"method,omitempty"`
+	// Body for write requests e.g. POST, PATCH, etc.
+	Body []byte `json:"body,omitempty"`
+	// Parameters from the HTTP request
+	Params map[string]string `json:"params,omitempty"`
 	// The group and version of the requested resource
 	v1.GroupVersionResource
 }
@@ -251,18 +257,21 @@ func HTTPStatusFromError(err error) int {
 //
 // The event's resource ID and event ID will be set to a randomly generated
 // UUID, because we'll have
-func (evs EventSource) NewResourceRequestEvent(gvr v1.GroupVersionResource, namespace string, name string) (*cloudevents.Event, error) {
+func (evs EventSource) NewResourceRequestEvent(gvr v1.GroupVersionResource, namespace, name, method string, body []byte, params map[string]string) (*cloudevents.Event, error) {
 	reqUUID := uuid.NewString()
 	rr := &ResourceRequest{
 		UUID:                 reqUUID,
 		Namespace:            namespace,
 		Name:                 name,
 		GroupVersionResource: gvr,
+		Method:               method,
+		Body:                 body,
+		Params:               params,
 	}
 	cev := cloudevents.NewEvent()
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
-	cev.SetType(GetRequest.String())
+	cev.SetType(method)
 	cev.SetDataSchema(TargetResource.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)

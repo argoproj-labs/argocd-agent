@@ -168,6 +168,49 @@ func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, 
 	return manifest.Manifest, nil
 }
 
+func (c *ArgoRestClient) RunResourceAction(app *v1alpha1.Application, action, group, version, kind, namespace, name string) error {
+	reqURL := c.url(
+		"appNamespace", app.Namespace,
+		"project", app.Spec.Project,
+		"namespace", namespace,
+		"resourceName", name,
+		"group", group,
+		"version", version,
+		"kind", kind,
+	)
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions", app.Name)
+
+	reqBody, err := json.Marshal(action)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, reqURL.String(), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Add("Content-Type", "application/json")
+
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("expected HTTP 200, got %d resp %v", resp.StatusCode, string(respBytes))
+	}
+
+	return nil
+}
+
 // url constructs a URL for hitting an Argo CD API endpoint.
 func (c *ArgoRestClient) url(params ...string) *url.URL {
 	u := &url.URL{Scheme: "https", Host: c.endpoint}

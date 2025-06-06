@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
@@ -13,6 +15,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 const ownerLookupRecursionLimit = 5
@@ -32,8 +35,9 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 		return err
 	}
 	logCtx := log().WithFields(logrus.Fields{
-		"method": "processIncomingResourceRequest",
-		"uuid":   rreq.UUID,
+		"method":      "processIncomingResourceRequest",
+		"uuid":        rreq.UUID,
+		"http_method": rreq.Method,
 	})
 
 	if rreq.IsEmpty() {
@@ -53,13 +57,23 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	// Extract required information from the resource request
 	gvr, name, namespace := rreqEventToGvk(rreq)
 
-	// If we have a request for a named resource, we fetch that particular
-	// resource. If the name is empty, we fetch a list of resources instead.
-	if name != "" {
-		unres, err = a.getManagedResource(ctx, gvr, name, namespace)
-	} else {
-		unlist, err = a.getAvailableResources(ctx, gvr, namespace)
+	switch rreq.Method {
+	case http.MethodGet:
+		// If we have a request for a named resource, we fetch that particular
+		// resource. If the name is empty, we fetch a list of resources instead.
+		if name != "" {
+			unres, err = a.getManagedResource(ctx, gvr, name, namespace)
+		} else {
+			unlist, err = a.getAvailableResources(ctx, gvr, namespace)
+		}
+	case http.MethodPost:
+		unres, err = a.processIncomingPostResourceRequest(ctx, rreq, gvr)
+	case http.MethodPatch:
+		unres, err = a.processIncomingPatchResourceRequest(ctx, rreq, gvr)
+	default:
+		err = fmt.Errorf("invalid HTTP method %s for resource request", rreq.Method)
 	}
+
 	if err != nil {
 		logCtx.Errorf("could not request resource: %v", err)
 		status = err
@@ -85,6 +99,55 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	logCtx.Tracef("Emitted resource response")
 
 	return nil
+}
+
+func (a *Agent) processIncomingPostResourceRequest(ctx context.Context, req *event.ResourceRequest, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
+	resourceObj := &unstructured.Unstructured{}
+	if err := json.Unmarshal(req.Body, resourceObj); err != nil {
+		return nil, err
+	}
+
+	createOpts := v1.CreateOptions{}
+	if params, ok := req.Params["dryRun"]; ok {
+		createOpts.DryRun = []string{params}
+	}
+
+	if fieldValidation, ok := req.Params["fieldValidation"]; ok {
+		createOpts.FieldValidation = fieldValidation
+	}
+
+	if fieldMgr, ok := req.Params["fieldManager"]; ok {
+		createOpts.FieldManager = fieldMgr
+	}
+
+	client := a.kubeClient.DynamicClient.Resource(gvr)
+	return client.Namespace(req.Namespace).Create(ctx, resourceObj, createOpts)
+}
+
+func (a *Agent) processIncomingPatchResourceRequest(ctx context.Context, req *event.ResourceRequest, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
+	patchOpts := v1.PatchOptions{}
+	if params, ok := req.Params["dryRun"]; ok {
+		patchOpts.DryRun = []string{params}
+	}
+
+	if force, ok := req.Params["force"]; ok {
+		forceBool, err := strconv.ParseBool(force)
+		if err != nil {
+			return nil, err
+		}
+		patchOpts.Force = &forceBool
+	}
+
+	if fieldValidation, ok := req.Params["fieldValidation"]; ok {
+		patchOpts.FieldValidation = fieldValidation
+	}
+
+	if fieldMgr, ok := req.Params["fieldManager"]; ok {
+		patchOpts.FieldManager = fieldMgr
+	}
+
+	client := a.kubeClient.DynamicClient.Resource(gvr)
+	return client.Namespace(req.Namespace).Patch(ctx, req.Name, k8stypes.MergePatchType, req.Body, patchOpts)
 }
 
 // rreqEventToGvk returns a GroupVersionResource object, name and namespace for
