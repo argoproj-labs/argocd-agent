@@ -590,6 +590,10 @@ func (m *ApplicationManager) RemoveFinalizers(ctx context.Context, incoming *v1a
 	return updated, err
 }
 
+func (m *ApplicationManager) List(ctx context.Context, selector backend.ApplicationSelector) ([]v1alpha1.Application, error) {
+	return m.applicationBackend.List(ctx, selector)
+}
+
 func log() *logrus.Entry {
 	return logrus.WithField("component", "AppManager")
 }

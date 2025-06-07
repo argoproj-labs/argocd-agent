@@ -15,11 +15,16 @@
 package agent
 
 import (
+	"reflect"
+
+	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	ty "k8s.io/apimachinery/pkg/types"
 )
 
 // addAppCreationToQueue processes a new application event originating from the
@@ -72,6 +77,26 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	if !a.appManager.IsManaged(new.QualifiedName()) {
 		logCtx.Errorf("Received update event for unmanaged app")
 		return
+	}
+
+	// Revert any direct modifications done in application on managed-cluster
+	// because for managed-agent all changes should be done through principal
+	sourceUID, exists := new.Annotations[manager.SourceUIDAnnotation]
+	if exists && a.mode == types.AgentModeManaged {
+		if cachedAppSpec, ok := appCache.GetApplicationSpecCache(ty.UID(sourceUID)); ok {
+			logCtx.Debugf("Application: %s is available in agent cache", new.Name)
+
+			if diff := reflect.DeepEqual(cachedAppSpec, new.Spec); !diff {
+				new.Spec = cachedAppSpec
+				if _, err := a.appManager.UpdateManagedApp(a.context, new); err != nil {
+					logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", new.Name, err)
+				} else {
+					logCtx.Debugf("Modifications done in application: %s are reverted", new.Name)
+				}
+			}
+		} else {
+			logCtx.Debugf("Application: %s is not available in agent cache", new.Name)
+		}
 	}
 
 	q := a.queues.SendQ(defaultQueueName)
