@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -17,6 +19,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func Test_isResourceOwnedByApp(t *testing.T) {
@@ -229,6 +233,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 				Version:  "v1",
 				Resource: "pods",
 			},
+			Method: http.MethodGet,
 		}
 
 		ev := cloudevents.NewEvent()
@@ -292,6 +297,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 				Version:  "v1",
 				Resource: "pods",
 			},
+			Method: http.MethodGet,
 		}
 
 		ev := cloudevents.NewEvent()
@@ -339,6 +345,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 				Version:  "v1",
 				Resource: "pods",
 			},
+			Method: http.MethodGet,
 		}
 
 		ev := cloudevents.NewEvent()
@@ -460,4 +467,246 @@ func Test_getAvailableResources(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, list)
 	})
+}
+
+func Test_processIncomingPostResourceRequest(t *testing.T) {
+	type testCase struct {
+		name         string
+		bodyObj      any
+		params       map[string]string
+		namespace    string
+		expectErr    bool
+		expectCreate bool
+	}
+
+	tests := []testCase{
+		{
+			name: "Successfully creates resource",
+			bodyObj: &corev1.Pod{
+				TypeMeta: v1.TypeMeta{
+					Kind: "Pod",
+				},
+				ObjectMeta: v1.ObjectMeta{
+					Name:      "mypod2",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "c", Image: "nginx"},
+					},
+				},
+			},
+			params:       map[string]string{},
+			namespace:    "default",
+			expectErr:    false,
+			expectCreate: true,
+		},
+		{
+			name: "Create returns error",
+			bodyObj: &corev1.Pod{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      "mypod",
+					Namespace: "nonexistent",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "c", Image: "nginx"},
+					},
+				},
+			},
+			params:       map[string]string{},
+			namespace:    "nonexistent",
+			expectErr:    true,
+			expectCreate: false,
+		},
+		{
+			name:         "Fails to unmarshal body",
+			bodyObj:      "{invalid-json",
+			params:       map[string]string{},
+			namespace:    "default",
+			expectErr:    true,
+			expectCreate: false,
+		},
+		{
+			name: "Passes CreateOptions params",
+			bodyObj: &corev1.Pod{
+				TypeMeta: v1.TypeMeta{
+					Kind: "Pod",
+				},
+				ObjectMeta: v1.ObjectMeta{
+					Name:      "mypod2",
+					Namespace: "default",
+				},
+			},
+			params: map[string]string{
+				"dryRun":          "All",
+				"fieldValidation": "Strict",
+				"fieldManager":    "test-manager",
+			},
+			namespace:    "default",
+			expectErr:    false,
+			expectCreate: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var body []byte
+			var err error
+			body, err = json.Marshal(tc.bodyObj)
+			require.NoError(t, err)
+
+			kubeClient := kube.NewDynamicFakeClient()
+			agent := &Agent{
+				context:    context.Background(),
+				kubeClient: kubeClient,
+			}
+
+			fakeDyn := fake.NewSimpleDynamicClient(runtime.NewScheme())
+			if tc.name == "Create returns error" {
+				fakeDyn.PrependReactor("create", "pods", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+					return true, nil, fmt.Errorf("failed to create pod")
+				})
+				kubeClient.DynamicClient = fakeDyn
+			}
+			kubeClient.DynamicClient = fakeDyn
+
+			gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+			req := &event.ResourceRequest{
+				Body:      body,
+				Params:    tc.params,
+				Namespace: tc.namespace,
+				Method:    http.MethodPost,
+				GroupVersionResource: v1.GroupVersionResource{
+					Group:    "",
+					Version:  "v1",
+					Resource: "pods",
+				},
+			}
+
+			res, err := agent.processIncomingPostResourceRequest(context.Background(), req, gvr)
+			if tc.expectErr {
+				assert.Error(t, err)
+				assert.Nil(t, res)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, res)
+				if tc.expectCreate {
+					assert.Equal(t, "mypod2", res.GetName())
+				}
+			}
+		})
+	}
+}
+
+func Test_processIncomingPatchResourceRequest(t *testing.T) {
+	type testCase struct {
+		name          string
+		params        map[string]string
+		namespace     string
+		patchBody     []byte
+		setupReactor  func(fakeDyn *fake.FakeDynamicClient)
+		expectErr     bool
+		expectPatched bool
+		forceValue    string
+	}
+
+	originalObj := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "mypod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "c", Image: "nginx"},
+			},
+		},
+	}
+	patch := []byte(`{"metadata":{"labels":{"patched":"true"}}}`)
+
+	tests := []testCase{
+		{
+			name:          "Successfully patches resource",
+			params:        map[string]string{},
+			namespace:     "default",
+			patchBody:     patch,
+			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
+			expectErr:     false,
+			expectPatched: true,
+		},
+		{
+			name:      "Patch returns error",
+			params:    map[string]string{},
+			namespace: "default",
+			patchBody: patch,
+			setupReactor: func(fakeDyn *fake.FakeDynamicClient) {
+				fakeDyn.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, fmt.Errorf("patch failed")
+				})
+			},
+			expectErr:     true,
+			expectPatched: false,
+		},
+		{
+			name:          "Invalid force param returns error",
+			params:        map[string]string{"force": "notabool"},
+			namespace:     "default",
+			patchBody:     patch,
+			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
+			expectErr:     true,
+			expectPatched: false,
+		},
+		{
+			name:          "Passes PatchOptions params",
+			params:        map[string]string{"dryRun": "All", "fieldValidation": "Strict", "fieldManager": "test-manager", "force": "true"},
+			namespace:     "default",
+			patchBody:     patch,
+			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
+			expectErr:     false,
+			expectPatched: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			kubeClient := kube.NewDynamicFakeClient(originalObj)
+			scheme := runtime.NewScheme()
+			_ = corev1.AddToScheme(scheme)
+			fakeDyn := fake.NewSimpleDynamicClient(scheme, originalObj)
+			tc.setupReactor(fakeDyn)
+			kubeClient.DynamicClient = fakeDyn
+
+			agent := &Agent{
+				context:    context.Background(),
+				kubeClient: kubeClient,
+			}
+
+			gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+			req := &event.ResourceRequest{
+				Name:      "mypod",
+				Body:      tc.patchBody,
+				Params:    tc.params,
+				Namespace: tc.namespace,
+				Method:    http.MethodPatch,
+				GroupVersionResource: v1.GroupVersionResource{
+					Group:    "",
+					Version:  "v1",
+					Resource: "pods",
+				},
+			}
+
+			res, err := agent.processIncomingPatchResourceRequest(context.Background(), req, gvr)
+			if tc.expectErr {
+				assert.Error(t, err)
+				assert.Nil(t, res)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, res)
+				if tc.expectPatched {
+					labels := res.GetLabels()
+					assert.Equal(t, "true", labels["patched"])
+				}
+			}
+		})
+	}
 }

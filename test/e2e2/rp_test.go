@@ -34,10 +34,12 @@ import (
 	"github.com/stretchr/testify/suite"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 )
 
 type ResourceProxyTestSuite struct {
@@ -134,7 +136,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	resp.Body.Close()
 
 	// Other methods should be forbidden as of now
-	for _, m := range []string{http.MethodConnect, http.MethodDelete, http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut} {
+	for _, m := range []string{http.MethodConnect, http.MethodDelete, http.MethodOptions, http.MethodPut} {
 		resp, err = rpClient.Do(&http.Request{
 			Method: m,
 			URL:    &url.URL{Scheme: "https", Host: "127.0.0.1:9090", Path: "/apis/apps/v1/namespaces/argocd/deployments/argocd-server"},
@@ -251,6 +253,200 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	_, err = argoClient.GetResource(&app,
 		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-backend")
 	requires.Error(err)
+}
+
+func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
+	requires := suite.Require()
+
+	ctx := context.Background()
+	deploymentActionKey := "resource.customizations.actions.apps_Deployment"
+
+	updateResourceAction := func(updateFn func(argocdCM *corev1.ConfigMap)) {
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			argocdCM := &corev1.ConfigMap{}
+			err := suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: "argocd"}, argocdCM, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+
+			// update resource action
+			updateFn(argocdCM)
+			return suite.PrincipalClient.Update(ctx, argocdCM, metav1.UpdateOptions{})
+		})
+		requires.NoError(err)
+	}
+
+	// Create a custom action for a deployment in the argocd-cm
+	updateResourceAction(func(argocdCM *corev1.ConfigMap) {
+		argocdCM.Data[deploymentActionKey] = getCustomResourceAction()
+	})
+
+	defer func() {
+		updateResourceAction(func(argocdCM *corev1.ConfigMap) {
+			if _, ok := argocdCM.Data[deploymentActionKey]; !ok {
+				return
+			}
+			delete(argocdCM.Data, deploymentActionKey)
+		})
+
+		// delete a resource created by action
+		newCM := &corev1.ConfigMap{}
+		err := suite.ManagedAgentClient.Get(ctx, types.NamespacedName{Name: "test-cm", Namespace: "guestbook"},
+			newCM, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			return
+		}
+		requires.NoError(err)
+
+		err = suite.ManagedAgentClient.Delete(ctx, newCM, metav1.DeleteOptions{})
+		requires.NoError(err)
+	}()
+
+	// Get the Argo server endpoint to use
+	srvService := &corev1.Service{}
+	err := suite.PrincipalClient.Get(context.Background(),
+		types.NamespacedName{Namespace: "argocd", Name: "argocd-server"}, srvService, v1.GetOptions{})
+	requires.NoError(err)
+	argoEndpoint := srvService.Spec.LoadBalancerIP
+
+	if len(srvService.Status.LoadBalancer.Ingress) > 0 {
+		hostname := srvService.Status.LoadBalancer.Ingress[0].Hostname
+		if hostname != "" {
+			argoEndpoint = hostname
+		}
+	}
+	appName := "guestbook-ui"
+
+	// Read admin secret from principal's cluster
+	pwdSecret := &corev1.Secret{}
+	err = suite.PrincipalClient.Get(context.Background(),
+		types.NamespacedName{Namespace: "argocd", Name: "argocd-initial-admin-secret"}, pwdSecret, v1.GetOptions{})
+	requires.NoError(err)
+
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", string(pwdSecret.Data["password"]))
+	err = argoClient.Login()
+	requires.NoError(err)
+
+	// Create a managed application in the principal's cluster
+	app := v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      appName,
+			Namespace: "agent-managed",
+		},
+		Spec: v1alpha1.ApplicationSpec{
+			Project: "default",
+			Source: &v1alpha1.ApplicationSource{
+				RepoURL:        "https://github.com/argoproj/argocd-example-apps",
+				TargetRevision: "HEAD",
+				Path:           "kustomize-guestbook",
+			},
+			Destination: v1alpha1.ApplicationDestination{
+				Name:      "agent-managed",
+				Namespace: "guestbook",
+			},
+			SyncPolicy: &v1alpha1.SyncPolicy{
+				Automated: &v1alpha1.SyncPolicyAutomated{},
+				SyncOptions: v1alpha1.SyncOptions{
+					"CreateNamespace=true",
+				},
+			},
+		},
+	}
+
+	err = suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	// Wait until the app is synced and healthy
+	retries := 0
+	requires.Eventually(func() bool {
+		app := &v1alpha1.Application{}
+		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, app, v1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		if app.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && app.Status.Health.Status == health.HealthStatusHealthy {
+			return true
+		} else {
+			// Sometimes, the sync hangs on the workload cluster. We trigger
+			// a sync every 5th or so retry.
+			if retries > 0 && retries%5 == 0 {
+				suite.T().Logf("Triggering re-sync")
+				err = argoClient.Sync(app)
+				if err != nil {
+					return true
+				}
+			}
+			retries += 1
+		}
+		return false
+	}, 60*time.Second, 1*time.Second)
+	requires.NoError(err)
+
+	// Execute the action
+	err = argoClient.RunResourceAction(&app, "test",
+		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
+	requires.NoError(err)
+
+	// Check if a new resource is created after running the resource action
+	requires.Eventually(func() bool {
+		newCM := &corev1.ConfigMap{}
+		err = suite.ManagedAgentClient.Get(ctx, types.NamespacedName{Name: "test-cm", Namespace: "guestbook"},
+			newCM, metav1.GetOptions{})
+
+		if err != nil {
+			return false
+		}
+
+		return newCM.Data["testKey"] == "testValue"
+	}, 20*time.Second, 1*time.Second)
+
+	// Check if an existing resource is patched after running the resource action
+	requires.Eventually(func() bool {
+		deployment := &appsv1.Deployment{}
+		err = suite.ManagedAgentClient.Get(ctx, types.NamespacedName{Name: "kustomize-guestbook-ui", Namespace: "guestbook"},
+			deployment, metav1.GetOptions{})
+
+		if err != nil {
+			return false
+		}
+
+		return deployment.Labels["test-label"] == "test"
+	}, 20*time.Second, 1*time.Second)
+}
+
+func getCustomResourceAction() string {
+	return `discovery.lua: |
+    actions = {}
+    actions["test"] = {}
+    return actions
+definitions:
+  - name: test
+    action.lua: |
+      -- Create a new ConfigMap
+      cm = {}
+      cm.apiVersion = "v1"
+      cm.kind = "ConfigMap"
+      cm.metadata = {}
+      cm.metadata.name = "test-cm"
+      cm.metadata.namespace = obj.metadata.namespace     
+      cm.data = {}
+      cm.data.testKey = "testValue"
+      impactedResource1 = {}
+      impactedResource1.operation = "create"
+      impactedResource1.resource = cm
+      	  
+      -- Patch the original Object
+      if obj.metadata.labels == nil then
+        obj.metadata.labels = {}
+      end
+      obj.metadata.labels["test-label"] = "test"
+      impactedResource2 = {}
+      impactedResource2.operation = "patch"
+      impactedResource2.resource = obj
+      result = {}
+      result[1] = impactedResource1
+      result[2] = impactedResource2
+      return result`
 }
 
 func TestResourceProxyTestSuite(t *testing.T) {
