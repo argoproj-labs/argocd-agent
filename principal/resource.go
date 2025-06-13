@@ -129,7 +129,14 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 	logCtx.Tracef("Submitting event: %v", sentEv)
 	q.Add(sentEv)
 
-	logCtx.Infof("Proxying request for resource %s %s/%s", params.Get("resource"), params.Get("namespace"), params.Get("name"))
+	requestedName := params.Get("name")
+	requestedNamespace := params.Get("namespace")
+
+	if requestedName != "" {
+		logCtx.Infof("Proxying request for resource of type %s named %s/%s", gvr.String(), requestedNamespace, requestedName)
+	} else {
+		logCtx.Infof("Proxying request for resources of type %s in namespace %s", gvr.String(), requestedNamespace)
+	}
 
 	// Wait for the event from the agent
 	ctx, cancel := context.WithTimeout(s.ctx, requestTimeout)
