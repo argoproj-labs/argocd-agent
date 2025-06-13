@@ -36,7 +36,7 @@ go run github.com/argoproj-labs/argocd-agent/cmd/agent \
     --insecure-tls \
     --kubecontext vcluster-agent-managed \
     --namespace agent-managed \
-    --log-level trace $ARGS \
+    --log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} $ARGS \
     --healthz-port 8001 \
     #--enable-compression true
     #--keep-alive-ping-interval 15m

@@ -40,7 +40,7 @@ go run github.com/argoproj-labs/argocd-agent/cmd/principal \
 	--allowed-namespaces '*' \
 	--insecure-jwt-generate \
 	--kubecontext vcluster-control-plane \
-	--log-level trace \
+	--log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} \
 	--namespace argocd \
 	--auth "mtls:CN=([^,]+)" \
 	$ARGS
