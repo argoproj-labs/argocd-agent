@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -38,26 +39,33 @@ var appSpecCache = &ApplicationSpecCache{
 }
 
 // SetApplicationSpec inserts/updates app spec in cache
-func SetApplicationSpec(sourceUID types.UID, app v1alpha1.ApplicationSpec) {
+func SetApplicationSpec(sourceUID types.UID, app v1alpha1.ApplicationSpec, log *logrus.Entry) {
 	appSpecCache.lock.Lock()
 	defer appSpecCache.lock.Unlock()
+
+	log.Tracef("Setting value in ApplicationSpec cache: '%s' %v", sourceUID, app)
 
 	appSpecCache.appSpec[sourceUID] = app
 }
 
 // GetApplicationSpec returns cached app spec
-func GetApplicationSpec(sourceUID types.UID) (v1alpha1.ApplicationSpec, bool) {
+func GetApplicationSpec(sourceUID types.UID, log *logrus.Entry) (v1alpha1.ApplicationSpec, bool) {
+
 	appSpecCache.lock.RLock()
 	defer appSpecCache.lock.RUnlock()
 
 	appSpec, ok := appSpecCache.appSpec[sourceUID]
+
+	log.Tracef("Retrieved value from ApplicationSpec cache: '%s' %v", sourceUID, appSpec)
 	return appSpec, ok
 }
 
 // DeleteApplicationSpec removes app spec from cache
-func DeleteApplicationSpec(sourceUID types.UID) {
+func DeleteApplicationSpec(sourceUID types.UID, log *logrus.Entry) {
 	appSpecCache.lock.Lock()
 	defer appSpecCache.lock.Unlock()
+
+	log.Tracef("Deleting value from ApplicationSpec cache: '%s'", sourceUID)
 
 	delete(appSpecCache.appSpec, sourceUID)
 }

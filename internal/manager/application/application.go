@@ -609,11 +609,12 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 
 	sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
 	if exists && m.mode == manager.ManagerModeManaged {
-		if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID)); ok {
+		if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID), logCtx); ok {
 			logCtx.Debugf("Application: %s is available in agent cache", app.Name)
 
 			if diff := reflect.DeepEqual(cachedAppSpec, app.Spec); !diff {
 				app.Spec = cachedAppSpec
+				logCtx.Infof("Reverting modifications done in application: %s", app.Name)
 				if _, err := m.UpdateManagedApp(ctx, app); err != nil {
 					logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", app.Name, err)
 					return false

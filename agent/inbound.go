@@ -340,16 +340,17 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	incoming.Spec.Destination.Server = ""
 	incoming.Spec.Destination.Name = "in-cluster"
 
+	if a.mode == types.AgentModeManaged {
+		// Store app spec in cache
+		appCache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+	}
+
 	created, err := a.appManager.Create(a.context, incoming)
 	if apierrors.IsAlreadyExists(err) {
 		logCtx.Debug("application already exists")
 		return created, nil
 	}
 
-	if a.mode == types.AgentModeManaged && err == nil {
-		// Store app spec in cache
-		appCache.SetApplicationSpec(incoming.UID, incoming.Spec)
-	}
 	return created, err
 }
 
@@ -379,12 +380,12 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	var napp *v1alpha1.Application
 	switch a.mode {
 	case types.AgentModeManaged:
+
+		// Update app spec in cache
 		logCtx.Tracef("Calling update spec for this event")
+		appCache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+
 		napp, err = a.appManager.UpdateManagedApp(a.context, incoming)
-		if err == nil {
-			// Update app spec in cache
-			appCache.SetApplicationSpec(incoming.UID, napp.Spec)
-		}
 	case types.AgentModeAutonomous:
 		logCtx.Tracef("Calling update operation for this event")
 		napp, err = a.appManager.UpdateOperation(a.context, incoming)
@@ -417,7 +418,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
 			if a.mode == types.AgentModeManaged {
-				appCache.DeleteApplicationSpec(app.UID)
+				appCache.DeleteApplicationSpec(app.UID, logCtx)
 			}
 			return nil
 		}
@@ -425,7 +426,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	}
 
 	if a.mode == types.AgentModeManaged && err == nil {
-		appCache.DeleteApplicationSpec(app.UID)
+		appCache.DeleteApplicationSpec(app.UID, logCtx)
 	}
 
 	err = a.appManager.Unmanage(app.QualifiedName())

@@ -15,9 +15,11 @@
 package cache
 
 import (
+	"context"
 	"testing"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,15 +27,17 @@ func Test_ApplicationSpecCache(t *testing.T) {
 	t.Run("Test ApplicationSpec Cache", func(t *testing.T) {
 		assert.Empty(t, appSpecCache.appSpec)
 
+		log := logrus.New().WithContext(context.Background())
+
 		expectedAppSpec := v1alpha1.ApplicationSpec{Project: "test-project"}
-		SetApplicationSpec("test", expectedAppSpec)
+		SetApplicationSpec("test", expectedAppSpec, log)
 		assert.Equal(t, 1, len(appSpecCache.appSpec))
 
-		actualAppSpec, ok := GetApplicationSpec("test")
+		actualAppSpec, ok := GetApplicationSpec("test", log)
 		assert.True(t, ok)
 		assert.Equal(t, expectedAppSpec, actualAppSpec)
 
-		DeleteApplicationSpec("test")
+		DeleteApplicationSpec("test", log)
 		assert.Empty(t, appSpecCache.appSpec)
 	})
 }

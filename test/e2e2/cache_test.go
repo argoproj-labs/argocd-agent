@@ -55,7 +55,7 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterChanges() {
 	// Case 1: Modify the application directly in the managed-cluster,
 	// but changes are reverted to be in sync with principal
 	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires)
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires, suite.T())
 
 	// Case 2:  Modify the application on the principal-cluster and
 	// ensure new updates are propagated to the managed-cluster
@@ -68,7 +68,7 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterChanges() {
 	requires.NoError(suite.PrincipalClient.Get(suite.Ctx, key, &app, metav1.GetOptions{}))
 	app.Spec.Destination.Name = "in-cluster"
 	app.Spec.Destination.Server = ""
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires)
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires, suite.T())
 }
 
 // This test validates the scenario when agent is disconnected with principal and then user tries
@@ -89,7 +89,7 @@ func (suite *CacheTestSuite) Test_RevertDisconnectedManagedClusterChanges() {
 	}, 30*time.Second, 1*time.Second)
 
 	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires)
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires, suite.T())
 
 	// Case 2: Agent is reconnected with principal and now changes done in principal should reflect in managed-cluster
 	requires.NoError(fixture.StartProcess("principal"))
@@ -118,7 +118,7 @@ func (suite *CacheTestSuite) Test_CacheRecreatedOnRestart() {
 	fixture.WaitForAgent(suite.T(), "agent-managed")
 
 	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires)
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires, suite.T())
 
 	// Case 2:  Modify the application on the principal-cluster and
 	// ensure new updates are propagated to the managed-cluster
@@ -138,16 +138,20 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterOfflineChanges() {
 
 	// Agent in not running, but still make changes in the managed-cluster application manifest.
 	// When agent is restarted, these changes should be reverted to be in sync with principal.
+	requires.Eventually(func() bool {
+		return fixture.IsProcessRunning("agent-managed")
+	}, 60*time.Second, 1*time.Second)
+
 	requires.NoError(fixture.StopProcess("agent-managed"))
 	requires.Eventually(func() bool {
 		return !fixture.IsProcessRunning("agent-managed")
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
 
 	requires.NoError(fixture.StartProcess("agent-managed"))
 	fixture.WaitForAgent(suite.T(), "agent-managed")
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires)
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires, suite.T())
 }
 
 func createApp(ctx context.Context, client fixture.KubeClient, requires *require.Assertions) argoapp.Application {
@@ -218,10 +222,13 @@ func validateAppInfoUpdated(ctx context.Context, client fixture.KubeClient, key 
 	}, 90*time.Second, 2*time.Second)
 }
 
-func validateAppReverted(ctx context.Context, client fixture.KubeClient, app *argoapp.Application, key types.NamespacedName, requires *require.Assertions) {
+func validateAppReverted(ctx context.Context, client fixture.KubeClient, app *argoapp.Application, key types.NamespacedName, requires *require.Assertions, t *testing.T) {
 	requires.Eventually(func() bool {
 		mapp := argoapp.Application{}
 		err := client.Get(ctx, key, &mapp, metav1.GetOptions{})
+		if err != nil {
+			t.Logf("Get error in validateAppReverted: %v", err)
+		}
 		return err == nil &&
 			reflect.DeepEqual(&app.Spec, &mapp.Spec)
 	}, 90*time.Second, 2*time.Second)

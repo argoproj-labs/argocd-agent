@@ -751,7 +751,7 @@ func Test_RevertManagedAppChanges(t *testing.T) {
 		require.NoError(t, err)
 
 		// Store app spec in cache
-		appCache.SetApplicationSpec("some_uid", app.Spec)
+		appCache.SetApplicationSpec("some_uid", app.Spec, log())
 
 		reverted := mgr.RevertManagedAppChanges(context.Background(), app)
 		require.False(t, reverted)
