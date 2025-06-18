@@ -250,6 +250,8 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 
 // CompareSourceUID checks for an existing app with the same name/namespace and compare its source UID with the incoming app.
 func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1alpha1.Application) (bool, bool, error) {
+	incoming.SetNamespace(m.namespace)
+
 	existing, err := m.applicationBackend.Get(ctx, incoming.Name, incoming.Namespace)
 	if err != nil {
 		if errors.IsNotFound(err) {
