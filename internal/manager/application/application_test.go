@@ -705,6 +705,24 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 		require.False(t, uidMatch)
 		require.Nil(t, err)
 	})
+
+	t.Run("should override incoming namespace", func(t *testing.T) {
+		oldApp.Annotations = map[string]string{manager.SourceUIDAnnotation: "old_uid"}
+		getMock.Unset()
+		getMock = mockedBackend.On("Get", mock.Anything, mock.Anything, "argocd").Return(oldApp, nil)
+		m, err := NewApplicationManager(mockedBackend, oldApp.Namespace)
+		require.Nil(t, err)
+		ctx := context.Background()
+
+		incoming := oldApp.DeepCopy()
+		incoming.Namespace = "foobar"
+		incoming.UID = ktypes.UID("old_uid")
+
+		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.True(t, exists)
+		require.Nil(t, err)
+		require.True(t, uidMatch)
+	})
 }
 
 func init() {
