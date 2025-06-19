@@ -14,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
@@ -27,8 +28,10 @@ var ErrUnmanaged = errors.New("resource not managed by app")
 //
 // There can be multiple forms of requests. Currently supported are:
 //
-// - Request for a particular resource, both namespace and cluster scoped
-// - Request for a list of available APIs
+//   - Request for a particular resource, both namespace and cluster scoped
+//   - Request for a limited list of resources, both namespace and cluster
+//     scoped.
+//   - Request for a list of available APIs
 func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	rreq, err := ev.ResourceRequest()
 	if err != nil {
@@ -39,10 +42,6 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 		"uuid":        rreq.UUID,
 		"http_method": rreq.Method,
 	})
-
-	if rreq.IsEmpty() {
-		return fmt.Errorf("group version resource is empty")
-	}
 
 	logCtx.Tracef("Start processing %v", rreq)
 
@@ -57,14 +56,25 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	// Extract required information from the resource request
 	gvr, name, namespace := rreqEventToGvk(rreq)
 
+	logCtx.Infof("Processing resource request for resource of type %s named %s/%s", gvr.String(), namespace, name)
+
 	switch rreq.Method {
 	case http.MethodGet:
 		// If we have a request for a named resource, we fetch that particular
-		// resource. If the name is empty, we fetch a list of resources instead.
+		// resource. If the name is empty, we fetch either a list of resources
+		// or a list of APIs instead.
 		if name != "" {
-			unres, err = a.getManagedResource(ctx, gvr, name, namespace)
+			if gvr.Resource != "" {
+				logCtx.Debugf("Fetching managed resource %s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
+				unres, err = a.getManagedResource(ctx, gvr, name, namespace)
+			}
 		} else {
-			unlist, err = a.getAvailableResources(ctx, gvr, namespace)
+			if gvr.Resource != "" {
+				unlist, err = a.getAvailableResources(ctx, gvr, namespace)
+			} else {
+				logCtx.Debugf("Fetching APIs for group %s and version %s", gvr.Group, gvr.Version)
+				unres, err = a.getAvailableAPIs(ctx, gvr.Group, gvr.Version)
+			}
 		}
 	case http.MethodPost:
 		unres, err = a.processIncomingPostResourceRequest(ctx, rreq, gvr)
@@ -83,11 +93,12 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 			jsonres, err = json.Marshal(unres)
 		} else if unlist != nil {
 			jsonres, err = json.Marshal(unlist)
+		} else {
+			logCtx.Warnf("No resource found for request %v", rreq)
 		}
 		if err != nil {
 			return fmt.Errorf("could not marshal resource to json: %w", err)
 		}
-		logCtx.Tracef("marshaled resource")
 	}
 
 	q := a.queues.SendQ(defaultQueueName)
@@ -202,6 +213,10 @@ func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersi
 	case "apigroups":
 	case "":
 		break
+	case "events":
+		// We do allow listing events for now. We have to figure out how to
+		// properly filter the events for the resource in question.
+		break
 	default:
 		return nil, fmt.Errorf("not authorized to list resources: %s", gvr.String())
 	}
@@ -215,6 +230,42 @@ func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersi
 	}
 
 	return res, err
+}
+
+// getAvailableAPIs retrieves a list of available APIs for a given group and version.
+// If group and version are empty, all available APIs are returned.
+// If group is empty and version is not, all APIs for the given version are returned.
+// If group and version are not empty, all APIs for the given group and version are returned.
+//
+// It does not yet support the new aggregated API.
+func (a *Agent) getAvailableAPIs(ctx context.Context, group, version string) (*unstructured.Unstructured, error) {
+	groupVersion := fmt.Sprintf("%s/%s", group, version)
+	var groupList *v1.APIGroupList
+	var resourceList *v1.APIResourceList
+	var err error
+
+	if group == "" && version == "" {
+		groupList, err = a.kubeClient.Clientset.Discovery().ServerGroups()
+	} else if group == "" && version != "" {
+		resourceList, err = a.kubeClient.Clientset.Discovery().ServerResourcesForGroupVersion(version)
+	} else {
+		resourceList, err = a.kubeClient.Clientset.Discovery().ServerResourcesForGroupVersion(groupVersion)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var obj map[string]any
+	if groupList != nil {
+		obj, err = runtime.DefaultUnstructuredConverter.ToUnstructured(groupList)
+	} else if resourceList != nil {
+		obj, err = runtime.DefaultUnstructuredConverter.ToUnstructured(resourceList)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &unstructured.Unstructured{Object: obj}, nil
 }
 
 // isResourceManaged checks whether a given resource is considered to be

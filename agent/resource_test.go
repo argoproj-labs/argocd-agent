@@ -386,7 +386,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 
 		// Process the request
 		err := agent.processIncomingResourceRequest(event.New(&ev, event.TargetResource))
-		assert.Error(t, err) // Should return error for invalid request
+		assert.NoError(t, err)
 	})
 }
 
@@ -709,4 +709,122 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_getAvailableAPIs(t *testing.T) {
+	t.Run("Successfully get API resources for apps/v1", func(t *testing.T) {
+		agent := &Agent{
+			context:    context.Background(),
+			kubeClient: kube.NewDynamicFakeClient(),
+		}
+
+		result, err := agent.getAvailableAPIs(context.Background(), "apps", "v1")
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		// The runtime converter preserves the original structure in Object map
+		// Check that groupVersion is set correctly
+		groupVersion, exists := result.Object["groupVersion"]
+		assert.True(t, exists)
+		assert.Equal(t, "apps/v1", groupVersion)
+
+		// Check that resources array exists and has content
+		resources, exists := result.Object["resources"]
+		assert.True(t, exists)
+		resourcesList, ok := resources.([]interface{})
+		assert.True(t, ok)
+		assert.Greater(t, len(resourcesList), 0)
+
+		// Check that the first resource has the expected fields
+		firstResource, ok := resourcesList[0].(map[string]interface{})
+		assert.True(t, ok)
+		assert.Contains(t, firstResource, "name")
+		assert.Contains(t, firstResource, "kind")
+		assert.Contains(t, firstResource, "verbs")
+		assert.Contains(t, firstResource, "namespaced")
+		assert.Contains(t, firstResource, "version")
+		assert.Equal(t, "v1", firstResource["version"])
+	})
+
+	t.Run("Successfully get API resources for core v1", func(t *testing.T) {
+		agent := &Agent{
+			context:    context.Background(),
+			kubeClient: kube.NewDynamicFakeClient(),
+		}
+
+		result, err := agent.getAvailableAPIs(context.Background(), "", "v1")
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		// Check that groupVersion is set correctly for core API
+		groupVersion, exists := result.Object["groupVersion"]
+		assert.True(t, exists)
+		assert.Equal(t, "v1", groupVersion)
+
+		// Check that resources array exists and has content
+		resources, exists := result.Object["resources"]
+		assert.True(t, exists)
+		resourcesList, ok := resources.([]interface{})
+		assert.True(t, ok)
+		assert.Greater(t, len(resourcesList), 0)
+
+		// Check that the first resource has the expected fields
+		firstResource, ok := resourcesList[0].(map[string]interface{})
+		assert.True(t, ok)
+		assert.Contains(t, firstResource, "name")
+		assert.Contains(t, firstResource, "kind")
+		assert.Contains(t, firstResource, "verbs")
+		assert.Contains(t, firstResource, "namespaced")
+		assert.Contains(t, firstResource, "version")
+		assert.Equal(t, "v1", firstResource["version"])
+	})
+
+	t.Run("Successfully get all API groups when group and version are empty", func(t *testing.T) {
+		agent := &Agent{
+			context:    context.Background(),
+			kubeClient: kube.NewDynamicFakeClient(),
+		}
+
+		result, err := agent.getAvailableAPIs(context.Background(), "", "")
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		// Check that groups array exists and has content
+		groups, exists := result.Object["groups"]
+		assert.True(t, exists)
+		groupsList, ok := groups.([]interface{})
+		assert.True(t, ok)
+		assert.Greater(t, len(groupsList), 0)
+
+		// Check that the first group has the expected fields
+		firstGroup, ok := groupsList[0].(map[string]interface{})
+		assert.True(t, ok)
+		assert.Contains(t, firstGroup, "name")
+		assert.Contains(t, firstGroup, "versions")
+		assert.Contains(t, firstGroup, "preferredVersion")
+
+		// Check that versions array exists and has content
+		versions, exists := firstGroup["versions"]
+		assert.True(t, exists)
+		versionsList, ok := versions.([]interface{})
+		assert.True(t, ok)
+		assert.Greater(t, len(versionsList), 0)
+
+		// Check that the first version has the expected fields
+		firstVersion, ok := versionsList[0].(map[string]interface{})
+		assert.True(t, ok)
+		assert.Contains(t, firstVersion, "groupVersion")
+		assert.Contains(t, firstVersion, "version")
+	})
+
+	t.Run("Returns error for non-existent API group", func(t *testing.T) {
+		agent := &Agent{
+			context:    context.Background(),
+			kubeClient: kube.NewDynamicFakeClient(),
+		}
+
+		result, err := agent.getAvailableAPIs(context.Background(), "nonexistent", "v1")
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	})
 }
