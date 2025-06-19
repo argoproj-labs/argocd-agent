@@ -28,8 +28,10 @@ var ErrUnmanaged = errors.New("resource not managed by app")
 //
 // There can be multiple forms of requests. Currently supported are:
 //
-// - Request for a particular resource, both namespace and cluster scoped
-// - Request for a list of available APIs
+//   - Request for a particular resource, both namespace and cluster scoped
+//   - Request for a limited list of resources, both namespace and cluster
+//     scoped.
+//   - Request for a list of available APIs
 func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	rreq, err := ev.ResourceRequest()
 	if err != nil {
