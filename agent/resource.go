@@ -59,7 +59,8 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	switch rreq.Method {
 	case http.MethodGet:
 		// If we have a request for a named resource, we fetch that particular
-		// resource. If the name is empty, we fetch a list of resources instead.
+		// resource. If the name is empty, we fetch either a list of resources
+		// or a list of APIs instead.
 		if name != "" {
 			if gvr.Resource != "" {
 				logCtx.Debugf("Fetching managed resource %s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
