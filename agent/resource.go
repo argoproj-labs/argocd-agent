@@ -235,8 +235,6 @@ func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersi
 // If group and version are not empty, all APIs for the given group and version are returned.
 //
 // It does not yet support the new aggregated API.
-//
-//nolint:unused
 func (a *Agent) getAvailableAPIs(ctx context.Context, group, version string) (*unstructured.Unstructured, error) {
 	groupVersion := fmt.Sprintf("%s/%s", group, version)
 	var groupList *v1.APIGroupList
