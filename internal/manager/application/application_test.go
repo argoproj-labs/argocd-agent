@@ -35,6 +35,7 @@ import (
 	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
 	"k8s.io/apimachinery/pkg/api/errors"
 
+	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -727,4 +728,38 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
+}
+
+func Test_RevertManagedAppChanges(t *testing.T) {
+	t.Run("Revert spec changes", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "some_uid",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "test",
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", app)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent))
+		require.NoError(t, err)
+
+		// Store app spec in cache
+		appCache.SetApplicationSpec("some_uid", app.Spec, log())
+
+		reverted := mgr.RevertManagedAppChanges(context.Background(), app)
+		require.False(t, reverted)
+
+		// Update app spec
+		app.Spec.Project = "test1"
+
+		reverted = mgr.RevertManagedAppChanges(context.Background(), app)
+		require.True(t, reverted)
+	})
 }

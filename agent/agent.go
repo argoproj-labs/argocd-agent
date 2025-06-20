@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
@@ -43,7 +44,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 
+	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	ty "k8s.io/apimachinery/pkg/types"
 )
 
 const waitForSyncedDuration = 10 * time.Second
@@ -254,6 +257,23 @@ func (a *Agent) Start(ctx context.Context) error {
 	a.context = infCtx
 	a.cancelFn = cancelFn
 
+	// For managed-agent we need to maintain a cache to keep applications in sync with last known state of
+	// principal in case agent is disconnected with principal or application in managed-cluster is modified.
+	if a.mode == types.AgentModeManaged {
+		log().Infof("Recreating application spec cache from existing resources on cluster")
+		appList, err := a.appManager.List(ctx, backend.ApplicationSelector{Namespaces: []string{a.namespace}})
+		if err != nil {
+			log().Errorf("Error while fetching list of applications: %v", err)
+		}
+
+		for _, app := range appList {
+			sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
+			if exists {
+				appCache.SetApplicationSpec(ty.UID(sourceUID), app.Spec, log())
+			}
+		}
+	}
+
 	if a.options.metricsPort > 0 {
 		metrics.StartMetricsServer(metrics.WithListener("", a.options.metricsPort))
 	}
@@ -315,7 +335,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		_ = a.maintainConnection()
 	}
 
-	return err
+	return nil
 }
 
 func (a *Agent) Stop() error {

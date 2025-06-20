@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -112,7 +113,6 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 				if err := a.deleteApplication(incomingApp); err != nil {
 					return fmt.Errorf("could not delete existing app prior to creation: %w", err)
 				}
-
 			}
 		}
 
@@ -340,6 +340,11 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	incoming.Spec.Destination.Server = ""
 	incoming.Spec.Destination.Name = "in-cluster"
 
+	if a.mode == types.AgentModeManaged {
+		// Store app spec in cache
+		appCache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+	}
+
 	created, err := a.appManager.Create(a.context, incoming)
 	if apierrors.IsAlreadyExists(err) {
 		logCtx.Debug("application already exists")
@@ -375,7 +380,11 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	var napp *v1alpha1.Application
 	switch a.mode {
 	case types.AgentModeManaged:
+
+		// Update app spec in cache
 		logCtx.Tracef("Calling update spec for this event")
+		appCache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+
 		napp, err = a.appManager.UpdateManagedApp(a.context, incoming)
 	case types.AgentModeAutonomous:
 		logCtx.Tracef("Calling update operation for this event")
@@ -408,10 +417,18 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
+			if a.mode == types.AgentModeManaged {
+				appCache.DeleteApplicationSpec(app.UID, logCtx)
+			}
 			return nil
 		}
 		return err
 	}
+
+	if a.mode == types.AgentModeManaged && err == nil {
+		appCache.DeleteApplicationSpec(app.UID, logCtx)
+	}
+
 	err = a.appManager.Unmanage(app.QualifiedName())
 	if err != nil {
 		log().Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
