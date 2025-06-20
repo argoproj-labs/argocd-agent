@@ -4,3 +4,4 @@ test/profile
 vendor/
 .vscode
 build/
+__pycache__
