@@ -80,6 +80,8 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 		unres, err = a.processIncomingPostResourceRequest(ctx, rreq, gvr)
 	case http.MethodPatch:
 		unres, err = a.processIncomingPatchResourceRequest(ctx, rreq, gvr)
+	case http.MethodDelete:
+		err = a.processIncomingDeleteResourceRequest(ctx, rreq, gvr)
 	default:
 		err = fmt.Errorf("invalid HTTP method %s for resource request", rreq.Method)
 	}
@@ -159,6 +161,17 @@ func (a *Agent) processIncomingPatchResourceRequest(ctx context.Context, req *ev
 
 	client := a.kubeClient.DynamicClient.Resource(gvr)
 	return client.Namespace(req.Namespace).Patch(ctx, req.Name, k8stypes.MergePatchType, req.Body, patchOpts)
+}
+
+func (a *Agent) processIncomingDeleteResourceRequest(ctx context.Context, req *event.ResourceRequest, gvr schema.GroupVersionResource) error {
+	// DeleteOptions are sent in the request body as a JSON object.
+	deleteOpts := &v1.DeleteOptions{}
+	if err := json.Unmarshal(req.Body, deleteOpts); err != nil {
+		return err
+	}
+
+	client := a.kubeClient.DynamicClient.Resource(gvr)
+	return client.Namespace(req.Namespace).Delete(ctx, req.Name, *deleteOpts)
 }
 
 // rreqEventToGvk returns a GroupVersionResource object, name and namespace for

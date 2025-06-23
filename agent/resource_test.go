@@ -828,3 +828,104 @@ func Test_getAvailableAPIs(t *testing.T) {
 		assert.Nil(t, result)
 	})
 }
+
+func Test_processIncomingDeleteResourceRequest(t *testing.T) {
+	type testCase struct {
+		name          string
+		namespace     string
+		resourceName  string
+		deleteBody    []byte
+		expectErr     bool
+		expectDeleted bool
+	}
+
+	validDeleteOptions := v1.DeleteOptions{
+		GracePeriodSeconds: func() *int64 { v := int64(30); return &v }(),
+		PropagationPolicy:  func() *v1.DeletionPropagation { v := v1.DeletePropagationForeground; return &v }(),
+	}
+	validDeleteBody, _ := json.Marshal(validDeleteOptions)
+	invalidDeleteBody := []byte(`{"invalid": json}`)
+
+	// Create a test pod for deletion
+	originalObj := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "c", Image: "nginx"},
+			},
+		},
+	}
+
+	tests := []testCase{
+		{
+			name:          "Successfully deletes resource",
+			namespace:     "default",
+			resourceName:  "test-pod",
+			deleteBody:    validDeleteBody,
+			expectErr:     false,
+			expectDeleted: true,
+		},
+		{
+			name:          "Successfully deletes resource with empty delete options",
+			namespace:     "default",
+			resourceName:  "test-pod",
+			deleteBody:    []byte(`{}`),
+			expectErr:     false,
+			expectDeleted: true,
+		},
+		{
+			name:          "Returns error for invalid JSON delete options",
+			namespace:     "default",
+			resourceName:  "test-pod",
+			deleteBody:    invalidDeleteBody,
+			expectErr:     true,
+			expectDeleted: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			kubeClient := kube.NewDynamicFakeClient(originalObj)
+			scheme := runtime.NewScheme()
+			_ = corev1.AddToScheme(scheme)
+			fakeDyn := fake.NewSimpleDynamicClient(scheme, originalObj)
+			kubeClient.DynamicClient = fakeDyn
+
+			agent := &Agent{
+				context:    context.Background(),
+				kubeClient: kubeClient,
+			}
+
+			gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+
+			req := &event.ResourceRequest{
+				Name:      tc.resourceName,
+				Body:      tc.deleteBody,
+				Namespace: tc.namespace,
+				Method:    http.MethodDelete,
+				GroupVersionResource: v1.GroupVersionResource{
+					Group:    gvr.Group,
+					Version:  gvr.Version,
+					Resource: gvr.Resource,
+				},
+			}
+
+			err := agent.processIncomingDeleteResourceRequest(context.Background(), req, gvr)
+
+			if tc.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			if tc.expectDeleted {
+				_, err := kubeClient.DynamicClient.Resource(gvr).Namespace(tc.namespace).Get(context.Background(), tc.resourceName, v1.GetOptions{})
+				assert.Error(t, err)
+				assert.True(t, errors.IsNotFound(err))
+			}
+		})
+	}
+}

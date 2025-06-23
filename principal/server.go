@@ -293,7 +293,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 			// For matching resource requests from the Argo CD API
 			resourceproxy.WithRequestMatcher(
 				resourceRequestRegexp,
-				[]string{"get", "patch", "post"},
+				[]string{"get", "patch", "post", "delete"},
 				s.processResourceRequest,
 			),
 			// Fake version output
