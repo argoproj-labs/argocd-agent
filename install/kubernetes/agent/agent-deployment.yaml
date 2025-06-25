@@ -125,4 +125,3 @@ spec:
             path: tls.key
           - key: ca.crt
             path: ca.crt
-          optional: true
