@@ -174,3 +174,195 @@ func Test_deleteNamespaceCallback(t *testing.T) {
 		require.True(t, a.queues.HasQueuePair("agent"))
 	})
 }
+
+func Test_addAppProjectCreationToQueue(t *testing.T) {
+	a := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	t.Run("Add appProject in autonomous mode", func(t *testing.T) {
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		a.addAppProjectCreationToQueue(appProject)
+		defer a.projectManager.ClearManaged()
+
+		// Should have an event in queue
+		require.Equal(t, 1, a.queues.SendQ(defaultQueueName).Len())
+		ev, _ := a.queues.SendQ(defaultQueueName).Get()
+		assert.NotNil(t, ev)
+		assert.Equal(t, event.Create.String(), ev.Type())
+		// Queue should be empty after get
+		assert.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+
+		// AppProject should be managed by now
+		assert.True(t, a.projectManager.IsManaged("test-project"))
+	})
+
+	t.Run("Add appProject in managed mode", func(t *testing.T) {
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		a.mode = types.AgentModeManaged
+		defer func() {
+			a.mode = types.AgentModeAutonomous
+			a.projectManager.ClearManaged()
+		}()
+		a.addAppProjectCreationToQueue(appProject)
+
+		// Should not have an event in queue in managed mode
+		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+
+		// AppProject should be managed by now
+		assert.True(t, a.projectManager.IsManaged("test-project"))
+	})
+
+	t.Run("Add appProject that is already managed", func(t *testing.T) {
+		a.projectManager.Manage("test-project")
+		defer a.projectManager.ClearManaged()
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		a.addAppProjectCreationToQueue(appProject)
+
+		// Should not have an event in queue because it's already managed
+		items := a.queues.SendQ(defaultQueueName).Len()
+		assert.Equal(t, 0, items)
+
+		// AppProject should still be managed
+		assert.True(t, a.projectManager.IsManaged("test-project"))
+	})
+
+	t.Run("Use the default queue irrespective of the Client ID", func(t *testing.T) {
+		defer a.projectManager.ClearManaged()
+		a.remote.SetClientID("notexisting")
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		a.addAppProjectCreationToQueue(appProject)
+
+		// Should have an event in queue
+		items := a.queues.SendQ(defaultQueueName).Len()
+		assert.Equal(t, 1, items)
+
+		// AppProject should be managed by now
+		assert.True(t, a.projectManager.IsManaged("test-project"))
+	})
+}
+
+func Test_addAppProjectUpdateToQueue(t *testing.T) {
+	a := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	t.Run("Update event for autonomous agent", func(t *testing.T) {
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		// AppProject must be already managed for event to be generated
+		_ = a.projectManager.Manage("test-project")
+		a.mode = types.AgentModeAutonomous
+		a.addAppProjectUpdateToQueue(appProject, appProject)
+		defer a.projectManager.Unmanage("test-project")
+
+		ev, _ := a.queues.SendQ(defaultQueueName).Get()
+		require.NotNil(t, ev)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+	})
+
+	t.Run("Update event for managed agent", func(t *testing.T) {
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		// AppProject must be already managed for event to be generated
+		_ = a.projectManager.Manage("test-project")
+		a.mode = types.AgentModeManaged
+		a.addAppProjectUpdateToQueue(appProject, appProject)
+		defer func() {
+			a.mode = types.AgentModeAutonomous
+			a.projectManager.Unmanage("test-project")
+		}()
+
+		// Should not have an event in queue in managed mode
+		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+	})
+
+	t.Run("Update event for unmanaged appProject", func(t *testing.T) {
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		a.addAppProjectUpdateToQueue(appProject, appProject)
+
+		// Should not have an event in queue for unmanaged appProject
+		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+	})
+
+	t.Run("Ignore change for already seen resource version", func(t *testing.T) {
+		appProject := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:            "test-project",
+				Namespace:       "agent",
+				ResourceVersion: "12345",
+			},
+		}
+		// AppProject must be already managed for the change to be checked
+		_ = a.projectManager.Manage("test-project")
+		defer a.projectManager.Unmanage("test-project")
+
+		// Mark this change as already seen
+		a.projectManager.IgnoreChange("test-project", "12345")
+		defer a.projectManager.ClearIgnored()
+
+		a.addAppProjectUpdateToQueue(appProject, appProject)
+
+		// Should not have an event in queue for ignored change
+		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+	})
+
+	t.Run("Handle missing default queue gracefully", func(t *testing.T) {
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		// AppProject must be already managed for event to be generated
+		_ = a.projectManager.Manage("test-project")
+		defer a.projectManager.Unmanage("test-project")
+
+		// Delete the default queue to simulate it being missing
+		err := a.queues.Delete(defaultQueueName, true)
+		require.NoError(t, err)
+
+		a.addAppProjectUpdateToQueue(appProject, appProject)
+
+		// Should not have an event in any queue since default queue is missing
+		// Recreate the queue for other tests
+		err = a.queues.Create(defaultQueueName)
+		require.NoError(t, err)
+	})
+}
+
+func Test_addAppProjectDeletionToQueue(t *testing.T) {
+	a := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	t.Run("Deletion event for managed appProject on autonomous agent", func(t *testing.T) {
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		// AppProject must be already managed for proper cleanup
+		_ = a.projectManager.Manage("test-project")
+		a.addAppProjectDeletionToQueue(appProject)
+
+		ev, _ := a.queues.SendQ(defaultQueueName).Get()
+		assert.Equal(t, event.Delete.String(), ev.Type())
+		require.False(t, a.projectManager.IsManaged("test-project"))
+	})
+
+	t.Run("Deletion event for managed appProject on managed agent", func(t *testing.T) {
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		a.mode = types.AgentModeManaged
+		defer func() {
+			a.mode = types.AgentModeAutonomous
+		}()
+		// AppProject must be already managed for proper cleanup
+		_ = a.projectManager.Manage("test-project")
+		a.addAppProjectDeletionToQueue(appProject)
+
+		// Should not have an event in queue in managed mode
+		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+		// AppProject should still be unmanaged
+		require.False(t, a.projectManager.IsManaged("test-project"))
+	})
+
+	t.Run("Deletion event for unmanaged appProject", func(t *testing.T) {
+		appProject := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Name: "test-project", Namespace: "agent"}}
+		// AppProject is not managed, but deletion should proceed anyways
+		a.addAppProjectDeletionToQueue(appProject)
+
+		ev, _ := a.queues.SendQ(defaultQueueName).Get()
+		assert.Equal(t, event.Delete.String(), ev.Type())
+		require.False(t, a.projectManager.IsManaged("test-project"))
+	})
+}
