@@ -1,7 +1,9 @@
 resources:
 - agent-sa.yaml
 - agent-role.yaml
+- agent-clusterrole.yaml
 - agent-rolebinding.yaml
+- agent-clusterrolebinding.yaml
 - agent-deployment.yaml
 - agent-params-cm.yaml
 - agent-metrics-service.yaml

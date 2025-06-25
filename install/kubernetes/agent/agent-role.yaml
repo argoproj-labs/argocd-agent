@@ -41,9 +41,3 @@ rules:
   verbs:
   - create
   - list
-- apiGroups:
-    - ""
-  resources:
-    - namespaces
-  verbs:
-    - list
