@@ -24,6 +24,7 @@ VCLUSTERS="control-plane:argocd agent-managed:argocd agent-autonomous:argocd"
 VCLUSTERS_AGENTS="agent-managed:argocd agent-autonomous:argocd"
 gen_admin_pwd="${ARGOCD_AGENT_GEN_ADMIN_PWD:-true}"
 action="$1"
+shift
 
 LB_NETWORK=${LB_NETWORK:-192.168.56}
 
@@ -286,7 +287,9 @@ create)
         # fi
     done
     sleep 2
-    apply
+    if test "$1" != "--skip-argo"; then
+       apply
+    fi
     ;;
 apply)
     apply
