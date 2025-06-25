@@ -20,6 +20,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	argoapp "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
 	corev1 "k8s.io/api/core/v1"
@@ -153,6 +154,54 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 	}
 	for _, app := range list.Items {
 		err = ensureDeletion(ctx, principalClient, &app)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete all appProjects from the principal
+	appProjectList := argoapp.AppProjectList{}
+	err = principalClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, appProject := range appProjectList.Items {
+		if appProject.Name == appproject.DefaultAppProjectName {
+			continue
+		}
+		err = ensureDeletion(ctx, principalClient, &appProject)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete all appProjects from the autonomous agent
+	appProjectList = argoapp.AppProjectList{}
+	err = autonomousAgentClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, appProject := range appProjectList.Items {
+		if appProject.Name == appproject.DefaultAppProjectName {
+			continue
+		}
+		err = ensureDeletion(ctx, autonomousAgentClient, &appProject)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete all appProjects from the managed agent
+	appProjectList = argoapp.AppProjectList{}
+	err = managedAgentClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, appProject := range appProjectList.Items {
+		if appProject.Name == appproject.DefaultAppProjectName {
+			continue
+		}
+		err = ensureDeletion(ctx, managedAgentClient, &appProject)
 		if err != nil {
 			return err
 		}

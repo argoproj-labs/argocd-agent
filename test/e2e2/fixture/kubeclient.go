@@ -319,3 +319,26 @@ func (c KubeClient) EnsureApplicationUpdate(ctx context.Context, key types.Names
 		}
 	}
 }
+
+// EnsureAppProjectUpdate ensures the argocd appProject with the given key is
+// updated by retrying if there is a conflicting change.
+func (c KubeClient) EnsureAppProjectUpdate(ctx context.Context, key types.NamespacedName, modify func(*argoapp.AppProject) error, options metav1.UpdateOptions) error {
+	var err error
+	for {
+		var appProject argoapp.AppProject
+		err = c.Get(ctx, key, &appProject, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		err = modify(&appProject)
+		if err != nil {
+			return err
+		}
+
+		err = c.Update(ctx, &appProject, options)
+		if !errors.IsConflict(err) {
+			return err
+		}
+	}
+}
