@@ -170,7 +170,7 @@ spec:
             path: jwt.key
       - name: tls-secret
         secret:
-          secretName: argocd-agent-tls
+          secretName: argocd-agent-principal-tls
           items:
           - key: tls.key
             path: tls.key
