@@ -94,7 +94,7 @@ func Test_DeleteAppProject(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
 		deletionPropagation := backend.DeletePropagationForeground
-		err = mgr.Delete(context.TODO(), "argocd", existing, &deletionPropagation)
+		err = mgr.Delete(context.TODO(), existing, &deletionPropagation)
 		assert.NoError(t, err)
 		app, err = appC.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), "foobar", v1.GetOptions{})
 		assert.True(t, errors.IsNotFound(err))

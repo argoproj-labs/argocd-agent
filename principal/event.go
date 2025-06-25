@@ -23,6 +23,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
@@ -34,6 +35,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -129,6 +131,11 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		} else if created {
 			logCtx.Infof("Created namespace %s", agentName)
 		}
+
+		// AppProjects from the autonomous agents are prefixed with the agent name
+		if incoming.Spec.Project != appproject.DefaultAppProjectName {
+			incoming.Spec.Project = agentPrefixedProjectName(incoming.Spec.Project, agentName)
+		}
 	}
 
 	switch ev.Type() {
@@ -218,12 +225,22 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 		"event_id":    event.EventID(ev),
 	})
 
+	// AppProjects coming from different autonomous agents could have the same name,
+	// so we prefix the project name with the agent name
+	if agentMode.IsAutonomous() && incoming.Name != appproject.DefaultAppProjectName {
+		incoming.Name = agentPrefixedProjectName(incoming.Name, agentName)
+
+		if incoming.Annotations == nil {
+			incoming.Annotations = make(map[string]string)
+		}
+		incoming.Annotations[appproject.AppProjectAgentModeAnnotation] = string(agentMode)
+	}
+
 	switch ev.Type() {
 
 	// AppProject creation event will only be processed in autonomous mode
 	case event.Create.String():
 		if agentMode.IsAutonomous() {
-			incoming.SetNamespace(agentName)
 			_, err := s.projectManager.Create(ctx, incoming)
 			if err != nil {
 				return fmt.Errorf("could not create app-project %s: %w", incoming.Name, err)
@@ -232,6 +249,18 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 			logCtx.Debugf("Discarding event, because agent is not in autonomous mode")
 			return event.ErrEventDiscarded
 		}
+	// AppProject spec updates are only allowed in autonomous mode
+	case event.SpecUpdate.String():
+		if !agentMode.IsAutonomous() {
+			logCtx.Debug("Discarding event, because agent is not in autonomous mode")
+			return event.NewEventNotAllowedErr("event type not allowed when mode is not autonomous")
+		}
+
+		_, err := s.projectManager.UpdateAppProject(ctx, incoming)
+		if err != nil {
+			return fmt.Errorf("could not update app-project %s: %w", incoming.Name, err)
+		}
+		logCtx.Infof("Updated appProject %s from agent %s", incoming.Name, agentName)
 	// AppProject deletion
 	case event.Delete.String():
 		if !agentMode.IsAutonomous() {
@@ -239,7 +268,7 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 		}
 
 		deletionPropagation := backend.DeletePropagationForeground
-		err := s.projectManager.Delete(ctx, agentName, incoming, &deletionPropagation)
+		err := s.projectManager.Delete(ctx, incoming, &deletionPropagation)
 		if err != nil {
 			return fmt.Errorf("could not delete app-project %s: %w", incoming.Name, err)
 		}
@@ -499,4 +528,12 @@ func (s *Server) createNamespaceIfNotExist(ctx context.Context, name string) (bo
 		}
 	}
 	return false, nil
+}
+
+func agentPrefixedProjectName(project, agent string) string {
+	project = agent + "-" + project
+	if len(project) > validation.DNS1123SubdomainMaxLength {
+		project = project[:validation.DNS1123SubdomainMaxLength]
+	}
+	return project
 }
