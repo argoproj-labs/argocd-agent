@@ -56,7 +56,7 @@ echo "  -> Resource proxy TLS config created."
 
 echo "[*] Creating JWT signing key and secret"
 ${OPENSSL} genpkey -algorithm RSA -out /tmp/jwt.key -pkeyopt rsa_keygen_bits:2048
-${kubectl} create secret generic --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd argocd-agent-jwt --from-file=jwt.key=/tmp/jwt.key
+${KUBECTL} create secret generic --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd argocd-agent-jwt --from-file=jwt.key=/tmp/jwt.key
 
 AGENTS="agent-managed agent-autonomous"
 for agent in ${AGENTS}; do
