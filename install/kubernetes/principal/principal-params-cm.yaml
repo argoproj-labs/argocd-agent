@@ -19,8 +19,8 @@ data:
   principal.metrics.port: "8000"
   # principal.namespace: The namespace the principal will operate in. If left
   # blank, the namespace where the pod is running in will be used.
-  # Default: ""
-  principal.namespace: ""
+  # Default: "argocd"
+  principal.namespace: "argocd"
   # principal.allowed-namespaces: A list of namespaces the principal shall
   # watch and process Argo CD resources in. Seperate entries using commas.
   # Entries may contain shell-style wildcards.
@@ -43,11 +43,11 @@ data:
   # principal.tls.server.cert-path: Path to the TLS certificate to be used by
   # the gRPC server.
   # Default: ""
-  principal.tls.server.cert-path: "/app/config/tls/tls.crt"
+  principal.tls.server.cert-path: ""
   # principal.tls.server.key-path: Path to the TLS private key to be used by
   # the gRPC server.
   # Default: ""
-  principal.tls.server.key-path: "/app/config/tls/tls.key"
+  principal.tls.server.key-path: ""
   # principal.tls.server.allow-generate: Whether to allow the principal to
   # generate its own set of TLS cert and key on startup when none are
   # configured. This is insecure. Do only use for development.
@@ -56,7 +56,7 @@ data:
   # principal.tls.server.root-ca-path: Path to a TLS root certificate authority
   # to be used to validate agent's client certificates against.
   # Default: ""
-  principal.tls.server.root-ca-path: "/app/config/tls/ca.crt"
+  principal.tls.server.root-ca-path: ""
   # principal.tls.client-cert.require: Whether to require client certs from
   # agents upon connection.
   # Default: false

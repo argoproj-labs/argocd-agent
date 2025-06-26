@@ -103,8 +103,6 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           volumeMounts:
-            - name: tls-secret
-              mountPath: /app/config/tls
             - name: userpass-passwd
               mountPath: /app/config/creds
       serviceAccountName: argocd-agent-agent
@@ -115,13 +113,3 @@ spec:
           items:
           - key: credentials
             path: userpass.creds
-      - name: tls-secret
-        secret:
-          secretName: argocd-agent-client-tls
-          items:
-          - key: tls.crt
-            path: tls.crt
-          - key: tls.key
-            path: tls.key
-          - key: ca.crt
-            path: ca.crt
