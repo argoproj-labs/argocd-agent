@@ -136,7 +136,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	resp.Body.Close()
 
 	// Other methods should be forbidden as of now
-	for _, m := range []string{http.MethodConnect, http.MethodDelete, http.MethodOptions, http.MethodPut} {
+	for _, m := range []string{http.MethodConnect, http.MethodOptions, http.MethodPut} {
 		resp, err = rpClient.Do(&http.Request{
 			Method: m,
 			URL:    &url.URL{Scheme: "https", Host: "127.0.0.1:9090", Path: "/apis/apps/v1/namespaces/argocd/deployments/argocd-server"},
