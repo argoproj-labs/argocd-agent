@@ -38,14 +38,7 @@ jobs:
         id: image
  
   build-and-push:
-    strategy:
-      fail-fast: true
-      matrix:
-        components:
-        - name: agent
-        - name: principal
-      
-    name: Build and push images
+    name: Build and push image
     runs-on: ubuntu-22.04
     if: github.repository == 'argoproj-labs/argocd-agent'
     needs: [set-vars]
@@ -54,13 +47,13 @@ jobs:
       IMAGE_TAG: ${{ needs.set-vars.outputs.image-tag }}
       IMAGE_LATEST: ${{ needs.set-vars.outputs.latest }}
       IMAGE_REPOSITORY: ghcr.io/argoproj-labs/argocd-agent
-      IMAGE_NAME: ghcr.io/argoproj-labs/argocd-agent/argocd-agent-${{ matrix.components.name }}
+      IMAGE_NAME: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
     steps:
     - name: Checkout source code
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-    - name: Build ${{ matrix.component.name }} image
+    - name: Build argocd-agent container image
       run: |
-          make image-${{ matrix.components.name }}
+          make image
     - name: Tag latest
       if: env.IMAGE_LATEST == 'yes'
       run: |
