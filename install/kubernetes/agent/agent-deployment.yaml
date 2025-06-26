@@ -117,7 +117,7 @@ spec:
             path: userpass.creds
       - name: tls-secret
         secret:
-          secretName: argocd-agent-tls
+          secretName: argocd-agent-client-tls
           items:
           - key: tls.crt
             path: tls.crt
@@ -125,4 +125,3 @@ spec:
             path: tls.key
           - key: ca.crt
             path: ca.crt
-          optional: true

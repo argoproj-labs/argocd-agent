@@ -21,3 +21,12 @@ rules:
   - update
   - delete
   - patch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - list
+  - watch
