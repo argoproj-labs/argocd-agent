@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/agent"
-	"github.com/argoproj-labs/argocd-agent/cmd/cmd"
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
@@ -214,10 +213,10 @@ func NewAgentRunCommand() *cobra.Command {
 		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_WEBSOCKET", false),
 		"Agent will rely on gRPC over WebSocket to stream events to the Principal")
 	command.Flags().IntVar(&metricsPort, "metrics-port",
-		env.NumWithDefault("ARGOCD_AGENT_METRICS_PORT", cmd.ValidPort, 8181),
+		env.NumWithDefault("ARGOCD_AGENT_METRICS_PORT", cmdutil.ValidPort, 8181),
 		"Port the metrics server will listen on")
 	command.Flags().IntVar(&healthzPort, "healthz-port",
-		env.NumWithDefault("ARGOCD_AGENT_HEALTH_CHECK_PORT", cmd.ValidPort, 8001),
+		env.NumWithDefault("ARGOCD_AGENT_HEALTH_CHECK_PORT", cmdutil.ValidPort, 8001),
 		"Port the health check server will listen on")
 	command.Flags().DurationVar(&keepAlivePingInterval, "keep-alive-ping-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_KEEP_ALIVE_PING_INTERVAL", nil, 0),
