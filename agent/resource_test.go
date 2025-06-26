@@ -831,12 +831,11 @@ func Test_getAvailableAPIs(t *testing.T) {
 
 func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 	type testCase struct {
-		name          string
-		namespace     string
-		resourceName  string
-		deleteBody    []byte
-		expectErr     bool
-		expectDeleted bool
+		name         string
+		namespace    string
+		resourceName string
+		deleteBody   []byte
+		expectErr    bool
 	}
 
 	validDeleteOptions := v1.DeleteOptions{
@@ -861,28 +860,25 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 
 	tests := []testCase{
 		{
-			name:          "Successfully deletes resource",
-			namespace:     "default",
-			resourceName:  "test-pod",
-			deleteBody:    validDeleteBody,
-			expectErr:     false,
-			expectDeleted: true,
+			name:         "Successfully deletes resource",
+			namespace:    "default",
+			resourceName: "test-pod",
+			deleteBody:   validDeleteBody,
+			expectErr:    false,
 		},
 		{
-			name:          "Successfully deletes resource with empty delete options",
-			namespace:     "default",
-			resourceName:  "test-pod",
-			deleteBody:    []byte(`{}`),
-			expectErr:     false,
-			expectDeleted: true,
+			name:         "Successfully deletes resource with empty delete options",
+			namespace:    "default",
+			resourceName: "test-pod",
+			deleteBody:   []byte(`{}`),
+			expectErr:    false,
 		},
 		{
-			name:          "Returns error for invalid JSON delete options",
-			namespace:     "default",
-			resourceName:  "test-pod",
-			deleteBody:    invalidDeleteBody,
-			expectErr:     true,
-			expectDeleted: false,
+			name:         "Returns error for invalid JSON delete options",
+			namespace:    "default",
+			resourceName: "test-pod",
+			deleteBody:   invalidDeleteBody,
+			expectErr:    true,
 		},
 	}
 
@@ -921,7 +917,7 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			if tc.expectDeleted {
+			if !tc.expectErr {
 				_, err := kubeClient.DynamicClient.Resource(gvr).Namespace(tc.namespace).Get(context.Background(), tc.resourceName, v1.GetOptions{})
 				assert.Error(t, err)
 				assert.True(t, errors.IsNotFound(err))
