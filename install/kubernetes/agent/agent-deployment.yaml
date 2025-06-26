@@ -45,6 +45,12 @@ spec:
                 name: argocd-agent-params
                 key: agent.namespace
                 optional: true
+          - name: ARGOCD_AGENT_TLS_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.tls.secret-name
+                optional: true
           - name: ARGOCD_AGENT_TLS_CLIENT_CERT_PATH
             valueFrom:
               configMapKeyRef:
@@ -62,6 +68,12 @@ spec:
               configMapKeyRef:
                 name: argocd-agent-params
                 key: agent.tls.client.insecure
+                optional: true
+          - name: ARGOCD_AGENT_TLS_ROOT_CA_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.tls.root-ca-secret-name
                 optional: true
           - name: ARGOCD_AGENT_TLS_ROOT_CA_PATH
             valueFrom:

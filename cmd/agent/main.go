@@ -44,6 +44,7 @@ func NewAgentRunCommand() *cobra.Command {
 		logLevel          string
 		logFormat         string
 		insecure          bool
+		rootCASecretName  string
 		rootCAPath        string
 		kubeConfig        string
 		kubeContext       string
@@ -52,6 +53,7 @@ func NewAgentRunCommand() *cobra.Command {
 		creds             string
 		showVersion       bool
 		versionFormat     string
+		tlsSecretName     string
 		tlsClientCrt      string
 		tlsClientKey      string
 		enableWebSocket   bool
@@ -126,20 +128,27 @@ func NewAgentRunCommand() *cobra.Command {
 			// insecure option was given - in which case, certificates will
 			// not be verified.
 			if insecure {
+				logrus.Warn("INSECURE: Not verifying remote TLS certificate")
 				remoteOpts = append(remoteOpts, client.WithInsecureSkipTLSVerify())
 			} else if rootCAPath != "" {
+				logrus.Infof("Loading root CA certificate from file %s", rootCAPath)
 				remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromFile(rootCAPath))
 			} else {
-				remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, config.SecretNamePrincipalCA, namespace, ""))
+				logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCASecretName)
+				remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, namespace, rootCASecretName, ""))
 			}
 
 			// If both a certificate and a key are specified on the command
 			// line, the agent will load the client cert from these files.
 			// Otherwise, it will try and load the TLS keypair from a secret.
 			if tlsClientCrt != "" && tlsClientKey != "" {
+				logrus.Infof("Loading client TLS configuration from files cert=%s and key=%s", tlsClientCrt, tlsClientKey)
 				remoteOpts = append(remoteOpts, client.WithTLSClientCertFromFile(tlsClientCrt, tlsClientKey))
-			} else if tlsClientCrt == "" && tlsClientKey == "" {
-				remoteOpts = append(remoteOpts, client.WithTLSClientCertFromSecret(kubeConfig.Clientset, config.SecretNameAgentClientCert, namespace))
+			} else if (tlsClientCrt != "" && tlsClientKey == "") || (tlsClientCrt == "" && tlsClientKey != "") {
+				cmdutil.Fatal("Both --tls-client-cert and --tls-client-key have to be given")
+			} else {
+				logrus.Infof("Loading client TLS certificate from secret %s/%s", namespace, tlsSecretName)
+				remoteOpts = append(remoteOpts, client.WithTLSClientCertFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
 			}
 
 			remoteOpts = append(remoteOpts, client.WithWebSocket(enableWebSocket))
@@ -200,9 +209,15 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&creds, "creds",
 		env.StringWithDefault("ARGOCD_AGENT_CREDS", nil, ""),
 		"Credentials to use when connecting to server")
+	command.Flags().StringVar(&rootCASecretName, "root-ca-secret-name",
+		env.StringWithDefault("ARGOCD_AGENT_TLS_ROOT_CA_SECRET_NAME", nil, config.SecretNamePrincipalCA),
+		"Name of the secret containing the root CA certificate")
 	command.Flags().StringVar(&rootCAPath, "root-ca-path",
 		env.StringWithDefault("ARGOCD_AGENT_TLS_ROOT_CA_PATH", nil, ""),
 		"Path to a file containing root CA certificate for verifying remote TLS")
+	command.Flags().StringVar(&tlsSecretName, "tls-secret-name",
+		env.StringWithDefault("ARGOCD_AGENT_TLS_SECRET_NAME", nil, config.SecretNameAgentClientCert),
+		"Name of the secret containing the TLS certificate")
 	command.Flags().StringVar(&tlsClientCrt, "tls-client-cert",
 		env.StringWithDefault("ARGOCD_AGENT_TLS_CLIENT_CERT_PATH", nil, ""),
 		"Path to TLS client certificate")

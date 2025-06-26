@@ -75,6 +75,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.namespace-create.labels
                 optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.tls.secret-name
+                optional: true
           - name: ARGOCD_PRINCIPAL_TLS_SERVER_CERT_PATH
             valueFrom:
               configMapKeyRef:
@@ -99,6 +105,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.tls.client-cert.require
                 optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_CA_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.tls.ca.secret-name
+                optional: true
           - name: ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_PATH
             valueFrom:
               configMapKeyRef:
@@ -110,6 +122,36 @@ spec:
               configMapKeyRef:
                 name: argocd-agent-params
                 key: principal.tls.client-cert.match-subject
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.resource-proxy.secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_TLS_CERT_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.resource-proxy.tls.cert-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_TLS_KEY_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.resource-proxy.tls.key-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_CA_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.resource-proxy.ca.secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.resource-proxy.ca.path
                 optional: true
           - name: ARGOCD_PRINCIPAL_JWT_ALLOW_GENERATE
             valueFrom:

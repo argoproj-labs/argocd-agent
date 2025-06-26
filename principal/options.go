@@ -213,7 +213,7 @@ func WithTLSRootCaFromFile(caPath string) ServerOption {
 // If field is non-empty, only loads certificates stored in the named field.
 // Otherwise, if field is empty, loads certificates from all fields in the
 // Secret.
-func WithTLSRootCaFromSecret(kube kubernetes.Interface, name string, namespace, field string) ServerOption {
+func WithTLSRootCaFromSecret(kube kubernetes.Interface, namespace, name, field string) ServerOption {
 	return func(o *Server) error {
 		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, field)
 		if err != nil {
@@ -258,7 +258,7 @@ func WithTLSKeyPairFromPath(certPath, keyPath string) ServerOption {
 // WithTLSKeyPairFromSecret configures the TLS certificate and private key to
 // be used by the server. The keypair will be loaded from the secret referred
 // to by name and namespace. The secret must be of type tls.
-func WithTLSKeyPairFromSecret(kube kubernetes.Interface, name, namespace string) ServerOption {
+func WithTLSKeyPairFromSecret(kube kubernetes.Interface, namespace, name string) ServerOption {
 	return func(o *Server) error {
 		c, err := tlsutil.TLSCertFromSecret(context.Background(), kube, namespace, name)
 		if err != nil {

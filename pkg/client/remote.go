@@ -151,7 +151,7 @@ func WithTLSClientCertFromFile(certPath, keyPath string) RemoteOption {
 
 // WithTLSClientCertFromSecret configures the remote to present the client cert
 // loaded from the secret on every outbound connection.
-func WithTLSClientCertFromSecret(kube kubernetes.Interface, name, namespace string) RemoteOption {
+func WithTLSClientCertFromSecret(kube kubernetes.Interface, namespace, name string) RemoteOption {
 	return func(r *Remote) error {
 		c, err := tlsutil.TLSCertFromSecret(context.Background(), kube, namespace, name)
 		if err != nil {
@@ -202,7 +202,7 @@ func WithRootAuthoritiesFromFile(caPath string) RemoteOption {
 // field. Otherwise, the ConfigMap is expected to contain one or more
 // certificates in each field of the ConfigMap, and all certificates will be
 // loaded into the certificate pool.
-func WithRootAuthoritiesFromSecret(kube kubernetes.Interface, name, namespace, field string) RemoteOption {
+func WithRootAuthoritiesFromSecret(kube kubernetes.Interface, namespace, name, field string) RemoteOption {
 	return func(r *Remote) error {
 		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, field)
 		if err != nil {
