@@ -2,8 +2,7 @@ DOCKER_BIN?=docker
 
 # Image names
 IMAGE_REPOSITORY?=ghcr.io/argoproj-labs/argocd-agent
-IMAGE_NAME_AGENT=argocd-agent-agent
-IMAGE_NAME_PRINCIPAL=argocd-agent-principal
+IMAGE_NAME=argocd-agent
 IMAGE_PLATFORMS?=linux/amd64
 IMAGE_TAG?=latest
 
@@ -12,8 +11,7 @@ MKDOCS_DOCKER_IMAGE?=squidfunk/mkdocs-material:9
 MKDOCS_RUN_ARGS?=
 
 # Binary names
-BIN_NAME_AGENT=argocd-agent-agent
-BIN_NAME_PRINCIPAL=argocd-agent-principal
+BIN_NAME_ARGOCD_AGENT=argocd-agent
 BIN_NAME_CLI=argocd-agentctl
 BIN_ARCH?=$(shell go env GOARCH)
 BIN_OS?=$(shell go env GOOS)
@@ -45,7 +43,7 @@ fmt:
 	go fmt ./...
 
 .PHONY: build
-build: agent principal cli
+build: argocd-agent cli
 
 .PHONY: setup-e2e2
 setup-e2e2: cli
@@ -150,33 +148,21 @@ codegen: protogen
 lint: install-lint-toolchain
 	$(BIN_DIR)/golangci-lint run --verbose
 
-.PHONY: agent
-agent:
-	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_AGENT) -ldflags '$(LDFLAGS)' ./cmd/agent
-
-.PHONY: principal
-principal:
-	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_PRINCIPAL) -ldflags '$(LDFLAGS)' ./cmd/principal
+.PHONY: argocd-agent
+argocd-agent:
+	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_AGENT) -ldflags '$(LDFLAGS)' ./cmd/argocd-agent
 
 .PHONY: cli
 cli:
 	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_CLI) -ldflags '$(LDFLAGS)' ./cmd/ctl
 
-.PHONY: images
-images: image-agent image-principal
+.PHONY: image
+image:
+	$(DOCKER_BIN) build -f Dockerfile --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG) .
 
-.PHONY: image-agent
-image-agent:
-	$(DOCKER_BIN) build -f Dockerfile.agent --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_AGENT):$(IMAGE_TAG) .
-
-.PHONY: image-principal
-image-principal:
-	$(DOCKER_BIN) build -f Dockerfile.principal --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME_PRINCIPAL):$(IMAGE_TAG) .
-
-.PHONY: push-images
-push-images:
-	$(DOCKER_BIN) push $(IMAGE_REPOSITORY)/$(IMAGE_NAME_AGENT):$(IMAGE_TAG)
-	$(DOCKER_BIN) push $(IMAGE_REPOSITORY)/$(IMAGE_NAME_PRINCIPAL):$(IMAGE_TAG)
+.PHONY: push-image
+push-image:
+	$(DOCKER_BIN) push $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
 .PHONY: serve-docs
 serve-docs:

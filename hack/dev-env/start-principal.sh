@@ -36,7 +36,7 @@ if test "${ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS}" = ""; then
 fi
 
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
-go run github.com/argoproj-labs/argocd-agent/cmd/principal \
+go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent principal \
 	--allowed-namespaces '*' \
 	--kubecontext vcluster-control-plane \
 	--log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} \

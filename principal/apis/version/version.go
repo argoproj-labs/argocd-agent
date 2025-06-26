@@ -34,7 +34,7 @@ type server struct {
 }
 
 func NewServer(authfunc func(context.Context) (context.Context, error)) *server {
-	return &server{authfunc: authfunc, version: version.New("argocd-agent", "principal")}
+	return &server{authfunc: authfunc, version: version.New("argocd-agent")}
 }
 
 func (s *server) Version(ctx context.Context, r *versionapi.VersionRequest) (*versionapi.VersionResponse, error) {

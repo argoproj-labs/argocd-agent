@@ -37,6 +37,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// NewAgentRunCommand returns a new agent run command.
 func NewAgentRunCommand() *cobra.Command {
 	var (
 		serverAddress     string
@@ -67,10 +68,11 @@ func NewAgentRunCommand() *cobra.Command {
 		keepAlivePingInterval time.Duration
 	)
 	command := &cobra.Command{
+		Use:   "agent",
 		Short: "Run the argocd-agent agent component",
 		Run: func(c *cobra.Command, args []string) {
 			if showVersion {
-				cmdutil.PrintVersion(version.New("argocd-agent", "agent"), versionFormat)
+				cmdutil.PrintVersion(version.New("argocd-agent"), versionFormat)
 				os.Exit(0)
 			}
 			ctx, cancelFn := context.WithCancel(context.Background())
@@ -290,13 +292,4 @@ func loadCreds(path string) (auth.Credentials, error) {
 		userpass.ClientSecretField: c[1],
 	}
 	return creds, nil
-}
-
-func main() {
-	cmdutil.InitLogging()
-	c := NewAgentRunCommand()
-	err := c.Execute()
-	if err != nil {
-		cmdutil.Fatal("ERROR: %v", err)
-	}
 }

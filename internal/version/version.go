@@ -32,8 +32,6 @@ var buildDate = time.Now().Format(time.RFC3339)
 type versionInformation struct {
 	// Name is the name of the argocd-agent.
 	Name string `json:"name"`
-	// Component is the component of the argocd-agent.
-	Component string `json:"component"`
 	// Version is the version of the argocd-agent.
 	Version string `json:"version"`
 	// GitRevision is the git revision of the argocd-agent.
@@ -54,10 +52,9 @@ type Version struct {
 }
 
 // New returns a new Version object.
-func New(name, component string) *Version {
+func New(name string) *Version {
 	v := versionInformation{
 		Name:          name,
-		Component:     component,
 		Version:       version,
 		GitRevision:   gitRevision,
 		GitStatus:     gitStatus,
@@ -81,11 +78,6 @@ func (v *Version) Version() string {
 // Name returns the name of the argocd-agent.
 func (v *Version) Name() string {
 	return v.v.Name
-}
-
-// Component returns the component of the argocd-agent
-func (v *Version) Component() string {
-	return v.v.Component
 }
 
 // GitRevision returns the git revision of the argocd-agent.
