@@ -20,9 +20,11 @@ This file holds all TLS utility functions that interact with Kubernetes
 
 import (
 	"context"
+	"crypto"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 
@@ -35,6 +37,7 @@ import (
 const tlsCertFieldName = "tls.crt"
 const tlsKeyFieldName = "tls.key"
 const tlsTypeLabelValue = "kubernetes.io/tls"
+const jwtKeyFieldName = "jwt.key"
 
 // TLSCertFromSecret reads a Kubernetes TLS secrets, and parses its data into
 // a tls.Certificate.
@@ -157,4 +160,32 @@ func GetKubeConfigClientCert(conf *rest.Config) (*tls.Certificate, error) {
 	}
 
 	return &cert, err
+}
+
+// JWTSigningKeyFromSecret reads a JWT signing key from a Kubernetes secret.
+// The secret should contain a JWT signing key in the "jwt.key" field.
+func JWTSigningKeyFromSecret(ctx context.Context, kube kubernetes.Interface, namespace, name string) (crypto.PrivateKey, error) {
+	secret, err := kube.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("could not read JWT secret %s/%s: %w", namespace, name, err)
+	}
+	if len(secret.Data) == 0 {
+		return nil, fmt.Errorf("%s/%s: empty secret", namespace, name)
+	}
+	keyData := secret.Data[jwtKeyFieldName]
+	if keyData == nil {
+		return nil, fmt.Errorf("JWT signing key is missing in secret %s/%s", namespace, name)
+	}
+
+	pemBlock, _ := pem.Decode(keyData)
+	if pemBlock == nil {
+		return nil, fmt.Errorf("JWT signing key in secret %s/%s contains malformed PEM data", namespace, name)
+	}
+
+	key, err := x509.ParsePKCS8PrivateKey(pemBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse JWT signing key from secret %s/%s: %w", namespace, name, err)
+	}
+
+	return key, nil
 }
