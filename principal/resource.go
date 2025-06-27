@@ -16,6 +16,7 @@ package principal
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -165,7 +166,7 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 
 			// Make sure that we have the right response event. This should
 			// usually not happen, because the resource proxy has a mapping
-			// of request to response, but we'll be vigilante.
+			// of request to response, but we'll be vigilant.
 			rcvdUUID := event.EventID(rcvdEv)
 			if rcvdUUID != sentUUID {
 				log().Error("Received mismatching UUID in response")
@@ -196,6 +197,106 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 				w.WriteHeader(resp.Status)
 			}
 			return
+		default:
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+// sendSynchronousRedisMessageToAgent is called to send a message (and wait for a response) to remote agent via principal's machinery
+// - should not be used for asynchronous messages.
+func (s *Server) sendSynchronousRedisMessageToAgent(agentName string, connectionUUID string, body event.RedisCommandBody) *event.RedisResponseBody {
+
+	logCtx := log().WithField("function", "sendSynchronousRedisMessageToAgent").WithField("connectionUUID", connectionUUID).WithField("agentName", agentName)
+
+	// If the agent is not connected, return early
+	if !s.queues.HasQueuePair(agentName) {
+		logCtx.Debugf("Agent is not connected, stop proxying")
+		return nil
+	}
+
+	q := s.queues.SendQ(agentName)
+	if q == nil {
+		logCtx.Errorf("Help! Queue disappeared")
+		return nil
+	}
+
+	// Create the event
+	sentEv, err := s.events.NewRedisRequestEvent(connectionUUID, body)
+	if err != nil {
+		logCtx.Errorf("Could not create event: %v", err)
+		return nil
+	}
+
+	// Remember the resource ID of the sent event
+	sentEventUUID := event.EventID(sentEv)
+
+	logCtx = logCtx.WithField("sendEventUUID", sentEventUUID)
+
+	// Start tracking the event, so we can later get the response
+	eventCh, err := s.redisProxy.EventIDTracker.Track(sentEventUUID, agentName)
+	if err != nil {
+		logCtx.Errorf("Could not track event %s: %v", sentEventUUID, err)
+	}
+	defer func() {
+		err := s.redisProxy.EventIDTracker.StopTracking(sentEventUUID)
+		if err != nil {
+			logCtx.Warnf("Could not untrack %s: %v", sentEventUUID, err)
+		}
+	}()
+
+	// Submit the event to the queue
+	logCtx.Tracef("Submitting event: %v", sentEv)
+	q.Add(sentEv)
+
+	// Wait for the event from the agent (timeout after 60 seconds)
+	ctx, cancel := context.WithTimeout(s.ctx, 60*time.Second)
+	defer cancel()
+
+	// The response is being read through a channel that is kept open and
+	// written to by the resource proxy.
+	for {
+		select {
+		case <-ctx.Done():
+			var outText string
+			if body.Get != nil {
+				outText = fmt.Sprintf("GET %v", *body.Get)
+			} else if body.Subscribe != nil {
+				outText = fmt.Sprintf("SUBSCRIBE %v", *body.Subscribe)
+			}
+
+			logCtx.Errorf("Timeout communicating to the agent: %v %s", ctx.Err(), outText)
+			return nil
+		case rcvdEv, ok := <-eventCh:
+			// Channel was closed. Bail out.
+			if !ok {
+				logCtx.Tracef("EventQueue has closed the channel")
+				return nil
+			}
+
+			// Make sure that we have the right response event. This should
+			// usually not happen, because the resource proxy has a mapping
+			// of request to response, but we'll be vigilant.
+			rcvdUUID := event.EventID(rcvdEv)
+
+			logCtx = logCtx.WithField("rcvdUUID", rcvdUUID)
+
+			if rcvdUUID != sentEventUUID {
+				logCtx.Error("Received mismatching UUID in response")
+				return nil
+			}
+
+			// Get the resource out of the event
+			resp := &event.RedisResponse{}
+			err = rcvdEv.DataAs(resp)
+			if err != nil {
+				logCtx.WithError(err).Error("Could not get data from event")
+				return nil
+			}
+
+			logCtx.Trace("Received redis response message")
+
+			return &resp.Body
 		default:
 			time.Sleep(100 * time.Millisecond)
 		}

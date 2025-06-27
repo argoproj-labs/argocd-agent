@@ -52,9 +52,8 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		"client":       agentName,
 		"event_target": ev.DataSchema(),
 		"event_type":   ev.Type(),
+		"agent_name":   agentName,
 	})
-
-	logCtx.Debugf("Processing event")
 
 	// Start measuring time for event processing
 	cp := checkpoint.NewCheckpoint("process_recv_queue")
@@ -65,6 +64,8 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	// Start checkpoint step
 	cp.Start(target.String())
 
+	logCtx.Debugf("Processing event %s", target)
+
 	switch target {
 	case event.TargetApplication:
 		err = s.processApplicationEvent(ctx, agentName, ev)
@@ -72,6 +73,21 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		err = s.processAppProjectEvent(ctx, agentName, ev)
 	case event.TargetResource:
 		err = s.processResourceEventResponse(ctx, agentName, ev)
+	case event.TargetRedis:
+		resReq := &event.RedisResponse{}
+		err := ev.DataAs(resReq)
+		if err == nil {
+			logCtx.Infof("processRecvQueue %s %v", resReq.ConnectionUUID, resReq)
+		}
+
+		// Process redis responses on their own thread, as they may block
+		go func() {
+			err = s.processRedisEventResponse(ctx, logCtx, agentName, ev)
+			if err != nil {
+				logCtx.WithError(err).Error("unable to process redis event response")
+			}
+		}()
+
 	case event.TargetResourceResync:
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 	default:
@@ -281,6 +297,91 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 	return nil
 }
 
+// processRedisEventResponse proceses (redis) messages received from agents:
+// - These messages will be Get responses, initial Subscribe response, and (async) Subscribe notifications
+func (s *Server) processRedisEventResponse(ctx context.Context, logCtx *logrus.Entry, agentName string, ev *cloudevents.Event) error {
+
+	resReq := &event.RedisResponse{}
+	err := ev.DataAs(resReq)
+	if err != nil {
+		return err
+	}
+
+	if resReq.ConnectionUUID == "" {
+		return fmt.Errorf("invalid connectionID seen in redis messsage")
+	}
+
+	// Wait up to 30 seconds for event to be handled
+	ctx, cancelFunc := context.WithTimeout(ctx, time.Second*30)
+	defer cancelFunc()
+
+	logCtx = logCtx.WithField("connectionUUID", resReq.ConnectionUUID).WithField("agent-name", agentName)
+
+	if resReq.Body.PushFromSubscribe != nil {
+
+		logCtx = logCtx.WithField("channelName", resReq.Body.PushFromSubscribe.ChannelName)
+
+		logCtx.Tracef("handling PushFromSubscribe, retrieving tracked channel")
+
+		// PushFromSubscribe is asynchronous, so we can't use event id tracker to find the corresponding channel.
+		// - We instead use connection id, which maps directly to the connection from Argo CD
+		trAgent, evChan := s.redisProxy.ConnectionIDTracker.Tracked(resReq.ConnectionUUID)
+		if trAgent != agentName {
+			err := fmt.Errorf("agent mismap between event and tracking for PushFromSubscribe: '%s' '%s' '%s'", trAgent, agentName, resReq.ConnectionUUID)
+			logCtx.WithError(err).Error("agent mismap between event and tracking")
+			return err
+		}
+
+		logCtx.Tracef("handling PushFromSubscribe, sending message to tracked channel")
+
+		// Forward the event back to the appropriate receiver via connection-specific channel
+		select {
+		case evChan <- ev:
+			err = nil
+		case <-ctx.Done():
+			err = fmt.Errorf("error waiting for response to be read: %w", ctx.Err())
+		}
+
+		if err == nil {
+			logCtx.Tracef("handling PushFromSubscribe, sent message to tracked channel")
+		} else {
+			logCtx.WithError(err).Error("error waiting for response to be read")
+		}
+
+		return err
+	}
+
+	logCtx = logCtx.WithField("eventID", resReq.UUID)
+
+	// For all other responses, we send the event on the eventIDTracker channel
+
+	// We need to make sure that a) the event is tracked at all, and b) the
+	// event is for the currently processed agent.
+	trAgent, evChan := s.redisProxy.EventIDTracker.Tracked(resReq.UUID)
+	if evChan == nil {
+		logCtx.Errorf("redis response not tracked for eventID")
+		return fmt.Errorf("redis response not tracked")
+	}
+	if trAgent != agentName {
+		logCtx.Errorf("agent mismap between event and tracking: '%s' '%s'", trAgent, agentName)
+		return fmt.Errorf("agent mismap between event and tracking: '%s' '%s'", trAgent, agentName)
+	}
+
+	logCtx.Trace("sending message to eventIDTracker channel")
+
+	// Forward the message back to the appropriate reciver via event-specific channel
+	select {
+	case evChan <- ev:
+		err = nil
+	case <-ctx.Done():
+		err = fmt.Errorf("error waiting for response to be read: %w", ctx.Err())
+	}
+
+	logCtx.Trace("sent message to eventIDTracker channel")
+
+	return err
+}
+
 // processResourceEventResponse will process a response to a resource request
 // event.
 func (s *Server) processResourceEventResponse(ctx context.Context, agentName string, ev *cloudevents.Event) error {
@@ -434,6 +535,8 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					break
 				}
 
+				logCtx = logCtx.WithField("queueName", queueName)
+
 				queuesProcessed += 1
 
 				logCtx.Trace("Acquired queue lock")
@@ -451,11 +554,12 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					defer func() {
 						sem.Release(1)
 						queueLock.Unlock(agentName)
+
 					}()
 
 					ev, err := s.processRecvQueue(ctx, agentName, q)
 					if err != nil {
-						logCtx.WithField("client", agentName).WithError(err).Errorf("Could not process agent recveiver queue")
+						logCtx.WithField("client", agentName).WithError(err).Errorf("Could not process agent receiver queue")
 						// Don't send an ACK if it is a retryable error.
 						if kube.IsRetryableError(err) {
 							logCtx.Trace("Skipping ACK for retryable errors")

@@ -60,8 +60,16 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 		err = a.processIncomingResourceRequest(ev)
 	case event.TargetResourceResync:
 		err = a.processIncomingResourceResyncEvent(ev)
+	case event.TargetRedis:
+		go func() {
+			// Process request in a separate go routine, to avoid blocking the event thread on redis I/O
+			err := a.processIncomingRedisRequest(ev)
+			if err != nil {
+				log().WithError(err).Errorf("Unable to process incoming redis event")
+			}
+		}()
 	default:
-		err = fmt.Errorf("unknown event target: %s", ev.Target())
+		err = fmt.Errorf("unknown event target - processIncomingEvent: %s", ev.Target())
 	}
 
 	cp.End()
