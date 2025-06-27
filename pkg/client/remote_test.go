@@ -52,6 +52,12 @@ func Test_Connect(t *testing.T) {
 	err = s.Start(context.Background(), errch)
 	require.NoError(t, err)
 
+	t.Cleanup(func() {
+		if s != nil {
+			require.NoError(t, s.Shutdown())
+		}
+	})
+
 	t.Run("Connect to a server", func(t *testing.T) {
 		r, err := NewRemote("127.0.0.1", s.ListenerForE2EOnly().Port(),
 			WithInsecureSkipTLSVerify(),

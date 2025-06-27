@@ -185,6 +185,7 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	app := &v1alpha1.Application{}
 	proj := &v1alpha1.AppProject{}
 	resResp := &event.ResourceResponse{}
+	redisResp := &event.RedisResponse{}
 	incomingEvent, err := format.FromProto(streamEvent.Event)
 	if err != nil {
 		return fmt.Errorf("could not unserialize event from wire: %w", err)
@@ -195,6 +196,7 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		"event_id":     event.EventID(incomingEvent),
 		"event_target": incomingEvent.DataSchema(),
 		"event_type":   incomingEvent.Type(),
+		"agent_name":   c.agentName,
 	})
 
 	switch event.Target(incomingEvent) {
@@ -204,11 +206,22 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		err = incomingEvent.DataAs(proj)
 	case event.TargetResource:
 		err = incomingEvent.DataAs(resResp)
+	case event.TargetRedis:
+		err = incomingEvent.DataAs(redisResp)
+		if err != nil {
+			logCtx = logCtx.WithField("connectionUUID", redisResp.ConnectionUUID)
+		}
+		logCtx.Tracef("Received redis response in recvFunc")
 	}
+
 	if err != nil {
 		return fmt.Errorf("could not unserialize app data from wire: %w", err)
 	}
-	logCtx.Infof("Received update for application %v", app.QualifiedName())
+
+	if app.Name != "" {
+		logCtx.Infof("Received update for application '%v'", app.QualifiedName())
+	}
+
 	q := s.queues.RecvQ(c.agentName)
 	if q == nil {
 		return fmt.Errorf("panic: no recvq for agent %s", c.agentName)
@@ -226,6 +239,7 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	}
 
 	q.Add(incomingEvent)
+
 	return nil
 }
 

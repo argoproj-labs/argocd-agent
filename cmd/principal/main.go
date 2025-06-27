@@ -335,9 +335,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&keepAliveMinimumInterval, "keepalive-min-interval",
 		env.DurationWithDefault("ARGOCD_PRINCIPAL_KEEP_ALIVE_MIN_INTERVAL", nil, 0),
 		"Drop agent connections that send keepalive pings more often than the specified interval") // It should be less than "keep-alive-ping-interval" of agent
+
 	command.Flags().StringVar(&redisAddress, "redis-server-address",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS", nil, ""),
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS", nil, "argocd-redis:6379"),
 		"Redis server hostname and port (e.g. argocd-redis:6379).")
+
 	command.Flags().StringVar(&redisCompressionType, "redis-compression-type",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),
 		"Compression algorithm required by Redis. (possible values: gzip, none. Default value: gzip)")

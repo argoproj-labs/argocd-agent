@@ -87,6 +87,9 @@ type Agent struct {
 	resyncedOnStart bool
 	// resources is a list of all the resources that are currently being managed by the agent
 	resources *resources.Resources
+
+	// redisProxyMsgHandler manages redis connection state for agent
+	redisProxyMsgHandler *redisProxyMsgHandler
 }
 
 const defaultQueueName = "default"
@@ -117,6 +120,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.infStopCh = make(chan struct{})
 	a.namespace = namespace
 	a.mode = types.AgentModeAutonomous
+	a.redisProxyMsgHandler = &redisProxyMsgHandler{}
 
 	for _, o := range opts {
 		err := o(a)
@@ -248,6 +252,18 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.resources = resources.NewResources()
 
 	a.syncCh = make(chan bool, 1)
+
+	argoClient, argoCache, err := a.getRedisClientAndCache()
+	if err != nil {
+		return nil, err
+	}
+
+	a.redisProxyMsgHandler.argoCDRedisCache = argoCache
+	a.redisProxyMsgHandler.argoCDRedisClient = argoClient
+	a.redisProxyMsgHandler.connections = &connectionEntries{
+		connMap: map[string]connectionEntry{},
+	}
+
 	return a, nil
 }
 
