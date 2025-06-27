@@ -21,6 +21,8 @@ RECREATE="$1"
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 BASEPATH="$( cd -- "$(dirname "$0")/../.." >/dev/null 2>&1 ; pwd -P )"
 AGENTCTL=${BASEPATH}/dist/argocd-agentctl
+KUBECTL=$(which kubectl)
+OPENSSL=$(which openssl)
 
 export ARGOCD_AGENT_PRINCIPAL_CONTEXT=vcluster-control-plane
 export ARGOCD_AGENT_PRINCIPAL_NAMESPACE=argocd
@@ -51,6 +53,10 @@ ${AGENTCTL} pki issue resource-proxy --upsert \
 	--principal-namespace argocd \
 	--ip "127.0.0.1,${IPADDR}"
 echo "  -> Resource proxy TLS config created."
+
+echo "[*] Creating JWT signing key and secret"
+${OPENSSL} genpkey -algorithm RSA -out /tmp/jwt.key -pkeyopt rsa_keygen_bits:2048
+${KUBECTL} create secret generic --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd argocd-agent-jwt --from-file=jwt.key=/tmp/jwt.key
 
 AGENTS="agent-managed agent-autonomous"
 for agent in ${AGENTS}; do

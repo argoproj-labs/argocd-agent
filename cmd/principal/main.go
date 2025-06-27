@@ -185,7 +185,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 			} else if allowJwtGenerate {
 				opts = append(opts, principal.WithGeneratedTokenSigningKey())
 			} else {
-				cmdutil.Fatal("No JWT signing key given and auto generation not allowed.")
+				logrus.Infof("Loading JWT signing key from secret %s/%s", namespace, config.SecretNameJWT)
+				opts = append(opts, principal.WithTokenSigningKeyFromSecret(kubeConfig.Clientset, config.SecretNameJWT, namespace))
 			}
 
 			authMethods := auth.NewMethods()

@@ -255,3 +255,71 @@ func Test_TransportFromConfig(t *testing.T) {
 		assert.Nil(t, ht)
 	})
 }
+
+func Test_JWTSigningKeyFromSecret(t *testing.T) {
+	t.Run("Secret not found", func(t *testing.T) {
+		kcl := kube.NewFakeClientsetWithResources()
+		_, err := JWTSigningKeyFromSecret(context.TODO(), kcl, "argocd", "jwt-secret")
+		assert.ErrorContains(t, err, "not found")
+	})
+
+	t.Run("Valid JWT key secret", func(t *testing.T) {
+		jwtKeyPem := testutil.MustReadFile("testdata/001_test_key.pem")
+		secret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "jwt-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				jwtKeyFieldName: jwtKeyPem,
+			},
+		}
+		kcl := kube.NewFakeClientsetWithResources(secret)
+		key, err := JWTSigningKeyFromSecret(context.TODO(), kcl, "argocd", "jwt-secret")
+		assert.NoError(t, err)
+		assert.NotNil(t, key)
+	})
+
+	t.Run("Empty secret", func(t *testing.T) {
+		secret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "jwt-secret",
+				Namespace: "argocd",
+			},
+			Data: nil,
+		}
+		kcl := kube.NewFakeClientsetWithResources(secret)
+		_, err := JWTSigningKeyFromSecret(context.TODO(), kcl, "argocd", "jwt-secret")
+		assert.ErrorContains(t, err, "empty secret")
+	})
+
+	t.Run("Missing JWT key in secret", func(t *testing.T) {
+		secret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "jwt-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"other-field": []byte("some data"),
+			},
+		}
+		kcl := kube.NewFakeClientsetWithResources(secret)
+		_, err := JWTSigningKeyFromSecret(context.TODO(), kcl, "argocd", "jwt-secret")
+		assert.ErrorContains(t, err, "JWT signing key is missing")
+	})
+
+	t.Run("Invalid JWT key data", func(t *testing.T) {
+		secret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "jwt-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				jwtKeyFieldName: []byte("invalid key data"),
+			},
+		}
+		kcl := kube.NewFakeClientsetWithResources(secret)
+		_, err := JWTSigningKeyFromSecret(context.TODO(), kcl, "argocd", "jwt-secret")
+		assert.ErrorContains(t, err, "malformed PEM data")
+	})
+}
