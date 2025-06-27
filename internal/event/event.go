@@ -58,6 +58,8 @@ const (
 	EventProcessed             EventType = TypePrefix + ".processed"
 	GetRequest                 EventType = TypePrefix + ".get"
 	GetResponse                EventType = TypePrefix + ".response"
+	RedisGenericRequest        EventType = TypePrefix + ".redis-request"
+	RedisGenericResponse       EventType = TypePrefix + ".redis-response"
 	SyncedResourceList         EventType = TypePrefix + ".request-synced-resource-list"
 	ResponseSyncedResource     EventType = TypePrefix + ".response-synced-resource"
 	EventRequestUpdate         EventType = TypePrefix + ".request-update"
@@ -70,6 +72,7 @@ const (
 	TargetAppProject     EventTarget = "appproject"
 	TargetEventAck       EventTarget = "eventProcessed"
 	TargetResource       EventTarget = "resource"
+	TargetRedis          EventTarget = "redis"
 	TargetResourceResync EventTarget = "resourceResync"
 )
 
@@ -171,6 +174,59 @@ func (evs EventSource) AppProjectEvent(evType EventType, appProject *v1alpha1.Ap
 	return &cev
 }
 
+type RedisRequest struct {
+	UUID           string           `json:"uuid"`
+	ConnectionUUID string           `json:"connectionUuid"`
+	Body           RedisCommandBody `json:"body"`
+}
+
+type RedisCommandBody struct {
+	Get       *RedisCommandBodyGet       `json:"get,omitempty"`
+	Subscribe *RedisCommandBodySubscribe `json:"subscribe,omitempty"`
+	Ping      *RedisCommandBodyPing      `json:"ping,omitempty"`
+}
+
+type RedisCommandBodyGet struct {
+	Key string `json:"key"`
+}
+
+type RedisCommandBodySubscribe struct {
+	ChannelName string `json:"channel"`
+}
+
+type RedisCommandBodyPing struct {
+}
+
+type RedisResponse struct {
+	UUID           string            `json:"uuid"`
+	ConnectionUUID string            `json:"connectionUuid"`
+	Body           RedisResponseBody `json:"body"`
+}
+
+type RedisResponseBody struct {
+	Get               *RedisResponseBodyGet               `json:"get,omitempty"`
+	SubscribeResponse *RedisResponseBodySubscribeResponse `json:"subscribeResponse,omitempty"`
+	PushFromSubscribe *RedisResponseBodyPushFromSubscribe `json:"pushFromSubscribe,omitempty"`
+	Pong              *RedisResponseBodyPong              `json:"pong,omitempty"`
+}
+
+type RedisResponseBodySubscribeResponse struct {
+	Error string `json:"error"`
+}
+
+type RedisResponseBodyGet struct {
+	Bytes    []byte `json:"bytes"`
+	CacheHit bool   `json:"cacheHit"`
+	Error    string `json:"error"`
+}
+
+type RedisResponseBodyPushFromSubscribe struct {
+	ChannelName string `json:"channelName"`
+}
+
+type RedisResponseBodyPong struct {
+}
+
 // ResourceRequest is an event that holds a request for a resource. It is
 // usually emitted from the resource proxy, and is sent from the principal
 // to an agent.
@@ -248,6 +304,43 @@ func HTTPStatusFromError(err error) int {
 		}
 	}
 	return http.StatusOK
+}
+
+func (evs EventSource) NewRedisRequestEvent(connectionUUID string, body RedisCommandBody) (*cloudevents.Event, error) {
+	reqUUID := uuid.NewString()
+	rr := &RedisRequest{
+		UUID:           reqUUID,
+		ConnectionUUID: connectionUUID,
+		Body:           body,
+	}
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(RedisGenericRequest.String())
+	cev.SetDataSchema(TargetRedis.String())
+	// cev.SetExtension(resourceID, reqUUID)
+	cev.SetExtension(eventID, reqUUID)
+	err := cev.SetData(cloudevents.ApplicationJSON, rr)
+	return &cev, err
+}
+
+func (evs EventSource) NewRedisResponseEvent(reqUUID string, connectionUUID string, body RedisResponseBody) *cloudevents.Event {
+	resUUID := uuid.NewString()
+	rr := &RedisResponse{
+		UUID:           reqUUID,
+		ConnectionUUID: connectionUUID,
+		Body:           body,
+	}
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(RedisGenericResponse.String())
+	cev.SetDataSchema(TargetRedis.String())
+	cev.SetExtension(resourceID, resUUID)
+	// eventid must be set to the requested resource's uuid
+	cev.SetExtension(eventID, reqUUID)
+	_ = cev.SetData(cloudevents.ApplicationJSON, rr)
+	return &cev
 }
 
 // NewResourceRequestEvent creates a cloud event for requesting a resource from
@@ -438,7 +531,7 @@ func FromWire(pev *pb.CloudEvent) (*Event, error) {
 	ev := &Event{}
 	var target EventTarget
 	if ev.target = Target(raw); ev.target == "" {
-		return nil, fmt.Errorf("unknown event target: %s", target)
+		return nil, fmt.Errorf("unknown event target FromWire: %s / %v", target, *raw)
 	}
 	ev.event = raw
 	return ev, nil
@@ -456,6 +549,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetEventAck
 	case TargetResourceResync.String():
 		return TargetResourceResync
+	case TargetRedis.String():
+		return TargetRedis
 	}
 	return ""
 }
@@ -504,6 +599,13 @@ func (ev Event) AppProject() (*v1alpha1.AppProject, error) {
 	proj := &v1alpha1.AppProject{}
 	err := ev.event.DataAs(proj)
 	return proj, err
+}
+
+// ResourceRequest gets the resource request payload from an event
+func (ev Event) RedisRequest() (*RedisRequest, error) {
+	req := &RedisRequest{}
+	err := ev.event.DataAs(req)
+	return req, err
 }
 
 // ResourceRequest gets the resource request payload from an event
