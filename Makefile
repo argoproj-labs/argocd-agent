@@ -55,7 +55,7 @@ setup-e2e2: cli
 
 .PHONY: start-e2e2
 start-e2e2: cli install-goreman
-	goreman -exit-on-stop=false -f hack/dev-env/Procfile.e2e start
+	./hack/dev-env/start-e2e2.sh
 
 .PHONY: test-e2e2
 test-e2e2:

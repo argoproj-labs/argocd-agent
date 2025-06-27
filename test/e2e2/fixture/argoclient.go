@@ -16,6 +16,7 @@ package fixture
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,9 @@ import (
 	"net/url"
 
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 /*
@@ -236,4 +240,38 @@ func (c *ArgoRestClient) Do(req *http.Request) (*http.Response, error) {
 	}
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", c.token))
 	return c.client.Do(req)
+}
+
+func GetInitialAdminSecret(k8sClient KubeClient) (string, error) {
+	// Read admin secret from principal's cluster
+	pwdSecret := &corev1.Secret{}
+	err := k8sClient.Get(context.Background(),
+		types.NamespacedName{Namespace: "argocd", Name: "argocd-initial-admin-secret"}, pwdSecret, metav1.GetOptions{})
+
+	if err != nil {
+		return "", fmt.Errorf("unable to get admin secret: %v", err)
+	}
+
+	return string(pwdSecret.Data["password"]), nil
+}
+
+func GetArgoCDServerEndpoint(k8sClient KubeClient) (string, error) {
+
+	// Get the Argo server endpoint to use
+	srvService := &corev1.Service{}
+	err := k8sClient.Get(context.Background(),
+		types.NamespacedName{Namespace: "argocd", Name: "argocd-server"}, srvService, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	argoEndpoint := srvService.Spec.LoadBalancerIP
+
+	if len(srvService.Status.LoadBalancer.Ingress) > 0 {
+		hostname := srvService.Status.LoadBalancer.Ingress[0].Hostname
+		if hostname != "" {
+			argoEndpoint = hostname
+		}
+	}
+
+	return argoEndpoint, nil
 }
