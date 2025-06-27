@@ -8,3 +8,8 @@ resources:
 - principal-service.yaml
 - principal-params-cm.yaml
 - principal-metrics-service.yaml
+
+images:
+- name: argocd-agent
+  newName: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
+  newTag: latest
