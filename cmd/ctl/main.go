@@ -62,7 +62,7 @@ func NewVersionCommand() *cobra.Command {
 		Use:   "version",
 		Short: "Display the version of argocd-agent-ctl",
 		Run: func(cmd *cobra.Command, args []string) {
-			v := version.New("argocd-agent", "ctl")
+			v := version.New("argocd-agent")
 			fmt.Println(v.JSON(indent))
 		},
 	}

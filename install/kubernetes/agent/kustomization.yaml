@@ -7,3 +7,8 @@ resources:
 - agent-deployment.yaml
 - agent-params-cm.yaml
 - agent-metrics-service.yaml
+
+images:
+- name: argocd-agent
+  newName: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
+  newTag: latest

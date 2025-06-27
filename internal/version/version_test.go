@@ -25,9 +25,8 @@ import (
 
 func Test_Version(t *testing.T) {
 	t.Run("Text version", func(t *testing.T) {
-		v := New("foo", "bar")
+		v := New("foo")
 		assert.Equal(t, "foo", v.Name())
-		assert.Equal(t, "bar", v.Component())
 		assert.Equal(t, version, v.Version())
 		assert.Equal(t, gitRevision, v.GitRevision())
 		assert.Equal(t, gitStatus, v.GitStatus())
@@ -35,14 +34,13 @@ func Test_Version(t *testing.T) {
 	})
 
 	t.Run("YAML version", func(t *testing.T) {
-		v := New("foo", "bar")
+		v := New("foo")
 		y := v.YAML()
 		require.NotContains(t, y, "error: ")
 		vn := Version{}
 		err := yaml.Unmarshal([]byte(y), &vn.v)
 		require.NoError(t, err)
 		assert.Equal(t, "foo", vn.Name())
-		assert.Equal(t, "bar", vn.Component())
 		assert.Equal(t, version, vn.Version())
 		assert.Equal(t, gitRevision, vn.GitRevision())
 		assert.Equal(t, gitStatus, vn.GitStatus())
@@ -50,14 +48,13 @@ func Test_Version(t *testing.T) {
 	})
 
 	t.Run("JSON version", func(t *testing.T) {
-		v := New("foo", "bar")
+		v := New("foo")
 		j := v.JSON(false)
 		require.NotEqual(t, "{}", j)
 		vn := Version{}
 		err := json.Unmarshal([]byte(j), &vn.v)
 		require.NoError(t, err)
 		assert.Equal(t, "foo", vn.Name())
-		assert.Equal(t, "bar", vn.Component())
 		assert.Equal(t, version, vn.Version())
 		assert.Equal(t, gitRevision, vn.GitRevision())
 		assert.Equal(t, gitStatus, vn.GitStatus())
@@ -65,14 +62,13 @@ func Test_Version(t *testing.T) {
 	})
 
 	t.Run("JSON version with indent", func(t *testing.T) {
-		v := New("foo", "bar")
+		v := New("foo")
 		j := v.JSON(true)
 		require.NotEqual(t, "{}", j)
 		vn := Version{}
 		err := json.Unmarshal([]byte(j), &vn.v)
 		require.NoError(t, err)
 		assert.Equal(t, "foo", vn.Name())
-		assert.Equal(t, "bar", vn.Component())
 		assert.Equal(t, version, vn.Version())
 		assert.Equal(t, gitRevision, vn.GitRevision())
 		assert.Equal(t, gitStatus, vn.GitStatus())

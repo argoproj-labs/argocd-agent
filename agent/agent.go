@@ -112,7 +112,7 @@ type AgentOption func(*Agent) error
 // options.
 func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace string, opts ...AgentOption) (*Agent, error) {
 	a := &Agent{
-		version: version.New("argocd-agent", "agent"),
+		version: version.New("argocd-agent"),
 	}
 	a.infStopCh = make(chan struct{})
 	a.namespace = namespace

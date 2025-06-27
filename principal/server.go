@@ -154,7 +154,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		queues:          queue.NewSendRecvQueues(),
 		namespace:       namespace,
 		noauth:          noAuthEndpoints,
-		version:         version.New("argocd-agent", "principal"),
+		version:         version.New("argocd-agent"),
 		kubeClient:      kubeClient,
 		resyncStatus:    newResyncStatus(),
 		resources:       resources.NewAgentResources(),
