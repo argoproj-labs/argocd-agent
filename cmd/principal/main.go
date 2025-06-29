@@ -45,35 +45,40 @@ import (
 
 func NewPrincipalRunCommand() *cobra.Command {
 	var (
-		listenHost             string
-		listenPort             int
-		logLevel               string
-		logFormat              string
-		metricsPort            int
-		namespace              string
-		allowedNamespaces      []string
-		kubeConfig             string
-		kubeContext            string
-		tlsCert                string
-		tlsKey                 string
-		jwtKey                 string
-		allowTLSGenerate       bool
-		allowJwtGenerate       bool
-		authMethod             string
-		rootCaPath             string
-		requireClientCerts     bool
-		clientCertSubjectMatch bool
-		autoNamespaceAllow     bool
-		autoNamespacePattern   string
-		autoNamespaceLabels    []string
-		enableWebSocket        bool
-		enableResourceProxy    bool
-		pprofPort              int
-		resourceProxyCertPath  string
-		resourceProxyKeyPath   string
-		resourceProxyCAPath    string
-		showVersion            bool
-		versionFormat          string
+		listenHost                string
+		listenPort                int
+		logLevel                  string
+		logFormat                 string
+		metricsPort               int
+		namespace                 string
+		allowedNamespaces         []string
+		kubeConfig                string
+		kubeContext               string
+		tlsSecretName             string
+		tlsCert                   string
+		tlsKey                    string
+		jwtSecretName             string
+		jwtKey                    string
+		allowTLSGenerate          bool
+		allowJwtGenerate          bool
+		authMethod                string
+		rootCaSecretName          string
+		rootCaPath                string
+		requireClientCerts        bool
+		clientCertSubjectMatch    bool
+		autoNamespaceAllow        bool
+		autoNamespacePattern      string
+		autoNamespaceLabels       []string
+		enableWebSocket           bool
+		enableResourceProxy       bool
+		pprofPort                 int
+		resourceProxySecretName   string
+		resourceProxyCertPath     string
+		resourceProxyKeyPath      string
+		resourceProxyCaSecretName string
+		resourceProxyCAPath       string
+		showVersion               bool
+		versionFormat             string
 
 		// Minimum time duration for agent to wait before sending next keepalive ping to principal
 		// if agent sends ping more often than specified interval then connection will be dropped
@@ -153,14 +158,16 @@ func NewPrincipalRunCommand() *cobra.Command {
 			} else if (tlsCert != "" && tlsKey == "") || (tlsCert == "" && tlsKey != "") {
 				cmdutil.Fatal("Both --tls-cert and --tls-key have to be given")
 			} else {
-				logrus.Infof("Loading gRPC TLS certificate from secret %s/%s", namespace, config.SecretNamePrincipalCA)
-				opts = append(opts, principal.WithTLSKeyPairFromSecret(kubeConfig.Clientset, config.SecretNamePrincipalTLS, namespace))
+				logrus.Infof("Loading gRPC TLS certificate from secret %s/%s", namespace, tlsSecretName)
+				opts = append(opts, principal.WithTLSKeyPairFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
 			}
 
 			if rootCaPath != "" {
+				logrus.Infof("Loading root CA certificate from file %s", rootCaPath)
 				opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
 			} else {
-				opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, config.SecretNamePrincipalCA, namespace, "tls.crt"))
+				logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCaSecretName)
+				opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, namespace, rootCaSecretName, "tls.crt"))
 			}
 
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
@@ -170,9 +177,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if enableResourceProxy {
 				var proxyTLS *tls.Config
 				if resourceProxyCertPath != "" && resourceProxyKeyPath != "" && resourceProxyCAPath != "" {
+					logrus.Infof("Loading resource proxy TLS configuration from files cert=%s, key=%s and ca=%s", resourceProxyCertPath, resourceProxyKeyPath, resourceProxyCAPath)
 					proxyTLS, err = getResourceProxyTLSConfigFromFiles(resourceProxyCertPath, resourceProxyKeyPath, resourceProxyCAPath)
 				} else {
-					proxyTLS, err = getResourceProxyTLSConfigFromKube(kubeConfig, namespace)
+					logrus.Infof("Loading resource proxy TLS certificate from secrets %s/%s and %s/%s", namespace, resourceProxySecretName, namespace, resourceProxyCaSecretName)
+					proxyTLS, err = getResourceProxyTLSConfigFromKube(kubeConfig, namespace, resourceProxySecretName, resourceProxyCaSecretName)
 				}
 				if err != nil {
 					cmdutil.Fatal("Error reading TLS config for resource proxy: %v", err)
@@ -181,12 +190,14 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			if jwtKey != "" {
+				logrus.Infof("Loading JWT signing key from file %s", jwtKey)
 				opts = append(opts, principal.WithTokenSigningKeyFromFile(jwtKey))
 			} else if allowJwtGenerate {
+				logrus.Info("Using one-time generated JWT signing key")
 				opts = append(opts, principal.WithGeneratedTokenSigningKey())
 			} else {
-				logrus.Infof("Loading JWT signing key from secret %s/%s", namespace, config.SecretNameJWT)
-				opts = append(opts, principal.WithTokenSigningKeyFromSecret(kubeConfig.Clientset, config.SecretNameJWT, namespace))
+				logrus.Infof("Loading JWT signing key from secret %s/%s", namespace, jwtSecretName)
+				opts = append(opts, principal.WithTokenSigningKeyFromSecret(kubeConfig.Clientset, namespace, jwtSecretName))
 			}
 
 			authMethods := auth.NewMethods()
@@ -285,6 +296,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_NAMESPACE_CREATE_LABELS", nil, []string{}),
 		"Labels to apply to auto-created namespaces")
 
+	command.Flags().StringVar(&tlsSecretName, "tls-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SECRET_NAME", nil, config.SecretNamePrincipalTLS),
+		"Secret name of TLS certificate and key")
 	command.Flags().StringVar(&tlsCert, "tls-cert",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_CERT_PATH", nil, ""),
 		"Use TLS certificate from path")
@@ -294,6 +308,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&allowTLSGenerate, "insecure-tls-generate",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ALLOW_GENERATE", false),
 		"INSECURE: Generate and use temporary TLS cert and key")
+	command.Flags().StringVar(&rootCaSecretName, "tls-ca-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_SECRET_NAME", nil, config.SecretNamePrincipalCA),
+		"Secret name of TLS CA certificate")
 	command.Flags().StringVar(&rootCaPath, "root-ca-path",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_PATH", nil, ""),
 		"Path to a file containing the root CA certificate for verifying client certs of agents")
@@ -304,16 +321,25 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_TLS_CLIENT_CERT_MATCH_SUBJECT", false),
 		"Whether a client cert's subject must match the agent name")
 
+	command.Flags().StringVar(&resourceProxySecretName, "resource-proxy-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_SECRET_NAME", nil, config.SecretNameProxyTLS),
+		"Secret name of the resource proxy")
 	command.Flags().StringVar(&resourceProxyCertPath, "resource-proxy-cert-path",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_TLS_CERT_PATH", nil, ""),
 		"Path to a file containing the resource proxy's TLS certificate")
 	command.Flags().StringVar(&resourceProxyKeyPath, "resource-proxy-key-path",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_TLS_KEY_PATH", nil, ""),
 		"Path to a file containing the resource proxy's TLS private key")
+	command.Flags().StringVar(&resourceProxyCaSecretName, "resource-proxy-ca-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_CA_SECRET_NAME", nil, config.SecretNamePrincipalCA),
+		"Secret name of the resource proxy's CA certificate")
 	command.Flags().StringVar(&resourceProxyCAPath, "resource-proxy-ca-path",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_TLS_CA_PATH", nil, ""),
 		"Path to a file containing the resource proxy's TLS CA data")
 
+	command.Flags().StringVar(&jwtSecretName, "jwt-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_JWT_SECRET_NAME", nil, config.SecretNameJWT),
+		"Secret name of the JWT signing key")
 	command.Flags().StringVar(&jwtKey, "jwt-key",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_JWT_KEY_PATH", nil, ""),
 		"Use JWT signing key from path")
@@ -375,15 +401,15 @@ func observer(interval time.Duration) {
 //
 // The secret names where the certificates are stored in are hard-coded at the
 // moment.
-func getResourceProxyTLSConfigFromKube(kubeClient *kube.KubernetesClient, namespace string) (*tls.Config, error) {
+func getResourceProxyTLSConfigFromKube(kubeClient *kube.KubernetesClient, namespace, certName, caName string) (*tls.Config, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	proxyCert, err := tlsutil.TLSCertFromSecret(ctx, kubeClient.Clientset, namespace, config.SecretNameProxyTLS)
+	proxyCert, err := tlsutil.TLSCertFromSecret(ctx, kubeClient.Clientset, namespace, certName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting proxy certificate: %w", err)
 	}
 
-	clientCA, err := tlsutil.X509CertPoolFromSecret(ctx, kubeClient.Clientset, namespace, config.SecretNamePrincipalCA, "tls.crt")
+	clientCA, err := tlsutil.X509CertPoolFromSecret(ctx, kubeClient.Clientset, namespace, caName, "tls.crt")
 	if err != nil {
 		return nil, fmt.Errorf("error getting client CA certificate: %w", err)
 	}
