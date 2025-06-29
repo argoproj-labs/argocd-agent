@@ -22,16 +22,16 @@ data:
   # agent.tls.root-ca-secret-name: The name of the secret containing the
   # certificates for the TLS root certificate authority used to validate the
   # remote principal.
-  # Default: ""
-  agent.tls.root-ca-secret-name: ""
+  # Default: "argocd-agent-ca"
+  agent.tls.root-ca-secret-name: "argocd-agent-ca"
   # agent.tls.root-ca-path: The path to a file containing the certificates for
   # the TLS root certificate authority used to validate the remote principal. 
   # Default: ""
   agent.tls.root-ca-path: ""
   # agent.tls.secret-name: The name of the secret containing the agent
   # certificate.
-  # Default: ""
-  agent.tls.secret-name: ""
+  # Default: "argocd-agent-client-tls"
+  agent.tls.secret-name: "argocd-agent-client-tls"
   # agent.tls.client.cert-path: Path to a file containing the agent's TLS client
   # certificate.
   # Default: ""

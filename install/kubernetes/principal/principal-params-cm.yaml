@@ -41,8 +41,8 @@ data:
   # as a comma separated list, e.g. "foo=bar,bar=baz"
   principal.namespace-create.labels: ""
   # principal.tls.secret-name: The name of the secret containing the TLS certificate and key.
-  # Default: ""
-  principal.tls.secret-name: ""
+  # Default: "argocd-agent-principal-tls"
+  principal.tls.secret-name: "argocd-agent-principal-tls"
   # principal.tls.server.cert-path: Path to the TLS certificate to be used by
   # the gRPC server.
   # Default: ""
@@ -61,8 +61,8 @@ data:
   # Default: false
   principal.tls.client-cert.require: "false"
   # principal.tls.server.secret-name: The name of the secret containing the root CA TLS certificate.
-  # Default: ""
-  principal.tls.server.root-ca-secret-name: ""
+  # Default: "argocd-agent-ca"
+  principal.tls.server.root-ca-secret-name: "argocd-agent-ca"
   # principal.tls.server.root-ca-path: Path to a TLS root certificate authority
   # to be used to validate agent's client certificates against.
   # Default: ""
@@ -73,8 +73,8 @@ data:
   principal.tls.client-cert.match-subject: "false"
   # principal.resource-proxy.secret-name: The name of the secret containing
   # the TLS certificate and key for the resource proxy.
-  # Default: ""
-  principal.resource-proxy.secret-name: ""
+  # Default: "argocd-agent-resource-proxy-tls"
+  principal.resource-proxy.secret-name: "argocd-agent-resource-proxy-tls"
   # principal.resource-proxy.tls.cert-path: Path to the TLS certificate to be used by
   # the resource proxy.
   # Default: ""
@@ -85,8 +85,8 @@ data:
   principal.resource-proxy.tls.key-path: ""
   # principal.resource-proxy.ca.secret-name: The name of the secret containing
   # the CA certificate for the resource proxy.
-  # Default: ""
-  principal.resource-proxy.ca.secret-name: ""
+  # Default: "argocd-agent-ca"
+  principal.resource-proxy.ca.secret-name: "argocd-agent-ca"
   # principal.resource-proxy.ca.path: Path to the CA certificate to be used by
   # the resource proxy.
   # Default: ""
@@ -97,8 +97,8 @@ data:
   # Default: false
   principal.jwt.allow-generate: "false"
   # principal.jwt.secret-name: The name of the secret containing the JWT signing key.
-  # Default: ""
-  principal.jwt.secret-name: ""
+  # Default: "argocd-agent-jwt"
+  principal.jwt.secret-name: "argocd-agent-jwt"
   # principal.jwt.key-path: Path to the private key to be used for signing JWT
   # tokens.
   # Default: ""
