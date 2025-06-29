@@ -57,6 +57,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		tlsSecretName             string
 		tlsCert                   string
 		tlsKey                    string
+		jwtSecretName             string
 		jwtKey                    string
 		allowTLSGenerate          bool
 		allowJwtGenerate          bool
@@ -189,12 +190,14 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			if jwtKey != "" {
+				logrus.Infof("Loading JWT signing key from file %s", jwtKey)
 				opts = append(opts, principal.WithTokenSigningKeyFromFile(jwtKey))
 			} else if allowJwtGenerate {
+				logrus.Info("Using one-time generated JWT signing key")
 				opts = append(opts, principal.WithGeneratedTokenSigningKey())
 			} else {
-				logrus.Infof("Loading JWT signing key from secret %s/%s", namespace, config.SecretNameJWT)
-				opts = append(opts, principal.WithTokenSigningKeyFromSecret(kubeConfig.Clientset, config.SecretNameJWT, namespace))
+				logrus.Infof("Loading JWT signing key from secret %s/%s", namespace, jwtSecretName)
+				opts = append(opts, principal.WithTokenSigningKeyFromSecret(kubeConfig.Clientset, namespace, jwtSecretName))
 			}
 
 			authMethods := auth.NewMethods()
@@ -334,6 +337,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_TLS_CA_PATH", nil, ""),
 		"Path to a file containing the resource proxy's TLS CA data")
 
+	command.Flags().StringVar(&jwtSecretName, "jwt-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_JWT_SECRET_NAME", nil, config.SecretNameJWT),
+		"Secret name of the JWT signing key")
 	command.Flags().StringVar(&jwtKey, "jwt-key",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_JWT_KEY_PATH", nil, ""),
 		"Use JWT signing key from path")

@@ -159,6 +159,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.jwt.allow-generate
                 optional: true
+          - name: ARGOCD_PRINCIPAL_JWT_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.jwt.secret-name
+                optional: true
           - name: ARGOCD_PRINCIPAL_JWT_KEY_PATH
             valueFrom:
               configMapKeyRef:

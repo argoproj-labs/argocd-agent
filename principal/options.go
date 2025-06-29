@@ -151,7 +151,7 @@ func WithTokenSigningKeyFromFile(path string) ServerOption {
 // WithTokenSigningKeyFromSecret sets the RSA private key to use for signing the tokens
 // issued by the Server. The key will be loaded from the secret referred to by name and namespace.
 // The secret should contain a JWT signing key in the "jwt.key" field.
-func WithTokenSigningKeyFromSecret(kube kubernetes.Interface, name, namespace string) ServerOption {
+func WithTokenSigningKeyFromSecret(kube kubernetes.Interface, namespace, name string) ServerOption {
 	return func(o *Server) error {
 		key, err := tlsutil.JWTSigningKeyFromSecret(context.Background(), kube, namespace, name)
 		if err != nil {

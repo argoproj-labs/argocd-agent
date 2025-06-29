@@ -96,9 +96,13 @@ data:
   # for development.
   # Default: false
   principal.jwt.allow-generate: "false"
+  # principal.jwt.secret-name: The name of the secret containing the JWT signing key.
+  # Default: ""
+  principal.jwt.secret-name: ""
   # principal.jwt.key-path: Path to the private key to be used for signing JWT
   # tokens.
-  principal.jwt.key-path: "/app/config/jwt/jwt.key"
+  # Default: ""
+  principal.jwt.key-path: ""
   # principal.auth: The authentication method. Must be in the
   # format <method>:<configuration>. Valid values are:
   # - "userpass:_path_to_encrypted_creds_" where _path_to_encrypted_creds_ is
