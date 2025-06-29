@@ -7,11 +7,11 @@ data:
   # for all interfaces.
   # Default: ""
   principal.listen.host: ""
-  # principal.listen.port: The port the gRPC server should listen on. 
+  # principal.listen.port: The port the gRPC server should listen on.
   # Default: 8443
   principal.listen.port: "8443"
   # principal.log.level: The logging level to use. One of trace, debug, info,
-  # warn or error. 
+  # warn or error.
   # Default: info
   principal.log.level: info
   # principal.metrics.port: The port the metrics server should listen on.
@@ -56,14 +56,17 @@ data:
   # configured. This is insecure. Do only use for development.
   # Default: false
   principal.tls.server.allow-generate: "false"
-  # principal.tls.server.root-ca-path: Path to a TLS root certificate authority
-  # to be used to validate agent's client certificates against.
-  # Default: ""
-  principal.tls.server.root-ca-path: ""
   # principal.tls.client-cert.require: Whether to require client certs from
   # agents upon connection.
   # Default: false
   principal.tls.client-cert.require: "false"
+  # principal.tls.server.secret-name: The name of the secret containing the root CA TLS certificate.
+  # Default: ""
+  principal.tls.server.root-ca-secret-name: ""
+  # principal.tls.server.root-ca-path: Path to a TLS root certificate authority
+  # to be used to validate agent's client certificates against.
+  # Default: ""
+  principal.tls.server.root-ca-path: ""
   # principal.tls.client-cert.match-subject: Whether to match the subject field
   # in a client certificate presented by an agent to the agent's name.
   # Default: false

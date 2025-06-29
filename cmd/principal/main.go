@@ -61,7 +61,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		allowTLSGenerate          bool
 		allowJwtGenerate          bool
 		authMethod                string
-		tlsCaSecretName           string
+		rootCaSecretName          string
 		rootCaPath                string
 		requireClientCerts        bool
 		clientCertSubjectMatch    bool
@@ -165,8 +165,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 				logrus.Infof("Loading root CA certificate from file %s", rootCaPath)
 				opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
 			} else {
-				logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, tlsCaSecretName)
-				opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, namespace, tlsCaSecretName, "tls.crt"))
+				logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCaSecretName)
+				opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, namespace, rootCaSecretName, "tls.crt"))
 			}
 
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
@@ -305,8 +305,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&allowTLSGenerate, "insecure-tls-generate",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ALLOW_GENERATE", false),
 		"INSECURE: Generate and use temporary TLS cert and key")
-	command.Flags().StringVar(&tlsCaSecretName, "tls-ca-secret-name",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_CA_SECRET_NAME", nil, config.SecretNamePrincipalCA),
+	command.Flags().StringVar(&rootCaSecretName, "tls-ca-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_SECRET_NAME", nil, config.SecretNamePrincipalCA),
 		"Secret name of TLS CA certificate")
 	command.Flags().StringVar(&rootCaPath, "root-ca-path",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_PATH", nil, ""),

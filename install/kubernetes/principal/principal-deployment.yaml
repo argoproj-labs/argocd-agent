@@ -105,11 +105,11 @@ spec:
                 name: argocd-agent-params
                 key: principal.tls.client-cert.require
                 optional: true
-          - name: ARGOCD_PRINCIPAL_TLS_CA_SECRET_NAME
+          - name: ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_SECRET_NAME
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: principal.tls.ca.secret-name
+                key: principal.tls.server.root-ca-secret-name
                 optional: true
           - name: ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_PATH
             valueFrom:
