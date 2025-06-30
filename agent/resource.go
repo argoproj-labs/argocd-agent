@@ -170,6 +170,12 @@ func (a *Agent) processIncomingDeleteResourceRequest(ctx context.Context, req *e
 		return err
 	}
 
+	// Retrieve the resource and check if it is managed by an Argo CD application.
+	_, err := a.getManagedResource(ctx, gvr, req.Name, req.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve resource: %w", err)
+	}
+
 	client := a.kubeClient.DynamicClient.Resource(gvr)
 	return client.Namespace(req.Namespace).Delete(ctx, req.Name, *deleteOpts)
 }

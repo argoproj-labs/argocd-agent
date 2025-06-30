@@ -836,6 +836,7 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 		resourceName string
 		deleteBody   []byte
 		expectErr    bool
+		managedByApp bool
 	}
 
 	validDeleteOptions := v1.DeleteOptions{
@@ -865,6 +866,7 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 			resourceName: "test-pod",
 			deleteBody:   validDeleteBody,
 			expectErr:    false,
+			managedByApp: true,
 		},
 		{
 			name:         "Successfully deletes resource with empty delete options",
@@ -872,6 +874,7 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 			resourceName: "test-pod",
 			deleteBody:   []byte(`{}`),
 			expectErr:    false,
+			managedByApp: true,
 		},
 		{
 			name:         "Returns error for invalid JSON delete options",
@@ -879,15 +882,31 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 			resourceName: "test-pod",
 			deleteBody:   invalidDeleteBody,
 			expectErr:    true,
+			managedByApp: true,
+		},
+		{
+			name:         "Returns error for unmanaged resource",
+			namespace:    "default",
+			resourceName: "test-pod",
+			deleteBody:   validDeleteBody,
+			expectErr:    true,
+			managedByApp: false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			kubeClient := kube.NewDynamicFakeClient(originalObj)
+			obj := originalObj.DeepCopy()
+			if tc.managedByApp {
+				obj.ObjectMeta.Labels = map[string]string{
+					"app.kubernetes.io/instance": "some-app",
+				}
+			}
+
+			kubeClient := kube.NewDynamicFakeClient(obj)
 			scheme := runtime.NewScheme()
 			_ = corev1.AddToScheme(scheme)
-			fakeDyn := fake.NewSimpleDynamicClient(scheme, originalObj)
+			fakeDyn := fake.NewSimpleDynamicClient(scheme, obj)
 			kubeClient.DynamicClient = fakeDyn
 
 			agent := &Agent{
