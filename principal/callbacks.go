@@ -15,8 +15,9 @@
 package principal
 
 import (
+	"strings"
+
 	"github.com/argoproj-labs/argocd-agent/internal/event"
-	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
@@ -146,7 +147,8 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 	s.resources.Add(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
 
-	if outbound.Annotations[appproject.AppProjectAgentModeAnnotation] == string(types.AgentModeAutonomous) {
+	// Check if this AppProject was created by an autonomous agent by examining its name prefix
+	if s.isAppProjectFromAutonomousAgent(outbound.Name) {
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
@@ -189,18 +191,20 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		"appproject_name": old.Name,
 	})
 
-	if new.Annotations[appproject.AppProjectAgentModeAnnotation] == string(types.AgentModeAutonomous) {
+	// Check if this AppProject was created by an autonomous agent by examining its name prefix
+	if s.isAppProjectFromAutonomousAgent(new.Name) {
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
 
 	if len(new.Finalizers) > 0 && len(new.Finalizers) != len(old.Finalizers) {
 		var err error
-		new, err = s.projectManager.RemoveFinalizers(s.ctx, new)
+		tmp, err := s.projectManager.RemoveFinalizers(s.ctx, new)
 		if err != nil {
 			logCtx.WithError(err).Warnf("Could not remove finalizer")
 		} else {
 			logCtx.Debug("Removed finalizer")
+			new = tmp
 		}
 	}
 	if s.projectManager.IsChangeIgnored(new.Name, new.ResourceVersion) {
@@ -231,6 +235,12 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	})
 
 	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
+
+	// Check if this AppProject was created by an autonomous agent by examining its name prefix
+	if s.isAppProjectFromAutonomousAgent(outbound.Name) {
+		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
+		return
+	}
 
 	if !s.queues.HasQueuePair(outbound.Namespace) {
 		if err := s.queues.Create(outbound.Namespace); err != nil {
@@ -295,6 +305,8 @@ func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {
 // 2. The agent name matches one of the AppProject's destinations and source namespaces
 func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[string]bool {
 	agents := map[string]bool{}
+	s.clientLock.RLock()
+	defer s.clientLock.RUnlock()
 	for agentName, mode := range s.namespaceMap {
 		if mode != types.AgentModeManaged {
 			continue
@@ -383,4 +395,17 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alp
 	appProject.Spec.Roles = []v1alpha1.ProjectRole{}
 
 	return appProject
+}
+
+// isAppProjectFromAutonomousAgent checks if an AppProject was created by an autonomous agent
+// by examining if its name is prefixed with an autonomous agent name (pattern: "{agentName}-{projectName}")
+func (s *Server) isAppProjectFromAutonomousAgent(projectName string) bool {
+	for agentName, mode := range s.namespaceMap {
+		if mode == types.AgentModeAutonomous &&
+			strings.HasPrefix(projectName, agentName+"-") {
+			return true
+		}
+	}
+
+	return false
 }

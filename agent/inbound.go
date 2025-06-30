@@ -440,8 +440,8 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 // queue.
 func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
 	logCtx := log().WithFields(logrus.Fields{
-		"method": "CreateAppProject",
-		"app":    incoming.Name,
+		"method":     "CreateAppProject",
+		"appProject": incoming.Name,
 	})
 
 	// In modes other than "managed", we don't process new AppProject events
@@ -476,7 +476,7 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"method":          "UpdateAppProject",
-		"app":             incoming.Name,
+		"appProject":      incoming.Name,
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
@@ -501,8 +501,8 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 
 func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 	logCtx := log().WithFields(logrus.Fields{
-		"method": "DeleteAppProject",
-		"app":    project.Name,
+		"method":     "DeleteAppProject",
+		"appProject": project.Name,
 	})
 
 	// If we receive an update appproject event for an AppProject we don't know about yet it

@@ -181,7 +181,9 @@ func Test_CreateEvents(t *testing.T) {
 		assert.Equal(t, "HEAD", napp.Spec.Source.TargetRevision)
 		assert.Nil(t, napp.Operation)
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, napp.Status.Sync.Status)
-		assert.Equal(t, agentPrefixedProjectName(app.Spec.Project, "foo"), napp.Spec.Project)
+		prefixedName, err := agentPrefixedProjectName(app.Spec.Project, "foo")
+		assert.Nil(t, err)
+		assert.Equal(t, prefixedName, napp.Spec.Project)
 		ns, err := fac.Clientset.CoreV1().Namespaces().Get(context.TODO(), "foo", v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.NotNil(t, ns)
@@ -418,7 +420,8 @@ func Test_processAppProjectEvent(t *testing.T) {
 		_, err = s.processRecvQueue(context.Background(), "foo", wq)
 		assert.NoError(t, err)
 
-		projName := agentPrefixedProjectName(project.Name, "foo")
+		projName, err := agentPrefixedProjectName(project.Name, "foo")
+		assert.Nil(t, err)
 
 		// Check that the AppProject was created with the prefixed name
 		createdProject, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), projName, v1.GetOptions{})
@@ -457,7 +460,8 @@ func Test_processAppProjectEvent(t *testing.T) {
 		_, err = s.processRecvQueue(context.Background(), "foo", wq)
 		assert.NoError(t, err)
 
-		projName := agentPrefixedProjectName(project.Name, "foo")
+		projName, err := agentPrefixedProjectName(project.Name, "foo")
+		assert.Nil(t, err)
 
 		// Check that the AppProject was created with the prefixed name
 		got, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), projName, v1.GetOptions{})
@@ -661,20 +665,18 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 
 func Test_agentPrefixedProjectName(t *testing.T) {
 	t.Run("Normal project name", func(t *testing.T) {
-		result := agentPrefixedProjectName("myproject", "myagent")
+		result, err := agentPrefixedProjectName("myproject", "myagent")
+		assert.Nil(t, err)
 		assert.Equal(t, "myagent-myproject", result)
 	})
 
-	t.Run("Long name that exceeds DNS1123 limit gets truncated", func(t *testing.T) {
+	t.Run("Return an error if the name exceeds DNS1123 limit", func(t *testing.T) {
 		// Create a project name that when combined with agent name exceeds 253 characters
 		longProjectName := strings.Repeat("test", 245)
 		agentName := "my-agent"
 
-		result := agentPrefixedProjectName(longProjectName, agentName)
-
-		// The result should be exactly 253 characters (the DNS1123 subdomain limit)
-		assert.Equal(t, 253, len(result))
-		// Should still start with the agent name prefix
-		assert.True(t, strings.HasPrefix(result, "my-agent-test"))
+		result, err := agentPrefixedProjectName(longProjectName, agentName)
+		assert.ErrorContains(t, err, "agent prefixed project name cannot be longer than 253 characters")
+		assert.Empty(t, result)
 	})
 }

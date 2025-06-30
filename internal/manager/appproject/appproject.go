@@ -42,9 +42,6 @@ const (
 
 	// DefaultAppProjectName is the name of the default AppProject
 	DefaultAppProjectName = "default"
-
-	// AppProjectAgentModeAnnotation indicates the mode of the agent that manages the AppProject
-	AppProjectAgentModeAnnotation = "argocd-agent.argoproj.io/agent-mode"
 )
 
 // AppProjectManager manages Argo CD AppProject resources on a given backend.

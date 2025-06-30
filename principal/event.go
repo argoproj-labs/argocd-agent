@@ -134,7 +134,10 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 
 		// AppProjects from the autonomous agents are prefixed with the agent name
 		if incoming.Spec.Project != appproject.DefaultAppProjectName {
-			incoming.Spec.Project = agentPrefixedProjectName(incoming.Spec.Project, agentName)
+			incoming.Spec.Project, err = agentPrefixedProjectName(incoming.Spec.Project, agentName)
+			if err != nil {
+				return fmt.Errorf("could not prefix project name: %w", err)
+			}
 		}
 	}
 
@@ -228,12 +231,10 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 	// AppProjects coming from different autonomous agents could have the same name,
 	// so we prefix the project name with the agent name
 	if agentMode.IsAutonomous() && incoming.Name != appproject.DefaultAppProjectName {
-		incoming.Name = agentPrefixedProjectName(incoming.Name, agentName)
-
-		if incoming.Annotations == nil {
-			incoming.Annotations = make(map[string]string)
+		incoming.Name, err = agentPrefixedProjectName(incoming.Name, agentName)
+		if err != nil {
+			return fmt.Errorf("could not prefix project name: %w", err)
 		}
-		incoming.Annotations[appproject.AppProjectAgentModeAnnotation] = string(agentMode)
 	}
 
 	switch ev.Type() {
@@ -530,10 +531,11 @@ func (s *Server) createNamespaceIfNotExist(ctx context.Context, name string) (bo
 	return false, nil
 }
 
-func agentPrefixedProjectName(project, agent string) string {
+func agentPrefixedProjectName(project, agent string) (string, error) {
 	project = agent + "-" + project
 	if len(project) > validation.DNS1123SubdomainMaxLength {
-		project = project[:validation.DNS1123SubdomainMaxLength]
+		return "", fmt.Errorf("agent prefixed project name cannot be longer than %d characters: %s",
+			validation.DNS1123SubdomainMaxLength, project)
 	}
-	return project
+	return project, nil
 }

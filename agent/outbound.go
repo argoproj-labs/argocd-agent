@@ -165,6 +165,11 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 
 	a.resources.Add(resources.NewResourceKeyFromAppProject(appProject))
 
+	// Only send the creation event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
+		return
+	}
+
 	// Update events trigger a new event sometimes, too. If we've already seen
 	// the appProject, we just ignore the request then.
 	if a.projectManager.IsManaged(appProject.Name) {
@@ -174,11 +179,6 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 
 	if err := a.projectManager.Manage(appProject.Name); err != nil {
 		logCtx.Errorf("Could not manage appProject: %v", err)
-		return
-	}
-
-	// Only send the creation event when we're in autonomous mode
-	if !a.mode.IsAutonomous() {
 		return
 	}
 
@@ -201,6 +201,11 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 		"sendq_name": defaultQueueName,
 	})
 
+	// Only send the update event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
+		return
+	}
+
 	a.watchLock.Lock()
 	defer a.watchLock.Unlock()
 
@@ -212,11 +217,6 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 	// If the appProject is not managed, we ignore this event.
 	if !a.projectManager.IsManaged(new.Name) {
 		logCtx.Errorf("Received update event for unmanaged appProject")
-		return
-	}
-
-	// Only send the update event when we're in autonomous mode
-	if !a.mode.IsAutonomous() {
 		return
 	}
 
@@ -243,15 +243,15 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 
 	a.resources.Remove(resources.NewResourceKeyFromAppProject(appProject))
 
+	// Only send the deletion event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
+		return
+	}
+
 	if !a.projectManager.IsManaged(appProject.Name) {
 		logCtx.Warn("AppProject is not managed, proceeding anyways")
 	} else {
 		_ = a.projectManager.Unmanage(appProject.Name)
-	}
-
-	// Only send the deletion event when we're in autonomous mode
-	if !a.mode.IsAutonomous() {
-		return
 	}
 
 	q := a.queues.SendQ(defaultQueueName)

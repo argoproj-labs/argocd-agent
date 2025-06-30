@@ -209,8 +209,8 @@ func Test_addAppProjectCreationToQueue(t *testing.T) {
 		// Should not have an event in queue in managed mode
 		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
 
-		// AppProject should be managed by now
-		assert.True(t, a.projectManager.IsManaged("test-project"))
+		// AppProject should be not be managed by now
+		assert.False(t, a.projectManager.IsManaged("test-project"))
 	})
 
 	t.Run("Add appProject that is already managed", func(t *testing.T) {
@@ -352,8 +352,8 @@ func Test_addAppProjectDeletionToQueue(t *testing.T) {
 
 		// Should not have an event in queue in managed mode
 		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
-		// AppProject should still be unmanaged
-		require.False(t, a.projectManager.IsManaged("test-project"))
+		// AppProject should still be managed
+		require.True(t, a.projectManager.IsManaged("test-project"))
 	})
 
 	t.Run("Deletion event for unmanaged appProject", func(t *testing.T) {

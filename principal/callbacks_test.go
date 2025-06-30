@@ -546,3 +546,57 @@ func TestAgentSpecificAppProject(t *testing.T) {
 		})
 	}
 }
+
+func TestIsAppProjectFromAutonomousAgent(t *testing.T) {
+	tests := []struct {
+		name         string
+		projectName  string
+		namespaceMap map[string]types.AgentMode
+		want         bool
+	}{
+		{
+			name:        "project matches autonomous agent prefix",
+			projectName: "agent1-myproject",
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeAutonomous,
+				"agent2": types.AgentModeManaged,
+				"agent3": types.AgentModeAutonomous,
+			},
+			want: true,
+		},
+		{
+			name:        "project doesn't match any autonomous agent prefix",
+			projectName: "someproject",
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeAutonomous,
+				"agent2": types.AgentModeManaged,
+			},
+			want: false,
+		},
+		{
+			name:        "project matches managed agent prefix (not autonomous)",
+			projectName: "agent2-project",
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeAutonomous,
+				"agent2": types.AgentModeManaged,
+			},
+			want: false,
+		},
+		{
+			name:        "multiple dashes in project name",
+			projectName: "agent1-my-complex-project-name",
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeAutonomous,
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{namespaceMap: tt.namespaceMap}
+			got := s.isAppProjectFromAutonomousAgent(tt.projectName)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

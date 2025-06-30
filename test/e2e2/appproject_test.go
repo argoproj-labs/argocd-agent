@@ -18,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/test/e2e2/fixture"
 	argoapp "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
@@ -145,12 +144,6 @@ func (suite *AppProjectTestSuite) Test_AppProject_Autonomous() {
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second)
-
-	// Ensure that the appProject has the annotation mode
-	pappProject := argoapp.AppProject{}
-	err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &pappProject, metav1.GetOptions{})
-	requires.NoError(err)
-	requires.Equal("autonomous", pappProject.Annotations[appproject.AppProjectAgentModeAnnotation])
 
 	// Modify the appProject on the autonomous-agent and ensure the change is
 	// propagated to the principal
