@@ -43,6 +43,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// NewPrincipalRunCommand returns a new principal run command.
 func NewPrincipalRunCommand() *cobra.Command {
 	var (
 		listenHost                string
@@ -89,10 +90,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisCompressionType string
 	)
 	var command = &cobra.Command{
+		Use:   "principal",
 		Short: "Run the argocd-agent principal component",
 		Run: func(c *cobra.Command, args []string) {
 			if showVersion {
-				cmdutil.PrintVersion(version.New("argocd-agent", "principal"), versionFormat)
+				cmdutil.PrintVersion(version.New("argocd-agent"), versionFormat)
 				os.Exit(0)
 			}
 
@@ -463,14 +465,5 @@ func parseAuth(authStr string) (string, string, error) {
 		return "mtls", p[1], nil
 	default:
 		return "", "", fmt.Errorf("unknown auth method: %s", p[0])
-	}
-}
-
-func main() {
-	cmdutil.InitLogging()
-	cmd := NewPrincipalRunCommand()
-	err := cmd.Execute()
-	if err != nil {
-		os.Exit(1)
 	}
 }
