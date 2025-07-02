@@ -131,6 +131,8 @@ apply() {
         sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/redis-service.yaml
         sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/repo-server-service.yaml
         sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/server-service.yaml
+        sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/agent-managed/redis-service.yaml
+        sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/agent-autonomous/redis-service.yaml
     fi
 
     LATEST_RELEASE_TAG=`curl -s "https://api.github.com/repos/argoproj/argo-cd/releases/latest" | jq -r .tag_name`
