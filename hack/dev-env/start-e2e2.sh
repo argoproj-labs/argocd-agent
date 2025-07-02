@@ -9,13 +9,18 @@ getExternalLoadBalancerIP() {
   for ((i=1; i<=MAX_ATTEMPTS; i++)); do
     
     echo ""
-    EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME $K8S_CONTEXT $K8S_NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+    EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME $K8S_CONTEXT $K8S_NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+    EXTERNAL_HOST=$(kubectl get svc $SERVICE_NAME $K8S_CONTEXT $K8S_NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
 
     if [ -n "$EXTERNAL_IP" ]; then
-      echo "External IP is $EXTERNAL_IP"
+      echo "External IP for $SERVICE_NAME on $K8S_CONTEXT is $EXTERNAL_IP"
+      break
+    elif [ -n "$EXTERNAL_HOST" ]; then
+      echo "External host for $SERVICE_NAME on $K8S_CONTEXT is $EXTERNAL_HOST"
+      EXTERNAL_IP=$EXTERNAL_HOST
       break
     else
-      echo "External IP not yet available, attempting again in 5 seconds..."
+      echo "External IP for $SERVICE_NAME on $K8S_CONTEXT not yet available, attempting again in 5 seconds..."
       sleep 5
     fi
   done
