@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 
 # getExternalLoadBalancerIP will set EXTERNAL_IP with the load balancer hostname from the specified Service
 getExternalLoadBalancerIP() {
