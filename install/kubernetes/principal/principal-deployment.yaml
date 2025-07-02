@@ -208,9 +208,11 @@ spec:
           items:
           - key: passwd
             path: passwd
+          optional: true
       - name: jwt-secret
         secret:
           secretName: argocd-agent-jwt
           items:
           - key: jwt.key
             path: jwt.key
+          optional: true
