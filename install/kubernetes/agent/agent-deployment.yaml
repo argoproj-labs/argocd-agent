@@ -125,3 +125,4 @@ spec:
           items:
           - key: credentials
             path: userpass.creds
+          optional: true
