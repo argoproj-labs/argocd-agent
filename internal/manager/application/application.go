@@ -27,12 +27,10 @@ import (
 	"k8s.io/client-go/util/retry"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
-	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
-	ty "k8s.io/apimachinery/pkg/types"
 )
 
 type updateTransformer func(existing, incoming *v1alpha1.Application)
@@ -601,29 +599,29 @@ func (m *ApplicationManager) List(ctx context.Context, selector backend.Applicat
 // RevertManagedAppChanges compares the actual spec with expected spec stored in cache,
 // if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as principal.
 func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v1alpha1.Application) bool {
-	logCtx := log().WithFields(logrus.Fields{
-		"component":       "RevertManagedAppChanges",
-		"application":     app.QualifiedName(),
-		"resourceVersion": app.ResourceVersion,
-	})
+	// logCtx := log().WithFields(logrus.Fields{
+	// 	"component":       "RevertManagedAppChanges",
+	// 	"application":     app.QualifiedName(),
+	// 	"resourceVersion": app.ResourceVersion,
+	// })
 
-	sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
-	if exists && m.mode == manager.ManagerModeManaged {
-		if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID), logCtx); ok {
-			logCtx.Debugf("Application: %s is available in agent cache", app.Name)
+	// sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
+	// if exists && m.mode == manager.ManagerModeManaged {
+	// 	if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID), logCtx); ok {
+	// 		logCtx.Debugf("Application: %s is available in agent cache", app.Name)
 
-			if diff := reflect.DeepEqual(cachedAppSpec, app.Spec); !diff {
-				app.Spec = cachedAppSpec
-				logCtx.Infof("Reverting modifications done in application: %s", app.Name)
-				if _, err := m.UpdateManagedApp(ctx, app); err != nil {
-					logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", app.Name, err)
-					return false
-				}
-				return true
-			}
-		}
-		logCtx.Debugf("Application: %s is not available in agent cache", app.Name)
-	}
+	// 		if diff := reflect.DeepEqual(cachedAppSpec, app.Spec); !diff {
+	// 			app.Spec = cachedAppSpec
+	// 			logCtx.Infof("Reverting modifications done in application: %s", app.Name)
+	// 			if _, err := m.UpdateManagedApp(ctx, app); err != nil {
+	// 				logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", app.Name, err)
+	// 				return false
+	// 			}
+	// 			return true
+	// 		}
+	// 	}
+	// 	logCtx.Debugf("Application: %s is not available in agent cache", app.Name)
+	// }
 	return false
 }
 

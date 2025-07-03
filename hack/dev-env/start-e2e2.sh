@@ -51,6 +51,10 @@ K8S_NAMESPACE="-n argocd"
 getExternalLoadBalancerIP "argocd-redis"
 export AUTONOMOUS_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
 
+echo "JGW Config maps:"
+kubectl --context=vcluster-control-plane -n argocd  get configmaps -A
+
+echo "post JGW"
 
 export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed $K8S_NAMESPACE -o jsonpath='{.data.auth}' | base64 --decode)
 
