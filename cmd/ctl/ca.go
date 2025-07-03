@@ -70,6 +70,7 @@ OR TO PROTECT ANY KIND OF DATA.
 	command.AddCommand(NewPKIDeleteCommand())
 	command.AddCommand(NewPKIPrintCommand())
 	command.AddCommand(NewPKIIssueCommand())
+	command.AddCommand(NewPKIPropagateCommand())
 	return command
 }
 
@@ -126,6 +127,69 @@ func NewPKIInitCommand() *cobra.Command {
 		},
 	}
 
+	command.Flags().BoolVarP(&force, "force", "f", false, "Force regeneration of PKI if it exists")
+	return command
+}
+
+func NewPKIPropagateCommand() *cobra.Command {
+	var (
+		force bool
+	)
+	command := &cobra.Command{
+		Short: "NON-PROD!! Propagate the PKI to the agent",
+		Use:   "propagate",
+		Run: func(cmd *cobra.Command, args []string) {
+			if globalOpts.principalContext == globalOpts.agentContext {
+				cmdutil.Fatal("PKI and agent cannot reside within the same context.")
+			} else if globalOpts.principalContext == "" || globalOpts.agentContext == "" {
+				cmdutil.Fatal("Must specify both principal and agent contexts.")
+			}
+			ctx := context.TODO()
+			principalClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			if err != nil {
+				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
+			}
+			agentClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.agentNamespace, "", globalOpts.agentContext)
+			if err != nil {
+				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
+			}
+			caSecret, err := principalClt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			if err != nil {
+				cmdutil.Fatal("Error getting CA secret from principal: %v", err)
+			}
+			agentSecret := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      config.SecretNameAgentCA,
+					Namespace: globalOpts.agentNamespace,
+				},
+				Type: corev1.SecretTypeOpaque,
+				Data: map[string][]byte{
+					"ca.crt": caSecret.Data["tls.crt"],
+				},
+			}
+			exists := false
+			_, err = agentClt.Clientset.CoreV1().Secrets(globalOpts.agentNamespace).Get(ctx, config.SecretNameAgentCA, v1.GetOptions{})
+			if err != nil {
+				if !errors.IsNotFound(err) {
+					cmdutil.Fatal("Error getting agent CA secret: %v", err)
+				}
+			} else {
+				if !force {
+					cmdutil.Fatal("Agent CA secret already exists. Please delete it before propagating.")
+				}
+				exists = true
+			}
+			if !exists {
+				_, err = agentClt.Clientset.CoreV1().Secrets(globalOpts.agentNamespace).Create(ctx, agentSecret, v1.CreateOptions{})
+			} else {
+				_, err = agentClt.Clientset.CoreV1().Secrets(globalOpts.agentNamespace).Update(ctx, agentSecret, v1.UpdateOptions{})
+			}
+			if err != nil {
+				cmdutil.Fatal("Error updating agent CA secret: %v", err)
+			}
+			fmt.Printf("Agent CA secret %s/%s created\n", globalOpts.agentNamespace, config.SecretNameAgentCA)
+		},
+	}
 	command.Flags().BoolVarP(&force, "force", "f", false, "Force regeneration of PKI if it exists")
 	return command
 }
