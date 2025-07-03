@@ -52,7 +52,7 @@ getExternalLoadBalancerIP "argocd-redis"
 export AUTONOMOUS_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
 
 echo "JGW Config maps:"
-kubectl --context=vcluster-control-plane -n argocd  get configmaps -A
+kubectl --context=vcluster-control-plane -n argocd  get configmaps -A -o yaml
 
 echo "post JGW"
 
