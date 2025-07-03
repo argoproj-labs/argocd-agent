@@ -51,12 +51,44 @@ K8S_NAMESPACE="-n argocd"
 getExternalLoadBalancerIP "argocd-redis"
 export AUTONOMOUS_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
 
+
+
+
+set -x
+
+
+
+IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+echo "IPADDR is $IPADDR"
+
+echo ""
+echo "Patching ConfigMap 'argocd-cmd-params-cm' to redirect redis to agent"
+kubectl --context=vcluster-control-plane -n argocd patch configmap argocd-cmd-params-cm --type json --patch '[{"op": "add", "path": "/data/redis.server", "value": "$IPADDR:6379"}]'
+
+kubectl --context=vcluster-control-plane -n argocd get configmap argocd-cmd-params-cm -o yaml
+
+echo ""
+echo "Restarting all pods in argocd NS"
+kubectl --context=vcluster-control-plane -n argocd delete pods --all
+
+
+
+
+
+
+
+
+
 echo "JGW Config maps:"
 kubectl --context=vcluster-control-plane -n argocd  get configmaps -A -o yaml
-
 echo "post JGW"
 
 export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed $K8S_NAMESPACE -o jsonpath='{.data.auth}' | base64 --decode)
+
+
+
+
+
 
 goreman -exit-on-stop=false -f hack/dev-env/Procfile.e2e start
 

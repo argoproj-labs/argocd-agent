@@ -4,4 +4,4 @@ metadata:
   name: argocd-cmd-params-cm
 data:
   application.namespaces: "*"
-  redis.server: 192.168.56.222:6379
+#  redis.server: 192.168.56.222:6379
