@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -92,7 +93,13 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	requires.NoError(err)
 	defer closer.Close()
 
-	syncAppWithAutoResync(&appOnPrincipal, appClient, &suite.BaseSuite)
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
+	err = argoClient.Login()
+	requires.NoError(err)
+
+	syncAppWithAutoResyncNew(&appOnPrincipal, argoClient, &suite.BaseSuite)
+
+	// syncAppWithAutoResync(&appOnPrincipal, appClient, &suite.BaseSuite)
 
 	cancellableContext, cancelFunc := context.WithCancel(suite.Ctx)
 	defer cancelFunc()
@@ -270,7 +277,13 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 		},
 	}
 
-	syncAppWithAutoResync(&appOnPrincipal, appClient, &suite.BaseSuite)
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
+	err = argoClient.Login()
+	requires.NoError(err)
+
+	syncAppWithAutoResyncNew(&appOnPrincipal, argoClient, &suite.BaseSuite)
+
+	// syncAppWithAutoResync(&appOnPrincipal, appClient, &suite.BaseSuite)
 
 	cancellableContext, cancelFunc := context.WithCancel(suite.Ctx)
 	defer cancelFunc()
@@ -405,7 +418,40 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	requires.True(matchFound)
 }
 
-func syncAppWithAutoResync(app *v1alpha1.Application, appClient application.ApplicationServiceClient, suite *fixture.BaseSuite) {
+func syncAppWithAutoResyncNew(appParam *v1alpha1.Application, argoClient *fixture.ArgoRestClient, suite *fixture.BaseSuite) {
+	var err error
+
+	requires := suite.Require()
+
+	// Wait until the app is synced and healthy
+	retries := 0
+	requires.Eventually(func() bool {
+		app := &v1alpha1.Application{}
+		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: appParam.Namespace, Name: appParam.Name}, app, v1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		if app.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && app.Status.Health.Status == health.HealthStatusHealthy {
+			return true
+		} else {
+			// Sometimes, the sync hangs on the workload cluster. We trigger
+			// a sync every 5th or so retry.
+			if retries > 0 && retries%5 == 0 {
+				suite.T().Logf("Triggering re-sync")
+				err = argoClient.Sync(app)
+				if err != nil {
+					return true
+				}
+			}
+			retries += 1
+		}
+		return false
+	}, 60*time.Second, 1*time.Second)
+	requires.NoError(err)
+
+}
+
+func syncAppWithAutoResyncOld(app *v1alpha1.Application, appClient application.ApplicationServiceClient, suite *fixture.BaseSuite) {
 
 	requires := suite.Require()
 
