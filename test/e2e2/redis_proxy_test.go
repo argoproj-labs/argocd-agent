@@ -428,7 +428,7 @@ func syncAppWithAutoResync(app *v1alpha1.Application, appClient application.Appl
 			if retries > 0 && retries%5 == 0 {
 				suite.T().Logf("Triggering re-sync")
 
-				_, err := appClient.Sync(suite.Ctx, &application.ApplicationSyncRequest{
+				_, err = appClient.Sync(suite.Ctx, &application.ApplicationSyncRequest{
 					Name:         &app.Name,
 					AppNamespace: &app.Namespace,
 				})

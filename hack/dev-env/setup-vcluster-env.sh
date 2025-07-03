@@ -176,6 +176,8 @@ apply() {
     kubectl --context vcluster-$cluster apply -n $namespace -k ${TMP_DIR}/${cluster} || true
     kubectl --context vcluster-$cluster apply -n $namespace -k ${TMP_DIR}/${cluster}
 
+    kubectl --context vcluster-$cluster n $namespace  delete networkpolicies --all
+
     if [[ "$OPENSHIFT" != "" ]]; then
 
         # echo "-> Waiting for Redis load balancer on control plane Argo CD"
