@@ -120,7 +120,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	err = suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
 	requires.NoError(err)
 
-	requires.True(len(podList.Items) == 1, fmt.Sprintf("should only be one kustomize-guestbook pod: %v", podList.Items))
+	requires.True(len(podList.Items) == 1, fmt.Sprintf("should (only be) one kustomize-guestbook pod: %v", podList.Items))
 
 	// Locate guestbook pod
 	var oldPod corev1.Pod
@@ -409,10 +409,12 @@ func syncAppWithAutoResync(app *v1alpha1.Application, appClient application.Appl
 
 	requires := suite.Require()
 
+	var err error
+
 	// Wait until the app is synced and healthy
 	retries := 0
 	requires.Eventually(func() bool {
-		err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: app.Namespace, Name: app.Name}, app, metav1.GetOptions{})
+		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: app.Namespace, Name: app.Name}, app, metav1.GetOptions{})
 		if err != nil {
 			suite.T().Logf("Error on get: %v", err)
 			return false
@@ -440,6 +442,7 @@ func syncAppWithAutoResync(app *v1alpha1.Application, appClient application.Appl
 		return false
 	}, 60*time.Second, 1*time.Second)
 
+	requires.NoError(err)
 }
 
 func createArgoCDAPIClient(ctx context.Context, argoServerEndpoint string, password string) (argocdclient.Client, string, io.Closer, error) {

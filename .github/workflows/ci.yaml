@@ -205,7 +205,7 @@ jobs:
         run: |
           make all
           make start-e2e2 2>&1 | tee /tmp/e2e-argocd-agent.log &
-          sleep 10
+          sleep 30
       - name: Run the e2e tests
         run: |
           set -o pipefail
