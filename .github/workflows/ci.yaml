@@ -216,6 +216,7 @@ jobs:
         run: |
           kubectl --context vcluster-agent-autonomous logs -n argocd argocd-application-controller-0 > /tmp/vcluster-agent-autonomous-controller.log
           kubectl --context vcluster-agent-managed logs -n argocd argocd-application-controller-0 > /tmp/vcluster-agent-managed-controller.log
+          kubectl --context vcluster-control-plane logs -n argocd deployment/argocd-server > /tmp/vcluster-control-plane-server.log
         if: ${{ failure() }}
       - name: Upload e2e-argocd-agent logs
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
@@ -241,3 +242,10 @@ jobs:
           name: vcluster-agent-managed-controller.log
           path: /tmp/vcluster-agent-managed-controller.log
         if: ${{ failure() }}
+      - name: Upload vcluster-control-plane-server logs
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: vcluster-control-plane-server.log
+          path: /tmp/vcluster-control-plane-server.log
+        if: ${{ failure() }}
+

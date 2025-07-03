@@ -120,7 +120,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	err = suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
 	requires.NoError(err)
 
-	requires.True(len(podList.Items) == 1, "should only be one kustomize-guestbook pod")
+	requires.True(len(podList.Items) == 1, fmt.Sprintf("should only be one kustomize-guestbook pod: %v", podList.Items))
 
 	// Locate guestbook pod
 	var oldPod corev1.Pod
