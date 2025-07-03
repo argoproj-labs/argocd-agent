@@ -63,7 +63,7 @@ echo "IPADDR is $IPADDR"
 
 echo ""
 echo "Patching ConfigMap 'argocd-cmd-params-cm' to redirect redis to agent"
-kubectl --context=vcluster-control-plane -n argocd patch configmap argocd-cmd-params-cm --type json --patch '[{"op": "add", "path": "/data/redis.server", "value": "$IPADDR:6379"}]'
+kubectl --context=vcluster-control-plane -n argocd patch configmap argocd-cmd-params-cm --type json --patch '[{"op": "add", "path": "/data/redis.server", "value": "'$IPADDR':6379"}]'
 
 kubectl --context=vcluster-control-plane -n argocd get configmap argocd-cmd-params-cm -o yaml
 
