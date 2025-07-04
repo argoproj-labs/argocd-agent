@@ -329,7 +329,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	if eventWriter != nil {
 		eventWriter.UpdateTarget(subs)
 	} else {
-		eventWriter = event.NewEventWriter(subs)
+		eventWriter = event.NewEventWriter(subs, c.agentName)
 		s.eventWriters.Add(c.agentName, eventWriter)
 	}
 

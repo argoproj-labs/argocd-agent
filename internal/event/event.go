@@ -665,6 +665,8 @@ type EventWriter struct {
 	target streamWriter
 
 	log *logrus.Entry
+
+	eventWriterUUID string
 }
 
 type eventMessage struct {
@@ -681,7 +683,7 @@ type eventMessage struct {
 	backoff *wait.Backoff
 }
 
-func NewEventWriter(target streamWriter) *EventWriter {
+func NewEventWriter(target streamWriter, name string) *EventWriter {
 	return &EventWriter{
 		latestEvents: map[string]*eventMessage{},
 		target:       target,
@@ -689,6 +691,7 @@ func NewEventWriter(target streamWriter) *EventWriter {
 			"module":      "EventWriter",
 			"client_addr": grpcutil.AddressFromContext(target.Context()),
 		}),
+		eventWriterUUID: uuid.NewString() + "-" + name,
 	}
 }
 
@@ -701,9 +704,10 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	resID := ResourceID(ev)
 	logCtx := ew.log.WithFields(logrus.Fields{
-		"resource_id": ResourceID(ev),
-		"event_id":    EventID(ev),
-		"type":        ev.Type(),
+		"resource_id":       ResourceID(ev),
+		"event_id":          EventID(ev),
+		"type":              ev.Type(),
+		"event_writer_uuid": ew.eventWriterUUID,
 	})
 
 	ew.mu.Lock()
@@ -742,6 +746,10 @@ func (ew *EventWriter) Get(resID string) *eventMessage {
 }
 
 func (ew *EventWriter) Remove(ev *cloudevents.Event) {
+	logCtx := ew.log.WithFields(logrus.Fields{
+		"event_writer_uuid": ew.eventWriterUUID,
+	})
+
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
 
@@ -758,6 +766,8 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 
 	if latestEventID == EventID(ev) {
 		delete(ew.latestEvents, resourceID)
+
+		logCtx.Tracef("removed event with id: %s", resourceID)
 	}
 }
 
@@ -765,7 +775,12 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 // Note: This function will never return unless the context is done, and therefore
 // should be started in a separate goroutine.
 func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
-	ew.log.Info("Starting event writer")
+
+	logCtx := ew.log.WithFields(logrus.Fields{
+		"event_writer_uuid": ew.eventWriterUUID,
+	})
+
+	logCtx.Info("Starting event writer")
 	for {
 		select {
 		case <-ctx.Done():
@@ -774,16 +789,18 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 		default:
 			ew.mu.RLock()
 			resourceIDs := make([]string, 0, len(ew.latestEvents))
-			count := 1
+			if len(ew.latestEvents) > 0 {
+				count := 1
+				logCtx.Info("JGW SendWaitingEvent currently in queue:")
 
-			ew.log.Info("JGW SendWaitingEvent currently in queue:")
+				for resID := range ew.latestEvents {
+					val := ew.latestEvents[resID]
+					resourceIDs = append(resourceIDs, resID)
+					ew.log.Infof("%d) resID: %s, event: %v", count, resID, val.event.String())
 
-			for resID := range ew.latestEvents {
-				val := ew.latestEvents[resID]
-				resourceIDs = append(resourceIDs, resID)
-				ew.log.Infof("%d) resID: %s, event: %v", count, resID, val.event.String())
+					count++
+				}
 
-				count++
 			}
 			ew.mu.RUnlock()
 
@@ -814,10 +831,11 @@ func (ew *EventWriter) sendEvent(resID string) {
 	}()
 
 	logCtx := ew.log.WithFields(logrus.Fields{
-		"resource_id":  resID,
-		"event_id":     EventID(eventMsg.event),
-		"event_target": eventMsg.event.DataSchema(),
-		"event_type":   eventMsg.event.Type(),
+		"resource_id":       resID,
+		"event_id":          EventID(eventMsg.event),
+		"event_target":      eventMsg.event.DataSchema(),
+		"event_type":        eventMsg.event.Type(),
+		"event_writer_uuid": ew.eventWriterUUID,
 	})
 
 	// Check if it is time to resend the event.
@@ -841,6 +859,7 @@ func (ew *EventWriter) sendEvent(resID string) {
 		return
 	}
 
+	logCtx.Trace("pre-send")
 	// A Send() on the stream is actually not blocking.
 	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
 	if err != nil {

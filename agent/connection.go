@@ -167,7 +167,7 @@ func (a *Agent) handleStreamEvents() error {
 		return err
 	}
 
-	a.eventWriter = event.NewEventWriter(stream)
+	a.eventWriter = event.NewEventWriter(stream, a.namespace)
 	go a.eventWriter.SendWaitingEvents(a.context)
 
 	logCtx := log().WithFields(logrus.Fields{

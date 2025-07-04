@@ -50,7 +50,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should add/update/remove events from the queue", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter(fs, "")
 
 		ev := es.ApplicationEvent(Create, app1)
 		evSender.Add(ev)
@@ -90,7 +90,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle events from multiple resources", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter(fs, "")
 
 		app1Events := []EventType{Create, Update, Delete}
 		app2Events := []EventType{Create, Update, Update, Delete}
@@ -117,7 +117,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should send waiting events to the stream", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter(fs, "")
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
