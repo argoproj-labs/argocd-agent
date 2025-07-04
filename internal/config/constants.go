@@ -8,6 +8,10 @@ package config
 // configuration for the principal's Certificate Authority
 const SecretNamePrincipalCA = "argocd-agent-ca"
 
+// SecretNameAgentCA is the name of the secret containing the TLS
+// configuration for the agent's Certificate Authority
+const SecretNameAgentCA = "argocd-agent-ca"
+
 // SecretNamePrincipalTLS is the name of the secret containing the TLS
 // configuration for the principal's gRPC service.
 const SecretNamePrincipalTLS = "argocd-agent-principal-tls"
