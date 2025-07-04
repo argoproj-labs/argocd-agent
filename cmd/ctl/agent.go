@@ -443,7 +443,7 @@ func serverURL(address, agentName string) (string, error) {
 		}
 		addr := tok[0]
 		port := tok[1]
-		if len(validation.NameIsDNSLabel(addr, false)) > 0 {
+		if len(validation.NameIsDNSSubdomain(addr, false)) > 0 {
 			return "", fmt.Errorf("invalid address: %s", address)
 		}
 		if _, err := strconv.ParseUint(port, 10, 16); err != nil {
