@@ -796,7 +796,7 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 				for resID := range ew.latestEvents {
 					val := ew.latestEvents[resID]
 					resourceIDs = append(resourceIDs, resID)
-					ew.log.Infof("%d) resID: %s, event: %v", count, resID, val.event.String())
+					logCtx.Infof("%d) resID: %s, event: %v", count, resID, val.event.String())
 
 					count++
 				}
