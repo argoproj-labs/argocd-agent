@@ -74,7 +74,7 @@ func (suite *BaseSuite) TearDownTest() {
 	suite.Require().Nil(err)
 }
 
-func ensureDeletion(ctx context.Context, kclient KubeClient, app KubeObject) error {
+func EnsureDeletion(ctx context.Context, kclient KubeClient, app KubeObject) error {
 	err := kclient.Delete(ctx, app, metav1.DeleteOptions{})
 	if errors.IsNotFound(err) {
 		// application is already deleted
@@ -113,7 +113,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
-		err = ensureDeletion(ctx, principalClient, &app)
+		err = EnsureDeletion(ctx, principalClient, &app)
 		if err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
-		err = ensureDeletion(ctx, autonomousAgentClient, &app)
+		err = EnsureDeletion(ctx, autonomousAgentClient, &app)
 		if err != nil {
 			return err
 		}
@@ -139,7 +139,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
-		err = ensureDeletion(ctx, managedAgentClient, &app)
+		err = EnsureDeletion(ctx, managedAgentClient, &app)
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
-		err = ensureDeletion(ctx, principalClient, &app)
+		err = EnsureDeletion(ctx, principalClient, &app)
 		if err != nil {
 			return err
 		}
@@ -160,11 +160,11 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 	// Delete any left over namespaces
 	ns := corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "guestbook"}}
-	err = ensureDeletion(ctx, managedAgentClient, &ns)
+	err = EnsureDeletion(ctx, managedAgentClient, &ns)
 	if err != nil {
 		return err
 	}
-	err = ensureDeletion(ctx, autonomousAgentClient, &ns)
+	err = EnsureDeletion(ctx, autonomousAgentClient, &ns)
 	if err != nil {
 		return err
 	}

@@ -34,6 +34,7 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/stretchr/testify/suite"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -219,7 +220,237 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 
 }
 
+// func ensureApplicationExists(appOnAutonomous *v1alpha1.Application, suite *fixture.BaseSuite) {
+
+// 	err = suite.AutonomousAgentClient.Create(suite.Ctx, &appOnAutonomous, metav1.CreateOptions{})
+// 	requires.NoError(err)
+
+// 	argocdClient, sessionToken, closer, err := createArgoCDAPIClient(suite.Ctx, argoEndpoint, password)
+// 	requires.NoError(err)
+// 	defer closer.Close()
+
+// 	closer, appClient, err := argocdClient.NewApplicationClient()
+// 	requires.NoError(err)
+// 	defer closer.Close()
+
+// 	// Sync the app
+// 	appOnPrincipal := v1alpha1.Application{
+// 		ObjectMeta: metav1.ObjectMeta{
+// 			Name:      "my-app",
+// 			Namespace: "agent-autonomous",
+// 		},
+// 	}
+
+// 	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
+// 	err = argoClient.Login()
+// 	requires.NoError(err)
+
+// 	syncAppWithAutoResyncNew(&appOnPrincipal, argoClient, &suite.BaseSuite)
+
+// }
+
 func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
+	requires := suite.Require()
+
+	t := suite.T()
+
+	// Get the Argo server endpoint to use
+	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
+	requires.NoError(err)
+
+	// Read admin secret from principal's cluster
+	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
+	requires.NoError(err)
+
+	// Create an autonomous agent application in the principal's cluster
+	appOnAutonomous := v1alpha1.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-app",
+			Namespace: "argocd",
+		},
+		Spec: v1alpha1.ApplicationSpec{
+			Project: "default",
+			Source: &v1alpha1.ApplicationSource{
+				RepoURL:        "https://github.com/argoproj/argocd-example-apps",
+				TargetRevision: "HEAD",
+				Path:           "kustomize-guestbook",
+			},
+			Destination: v1alpha1.ApplicationDestination{
+				Server:    "https://kubernetes.default.svc",
+				Namespace: "guestbook",
+			},
+			SyncPolicy: &v1alpha1.SyncPolicy{
+				Automated: &v1alpha1.SyncPolicyAutomated{},
+				SyncOptions: v1alpha1.SyncOptions{
+					"CreateNamespace=true",
+				},
+			},
+		},
+	}
+
+	// err = suite.AutonomousAgentClient.Create(suite.Ctx, &appOnAutonomous, metav1.CreateOptions{})
+	// requires.NoError(err)
+
+	argocdClient, sessionToken, closer, err := createArgoCDAPIClient(suite.Ctx, argoEndpoint, password)
+	requires.NoError(err)
+	defer closer.Close()
+
+	closer, appClient, err := argocdClient.NewApplicationClient()
+	requires.NoError(err)
+	defer closer.Close()
+
+	// Sync the app
+	appOnPrincipal := v1alpha1.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-app",
+			Namespace: "agent-autonomous",
+		},
+	}
+
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
+	err = argoClient.Login()
+	requires.NoError(err)
+
+	ensureAppExistsAndIsSyncedAndHealthy(&appOnAutonomous /*argoClient,*/, suite.AutonomousAgentClient, &suite.BaseSuite)
+
+	// syncAppWithAutoResyncNew(&appOnPrincipal, argoClient, &suite.BaseSuite)
+
+	// syncAppWithAutoResync(&appOnPrincipal, appClient, &suite.BaseSuite)
+
+	cancellableContext, cancelFunc := context.WithCancel(suite.Ctx)
+	defer cancelFunc()
+
+	// Stream resource tree events for the application
+	resourceTreeURL := "https://" + argoEndpoint + "/api/v1/stream/applications/" + appOnPrincipal.Name + "/resource-tree?appNamespace=" + appOnPrincipal.Namespace
+
+	t.Log("beginning stream", time.Now())
+
+	// Wait for sucessful connection to event source
+	var msgChan chan string
+	requires.Eventually(func() bool {
+		var err error
+		msgChan, err = streamFromEventSourceNew(cancellableContext, resourceTreeURL, sessionToken, t)
+		if err != nil {
+			t.Logf("streamFromEventSource returned error: %v", err)
+			return false
+		}
+		return true
+
+	}, 5*time.Minute, 5*time.Second)
+
+	requires.NotNil(msgChan)
+
+	// Find pod of deployed Application, on autonomous cluster
+
+	var podList corev1.PodList
+	err = suite.AutonomousAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
+	requires.NoError(err)
+
+	requires.True(len(podList.Items) == 1, "should only be one kustomize-guestbook pod")
+
+	// Locate guestbook pod
+	var oldPod corev1.Pod
+	for idx := range podList.Items {
+		pod := podList.Items[idx]
+		if strings.Contains(pod.Name, "kustomize-guestbook-ui") {
+			oldPod = pod
+			break
+		}
+	}
+	requires.NotEmpty(oldPod.Name)
+
+	var tree *v1alpha1.ApplicationTree
+	requires.Eventually(func() bool {
+		var err error
+		// Ensure that the pod appears in the resource tree value returned by Argo CD server
+		tree, err = appClient.ResourceTree(suite.Ctx, &application.ResourcesQuery{
+			ApplicationName: &appOnPrincipal.Name,
+			AppNamespace:    &appOnPrincipal.Namespace,
+			Project:         &appOnPrincipal.Spec.Project,
+		})
+		if err != nil {
+			t.Log(err)
+			return false
+		}
+
+		return true
+
+	}, time.Second*60, time.Second*5)
+
+	requires.NotNil(tree)
+
+	matchFound := false
+	for _, node := range tree.Nodes {
+		if node.Kind == "Pod" && node.Name == oldPod.Name {
+			matchFound = true
+			break
+		}
+	}
+	requires.True(matchFound)
+
+	t.Log("deleting pod", time.Now())
+
+	// Delete pod on managed agent cluster
+	err = suite.AutonomousAgentClient.Delete(suite.Ctx, &oldPod, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// Wait for new pod to be created, to replace the old one that was deleted
+	var newPod corev1.Pod
+	requires.Eventually(func() bool {
+		var podList corev1.PodList
+		err = suite.AutonomousAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
+		requires.NoError(err)
+
+		for idx := range podList.Items {
+			pod := podList.Items[idx]
+			if strings.Contains(pod.Name, "kustomize-guestbook-ui") && newPod.Name != oldPod.Name {
+				newPod = pod
+				break
+			}
+		}
+
+		return newPod.Name != ""
+
+	}, time.Second*30, time.Second*5)
+
+	// Verify the name of the new pod exists in what has been sent on the subscribe channel
+
+	requires.Eventually(func() bool {
+		for {
+			// drain channel looking for name of new pod
+			select {
+			case msg := <-msgChan:
+				t.Log("Processing message:", msg)
+				if strings.Contains(msg, newPod.Name) {
+					t.Log("new pod name found:", newPod.Name)
+					return true
+				}
+			default:
+				return false
+			}
+		}
+	}, time.Second*30, time.Second*5)
+
+	// Ensure that the pod appears in the new resource tree value returned by Argo CD server
+	tree, err = appClient.ResourceTree(suite.Ctx, &application.ResourcesQuery{
+		ApplicationName: &appOnPrincipal.Name,
+		AppNamespace:    &appOnPrincipal.Namespace,
+		Project:         &appOnPrincipal.Spec.Project,
+	})
+	requires.NoError(err)
+	requires.NotNil(tree)
+
+	matchFound = false
+	for _, node := range tree.Nodes {
+		if node.Kind == "Pod" && node.Name == newPod.Name {
+			matchFound = true
+			break
+		}
+	}
+	requires.True(matchFound)
+}
+
+func (suite *RedisProxyTestSuite) OldTest_RedisProxy_AutonomousAgent_Argo() {
 	requires := suite.Require()
 
 	t := suite.T()
@@ -416,6 +647,86 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 		}
 	}
 	requires.True(matchFound)
+}
+
+func ensureAppExistsAndIsSyncedAndHealthy(appParam *v1alpha1.Application /*argoClient *fixture.ArgoRestClient,*/, k8sClient fixture.KubeClient, suite *fixture.BaseSuite) error {
+
+	overallExpireTime := time.Now().Add(time.Minute * 5)
+
+	count := 0
+outer:
+	for {
+		count++
+
+		if count > 1 {
+			time.Sleep(5 * time.Second)
+		}
+
+		if time.Now().After(overallExpireTime) {
+			return fmt.Errorf("ensureSyncedAndHealthyApp expired")
+		}
+
+		appForGet := v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      appParam.Name,
+				Namespace: appParam.Namespace,
+			},
+		}
+
+		err := k8sClient.Get(suite.Ctx, types.NamespacedName{Namespace: appForGet.Namespace, Name: appForGet.Name}, &appForGet, metav1.GetOptions{})
+		if err == nil {
+			// It exists, so needs to be deleted
+			suite.T().Logf("Deleting: %s", appForGet.Name)
+			if err := fixture.EnsureDeletion(suite.Ctx, k8sClient, &appForGet); err != nil {
+				suite.T().Logf("unable to delete: %s %v", appForGet.Name, err)
+				continue
+			} else {
+				// delete succeeded, so continue
+			}
+		} else {
+			if !apierrors.IsNotFound(err) {
+				suite.T().Logf("unexpected error when deleting: %s %v", appForGet.Name, err)
+			} else {
+				// error is a not found error, which is xpected
+			}
+		}
+
+		appFromCreate := appParam.DeepCopy()
+		suite.T().Logf("Creating: %s", appFromCreate.Name)
+		err = k8sClient.Create(suite.Ctx, appFromCreate, metav1.CreateOptions{})
+		if err != nil {
+			suite.T().Logf("unexpected error when creating: %s %v", appFromCreate.Name, err)
+			continue
+		}
+
+		singleRoundExpireTime := time.Now().Add(time.Minute * 1)
+		for {
+
+			err := k8sClient.Get(suite.Ctx, types.NamespacedName{Namespace: appFromCreate.Namespace, Name: appFromCreate.Name}, appFromCreate, metav1.GetOptions{})
+			if err != nil {
+				suite.T().Logf("unexpected error when getting after creation %s %v", appFromCreate.Name, err)
+				continue
+			}
+
+			if appFromCreate.Status.Health.Status == health.HealthStatusHealthy && appFromCreate.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced {
+				suite.T().Logf("success: application is synched/healthy: %s", appFromCreate.Name)
+				// success
+				return nil
+			} else {
+				suite.T().Logf("waiting for application to be synched/healthy: %s %s/%s", appFromCreate.Name, appFromCreate.Status.Health.Status, appFromCreate.Status.Sync.Status)
+			}
+
+			if time.Now().After(singleRoundExpireTime) {
+				suite.T().Logf("application never became synched/healthy, so restarting: %s", appFromCreate.Name)
+				continue outer
+			}
+
+			time.Sleep(time.Second * 5)
+
+		}
+
+	}
+
 }
 
 func syncAppWithAutoResyncNew(appParam *v1alpha1.Application, argoClient *fixture.ArgoRestClient, suite *fixture.BaseSuite) {
