@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -42,6 +43,7 @@ import (
 	"gopkg.in/yaml.v3"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -434,7 +436,19 @@ func clusterSecretName(agentName string) string {
 func serverURL(address, agentName string) (string, error) {
 	_, err := netip.ParseAddrPort(address)
 	if err != nil {
-		return "", err
+		// We now have a host:port address, so we need to validate the host
+		tok := strings.SplitN(address, ":", 2)
+		if len(tok) != 2 {
+			return "", fmt.Errorf("invalid address: %s", address)
+		}
+		addr := tok[0]
+		port := tok[1]
+		if len(validation.NameIsDNSSubdomain(addr, false)) > 0 {
+			return "", fmt.Errorf("invalid address: %s", address)
+		}
+		if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+			return "", fmt.Errorf("invalid port: %s", port)
+		}
 	}
 	if !session.IsValidClientID(agentName) {
 		return "", fmt.Errorf("invalid agent name")
