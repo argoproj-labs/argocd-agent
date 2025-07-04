@@ -784,7 +784,7 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			ew.log.Info("Shutting down event writer")
+			logCtx.Info("Shutting down event writer")
 			return
 		default:
 			ew.mu.RLock()
@@ -804,21 +804,33 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 			}
 			ew.mu.RUnlock()
 
+			logCtx.Trace("pre-send-all-events")
 			for _, resourceID := range resourceIDs {
 				ew.sendEvent(resourceID)
 			}
+			logCtx.Trace("post-send-all-events")
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
 func (ew *EventWriter) sendEvent(resID string) {
+	logCtx := ew.log.WithFields(logrus.Fields{
+		"resource_id":       resID,
+		"event_writer_uuid": ew.eventWriterUUID,
+	})
+
 	// Check if the event is already ACK'd.
 	eventMsg := ew.Get(resID)
 	if eventMsg == nil {
-		ew.log.WithField("resource_id", resID).Trace("event is not found, perhaps it is already ACK'd")
+		logCtx.WithField("resource_id", resID).Trace("event is not found, perhaps it is already ACK'd")
 		return
 	}
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"event_id":     EventID(eventMsg.event),
+		"event_target": eventMsg.event.DataSchema(),
+		"event_type":   eventMsg.event.Type()})
 
 	isACKRemoved := false
 
@@ -828,15 +840,8 @@ func (ew *EventWriter) sendEvent(resID string) {
 		if !isACKRemoved {
 			eventMsg.mu.Unlock()
 		}
+		logCtx.Trace("sendEvent exited")
 	}()
-
-	logCtx := ew.log.WithFields(logrus.Fields{
-		"resource_id":       resID,
-		"event_id":          EventID(eventMsg.event),
-		"event_target":      eventMsg.event.DataSchema(),
-		"event_type":        eventMsg.event.Type(),
-		"event_writer_uuid": ew.eventWriterUUID,
-	})
 
 	// Check if it is time to resend the event.
 	if eventMsg.retryAfter != nil {
