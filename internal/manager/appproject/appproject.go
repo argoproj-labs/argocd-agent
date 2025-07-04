@@ -35,9 +35,14 @@ import (
 type updateTransformer func(existing, incoming *v1alpha1.AppProject)
 type patchTransformer func(existing, incoming *v1alpha1.AppProject) (jsondiff.Patch, error)
 
-// LastUpdatedAnnotation is a label put on AppProject which contains the time
-// when an update was last received for this AppProject
-const LastUpdatedAnnotation = "argocd-agent.argoproj.io/last-updated"
+const (
+	// LastUpdatedAnnotation is a label put on AppProject which contains the time
+	// when an update was last received for this AppProject
+	LastUpdatedAnnotation = "argocd-agent.argoproj.io/last-updated"
+
+	// DefaultAppProjectName is the name of the default AppProject
+	DefaultAppProjectName = "default"
+)
 
 // AppProjectManager manages Argo CD AppProject resources on a given backend.
 //
@@ -192,8 +197,6 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 	var updated *v1alpha1.AppProject
 	var err error
 
-	incoming.SetNamespace(m.namespace)
-
 	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.AppProject) {
 		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
 			if incoming.Annotations == nil {
@@ -301,7 +304,7 @@ func (m *AppProjectManager) update(ctx context.Context, upsert bool, incoming *v
 // principal, any existing finalizers will be removed before deletion is
 // attempted.
 // 'deletionPropagation' follows the corresponding K8s behaviour, defaulting to Foreground if nil.
-func (m *AppProjectManager) Delete(ctx context.Context, namespace string, incoming *v1alpha1.AppProject, deletionPropagation *backend.DeletionPropagation) error {
+func (m *AppProjectManager) Delete(ctx context.Context, incoming *v1alpha1.AppProject, deletionPropagation *backend.DeletionPropagation) error {
 	removeFinalizer := false
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "DeleteOperation",
@@ -310,7 +313,6 @@ func (m *AppProjectManager) Delete(ctx context.Context, namespace string, incomi
 	})
 	if m.role.IsPrincipal() {
 		removeFinalizer = true
-		incoming.SetNamespace(namespace)
 	}
 	var err error
 	var updated *v1alpha1.AppProject

@@ -212,10 +212,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
 		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("").List(ctx, opts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, opts)
 		}),
 		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("").Watch(ctx, opts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, opts)
 		}),
 		informer.WithAddHandler[*v1alpha1.AppProject](s.newAppProjectCallback),
 		informer.WithUpdateHandler[*v1alpha1.AppProject](s.updateAppProjectCallback),

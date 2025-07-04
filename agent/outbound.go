@@ -19,6 +19,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -149,4 +150,116 @@ func (a *Agent) deleteNamespaceCallback(outbound *corev1.Namespace) {
 	}
 
 	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
+}
+
+// addAppProjectCreationToQueue processes a new appProject event originating from the
+// AppProject Informer and puts it in the send queue.
+func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
+	logCtx := log().WithFields(logrus.Fields{
+		"event":      "NewAppProject",
+		"appProject": appProject.Name,
+		"sendq_name": defaultQueueName,
+	})
+
+	logCtx.Debugf("New appProject event")
+
+	a.resources.Add(resources.NewResourceKeyFromAppProject(appProject))
+
+	// Only send the creation event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
+		return
+	}
+
+	// Update events trigger a new event sometimes, too. If we've already seen
+	// the appProject, we just ignore the request then.
+	if a.projectManager.IsManaged(appProject.Name) {
+		logCtx.Error("Cannot manage appProject that is already managed")
+		return
+	}
+
+	if err := a.projectManager.Manage(appProject.Name); err != nil {
+		logCtx.Errorf("Could not manage appProject: %v", err)
+		return
+	}
+
+	q := a.queues.SendQ(defaultQueueName)
+	if q == nil {
+		logCtx.Error("Default queue disappeared!")
+		return
+	}
+
+	q.Add(a.emitter.AppProjectEvent(event.Create, appProject))
+	logCtx.WithField("sendq_len", q.Len()).Debugf("Added appProject create event to send queue")
+}
+
+// addAppProjectUpdateToQueue processes an appProject update event originating from the
+// AppProject Informer and puts it in the send queue.
+func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alpha1.AppProject) {
+	logCtx := log().WithFields(logrus.Fields{
+		"event":      "UpdateAppProject",
+		"appProject": new.Name,
+		"sendq_name": defaultQueueName,
+	})
+
+	// Only send the update event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
+		return
+	}
+
+	a.watchLock.Lock()
+	defer a.watchLock.Unlock()
+
+	if a.projectManager.IsChangeIgnored(new.Name, new.ResourceVersion) {
+		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
+		return
+	}
+
+	// If the appProject is not managed, we ignore this event.
+	if !a.projectManager.IsManaged(new.Name) {
+		logCtx.Errorf("Received update event for unmanaged appProject")
+		return
+	}
+
+	q := a.queues.SendQ(defaultQueueName)
+	if q == nil {
+		logCtx.Error("Default queue disappeared!")
+		return
+	}
+
+	q.Add(a.emitter.AppProjectEvent(event.SpecUpdate, new))
+	logCtx.WithField("sendq_len", q.Len()).Debugf("Added appProject spec update event to send queue")
+}
+
+// addAppProjectDeletionToQueue processes an appProject delete event originating from the
+// AppProject Informer and puts it in the send queue.
+func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
+	logCtx := log().WithFields(logrus.Fields{
+		"event":      "DeleteAppProject",
+		"appProject": appProject.Name,
+		"sendq_name": defaultQueueName,
+	})
+
+	logCtx.Debugf("Delete appProject event")
+
+	a.resources.Remove(resources.NewResourceKeyFromAppProject(appProject))
+
+	// Only send the deletion event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
+		return
+	}
+
+	if !a.projectManager.IsManaged(appProject.Name) {
+		logCtx.Warn("AppProject is not managed, proceeding anyways")
+	} else {
+		_ = a.projectManager.Unmanage(appProject.Name)
+	}
+
+	q := a.queues.SendQ(defaultQueueName)
+	if q == nil {
+		logCtx.Error("Default queue disappeared!")
+		return
+	}
+
+	q.Add(a.emitter.AppProjectEvent(event.Delete, appProject))
+	logCtx.WithField("sendq_len", q.Len()).Debugf("Added appProject delete event to send queue")
 }

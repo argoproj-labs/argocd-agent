@@ -179,8 +179,6 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		application.WithMode(managerMode),
 	}
 
-	var projInformerOptions []informer.InformerOption[*v1alpha1.AppProject]
-
 	if a.options.metricsPort > 0 {
 		a.metrics = metrics.NewAgentMetrics()
 	}
@@ -199,12 +197,17 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).List(ctx, opts)
 	}
 
-	projInformerOptions = append(projInformerOptions, informer.WithListHandler[*v1alpha1.AppProject](projListFunc))
-
 	projWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).Watch(ctx, opts)
 	}
-	projInformerOptions = append(projInformerOptions, informer.WithWatchHandler[*v1alpha1.AppProject](projWatchFunc))
+
+	projInformerOptions := []informer.InformerOption[*v1alpha1.AppProject]{
+		informer.WithListHandler[*v1alpha1.AppProject](projListFunc),
+		informer.WithWatchHandler[*v1alpha1.AppProject](projWatchFunc),
+		informer.WithAddHandler[*v1alpha1.AppProject](a.addAppProjectCreationToQueue),
+		informer.WithUpdateHandler[*v1alpha1.AppProject](a.addAppProjectUpdateToQueue),
+		informer.WithDeleteHandler[*v1alpha1.AppProject](a.addAppProjectDeletionToQueue),
+	}
 
 	projInformer, err := informer.NewInformer(ctx, projInformerOptions...)
 	if err != nil {
