@@ -318,7 +318,7 @@ func (evs EventSource) NewRedisRequestEvent(connectionUUID string, body RedisCom
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(RedisGenericRequest.String())
 	cev.SetDataSchema(TargetRedis.String())
-	// cev.SetExtension(resourceID, reqUUID)
+	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
 	err := cev.SetData(cloudevents.ApplicationJSON, rr)
 	return &cev, err
@@ -718,6 +718,11 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 		Duration: 5 * time.Second,
 		Factor:   2.0,
 		Jitter:   0.1,
+	}
+
+	if resID == "" {
+		logCtx.Error("resID was empty")
+		return
 	}
 
 	eventMsg, exists := ew.latestEvents[resID]
