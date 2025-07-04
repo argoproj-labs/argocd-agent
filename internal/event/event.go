@@ -774,8 +774,16 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 		default:
 			ew.mu.RLock()
 			resourceIDs := make([]string, 0, len(ew.latestEvents))
+			count := 1
+
+			ew.log.Info("JGW SendWaitingEvent currently in queue:")
+
 			for resID := range ew.latestEvents {
+				val := ew.latestEvents[resID]
 				resourceIDs = append(resourceIDs, resID)
+				ew.log.Infof("%d) resID: %s, event: %v", count, resID, val.event.String())
+
+				count++
 			}
 			ew.mu.RUnlock()
 
