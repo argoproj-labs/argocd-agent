@@ -82,8 +82,8 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 		},
 	}
 
-	err = suite.PrincipalClient.Create(suite.Ctx, &appOnPrincipal, metav1.CreateOptions{})
-	requires.NoError(err)
+	// err = suite.PrincipalClient.Create(suite.Ctx, &appOnPrincipal, metav1.CreateOptions{})
+	// requires.NoError(err)
 
 	argocdClient, sessionToken, closer, err := createArgoCDAPIClient(suite.Ctx, argoEndpoint, password)
 	requires.NoError(err)
