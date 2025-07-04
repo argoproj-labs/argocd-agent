@@ -157,7 +157,7 @@ func Test_Serve(t *testing.T) {
 	errch := make(chan error)
 
 	err = s.Start(context.Background(), errch)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Create and register authentication method
 	up := userPass(t, "hello", "world")

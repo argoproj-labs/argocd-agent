@@ -58,6 +58,8 @@ const (
 	EventProcessed             EventType = TypePrefix + ".processed"
 	GetRequest                 EventType = TypePrefix + ".get"
 	GetResponse                EventType = TypePrefix + ".response"
+	RedisGenericRequest        EventType = TypePrefix + ".redis-request"
+	RedisGenericResponse       EventType = TypePrefix + ".redis-response"
 	SyncedResourceList         EventType = TypePrefix + ".request-synced-resource-list"
 	ResponseSyncedResource     EventType = TypePrefix + ".response-synced-resource"
 	EventRequestUpdate         EventType = TypePrefix + ".request-update"
@@ -70,6 +72,7 @@ const (
 	TargetAppProject     EventTarget = "appproject"
 	TargetEventAck       EventTarget = "eventProcessed"
 	TargetResource       EventTarget = "resource"
+	TargetRedis          EventTarget = "redis"
 	TargetResourceResync EventTarget = "resourceResync"
 )
 
@@ -171,6 +174,59 @@ func (evs EventSource) AppProjectEvent(evType EventType, appProject *v1alpha1.Ap
 	return &cev
 }
 
+type RedisRequest struct {
+	UUID           string           `json:"uuid"`
+	ConnectionUUID string           `json:"connectionUuid"`
+	Body           RedisCommandBody `json:"body"`
+}
+
+type RedisCommandBody struct {
+	Get       *RedisCommandBodyGet       `json:"get,omitempty"`
+	Subscribe *RedisCommandBodySubscribe `json:"subscribe,omitempty"`
+	Ping      *RedisCommandBodyPing      `json:"ping,omitempty"`
+}
+
+type RedisCommandBodyGet struct {
+	Key string `json:"key"`
+}
+
+type RedisCommandBodySubscribe struct {
+	ChannelName string `json:"channel"`
+}
+
+type RedisCommandBodyPing struct {
+}
+
+type RedisResponse struct {
+	UUID           string            `json:"uuid"`
+	ConnectionUUID string            `json:"connectionUuid"`
+	Body           RedisResponseBody `json:"body"`
+}
+
+type RedisResponseBody struct {
+	Get               *RedisResponseBodyGet               `json:"get,omitempty"`
+	SubscribeResponse *RedisResponseBodySubscribeResponse `json:"subscribeResponse,omitempty"`
+	PushFromSubscribe *RedisResponseBodyPushFromSubscribe `json:"pushFromSubscribe,omitempty"`
+	Pong              *RedisResponseBodyPong              `json:"pong,omitempty"`
+}
+
+type RedisResponseBodySubscribeResponse struct {
+	Error string `json:"error"`
+}
+
+type RedisResponseBodyGet struct {
+	Bytes    []byte `json:"bytes"`
+	CacheHit bool   `json:"cacheHit"`
+	Error    string `json:"error"`
+}
+
+type RedisResponseBodyPushFromSubscribe struct {
+	ChannelName string `json:"channelName"`
+}
+
+type RedisResponseBodyPong struct {
+}
+
 // ResourceRequest is an event that holds a request for a resource. It is
 // usually emitted from the resource proxy, and is sent from the principal
 // to an agent.
@@ -248,6 +304,43 @@ func HTTPStatusFromError(err error) int {
 		}
 	}
 	return http.StatusOK
+}
+
+func (evs EventSource) NewRedisRequestEvent(connectionUUID string, body RedisCommandBody) (*cloudevents.Event, error) {
+	reqUUID := uuid.NewString()
+	rr := &RedisRequest{
+		UUID:           reqUUID,
+		ConnectionUUID: connectionUUID,
+		Body:           body,
+	}
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(RedisGenericRequest.String())
+	cev.SetDataSchema(TargetRedis.String())
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetExtension(eventID, reqUUID)
+	err := cev.SetData(cloudevents.ApplicationJSON, rr)
+	return &cev, err
+}
+
+func (evs EventSource) NewRedisResponseEvent(reqUUID string, connectionUUID string, body RedisResponseBody) *cloudevents.Event {
+	resUUID := uuid.NewString()
+	rr := &RedisResponse{
+		UUID:           reqUUID,
+		ConnectionUUID: connectionUUID,
+		Body:           body,
+	}
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(RedisGenericResponse.String())
+	cev.SetDataSchema(TargetRedis.String())
+	cev.SetExtension(resourceID, resUUID)
+	// eventid must be set to the requested resource's uuid
+	cev.SetExtension(eventID, reqUUID)
+	_ = cev.SetData(cloudevents.ApplicationJSON, rr)
+	return &cev
 }
 
 // NewResourceRequestEvent creates a cloud event for requesting a resource from
@@ -438,7 +531,7 @@ func FromWire(pev *pb.CloudEvent) (*Event, error) {
 	ev := &Event{}
 	var target EventTarget
 	if ev.target = Target(raw); ev.target == "" {
-		return nil, fmt.Errorf("unknown event target: %s", target)
+		return nil, fmt.Errorf("unknown event target FromWire: %s / %v", target, *raw)
 	}
 	ev.event = raw
 	return ev, nil
@@ -456,6 +549,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetEventAck
 	case TargetResourceResync.String():
 		return TargetResourceResync
+	case TargetRedis.String():
+		return TargetRedis
 	}
 	return ""
 }
@@ -504,6 +599,13 @@ func (ev Event) AppProject() (*v1alpha1.AppProject, error) {
 	proj := &v1alpha1.AppProject{}
 	err := ev.event.DataAs(proj)
 	return proj, err
+}
+
+// ResourceRequest gets the resource request payload from an event
+func (ev Event) RedisRequest() (*RedisRequest, error) {
+	req := &RedisRequest{}
+	err := ev.event.DataAs(req)
+	return req, err
 }
 
 // ResourceRequest gets the resource request payload from an event
@@ -563,6 +665,8 @@ type EventWriter struct {
 	target streamWriter
 
 	log *logrus.Entry
+
+	eventWriterUUID string
 }
 
 type eventMessage struct {
@@ -579,7 +683,7 @@ type eventMessage struct {
 	backoff *wait.Backoff
 }
 
-func NewEventWriter(target streamWriter) *EventWriter {
+func NewEventWriter(target streamWriter, name string) *EventWriter {
 	return &EventWriter{
 		latestEvents: map[string]*eventMessage{},
 		target:       target,
@@ -587,6 +691,7 @@ func NewEventWriter(target streamWriter) *EventWriter {
 			"module":      "EventWriter",
 			"client_addr": grpcutil.AddressFromContext(target.Context()),
 		}),
+		eventWriterUUID: uuid.NewString() + "-" + name,
 	}
 }
 
@@ -599,9 +704,10 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	resID := ResourceID(ev)
 	logCtx := ew.log.WithFields(logrus.Fields{
-		"resource_id": ResourceID(ev),
-		"event_id":    EventID(ev),
-		"type":        ev.Type(),
+		"resource_id":       ResourceID(ev),
+		"event_id":          EventID(ev),
+		"type":              ev.Type(),
+		"event_writer_uuid": ew.eventWriterUUID,
 	})
 
 	ew.mu.Lock()
@@ -612,6 +718,11 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 		Duration: 5 * time.Second,
 		Factor:   2.0,
 		Jitter:   0.1,
+	}
+
+	if resID == "" {
+		logCtx.Error("resID was empty")
+		return
 	}
 
 	eventMsg, exists := ew.latestEvents[resID]
@@ -640,6 +751,10 @@ func (ew *EventWriter) Get(resID string) *eventMessage {
 }
 
 func (ew *EventWriter) Remove(ev *cloudevents.Event) {
+	logCtx := ew.log.WithFields(logrus.Fields{
+		"event_writer_uuid": ew.eventWriterUUID,
+	})
+
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
 
@@ -656,6 +771,8 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 
 	if latestEventID == EventID(ev) {
 		delete(ew.latestEvents, resourceID)
+
+		logCtx.Tracef("removed event with id: %s", resourceID)
 	}
 }
 
@@ -663,35 +780,62 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 // Note: This function will never return unless the context is done, and therefore
 // should be started in a separate goroutine.
 func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
-	ew.log.Info("Starting event writer")
+
+	logCtx := ew.log.WithFields(logrus.Fields{
+		"event_writer_uuid": ew.eventWriterUUID,
+	})
+
+	logCtx.Info("Starting event writer")
 	for {
 		select {
 		case <-ctx.Done():
-			ew.log.Info("Shutting down event writer")
+			logCtx.Info("Shutting down event writer")
 			return
 		default:
 			ew.mu.RLock()
 			resourceIDs := make([]string, 0, len(ew.latestEvents))
-			for resID := range ew.latestEvents {
-				resourceIDs = append(resourceIDs, resID)
+			if len(ew.latestEvents) > 0 {
+				count := 1
+				logCtx.Info("JGW SendWaitingEvent currently in queue:")
+
+				for resID := range ew.latestEvents {
+					val := ew.latestEvents[resID]
+					resourceIDs = append(resourceIDs, resID)
+					logCtx.Infof("%d) resID: %s, event: %v", count, resID, val.event.String())
+
+					count++
+				}
+
 			}
 			ew.mu.RUnlock()
 
+			logCtx.Trace("pre-send-all-events")
 			for _, resourceID := range resourceIDs {
 				ew.sendEvent(resourceID)
 			}
+			logCtx.Trace("post-send-all-events")
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
 func (ew *EventWriter) sendEvent(resID string) {
+	logCtx := ew.log.WithFields(logrus.Fields{
+		"resource_id":       resID,
+		"event_writer_uuid": ew.eventWriterUUID,
+	})
+
 	// Check if the event is already ACK'd.
 	eventMsg := ew.Get(resID)
 	if eventMsg == nil {
-		ew.log.WithField("resource_id", resID).Trace("event is not found, perhaps it is already ACK'd")
+		logCtx.WithField("resource_id", resID).Trace("event is not found, perhaps it is already ACK'd")
 		return
 	}
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"event_id":     EventID(eventMsg.event),
+		"event_target": eventMsg.event.DataSchema(),
+		"event_type":   eventMsg.event.Type()})
 
 	isACKRemoved := false
 
@@ -701,14 +845,8 @@ func (ew *EventWriter) sendEvent(resID string) {
 		if !isACKRemoved {
 			eventMsg.mu.Unlock()
 		}
+		logCtx.Trace("sendEvent exited")
 	}()
-
-	logCtx := ew.log.WithFields(logrus.Fields{
-		"resource_id":  resID,
-		"event_id":     EventID(eventMsg.event),
-		"event_target": eventMsg.event.DataSchema(),
-		"event_type":   eventMsg.event.Type(),
-	})
 
 	// Check if it is time to resend the event.
 	if eventMsg.retryAfter != nil {
@@ -731,6 +869,7 @@ func (ew *EventWriter) sendEvent(resID string) {
 		return
 	}
 
+	logCtx.Trace("pre-send")
 	// A Send() on the stream is actually not blocking.
 	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
 	if err != nil {

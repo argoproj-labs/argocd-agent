@@ -71,3 +71,24 @@ func WithHealthzPort(port int) AgentOption {
 		}
 	}
 }
+
+func WithRedisHost(host string) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisAddress = host
+		return nil
+	}
+}
+
+func WithRedisUsername(username string) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisUsername = username
+		return nil
+	}
+}
+
+func WithRedisPassword(password string) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisPassword = password
+		return nil
+	}
+}

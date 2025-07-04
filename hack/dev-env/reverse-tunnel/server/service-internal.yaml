@@ -8,5 +8,11 @@ spec:
     port: 9090
     targetPort: 9090
     protocol: TCP
+
+  - name: "6379"
+    port: 6379
+    targetPort: 6379
+    protocol: TCP
+
   selector:
     app: rathole-container
