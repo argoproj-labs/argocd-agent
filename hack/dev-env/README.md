@@ -174,10 +174,24 @@ Keep in mind that you manage the autonomous application from the vcluster-agent-
 
 ### Resetting Dev Environment
 
-If you want to reset the development environment, you can run the following command:
+If you want to reset the development environment, you have two options:
+
+Option 1: Reset MicroK8s cluster
+
+This is the most straightforward way to reset the development environment, but it will remove all data in your MicroK8s cluster.
 
 ```shell
 sudo microk8s reset
+```
+
+Option 2: Remove vclusters
+
+This option allows you to delete the vclusters without needing to wait for the MicroK8s reset to complete. This will remove the vclusters and their associated resources, but it will not remove any other resources in your MicroK8s cluster.
+
+```shell
+vcluster delete vcluster-control-plane
+vcluster delete vcluster-agent-managed
+vcluster delete vcluster-agent-autonomous
 ```
 
 ### Starting a debug session from vscode
