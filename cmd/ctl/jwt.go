@@ -216,7 +216,7 @@ func NewJWTDeleteKeyCommand() *cobra.Command {
 			if !force {
 				fmt.Print("Are you sure you want to delete the JWT signing key? [y/N]: ")
 				var response string
-				fmt.Scanln(&response)
+				_, _ = fmt.Scanln(&response)
 				if response != "y" && response != "Y" {
 					fmt.Println("Aborted.")
 					return
