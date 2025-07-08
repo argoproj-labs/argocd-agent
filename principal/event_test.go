@@ -16,6 +16,7 @@ package principal
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,6 +145,7 @@ func Test_CreateEvents(t *testing.T) {
 				Namespace: "argocd",
 			},
 			Spec: v1alpha1.ApplicationSpec{
+				Project: "test",
 				Source: &v1alpha1.ApplicationSource{
 					RepoURL:        "foo",
 					Path:           ".",
@@ -179,6 +181,9 @@ func Test_CreateEvents(t *testing.T) {
 		assert.Equal(t, "HEAD", napp.Spec.Source.TargetRevision)
 		assert.Nil(t, napp.Operation)
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, napp.Status.Sync.Status)
+		prefixedName, err := agentPrefixedProjectName(app.Spec.Project, "foo")
+		assert.Nil(t, err)
+		assert.Equal(t, prefixedName, napp.Spec.Project)
 		ns, err := fac.Clientset.CoreV1().Namespaces().Get(context.TODO(), "foo", v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.NotNil(t, ns)
@@ -233,6 +238,7 @@ func Test_UpdateEvents(t *testing.T) {
 				Namespace: "argocd",
 			},
 			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
 				Source: &v1alpha1.ApplicationSource{
 					RepoURL:        "foo",
 					Path:           ".",
@@ -288,6 +294,7 @@ func Test_UpdateEvents(t *testing.T) {
 		require.NotNil(t, napp)
 		assert.Equal(t, "HEAD", napp.Spec.Source.TargetRevision)
 		assert.Nil(t, napp.Operation)
+		assert.Equal(t, "default", napp.Spec.Project)
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, napp.Status.Sync.Status)
 	})
 
@@ -385,7 +392,84 @@ func Test_processAppProjectEvent(t *testing.T) {
 		assert.ErrorIs(t, err, event.ErrEventDiscarded)
 	})
 
-	t.Run("Delete AppProject", func(t *testing.T) {
+	t.Run("Create appProject in autonomous mode", func(t *testing.T) {
+		project := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceRepos: []string{"foo"},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps()
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("appproject")
+		ev.SetType(event.Create.String())
+		ev.SetData(cloudevents.ApplicationJSON, project)
+
+		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq.On("Get").Return(&ev, false)
+		wq.On("Done", &ev)
+
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		require.NoError(t, err)
+		s.setAgentMode("foo", types.AgentModeAutonomous)
+
+		_, err = s.processRecvQueue(context.Background(), "foo", wq)
+		assert.NoError(t, err)
+
+		projName, err := agentPrefixedProjectName(project.Name, "foo")
+		assert.Nil(t, err)
+
+		// Check that the AppProject was created with the prefixed name
+		createdProject, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), projName, v1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, projName, createdProject.Name)
+	})
+
+	t.Run("Update appProject in autonomous mode", func(t *testing.T) {
+		project := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foo-test",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceRepos: []string{"foo"},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps(project)
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("appproject")
+		ev.SetType(event.SpecUpdate.String())
+
+		updatedProject := project.DeepCopy()
+		updatedProject.Spec.Description = "updated"
+		ev.SetData(cloudevents.ApplicationJSON, updatedProject)
+
+		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq.On("Get").Return(&ev, false)
+		wq.On("Done", &ev)
+
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		require.NoError(t, err)
+		s.setAgentMode("foo", types.AgentModeAutonomous)
+
+		_, err = s.processRecvQueue(context.Background(), "foo", wq)
+		assert.NoError(t, err)
+
+		projName, err := agentPrefixedProjectName(project.Name, "foo")
+		assert.Nil(t, err)
+
+		// Check that the AppProject was created with the prefixed name
+		got, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), projName, v1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, updatedProject.Spec.Description, got.Spec.Description)
+	})
+
+	t.Run("Delete AppProject in managed mode", func(t *testing.T) {
 		upApp := &v1alpha1.AppProject{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test",
@@ -576,5 +660,23 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		expected := "principal can only handle ResourceResync request in autonomous mode"
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 		assert.Equal(t, expected, err.Error())
+	})
+}
+
+func Test_agentPrefixedProjectName(t *testing.T) {
+	t.Run("Normal project name", func(t *testing.T) {
+		result, err := agentPrefixedProjectName("myproject", "myagent")
+		assert.Nil(t, err)
+		assert.Equal(t, "myagent-myproject", result)
+	})
+
+	t.Run("Return an error if the name exceeds DNS1123 limit", func(t *testing.T) {
+		// Create a project name that when combined with agent name exceeds 253 characters
+		longProjectName := strings.Repeat("test", 245)
+		agentName := "my-agent"
+
+		result, err := agentPrefixedProjectName(longProjectName, agentName)
+		assert.ErrorContains(t, err, "agent prefixed project name cannot be longer than 253 characters")
+		assert.Empty(t, result)
 	})
 }

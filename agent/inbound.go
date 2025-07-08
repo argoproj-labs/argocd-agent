@@ -439,10 +439,9 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 // createAppProject creates an AppProject upon an event in the agent's work
 // queue.
 func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
-	incoming.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
-		"method": "CreateAppProject",
-		"app":    incoming.Name,
+		"method":     "CreateAppProject",
+		"appProject": incoming.Name,
 	})
 
 	// In modes other than "managed", we don't process new AppProject events
@@ -455,8 +454,8 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	// If we receive a new AppProject event for an AppProject we already manage, it usually
 	// means that we're out-of-sync from the control plane.
 	if a.projectManager.IsManaged(incoming.Name) {
-		logCtx.Trace("Discarding this event, because AppProject is already managed on this agent")
-		return nil, event.NewEventDiscardedErr("appproject %s is already managed", incoming.Name)
+		logCtx.Trace("AppProject is already managed on this agent. Updating the existing AppProject")
+		return a.updateAppProject(incoming)
 	}
 
 	logCtx.Infof("Creating a new AppProject on behalf of an incoming event")
@@ -475,13 +474,16 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 }
 
 func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
-	//
-	incoming.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
 		"method":          "UpdateAppProject",
-		"app":             incoming.Name,
+		"appProject":      incoming.Name,
 		"resourceVersion": incoming.ResourceVersion,
 	})
+
+	if !a.projectManager.IsManaged(incoming.Name) {
+		logCtx.Trace("AppProject is not managed on this agent. Creating the new AppProject")
+		return a.createAppProject(incoming)
+	}
 
 	if a.projectManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
 		logCtx.Tracef("Discarding this event, because agent has seen this version %s already", incoming.ResourceVersion)
@@ -498,10 +500,9 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 }
 
 func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
-	project.SetNamespace(a.namespace)
 	logCtx := log().WithFields(logrus.Fields{
-		"method": "DeleteAppProject",
-		"app":    project.Name,
+		"method":     "DeleteAppProject",
+		"appProject": project.Name,
 	})
 
 	// If we receive an update appproject event for an AppProject we don't know about yet it
@@ -515,7 +516,7 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 	logCtx.Infof("Deleting appProject")
 
 	deletionPropagation := backend.DeletePropagationBackground
-	err := a.projectManager.Delete(a.context, a.namespace, project, &deletionPropagation)
+	err := a.projectManager.Delete(a.context, project, &deletionPropagation)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("appProject not found, perhaps it is already deleted")

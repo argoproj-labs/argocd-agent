@@ -590,13 +590,23 @@ func Test_CreateAppProject(t *testing.T) {
 		require.ErrorContains(t, err, "not in managed mode")
 	})
 
-	t.Run("Discard event because appproject is already managed", func(t *testing.T) {
+	t.Run("Update appproject when already managed", func(t *testing.T) {
 		defer a.projectManager.Unmanage(project.Name)
 		a.mode = types.AgentModeManaged
 		a.projectManager.Manage(project.Name)
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.AppProject{}, nil)
+		defer getMock.Unset()
+
+		supportsPatchMock := be.On("SupportsPatch").Return(false)
+		defer supportsPatchMock.Unset()
+
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(&v1alpha1.AppProject{}, nil)
+		defer updateMock.Unset()
+
 		napp, err := a.createAppProject(project)
-		require.ErrorContains(t, err, "is already managed")
-		require.Nil(t, napp)
+		require.NoError(t, err)
+		require.NotNil(t, napp)
 	})
 
 	t.Run("Create appproject", func(t *testing.T) {
@@ -631,12 +641,24 @@ func Test_UpdateAppProject(t *testing.T) {
 	t.Run("Update appproject using patch", func(t *testing.T) {
 		a.mode = types.AgentModeManaged
 		a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true), appproject.WithMode(manager.ManagerModeManaged), appproject.WithRole(manager.ManagerRoleAgent))
+		a.projectManager.Manage(project.Name)
+		defer a.projectManager.Unmanage(project.Name)
 		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.AppProject{}, nil)
 		defer getEvent.Unset()
 		supportsPatchEvent := be.On("SupportsPatch").Return(true)
 		defer supportsPatchEvent.Unset()
 		patchEvent := be.On("Patch", mock.Anything, "test", "argocd", mock.Anything).Return(&v1alpha1.AppProject{}, nil)
 		defer patchEvent.Unset()
+		napp, err := a.updateAppProject(project)
+		require.NoError(t, err)
+		require.NotNil(t, napp)
+	})
+
+	t.Run("Create the appproject if it doesn't exist", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+		a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true), appproject.WithMode(manager.ManagerModeManaged), appproject.WithRole(manager.ManagerRoleAgent))
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(&v1alpha1.AppProject{}, nil)
+		defer createMock.Unset()
 		napp, err := a.updateAppProject(project)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
