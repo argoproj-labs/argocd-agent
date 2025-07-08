@@ -34,6 +34,7 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/stretchr/testify/suite"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -81,9 +82,6 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 		},
 	}
 
-	err = suite.PrincipalClient.Create(suite.Ctx, &appOnPrincipal, metav1.CreateOptions{})
-	requires.NoError(err)
-
 	argocdClient, sessionToken, closer, err := createArgoCDAPIClient(suite.Ctx, argoEndpoint, password)
 	requires.NoError(err)
 	defer closer.Close()
@@ -92,7 +90,12 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	requires.NoError(err)
 	defer closer.Close()
 
-	syncAppWithAutoResync(&appOnPrincipal, appClient, &suite.BaseSuite)
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
+	err = argoClient.Login()
+	requires.NoError(err)
+
+	err = ensureAppExistsAndIsSyncedAndHealthy(&appOnPrincipal, suite.PrincipalClient, &suite.BaseSuite)
+	requires.NoError(err)
 
 	cancellableContext, cancelFunc := context.WithCancel(suite.Ctx)
 	defer cancelFunc()
@@ -120,7 +123,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	err = suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
 	requires.NoError(err)
 
-	requires.True(len(podList.Items) == 1, "should only be one kustomize-guestbook pod")
+	requires.True(len(podList.Items) == 1, fmt.Sprintf("should (only be) one kustomize-guestbook pod: %v", podList.Items))
 
 	// Locate guestbook pod
 	var oldPod corev1.Pod
@@ -225,7 +228,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
 	requires.NoError(err)
 
-	// Create a autonomous agent application in the principal's cluster
+	// Create an autonomous agent application in the principal's cluster
 	appOnAutonomous := v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-app",
@@ -251,9 +254,6 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 		},
 	}
 
-	err = suite.AutonomousAgentClient.Create(suite.Ctx, &appOnAutonomous, metav1.CreateOptions{})
-	requires.NoError(err)
-
 	argocdClient, sessionToken, closer, err := createArgoCDAPIClient(suite.Ctx, argoEndpoint, password)
 	requires.NoError(err)
 	defer closer.Close()
@@ -270,7 +270,12 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 		},
 	}
 
-	syncAppWithAutoResync(&appOnPrincipal, appClient, &suite.BaseSuite)
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
+	err = argoClient.Login()
+	requires.NoError(err)
+
+	err = ensureAppExistsAndIsSyncedAndHealthy(&appOnAutonomous, suite.AutonomousAgentClient, &suite.BaseSuite)
+	requires.NoError(err)
 
 	cancellableContext, cancelFunc := context.WithCancel(suite.Ctx)
 	defer cancelFunc()
@@ -405,41 +410,89 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	requires.True(matchFound)
 }
 
-func syncAppWithAutoResync(app *v1alpha1.Application, appClient application.ApplicationServiceClient, suite *fixture.BaseSuite) {
+// ensureAppExistsAndIsSyncedAndHealthy ensures that a given Argo CD Application exists, and is synced/healthy
+// - If the app does not exist, it is created.
+// - If the app exists, it is deleted, then created.
+// - If the created app never becomes healthy, it is deleted and recreated.
+// - After X minutes, if the synced/healthy condition is never met, it stops trying and returns an error.
+func ensureAppExistsAndIsSyncedAndHealthy(appParam *v1alpha1.Application, k8sClient fixture.KubeClient, suite *fixture.BaseSuite) error {
 
-	requires := suite.Require()
+	overallExpireTime := time.Now().Add(time.Minute * 5)
 
-	// Wait until the app is synced and healthy
-	retries := 0
-	requires.Eventually(func() bool {
-		err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: app.Namespace, Name: app.Name}, app, metav1.GetOptions{})
-		if err != nil {
-			suite.T().Logf("Error on get: %v", err)
-			return false
+	count := 0
+outer:
+	for {
+		count++
+
+		if count > 1 {
+			time.Sleep(5 * time.Second) // Short delay between failures
 		}
 
-		if app.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && app.Status.Health.Status == health.HealthStatusHealthy {
-			return true
-		} else {
-			// Sometimes, the sync hangs on the workload cluster. We trigger
-			// a sync every 5th or so retry.
-			if retries > 0 && retries%5 == 0 {
-				suite.T().Logf("Triggering re-sync")
+		if time.Now().After(overallExpireTime) {
+			return fmt.Errorf("ensureSyncedAndHealthyApp expired")
+		}
 
-				_, err := appClient.Sync(suite.Ctx, &application.ApplicationSyncRequest{
-					Name:         &app.Name,
-					AppNamespace: &app.Namespace,
-				})
-				if err != nil {
-					suite.T().Logf("Error on sync: %v", err)
-					return true
-				}
+		appForGet := v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      appParam.Name,
+				Namespace: appParam.Namespace,
+			},
+		}
+
+		// Get the current application data
+		err := k8sClient.Get(suite.Ctx, types.NamespacedName{Namespace: appForGet.Namespace, Name: appForGet.Name}, &appForGet, metav1.GetOptions{})
+		if err == nil {
+			// It exists, so needs to be deleted
+			suite.T().Logf("Deleting: %s", appForGet.Name)
+			if err := fixture.EnsureDeletion(suite.Ctx, k8sClient, &appForGet); err != nil {
+				suite.T().Logf("unable to delete: %s %v", appForGet.Name, err)
+				continue
+			} else {
+				// delete succeeded, so continue
 			}
-			retries += 1
+		} else {
+			if !apierrors.IsNotFound(err) {
+				suite.T().Logf("unexpected error when deleting: %s %v", appForGet.Name, err)
+			} else {
+				// error is a 'not found' error, which is expected
+			}
 		}
-		return false
-	}, 60*time.Second, 1*time.Second)
 
+		appFromCreate := appParam.DeepCopy()
+		suite.T().Logf("Creating: %s", appFromCreate.Name)
+		err = k8sClient.Create(suite.Ctx, appFromCreate, metav1.CreateOptions{})
+		if err != nil {
+			suite.T().Logf("unexpected error when creating: %s %v", appFromCreate.Name, err)
+			continue
+		}
+
+		// Wait X seconds for app to become synced/healthy
+		singleRoundExpireTime := time.Now().Add(time.Minute * 1)
+		for {
+
+			err := k8sClient.Get(suite.Ctx, types.NamespacedName{Namespace: appFromCreate.Namespace, Name: appFromCreate.Name}, appFromCreate, metav1.GetOptions{})
+			if err != nil {
+				suite.T().Logf("unexpected error when getting after creation %s %v", appFromCreate.Name, err)
+				continue
+			}
+
+			if appFromCreate.Status.Health.Status == health.HealthStatusHealthy && appFromCreate.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced {
+				suite.T().Logf("success: application is synched/healthy: %s", appFromCreate.Name)
+				// success
+				return nil
+			} else {
+				suite.T().Logf("waiting for application to be synched/healthy: %s %s/%s", appFromCreate.Name, appFromCreate.Status.Health.Status, appFromCreate.Status.Sync.Status)
+			}
+
+			if time.Now().After(singleRoundExpireTime) {
+				suite.T().Logf("application never became synched/healthy, so restarting: %s", appFromCreate.Name)
+				continue outer
+			}
+
+			time.Sleep(time.Second * 5)
+
+		}
+	}
 }
 
 func createArgoCDAPIClient(ctx context.Context, argoServerEndpoint string, password string) (argocdclient.Client, string, io.Closer, error) {
@@ -482,7 +535,8 @@ func createArgoCDAPIClient(ctx context.Context, argoServerEndpoint string, passw
 
 }
 
-// streamFromEventSource connections to event source API at given URL (using given token), and sends received data back on channel
+// streamFromEventSource connects to event source API at given URL (using given token), and sends received data back on channel
+// - resource tree events (changes in Application resources) are an example of one type of data that can be received via this API
 func streamFromEventSourceNew(ctx context.Context, eventSourceAPIURL string, sessionToken string, t *testing.T) (chan string, error) {
 
 	msgChan := make(chan string)
@@ -558,66 +612,6 @@ func streamFromEventSourceNew(ctx context.Context, eventSourceAPIURL string, ses
 
 	return msgChan, nil
 }
-
-// streamFromEventSource connections to event source API at given URL (using given token), and sends received data back on channel
-// func streamFromEventSourceOld(ctx context.Context, eventSourceAPIURL string, sessionToken string, t *testing.T) (chan string, error) {
-
-// 	msgChan := make(chan string)
-
-// 	req, err := http.NewRequest("GET", eventSourceAPIURL, nil)
-// 	if err != nil {
-// 		t.Logf("Error creating request: %v", err)
-// 		return nil, fmt.Errorf("error creating request: %v", err)
-// 	}
-// 	req.Header.Set("Accept", "text/event-stream") // server sent event mime type
-
-// 	req = req.WithContext(ctx)
-
-// 	cookie := &http.Cookie{
-// 		Name:  "argocd.token",
-// 		Value: sessionToken, // session token
-// 	}
-// 	req.AddCookie(cookie)
-
-// 	tr := &http.Transport{
-// 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-// 	}
-// 	client := &http.Client{Transport: tr}
-
-// 	go func() {
-// 		resp, err := client.Do(req)
-// 		if err != nil {
-// 			t.Logf("Error performing request: %v", err)
-// 			return
-// 		}
-
-// 		defer resp.Body.Close()
-
-// 		reader := bufio.NewReader(resp.Body)
-// 		for {
-// 			line, err := reader.ReadString('\n')
-// 			if err != nil {
-// 				t.Logf("Error reading from stream: %v", err)
-// 				return
-// 			}
-
-// 			if strings.HasPrefix(line, "data:") {
-// 				data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-// 				select {
-// 				case <-ctx.Done():
-// 					t.Log("Context is complete")
-// 					return
-// 				default:
-// 					msgChan <- data
-// 				}
-
-// 			}
-// 		}
-
-// 	}()
-
-// 	return msgChan, nil
-// }
 
 func TestRedisProxyTestSuite(t *testing.T) {
 	suite.Run(t, new(RedisProxyTestSuite))

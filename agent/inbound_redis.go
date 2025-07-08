@@ -83,14 +83,14 @@ func (a *Agent) processIncomingRedisRequest(ev *event.Event) error {
 
 	} else if rreq.Body.Ping != nil {
 
-		// We have seeng a ping for this connection, so update the lifecycle struct
+		// We have seen a ping for this connection, so update the lifecycle struct
 		connections := a.redisProxyMsgHandler.connections
 
 		connections.lock.Lock()
-		defer connections.lock.Unlock()
 		connections.connMap[rreq.ConnectionUUID] = connectionEntry{
 			lastPing: time.Now(),
 		}
+		connections.lock.Unlock()
 
 		// Send pong back to principal
 		responseBody = &event.RedisResponseBody{

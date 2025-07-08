@@ -12,7 +12,6 @@ import (
 // startArgoCDRedisEndpointReader reads redis commands from socket from Argo CD, parses them, and then writes them to channel
 func startArgoCDRedisEndpointReader(logCtx *logrus.Entry, fromArgoCDRead *bufio.Reader) chan parsedRedisCommand {
 
-	// fromArgoCDRead := bufio.NewReader(fromArgoCDConn)
 	receiverChan := make(chan parsedRedisCommand)
 
 	go func() {

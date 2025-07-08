@@ -171,6 +171,11 @@ apply() {
     echo "  --> Creating instance in vcluster $cluster"
     kubectl --context vcluster-$cluster create ns $namespace || true
 
+    # Update principal Argo CD ConfigMap 'argocd-cmd-params-cm' to use agent address as redis endpoint, to enable redis proxy functionality
+    ARGO_AGENT_IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+    echo "Argo cd agent IPADDR is $ARGO_AGENT_IPADDR"
+    sed -i.bak "s/redis-server-address/$ARGO_AGENT_IPADDR/g" "$TMP_DIR/control-plane/argocd-cmd-params-cm.yaml"
+
     # Run 'kubectl apply' twice, to avoid the following error that occurs during the first invocation:
     # - 'error: resource mapping not found for name: "default" namespace: "" from "(...)": no matches for kind "AppProject" in version "argoproj.io/v1alpha1"'
     kubectl --context vcluster-$cluster apply -n $namespace -k ${TMP_DIR}/${cluster} || true

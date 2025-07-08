@@ -86,7 +86,7 @@ func (rp *RedisProxy) Start() error {
 		}
 	}()
 
-	log().Infof("Redis proxy started")
+	log().Infof("Redis proxy started on %s", rp.listenAddress)
 
 	return nil
 }

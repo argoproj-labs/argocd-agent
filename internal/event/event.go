@@ -318,7 +318,7 @@ func (evs EventSource) NewRedisRequestEvent(connectionUUID string, body RedisCom
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(RedisGenericRequest.String())
 	cev.SetDataSchema(TargetRedis.String())
-	// cev.SetExtension(resourceID, reqUUID)
+	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
 	err := cev.SetData(cloudevents.ApplicationJSON, rr)
 	return &cev, err
@@ -716,6 +716,11 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 		Jitter:   0.1,
 	}
 
+	if resID == "" {
+		logCtx.Error("resID was empty")
+		return
+	}
+
 	eventMsg, exists := ew.latestEvents[resID]
 	if !exists {
 		ew.latestEvents[resID] = &eventMessage{
@@ -765,11 +770,14 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 // Note: This function will never return unless the context is done, and therefore
 // should be started in a separate goroutine.
 func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
-	ew.log.Info("Starting event writer")
+
+	logCtx := ew.log
+
+	logCtx.Info("Starting event writer")
 	for {
 		select {
 		case <-ctx.Done():
-			ew.log.Info("Shutting down event writer")
+			logCtx.Info("Shutting down event writer")
 			return
 		default:
 			ew.mu.RLock()
@@ -788,12 +796,21 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 }
 
 func (ew *EventWriter) sendEvent(resID string) {
+	logCtx := ew.log.WithFields(logrus.Fields{
+		"resource_id": resID,
+	})
+
 	// Check if the event is already ACK'd.
 	eventMsg := ew.Get(resID)
 	if eventMsg == nil {
-		ew.log.WithField("resource_id", resID).Trace("event is not found, perhaps it is already ACK'd")
+		logCtx.Trace("event is not found, perhaps it is already ACK'd")
 		return
 	}
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"event_id":     EventID(eventMsg.event),
+		"event_target": eventMsg.event.DataSchema(),
+		"event_type":   eventMsg.event.Type()})
 
 	isACKRemoved := false
 
@@ -804,13 +821,6 @@ func (ew *EventWriter) sendEvent(resID string) {
 			eventMsg.mu.Unlock()
 		}
 	}()
-
-	logCtx := ew.log.WithFields(logrus.Fields{
-		"resource_id":  resID,
-		"event_id":     EventID(eventMsg.event),
-		"event_target": eventMsg.event.DataSchema(),
-		"event_type":   eventMsg.event.Type(),
-	})
 
 	// Check if it is time to resend the event.
 	if eventMsg.retryAfter != nil {
