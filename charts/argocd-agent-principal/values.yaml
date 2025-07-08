@@ -1,0 +1,135 @@
+# Default values for argocd-agent-principal
+# This is a YAML-formatted file.
+
+# Image configuration
+image:
+  repository: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
+  pullPolicy: Always
+  tag: "latest"
+
+# Replica count
+replicaCount: 1
+
+# ServiceAccount configuration
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod security context
+podSecurityContext: {}
+
+# Container security context
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8443
+
+# Metrics service configuration
+metricsService:
+  type: ClusterIP
+  port: 8000
+
+# Principal configuration parameters
+principal:
+  # The interface address to listen on. Leave empty for all interfaces.
+  listenHost: ""
+  # The port the gRPC server should listen on.
+  listenPort: "8443"
+  # The logging level to use. One of trace, debug, info, warn or error.
+  logLevel: info
+  # The port the metrics server should listen on.
+  metricsPort: "8000"
+  # The namespace the principal will operate in. If left blank, the namespace where the pod is running in will be used.
+  namespace: "argocd"
+  # A list of namespaces the principal shall watch and process Argo CD resources in. Separate entries using commas.
+  allowedNamespaces: ""
+  
+  # Namespace creation configuration
+  namespaceCreate:
+    # Whether the principal is allowed to create namespaces for agents if they don't exist yet.
+    enable: "false"
+    # A regexp pattern to restrict the names of namespaces to be created. If empty, all patterns are allowed.
+    pattern: ""
+    # A set of labels to apply to namespaces created for agents.
+    labels: ""
+  
+  # TLS configuration
+  tls:
+    # The name of the secret containing the TLS certificate and key.
+    secretName: "argocd-agent-principal-tls"
+    server:
+      # Path to the TLS certificate to be used by the gRPC server.
+      certPath: ""
+      # Path to the TLS private key to be used by the gRPC server.
+      keyPath: ""
+      # Whether to allow the principal to generate its own set of TLS cert and key on startup when none are configured.
+      allowGenerate: "false"
+      # The name of the secret containing the root CA TLS certificate.
+      rootCaSecretName: "argocd-agent-ca"
+      # Path to a TLS root certificate authority to be used to validate agent's client certificates against.
+      rootCaPath: ""
+    clientCert:
+      # Whether to require client certs from agents upon connection.
+      require: "false"
+      # Whether to match the subject field in a client certificate presented by an agent to the agent's name.
+      matchSubject: "false"
+  
+  # Resource proxy configuration
+  resourceProxy:
+    # The name of the secret containing the TLS certificate and key for the resource proxy.
+    secretName: "argocd-agent-resource-proxy-tls"
+    tls:
+      # Path to the TLS certificate to be used by the resource proxy.
+      certPath: ""
+      # Path to the TLS private key to be used by the resource proxy.
+      keyPath: ""
+    ca:
+      # The name of the secret containing the CA certificate for the resource proxy.
+      secretName: "argocd-agent-ca"
+      # Path to the CA certificate to be used by the resource proxy.
+      path: ""
+  
+  # JWT configuration
+  jwt:
+    # Whether to allow the principal to generate its own private key for signing JWT tokens.
+    allowGenerate: "false"
+    # The name of the secret containing the JWT signing key.
+    secretName: "argocd-agent-jwt"
+    # Path to the private key to be used for signing JWT tokens.
+    keyPath: ""
+  
+  # Authentication configuration
+  auth: "userpass:/app/config/userpass/passwd"
+
+# Resources configuration
+resources: {}
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Namespace where the chart will be deployed
+namespaceOverride: "" 

@@ -1,0 +1,166 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "argocd-agent-agent.fullname" . }}
+  namespace: {{ include "argocd-agent-agent.namespace" . }}
+  labels:
+    {{- include "argocd-agent-agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "argocd-agent-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "argocd-agent-agent.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "argocd-agent-agent.serviceAccountName" . }}
+      containers:
+        - name: {{ .Chart.Name }}
+          args:
+            - agent
+          env:
+          - name: ARGOCD_AGENT_REMOTE_SERVER
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.server.address
+                optional: true
+          - name: ARGOCD_AGENT_REMOTE_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.server.port
+                optional: true
+          - name: ARGOCD_AGENT_LOG_LEVEL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.log.level
+                optional: true
+          - name: ARGOCD_AGENT_NAMESPACE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.namespace
+                optional: true
+          - name: ARGOCD_AGENT_TLS_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.tls.secret-name
+                optional: true
+          - name: ARGOCD_AGENT_TLS_CLIENT_CERT_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.tls.client.cert-path
+                optional: true
+          - name: ARGOCD_AGENT_TLS_CLIENT_KEY_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.tls.client.key-path
+                optional: true
+          - name: ARGOCD_AGENT_TLS_INSECURE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.tls.client.insecure
+                optional: true
+          - name: ARGOCD_AGENT_TLS_ROOT_CA_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.tls.root-ca-secret-name
+                optional: true
+          - name: ARGOCD_AGENT_TLS_ROOT_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.tls.root-ca-path
+                optional: true
+          - name: ARGOCD_AGENT_MODE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.mode
+                optional: true
+          - name: ARGOCD_AGENT_CREDS
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.creds
+                optional: true
+          - name: ARGOCD_AGENT_METRICS_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.fullname" . }}-params
+                key: agent.metrics.port
+                optional: true
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: metrics
+              containerPort: 8000
+              protocol: TCP
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: userpass-passwd
+              mountPath: /app/config/creds
+            - name: client-tls
+              mountPath: /app/config/tls
+            - name: ca-cert
+              mountPath: /app/config/ca
+      volumes:
+      - name: userpass-passwd
+        secret:
+          secretName: {{ include "argocd-agent-agent.fullname" . }}-userpass
+          items:
+          - key: credentials
+            path: userpass.creds
+          optional: true
+      - name: client-tls
+        secret:
+          secretName: {{ .Values.agent.tls.secretName }}
+          items:
+          - key: tls.crt
+            path: tls.crt
+          - key: tls.key
+            path: tls.key
+          optional: true
+      - name: ca-cert
+        secret:
+          secretName: {{ .Values.agent.tls.rootCaSecretName }}
+          items:
+          - key: ca.crt
+            path: ca.crt
+          optional: true
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }} 

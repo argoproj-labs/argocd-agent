@@ -1,0 +1,15 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "argocd-agent-agent.fullname" . }}
+  namespace: {{ include "argocd-agent-agent.namespace" . }}
+  labels:
+    {{- include "argocd-agent-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "argocd-agent-agent.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "argocd-agent-agent.serviceAccountName" . }}
+  namespace: {{ include "argocd-agent-agent.namespace" . }} 

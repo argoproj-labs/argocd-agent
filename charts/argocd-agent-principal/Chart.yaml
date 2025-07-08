@@ -1,0 +1,15 @@
+apiVersion: v2
+name: argocd-agent-principal
+description: A Helm chart for ArgoCD Agent Principal
+type: application
+version: 0.1.0
+appVersion: "latest"
+home: https://github.com/argoproj-labs/argocd-agent
+keywords:
+  - argocd
+  - agent
+  - principal
+  - kubernetes
+maintainers:
+  - name: ArgoProj Labs
+    url: https://github.com/argoproj-labs 

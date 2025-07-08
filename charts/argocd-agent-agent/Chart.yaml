@@ -1,0 +1,14 @@
+apiVersion: v2
+name: argocd-agent-agent
+description: A Helm chart for ArgoCD Agent
+type: application
+version: 0.1.0
+appVersion: "latest"
+home: https://github.com/argoproj-labs/argocd-agent
+keywords:
+  - argocd
+  - agent
+  - kubernetes
+maintainers:
+  - name: ArgoProj Labs
+    url: https://github.com/argoproj-labs 

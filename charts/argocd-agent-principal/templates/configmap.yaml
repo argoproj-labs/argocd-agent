@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "argocd-agent-principal.fullname" . }}-params
+  namespace: {{ include "argocd-agent-principal.namespace" . }}
+  labels:
+    {{- include "argocd-agent-principal.labels" . | nindent 4 }}
+data:
+  principal.listen.host: {{ .Values.principal.listenHost | quote }}
+  principal.listen.port: {{ .Values.principal.listenPort | quote }}
+  principal.log.level: {{ .Values.principal.logLevel | quote }}
+  principal.metrics.port: {{ .Values.principal.metricsPort | quote }}
+  principal.namespace: {{ .Values.principal.namespace | quote }}
+  principal.allowed-namespaces: {{ .Values.principal.allowedNamespaces | quote }}
+  principal.namespace-create.enable: {{ .Values.principal.namespaceCreate.enable | quote }}
+  principal.namespace-create.pattern: {{ .Values.principal.namespaceCreate.pattern | quote }}
+  principal.namespace-create.labels: {{ .Values.principal.namespaceCreate.labels | quote }}
+  principal.tls.secret-name: {{ .Values.principal.tls.secretName | quote }}
+  principal.tls.server.cert-path: {{ .Values.principal.tls.server.certPath | quote }}
+  principal.tls.server.key-path: {{ .Values.principal.tls.server.keyPath | quote }}
+  principal.tls.server.allow-generate: {{ .Values.principal.tls.server.allowGenerate | quote }}
+  principal.tls.client-cert.require: {{ .Values.principal.tls.clientCert.require | quote }}
+  principal.tls.server.root-ca-secret-name: {{ .Values.principal.tls.server.rootCaSecretName | quote }}
+  principal.tls.server.root-ca-path: {{ .Values.principal.tls.server.rootCaPath | quote }}
+  principal.tls.client-cert.match-subject: {{ .Values.principal.tls.clientCert.matchSubject | quote }}
+  principal.resource-proxy.secret-name: {{ .Values.principal.resourceProxy.secretName | quote }}
+  principal.resource-proxy.tls.cert-path: {{ .Values.principal.resourceProxy.tls.certPath | quote }}
+  principal.resource-proxy.tls.key-path: {{ .Values.principal.resourceProxy.tls.keyPath | quote }}
+  principal.resource-proxy.ca.secret-name: {{ .Values.principal.resourceProxy.ca.secretName | quote }}
+  principal.resource-proxy.ca.path: {{ .Values.principal.resourceProxy.ca.path | quote }}
+  principal.jwt.allow-generate: {{ .Values.principal.jwt.allowGenerate | quote }}
+  principal.jwt.secret-name: {{ .Values.principal.jwt.secretName | quote }}
+  principal.jwt.key-path: {{ .Values.principal.jwt.keyPath | quote }}
+  principal.auth: {{ .Values.principal.auth | quote }} 

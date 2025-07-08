@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "argocd-agent-agent.fullname" . }}-params
+  namespace: {{ include "argocd-agent-agent.namespace" . }}
+  labels:
+    {{- include "argocd-agent-agent.labels" . | nindent 4 }}
+data:
+  agent.mode: {{ .Values.agent.mode | quote }}
+  agent.creds: {{ .Values.agent.creds | quote }}
+  agent.tls.client.insecure: {{ .Values.agent.tls.clientInsecure | quote }}
+  agent.tls.root-ca-secret-name: {{ .Values.agent.tls.rootCaSecretName | quote }}
+  agent.tls.root-ca-path: {{ .Values.agent.tls.rootCaPath | quote }}
+  agent.tls.secret-name: {{ .Values.agent.tls.secretName | quote }}
+  agent.tls.client.cert-path: {{ .Values.agent.tls.client.certPath | quote }}
+  agent.tls.client.key-path: {{ .Values.agent.tls.client.keyPath | quote }}
+  agent.log.level: {{ .Values.agent.logLevel | quote }}
+  agent.namespace: {{ .Values.agent.namespace | quote }}
+  agent.server.address: {{ .Values.agent.server.address | quote }}
+  agent.server.port: {{ .Values.agent.server.port | quote }}
+  agent.metrics.port: {{ .Values.agent.metricsPort | quote }} 

@@ -1,0 +1,21 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "argocd-agent-agent.fullname" . }}
+  labels:
+    {{- include "argocd-agent-agent.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  - applicationsets
+  - appprojects
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete 
