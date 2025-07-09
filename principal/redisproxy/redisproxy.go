@@ -140,7 +140,13 @@ func (rp *RedisProxy) handleConnection(fromArgoCDConn net.Conn) {
 		// Any traffic sent from principal redis will be automatically forwarded back to principal argocd, without any modification.
 		// - As of this writing, there is no need to proxy/MITM any traffic in the direction of (principal redis) -> (principal argo cd)
 		if err := forwardTrafficSimple("r->a", redisReader, argocdWriter, logCtx); err != nil {
-			logCtx.WithError(err).Error("traffic forwarder returned error")
+
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				logCtx.WithError(err).Trace("forwardTraffic exited due to closed network connection, this is usually expected behaviour.")
+			} else {
+				logCtx.WithError(err).Error("traffic forwarder returned unexpected error")
+			}
+
 			return
 		}
 	}()
@@ -182,7 +188,7 @@ type connectionState struct {
 // - This functions runs for the lifecycle of the connection.
 func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, endpointMessageChannel chan parsedRedisCommand, argocdWriter argoCDRedisWriter, redisWriter *bufio.Writer, logCtx *logrus.Entry) {
 
-	defer logCtx.Trace("handleConnectionMessageLoop has exited")
+	defer logCtx.Debug("handleConnectionMessageLoop has exited")
 
 	for {
 
@@ -193,12 +199,18 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 		parsedRedisCommandVal := readNextMessageFromArgoCDOrInternal(connState, endpointMessageChannel, logCtx)
 
 		if parsedRedisCommandVal.connContextCancelled {
-			logCtx.Trace("exit due to cancelled context reported by readNextMessageFromArgoCDOrInternal")
+			logCtx.Debug("exit due to cancelled context reported by readNextMessageFromArgoCDOrInternal")
 			return
 		}
 
 		if parsedRedisCommandVal.err != nil {
-			logCtx.WithError(parsedRedisCommandVal.err).Error("exit due to readNextMessage returned error")
+
+			if strings.HasSuffix(parsedRedisCommandVal.err.Error(), "EOF") {
+				logCtx.WithError(parsedRedisCommandVal.err).Debug("EOF error from readNextMessage, likely expected due to closed connection")
+			} else {
+				logCtx.WithError(parsedRedisCommandVal.err).Error("unexpected error from readNextMessage")
+			}
+
 			return
 		}
 
@@ -537,7 +549,13 @@ func readNextMessageFromArgoCDOrInternal(connState *connectionState, receiverCha
 		}
 
 	// Read messages from argo cd TCP-IP socket
-	case rcMessage := <-receiverChan:
+	case rcMessage, ok := <-receiverChan:
+
+		if !ok {
+			logCtx.Debug("receiver channel has closed")
+			return parsedRedisCommand{connContextCancelled: true}
+		}
+
 		return rcMessage
 
 	// Read internal (subscribe notify) messages sent to us by an agent
@@ -628,12 +646,14 @@ func forwardTrafficSimple(debugStr string, r *bufio.Reader, argocdWriter *argoCD
 		// Read from input
 		n, err := r.Read(buf)
 		if err != nil {
+			// Log as trace as this is likely as simple closed connection
 			logCtx.WithError(err).Trace("unable to read from connection " + debugStr)
 			return err
 		}
 
 		// Write to output
 		if err := argocdWriter.writeToArgoCDRedisSocket(logCtx, buf[0:n]); err != nil {
+			// Log as trace as this is likely as simple closed connection
 			logCtx.WithError(err).Trace("unable to write to connection " + debugStr)
 			return err
 		}
@@ -739,7 +759,7 @@ func extractAgentNameFromRedisCommandKey(redisKey string, logCtx *logrus.Entry) 
 			return "", nil
 		}
 
-		if strings.HasPrefix("mfst|", redisKey) {
+		if strings.HasPrefix(redisKey, "mfst|") {
 			// mfst| is forwarded to principal, but I think this may not be a permanent behaviour.
 			// Example key:
 			// - mfst|annotation:app.kubernetes.io/instance|agent-managed_my-app|(revision id)|guestbook|3093507789|1.8.3.gz

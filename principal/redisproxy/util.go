@@ -20,8 +20,8 @@ func startArgoCDRedisEndpointReader(logCtx *logrus.Entry, fromArgoCDRead *bufio.
 			// Read from Argo CD server input
 			parsedReceived, rawReceived, err := readRedisArray(fromArgoCDRead)
 			if err != nil {
-				logCtx.WithError(err).Error("unable to read array. Stopped reading redis endpoint input.")
-				receiverChan <- parsedRedisCommand{err: err}
+				logCtx.WithError(err).Debug("unable to read from Argo CD redis endpoint input, usually due to closed connection")
+				// We don't need to send the 'err' back on the channel, as the close() call above will handle informing the channel consumer.
 				return
 			}
 			// Write to channel

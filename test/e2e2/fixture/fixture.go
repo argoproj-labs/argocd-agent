@@ -170,7 +170,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
-		err = ensureDeletion(ctx, principalClient, &appProject)
+		err = EnsureDeletion(ctx, principalClient, &appProject)
 		if err != nil {
 			return err
 		}
@@ -186,7 +186,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
-		err = ensureDeletion(ctx, autonomousAgentClient, &appProject)
+		err = EnsureDeletion(ctx, autonomousAgentClient, &appProject)
 		if err != nil {
 			return err
 		}
@@ -202,7 +202,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
-		err = ensureDeletion(ctx, managedAgentClient, &appProject)
+		err = EnsureDeletion(ctx, managedAgentClient, &appProject)
 		if err != nil {
 			return err
 		}
