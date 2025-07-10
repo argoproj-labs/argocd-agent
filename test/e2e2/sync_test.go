@@ -216,8 +216,8 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeOutOfSync
 	}, 60*time.Second, 1*time.Second)
 
-	// Sync the app
-	err = fixture.SyncApplication(suite.Ctx, agentKey, suite.AutonomousAgentClient)
+	// Sync the app from the control plane
+	err = fixture.SyncApplication(suite.Ctx, principalKey, suite.PrincipalClient)
 	requires.NoError(err)
 
 	// Wait for the app on the autonomous-agent to become synced
