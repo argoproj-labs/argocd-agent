@@ -28,7 +28,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"

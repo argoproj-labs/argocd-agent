@@ -24,7 +24,7 @@ import (
 	"reflect"
 	"strings"
 
-	argoapp "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	apps "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"

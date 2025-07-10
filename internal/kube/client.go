@@ -25,7 +25,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned"
+	"github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"

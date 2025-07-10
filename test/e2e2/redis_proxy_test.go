@@ -27,10 +27,10 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e2/fixture"
 
-	argocdclient "github.com/argoproj/argo-cd/v2/pkg/apiclient"
-	"github.com/argoproj/argo-cd/v2/pkg/apiclient/application"
-	sessionpkg "github.com/argoproj/argo-cd/v2/pkg/apiclient/session"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	argocdclient "github.com/argoproj/argo-cd/v3/pkg/apiclient"
+	"github.com/argoproj/argo-cd/v3/pkg/apiclient/application"
+	sessionpkg "github.com/argoproj/argo-cd/v3/pkg/apiclient/session"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/stretchr/testify/suite"
 	corev1 "k8s.io/api/core/v1"

@@ -30,8 +30,8 @@ import (
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
 	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/stretchr/testify/assert"

@@ -20,10 +20,10 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/argoproj/argo-cd/v2/common"
-	appv1 "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	cacheutil "github.com/argoproj/argo-cd/v2/util/cache"
-	appstatecache "github.com/argoproj/argo-cd/v2/util/cache/appstate"
+	"github.com/argoproj/argo-cd/v3/common"
+	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
+	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

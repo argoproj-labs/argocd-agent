@@ -21,8 +21,8 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wI2L/jsondiff"

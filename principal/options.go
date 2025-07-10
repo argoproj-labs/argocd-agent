@@ -33,7 +33,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
-	cacheutil "github.com/argoproj/argo-cd/v2/util/cache"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"k8s.io/client-go/kubernetes"
 )
 

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/argoproj/argo-cd/v2/common"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/common"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -18,7 +18,7 @@ and was slightly modified. It is a package-private function in Argo CD, so
 we are not able to just use it from the package.
 
 TODO(jannfis): Submit PR to Argo CD to make this function public, so we can
-just use it directly from github.com/argoproj/argo-cd/v2 package.
+just use it directly from github.com/argoproj/argo-cd/v3 package.
 */
 
 // ClusterToSecret converts a cluster object to string data for serialization to a secret

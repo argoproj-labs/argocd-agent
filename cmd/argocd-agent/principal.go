@@ -37,7 +37,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/principal"
-	cacheutil "github.com/argoproj/argo-cd/v2/util/cache"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
