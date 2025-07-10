@@ -91,11 +91,6 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 
 	// oldApp is the app that is already present on the agent
 	oldApp := incomingApp.DeepCopy()
-	oldApp.Annotations = map[string]string{
-		manager.SourceUIDAnnotation: "old_uid",
-	}
-	a.appManager.Manage(oldApp.QualifiedName())
-	defer a.appManager.ClearManaged()
 
 	incomingApp.UID = ktypes.UID("new_uid")
 
@@ -107,12 +102,18 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		manager.SourceUIDAnnotation: string(incomingApp.UID),
 	}
 
-	configureManager := func(t *testing.T) {
+	configureManager := func(t *testing.T, mode manager.ManagerMode) {
 		t.Helper()
+		oldApp.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
 		be = backend_mocks.NewApplication(t)
 		var err error
 		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true),
-			application.WithRole(manager.ManagerRoleAgent), application.WithMode(manager.ManagerModeManaged))
+			application.WithRole(manager.ManagerRoleAgent), application.WithMode(mode))
 		require.NoError(t, err)
 		require.NotNil(t, a)
 
@@ -140,7 +141,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 	}
 
 	t.Run("Create: Old app with diff UID must be deleted before creating the incoming app", func(t *testing.T) {
-		configureManager(t)
+		configureManager(t, manager.ManagerModeManaged)
 		defer unsetMocks(t)
 		a.appManager.Manage(oldApp.QualifiedName())
 		defer a.appManager.ClearManaged()
@@ -166,7 +167,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 	})
 
 	t.Run("Create: Old app with the same UID must be updated", func(t *testing.T) {
-		configureManager(t)
+		configureManager(t, manager.ManagerModeManaged)
 		defer unsetMocks(t)
 		a.appManager.Manage(oldApp.QualifiedName())
 		defer a.appManager.ClearManaged()
@@ -197,7 +198,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 	})
 
 	t.Run("Update: Old app with diff UID must be deleted and a new app must be created", func(t *testing.T) {
-		configureManager(t)
+		configureManager(t, manager.ManagerModeManaged)
 		defer unsetMocks(t)
 		a.appManager.Manage(oldApp.QualifiedName())
 		defer a.appManager.ClearManaged()
@@ -225,7 +226,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 	})
 
 	t.Run("Update: incoming app must be created if it doesn't exist while handling update event", func(t *testing.T) {
-		configureManager(t)
+		configureManager(t, manager.ManagerModeManaged)
 		defer unsetMocks(t)
 		a.appManager.Manage(oldApp.QualifiedName())
 		defer a.appManager.ClearManaged()
@@ -261,8 +262,48 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		require.Equal(t, newApp, latestApp)
 	})
 
+	t.Run("Update: Don't compare source UID for the autonomous agent", func(t *testing.T) {
+		configureManager(t, manager.ManagerModeAutonomous)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		a.mode = types.AgentModeAutonomous
+		defer func() {
+			a.mode = types.AgentModeManaged
+		}()
+
+		// Create a fake sync operation for the autonomous agent app.
+		newApp := incomingApp.DeepCopy()
+		newApp.Operation = &v1alpha1.Operation{
+			Sync: &v1alpha1.SyncOperation{
+				Revision: "1.0.0",
+			},
+		}
+
+		updateMock.Unset()
+		updateMock = be.On("Update", mock.Anything, mock.Anything).Return(newApp, nil)
+
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, newApp), event.TargetApplication)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		expectedCalls := []string{"Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		appInterface := be.Calls[2].ReturnArguments[0]
+		latestApp, ok := appInterface.(*v1alpha1.Application)
+		require.True(t, ok)
+		require.Equal(t, newApp.Operation, latestApp.Operation)
+	})
+
 	t.Run("Delete: Old app with diff UID must be deleted", func(t *testing.T) {
-		configureManager(t)
+		configureManager(t, manager.ManagerModeManaged)
 		defer unsetMocks(t)
 		a.appManager.Manage(oldApp.QualifiedName())
 		defer a.appManager.ClearManaged()

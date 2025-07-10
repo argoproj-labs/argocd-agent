@@ -93,9 +93,14 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		return err
 	}
 
-	exists, sourceUIDMatch, err := a.appManager.CompareSourceUID(a.context, incomingApp)
-	if err != nil {
-		return fmt.Errorf("failed to compare the source UID of app: %w", err)
+	var exists, sourceUIDMatch bool
+
+	// Source UID annotation is not present for apps on the autonomous agent since it is the source of truth.
+	if a.mode == types.AgentModeManaged {
+		exists, sourceUIDMatch, err = a.appManager.CompareSourceUID(a.context, incomingApp)
+		if err != nil {
+			return fmt.Errorf("failed to compare the source UID of app: %w", err)
+		}
 	}
 
 	switch ev.Type() {
@@ -121,6 +126,15 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 			logCtx.Errorf("Error creating application: %v", err)
 		}
 	case event.SpecUpdate:
+		// Principal may send update events to refresh/sync the apps on the autonomous agent.
+		if a.mode == types.AgentModeAutonomous {
+			_, err = a.updateApplication(incomingApp)
+			if err != nil {
+				logCtx.Errorf("Error updating application: %v", err)
+			}
+			return nil
+		}
+
 		if !exists {
 			logCtx.Debug("Received an Update event for an app that doesn't exist. Creating the incoming app")
 			if _, err := a.createApplication(incomingApp); err != nil {
