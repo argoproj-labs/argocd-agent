@@ -328,7 +328,6 @@ func (s *Server) processRedisEventResponse(ctx context.Context, logCtx *logrus.E
 		trAgent, evChan := s.redisProxy.ConnectionIDTracker.Tracked(resReq.ConnectionUUID)
 		if trAgent != agentName {
 			err := fmt.Errorf("agent mismap between event and tracking for PushFromSubscribe: '%s' '%s' '%s'", trAgent, agentName, resReq.ConnectionUUID)
-			logCtx.WithError(err).Error("agent mismap between event and tracking")
 			return err
 		}
 

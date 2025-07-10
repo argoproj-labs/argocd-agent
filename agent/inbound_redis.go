@@ -1,3 +1,17 @@
+// Copyright 2025 The argocd-agent Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package agent
 
 import (
@@ -47,6 +61,11 @@ type connectionEntry struct {
 	// lastPing the time at which the last ping message was received from principal
 	lastPing time.Time
 }
+
+const (
+	// principalRedisConnectionTimeout is the length of time the agent will wait to receive redis communication from principal, before it will close the connection. e.g. if we receive no requests for 10 minutes, we receive no heartbeats (pings) the connection is no longer required.
+	principalRedisConnectionTimeout = 10 * time.Minute
+)
 
 // processIncomingRedisRequest handles incoming redis-specific events from principal, including get/subscribe (from argo cd) and ping (internal).
 func (a *Agent) processIncomingRedisRequest(ev *event.Event) error {
@@ -100,12 +119,12 @@ func (a *Agent) processIncomingRedisRequest(ev *event.Event) error {
 
 	} else {
 		logCtx.Error("Unrecognized redis request body")
-		return nil
+		return fmt.Errorf("unrecognized redis request body")
 	}
 
 	if responseBody == nil {
-		logCtx.Error("Response command not defined")
-		return nil
+		logCtx.Error("unexpected lack of response to redis request: response command not defined")
+		return fmt.Errorf("unexpected lack of response to redis request")
 	}
 
 	q := a.queues.SendQ(defaultQueueName)
@@ -129,7 +148,6 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 		var err error
 		channelName, err = stripNamespaceFromKeyForAutonomousAgentForRedis(channelName, logCtx)
 		if err != nil {
-			logCtx.WithError(err).Errorf("unable to transform SUBSCRIBE key for autonomous agent '%s'", channelName)
 			return nil, fmt.Errorf("unable to transform SUBSCRIBE key for autonomous agent: %v", err)
 		}
 	}
@@ -192,7 +210,7 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 			}
 
 			// If the connection has not been active for X minutes, close the connection
-			if time.Since(*lastPing) >= time.Minute*10 {
+			if time.Since(*lastPing) >= principalRedisConnectionTimeout {
 				pubsub.Close()
 				logCtx.WithField("lastPing", lastPing).Trace("closing redis connection due to inactivity")
 				return
@@ -236,7 +254,6 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 		var err error
 		key, err = stripNamespaceFromKeyForAutonomousAgentForRedis(key, logCtx)
 		if err != nil {
-			logCtx.WithError(err).Errorf("unable to transform GET key for autonomous agent '%s'", key)
 			return nil, fmt.Errorf("unable to transform GET key for autonomous agent: %v", err)
 		}
 	}

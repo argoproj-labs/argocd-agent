@@ -40,33 +40,31 @@ import (
 // NewAgentRunCommand returns a new agent run command.
 func NewAgentRunCommand() *cobra.Command {
 	var (
-		serverAddress            string
-		serverPort               int
-		logLevel                 string
-		logFormat                string
-		insecure                 bool
-		rootCASecretName         string
-		rootCAPath               string
-		kubeConfig               string
-		kubeContext              string
-		namespace                string
-		agentMode                string
-		creds                    string
-		showVersion              bool
-		versionFormat            string
-		tlsSecretName            string
-		tlsClientCrt             string
-		tlsClientKey             string
-		enableWebSocket          bool
-		metricsPort              int
-		healthzPort              int
-		enableCompression        bool
-		pprofPort                int
-		redisAddr                string
-		redisUsername            string
-		redisPassword            string
-		autonomousAgentRedisHost string
-		managedAgentRedisHost    string
+		serverAddress     string
+		serverPort        int
+		logLevel          string
+		logFormat         string
+		insecure          bool
+		rootCASecretName  string
+		rootCAPath        string
+		kubeConfig        string
+		kubeContext       string
+		namespace         string
+		agentMode         string
+		creds             string
+		showVersion       bool
+		versionFormat     string
+		tlsSecretName     string
+		tlsClientCrt      string
+		tlsClientKey      string
+		enableWebSocket   bool
+		metricsPort       int
+		healthzPort       int
+		enableCompression bool
+		pprofPort         int
+		redisAddr         string
+		redisUsername     string
+		redisPassword     string
 
 		// Time interval for agent to principal ping
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
@@ -177,12 +175,6 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithMode(agentMode))
 			agentOpts = append(agentOpts, agent.WithHealthzPort(healthzPort))
 
-			if agentMode == "autonomous" && autonomousAgentRedisHost != "" {
-				redisAddr = autonomousAgentRedisHost
-			} else if agentMode == "managed" && managedAgentRedisHost != "" {
-				redisAddr = managedAgentRedisHost
-			}
-
 			agentOpts = append(agentOpts, agent.WithRedisHost(redisAddr))
 			agentOpts = append(agentOpts, agent.WithRedisUsername(redisUsername))
 			agentOpts = append(agentOpts, agent.WithRedisPassword(redisPassword))
@@ -223,14 +215,6 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&redisPassword, "redis-password",
 		env.StringWithDefault("REDIS_PASSWORD", nil, ""),
 		"The password to connect to redis with")
-
-	command.Flags().StringVar(&autonomousAgentRedisHost, "autonomous-agent-redis-host",
-		env.StringWithDefault("AUTONOMOUS_AGENT_REDIS_ADDR", nil, ""),
-		"The redis address to use when running in autonomous mode")
-
-	command.Flags().StringVar(&managedAgentRedisHost, "managed-agent-redis-host",
-		env.StringWithDefault("MANAGED_AGENT_REDIS_ADDR", nil, ""),
-		"The redis address to use when running in managed mode")
 
 	command.Flags().StringVar(&logFormat, "log-format",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),

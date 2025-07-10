@@ -1,3 +1,17 @@
+// Copyright 2025 The argocd-agent Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package redisproxy
 
 import (
@@ -763,11 +777,17 @@ func extractAgentNameFromRedisCommandKey(redisKey string, logCtx *logrus.Entry) 
 			// mfst| is forwarded to principal, but I think this may not be a permanent behaviour.
 			// Example key:
 			// - mfst|annotation:app.kubernetes.io/instance|agent-managed_my-app|(revision id)|guestbook|3093507789|1.8.3.gz
-			logCtx.Info("redirecting mfst| redis key to principal redis")
+			logCtx.Debug("redirecting mfst| redis key to principal redis")
 			return "", nil
 		}
 
-		logCtx.Errorf("Unexpected redis key seen: '%s'. Redirecting to principal by default.", redisKey)
+		if strings.HasPrefix(redisKey, "cluster|") {
+			// cluster| is likewise forwarded to principal
+			logCtx.Debug("redirecting cluster| redis key to principal redis")
+			return "", nil
+		}
+
+		logCtx.Warningf("Unexpected redis key seen: '%s'. Redirecting to principal by default.", redisKey)
 
 		return "", nil
 	}
