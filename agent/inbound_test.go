@@ -91,11 +91,6 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 
 	// oldApp is the app that is already present on the agent
 	oldApp := incomingApp.DeepCopy()
-	oldApp.Annotations = map[string]string{
-		manager.SourceUIDAnnotation: "old_uid",
-	}
-	a.appManager.Manage(oldApp.QualifiedName())
-	defer a.appManager.ClearManaged()
 
 	incomingApp.UID = ktypes.UID("new_uid")
 
@@ -109,6 +104,12 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 
 	configureManager := func(t *testing.T, mode manager.ManagerMode) {
 		t.Helper()
+		oldApp.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
 		be = backend_mocks.NewApplication(t)
 		var err error
 		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true),
