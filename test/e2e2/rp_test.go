@@ -158,25 +158,13 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	requires := suite.Require()
 
 	// Get the Argo server endpoint to use
-	srvService := &corev1.Service{}
-	err := suite.PrincipalClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-server"}, srvService, v1.GetOptions{})
+	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
 	requires.NoError(err)
-	argoEndpoint := srvService.Spec.LoadBalancerIP
-
-	if len(srvService.Status.LoadBalancer.Ingress) > 0 {
-		hostname := srvService.Status.LoadBalancer.Ingress[0].Hostname
-		if hostname != "" {
-			argoEndpoint = hostname
-		}
-	}
 
 	appName := "guestbook-rp"
 
 	// Read admin secret from principal's cluster
-	pwdSecret := &corev1.Secret{}
-	err = suite.PrincipalClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-initial-admin-secret"}, pwdSecret, v1.GetOptions{})
+	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
 	requires.NoError(err)
 
 	// Create a managed application in the principal's cluster
@@ -208,7 +196,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	err = suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", string(pwdSecret.Data["password"]))
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
 	err = argoClient.Login()
 	requires.NoError(err)
 

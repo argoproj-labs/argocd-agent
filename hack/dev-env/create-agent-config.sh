@@ -48,7 +48,7 @@ ${AGENTCTL} pki issue principal --upsert \
 	--ip "127.0.0.1,${IPADDR}"
 echo "  -> Principal TLS config created."
 
-echo "[*] Creating resouce proxy TLS configuration"
+echo "[*] Creating resource proxy TLS configuration"
 ${AGENTCTL} pki issue resource-proxy --upsert \
 	--principal-namespace argocd \
 	--ip "127.0.0.1,${IPADDR}"

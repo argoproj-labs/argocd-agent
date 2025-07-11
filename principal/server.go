@@ -45,6 +45,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/principal/redisproxy"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v2/util/glob"
@@ -107,6 +108,10 @@ type Server struct {
 	resourceProxyEnabled bool
 	// resourceProxy intercepts requests to the agent Kubernetes APIs
 	resourceProxy *resourceproxy.ResourceProxy
+
+	// redisProxy intercepts requests from argo cd to principal redis, and redirects (some of) them to agent redis
+	redisProxy *redisproxy.RedisProxy
+
 	// resourceProxyListenAddr is the listener address for the resource proxy
 	resourceProxyListenAddr string
 	// resourceProxyTLSConfig is the TLS configuration for the resource proxy
@@ -147,6 +152,8 @@ const waitForSyncedDuration = 60 * time.Second
 // defaultResourceProxyListenerAddr is the default listener address for the
 // resource proxy.
 const defaultResourceProxyListenerAddr = "0.0.0.0:9090"
+
+const defaultRedisProxyListenerAddr = "0.0.0.0:6379"
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
@@ -285,6 +292,8 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		s.resourceProxyListenAddr = defaultResourceProxyListenerAddr
 	}
 
+	s.redisProxy = redisproxy.New(defaultRedisProxyListenerAddr, s.options.redisAddress, s.sendSynchronousRedisMessageToAgent)
+
 	// Instantiate our ResourceProxy to intercept Kubernetes requests from Argo
 	// CD's API server.
 	if s.resourceProxyEnabled {
@@ -421,6 +430,13 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 			log().Info("Namespace informer has exited")
 		}
 	}()
+
+	if s.redisProxy != nil {
+		err = s.redisProxy.Start()
+		if err != nil {
+			return fmt.Errorf("unable to start RedisProxy: %w", err)
+		}
+	}
 
 	s.events = event.NewEventSource(s.options.serverName)
 
@@ -576,6 +592,12 @@ func (s *Server) Shutdown() error {
 
 	if s.resourceProxy != nil {
 		if err = s.resourceProxy.Stop(s.ctx); err != nil {
+			return err
+		}
+	}
+
+	if s.redisProxy != nil {
+		if err = s.redisProxy.Stop(); err != nil {
 			return err
 		}
 	}

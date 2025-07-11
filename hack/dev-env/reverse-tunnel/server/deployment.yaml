@@ -14,10 +14,12 @@ spec:
         app: rathole-container
     spec:
       containers:
-        - image: 'quay.io/jgwest-redhat/rathole:latest@sha256:53999f80b69f9a5020e19e9c9be90fc34b973d9bd822d4fd44b968f2ebe0845f' # built by rathole-image directory
+        - image: 'quay.io/jgwest-redhat/rathole:v0.5.0@sha256:53999f80b69f9a5020e19e9c9be90fc34b973d9bd822d4fd44b968f2ebe0845f' # built by rathole-image directory
           name: rathole-container
           ports:
             - containerPort: 2333
+              protocol: TCP
+            - containerPort: 6379
               protocol: TCP
             - containerPort: 9090
               protocol: TCP

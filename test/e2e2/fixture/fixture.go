@@ -75,18 +75,19 @@ func (suite *BaseSuite) TearDownTest() {
 	suite.Require().Nil(err)
 }
 
-func ensureDeletion(ctx context.Context, kclient KubeClient, app KubeObject) error {
-	err := kclient.Delete(ctx, app, metav1.DeleteOptions{})
+// EnsureDeletion will issue a delete for a namespace-scoped K8s resource, then wait for it to no longer exist
+func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) error {
+	err := kclient.Delete(ctx, obj, metav1.DeleteOptions{})
 	if errors.IsNotFound(err) {
-		// application is already deleted
+		// object is already deleted
 		return nil
 	} else if err != nil {
 		return err
 	}
 
-	key := types.NamespacedName{Name: app.GetName(), Namespace: app.GetNamespace()}
+	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
 	for count := 0; count < 120; count++ {
-		err := kclient.Get(ctx, key, app, metav1.GetOptions{})
+		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return nil
 		} else if err == nil {
@@ -96,7 +97,7 @@ func ensureDeletion(ctx context.Context, kclient KubeClient, app KubeObject) err
 		}
 	}
 
-	return fmt.Errorf("ensureDeletion: timeout waiting for deletion of %s/%s", key.Namespace, key.Name)
+	return fmt.Errorf("EnsureDeletion: timeout waiting for deletion of %s/%s", key.Namespace, key.Name)
 }
 
 func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient KubeClient, autonomousAgentClient KubeClient) error {
@@ -114,7 +115,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
-		err = ensureDeletion(ctx, principalClient, &app)
+		err = EnsureDeletion(ctx, principalClient, &app)
 		if err != nil {
 			return err
 		}
@@ -127,7 +128,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
-		err = ensureDeletion(ctx, autonomousAgentClient, &app)
+		err = EnsureDeletion(ctx, autonomousAgentClient, &app)
 		if err != nil {
 			return err
 		}
@@ -140,7 +141,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
-		err = ensureDeletion(ctx, managedAgentClient, &app)
+		err = EnsureDeletion(ctx, managedAgentClient, &app)
 		if err != nil {
 			return err
 		}
@@ -153,7 +154,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
-		err = ensureDeletion(ctx, principalClient, &app)
+		err = EnsureDeletion(ctx, principalClient, &app)
 		if err != nil {
 			return err
 		}
@@ -169,7 +170,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
-		err = ensureDeletion(ctx, principalClient, &appProject)
+		err = EnsureDeletion(ctx, principalClient, &appProject)
 		if err != nil {
 			return err
 		}
@@ -185,7 +186,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
-		err = ensureDeletion(ctx, autonomousAgentClient, &appProject)
+		err = EnsureDeletion(ctx, autonomousAgentClient, &appProject)
 		if err != nil {
 			return err
 		}
@@ -201,7 +202,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
-		err = ensureDeletion(ctx, managedAgentClient, &appProject)
+		err = EnsureDeletion(ctx, managedAgentClient, &appProject)
 		if err != nil {
 			return err
 		}
@@ -209,11 +210,11 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 	// Delete any left over namespaces
 	ns := corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "guestbook"}}
-	err = ensureDeletion(ctx, managedAgentClient, &ns)
+	err = EnsureDeletion(ctx, managedAgentClient, &ns)
 	if err != nil {
 		return err
 	}
-	err = ensureDeletion(ctx, autonomousAgentClient, &ns)
+	err = EnsureDeletion(ctx, autonomousAgentClient, &ns)
 	if err != nil {
 		return err
 	}

@@ -131,6 +131,8 @@ apply() {
         sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/redis-service.yaml
         sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/repo-server-service.yaml
         sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/server-service.yaml
+        sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/agent-managed/redis-service.yaml
+        sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/agent-autonomous/redis-service.yaml
     fi
 
     LATEST_RELEASE_TAG=`curl -s "https://api.github.com/repos/argoproj/argo-cd/releases/latest" | jq -r .tag_name`
@@ -169,6 +171,11 @@ apply() {
     echo "  --> Creating instance in vcluster $cluster"
     kubectl --context vcluster-$cluster create ns $namespace || true
 
+    # Update principal Argo CD ConfigMap 'argocd-cmd-params-cm' to use agent address as redis endpoint, to enable redis proxy functionality
+    ARGO_AGENT_IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+    echo "Argo cd agent IPADDR is $ARGO_AGENT_IPADDR"
+    sed -i.bak "s/redis-server-address/$ARGO_AGENT_IPADDR/g" "$TMP_DIR/control-plane/argocd-cmd-params-cm.yaml"
+
     # Run 'kubectl apply' twice, to avoid the following error that occurs during the first invocation:
     # - 'error: resource mapping not found for name: "default" namespace: "" from "(...)": no matches for kind "AppProject" in version "argoproj.io/v1alpha1"'
     kubectl --context vcluster-$cluster apply -n $namespace -k ${TMP_DIR}/${cluster} || true
@@ -176,18 +183,18 @@ apply() {
 
     if [[ "$OPENSHIFT" != "" ]]; then
 
-        echo "-> Waiting for Redis load balancer on control plane Argo CD"
+        # echo "-> Waiting for Redis load balancer on control plane Argo CD"
 
-        while [ true ]
-        do
-            REDIS_ADDR=`kubectl --context vcluster-control-plane -n argocd   get service/argocd-redis -o json | jq -r '.status.loadBalancer.ingress[0].hostname'`
+        # while [ true ]
+        # do
+        #     REDIS_ADDR=`kubectl --context vcluster-control-plane -n argocd   get service/argocd-redis -o json | jq -r '.status.loadBalancer.ingress[0].hostname'`
 
-            if [[ "$REDIS_ADDR" != "" ]] && [[ "$REDIS_ADDR" != "null" ]]; then
-                break
-            fi
+        #     if [[ "$REDIS_ADDR" != "" ]] && [[ "$REDIS_ADDR" != "null" ]]; then
+        #         break
+        #     fi
 
-            sleep 2
-        done
+        #     sleep 2
+        # done
 
         echo "-> Waiting for repo-server load balancer on control plane Argo CD"
 
@@ -205,8 +212,10 @@ apply() {
     else
         # For all other cases, use hardcoded values
         REPO_SERVER_ADDR="${LB_NETWORK}.222"
-        REDIS_ADDR="${LB_NETWORK}.221"
+        # REDIS_ADDR="${LB_NETWORK}.221"
     fi
+
+    REDIS_ADDR=argocd-redis # Now that redis proxy is implemented, agent can connect to its own redis (I've left the existing logic above, for debugging purposes, to be removed at a later time)
 
     echo "Redis on control plane: $REDIS_ADDR"
     echo "Repo server URL on control plane: $REPO_SERVER_ADDR"
