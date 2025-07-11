@@ -17,7 +17,7 @@ package fixture
 import (
 	"context"
 
-	argoapp "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )

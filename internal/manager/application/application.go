@@ -29,7 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	ty "k8s.io/apimachinery/pkg/types"

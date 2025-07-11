@@ -98,7 +98,7 @@ func getArgoCDVersion() string {
 		return "unknown"
 	}
 	for _, dep := range buildInfo.Deps {
-		if dep.Path == "github.com/argoproj/argo-cd/v2" {
+		if dep.Path == "github.com/argoproj/argo-cd/v3" {
 			return dep.Version
 		}
 	}

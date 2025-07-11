@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e2/fixture"
-	argoapp "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"

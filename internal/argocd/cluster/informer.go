@@ -1,9 +1,9 @@
 package cluster
 
 import (
-	"github.com/argoproj/argo-cd/v2/common"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/argo-cd/v2/util/db"
+	"github.com/argoproj/argo-cd/v3/common"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/util/db"
 	v1 "k8s.io/api/core/v1"
 )
 

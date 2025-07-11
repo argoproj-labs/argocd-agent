@@ -16,7 +16,7 @@ package kube
 
 import (
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
-	fakeappclient "github.com/argoproj/argo-cd/v2/pkg/client/clientset/versioned/fake"
+	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

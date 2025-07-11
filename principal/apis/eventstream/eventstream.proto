@@ -21,7 +21,7 @@ package eventstreamapi;
 import "google/api/annotations.proto";
 
 // The following imports require dependencies to be vendored in
-import "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1/generated.proto";
+import "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1/generated.proto";
 import "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb/cloudevent.proto";
 
 // Event describes an event

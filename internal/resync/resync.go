@@ -24,7 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"

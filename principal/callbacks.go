@@ -20,8 +20,8 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/argo-cd/v2/util/glob"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )

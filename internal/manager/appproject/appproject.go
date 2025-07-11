@@ -23,8 +23,8 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/argo-cd/v2/util/glob"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/api/errors"

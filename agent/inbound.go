@@ -25,7 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/dynamic"

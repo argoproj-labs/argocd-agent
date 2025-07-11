@@ -34,9 +34,9 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
-	"github.com/argoproj/argo-cd/v2/common"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
-	cacheutil "github.com/argoproj/argo-cd/v2/util/cache"
+	"github.com/argoproj/argo-cd/v3/common"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/sirupsen/logrus"
 )
 

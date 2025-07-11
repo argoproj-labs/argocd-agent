@@ -26,7 +26,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	wqmock "github.com/argoproj-labs/argocd-agent/test/mocks/k8s-workqueue"
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

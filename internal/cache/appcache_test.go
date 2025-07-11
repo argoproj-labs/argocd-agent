@@ -18,7 +18,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )
