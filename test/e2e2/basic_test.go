@@ -166,6 +166,8 @@ func (suite *BasicTestSuite) Test_AgentAutonomous() {
 	papp := argoapp.Application{}
 	err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &papp, metav1.GetOptions{})
 	requires.NoError(err)
+	app.Spec.Destination.Name = "agent-autonomous"
+	app.Spec.Destination.Server = ""
 	requires.Equal(&app.Spec, &papp.Spec)
 
 	// Modify the application on the autonomous-agent and ensure the change is

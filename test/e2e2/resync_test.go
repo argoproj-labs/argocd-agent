@@ -496,6 +496,8 @@ func (suite *ResyncTestSuite) createAutonomousApp() *argoapp.Application {
 	papp := argoapp.Application{}
 	err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &papp, metav1.GetOptions{})
 	requires.NoError(err)
+	app.Spec.Destination.Name = "agent-autonomous"
+	app.Spec.Destination.Server = ""
 	requires.Equal(&app.Spec, &papp.Spec)
 
 	return &app

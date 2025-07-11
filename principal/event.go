@@ -155,6 +155,14 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 				return fmt.Errorf("could not prefix project name: %w", err)
 			}
 		}
+
+		// Set the destination name to the cluster mapping for the agent
+		cluster := s.clusterMgr.Mapping(agentName)
+		if cluster == nil {
+			return fmt.Errorf("cluster mapping not found for agent %s", agentName)
+		}
+		incoming.Spec.Destination.Name = cluster.Name
+		incoming.Spec.Destination.Server = ""
 	}
 
 	switch ev.Type() {
