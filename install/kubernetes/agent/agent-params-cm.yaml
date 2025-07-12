@@ -58,4 +58,7 @@ data:
   # agent.metrics.port: The port the metrics server should listen on.
   # Default: 8181
   agent.metrics.port: "8181"
+  # agent.healthz.port: The port the health check server should listen on.
+  # Default: 8002
+  agent.healthz.port: "8002"
   

@@ -73,6 +73,7 @@ type ServerOptions struct {
 	clientCertSubjectMatch bool
 	redisAddress           string
 	redisCompressionType   cacheutil.RedisCompressionType
+	healthzPort            int
 }
 
 type ServerOption func(o *Server) error
@@ -444,5 +445,16 @@ func WithRedis(redisAddress, redisCompressionTypeStr string) ServerOption {
 		o.options.redisAddress = redisAddress
 
 		return nil
+	}
+}
+
+func WithHealthzPort(port int) ServerOption {
+	return func(o *Server) error {
+		if port > 0 && port < 32768 {
+			o.options.healthzPort = port
+			return nil
+		} else {
+			return fmt.Errorf("invalid port: %d", port)
+		}
 	}
 }

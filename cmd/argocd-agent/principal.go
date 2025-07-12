@@ -88,6 +88,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 		redisAddress         string
 		redisCompressionType string
+		healthzPort          int
 	)
 	var command = &cobra.Command{
 		Use:   "principal",
@@ -251,6 +252,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithWebSocket(enableWebSocket))
 			opts = append(opts, principal.WithKeepAliveMinimumInterval(keepAliveMinimumInterval))
 			opts = append(opts, principal.WithRedis(redisAddress, redisCompressionType))
+			opts = append(opts, principal.WithHealthzPort(healthzPort))
 
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
@@ -374,6 +376,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().IntVar(&pprofPort, "pprof-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_PPROF_PORT", cmdutil.ValidPort, 0),
 		"Port the pprof server will listen on")
+	command.Flags().IntVar(&healthzPort, "healthz-port",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT", cmdutil.ValidPort, 8003),
+		"Port the health check server will listen on")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
