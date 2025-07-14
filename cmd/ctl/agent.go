@@ -218,7 +218,7 @@ func NewAgentCreateCommand() *cobra.Command {
 			fmt.Printf("Agent %s created\n", agentName)
 		},
 	}
-	command.Flags().StringVar(&rpServer, "resource-proxy-server", "192.168.56.2:9090", "Address of principal's resource-proxy")
+	command.Flags().StringVar(&rpServer, "resource-proxy-server", "argocd-agent-resource-proxy:9090", "Address of principal's resource-proxy")
 	command.Flags().StringVar(&rpUsername, "resource-proxy-username", "", "The username for the resource-proxy")
 	command.Flags().StringVar(&rpPassword, "resource-proxy-password", "", "The password for the resource-proxy")
 	command.Flags().StringSliceVarP(&addLabels, "label", "l", []string{}, "Additional labels for the agent")

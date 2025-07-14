@@ -114,4 +114,4 @@ data:
   # - "mtls:_agent_id_regex_" where _agent_id_regex_ is the regex pattern for
   #   extracting the agent ID from client cert subject.
   # Default: userpass:_path_to_encrypted_creds_
-  principal.auth: "userpass:/app/config/userpass/passwd"
+  principal.auth: "mtls:CN=([^,]+)"

@@ -174,7 +174,11 @@ apply() {
     # Update principal Argo CD ConfigMap 'argocd-cmd-params-cm' to use agent address as redis endpoint, to enable redis proxy functionality
     ARGO_AGENT_IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
     echo "Argo cd agent IPADDR is $ARGO_AGENT_IPADDR"
-    sed -i.bak "s/redis-server-address/$ARGO_AGENT_IPADDR/g" "$TMP_DIR/control-plane/argocd-cmd-params-cm.yaml"
+    if test "$ARGOCD_AGENT_IN_CLUSTER" != ""; then
+	    sed -i.bak "s/redis-server-address/argocd-agent-redis-proxy/g" "$TMP_DIR/control-plane/argocd-cmd-params-cm.yaml"
+    else
+	    sed -i.bak "s/redis-server-address/$ARGO_AGENT_IPADDR/g" "$TMP_DIR/control-plane/argocd-cmd-params-cm.yaml"
+    fi
 
     # Run 'kubectl apply' twice, to avoid the following error that occurs during the first invocation:
     # - 'error: resource mapping not found for name: "default" namespace: "" from "(...)": no matches for kind "AppProject" in version "argoproj.io/v1alpha1"'

@@ -5,10 +5,13 @@ resources:
 - principal-rolebinding.yaml
 - principal-clusterrolebinding.yaml
 - principal-deployment.yaml
-- principal-service.yaml
+- principal-grpc-service.yaml
+- principal-resource-proxy-service.yaml
+- principal-redis-proxy-service.yaml
 - principal-params-cm.yaml
 - principal-metrics-service.yaml
 - principal-healthz-service.yaml
+- principal-userpass-secret.yaml
 
 images:
 - name: argocd-agent

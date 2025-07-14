@@ -24,10 +24,23 @@ AGENTCTL=${BASEPATH}/dist/argocd-agentctl
 KUBECTL=$(which kubectl)
 OPENSSL=$(which openssl)
 
+source ${SCRIPTPATH}/utility.sh
+
 export ARGOCD_AGENT_PRINCIPAL_CONTEXT=vcluster-control-plane
 export ARGOCD_AGENT_PRINCIPAL_NAMESPACE=argocd
 
-IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+if test "${ARGOCD_AGENT_IN_CLUSTER}" = ""; then
+	IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+	ARGOCD_AGENT_GRPC_SVC=$IPADDR
+	ARGOCD_AGENT_GRPC_SAN="--ip 127.0.0.1,${IPADDR}"
+	ARGOCD_AGENT_RESOURCE_PROXY=${IPADDR}
+	ARGOCD_AGENT_RESOURCE_PROXY_SAN="--ip 127.0.0.1,${IPADDR}"
+else
+	ARGOCD_AGENT_GRPC_SVC=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
+	ARGOCD_AGENT_GRPC_SAN="--ip 127.0.0.1,$ARGOCD_AGENT_GRPC_SVC"
+	ARGOCD_AGENT_RESOURCE_PROXY=argocd-agent-resource-proxy
+	ARGOCD_AGENT_RESOURCE_PROXY_SAN="--dns ${ARGOCD_AGENT_RESOURCE_PROXY}"
+fi
 
 if ! test -x ${AGENTCTL}; then
 	echo "Please build argocd-agentctl first by running 'make cli'" >&2
@@ -45,13 +58,13 @@ fi
 echo "[*] Creating principal TLS configuration"
 ${AGENTCTL} pki issue principal --upsert \
 	--principal-namespace argocd \
-	--ip "127.0.0.1,${IPADDR}"
+	${ARGOCD_AGENT_GRPC_SAN}
 echo "  -> Principal TLS config created."
 
 echo "[*] Creating resource proxy TLS configuration"
 ${AGENTCTL} pki issue resource-proxy --upsert \
 	--principal-namespace argocd \
-	--ip "127.0.0.1,${IPADDR}"
+	${ARGOCD_AGENT_RESOURCE_PROXY_SAN}
 echo "  -> Resource proxy TLS config created."
 
 echo "[*] Creating JWT signing key and secret"
@@ -69,10 +82,11 @@ for agent in ${AGENTS}; do
 		${AGENTCTL} agent create ${agent} \
 			--resource-proxy-username ${agent} \
 			--resource-proxy-password ${agent} \
-			--resource-proxy-server ${IPADDR}:9090
+			--resource-proxy-server ${ARGOCD_AGENT_RESOURCE_PROXY}:9090
 	else
 		echo "  -> Reusing existing cluster secret for agent configuration"
 	fi
 	echo "  -> Creating mTLS client certificate and key"
+	${AGENTCTL} pki propagate --agent-context vcluster-${agent} --agent-namespace argocd -f
 	${AGENTCTL} pki issue agent ${agent} --agent-context vcluster-${agent} --agent-namespace argocd --upsert
 done

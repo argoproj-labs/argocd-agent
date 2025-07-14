@@ -183,6 +183,11 @@ spec:
                 name: argocd-agent-params
                 key: principal.auth
                 optional: true
+          - name: REDIS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: argocd-redis
+                key: auth
 
           image: argocd-agent
           imagePullPolicy: Always
