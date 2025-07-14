@@ -470,6 +470,16 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 	log().Infof("Namespace informer synced and ready")
 
+	if s.options.healthzPort > 0 {
+		// Endpoint to check if the principal is up and running
+		http.HandleFunc("/healthz", s.healthzHandler)
+		healthzAddr := fmt.Sprintf(":%d", s.options.healthzPort)
+
+		log().Infof("Starting healthz server on %s", healthzAddr)
+		//nolint:errcheck
+		go http.ListenAndServe(healthzAddr, nil)
+	}
+
 	return nil
 }
 
@@ -708,4 +718,9 @@ func (s *Server) setAgentMode(namespace string, mode types.AgentMode) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 	s.namespaceMap[namespace] = mode
+}
+
+func (s *Server) healthzHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
 }

@@ -281,7 +281,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupAutonomous() {
 	err = fixture.StartProcess("agent-autonomous")
 	requires.NoError(err)
 
-	fixture.WaitForAgent(suite.T(), "agent-autonomous")
+	fixture.CheckReadiness(suite.T(), "agent-autonomous")
 
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}

@@ -8,6 +8,7 @@ resources:
 - principal-service.yaml
 - principal-params-cm.yaml
 - principal-metrics-service.yaml
+- principal-healthz-service.yaml
 
 images:
 - name: argocd-agent

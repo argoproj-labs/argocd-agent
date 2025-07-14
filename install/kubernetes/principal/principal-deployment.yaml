@@ -45,6 +45,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.metrics.port
                 optional: true
+          - name: ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.healthz.port
+                optional: true
           - name: ARGOCD_PRINCIPAL_NAMESPACE
             valueFrom:
               configMapKeyRef:
@@ -186,6 +192,8 @@ spec:
               name: principal
             - containerPort: 8000
               name: metrics
+            - containerPort: 8003
+              name: healthz
           securityContext:
             capabilities:
               drop:

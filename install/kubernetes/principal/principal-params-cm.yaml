@@ -17,6 +17,9 @@ data:
   # principal.metrics.port: The port the metrics server should listen on.
   # Default: 8000
   principal.metrics.port: "8000"
+  # principal.healthz.port: The port the health check server should listen on.
+  # Default: 8003
+  principal.healthz.port: "8003"
   # principal.namespace: The namespace the principal will operate in. If left
   # blank, the namespace where the pod is running in will be used.
   # Default: "argocd"
