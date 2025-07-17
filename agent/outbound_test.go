@@ -148,8 +148,8 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
 		// App must be already managed for event to be generated
 		a.addAppDeletionToQueue(app)
-		ev, _ := a.queues.SendQ(defaultQueueName).Get()
-		assert.Equal(t, event.Delete.String(), ev.Type())
+		items := a.queues.SendQ(defaultQueueName)
+		assert.Equal(t, 0, items.Len())
 		require.False(t, a.appManager.IsManaged("agent/guestbook"))
 	})
 }

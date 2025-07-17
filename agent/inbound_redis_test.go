@@ -75,7 +75,7 @@ func Test_stripNamespaceFromKeyForAutonomousAgent(t *testing.T) {
 
 		t.Run(testEntry.name, func(t *testing.T) {
 
-			res, err := stripNamespaceFromKeyForAutonomousAgentForRedis(testEntry.key, logCtx)
+			res, err := stripNamespaceFromRedisKey(testEntry.key, logCtx)
 
 			require.Equal(t, testEntry.expectedValue, res)
 			require.Equal(t, testEntry.errorExpected, err != nil, "error: %v", err)
@@ -104,7 +104,7 @@ func TestAgent_handleRedisGetMessage(t *testing.T) {
 					// Autonomous agent will strip the agent prefix from the key
 					mock.ExpectGet("app|managed-resources|my-app|1.8.3").SetVal(string(testData))
 				} else {
-					mock.ExpectGet("app|managed-resources|agent_my-app|1.8.3").SetVal(string(testData))
+					mock.ExpectGet("app|managed-resources|my-app|1.8.3").SetVal(string(testData))
 				}
 			},
 			expectedResult: &event.RedisResponseBody{
@@ -124,7 +124,7 @@ func TestAgent_handleRedisGetMessage(t *testing.T) {
 					// Autonomous agent will strip the agent prefix from the key
 					mock.ExpectGet("app|managed-resources|missing-app|1.8.3").RedisNil()
 				} else {
-					mock.ExpectGet("app|managed-resources|agent_missing-app|1.8.3").RedisNil()
+					mock.ExpectGet("app|managed-resources|missing-app|1.8.3").RedisNil()
 				}
 			},
 			expectedResult: &event.RedisResponseBody{
@@ -144,7 +144,7 @@ func TestAgent_handleRedisGetMessage(t *testing.T) {
 					// Autonomous agent will strip the agent prefix from the key
 					mock.ExpectGet("app|managed-resources|error-app|1.8.3").SetErr(errors.New("redis connection failed"))
 				} else {
-					mock.ExpectGet("app|managed-resources|agent_error-app|1.8.3").SetErr(errors.New("redis connection failed"))
+					mock.ExpectGet("app|managed-resources|error-app|1.8.3").SetErr(errors.New("redis connection failed"))
 				}
 			},
 			expectedResult: &event.RedisResponseBody{

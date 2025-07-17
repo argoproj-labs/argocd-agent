@@ -566,7 +566,7 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 			return err
 		}
 
-		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx)
+		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx, manager.ManagerRolePrincipal)
 		go resyncHandler.SendRequestUpdates(s.ctx)
 
 		// Principal should request SyncedResourceList to revert any deletions on the Principal side.

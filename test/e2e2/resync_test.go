@@ -64,7 +64,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnPrincipalStartupManaged() {
 	requires := suite.Require()
 
 	app := suite.createManagedApp()
-	key := fixture.ToNamespacedName(app)
+	key := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
 
 	// Stop the principal and delete the app from the control-plane
 	err := fixture.StopProcess("principal")
@@ -102,7 +102,8 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupManaged() {
 	requires := suite.Require()
 
 	app := suite.createManagedApp()
-	key := fixture.ToNamespacedName(app)
+	principalKey := fixture.ToNamespacedName(app)
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
 
 	// Stop the principal and update the app on the control-plane
 	err := fixture.StopProcess("principal")
@@ -112,14 +113,14 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupManaged() {
 		return !fixture.IsProcessRunning("principal")
 	}, 30*time.Second, 1*time.Second)
 
-	err = suite.PrincipalClient.EnsureApplicationUpdate(suite.Ctx, key, func(a *argoapp.Application) error {
+	err = suite.PrincipalClient.EnsureApplicationUpdate(suite.Ctx, principalKey, func(a *argoapp.Application) error {
 		a.Spec.Source.Path = "guestbook"
 		return nil
 	}, metav1.UpdateOptions{})
 	requires.NoError(err)
 
 	// App should not be updated on the workload cluster
-	err = suite.ManagedAgentClient.Get(suite.Ctx, key, app, metav1.GetOptions{})
+	err = suite.ManagedAgentClient.Get(suite.Ctx, agentKey, app, metav1.GetOptions{})
 	requires.NoError(err)
 	requires.Equal("kustomize-guestbook", app.Spec.Source.Path)
 
@@ -133,7 +134,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupManaged() {
 
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
 		return err == nil &&
 			app.Spec.Source.Path == "guestbook"
 	}, 60*time.Second, 1*time.Second)
@@ -145,7 +146,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupManaged() {
 	requires := suite.Require()
 
 	app := suite.createManagedApp()
-	key := fixture.ToNamespacedName(app)
+	key := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
 
 	// Stop the agent and delete the app
 	err := fixture.StopProcess("agent-managed")
@@ -155,7 +156,12 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupManaged() {
 		return !fixture.IsProcessRunning("agent-managed")
 	}, 30*time.Second, 1*time.Second)
 
-	err = suite.ManagedAgentClient.Delete(suite.Ctx, app, metav1.DeleteOptions{})
+	err = suite.ManagedAgentClient.Delete(suite.Ctx, &argoapp.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      app.Name,
+			Namespace: "argocd",
+		},
+	}, metav1.DeleteOptions{})
 	requires.NoError(err)
 
 	// Start the agent and ensure that the app is recreated on the agent side
@@ -179,7 +185,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupManaged() {
 	requires := suite.Require()
 
 	app := suite.createManagedApp()
-	key := fixture.ToNamespacedName(app)
+	key := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
 
 	// Stop the agent and update the app on the workload cluster
 	err := fixture.StopProcess("agent-managed")
@@ -386,7 +392,7 @@ func (suite *ResyncTestSuite) Test_ResyncOnConnectionLostManagedMode() {
 	// Create a managed app
 	app := suite.createManagedApp()
 	requires.NotNil(app)
-	key := fixture.ToNamespacedName(app)
+	key := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
 
 	// Disable the connection between the agent and the principal
 	requires.NoError(proxy.Disable())
@@ -532,24 +538,25 @@ func (suite *ResyncTestSuite) createManagedApp() *argoapp.Application {
 	err := suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := fixture.ToNamespacedName(&app)
+	principalKey := fixture.ToNamespacedName(&app)
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
 
 	// Ensure the app has been pushed to the workload cluster
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second)
 
 	// Check that the .spec field of the workload cluster matches that of the control-plane
 	app = argoapp.Application{}
-	err = suite.PrincipalClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+	err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 	// The destination on the agent will be set to in-cluster
 	app.Spec.Destination.Name = "in-cluster"
 	app.Spec.Destination.Server = ""
 	requires.NoError(err)
 	mapp := argoapp.Application{}
-	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &mapp, metav1.GetOptions{})
+	err = suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &mapp, metav1.GetOptions{})
 	requires.NoError(err)
 	requires.Equal(&app.Spec, &mapp.Spec)
 

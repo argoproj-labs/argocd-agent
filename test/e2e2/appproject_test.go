@@ -60,7 +60,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Managed() {
 		appProject := argoapp.AppProject{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &appProject, metav1.GetOptions{})
 		return err == nil
-	}, 30*time.Second, 1*time.Second)
+	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
 
 	// Ensure that the appProject is specific to the agent it is synced to
 	appProject = argoapp.AppProject{}
