@@ -138,25 +138,9 @@ func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppPro
 	}
 	project.Annotations[manager.SourceUIDAnnotation] = string(project.UID)
 
-	// If the AppProject has a source namespace, we only allow the agent to manage the AppProject
-	// if the source namespace matches the agent's namespace
-	// if m.role == manager.ManagerRoleAgent {
-	// 	fmt.Printf("Agent Namespace %v\n", m.namespace)
-	// 	if len(project.Spec.SourceNamespaces) > 0 {
-	// 		for _, ns := range project.Spec.SourceNamespaces {
-	// 			if glob.Match(ns, m.namespace) || m.namespace == " {
-	// 				created, err := createAppProject(ctx, m, project)
-	// 				if err != nil {
-	// 					return nil, err
-	// 				}
-	// 				return created, nil
-	// 			}
-	// 		}
-	// 	}
-	// 	return nil, fmt.Errorf("cannot create appproject: agent is not allowed to manage this namespace")
-	// }
-
-	//	Principal can create AppProject in any namespace
+	// AppProject must be created in the agent's namespace, which should be the
+	// same as ArgoCD's namespace.
+	project.Namespace = m.namespace
 	created, err := createAppProject(ctx, m, project)
 	if err != nil {
 		return nil, err
