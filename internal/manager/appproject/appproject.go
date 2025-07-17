@@ -24,7 +24,6 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -141,21 +140,21 @@ func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppPro
 
 	// If the AppProject has a source namespace, we only allow the agent to manage the AppProject
 	// if the source namespace matches the agent's namespace
-	if m.role == manager.ManagerRoleAgent {
-		fmt.Printf("Agent Namespace %v\n", m.namespace)
-		if len(project.Spec.SourceNamespaces) > 0 {
-			for _, ns := range project.Spec.SourceNamespaces {
-				if glob.Match(ns, m.namespace) {
-					created, err := createAppProject(ctx, m, project)
-					if err != nil {
-						return nil, err
-					}
-					return created, nil
-				}
-			}
-		}
-		return nil, fmt.Errorf("cannot create appproject: agent is not allowed to manage this namespace")
-	}
+	// if m.role == manager.ManagerRoleAgent {
+	// 	fmt.Printf("Agent Namespace %v\n", m.namespace)
+	// 	if len(project.Spec.SourceNamespaces) > 0 {
+	// 		for _, ns := range project.Spec.SourceNamespaces {
+	// 			if glob.Match(ns, m.namespace) || m.namespace == " {
+	// 				created, err := createAppProject(ctx, m, project)
+	// 				if err != nil {
+	// 					return nil, err
+	// 				}
+	// 				return created, nil
+	// 			}
+	// 		}
+	// 	}
+	// 	return nil, fmt.Errorf("cannot create appproject: agent is not allowed to manage this namespace")
+	// }
 
 	//	Principal can create AppProject in any namespace
 	created, err := createAppProject(ctx, m, project)

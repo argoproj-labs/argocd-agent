@@ -5,4 +5,3 @@ metadata:
 data:
   repo.server: repo-server-address:8081
   redis.server: redis-server-address:6379
-  application.namespaces: agent-managed

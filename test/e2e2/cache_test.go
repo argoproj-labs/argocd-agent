@@ -16,6 +16,7 @@ package e2e2
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -75,26 +76,27 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterChanges() {
 
 	// Create a managed application in the principal-cluster and ensure it is deployed into managed-cluster
 	app := createApp(suite.Ctx, suite.PrincipalClient, requires)
-	key := fixture.ToNamespacedName(&app)
-	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, key, requires)
+	principalKey := fixture.ToNamespacedName(&app)
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, principalKey, agentKey, requires)
 
 	// Case 1: Modify the application directly in the managed-cluster,
 	// but changes are reverted to be in sync with principal
-	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires, suite.T())
+	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 
 	// Case 2:  Modify the application on the principal-cluster and
 	// ensure new updates are propagated to the managed-cluster
-	updateAppInfo(suite.Ctx, suite.PrincipalClient, key, []string{"a", "b"}, requires)
-	validateAppInfoUpdated(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
+	updateAppInfo(suite.Ctx, suite.PrincipalClient, principalKey, []string{"a", "b"}, requires)
+	validateAppInfoUpdated(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
 
 	// Case 3: Again modify the application directly in the managed-agent,
 	// but this time application is reverted to state of Case 2.
-	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, key, []string{"x", "y"}, requires)
-	requires.NoError(suite.PrincipalClient.Get(suite.Ctx, key, &app, metav1.GetOptions{}))
+	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"x", "y"}, requires)
+	requires.NoError(suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{}))
 	app.Spec.Destination.Name = "in-cluster"
 	app.Spec.Destination.Server = ""
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires, suite.T())
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 }
 
 // This test validates the scenario when agent is disconnected with principal and then user tries
@@ -104,8 +106,9 @@ func (suite *CacheTestSuite) Test_RevertDisconnectedManagedClusterChanges() {
 
 	// Create a managed application in the principal-cluster and ensure it is deployed into managed-cluster
 	app := createApp(suite.Ctx, suite.PrincipalClient, requires)
-	key := fixture.ToNamespacedName(&app)
-	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, key, requires)
+	principalKey := fixture.ToNamespacedName(&app)
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, principalKey, agentKey, requires)
 
 	// Case 1: Agent is disconnected with principal, now modify the application directly in the managed-cluster,
 	// but changes should be reverted, to be in sync with last known state of principal application
@@ -114,15 +117,15 @@ func (suite *CacheTestSuite) Test_RevertDisconnectedManagedClusterChanges() {
 		return !fixture.IsProcessRunning(PrincipalName)
 	}, 30*time.Second, 1*time.Second)
 
-	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires, suite.T())
+	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 
 	// Case 2: Agent is reconnected with principal and now changes done in principal should reflect in managed-cluster
 	requires.NoError(fixture.StartProcess(PrincipalName))
 	fixture.CheckReadiness(suite.T(), PrincipalName)
 
-	updateAppInfo(suite.Ctx, suite.PrincipalClient, key, []string{"a", "b"}, requires)
-	validateAppInfoUpdated(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
+	updateAppInfo(suite.Ctx, suite.PrincipalClient, principalKey, []string{"a", "b"}, requires)
+	validateAppInfoUpdated(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
 }
 
 // This test is to validate the case when agent is restarted and managed-cluster app is still in sync with principal,
@@ -133,21 +136,22 @@ func (suite *CacheTestSuite) Test_CacheRecreatedOnRestart() {
 
 	// Create a managed application in the principal-cluster and ensure it is deployed into managed-cluster
 	app := createApp(suite.Ctx, suite.PrincipalClient, requires)
-	key := fixture.ToNamespacedName(&app)
-	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, key, requires)
+	principalKey := fixture.ToNamespacedName(&app)
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, principalKey, agentKey, requires)
 
 	// Case 1: Agent is restarted, now make direct changes in the managed-cluster,
 	// but they should be reverted to be in sync with last known state of principal app
 	fixture.RestartAgent(suite.T(), AgentManagedName)
 	fixture.CheckReadiness(suite.T(), AgentManagedName)
 
-	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires, suite.T())
+	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 
 	// Case 2:  Modify the application on the principal-cluster and
 	// ensure new updates are propagated to the managed-cluster
-	updateAppInfo(suite.Ctx, suite.PrincipalClient, key, []string{"a", "b"}, requires)
-	validateAppInfoUpdated(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
+	updateAppInfo(suite.Ctx, suite.PrincipalClient, principalKey, []string{"a", "b"}, requires)
+	validateAppInfoUpdated(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
 }
 
 // This test validates the scenario when agent is down, but user still makes changes in application manifest
@@ -157,8 +161,9 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterOfflineChanges() {
 
 	// Create a managed application in the principal-cluster and ensure it is deployed into managed-cluster
 	app := createApp(suite.Ctx, suite.PrincipalClient, requires)
-	key := fixture.ToNamespacedName(&app)
-	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, key, requires)
+	principalKey := fixture.ToNamespacedName(&app)
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, principalKey, agentKey, requires)
 
 	// Agent in not running, but still make changes in the managed-cluster application manifest.
 	// When agent is restarted, these changes should be reverted to be in sync with principal.
@@ -171,11 +176,11 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterOfflineChanges() {
 		return !fixture.IsProcessRunning(AgentManagedName)
 	}, 60*time.Second, 1*time.Second)
 
-	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, key, []string{"a", "b"}, requires)
+	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
 
 	requires.NoError(fixture.StartProcess(AgentManagedName))
 	fixture.CheckReadiness(suite.T(), AgentManagedName)
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, key, requires, suite.T())
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 }
 
 func createApp(ctx context.Context, client fixture.KubeClient, requires *require.Assertions) argoapp.Application {
@@ -206,9 +211,9 @@ func createApp(ctx context.Context, client fixture.KubeClient, requires *require
 	return app
 }
 
-func validateManagedAppCreated(ctx context.Context, mClient fixture.KubeClient, pClient fixture.KubeClient, key types.NamespacedName, requires *require.Assertions) argoapp.Application {
+func validateManagedAppCreated(ctx context.Context, mClient fixture.KubeClient, pClient fixture.KubeClient, principalKey types.NamespacedName, agentKey types.NamespacedName, requires *require.Assertions) argoapp.Application {
 	app := argoapp.Application{}
-	requires.NoError(pClient.Get(ctx, key, &app, metav1.GetOptions{}))
+	requires.NoError(pClient.Get(ctx, principalKey, &app, metav1.GetOptions{}))
 	// The destination on the agent will be set to "in-cluster"
 	app.Spec.Destination.Name = "in-cluster"
 	app.Spec.Destination.Server = ""
@@ -216,7 +221,7 @@ func validateManagedAppCreated(ctx context.Context, mClient fixture.KubeClient, 
 	// Check that the spec field of agent app matches with principal app
 	mapp := argoapp.Application{}
 	requires.Eventually(func() bool {
-		err := mClient.Get(ctx, key, &mapp, metav1.GetOptions{})
+		err := mClient.Get(ctx, agentKey, &mapp, metav1.GetOptions{})
 		return err == nil && reflect.DeepEqual(&app.Spec, &mapp.Spec)
 	}, 90*time.Second, 2*time.Second)
 
@@ -224,15 +229,21 @@ func validateManagedAppCreated(ctx context.Context, mClient fixture.KubeClient, 
 }
 
 func updateAppInfo(ctx context.Context, client fixture.KubeClient, key types.NamespacedName, info []string, requires *require.Assertions) {
-	requires.NoError(client.EnsureApplicationUpdate(ctx, key, func(app *argoapp.Application) error {
-		app.Spec.Info = []argoapp.Info{
-			{
-				Name:  info[0],
-				Value: info[1],
-			},
+	requires.Eventually(func() bool {
+		err := client.EnsureApplicationUpdate(ctx, key, func(app *argoapp.Application) error {
+			app.Spec.Info = []argoapp.Info{
+				{
+					Name:  info[0],
+					Value: info[1],
+				},
+			}
+			return nil
+		}, metav1.UpdateOptions{})
+		if err != nil {
+			fmt.Printf("Error updating app info for %v: %v\n", key, err)
 		}
-		return nil
-	}, metav1.UpdateOptions{}))
+		return err == nil
+	}, 30*time.Second, 2*time.Second)
 }
 
 func validateAppInfoUpdated(ctx context.Context, client fixture.KubeClient, key types.NamespacedName, info []string, requires *require.Assertions) {

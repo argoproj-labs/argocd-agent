@@ -115,7 +115,8 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	a.resources.Remove(resources.NewResourceKeyFromApp(app))
 
 	if !a.appManager.IsManaged(app.QualifiedName()) {
-		logCtx.Warn("App is not managed, proceeding anyways")
+		logCtx.Warn("Dropping app deletion event because the app is not managed")
+		return
 	} else {
 		_ = a.appManager.Unmanage(app.QualifiedName())
 	}
@@ -249,7 +250,8 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 	}
 
 	if !a.projectManager.IsManaged(appProject.Name) {
-		logCtx.Warn("AppProject is not managed, proceeding anyways")
+		logCtx.Warn("Dropping appProject deletion event because the appProject is not managed")
+		return
 	} else {
 		_ = a.projectManager.Unmanage(appProject.Name)
 	}

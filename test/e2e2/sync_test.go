@@ -87,55 +87,56 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := fixture.ToNamespacedName(&app)
+	principalKey := fixture.ToNamespacedName(&app)
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
 
 	// Ensure the app has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second)
 
 	// Check that the principal's sync status is "OutOfSync"
 	requires.Eventually(func() bool {
 		app = argoapp.Application{}
-		err = suite.PrincipalClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeOutOfSync
 	}, 60*time.Second, 1*time.Second)
 
 	// Sync the app
-	err = fixture.SyncApplication(suite.Ctx, key, suite.PrincipalClient)
+	err = fixture.SyncApplication(suite.Ctx, principalKey, suite.PrincipalClient)
 	requires.NoError(err)
 
 	// Wait for the app on the principal to become synced
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
-		err := suite.PrincipalClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
 	}, 60*time.Second, 1*time.Second)
 
 	// Ensure the app on the managed-agent becomes synced
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
 	}, 60*time.Second, 1*time.Second)
 
 	// Check that the .spec field of the managed-agent matches that of the
 	// principal
 	app = argoapp.Application{}
-	err = suite.PrincipalClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+	err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 	app.Spec.Destination.Name = "in-cluster"
 	app.Spec.Destination.Server = ""
 	requires.NoError(err)
 	mapp := argoapp.Application{}
-	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &mapp, metav1.GetOptions{})
+	err = suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &mapp, metav1.GetOptions{})
 	requires.NoError(err)
 	requires.Equal(&app.Spec, &mapp.Spec)
 
 	// Modify the application on the principal and ensure the change is
 	// propagated to the managed-agent
-	err = suite.PrincipalClient.EnsureApplicationUpdate(suite.Ctx, key, func(app *argoapp.Application) error {
+	err = suite.PrincipalClient.EnsureApplicationUpdate(suite.Ctx, principalKey, func(app *argoapp.Application) error {
 		app.Spec.Info = []argoapp.Info{
 			{
 				Name:  "e2e",
@@ -147,7 +148,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 	requires.NoError(err)
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
 		return err == nil &&
 			len(app.Spec.Info) == 1 &&
 			app.Spec.Info[0].Name == "e2e" &&
@@ -161,7 +162,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 	// Ensure the app has been deleted from the managed-agent
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
 		return errors.IsNotFound(err)
 	}, 90*time.Second, 1*time.Second)
 }
