@@ -143,6 +143,7 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 					"bar":                       "foo",
 					manager.SourceUIDAnnotation: "random_uid",
 				},
+				Finalizers: []string{"test-finalizer"},
 			},
 			Spec: v1alpha1.ApplicationSpec{
 				Source: &v1alpha1.ApplicationSource{
@@ -223,6 +224,10 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 
 		// Labels and annotations must be in sync with incoming
 		require.Equal(t, incoming.Labels, updated.Labels)
+
+		// Finalizers must be in sync
+		require.Equal(t, incoming.Finalizers, updated.Finalizers)
+
 		// Non-refresh annotations must be in sync with incoming
 		require.Equal(t, incoming.Annotations["bar"], updated.Annotations["bar"])
 		// Refresh annotation must not be removed
@@ -232,6 +237,7 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		// Spec must be in sync with incoming
 		require.Equal(t, incoming.Spec, updated.Spec)
 	})
+
 }
 
 func Test_ManagerUpdateStatus(t *testing.T) {
