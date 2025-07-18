@@ -85,8 +85,31 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 		return err
 	}
 
+	// Wait for the object to be deleted  for 60 seconds
+	// - Primarily this will be waiting for the finalizer to be removed, so that the object is deleted
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 120; count++ {
+	for count := 0; count < 60; count++ {
+		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			return nil
+		} else if err == nil {
+			time.Sleep(1 * time.Second)
+		} else {
+			return err
+		}
+	}
+
+	// After X seconds, give up waiting for the child objects to be deleted, and remove any finalizers on the object
+	if len(obj.GetFinalizers()) > 0 {
+		obj.SetFinalizers(nil)
+		if err := kclient.Update(ctx, obj, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
+	}
+
+	// Continue waiting for object to be deleted, now that finalizers have been removed.
+	key = types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
+	for count := 0; count < 60; count++ {
 		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return nil

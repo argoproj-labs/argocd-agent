@@ -214,20 +214,57 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		logCtx.Infof("Updated application spec %s", incoming.QualifiedName())
 	// App deletion
 	case event.Delete.String():
-		if !agentMode.IsAutonomous() {
-			logCtx.Debug("Discarding event, because agent is not in autonomous mode")
-			return event.NewEventNotAllowedErr("event type not allowed when mode is not autonomous")
-		}
+		if agentMode.IsAutonomous() {
 
-		deletionPropagation := backend.DeletePropagationForeground
-		err := s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
-		if err != nil {
-			if kerrors.IsNotFound(err) {
+			deletionPropagation := backend.DeletePropagationForeground
+			err = s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
+			if err != nil {
+				if kerrors.IsNotFound(err) {
+					return nil
+				}
+				return fmt.Errorf("could not delete application %s: %w", incoming.QualifiedName(), err)
+			}
+			logCtx.Infof("Deleted application %s", incoming.QualifiedName())
+
+		} else if agentMode.IsManaged() {
+
+			app, err := s.appManager.Get(ctx, incoming.Name, incoming.Namespace)
+			if err != nil {
+				if kerrors.IsNotFound(err) {
+					return nil // ignore not found error: no need to delete app if it doesn't exist
+				}
+				logCtx.WithError(err).Error("unexpected error when attempting to retrieve deleted Application")
+				return err
+			}
+
+			// When we receive an 'application deleted' event from a managed agent, it should only cause the principal application to be deleted IF the principal Application is ALSO in the deletion state (deletionTimestamp is non-nil)
+			if app.DeletionTimestamp == nil {
+				logCtx.Warn("application was detected as deleted from managed agent, even though principal application is not in deletion state")
 				return nil
 			}
-			return fmt.Errorf("could not delete application %s: %w", incoming.QualifiedName(), err)
+
+			// Remove the finalizers from the Application when it has been deleted from managed-agent
+			if len(app.Finalizers) > 0 {
+				_, err := s.appManager.RemoveFinalizers(ctx, app)
+				if err != nil {
+					logCtx.WithError(err).Error("unexpected error when attempting to update finalizers of deleted Application")
+					return err
+				}
+			}
+
+			deletionPropagation := backend.DeletePropagationForeground
+			err = s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
+			if err != nil {
+				if kerrors.IsNotFound(err) {
+					return nil
+				}
+				return fmt.Errorf("could not delete application %s: %w", incoming.QualifiedName(), err)
+			}
+			logCtx.Infof("Deleted application %s", incoming.QualifiedName())
+
+		} else {
+			return fmt.Errorf("unexpected agent mode")
 		}
-		logCtx.Infof("Deleted application %s", incoming.QualifiedName())
 	default:
 		return fmt.Errorf("unable to process event of type %s", ev.Type())
 	}
