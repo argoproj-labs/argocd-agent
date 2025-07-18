@@ -98,3 +98,62 @@ To install the principal component on the control plane cluster, you can use the
 ```
 kubectl --context <control plane context> -n argocd apply -k install/kubernetes/principal
 ```
+## Installation and configuration of the workload components
+
+
+### Argo CD installation
+
+Argo CD must be installed on the workload cluster. Right now, argocd-agent will expect the same, stable version of Argo CD on all involved clusters, the control plane and workload clusters.
+
+We recommend Kustomize or Helm to install Argo CD. It is also recommended to install Argo CD in its default namespace, which is `argocd`.
+
+The following Argo CD components must be installed and running on the control plane:
+
+* `argocd-application-controller`
+* `argocd-redis` (or potentially, the HA variant)
+* `argocd-repository-server`
+
+The following Argo CD components **must not** run on the workload cluster. If you installed them, either delete the StatefulSet or Deployment resource (recommended) or scale them *permanently* down to 0.
+
+* `argocd-server` 
+
+### Agent Pre-requisite
+
+___Note: soon we will be using helm to install agent___
+
+To install the agent, we will need the following things:
+
+- Argo-cd CRDs installed
+- Create namespace to deploy agent resources
+- Create a TLS secret containing the issued certificate for agent
+- 
+#### Create the PKI on the agent:
+
+```bash
+argocd-agentctl pki issue agent <agent-name> --agent-context <workload context> --agent-namespace <workload namespace> --upsert
+```
+
+#### Apply the installation manifests
+
+```shell 
+kubectl apply -n $(workload-namespace) -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main'
+```
+This should create all the required agent related resources.
+
+NOTE: update RBAC to refer to the right namespaces, rbac namespaces are set to `default` namespace
+
+#### Configuring the agent
+
+You can configure the agent by editing the `argocd-agent-params` ConfigMap in the agent's installation namespace. For an up-to-date example with comments, have a look at the
+[example](https://github.com/argoproj-labs/argocd-agent/blob/main/install/kubernetes/agent/agent-params-cm.yaml)
+
+Update the config-map with details with principal server address URL, creds, agent type and more.
+
+__Note:__
+Set `agent.tls.client.insecure` to `insecure` to if needed.
+
+After a change to the `argocd-agent-params` ConfigMap, the agent needs to be restarted to pick up the changes:
+
+```shell
+kubectl rollout -n argocd restart deployment argocd-agent-agent
+```
