@@ -144,7 +144,7 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 
 	channelName, err := stripNamespaceFromRedisKey(channelName, logCtx)
 	if err != nil {
-		return nil, fmt.Errorf("unable to transform SUBSCRIBE key for autonomous agent: %v", err)
+		return nil, fmt.Errorf("unable to transform SUBSCRIBE key for agent: %v", err)
 	}
 
 	// Subscribe to the argo cd redis channel via redis client
@@ -247,7 +247,7 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 
 	key, err := stripNamespaceFromRedisKey(key, logCtx)
 	if err != nil {
-		return nil, fmt.Errorf("unable to transform GET key for autonomous agent: %v", err)
+		return nil, fmt.Errorf("unable to transform GET key for agent: %v", err)
 	}
 
 	// Connect to local redis to GET key/value, and store response
