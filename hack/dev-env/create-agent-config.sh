@@ -74,11 +74,5 @@ for agent in ${AGENTS}; do
 		echo "  -> Reusing existing cluster secret for agent configuration"
 	fi
 	echo "  -> Creating mTLS client certificate and key"
-	# Current hack to have managed agent running out of a different namespace
-	if test "$agent" = "agent-managed"; then
-		namespace="agent-managed"
-	else
-		namespace="argocd"
-	fi
-	${AGENTCTL} pki issue agent ${agent} --agent-context vcluster-${agent} --agent-namespace ${namespace} --upsert
+	${AGENTCTL} pki issue agent ${agent} --agent-context vcluster-${agent} --agent-namespace argocd --upsert
 done

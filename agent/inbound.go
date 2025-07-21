@@ -22,6 +22,7 @@ import (
 	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -275,7 +276,7 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 		return fmt.Errorf("send queue not found for the default queue pair")
 	}
 
-	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx)
+	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent)
 
 	switch ev.Type() {
 	case event.SyncedResourceList:

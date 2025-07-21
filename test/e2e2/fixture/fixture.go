@@ -136,7 +136,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 	// Delete any remaining managed applications left on the managed agent
 	list = argoapp.ApplicationList{}
-	err = managedAgentClient.List(ctx, "agent-managed", &list, metav1.ListOptions{})
+	err = managedAgentClient.List(ctx, "argocd", &list, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}

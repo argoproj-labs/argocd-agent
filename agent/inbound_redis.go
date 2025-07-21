@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
-	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	rediscache "github.com/go-redis/cache/v9"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
@@ -143,13 +142,9 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 
 	logCtx.Tracef("Start processing redis SUBSCRIBE request with key '%s'", channelName)
 
-	// The autonomous Redis does not use namespace in key, so we need to strip it. See strip function for details.
-	if a.mode == types.AgentModeAutonomous {
-		var err error
-		channelName, err = stripNamespaceFromKeyForAutonomousAgentForRedis(channelName, logCtx)
-		if err != nil {
-			return nil, fmt.Errorf("unable to transform SUBSCRIBE key for autonomous agent: %v", err)
-		}
+	channelName, err := stripNamespaceFromRedisKey(channelName, logCtx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to transform SUBSCRIBE key for agent: %v", err)
 	}
 
 	// Subscribe to the argo cd redis channel via redis client
@@ -250,19 +245,16 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 
 	logCtx.Tracef("Start processing redis GET request with key '%s'", key)
 
-	if a.mode == types.AgentModeAutonomous {
-		var err error
-		key, err = stripNamespaceFromKeyForAutonomousAgentForRedis(key, logCtx)
-		if err != nil {
-			return nil, fmt.Errorf("unable to transform GET key for autonomous agent: %v", err)
-		}
+	key, err := stripNamespaceFromRedisKey(key, logCtx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to transform GET key for agent: %v", err)
 	}
 
 	// Connect to local redis to GET key/value, and store response
 	getBody := event.RedisResponseBodyGet{}
 
 	var data []byte
-	err := a.redisProxyMsgHandler.argoCDRedisCache.GetSkippingLocalCache(context.Background(), key, &data)
+	err = a.redisProxyMsgHandler.argoCDRedisCache.GetSkippingLocalCache(context.Background(), key, &data)
 	if errors.Is(err, rediscache.ErrCacheMiss) {
 		getBody.Bytes = nil
 		getBody.CacheHit = false
@@ -286,15 +278,14 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 	return res, nil
 }
 
-// stripNamespaceFromKeyForAutonomousAgentForRedis will remove the namespace from the namespace_name field of the redis key when running on an autonomous agent. See example below.
-// - Autonomous agent does not use application namespaces besides 'argocd', and thus this redis key must be transformed.
+// stripNamespaceFromRedisKey will remove the namespace from the namespace_name field of the redis key.
 //
 // Example:
 // "app|managed-resources|agent-autonomous_my-app|1.8.3"
 // "app|resources-tree|agent-autonomous_my-app|1.8.3.gz
 // needs to be converted to, e.g.
 // "app|resources-tree|my-app|1.8.3.gz
-func stripNamespaceFromKeyForAutonomousAgentForRedis(key string, logCtx *logrus.Entry) (string, error) {
+func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error) {
 
 	var matchedPrefix string
 	expectedPrefixes := []string{

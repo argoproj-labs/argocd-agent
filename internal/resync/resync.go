@@ -47,15 +47,18 @@ type RequestHandler struct {
 	resources *resources.Resources
 
 	log *logrus.Entry
+
+	role manager.ManagerRole
 }
 
-func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLimitingInterface[*cloudevent.Event], events *event.EventSource, resources *resources.Resources, log *logrus.Entry) *RequestHandler {
+func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLimitingInterface[*cloudevent.Event], events *event.EventSource, resources *resources.Resources, log *logrus.Entry, role manager.ManagerRole) *RequestHandler {
 	return &RequestHandler{
 		dynClient: dynClient,
 		sendQ:     queue,
 		events:    events,
 		log:       log,
 		resources: resources,
+		role:      role,
 	}
 }
 
@@ -202,9 +205,15 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 		return err
 	}
 
+	// Depending on the role, the namespace of the resource may be different.
+	namespace := reqUpdate.Namespace
+	if r.role == manager.ManagerRolePrincipal {
+		namespace = agentName
+	}
+
 	// Check if the given resource exists locally
 	resClient := r.dynClient.Resource(gvr)
-	res, err := resClient.Namespace(reqUpdate.Namespace).Get(ctx, reqUpdate.Name, v1.GetOptions{})
+	res, err := resClient.Namespace(namespace).Get(ctx, reqUpdate.Name, v1.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return err

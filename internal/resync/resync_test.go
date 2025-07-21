@@ -328,7 +328,7 @@ func createFakeHandler(t *testing.T) *RequestHandler {
 
 	dynClient := fake.NewSimpleDynamicClient(&runtime.Scheme{})
 	res := resources.NewResources()
-	return NewRequestHandler(dynClient, queues.SendQ(agentName), evs, res, logrus.NewEntry(logrus.New()))
+	return NewRequestHandler(dynClient, queues.SendQ(agentName), evs, res, logrus.NewEntry(logrus.New()), manager.ManagerRoleAgent)
 }
 
 func fakeUnresApp() *unstructured.Unstructured {
