@@ -146,6 +146,10 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 		require.False(t, a.appManager.IsManaged("agent/guestbook"))
 	})
 	t.Run("Deletion event for unmanaged application", func(t *testing.T) {
+		a := newAgent(t)
+		a.remote.SetClientID("agent")
+		a.mode = types.AgentModeAutonomous
+
 		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
 		// App must be already managed for event to be generated
 		a.addAppDeletionToQueue(app)

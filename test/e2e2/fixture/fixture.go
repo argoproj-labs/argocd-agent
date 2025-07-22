@@ -23,6 +23,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -228,6 +229,21 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		err = EnsureDeletion(ctx, managedAgentClient, &appProject)
 		if err != nil {
 			return err
+		}
+	}
+
+	// Remove known finalizer-containing resources from guestbook ns (before we delete the NS in the next step)
+	deploymentList := appsv1.DeploymentList{}
+	err = managedAgentClient.List(ctx, "guestbook", &deploymentList, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, deployment := range deploymentList.Items {
+		if len(deployment.Finalizers) > 0 {
+			deployment.Finalizers = nil
+			if err := managedAgentClient.Update(ctx, &deployment, metav1.UpdateOptions{}); err != nil {
+				return err
+			}
 		}
 	}
 

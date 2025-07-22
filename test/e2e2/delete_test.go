@@ -100,8 +100,13 @@ func (suite *DeleteTestSuite) Test_CascadeDeleteOnManagedAgent() {
 
 	t.Log("Ensure that finalizers and deletion timestamp are synced to managed-agent")
 	requires.Eventually(func() bool {
-		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&appOnPrincipal), &app, metav1.GetOptions{})
+		app := argoapp.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      appOnPrincipal.Name,
+				Namespace: "argocd",
+			},
+		}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&app), &app, metav1.GetOptions{})
 		return err == nil && app.DeletionTimestamp != nil && len(app.Finalizers) > 0
 	}, 60*time.Second, 1*time.Second)
 

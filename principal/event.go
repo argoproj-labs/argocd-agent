@@ -228,6 +228,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 
 		} else if agentMode.IsManaged() {
 
+			incoming.SetNamespace(agentName)
 			app, err := s.appManager.Get(ctx, incoming.Name, incoming.Namespace)
 			if err != nil {
 				if kerrors.IsNotFound(err) {
