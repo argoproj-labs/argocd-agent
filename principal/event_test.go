@@ -30,8 +30,10 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 )
 
 func Test_InvalidEvents(t *testing.T) {
@@ -351,6 +353,95 @@ func Test_UpdateEvents(t *testing.T) {
 		require.Equal(t, ev, *got)
 		assert.ErrorContains(t, err, "event type not allowed")
 	})
+
+}
+
+func Test_DeleteEvents_ManagedMode(t *testing.T) {
+
+	type test struct {
+		name                            string
+		deletionTimestampSetOnPrincipal bool
+	}
+
+	tests := []test{
+		{
+			name:                            "Delete event from managed mode agent should allow deletion if principal is already being deleted",
+			deletionTimestampSetOnPrincipal: true,
+		},
+		{
+			name:                            "Delete event from managed mode agent should NOT allow deletion if principal is NOT already being deleted",
+			deletionTimestampSetOnPrincipal: false,
+		},
+	}
+
+	for _, test := range tests {
+
+		t.Run(test.name, func(t *testing.T) {
+			delApp := &v1alpha1.Application{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      "test",
+					Namespace: "foo",
+					Finalizers: []string{
+						"test-finalizers",
+					},
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Source: &v1alpha1.ApplicationSource{
+						RepoURL:        "foo",
+						Path:           ".",
+						TargetRevision: "HEAD",
+					},
+				},
+				Operation: &v1alpha1.Operation{
+					Sync: &v1alpha1.SyncOperation{
+						Revision: "abc",
+					},
+				},
+				Status: v1alpha1.ApplicationStatus{
+					Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
+				},
+			}
+
+			if test.deletionTimestampSetOnPrincipal {
+				delApp.DeletionTimestamp = ptr.To(v1.Time{Time: time.Now()})
+			}
+
+			fac := kube.NewKubernetesFakeClientWithApps()
+			ev := cloudevents.NewEvent()
+			ev.SetDataSchema("application")
+			ev.SetType(event.Delete.String())
+			ev.SetData(cloudevents.ApplicationJSON, delApp)
+			wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+			wq.On("Get").Return(&ev, false)
+			wq.On("Done", &ev)
+			s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+			require.NoError(t, err)
+			s.setAgentMode("foo", types.AgentModeManaged)
+
+			_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Create(context.Background(), delApp, v1.CreateOptions{})
+
+			got, err := s.processRecvQueue(context.Background(), "foo", wq)
+			require.NoError(t, err)
+
+			if test.deletionTimestampSetOnPrincipal {
+				// If deletionTimestamp is set on principal, the Application should be removed by the call
+				require.NoError(t, err)
+				require.Equal(t, ev, *got)
+
+				// Verify Application is deleted
+				_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Get(context.Background(), delApp.Name, v1.GetOptions{})
+				require.True(t, apierrors.IsNotFound(err))
+
+			} else {
+				// If deletionTimestamp is NOT set on principal, the Application should NOT be removed by the call
+				require.NoError(t, err)
+
+				// Verify Application is NOT deleted
+				_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Get(context.Background(), delApp.Name, v1.GetOptions{})
+				require.NoError(t, err)
+			}
+		})
+	}
 
 }
 

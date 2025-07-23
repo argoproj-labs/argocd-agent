@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
@@ -185,6 +186,8 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		return nil, fmt.Errorf("updatedManagedApp should be called on a managed agent, only")
 	}
 
+	deletionTimestampChanged := false
+
 	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
 		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
 			if incoming.Annotations == nil {
@@ -198,6 +201,11 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Operation = incoming.Operation.DeepCopy()
 		existing.Status = *incoming.Status.DeepCopy()
+
+		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
+			deletionTimestampChanged = true
+		}
+
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		// We need to keep the refresh label if it is set on the existing app
 		if v, ok := existing.Annotations["argocd.argoproj.io/refresh"]; ok {
@@ -212,6 +220,10 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 				incoming.Annotations = make(map[string]string)
 			}
 			incoming.Annotations[manager.SourceUIDAnnotation] = v
+		}
+
+		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
+			deletionTimestampChanged = true
 		}
 
 		target := &v1alpha1.Application{
@@ -247,6 +259,14 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 			logCtx.Warnf("Couldn't unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
 	}
+
+	if deletionTimestampChanged {
+		logCtx.Infof("deletionTimestamp of managed agent changed from nil to non-nil, so deleting Application")
+		if err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, ptr.To(backend.DeletePropagationForeground)); err != nil {
+			return nil, err
+		}
+	}
+
 	return updated, err
 }
 

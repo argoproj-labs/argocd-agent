@@ -23,6 +23,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -85,8 +86,31 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 		return err
 	}
 
+	// Wait for the object to be deleted  for 60 seconds
+	// - Primarily this will be waiting for the finalizer to be removed, so that the object is deleted
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 120; count++ {
+	for count := 0; count < 60; count++ {
+		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			return nil
+		} else if err == nil {
+			time.Sleep(1 * time.Second)
+		} else {
+			return err
+		}
+	}
+
+	// After X seconds, give up waiting for the child objects to be deleted, and remove any finalizers on the object
+	if len(obj.GetFinalizers()) > 0 {
+		obj.SetFinalizers(nil)
+		if err := kclient.Update(ctx, obj, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
+	}
+
+	// Continue waiting for object to be deleted, now that finalizers have been removed.
+	key = types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
+	for count := 0; count < 60; count++ {
 		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return nil
@@ -205,6 +229,21 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		err = EnsureDeletion(ctx, managedAgentClient, &appProject)
 		if err != nil {
 			return err
+		}
+	}
+
+	// Remove known finalizer-containing resources from guestbook ns (before we delete the NS in the next step)
+	deploymentList := appsv1.DeploymentList{}
+	err = managedAgentClient.List(ctx, "guestbook", &deploymentList, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, deployment := range deploymentList.Items {
+		if len(deployment.Finalizers) > 0 {
+			deployment.Finalizers = nil
+			if err := managedAgentClient.Update(ctx, &deployment, metav1.UpdateOptions{}); err != nil {
+				return err
+			}
 		}
 	}
 

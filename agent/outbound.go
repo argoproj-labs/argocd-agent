@@ -127,11 +127,6 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 		return
 	}
 
-	// Only send the deletion event when we're in autonomous mode
-	if !a.mode.IsAutonomous() {
-		return
-	}
-
 	q.Add(a.emitter.ApplicationEvent(event.Delete, app))
 	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app delete event to send queue")
 }
