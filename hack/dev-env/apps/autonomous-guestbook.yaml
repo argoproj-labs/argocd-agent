@@ -10,7 +10,7 @@ spec:
     targetRevision: HEAD
     path: kustomize-guestbook
   destination:
-    server: https://kubernetes.default.svc
+    name: in-cluster
     namespace: guestbook
   syncPolicy:
     syncOptions:
