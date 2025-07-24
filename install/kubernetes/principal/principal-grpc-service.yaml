@@ -14,3 +14,4 @@ spec:
     targetPort: 8443
   selector:
     app.kubernetes.io/name: argocd-agent-principal
+  type: LoadBalancer
