@@ -33,9 +33,16 @@ nav:
     - Kubernetes: getting-started/kubernetes/index.md
     - OpenShift: getting-started/openshift/index.md
     - OCM-io: getting-started/ocm-io/index.md
+  - User guide:
+    - Managing Applications: user-guide/applications.md
+    - Managing AppProjects: user-guide/appprojects.md
+    - Adding an agent: user-guide/adding-agents.md
+    - Accessing live resources on workload clusters: user-guide/live-resources.md
   - Configuration:
-    - Principal: configuration/principal/index.md
-    - Agent: configuration/agent/index.md
+    - Principal: 
+        - PKI: configuration/principal/pki-certificates.md
+    - Agent:
+        - PKI: configuration/agent/pki-certificates.md
   - Operations:
     - Metrics: operations/metrics.md
     - Profiling: operations/profiling.md
