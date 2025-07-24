@@ -16,5 +16,8 @@ images:
 - name: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
   newName: quay.io/argoprojlabs/argocd-agent
   newTag: v0.2.0
+- name: ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent
+  newName: quay.io/argoprojlabs/argocd-agent-agent
+  newTag: v0.2.1
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
