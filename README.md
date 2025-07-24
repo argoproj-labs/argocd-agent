@@ -31,7 +31,7 @@ Imagine managing GitOps deployments across edge locations, multiple cloud provid
 
 ## ⚡ Quick Start
 
-Get up and running in minutes! Check out our [**Getting Started Guide**](docs/getting-started/kubernetes/index.md) for step-by-step instructions.
+Get up and running in minutes! Check out our [**Getting Started Guide**](https://argocd-agent.readthedocs.io/latest/getting-started/kubernetes/) for step-by-step instructions.
 
 ```bash
 # 1. Set up the control plane (where your Argo CD UI lives)
@@ -43,29 +43,29 @@ kubectl apply -k https://github.com/argoproj-labs/argocd-agent/install/kubernete
 # 3. Watch the magic happen ✨
 ```
 
-Want to try it out? Our [**quickstart demo**](docs/hack/quickstart.md) gets you running with a local environment in under 10 minutes.
+Want to try it out? Our [**getting started guide**](https://argocd-agent.readthedocs.io/latest/getting-started/) gets you running with a local environment in under 10 minutes.
 
 ## 🏗️ How It Works
 
-Think of argocd-agent as a **hub-and-spoke architecture** where the magic happens at the edges:
+Think of argocd-agent as a **hub-and-spoke architecture** where agents reach back to the control plane:
 
 ```
     ┌─────────────────┐
     │  Control Plane  │  ← Your Argo CD UI and API
-    │   (The Hub)     │
+    │   (The Hub)     │     (No outbound connections needed!)
     └─────────┬───────┘
-              │
+              ▲
     ┌─────────┼─────────┐
     │         │         │
-    ▼         ▼         ▼
+    │         │         │
 ┌─────────┐ ┌─────────┐ ┌─────────┐
-│ Agent 1 │ │ Agent 2 │ │ Agent N │  ← Lightweight agents
-│ AWS     │ │ Factory │ │ Edge    │
+│ Agent 1 ├─┘ Agent 2 ├─┘ Agent N │  ← Agents connect TO the hub
+│ AWS     │ │ Factory │ │ Edge    │     (Pull model!)
 └─────────┘ └─────────┘ └─────────┘
 ```
 
 **🎛️ Control Plane**: Your familiar Argo CD interface—manage everything from one place  
-**🤖 Agents**: Lightweight components that do the heavy lifting in each cluster  
+**🤖 Agents**: Lightweight components that reach out and connect to the hub  
 **🔄 Smart Sync**: Agents pull configuration and push status updates automatically  
 
 ### Two Flavors, One Experience
@@ -133,14 +133,14 @@ We're building argocd-agent together! Whether you're a GitOps veteran or just ge
 - [#argo-cd-agent](https://cloud-native.slack.com/archives/C07L5SX6A9J) on [CNCF Slack](https://slack.cncf.io/) - Real-time chat
 
 **🛠️ Contribute**
-- [Contributing Guide](docs/CONTRIBUTING.md) - Code, docs, and testing guidelines
+- [Contributing Guide](https://argocd-agent.readthedocs.io/latest/contributing/) - Code, docs, and testing guidelines
 - [Issue Tracker](https://github.com/argoproj-labs/argocd-agent/issues) - Bug reports and feature requests
 - [Good First Issues](https://github.com/argoproj-labs/argocd-agent/labels/good%20first%20issue) - Perfect for newcomers
 
 **📖 Learn More**
-- [**Documentation**](docs/) - Comprehensive guides and references
-- [**Architecture Deep Dive**](docs/concepts/) - Understanding the internals
-- [**Configuration Guide**](docs/configuration/) - Detailed setup instructions
+- [**Documentation**](https://argocd-agent.readthedocs.io/latest/) - Comprehensive guides and references
+- [**Architecture Deep Dive**](https://argocd-agent.readthedocs.io/latest/concepts/) - Understanding the internals
+- [**Configuration Guide**](https://argocd-agent.readthedocs.io/latest/configuration/) - Detailed setup instructions
 
 ## 🏢 Production Ready?
 
@@ -163,6 +163,6 @@ argocd-agent is licensed under the [Apache License 2.0](LICENSE).
 
 **Built with ❤️ by the Argo community**
 
-[**⭐ Star us on GitHub**](https://github.com/argoproj-labs/argocd-agent) | [**📖 Read the Docs**](docs/) | [**💬 Join the Discussion**](https://github.com/argoproj-labs/argocd-agent/discussions)
+[**⭐ Star us on GitHub**](https://github.com/argoproj-labs/argocd-agent) | [**📖 Read the Docs**](https://argocd-agent.readthedocs.io/latest/) | [**💬 Join the Discussion**](https://github.com/argoproj-labs/argocd-agent/discussions)
 
 </div>
