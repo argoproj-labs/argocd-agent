@@ -59,11 +59,11 @@ fi
 echo "*** generating new manifests"
 (
 	cd install/kubernetes/agent
-	kustomize edit set image ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent=quay.io/argoprojlabs/argocd-agent-agent:${TARGET_TAG}
+	kustomize edit set image ghcr.io/argoproj-labs/argocd-agent/argocd-agent=quay.io/argoprojlabs/argocd-agent:${TARGET_TAG}
 )
 (
 	cd install/kubernetes/principal
-	kustomize edit set image ghcr.io/argoproj-labs/argocd-agent/argocd-agent-principal=quay.io/argoprojlabs/argocd-agent-principal:${TARGET_TAG}
+	kustomize edit set image ghcr.io/argoproj-labs/argocd-agent/argocd-agent=quay.io/argoprojlabs/argocd-agent:${TARGET_TAG}
 )
 
 echo "*** committing changes to release branch"
@@ -73,10 +73,9 @@ git commit -S -s -m "release: Publish release ${TARGET_VERSION}"
 
 echo "*** building release images"
 
-for component in agent principal; do
-	export IMAGE_REPOSITORY="quay.io/argoprojlabs"
-	make image-${component}
-done
+export IMAGE_REPOSITORY="quay.io/argoprojlabs"
+export IMAGE_TAG="${TARGET_TAG}"
+make image
 
 echo "*** creating release tag"
 
