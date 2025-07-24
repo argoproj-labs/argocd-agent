@@ -139,7 +139,7 @@ We're building argocd-agent together! Whether you're a GitOps veteran or just ge
 
 **📖 Learn More**
 - [**Documentation**](https://argocd-agent.readthedocs.io/latest/) - Comprehensive guides and references
-- [**Architecture Deep Dive**](https://argocd-agent.readthedocs.io/latest/concepts/) - Understanding the internals
+- [**Architecture Deep Dive**](https://argocd-agent.readthedocs.io/latest/concepts/components-terminology/) - Understanding the internals
 - [**Configuration Guide**](https://argocd-agent.readthedocs.io/latest/configuration/) - Detailed setup instructions
 
 ## 🏢 Production Ready?
