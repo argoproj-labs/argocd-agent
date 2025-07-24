@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-agent-params
+  {{- if .Values.namespace }}
+  namespace: {{ .Values.namespace }} # Namespace from values.yaml
+  {{- end }}
+data:
+  # agent.mode: The mode this agent should operate in. Valid values are
+  # "autonomous" or "managed".
+  # Default: "autonomous"
+  agent.mode: {{ .Values.agentMode }}
+  # agent.creds: Valid credential identifier for this agent. Must be in the
+  # format <method>:<configuration>. Valid values are:
+  # - "userpass:_path_to_encrypted_creds_" where _path_to_encrypted_creds_ is
+  #   the path to the file containing encrypted credential for authenticatiion.
+  # - "mtls:_agent_id_regex_" where _agent_id_regex_ is the regex pattern for
+  #   extracting the agent ID from client cert subject.
+  # Default: ""
+  agent.creds: {{ .Values.auth }}
+  # agent.tls.client.insecure: Whether to skip the validation of the remote TLS
+  # credentials. Insecure. Do only use for development purposes.
+  # Default: false
+  agent.tls.client.insecure: "false"
+  # agent.tls.root-ca-path: The path to a file containing the certificates for
+  # the TLS root certificate authority used to validate the remote principal. 
+  # Default: ""
+  agent.tls.root-ca-path: "/app/config/tls/ca.crt"
+  # agent.tls.client.cert-path: Path to a file containing the agent's TLS client
+  # certificate.
+  # Default: ""
+  agent.tls.client.cert-path: "/app/config/tls/tls.crt"
+  # agent.tls.client.cert-path: Path to a file containing the agent's TLS client
+  # private key.
+  # Default: ""
+  agent.tls.client.key-path: "/app/config/tls/tls.key"
+  # agent.log.level: The log level the agent should use. Valid values are
+  # trace, debug, info, warn and error.
+  # Default: "info"
+  agent.log.level: {{ .Values.logLevel }}
+  # agent.namespace: The namespace the agent should operate and manage the
+  # Argo CD resources in.
+  # Default: "argocd"
+  agent.namespace: {{ .Values.agentNamespace }}
+  # agent.principal.address: The remote address of the principal to connect
+  # to. Can be a DNS name, an IPv4 address or an IPv6 address.
+  # Default: ""
+  agent.server.address: {{ .Values.server }}
+  # agent.server.port: The remote port of the principal to connect to.
+  # Default: "443"
+  agent.server.port: {{ .Values.serverPort }}
+  # agent.metrics.port: The port the metrics server should listen on.
+  # Default: 8181
+  agent.metrics.port: {{ .Values.metricsPort }}
