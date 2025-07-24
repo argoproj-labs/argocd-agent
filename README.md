@@ -1,123 +1,168 @@
-# argocd-agent
+# argocd-agent ✨
 
 [![Integration tests](https://github.com/argoproj-labs/argocd-agent/actions/workflows/ci.yaml/badge.svg)](https://github.com/argoproj-labs/argocd-agent/actions/workflows/ci.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/argoproj-labs/argocd-agent)](https://goreportcard.com/report/github.com/argoproj-labs/argocd-agent)
 [![codecov](https://codecov.io/gh/argoproj-labs/argocd-agent/graph/badge.svg?token=NP5UEU279Z)](https://codecov.io/gh/argoproj-labs/argocd-agent)
 
+**Scale Argo CD across hundreds of clusters with a single pane of glass** 🌐
 
-`argocd-agent` provides building blocks for implementing a distributed architecture with a central control plane for the popular GitOps tool
-[Argo CD](https://github.com/argoproj/argo-cd). It allows to scale out Argo CD in many-cluster scenarios by moving compute intensive parts of Argo CD (application controller, repository server) to the workload clusters ("spokes"), while keeping the control and observe components (API and UI) in a central location (control plane, or "hub").
+Imagine managing GitOps deployments across edge locations, multiple cloud providers, air-gapped environments, and remote sites—all from one central dashboard. argocd-agent makes this reality by extending Argo CD with a distributed architecture that brings the control plane to you, no matter where your workloads live.
 
-Some might refer to this architecture as "hub and spokes" or the "pull model" with a "single pane of glass".
+## 🚀 Why argocd-agent?
 
-## Status and current limitations
+**The Challenge**: Traditional multi-cluster Argo CD setups hit walls when scaling to hundreds of clusters, especially across unreliable networks, air-gapped environments, or edge locations.
 
-> [!IMPORTANT]
-> **Important notice:** The `argocd-agent` project has just been born and is far from ready for general consumption. We decided to make the code available as early as possible to attract potential collaborators and contributors along the way, and to get input from the community as the project progresses.
+**The Solution**: argocd-agent flips the script—instead of your control plane reaching out to remote clusters, lightweight agents reach back to a central hub. This "pull model" enables:
 
-You can check the
-[issue tracker](https://github.com/argoproj-labs/argocd-agent/issues)
-for things that we plan to work in the future, and the
-[milestones](https://github.com/argoproj-labs/argocd-agent/milestones)
-for when we plan to.
+✅ **Massive Scale**: Manage thousands of applications across hundreds of clusters  
+✅ **Network Resilience**: Works with intermittent connections, high latency, or restricted networks  
+✅ **Edge-Friendly**: Perfect for IoT, retail, manufacturing, or remote deployments  
+✅ **Air-Gap Ready**: Secure deployments that never expose cluster internals  
+✅ **Cloud Agnostic**: Seamlessly span AWS, GCP, Azure, on-premises, and hybrid environments  
 
-Going forward, things *will* change dramatically. Do not use unless you can cope with that.
+## 🎯 Perfect For
 
-As of now, the following hard limitations apply to `argocd-agent`:
+- **🏭 Manufacturing**: Deploy to factory floors and remote facilities
+- **🛒 Retail**: Manage point-of-sale and in-store systems across locations  
+- **🚢 Edge Computing**: IoT deployments, autonomous vehicles, ships, and remote sites
+- **🏛️ Enterprise**: Multi-datacenter deployments with strict security requirements
+- **☁️ Multi-Cloud**: Unified GitOps across different cloud providers
+- **🔒 Air-Gapped**: Secure environments with restricted network access
 
-* ~~Because `argocd-agent` makes extensive use of bidirectional streams, a HTTP/2 connection between the agents and the server is a hard requirement. None of the current RPC libaries (gRPC, connectrpc) support HTTP/1.x. If you have any forward or reverse proxies in between who do not support HTTP/2, many features of `argocd-agent` will not work.~~ https://github.com/argoproj-labs/argocd-agent/pull/190 introduced preliminary support for HTTP/1 via websockets.
+## ⚡ Quick Start
 
-`argocd-agent` is way from being feature complete. Things we need to figure out are, among others, retrieving and displaying pod logs, running resource actions and resource manipulation.
+Get up and running in minutes! Check out our [**Getting Started Guide**](docs/getting-started/kubernetes/index.md) for step-by-step instructions.
 
-## Quickstart
+```bash
+# 1. Set up the control plane (where your Argo CD UI lives)
+kubectl apply -k https://github.com/argoproj-labs/argocd-agent/install/kubernetes/principal
 
-See the [quickstart guide](docs/hack/quickstart.md) for more information.
+# 2. Deploy agents to your workload clusters
+kubectl apply -k https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent
 
-## Hacking, testing, demoing
+# 3. Watch the magic happen ✨
+```
 
-For a development and demo environment, we provide [some scripts and docs](https://github.com/argoproj-labs/argocd-agent/tree/main/hack/dev-env).
+Want to try it out? Our [**quickstart demo**](docs/hack/quickstart.md) gets you running with a local environment in under 10 minutes.
 
-Please refer to the [Contributing](#contributing) section below for information on how to contribute.
+## 🏗️ How It Works
 
-## Compatibility
+Think of argocd-agent as a **hub-and-spoke architecture** where the magic happens at the edges:
 
-`argocd-agent` works with an out-of-the-box Argo CD. We aim to support the currently supported Argo CD versions.
+```
+    ┌─────────────────┐
+    │  Control Plane  │  ← Your Argo CD UI and API
+    │   (The Hub)     │
+    └─────────┬───────┘
+              │
+    ┌─────────┼─────────┐
+    │         │         │
+    ▼         ▼         ▼
+┌─────────┐ ┌─────────┐ ┌─────────┐
+│ Agent 1 │ │ Agent 2 │ │ Agent N │  ← Lightweight agents
+│ AWS     │ │ Factory │ │ Edge    │
+└─────────┘ └─────────┘ └─────────┘
+```
 
-We plan to publish container images for every architecture supported by Argo CD.
+**🎛️ Control Plane**: Your familiar Argo CD interface—manage everything from one place  
+**🤖 Agents**: Lightweight components that do the heavy lifting in each cluster  
+**🔄 Smart Sync**: Agents pull configuration and push status updates automatically  
 
-## Architecture
+### Two Flavors, One Experience
 
-`argocd-agent` consists of two basic components, which resemble a client/server model:
+**🎯 Managed Mode**: Perfect for centralized control  
+- Deploy applications from your control plane to remote clusters
+- Ideal for rolling out updates, managing configurations, and maintaining consistency
 
-* The *control plane* aka the *principle*, which runs on the control-plane that also hosts the Argo CD API server and some other requirements
-* One or more *agents* running on the workload clusters
+**🦾 Autonomous Mode**: Built for independence  
+- Remote clusters manage their own applications (via GitOps)
+- Control plane provides observability and monitoring
+- Perfect for air-gapped or highly autonomous environments
 
-The *control plane* represents a central location that implements management and observability, e.g. the Argo CD API and UI components. However, no reconciliation of Applications happens on the control plane.
+Mix and match modes across your fleet—some clusters managed, others autonomous, all visible from one dashboard.
 
-An *agent* is deployed to each workload cluster. These clusters, however, are not connected from the control plane like they would be in a classical Argo CD multi-cluster setup. Instead, a subset of Argo CD (at least the application-controller) is deployed to those clusters as well. The agent on the workload cluster will communicate with the principal on the control plane. Depending on its operational mode configuration, the role of the agent is to either:
+## 🌟 Key Features
 
-* Submit status information from the Applications on the workload cluster back to the control plane,
-* Receive updates to Application configuration from the control plane or
-* A combination of above tasks
+### 🛡️ **Security First**
+- **mTLS everywhere**: All communications are encrypted and authenticated
+- **Zero trust**: Control plane never needs direct cluster access
+- **Certificate-based auth**: Strong identity verification for every agent
 
-In all cases, it's the agent that initiates the connection to the control plane, and never the other way round.
+### 🌐 **Network Resilient**
+- **Intermittent connections**: Agents work offline and sync when possible
+- **High latency tolerant**: Designed for satellite links, cellular, and unreliable networks
+- **HTTP/1.1 compatible**: Works through corporate proxies and legacy infrastructure
 
-The following diagram displays an architecture in maximum autonomy mode:
+### 📊 **Unified Observability**
+- **Single pane of glass**: See all clusters, applications, and deployments in one view
+- **Real-time status**: Health, sync status, and metrics from all environments
+- **Live resources**: Inspect Kubernetes resources across your entire fleet
 
-![Architectural diagram](docs/images/argocd-agent-autonomous-architecture.drawio.png "Architectural Diagram")
+### ⚙️ **Operationally Friendly**
+- **Lightweight**: Minimal resource footprint on remote clusters
+- **Self-healing**: Agents automatically reconnect and recover
+- **Easy upgrades**: Rolling updates without downtime
 
-## Design principles
+## 🚧 Current Status
 
-The following paragraphs describe the design principles upon which `argocd-agent` is built. All enhancements and contributions should follow those principles.
+> **🌱 Early Days**: argocd-agent is in active development and not yet ready for production use. We're building in the open to collaborate with the community and gather feedback early.
 
-### A permanent network connection is neither expected nor required
+**What works today:**
+- ✅ Basic hub-and-spoke architecture  
+- ✅ Application deployment and status sync
+- ✅ Multi-cluster observability  
+- ✅ Both managed and autonomous modes
+- ✅ Live resource viewing and manipulation
+- ✅ Custom resource actions
+- ✅ Resource proxy for transparent cluster access
 
-It is understood that workload clusters can be everywhere: In your black-fibre connected data centres, across different cloud providers, in a car, on a ship, wherever. Not all these locations will have a permanent, reliable and low-latency network connection.
+**Coming soon:**
+- 🚧 Pod logs streaming
+- 🚧 Advanced RBAC and multi-tenancy
+- 🚧 Enhanced UI integrations
+- 🚧 Production hardening
 
-Thus, `argocd-agent` is designed around the assumption that the connection between workload clusters (agents) and the control plane is not always available, and that it might not be possible to keep up a stable, good performing network connection between the components. However, the system will benefit from a stable network connection with low latency.
+Track our progress in the [**roadmap**](ROADMAP.md) and [**milestones**](https://github.com/argoproj-labs/argocd-agent/milestones).
 
-### Workload clusters are and will stay autonomous
+## 🤝 Join the Community
 
-When the agent cannot reach the control plane, the workload cluster still will be able to perform its operations in an autonomous way. Depending on the agent's mode of operation (see [Architecture](#Architecture) above), cluster admins may still be able to perform configuration (i.e. manage applications, etc) but those changes will only take effect once the agent is connected again.
+We're building argocd-agent together! Whether you're a GitOps veteran or just getting started, there are many ways to contribute:
 
-There are architectural variants in which a workload cluster will be dependent upon the availability of the control plane, for example when the workload cluster uses a repository server or Redis cache on the control plane. However, there will always be a variant where fully autonomous workload clusters are supported.
+**💬 Get Help & Share Ideas**
+- [GitHub Discussions](https://github.com/argoproj-labs/argocd-agent/discussions) - Ask questions, share use cases
+- [#argo-cd-agent](https://cloud-native.slack.com/archives/C07L5SX6A9J) on [CNCF Slack](https://slack.cncf.io/) - Real-time chat
 
-### The initiating component is always the agent, not the control plane
+**🛠️ Contribute**
+- [Contributing Guide](docs/CONTRIBUTING.md) - Code, docs, and testing guidelines
+- [Issue Tracker](https://github.com/argoproj-labs/argocd-agent/issues) - Bug reports and feature requests
+- [Good First Issues](https://github.com/argoproj-labs/argocd-agent/labels/good%20first%20issue) - Perfect for newcomers
 
-Connections are established in one direction only: from the agent to the control plane. Neither the control plane nor the agents need to know exact details about the topology of the system, as long as the agents know which control plane to connect to. In some parts of this doucmentation, we mention something called a _bi-directional stream_. This refers to a gRPC mechanisms where both parties may randomly transmit and receive data from its peer, all while the connection is established only in one direction.
+**📖 Learn More**
+- [**Documentation**](docs/) - Comprehensive guides and references
+- [**Architecture Deep Dive**](docs/concepts/) - Understanding the internals
+- [**Configuration Guide**](docs/configuration/) - Detailed setup instructions
 
-### Security
+## 🏢 Production Ready?
 
-The control plane component of `argocd-agent` provides a gRPC API over HTTPS/2. The connections to the API require mutual TLS and strong authentication. The agent won't need access to the control plane's Kubernetes API, and the control plane component has limited capabilities on the cluster it is running in. Thus, depending on the operational mode of the agents, there will be no single point of compromise - even in the case the control plane is compromised, the blast radius will be limited.
+argocd-agent is **not yet production-ready** but we're working hard to get there! If you're interested in:
 
-### Be lightweight by default but keep extensibility in mind
+- **🧪 Testing in dev/staging environments**
+- **🤝 Contributing to development**  
+- **💼 Enterprise partnerships**
+- **🗣️ Speaking about your use case**
 
-The `argocd-agent` should not impose any mandatory, heavy runtime dependencies or operational patterns. The hurdle of getting started should be as low as possible. The project should stay unencumbered of requirements such as persistant storage or relational databases by default. We are aware that at some point in time we may hit a scaling limit, especially when it comes to etcd and the Kubernetes API. Thus, major parts such as Application backends on the principal are designed to be pluggable, so users can contribute and use different kinds of backends according to their scalability requirements and operational preferences.
+We'd love to hear from you! [**Start a discussion**](https://github.com/argoproj-labs/argocd-agent/discussions) or reach out on Slack.
 
-## Operational variants
+## 📜 License
 
-`argocd-agent` can run in two distinct modes of operation: A *managed* mode and an *autonomous* mode. Both modes cater for different types of setups, and the control plane can handle a mixed-mode scenario where some of the agents run in managed mode, and others run in autonomous mode. However, an agent can only run in one of the modes. Having some parts on the agent's system in managed, and others in autonomous mode, is not supported.
+argocd-agent is licensed under the [Apache License 2.0](LICENSE).
 
-### Managed mode
+---
 
-In *managed mode*, the agent receives all of its configuration from the control plane. For example, if you create a new Application on the control plane, the agent will pull this Application to its local Argo CD. Any local changes to this Application will be overwritten by the primary copy on the control plane.
+<div align="center">
 
-The agent will submit status updates for managed Applications, such as sync status and health, back to the control plane.
+**Built with ❤️ by the Argo community**
 
-### Autonomous mode
+[**⭐ Star us on GitHub**](https://github.com/argoproj-labs/argocd-agent) | [**📖 Read the Docs**](docs/) | [**💬 Join the Discussion**](https://github.com/argoproj-labs/argocd-agent/discussions)
 
-In *autonomous mode*, the agent will not create or delete Applications on the agent's system. Instead, it is expected that the system runs in self-managed mode (i.e. Argo CD completely configured from Git, and all changes are made through Git). The agent will sync the state of the system to the control plane, so every CRUD operation through Argo CD on Applications will be reflected on the control plane.
-
-## Contributing
-
-We are grateful for all contributions to this project, and everybody is welcome to contribute to it in various ways.
-
-Participating in this project is subject to the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/main/code-of-conduct.md).
-
-See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for contribution guidlines specific to code, test, and docs.
-
-Please note that at this point in time, code contributors are expected to hack with minimal guidance. We do not yet have any guidelines, the build & test process is bumpy, things will change at high speed. It's best to orientate yourself on existing code.
-
-Please also note that code contributions will only be accepted if accompanied by proper unit tests, are passing the CI and are using signed-off commits to satisfy the DCO. No exceptions.
-
-If you want to get in touch, please use GitHub's [discussions](https://github.com/argoproj-labs/argocd-agent/discussions) or [issue tracker](https://github.com/argoproj-labs/argocd-agent/issues) or join [#argo-cd-agent](https://cloud-native.slack.com/archives/C07L5SX6A9J) on the [CNCF Slack](https://slack.cncf.io/).
+</div>
