@@ -53,14 +53,16 @@ Think of argocd-agent as a **hub-and-spoke architecture** where agents reach bac
     ┌─────────────────┐
     │  Control Plane  │  ← Your Argo CD UI and API
     │   (The Hub)     │     (No outbound connections needed!)
-    └─────────┬───────┘
-              ▲
-    ┌─────────┼─────────┐
-    │         │         │
-    │         │         │
+    └─────────────────┘
+              ▲ ▲ ▲
+              │ │ │
+              │ │ │
+┌─────────────┘ │ └─────────────┐
+│               │               │
+│               │               │
 ┌─────────┐ ┌─────────┐ ┌─────────┐
-│ Agent 1 ├─┘ Agent 2 ├─┘ Agent N │  ← Agents connect TO the hub
-│ AWS     │ │ Factory │ │ Edge    │     (Pull model!)
+│ Agent 1 │ │ Agent 2 │ │ Agent N │  ← Each agent connects independently
+│ AWS     │ │ Factory │ │ Edge    │     (Pull model - no inter-agent links!)
 └─────────┘ └─────────┘ └─────────┘
 ```
 
