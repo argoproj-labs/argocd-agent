@@ -457,7 +457,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 		return err
 	}
 
-	if a.mode == types.AgentModeManaged && err == nil {
+	if a.mode == types.AgentModeManaged {
 		appCache.DeleteApplicationSpec(app.UID, logCtx)
 	}
 

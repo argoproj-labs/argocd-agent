@@ -15,6 +15,7 @@
 package fixture
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -26,40 +27,62 @@ import (
 )
 
 const (
-	ManagedAgentServerKey    = "AGENT_E2E_MANAGED_CLUSTER_SERVER"
-	AutonomousAgentServerKey = "AGENT_E2E_AUTONOMOUS_CLUSTER_SERVER"
-	RedisServerAddressKey    = "AGENT_E2E_REDIS_SERVER_ADDRESS"
-	RedisServerPasswordKey   = "AGENT_E2E_REDIS_PASSWORD"
+	ManagedAgentServerKey              = "AGENT_E2E_MANAGED_CLUSTER_SERVER"
+	AutonomousAgentServerKey           = "AGENT_E2E_AUTONOMOUS_CLUSTER_SERVER"
+	PrincipalRedisServerAddressKey     = "AGENT_E2E_PRINCIPAL_REDIS_SERVER_ADDRESS"
+	PrincipalRedisServerPasswordKey    = "AGENT_E2E_PRINCIPAL_REDIS_PASSWORD"
+	AgentManagedRedisServerAddressKey  = "AGENT_E2E_AGENT_MANAGED_REDIS_SERVER_ADDRESS"
+	AgentManagedRedisServerPasswordKey = "AGENT_E2E_AGENT_MANAGED_REDIS_PASSWORD"
 )
 
-func HasConnectionInfo(serverName string, expected appv1.ConnectionState) bool {
-	actual, err := getClusterInfo(serverName)
+// HasConnectionStatus checks if the connection info for a given server matches
+// the expected connection state in principal cluster.
+func HasConnectionStatus(serverName string, expected appv1.ConnectionState) bool {
+	actual, err := GetPrincipalClusterInfo(serverName)
 
 	if err != nil {
+		fmt.Println("HasConnectionStatus: error", err)
 		return false
 	}
+
+	fmt.Printf("HasConnectionStatus expected: (%s, %s), actual: (%s, %s)\n",
+		expected.Status, expected.Message, actual.ConnectionState.Status, actual.ConnectionState.Message)
 
 	return actual.ConnectionState.Status == expected.Status &&
 		actual.ConnectionState.Message == expected.Message &&
 		verifyConnectionModificationTime(actual.ConnectionState.ModifiedAt, expected.ModifiedAt)
 }
 
-// getClusterInfo retrieves connection info from control plane's Redis server
-func getClusterInfo(server string) (appv1.ClusterInfo, error) {
+// HasClusterCacheInfoSynced checks if the cluster cache info is synced between principal and agent
+func HasClusterCacheInfoSynced(serverName string) bool {
+	principalClusterInfo, err := GetPrincipalClusterInfo(serverName)
+	if err != nil {
+		fmt.Println("HasConnectionStatus: error", err)
+		return false
+	}
 
-	// Create Redis client and cache
-	redisOptions := &redis.Options{Addr: os.Getenv(RedisServerAddressKey),
-		Password: os.Getenv(RedisServerPasswordKey)}
+	agentClusterInfo, err := GetManagedAgentClusterInfo()
+	if err != nil {
+		fmt.Println("HasClusterCacheInfoSynced: error", err)
+		return false
+	}
 
-	redisClient := redis.NewClient(redisOptions)
-	cache := appstatecache.NewCache(cacheutil.NewCache(
-		cacheutil.NewRedisCache(redisClient, time.Hour, cacheutil.RedisCompressionGZip)), time.Hour)
+	fmt.Printf("HasClusterCacheInfoSynced principal: (%d, %d, %d), agent: (%d, %d, %d)\n",
+		principalClusterInfo.ApplicationsCount, principalClusterInfo.CacheInfo.APIsCount, principalClusterInfo.CacheInfo.ResourcesCount,
+		agentClusterInfo.ApplicationsCount, agentClusterInfo.CacheInfo.APIsCount, agentClusterInfo.CacheInfo.ResourcesCount)
 
-	// fetch cluster info
-	var clusterInfo appv1.ClusterInfo
-	err := cache.GetClusterInfo(server, &clusterInfo)
+	return principalClusterInfo.ApplicationsCount == agentClusterInfo.ApplicationsCount &&
+		principalClusterInfo.CacheInfo.APIsCount == agentClusterInfo.CacheInfo.APIsCount &&
+		principalClusterInfo.CacheInfo.ResourcesCount == agentClusterInfo.CacheInfo.ResourcesCount
+}
 
-	return clusterInfo, err
+func HasApplicationsCount(expected int64) bool {
+	agentCacheInfo, err := GetManagedAgentClusterInfo()
+	if err != nil {
+		fmt.Println("HasApplicationsCount: error", err)
+		return false
+	}
+	return agentCacheInfo.ApplicationsCount == expected
 }
 
 func verifyConnectionModificationTime(actualTime *metav1.Time, expectedTime *metav1.Time) bool {
@@ -70,5 +93,51 @@ func verifyConnectionModificationTime(actualTime *metav1.Time, expectedTime *met
 
 	// if expected time is provided then verify that actual time is within 5 sec range from expected time,
 	// because starting agent may take some time
-	return actualTime.After(expectedTime.Add(-5 * time.Second))
+	result := actualTime.After(expectedTime.Add(-5 * time.Second))
+	fmt.Printf("verifyConnectionModificationTime expected: %t, actual: %t\n", true, result)
+	return result
+}
+
+// GetManagedAgentClusterInfo retrieves cluster info from managed agent's Redis server
+func GetManagedAgentClusterInfo() (appv1.ClusterInfo, error) {
+	// Create Redis client and cache
+	redisOptions := &redis.Options{Addr: os.Getenv(AgentManagedRedisServerAddressKey),
+		Password: os.Getenv(AgentManagedRedisServerPasswordKey)}
+
+	redisClient := redis.NewClient(redisOptions)
+	cache := appstatecache.NewCache(cacheutil.NewCache(
+		cacheutil.NewRedisCache(redisClient, time.Minute, cacheutil.RedisCompressionGZip)), time.Minute)
+
+	clusterServer := "https://kubernetes.default.svc"
+
+	// Fetch cluster info from redis cache
+	clusterInfo := appv1.ClusterInfo{}
+	err := cache.GetClusterInfo(clusterServer, &clusterInfo)
+	if err != nil {
+		// Treat missing cache key error (means no apps exist yet) as zero-value info
+		if err == cacheutil.ErrCacheMiss {
+			return appv1.ClusterInfo{}, nil
+		}
+		fmt.Println("GetManagedAgentClusterInfo: error", err)
+		return clusterInfo, err
+	}
+
+	return clusterInfo, nil
+}
+
+// GetPrincipalClusterInfo retrieves cluster info from principal's Redis server
+func GetPrincipalClusterInfo(server string) (appv1.ClusterInfo, error) {
+	// Create Redis client and cache
+	redisOptions := &redis.Options{Addr: os.Getenv(PrincipalRedisServerAddressKey),
+		Password: os.Getenv(PrincipalRedisServerPasswordKey)}
+
+	redisClient := redis.NewClient(redisOptions)
+	cache := appstatecache.NewCache(cacheutil.NewCache(
+		cacheutil.NewRedisCache(redisClient, 0, cacheutil.RedisCompressionGZip)), 0)
+
+	// fetch cluster info
+	var clusterInfo appv1.ClusterInfo
+	err := cache.GetClusterInfo(server, &clusterInfo)
+
+	return clusterInfo, err
 }

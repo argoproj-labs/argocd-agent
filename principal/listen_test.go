@@ -79,7 +79,7 @@ func Test_Listen(t *testing.T) {
 	templ := certTempl
 	fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 	t.Run("Auto-select port for listener", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), testNamespace,
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithListenerPort(0),
 			WithGeneratedTokenSigningKey(),
@@ -94,7 +94,7 @@ func Test_Listen(t *testing.T) {
 	})
 
 	t.Run("Listen on privileged port", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), testNamespace,
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithGeneratedTokenSigningKey(),
 			WithListenerPort(443),
@@ -145,7 +145,7 @@ func Test_Serve(t *testing.T) {
 	fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 
 	// We start a real (non-mocked) server
-	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), testNamespace,
+	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 		WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		WithGeneratedTokenSigningKey(),
 		WithListenerPort(0),

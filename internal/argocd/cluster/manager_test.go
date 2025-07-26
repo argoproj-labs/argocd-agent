@@ -8,6 +8,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,7 +41,18 @@ func newClusterSecret(t *testing.T, agentName string) (*v1alpha1.Cluster, *v1.Se
 }
 
 func Test_StartStop(t *testing.T) {
-	clt := kube.NewFakeClientsetWithResources()
+
+	// Add the required Redis secret for cluster cache functionality
+	redisSecret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "argocd-redis",
+			Namespace: "argocd",
+		},
+		Data: map[string][]byte{
+			"auth": []byte(uuid.NewString()),
+		},
+	}
+	clt := kube.NewFakeClientsetWithResources(redisSecret)
 	m, err := NewManager(context.TODO(), "argocd", "", "", clt)
 	require.NoError(t, err)
 	require.NotNil(t, m)
@@ -51,7 +63,17 @@ func Test_StartStop(t *testing.T) {
 }
 
 func Test_onClusterAdd(t *testing.T) {
-	clt := kube.NewFakeClientsetWithResources()
+	// Add the required Redis secret for cluster cache functionality
+	redisSecret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "argocd-redis",
+			Namespace: "argocd",
+		},
+		Data: map[string][]byte{
+			"auth": []byte(uuid.NewString()),
+		},
+	}
+	clt := kube.NewFakeClientsetWithResources(redisSecret)
 	m, err := NewManager(context.TODO(), "argocd", "", "", clt)
 	require.NoError(t, err)
 	require.NotNil(t, m)

@@ -23,6 +23,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
+	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
 	"github.com/sirupsen/logrus"
 )
 
@@ -63,6 +65,7 @@ type Manager struct {
 
 	redisAddress         string
 	redisCompressionType cacheutil.RedisCompressionType
+	clusterCache         *appstatecache.Cache
 }
 
 // NewManager instantiates and initializes a new Manager.
@@ -76,6 +79,11 @@ func NewManager(ctx context.Context, namespace, redisAddress string, redisCompre
 		filters:              filter.NewFilterChain[*v1.Secret](),
 		redisAddress:         redisAddress,
 		redisCompressionType: redisCompressionType,
+	}
+
+	m.clusterCache, err = NewClusterCacheInstance(ctx, kubeclient, namespace, redisAddress, redisCompressionType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
 	}
 
 	// We are only interested in secrets that have both, Argo CD's label for
@@ -132,9 +140,16 @@ func (m *Manager) Start() error {
 	// because of this info updated by principal are deleted after 10 minutes.
 	// To avoid this we need to re-save same info before cache is expired.
 	go func() {
+		ticker := time.NewTicker(3 * time.Minute)
+		defer ticker.Stop()
+
 		for {
-			go m.refreshClusterConnectionInfo()
-			time.Sleep(3 * time.Minute)
+			select {
+			case <-ticker.C:
+				m.refreshClusterInfo()
+			case <-m.ctx.Done():
+				return
+			}
 		}
 	}()
 

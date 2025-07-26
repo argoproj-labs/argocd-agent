@@ -17,6 +17,7 @@ package kube
 import (
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
+	"github.com/google/uuid"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,8 +28,18 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 )
 
-func NewFakeKubeClient() *kubefake.Clientset {
-	clientset := kubefake.NewSimpleClientset()
+func NewFakeKubeClient(namespace string) *kubefake.Clientset {
+	// Add the required Redis secret for cluster cache functionality
+	redisSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "argocd-redis",
+			Namespace: namespace,
+		},
+		Data: map[string][]byte{
+			"auth": []byte(uuid.NewString()),
+		},
+	}
+	clientset := kubefake.NewSimpleClientset(redisSecret)
 	return clientset
 }
 
@@ -37,9 +48,20 @@ func NewFakeClientsetWithResources(objects ...runtime.Object) *kubefake.Clientse
 	return clientset
 }
 
-func NewKubernetesFakeClientWithApps(apps ...runtime.Object) *kube.KubernetesClient {
+func NewKubernetesFakeClientWithApps(namespace string, apps ...runtime.Object) *kube.KubernetesClient {
+	// Add the required Redis secret for cluster cache functionality
+	redisSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "argocd-redis",
+			Namespace: namespace,
+		},
+		Data: map[string][]byte{
+			"auth": []byte(uuid.NewString()),
+		},
+	}
+
 	c := &kube.KubernetesClient{}
-	c.Clientset = NewFakeClientsetWithResources()
+	c.Clientset = NewFakeClientsetWithResources(redisSecret)
 	c.ApplicationsClientset = fakeappclient.NewSimpleClientset(apps...)
 	return c
 }
