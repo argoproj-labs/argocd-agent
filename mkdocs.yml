@@ -46,8 +46,10 @@ nav:
     - Accessing live resources on workload clusters: user-guide/live-resources.md
   - Configuration:
     - Principal: 
+        - Configuration parameters: configuration/principal/configuration.md
         - PKI: configuration/principal/pki-certificates.md
     - Agent:
+        - Configuration parameters: configuration/agent/configuration.md
         - PKI: configuration/agent/pki-certificates.md
   - Operations:
     - Metrics: operations/metrics.md
