@@ -33,6 +33,7 @@ nav:
       - Overview: concepts/agent-modes/index.md
       - Managed mode: concepts/agent-modes/managed.md
       - Autonomous mode: concepts/agent-modes/autonomous.md
+    - Sync protocol: concepts/sync-protocol.md
   - Getting started:
     - Overview: getting-started/index.md
     - Kubernetes: getting-started/kubernetes/index.md
