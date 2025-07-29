@@ -3,7 +3,7 @@
 # Declare variables to be passed into your templates.
 
 # Namespace to deploy your agent in
-namespace: "argocd"
+namespace: ""
 
 # Secret names for argo-agent deployment
 tlsSecretName: "argocd-agent-client-tls"
@@ -16,7 +16,6 @@ imageTag: "latest"
 agentMode: "autonomous"
 auth: "mtls:any"
 logLevel: "info"
-agentNamespace: "argocd"
 server: "http://principal.server.address.com" 
 serverPort: "443"
 metricsPort: "8181"

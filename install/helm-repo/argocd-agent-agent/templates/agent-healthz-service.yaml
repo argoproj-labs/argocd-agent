@@ -6,6 +6,7 @@ metadata:
       app.kubernetes.io/part-of: argocd-agent
       app.kubernetes.io/component: agent
   name: argocd-agent-agent-healthz
+  namespace: {{ include  "argocd-agent-agent.namespace" . }}
 spec:
   ports:
     - name: healthz

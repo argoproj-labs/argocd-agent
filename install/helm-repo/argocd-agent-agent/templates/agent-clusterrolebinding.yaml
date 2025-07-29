@@ -13,4 +13,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-agent-agent
-  namespace: {{ .Values.namespace }}
+  namespace: {{ include  "argocd-agent-agent.namespace" . }}

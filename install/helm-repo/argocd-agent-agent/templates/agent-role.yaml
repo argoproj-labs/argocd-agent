@@ -6,9 +6,7 @@ metadata:
     app.kubernetes.io/part-of: argocd-agent
     app.kubernetes.io/component: agent
   name: argocd-agent-agent
-  {{- if .Values.namespace }}
-  namespace: {{ .Values.namespace }}
-  {{- end }}
+  namespace: {{ include  "argocd-agent-agent.namespace" . }}
 rules:
 - apiGroups:
   - argoproj.io

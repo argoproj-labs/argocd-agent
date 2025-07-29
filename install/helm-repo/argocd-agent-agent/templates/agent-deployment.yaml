@@ -4,9 +4,7 @@ metadata:
   labels:
     app.kubernetes.io/name: argocd-agent-agent
   name: {{ include "argocd-agent-agent.fullname" . }}
-  {{- if .Values.namespace }}
-  namespace: {{ .Values.namespace }}
-  {{- end }}
+  namespace: {{ include  "argocd-agent-agent.namespace" . }}
 spec:
   selector:
     matchLabels:
