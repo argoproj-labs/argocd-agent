@@ -325,7 +325,7 @@ func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructur
 		var gvr schema.GroupVersionResource
 		for _, apiResource := range rif.APIResources {
 			if ref.Kind == apiResource.Kind {
-				gvr = schema.GroupVersionResource{Group: apiResource.Group, Version: apiResource.Version, Resource: apiResource.Name}
+				gvr = schema.GroupVersionResource{Group: gv.Group, Version: gv.Version, Resource: apiResource.Name}
 				break
 			}
 		}
@@ -336,10 +336,25 @@ func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructur
 			continue
 		}
 
-		// Get the owning object from the cluster.
-		owner, err := kube.DynamicClient.Resource(gvr).Namespace(res.GetNamespace()).Get(context.Background(), ref.Name, v1.GetOptions{})
+		// Get the owning object from the cluster. Since owner references are
+		// not namespaced, we need to use the namespace of the inspected
+		// resource to retrieve the owner.
+		//
+		// If the dependent resource is cluster-scoped, and the owner is
+		// not found, we can assume that the owner is not existing.
+		//
+		// If the dependent resource is namespaced, and the owner is not
+		// found, we try to retrieve the owner from the cluster-scope.
+		var owner *unstructured.Unstructured
+		owner, err = kube.DynamicClient.Resource(gvr).Namespace(res.GetNamespace()).Get(context.Background(), ref.Name, v1.GetOptions{})
 		if err != nil {
-			return false, err
+			if res.GetNamespace() == "" {
+				return false, err
+			}
+			owner, err = kube.DynamicClient.Resource(gvr).Get(context.Background(), ref.Name, v1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
 		}
 
 		isOwned, err := isResourceManaged(kube, owner, maxRecurse-1)

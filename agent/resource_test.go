@@ -13,6 +13,7 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,37 +61,138 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 	})
-	t.Run("Find manager by owner reference", func(t *testing.T) {
-		pod1 := &corev1.Pod{
+	t.Run("Find manager by owner reference recursively", func(t *testing.T) {
+		depl := &appsv1.Deployment{
 			ObjectMeta: v1.ObjectMeta{
-				Name:      "pod1",
-				Namespace: "default",
-				OwnerReferences: []v1.OwnerReference{
-					{
-						APIVersion: "v1",
-						Kind:       "Pod",
-						Name:       "pod2",
-						UID:        "1234",
-					},
-				},
-			},
-		}
-		pod2 := &corev1.Pod{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "pod2",
+				Name:      "depl1",
 				Namespace: "default",
 				Labels: map[string]string{
 					"app.kubernetes.io/instance": "some-app",
 				},
 			},
 		}
-		kubeclient := kube.NewDynamicFakeClient(pod1, pod2)
+		rs1 := &appsv1.ReplicaSet{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "rs1",
+				Namespace: "default",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "Deployment",
+						Name:       "depl1",
+					},
+				},
+			},
+		}
+		pod1 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: "default",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "ReplicaSet",
+						Name:       "rs1",
+					},
+				},
+			},
+		}
+		kubeclient := kube.NewDynamicFakeClient(depl, rs1, pod1)
 
 		un := objToUnstructured(pod1)
 
 		isOwned, err := isResourceManaged(kubeclient, un, 5)
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
+	})
+	t.Run("Cluster-scoped owner reference", func(t *testing.T) {
+		ns := &corev1.Namespace{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "ns1",
+				Namespace: "",
+				Labels: map[string]string{
+					"app.kubernetes.io/instance": "some-app",
+				},
+			},
+		}
+		rs1 := &appsv1.ReplicaSet{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "rs1",
+				Namespace: "default",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "v1",
+						Kind:       "Namespace",
+						Name:       "ns1",
+					},
+				},
+			},
+		}
+		pod1 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: "default",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "ReplicaSet",
+						Name:       "rs1",
+					},
+				},
+			},
+		}
+		kubeclient := kube.NewDynamicFakeClient(ns, rs1, pod1)
+
+		un := objToUnstructured(pod1)
+
+		isOwned, err := isResourceManaged(kubeclient, un, 5)
+		assert.True(t, isOwned)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid owner reference", func(t *testing.T) {
+		depl := &appsv1.Deployment{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "depl1",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/instance": "some-app",
+				},
+			},
+		}
+		rs1 := &appsv1.ReplicaSet{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "rs1",
+				Namespace: "default",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "Deployment",
+						Name:       "depl1",
+					},
+				},
+			},
+		}
+		pod1 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: "default",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "ReplicaSet",
+						Name:       "rs1",
+					},
+				},
+			},
+		}
+		kubeclient := kube.NewDynamicFakeClient(depl, rs1, pod1)
+
+		un := objToUnstructured(pod1)
+
+		isOwned, err := isResourceManaged(kubeclient, un, 5)
+		assert.False(t, isOwned)
+		assert.Error(t, err)
 	})
 	t.Run("Not managed", func(t *testing.T) {
 		pod1 := &corev1.Pod{
