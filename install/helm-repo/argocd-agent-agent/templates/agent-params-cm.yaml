@@ -21,7 +21,7 @@ data:
   # agent.tls.client.insecure: Whether to skip the validation of the remote TLS
   # credentials. Insecure. Do only use for development purposes.
   # Default: false
-  agent.tls.client.insecure: "false"
+  agent.tls.client.insecure: {{ .Values.tlsClientInSecure  | quote }}
   # agent.tls.root-ca-path: The path to a file containing the certificates for
   # the TLS root certificate authority used to validate the remote principal. 
   # Default: ""
@@ -45,10 +45,10 @@ data:
   # agent.principal.address: The remote address of the principal to connect
   # to. Can be a DNS name, an IPv4 address or an IPv6 address.
   # Default: ""
-  agent.server.address: {{ .Values.server }}
+  agent.server.address: {{ .Values.server}}
   # agent.server.port: The remote port of the principal to connect to.
   # Default: "443"
-  agent.server.port: {{ .Values.serverPort }}
+  agent.server.port: {{ .Values.serverPort | quote }}
   # agent.metrics.port: The port the metrics server should listen on.
   # Default: 8181
-  agent.metrics.port: {{ .Values.metricsPort }}
+  agent.metrics.port: {{ .Values.metricsPort | quote }}
