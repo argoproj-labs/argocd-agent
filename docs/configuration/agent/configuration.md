@@ -261,24 +261,7 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Default**: `""` (uses current context)
 - **Example**: `"my-cluster-context"`
 
-### Version Information
 
-#### Version
-- **Command Line Flag**: `--version`
-- **Environment Variable**: *(Not available)*
-- **ConfigMap Entry**: *(Not available in ConfigMap)*
-- **Description**: Display version information and exit
-- **Type**: Boolean
-- **Default**: `false`
-
-#### Version Format
-- **Command Line Flag**: `--version-format`
-- **Environment Variable**: *(Not available)*
-- **ConfigMap Entry**: *(Not available in ConfigMap)*
-- **Description**: Output version information in specified format
-- **Type**: String
-- **Default**: `"text"`
-- **Valid Values**: `"text"`, `"json"`, `"json-indent"`
 
 ## Configuration Examples
 

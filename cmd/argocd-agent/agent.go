@@ -30,7 +30,6 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
-	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -52,8 +51,6 @@ func NewAgentRunCommand() *cobra.Command {
 		namespace         string
 		agentMode         string
 		creds             string
-		showVersion       bool
-		versionFormat     string
 		tlsSecretName     string
 		tlsClientCrt      string
 		tlsClientKey      string
@@ -74,10 +71,6 @@ func NewAgentRunCommand() *cobra.Command {
 		Use:   "agent",
 		Short: "Run the argocd-agent agent component",
 		Run: func(c *cobra.Command, args []string) {
-			if showVersion {
-				cmdutil.PrintVersion(version.New("argocd-agent"), versionFormat)
-				os.Exit(0)
-			}
 			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
 
@@ -267,8 +260,6 @@ func NewAgentRunCommand() *cobra.Command {
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
-	command.Flags().BoolVar(&showVersion, "version", false, "Display version information and exit")
-	command.Flags().StringVar(&versionFormat, "version-format", "text", "Output version information in format: text, json, json-indent")
 	return command
 }
 
