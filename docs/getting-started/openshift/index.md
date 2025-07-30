@@ -1,15 +1,15 @@
 # ArgoCD Agent Hub and Spoke Cluster Setup Documentation Using Operator
-This document outlines the process of setting up ArgoCD Agent in a hub and spoke cluster architecture. This configuration allows a central ArgoCD instance (the hub) to manage applications deployed across multiple remote Kubernetes clusters (the spokes) through the argocd-agent.
+This document outlines the process of setting up ArgoCD Agent in a hub and spoke cluster architecture. This configuration allows a central ArgoCD instance (the hub) to manage applications deployed across multiple remote Kubernetes clusters (the spokes) through the ArgoCD-agent.
 ## Prerequisites
 Before proceeding with the setup, ensure you have the following:
 
 A running openshift/kubernetes cluster designated as the hub, with ArgoCD/openshift GitOps Operator installed.
-One or more Kubernetes clusters designated as spokes, ArgoCD/openshift GitOps Operator installed.
-oc configured to access both hub and spoke clusters.
-Operator must be installed in cluster scope mode.
-Apps in any Namespace should be enabled.
-Argocd-agentctl binary (for non-production scenario)
 
+- One or more Kubernetes clusters designated as spokes, ArgoCD/openshift GitOps Operator installed.
+- oc configured to access both hub and spoke clusters.
+- Operator must be installed in [cluster scope](https://argocd-operator.readthedocs.io/en/stable/usage/basics/#cluster-scoped-instance) mode.
+- Apps in any Namespace should be enabled.
+- Argocd-agentctl binary (for non-production scenario)
 
 
 ## Hub Cluster Setup
@@ -17,16 +17,18 @@ Argocd-agentctl binary (for non-production scenario)
 Hub cluster will be installed in argocd namespace
 
 Before you install the principal's manifest, you will need to create three
-Create a TLS secret containing the public CA certificate used by argocd-agent components
-Create a TLS secret containing the certificate and private key used by the principal's gRPC service
-Create a TLS secret containing the certificate and private key used by the principal's resource proxy
-Create a secret containing the private RSA key used to sign JWT issued by the principal
+- Create a TLS secret containing the public CA certificate used by ArgoCD-agent components
+- Create a TLS secret containing the certificate and private key used by the principal's gRPC service
+- Create a TLS secret containing the certificate and private key used by the principal's resource proxy
+- Create a secret containing the private RSA key used to sign JWT issued by the principal
 
 For non-production scenarios, you can use the argocd-agentctl CLI's PKI tooling. Please be advised that this is not a production-grade setup, and that important pieces of the PKI, such as the CA's private key, will be stored unprotected on your control plane cluster.
 
 Create the PKI on the principal:
 
-```argocd-agentctl --principal-context <control plane context> pki init```
+```
+argocd-agentctl --principal-context <control plane context> pki init
+```
 
 Issue the certificate for the principal's gRPC service:
 The gRPC service is the service the agents will connect to. This service usually needs to be exposed to the outside world, or at least from your other clusters where the agents are running on. Typically, this means the service is exposed by a load balancer or a node port.
@@ -50,12 +52,6 @@ argocd-agentctl pki issue resource-proxy \
     --dns <dns names of principal>
 ```
 
-Create argocd-redis secret, because principal looks for it to fetch redis authentication details.
-
-```
-oc create secret generic argocd-redis -n argocd --from-literal=auth="$(oc get secret    argocd-redis-initial-password -n argocd -o jsonpath='{.data.admin\.password}' | base64 -d)"
-```
-
 Deploy agent on hub cluster using argocd-operator/gitops-operator using ArgoCD CR given below
 
 
@@ -76,23 +72,28 @@ spec:
       jwtAllowGenerate: true
       auth: "mtls:CN=([^,]+)"
       logLevel: "trace"
-      image: "quay.io/user/argocd-agent:v1"
+      image: "<quay.io/user/argocd-agent:v1>"
   sourceNamespaces:
     - "agent-managed"
     - "agent-autonomous"  					
 ```
 
-The above CR should create all the necessary resource for argocd as well as argocd-agent principal in argocd namespace.
+The above CR should create all the necessary resource for ArgoCD as well as argocd-agent principal in argocd namespace.
 
+Create argocd-redis secret, because principal looks for it to fetch redis authentication details.
+
+```
+oc create secret generic argocd-redis -n argocd --from-literal=auth="$(oc get secret argocd-redis-initial-password -n argocd -o jsonpath='{.data.admin\.password}' | base64 -d)"
+```
 
 ## Setting up agent workload cluster 
 
 ### Configure Argo-CD for Agent 
  
-argocd instance on Agent cluster
+ArgoCD instance on Agent cluster
 
-Creating argocd instance for Workload/spoke cluster, this instance will be using the shared repo, redis instance from principal and, have locally running argocd-application-controller instance.
-Update the below manifest with loadbalancer ip to create argocd instance. 
+Creating ArgoCD instance for Workload/spoke cluster, this instance will be using the shared repo, redis instance from principal and, have locally running argocd-application-controller instance.
+Update the below manifest with loadbalancer ip to create ArgoCD instance. 
 ```
   apiVersion: argoproj.io/v1beta1
   kind: ArgoCD
@@ -121,7 +122,7 @@ Run this command while connected to principal
 argocd-agentctl pki issue agent <agent-name> --agent-context <workload context> --agent-namespace <workload namespace> --upsert
 ```
 
-Apply the installation manifests for argocd agent
+Apply the installation manifests for ArgoCD-agent agent
 ```
 oc apply -n $(workload-namespace) -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main'
 ```
@@ -129,7 +130,7 @@ This should create all the required agent related resources.
 
 Update the configMap with name `argocd-agent-params`  with parameters related to agent.mode,agent.creds, agent.namespace, agent.server.address.	
 ```
-  agent.mode: autonomous
+  agent.mode: managed
   agent.creds: mtls:any
   agent.tls.client.insecure: "false"
   agent.tls.root-ca-path: "/app/config/tls/ca.crt"
@@ -164,17 +165,34 @@ This should create all the required agent related resources.
 
 Update the configMap with name `argocd-agent-params`  with parameters related to agent.mode,agent.creds, agent.namespace, agent.server.address.
 ```
+data:
+  agent.keep-alive-ping-interval: 50s # Otherwise the connection would close I guess
+  agent.tls.client.insecure: 'false' 
+  agent.server.port: '443'
+  agent.tls.root-ca-path: ''
+  agent.tls.client.cert-path: ''
+  agent.tls.root-ca-secret-name: argocd-agent-ca
+  agent.tls.secret-name: argocd-agent-client-tls
   agent.mode: autonomous
-  agent.creds: mtls:any
-  agent.tls.client.insecure: "false"
-  agent.tls.root-ca-path: "/app/config/tls/ca.crt"
-  agent.tls.client.cert-path: "/app/config/tls/tls.crt"
-  agent.tls.client.key-path: "/app/config/tls/tls.key"
   agent.log.level: info
   agent.namespace: argocd
-  agent.server.address: <argocd-principal-server>
-  agent.server.port: 443
-  agent.metrics.port: 8181
+  agent.server.address: <principal server address>
+  agent.metrics.port: '8181'
+  agent.tls.client.key-path: ''
+  agent.healthz.port: '8002'
+  agent.creds: 'mtls:any'
 ```
-Also Update RBAC, rolebinding/clusterrolebinding with argocd, if pod is facing rbac issues. 
 
+
+#### Troubleshooting 
+___
+
+1. If pod fails to come up with error
+```
+```
+
+update the ClusterRoleBinding to update the subject namespace to `workload-namespace`.
+
+```
+kubectl patch clusterrolebinding argocd-agent-agent --type='json' -p='[{"op": "replace", "path": "/subjects/0/namespace", "value": "<workload-namespace>"}]'
+```
