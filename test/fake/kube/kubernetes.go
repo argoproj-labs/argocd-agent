@@ -64,8 +64,8 @@ func NewDynamicFakeClient(objects ...runtime.Object) *kube.KubernetesClient {
 	resourceList := &metav1.APIResourceList{
 		GroupVersion: groupVersion.String(),
 		APIResources: []metav1.APIResource{
-			{Version: "v1", Name: "deployments", SingularName: "deployment", Namespaced: true, Kind: "Deployment", Verbs: []string{"get", "list", "watch"}},
-			{Version: "v1", Name: "replicasets", SingularName: "replicaset", Namespaced: true, Kind: "ReplicaSet", Verbs: []string{"get", "list", "watch"}},
+			{Group: "apps", Version: "v1", Name: "deployments", SingularName: "deployment", Namespaced: true, Kind: "Deployment", Verbs: []string{"get", "list", "watch"}},
+			{Group: "apps", Version: "v1", Name: "replicasets", SingularName: "replicaset", Namespaced: true, Kind: "ReplicaSet", Verbs: []string{"get", "list", "watch"}},
 		},
 	}
 
@@ -75,6 +75,7 @@ func NewDynamicFakeClient(objects ...runtime.Object) *kube.KubernetesClient {
 		APIResources: []metav1.APIResource{
 			{Version: "v1", Name: "pods", SingularName: "pod", Namespaced: true, Kind: "Pod", Verbs: []string{"get", "list", "watch"}},
 			{Version: "v1", Name: "services", SingularName: "service", Namespaced: true, Kind: "Service", Verbs: []string{"get", "list", "watch"}},
+			{Version: "v1", Name: "namespaces", SingularName: "namespace", Namespaced: false, Kind: "Namespace", Verbs: []string{"get", "list", "watch"}},
 		},
 	}
 	fakeDiscoveryClient.Resources = []*metav1.APIResourceList{resourceList, coreResourceList}
