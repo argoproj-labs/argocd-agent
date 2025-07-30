@@ -8,7 +8,7 @@ A running OpenShift/kubernetes cluster designated as the hub, with Argo CD/OpenS
 - One or more Kubernetes clusters designated as spokes, Argo CD/OpenShift GitOps Operator installed.
 - oc configured to access both hub and spoke clusters.
 - Operator must be installed in [cluster scope](https://argocd-operator.readthedocs.io/en/stable/usage/basics/#cluster-scoped-instance) mode.
-- Apps in any Namespace should be enabled.
+- Apps in any Namespace must be enabled for Hub Cluster.
 - Argocd-agentctl binary (for non-production scenario)
 
 
@@ -59,7 +59,6 @@ apiVersion: argoproj.io/v1beta1
 kind: ArgoCD
 metadata:
   name: argocd
-  Namespace: argocd
 spec:
   controller:
     enabled: false
@@ -91,23 +90,15 @@ oc create secret generic argocd-redis -n argocd --from-literal=auth="$(oc get se
  
 Argo CD instance on Agent cluster
 
-Creating Argo CD instance for Workload/spoke cluster, this instance will be using the shared repo, redis instance from principal and, have locally running argocd-application-controller instance.
-Update the below manifest with loadbalancer ip to create Argo CD instance. 
+Creating Argo CD instance for Workload/spoke cluster.
 ```
   apiVersion: argoproj.io/v1beta1
   kind: ArgoCD
   metadata:
     name: argocd
-    namespace: argocd
   spec:
-    repo:
-      remote: <repo LoadBalancer IP addr>:8081
-    redis:
-      remote: <redisLoadBalancer IP addr>:6379
     server:
       enabled: false
-    sourceNamespaces:
-    - <workload namespace>
 ```
 
 ### Configure Agent in managed mode
@@ -192,6 +183,9 @@ ___
 
 1. If pod fails to come up with error
 ```
+time="2025-07-30T14:58:33Z" level=warning msg="INSECURE: Not verifying remote TLS certificate"
+time="2025-07-30T14:58:33Z" level=info msg="Loading client TLS certificate from secret argocd/argocd-agent-client-tls"
+[FATAL]: Error creating remote: unable to read TLS client from secret: could not read TLS secret argocd/argocd-agent-client-tls: secrets "argocd-agent-client-tls" is forbidden: User "system:serviceaccount:argocd:argocd-agent-agent" cannot get resource "secrets" in API group "" in the namespace "argocd"
 ```
 
 update the ClusterRoleBinding to update the subject namespace to `workload-namespace`.
