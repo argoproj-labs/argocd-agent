@@ -63,8 +63,8 @@ Create the name of the service account to use
 
 
 {{/*
-Override .Release.Namespace 
+Expand the namespace of the release.
 */}}
 {{- define "argocd-agent-agent.namespace" -}}
-{{- default .Release.Namespace .Values.namespace }}
+{{- default .Release.Namespace .Values.namespaceOverride | trunc 63 | trimSuffix "-" -}}
 {{- end }}

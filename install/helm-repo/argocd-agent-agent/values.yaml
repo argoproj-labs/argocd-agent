@@ -2,8 +2,8 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-# Namespace to deploy your agent in
-namespace: ""
+# Override Namespace to deploy your agent
+namespaceOverride: ""
 
 # Secret names for argo-agent deployment
 tlsSecretName: "argocd-agent-client-tls"
@@ -12,7 +12,6 @@ image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent"
 imageTag: "latest"
 
 # config-map to config parameters for argocd-agent
-
 agentMode: "autonomous"
 auth: "mtls:any"
 logLevel: "info"
