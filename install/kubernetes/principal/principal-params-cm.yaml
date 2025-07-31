@@ -115,3 +115,25 @@ data:
   #   extracting the agent ID from client cert subject.
   # Default: userpass:_path_to_encrypted_creds_
   principal.auth: "mtls:CN=([^,]+)"
+  # principal.log.format: The log format principal should use. Valid values are
+  # "json" or "text".
+  # Default: "text"
+  principal.log.format: "text"
+  # principal.websocket.enable: Whether to use the websocket to stream events to the
+  # agent.
+  # Default: false
+  principal.websocket.enable: "false"
+  # principal.redis.compression.type: The compression type to use for the Redis
+  # connection.
+  # Default: "gzip"
+  principal.redis.compression.type: "gzip"
+  # principal.resource-proxy.enable: Whether to enable the resource proxy.
+  # Default: true
+  principal.resource-proxy.enable: "true"
+  # principal.keep-alive.min-interval: Drop agent connections that send keepalive pings 
+  # more often than the specified interval.
+  # Default: 0
+  principal.keep-alive.min-interval: "0"
+  # principal.pprof.port: The port the pprof server will listen on.
+  # Default: 0
+  principal.pprof.port: "0"
