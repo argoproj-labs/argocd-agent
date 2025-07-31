@@ -228,9 +228,18 @@ func NewPKIInspectCommand() *cobra.Command {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
 
-			caSum := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, config.SecretNamePrincipalCA, true)
-			resourceProxySum := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, "argocd-agent-resource-proxy-tls", false)
-			principalSum := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, "argocd-agent-principal-tls", false)
+			caSum, err := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, config.SecretNamePrincipalCA, true)
+			if err != nil {
+				cmdutil.Fatal("CA is not initialized: %v", err)
+			}
+			resourceProxySum, err := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, "argocd-agent-resource-proxy-tls", false)
+			if err != nil && !errors.IsNotFound(err) {
+				cmdutil.Fatal("Error reading resource proxy certificate: %v", err)
+			}
+			principalSum, err := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, "argocd-agent-principal-tls", false)
+			if err != nil && !errors.IsNotFound(err) {
+				cmdutil.Fatal("Error reading principal certificate: %v", err)
+			}
 
 			sum := inspectSummary{
 				CA:            caSum,
@@ -533,18 +542,14 @@ func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, i
 
 }
 
-func readAndSummarizeCertificate(ctx context.Context, clt *kube.KubernetesClient, namespace, name string, isCA bool) certificateSummary {
+func readAndSummarizeCertificate(ctx context.Context, clt *kube.KubernetesClient, namespace, name string, isCA bool) (certificateSummary, error) {
 	cert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, namespace, name)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			return certificateSummary{}
-		} else {
-			cmdutil.Fatal("Error getting certificate: %v", err)
-		}
+		return certificateSummary{}, err
 	}
 	parsedCert, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
-		cmdutil.Fatal("Could not parse certificate: %v", err)
+		return certificateSummary{}, fmt.Errorf("Could not parse certificate: %v", err)
 	}
 
 	warnings := []string{}
@@ -570,5 +575,5 @@ func readAndSummarizeCertificate(ctx context.Context, clt *kube.KubernetesClient
 		Warnings:  warnings,
 	}
 
-	return sum
+	return sum, nil
 }

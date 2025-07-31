@@ -28,6 +28,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -43,9 +44,11 @@ func TestReadAndSummarizeCertificate(t *testing.T) {
 			Clientset: fakeClient,
 		}
 
-		summary := readAndSummarizeCertificate(ctx, client, namespace, secretName, false)
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, secretName, false)
 
-		// Should return empty summary for not found
+		// Should return empty summary and not found error
+		assert.Error(t, err)
+		assert.True(t, errors.IsNotFound(err))
 		assert.Empty(t, summary.Subject)
 		assert.Empty(t, summary.KeyType)
 		assert.Zero(t, summary.KeyLength)
@@ -94,7 +97,10 @@ func TestReadAndSummarizeCertificate(t *testing.T) {
 			Clientset: fakeClient,
 		}
 
-		summary := readAndSummarizeCertificate(ctx, client, namespace, secretName, true)
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, secretName, true)
+
+		// Should succeed with no error
+		assert.NoError(t, err)
 
 		// Verify certificate summary
 		assert.Contains(t, summary.Subject, "Test CA")
@@ -142,7 +148,10 @@ func TestReadAndSummarizeCertificate(t *testing.T) {
 			Clientset: fakeClient,
 		}
 
-		summary := readAndSummarizeCertificate(ctx, client, namespace, secretName, false)
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, secretName, false)
+
+		// Should succeed with no error
+		assert.NoError(t, err)
 
 		// Verify certificate summary
 		assert.Contains(t, summary.Subject, "test-server.example.com")
@@ -192,7 +201,10 @@ func TestReadAndSummarizeCertificate(t *testing.T) {
 			Clientset: fakeClient,
 		}
 
-		summary := readAndSummarizeCertificate(ctx, client, namespace, secretName, true)
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, secretName, true)
+
+		// Should succeed with no error
+		assert.NoError(t, err)
 
 		// Should have warning about not being a CA
 		assert.Contains(t, summary.Warnings, "This is not a CA certificate")
@@ -233,7 +245,10 @@ func TestReadAndSummarizeCertificate(t *testing.T) {
 			Clientset: fakeClient,
 		}
 
-		summary := readAndSummarizeCertificate(ctx, client, namespace, secretName, false)
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, secretName, false)
+
+		// Should succeed with no error
+		assert.NoError(t, err)
 
 		// Should have warning about invalid basic constraints
 		assert.Contains(t, summary.Warnings, "Basic constraints are invalid")
@@ -274,7 +289,10 @@ func TestReadAndSummarizeCertificate(t *testing.T) {
 			Clientset: fakeClient,
 		}
 
-		summary := readAndSummarizeCertificate(ctx, client, namespace, secretName, true) // expecting CA
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, secretName, true) // expecting CA
+
+		// Should succeed with no error
+		assert.NoError(t, err)
 
 		// Should have both warnings
 		assert.Contains(t, summary.Warnings, "This is not a CA certificate")
@@ -283,7 +301,7 @@ func TestReadAndSummarizeCertificate(t *testing.T) {
 	})
 
 	t.Run("Secret with invalid certificate data", func(t *testing.T) {
-		// Create secret with invalid certificate data
+		// Create secret with invalid certificate data that will fail TLSCertFromSecret
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      secretName,
@@ -296,16 +314,20 @@ func TestReadAndSummarizeCertificate(t *testing.T) {
 			},
 		}
 
-		// The function should call cmdutil.Fatal for parsing errors,
-		// but since we can't easily test Fatal calls without refactoring,
-		// we'll skip this test case for now. In a real scenario, we might
-		// want to refactor the function to return errors instead of calling Fatal.
-		_ = secret
-		t.Skip("Skipping test for invalid certificate data as it calls cmdutil.Fatal")
+		fakeClient := fakekube.NewFakeClientsetWithResources(secret)
+		client := &kube.KubernetesClient{
+			Clientset: fakeClient,
+		}
+
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, secretName, false)
+
+		// Should return error for invalid certificate data
+		assert.Error(t, err)
+		assert.Empty(t, summary.Subject)
 	})
 
 	t.Run("Empty certificate data", func(t *testing.T) {
-		// Create secret with empty certificate data
+		// Create secret with empty certificate data that will fail TLSCertFromSecret
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      secretName,
@@ -318,9 +340,51 @@ func TestReadAndSummarizeCertificate(t *testing.T) {
 			},
 		}
 
-		// Similar to above, this would trigger an error that calls cmdutil.Fatal
-		_ = secret
-		t.Skip("Skipping test for empty certificate data as it calls cmdutil.Fatal")
+		fakeClient := fakekube.NewFakeClientsetWithResources(secret)
+		client := &kube.KubernetesClient{
+			Clientset: fakeClient,
+		}
+
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, secretName, false)
+
+		// Should return error for empty certificate data
+		assert.Error(t, err)
+		assert.Empty(t, summary.Subject)
+	})
+
+	t.Run("Certificate parsing error", func(t *testing.T) {
+		// Create a secret with valid PEM structure but invalid certificate content
+		// This will pass TLSCertFromSecret but fail x509.ParseCertificate
+		invalidCertPEM := `-----BEGIN CERTIFICATE-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAinvalidcertificatedata
+-----END CERTIFICATE-----`
+
+		// Generate a valid key to go with the invalid cert
+		_, validKeyPEM := testcerts.CreateSelfSignedCert(t, "rsa", testcerts.DefaultCertTempl)
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: namespace,
+			},
+			Type: corev1.SecretTypeTLS,
+			Data: map[string][]byte{
+				"tls.crt": []byte(invalidCertPEM),
+				"tls.key": validKeyPEM,
+			},
+		}
+
+		fakeClient := fakekube.NewFakeClientsetWithResources(secret)
+		client := &kube.KubernetesClient{
+			Clientset: fakeClient,
+		}
+
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, secretName, false)
+
+		// Should return TLS loading error
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "tls: failed to find any PEM data")
+		assert.Empty(t, summary.Subject)
 	})
 }
 
@@ -339,7 +403,11 @@ func TestReadAndSummarizeCertificate_GetSecretError(t *testing.T) {
 			Clientset: fakeClient,
 		}
 
-		summary := readAndSummarizeCertificate(ctx, client, namespace, "non-existent-secret", false)
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, "non-existent-secret", false)
+
+		// Should return error when secret is not found
+		assert.Error(t, err)
+		assert.True(t, errors.IsNotFound(err))
 
 		// Should return empty summary when secret is not found
 		assert.Empty(t, summary.Subject)
