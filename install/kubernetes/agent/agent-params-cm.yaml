@@ -61,4 +61,23 @@ data:
   # agent.healthz.port: The port the health check server should listen on.
   # Default: 8002
   agent.healthz.port: "8002"
+  # agent.log.format: The log format agent should use. Valid values are
+  # "json" or "text".
+  # Default: "text"
+  agent.log.format: "text"
+  # agent.websocket.enable: Whether to use the websocket to stream events to the
+  # principal.
+  # Default: false
+  agent.websocket.enable: "false"
+  # agent.compression.enable: Whether to use compression while sending data
+  # between Principal and Agent using gRPC
+  # Default: false
+  agent.compression.enable: "false"
+  # agent.keep-alive.interval: The interval at which the agent should send
+  # a ping to the principal to keep the connection alive.
+  # Default: 0
+  agent.keep-alive.interval: "0"
+  # agent.pprof.port: The port the pprof server should listen on.
+  # Default: 0
+  agent.pprof.port: "0"
   
