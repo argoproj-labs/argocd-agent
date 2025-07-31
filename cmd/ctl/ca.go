@@ -395,7 +395,7 @@ func NewPKIIssuePrincipalCommand() *cobra.Command {
 		Short: "Issue a TLS certificate for the principal",
 		Use:   "principal",
 		Run: func(cmd *cobra.Command, args []string) {
-			issueAndSaveSecret(globalOpts.principalContext, "argocd-agent-principal-tls", "argocd", upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+			issueAndSaveSecret(globalOpts.principalContext, "argocd-agent-principal-tls", globalOpts.principalNamespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
 				return tlsutil.GenerateServerCertificate("argocd-agent-principal", c, pk, ips, dns)
 			})
 		},
@@ -421,7 +421,7 @@ func NewPKIIssueResourceProxyCommand() *cobra.Command {
 				fmt.Println("Please pass at least one of --ips or --dns options or use --no-san to create certificate without SAN")
 				os.Exit(1)
 			}
-			issueAndSaveSecret(globalOpts.principalContext, "argocd-agent-resource-proxy-tls", "argocd", upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+			issueAndSaveSecret(globalOpts.principalContext, "argocd-agent-resource-proxy-tls", globalOpts.principalNamespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
 				return tlsutil.GenerateServerCertificate("argocd-agent-resource-proxy", c, pk, ips, dns)
 			})
 		},
