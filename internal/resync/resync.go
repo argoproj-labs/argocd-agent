@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -88,7 +89,7 @@ func (r *RequestHandler) ProcessSyncedResourceListRequest(agentName string, req 
 			return fmt.Errorf("failed to create synced resource event: %w", err)
 		}
 
-		r.log.WithField("name", res.Name).WithField("kind", res.Kind).Trace("Sent synced resource event")
+		r.log.WithField(logfields.Name, res.Name).WithField(logfields.Kind, res.Kind).Trace("Sent synced resource event")
 		r.sendQ.Add(ev)
 	}
 
@@ -97,10 +98,10 @@ func (r *RequestHandler) ProcessSyncedResourceListRequest(agentName string, req 
 
 func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, incoming *event.SyncedResource, agentID string) error {
 	logCtx := r.log.WithFields(logrus.Fields{
-		"kind":      incoming.Kind,
-		"namespace": incoming.Namespace,
-		"name":      incoming.Name,
-		"uid":       incoming.UID,
+		logfields.Kind:      incoming.Kind,
+		logfields.Namespace: incoming.Namespace,
+		logfields.Name:      incoming.Name,
+		logfields.UID:       incoming.UID,
 	})
 
 	logCtx.Trace("Received a synced resource event")
@@ -187,15 +188,15 @@ func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resourc
 	}
 
 	r.sendQ.Add(ev)
-	r.log.WithField("kind", resource.Kind).WithField("name", resource.Name).Trace("Sent a request update event")
+	r.log.WithField(logfields.Kind, resource.Kind).WithField(logfields.Name, resource.Name).Trace("Sent a request update event")
 	return nil
 }
 
 func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentName string, reqUpdate *event.RequestUpdate) error {
 	logCtx := r.log.WithFields(logrus.Fields{
-		"name":      reqUpdate.Name,
-		"kind":      reqUpdate.Kind,
-		"namespace": reqUpdate.Namespace,
+		logfields.Name:      reqUpdate.Name,
+		logfields.Kind:      reqUpdate.Kind,
+		logfields.Namespace: reqUpdate.Namespace,
 	})
 
 	logCtx.Trace("Received a request for the resource update event")

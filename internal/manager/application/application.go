@@ -29,6 +29,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
@@ -378,7 +379,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
+		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
 	}
 	return updated, err
 }
@@ -452,7 +453,7 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
+		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
 	}
 	return updated, err
 }
@@ -509,7 +510,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.WithField("newResourceVersion", updated.ResourceVersion).Infof("Updated application status")
+		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
 	}
 	return updated, err
 }

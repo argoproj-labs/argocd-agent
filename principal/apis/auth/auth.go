@@ -22,6 +22,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/issuer"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/sirupsen/logrus"
@@ -182,5 +183,5 @@ func (s *Server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenReques
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("module", "grpc.AuthenticationServer")
+	return logging.ModuleLogger("grpc.AuthenticationServer")
 }

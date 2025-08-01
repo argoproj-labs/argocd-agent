@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
@@ -361,5 +362,5 @@ func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1al
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("component", "AppManager")
+	return logging.ComponentLogger("AppProjectManager")
 }

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 )
@@ -98,5 +99,5 @@ func (p *Tracker) StopTracking(eventID string) error {
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("module", "tracker")
+	return logging.ModuleLogger("tracker")
 }
