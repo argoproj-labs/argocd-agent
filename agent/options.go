@@ -92,3 +92,10 @@ func WithRedisPassword(password string) AgentOption {
 		return nil
 	}
 }
+
+func WithEnableResourceProxy(enable bool) AgentOption {
+	return func(o *Agent) error {
+		o.enableResourceProxy = enable
+		return nil
+	}
+}
