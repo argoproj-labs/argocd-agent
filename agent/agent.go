@@ -90,6 +90,9 @@ type Agent struct {
 
 	// redisProxyMsgHandler manages redis connection state for agent
 	redisProxyMsgHandler *redisProxyMsgHandler
+
+	// enableResourceProxy determines if the agent should proxy resources to the principal
+	enableResourceProxy bool
 }
 
 const defaultQueueName = "default"

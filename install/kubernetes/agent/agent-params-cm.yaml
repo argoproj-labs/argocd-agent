@@ -80,4 +80,6 @@ data:
   # agent.pprof.port: The port the pprof server should listen on.
   # Default: 0
   agent.pprof.port: "0"
-  
+  # agent.resource-proxy.enable: Whether to enable the resource proxy.
+  # Default: true
+  agent.resource-proxy.enable: "true"
