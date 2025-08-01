@@ -23,6 +23,8 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/session"
@@ -116,8 +118,8 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 	c.agentName = agentName
 
 	c.logCtx = logrus.WithFields(logrus.Fields{
-		"method": "Subscribe",
-		"client": c.agentName,
+		logfields.Method: "Subscribe",
+		logfields.Client: c.agentName,
 	})
 
 	// The stream can have on optional expiry time
@@ -484,5 +486,5 @@ recvloop:
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("module", "grpc.AppStream")
+	return logging.ModuleLogger("grpc.AppStream")
 }

@@ -33,6 +33,10 @@ const (
 	EventID        = "eventId"
 	Event          = "event"
 
+	// Client and agent
+	Client = "client"
+	Agent  = "agent"
+
 	// Networking
 	Direction   = "direction"
 	ClientAddr  = "clientAddr"
@@ -53,6 +57,7 @@ const (
 	// Kubernetes resources
 	Kind               = "kind"
 	Name               = "name"
+	UID                = "uid"
 	ResourceVersion    = "resourceVersion"
 	NewResourceVersion = "newResourceVersion"
 	OldResourceVersion = "oldResourceVersion"

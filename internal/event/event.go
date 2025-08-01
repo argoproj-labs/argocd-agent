@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -685,10 +687,7 @@ func NewEventWriter(target streamWriter) *EventWriter {
 	return &EventWriter{
 		latestEvents: map[string]*eventMessage{},
 		target:       target,
-		log: logrus.WithFields(logrus.Fields{
-			"module":      "EventWriter",
-			"client_addr": grpcutil.AddressFromContext(target.Context()),
-		}),
+		log:          logging.ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())),
 	}
 }
 

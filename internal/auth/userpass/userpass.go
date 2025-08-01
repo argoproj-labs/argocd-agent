@@ -27,6 +27,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/sirupsen/logrus"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -180,5 +181,5 @@ func (a *UserPassAuthentication) Init() error {
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("component", "AuthUserPass")
+	return logging.ComponentLogger("AuthUserPass")
 }

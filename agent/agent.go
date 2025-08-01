@@ -29,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
@@ -396,7 +397,7 @@ func (a *Agent) SetConnected(connected bool) {
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("module", "Agent")
+	return logging.ModuleLogger("Agent")
 }
 
 func (a *Agent) healthzHandler(w http.ResponseWriter, r *http.Request) {

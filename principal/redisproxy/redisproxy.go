@@ -27,6 +27,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/principal/tracker"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
@@ -822,5 +823,5 @@ func extractAgentNameFromRedisCommandKey(redisKey string, logCtx *logrus.Entry) 
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("module", "redisProxy")
+	return logging.ModuleLogger("redisProxy")
 }
