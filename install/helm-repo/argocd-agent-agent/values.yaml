@@ -1,0 +1,25 @@
+# Default values for argocd-agent-agent.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Override Namespace to deploy your agent
+namespaceOverride: ""
+
+# Secret names for argo-agent deployment
+tlsSecretName: "argocd-agent-client-tls"
+userPasswordSecretName: "argocd-agent-agent-userpass"
+image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent"
+imageTag: "latest"
+
+# config-map to config parameters for argocd-agent
+agentMode: "autonomous"
+auth: "mtls:any"
+logLevel: "info"
+server: "principal.server.address.com" 
+serverPort: "443"
+metricsPort: "8181"
+tlsClientInSecure: "false"
+healthzPort: "8002"
+tlsClientKeyPath: "/app/config/tls/tls.key"
+tlsClientCertPath: "/app/config/tls/tls.crt"
+tlsRootCAPath: "/app/config/tls/ca.crt"
