@@ -21,6 +21,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
@@ -63,9 +64,9 @@ func (a *Agent) maintainConnection() error {
 
 func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error {
 	logCtx := log().WithFields(logrus.Fields{
-		"module":      "StreamEvent",
-		"direction":   "Send",
-		"client_addr": grpcutil.AddressFromContext(stream.Context()),
+		logfields.Module:     "StreamEvent",
+		logfields.Direction:  "Send",
+		logfields.ClientAddr: grpcutil.AddressFromContext(stream.Context()),
 	})
 
 	q := a.queues.SendQ(defaultQueueName)
@@ -101,9 +102,9 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 // will block until an event has been received, or an error has occurred.
 func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) error {
 	logCtx := log().WithFields(logrus.Fields{
-		"module":      "StreamEvent",
-		"direction":   "Recv",
-		"client_addr": grpcutil.AddressFromContext(stream.Context()),
+		logfields.Module:     "StreamEvent",
+		logfields.Direction:  "Recv",
+		logfields.ClientAddr: grpcutil.AddressFromContext(stream.Context()),
 	})
 	rcvd, err := stream.Recv()
 	if err != nil {
@@ -172,8 +173,8 @@ func (a *Agent) handleStreamEvents() error {
 	go a.eventWriter.SendWaitingEvents(a.context)
 
 	logCtx := log().WithFields(logrus.Fields{
-		"module":      "StreamEvent",
-		"server_addr": grpcutil.AddressFromContext(stream.Context()),
+		logfields.Module:     "StreamEvent",
+		logfields.ServerAddr: grpcutil.AddressFromContext(stream.Context()),
 	})
 
 	if err := a.resyncOnStart(logCtx); err != nil {
@@ -239,7 +240,7 @@ func (a *Agent) handleStreamEvents() error {
 		}
 	}
 
-	log().WithField("component", "EventHandler").Info("Stream closed")
+	log().WithField(logfields.Component, "EventHandler").Info("Stream closed")
 
 	return nil
 }

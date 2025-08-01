@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/sirupsen/logrus"
 )
 
@@ -224,5 +225,5 @@ func (rp *ResourceProxy) proxyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("module", "proxy")
+	return logging.ModuleLogger("proxy")
 }

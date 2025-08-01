@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
@@ -478,5 +479,5 @@ func (r *Remote) SetClientID(id string) {
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("module", "Connector")
+	return logging.ModuleLogger("Connector")
 }
