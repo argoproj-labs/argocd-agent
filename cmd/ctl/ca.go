@@ -47,6 +47,19 @@ OR TO PROTECT ANY KIND OF DATA.
 You have been warned.
 */
 
+// certificateSummary is a summary of a certificate.
+type certificateSummary struct {
+	Subject   string   `json:"subject" yaml:"subject" text:"Subject"`
+	KeyType   string   `json:"keyType" yaml:"keyType" text:"Key type"`
+	KeyLength int      `json:"keyLength" yaml:"keyLength" text:"Key length"`
+	NotBefore string   `json:"notBefore" yaml:"notBefore" text:"Not valid before"`
+	NotAfter  string   `json:"notAfter" yaml:"notAfter" text:"Not valid after"`
+	Checksum  string   `json:"sha256" yaml:"sha256" text:"Checksum"`
+	IPs       []string `json:"ips,omitempty" yaml:"ips,omitempty" text:"IPs,omitempty"`
+	DNS       []string `json:"dns,omitempty" yaml:"dns,omitempty" text:"DNS,omitempty"`
+	Warnings  []string `json:"warnings,omitempty" yaml:"warnings,omitempty" text:"Warnings,omitempty"`
+}
+
 func NewPKICommand() *cobra.Command {
 	command := &cobra.Command{
 		Short: "!!NON-PROD!! Inspect and manage the principal's PKI",
@@ -199,14 +212,11 @@ func NewPKIInspectCommand() *cobra.Command {
 		full      bool
 		outFormat string
 	)
-	type summary struct {
-		Subject   string   `json:"subject" yaml:"subject" text:"Subject"`
-		KeyType   string   `json:"keyType" yaml:"keyType" text:"Key type"`
-		KeyLength int      `json:"keyLength" yaml:"keyLength" text:"Key length"`
-		NotBefore string   `json:"notBefore" yaml:"notBefore" text:"Not valid before"`
-		NotAfter  string   `json:"notAfter" yaml:"notAfter" text:"Not valid after"`
-		Checksum  string   `json:"sha256" yaml:"sha256" text:"Checksum"`
-		Warnings  []string `json:"warnings,omitempty" yaml:"warnings,omitempty" text:"Warnings,omitempty"`
+
+	type inspectSummary struct {
+		CA            certificateSummary `json:"ca,omitempty" yaml:"ca,omitempty" text:"CA,omitempty"`
+		Principal     certificateSummary `json:"principal,omitempty" yaml:"principal,omitempty" text:"Principal,omitempty"`
+		ResourceProxy certificateSummary `json:"resourceProxy,omitempty" yaml:"resourceProxy,omitempty" text:"Resource Proxy,omitempty"`
 	}
 	command := &cobra.Command{
 		Short: "NON-PROD!! Inspect the configured PKI",
@@ -217,39 +227,24 @@ func NewPKIInspectCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
-			tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
+
+			caSum, err := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, config.SecretNamePrincipalCA, true)
 			if err != nil {
-				cmdutil.Fatal("Could not read CA from secret: %v", err)
+				cmdutil.Fatal("CA is not initialized: %v", err)
 			}
-			if len(tlsCert.Certificate[0]) == 0 {
-				cmdutil.Fatal("No certificate in data")
+			resourceProxySum, err := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, "argocd-agent-resource-proxy-tls", false)
+			if err != nil && !errors.IsNotFound(err) {
+				cmdutil.Fatal("Error reading resource proxy certificate: %v", err)
 			}
-			cert, err := x509.ParseCertificate(tlsCert.Certificate[0])
-			if err != nil {
-				cmdutil.Fatal("Could not parse x509 data: %v", err)
-			}
-
-			key, ok := tlsCert.PrivateKey.(*rsa.PrivateKey)
-			if !ok {
-				cmdutil.Fatal("Not an RSA private key")
+			principalSum, err := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, "argocd-agent-principal-tls", false)
+			if err != nil && !errors.IsNotFound(err) {
+				cmdutil.Fatal("Error reading principal certificate: %v", err)
 			}
 
-			warnings := []string{}
-			if !cert.IsCA {
-				warnings = append(warnings, "- Is not a CA certificate")
-			}
-			if !cert.BasicConstraintsValid {
-				warnings = append(warnings, "- Basic constraints are invalid")
-			}
-
-			sum := summary{
-				Subject:   cert.Subject.String(),
-				KeyType:   "RSA",
-				KeyLength: key.Size() * 8,
-				NotBefore: cert.NotBefore.Format(time.RFC1123Z),
-				NotAfter:  cert.NotAfter.Format(time.RFC1123Z),
-				Checksum:  fmt.Sprintf("%x", sha256.Sum256(cert.Raw)),
-				Warnings:  warnings,
+			sum := inspectSummary{
+				CA:            caSum,
+				Principal:     principalSum,
+				ResourceProxy: resourceProxySum,
 			}
 
 			out, err := cmdutil.MarshalStruct(sum, outFormat)
@@ -545,4 +540,40 @@ func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, i
 		fmt.Printf("Secret %s/%s created\n", outNamespace, outName)
 	}
 
+}
+
+func readAndSummarizeCertificate(ctx context.Context, clt *kube.KubernetesClient, namespace, name string, isCA bool) (certificateSummary, error) {
+	cert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, namespace, name)
+	if err != nil {
+		return certificateSummary{}, err
+	}
+	parsedCert, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return certificateSummary{}, fmt.Errorf("could not parse certificate: %v", err)
+	}
+
+	warnings := []string{}
+	if !parsedCert.IsCA && isCA {
+		warnings = append(warnings, "This is not a CA certificate")
+	}
+	if !parsedCert.BasicConstraintsValid {
+		warnings = append(warnings, "Basic constraints are invalid")
+	}
+	ips := []string{}
+	for _, ip := range parsedCert.IPAddresses {
+		ips = append(ips, ip.String())
+	}
+	sum := certificateSummary{
+		Subject:   parsedCert.Subject.String(),
+		KeyType:   "RSA",
+		KeyLength: parsedCert.PublicKey.(*rsa.PublicKey).N.BitLen(),
+		NotBefore: parsedCert.NotBefore.Format(time.RFC1123Z),
+		NotAfter:  parsedCert.NotAfter.Format(time.RFC1123Z),
+		Checksum:  fmt.Sprintf("%x", sha256.Sum256(parsedCert.Raw)),
+		IPs:       ips,
+		DNS:       parsedCert.DNSNames,
+		Warnings:  warnings,
+	}
+
+	return sum, nil
 }
