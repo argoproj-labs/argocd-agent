@@ -36,21 +36,28 @@ helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-
 Configuration (values.yaml)
 The values.yaml file allows you to customize the behavior of the ArgoCD Agent. Here's a breakdown of the available parameters:
 
-#### Default values for argocd-agent-agent.
-#### This is a YAML-formatted file.
-#### Declare variables to be passed into your templates.
+Note:
+__Default values for argocd-agent-agent.__
+__This is a YAML-formatted file.__
+__Declare variables to be passed into your templates.__
 
 #### Namespace to deploy your agent in
-namespaceOverride: "argocd"
+```
+namespaceOverride: ""
+```
 
 #### Secret names for argo-agent deployment
+
+```
 tlsSecretName: "argocd-agent-client-tls"
 userPasswordSecretName: "argocd-agent-agent-userpass"
 image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent"
 imageTag: "latest"
+```
 
 #### config-map to config parameters for argocd-agent
 
+```
 agentMode: "autonomous"
 auth: "mtls:any"
 logLevel: "info"
@@ -59,12 +66,17 @@ serverPort: "443"
 metricsPort: "8181"
 tlsClientInSecure: "false"
 healthzPort: "8002"
+tlsClientKeyPath: "/app/config/tls/tls.key"
+tlsClientCertPath: "/app/config/tls/tls.crt"
+tlsRootCAPath: "/app/config/tls/ca.crt"
+```
 
 Parameter Descriptions:
 
 namespaceOverride:
 
 Default: ""
+
 The Kubernetes namespace where the agent's resources (Deployment, Service, ConfigMap, etc.) will be deployed. This can be overridden by the helm install --namespace flag.
 
 tlsSecretName:
@@ -75,57 +87,93 @@ The name of the Kubernetes Secret containing TLS client certificates for the age
 userPasswordSecretName:
 
 Default: "argocd-agent-agent-userpass"
+
 The name of the Kubernetes Secret containing user credentials if auth method is userpass.
 
 image:
 
 Default: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent"
+
 The Docker image repository for the ArgoCD Agent.
 
 imageTag:
 
 Default: "latest"
+
 The tag of the Docker image to use. It's recommended to use a specific version tag in production.
 
 agentMode:
 
 Default: "autonomous"
+
 The operating mode for the agent. Valid values are "autonomous" or "managed".
 
 auth:
 
 Default: "mtls:any"
+
 The credential identifier for the agent's authentication method. Examples: "userpass:_path_to_encrypted_creds_" or "mtls:_agent_id_regex_".
+Valid credential identifier for this agent. Must be in the
+format `<method>:<configuration>`. 
+Valid values are:
+- "userpass:_path_to_encrypted_creds_" where _path_to_encrypted_creds_ is
+  the path to the file containing encrypted credential for authenticatiion.
+- "mtls:_agent_id_regex_" where _agent_id_regex_ is the regex pattern for
+  extracting the agent ID from client cert subject.
 
 logLevel:
 
 Default: "info"
+
 The logging level for the agent. Valid values: "trace", "debug", "info", "warn", "error".
 
 server:
 
 Default: "http://principal.server.address.com"
+
 The remote address of the principal (Argo CD server) to connect to. Can be a DNS name or IP address.
 
 serverPort:
 
 Default: "443"
+
 The remote port of the principal to connect to. Note: This value must be treated as a string in the ConfigMap.
 
 metricsPort:
 
 Default: "8181"
+
 The port on which the agent's metrics server should listen. Note: This value must be treated as a string in the ConfigMap.
 
 tlsClientInSecure:
 
 Default: "false"
+
 Whether to skip validation of the remote TLS credentials. Insecure; use only for development purposes. Note: This value must be treated as a string in the ConfigMap.
 
 healthzPort:
 
 Default: "8002"
+
 The port the health check server should listen on.
+
+tlsClientKeyPath: 
+
+Default: "/app/config/tls/tls.key"
+
+Path to a file containing the agent's TLS client certificate.
+
+tlsClientCertPath: 
+
+Default: "/app/config/tls/tls.crt"
+
+Path to a file containing the agent's TLS client private key.
+
+tlsRootCAPath: 
+
+Default: "/app/config/tls/ca.crt"
+
+The path to a file containing the certificates for the TLS root certificate authority used to validate the remote principal. 
 
 #### Overriding Configuration Values
 You can override any of the default values in values.yaml during installation:

@@ -23,15 +23,15 @@ data:
   # agent.tls.root-ca-path: The path to a file containing the certificates for
   # the TLS root certificate authority used to validate the remote principal. 
   # Default: ""
-  agent.tls.root-ca-path: "/app/config/tls/ca.crt"
+  agent.tls.root-ca-path: {{ .Values.tlsRootCAPath }}
   # agent.tls.client.cert-path: Path to a file containing the agent's TLS client
   # certificate.
   # Default: ""
-  agent.tls.client.cert-path: "/app/config/tls/tls.crt"
+  agent.tls.client.cert-path: {{ .Values.tlsClientCertPath }}
   # agent.tls.client.cert-path: Path to a file containing the agent's TLS client
   # private key.
   # Default: ""
-  agent.tls.client.key-path: "/app/config/tls/tls.key"
+  agent.tls.client.key-path: {{ .Values.tlsClientKeyPath }}
   # agent.log.level: The log level the agent should use. Valid values are
   # trace, debug, info, warn and error.
   # Default: "info"
