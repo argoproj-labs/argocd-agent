@@ -317,10 +317,11 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		// Setup test environment
 		kubeClient := kube.NewDynamicFakeClient(pod)
 		agent := &Agent{
-			context:    context.Background(),
-			kubeClient: kubeClient,
-			queues:     queue.NewSendRecvQueues(),
-			emitter:    event.NewEventSource("test-agent"),
+			context:             context.Background(),
+			kubeClient:          kubeClient,
+			queues:              queue.NewSendRecvQueues(),
+			emitter:             event.NewEventSource("test-agent"),
+			enableResourceProxy: true,
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
@@ -381,10 +382,11 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		// Setup test environment
 		kubeClient := kube.NewDynamicFakeClient(pod)
 		agent := &Agent{
-			context:    context.Background(),
-			kubeClient: kubeClient,
-			queues:     queue.NewSendRecvQueues(),
-			emitter:    event.NewEventSource("test-agent"),
+			context:             context.Background(),
+			kubeClient:          kubeClient,
+			queues:              queue.NewSendRecvQueues(),
+			emitter:             event.NewEventSource("test-agent"),
+			enableResourceProxy: true,
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
@@ -429,10 +431,11 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		// Setup test environment with empty client
 		kubeClient := kube.NewDynamicFakeClient()
 		agent := &Agent{
-			context:    context.Background(),
-			kubeClient: kubeClient,
-			queues:     queue.NewSendRecvQueues(),
-			emitter:    event.NewEventSource("test-agent"),
+			context:             context.Background(),
+			kubeClient:          kubeClient,
+			queues:              queue.NewSendRecvQueues(),
+			emitter:             event.NewEventSource("test-agent"),
+			enableResourceProxy: true,
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
@@ -475,10 +478,11 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 
 	t.Run("Invalid request returns error", func(t *testing.T) {
 		agent := &Agent{
-			context:    context.Background(),
-			kubeClient: kube.NewDynamicFakeClient(),
-			queues:     queue.NewSendRecvQueues(),
-			emitter:    event.NewEventSource("test-agent"),
+			context:             context.Background(),
+			kubeClient:          kube.NewDynamicFakeClient(),
+			queues:              queue.NewSendRecvQueues(),
+			emitter:             event.NewEventSource("test-agent"),
+			enableResourceProxy: true,
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
@@ -495,8 +499,9 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 func Test_getAvailableResources(t *testing.T) {
 	t.Run("Error when resource is specified", func(t *testing.T) {
 		agent := &Agent{
-			context:    context.Background(),
-			kubeClient: kube.NewDynamicFakeClient(),
+			context:             context.Background(),
+			kubeClient:          kube.NewDynamicFakeClient(),
+			enableResourceProxy: true,
 		}
 
 		gvr := schema.GroupVersionResource{
@@ -526,8 +531,9 @@ func Test_getAvailableResources(t *testing.T) {
 		}
 
 		agent := &Agent{
-			context:    context.Background(),
-			kubeClient: kube.NewDynamicFakeClient(pod1, pod2),
+			context:             context.Background(),
+			kubeClient:          kube.NewDynamicFakeClient(pod1, pod2),
+			enableResourceProxy: true,
 		}
 
 		gvr := schema.GroupVersionResource{
@@ -555,8 +561,9 @@ func Test_getAvailableResources(t *testing.T) {
 		}
 
 		agent := &Agent{
-			context:    context.Background(),
-			kubeClient: kube.NewDynamicFakeClient(node1, node2),
+			context:             context.Background(),
+			kubeClient:          kube.NewDynamicFakeClient(node1, node2),
+			enableResourceProxy: true,
 		}
 
 		gvr := schema.GroupVersionResource{
