@@ -8,10 +8,12 @@ The resource proxy is a core feature of argocd-agent that enables transparent ac
 
 **Key Benefits:**
 
-- **Seamless Integration**: No additional setup required - works automatically with standard Argo CD UI
+- **Seamless Integration**: Works automatically with standard Argo CD UI once RBAC is configured
 - **Security**: All communication is authenticated using mTLS and goes through the established agent connection
 - **Transparency**: Users interact with resources exactly as they would in a standard Argo CD installation
 - **Performance**: Efficient proxying with request timeouts and proper error handling
+
+**⚠️ Important**: By default, agents have minimal RBAC permissions. For the resource proxy to work with your application resources, **enhanced RBAC permissions are required**. See the [RBAC Requirements](#rbac-requirements) section for details.
 
 ## How It Works
 
@@ -67,6 +69,201 @@ argocd-agent principal \
 ### Agent Configuration
 
 **No additional configuration is required on the agent side.** The agent automatically processes resource requests received from the principal through the standard event queue mechanism.
+
+## RBAC Requirements
+
+**IMPORTANT**: By default, agents are installed with minimal RBAC permissions that only allow access to Argo CD's own resources (Applications, AppProjects, etc.) and basic resources like Secrets and ConfigMaps. For the resource proxy to work correctly with live application resources, **agents need enhanced RBAC permissions**.
+
+### Default Agent Permissions
+
+The default agent installation includes these limited permissions:
+
+```yaml
+# ClusterRole permissions (cluster-wide)
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["list", "watch"]
+
+# Role permissions (namespace-scoped)
+- apiGroups: ["argoproj.io"]
+  resources: ["applications", "appprojects", "applicationsets"]
+  verbs: ["create", "get", "list", "watch", "update", "delete", "patch"]
+- apiGroups: [""]
+  resources: ["secrets", "configmaps"]
+  verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "list"]
+```
+
+### Enhanced RBAC for Resource Proxy
+
+To enable full resource proxy functionality, agents need permissions to access the Kubernetes resources managed by your Argo CD applications. The specific permissions required depend on what resource types your applications deploy.
+
+#### Common Application Resources
+
+For applications that deploy standard Kubernetes workloads, add these permissions:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-agent-enhanced
+rules:
+# Core Kubernetes resources
+- apiGroups: [""]
+  resources: 
+    - pods
+    - services
+    - endpoints
+    - persistentvolumeclaims
+    - configmaps
+    - secrets
+    - serviceaccounts
+    - namespaces
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Apps resources
+- apiGroups: ["apps"]
+  resources:
+    - deployments
+    - replicasets
+    - statefulsets
+    - daemonsets
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Networking resources
+- apiGroups: ["networking.k8s.io"]
+  resources:
+    - ingresses
+    - networkpolicies
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# RBAC resources
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources:
+    - roles
+    - rolebindings
+    - clusterroles
+    - clusterrolebindings
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Argo CD resources
+- apiGroups: ["argoproj.io"]
+  resources: ["*"]
+  verbs: ["*"]
+
+# API discovery (required for resource proxy)
+- apiGroups: [""]
+  resources: ["*"]
+  verbs: ["get", "list"]
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+```
+
+#### Application-Specific Resources
+
+For applications using custom resources or specific APIs, add permissions for those resources:
+
+```yaml
+# Example: For applications using cert-manager
+- apiGroups: ["cert-manager.io"]
+  resources: ["certificates", "issuers", "clusterissuers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Example: For applications using Istio
+- apiGroups: ["networking.istio.io"]
+  resources: ["virtualservices", "destinationrules", "gateways"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Example: For applications using monitoring stack
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["servicemonitors", "prometheusrules"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+```
+
+### Applying Enhanced RBAC
+
+To apply enhanced RBAC permissions to your agent:
+
+1. **Create Enhanced ClusterRole:**
+```bash
+kubectl apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-agent-enhanced
+rules:
+# Add rules from examples above
+EOF
+```
+
+2. **Update ClusterRoleBinding:**
+```bash
+kubectl patch clusterrolebinding argocd-agent-agent \
+  --type='merge' \
+  -p='{"roleRef":{"name":"argocd-agent-enhanced"}}'
+```
+
+Or create a new binding:
+```bash
+kubectl apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-agent-enhanced
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argocd-agent-enhanced
+subjects:
+- kind: ServiceAccount
+  name: argocd-agent-agent
+  namespace: default  # Replace with your agent namespace
+EOF
+```
+
+### Security Considerations for Enhanced RBAC
+
+While enhanced RBAC enables full resource proxy functionality, consider these security implications:
+
+- **Principle of Least Privilege**: Only grant permissions for resources your applications actually use
+- **Namespace Isolation**: Consider using Role/RoleBinding instead of ClusterRole/ClusterRoleBinding to limit access to specific namespaces
+- **Resource Filtering**: The agent only exposes resources with Argo CD tracking labels/annotations, providing additional security
+- **Regular Audits**: Periodically review and update RBAC permissions as applications change
+
+### Namespace-Scoped Alternative
+
+For environments requiring stricter security, you can use namespace-scoped permissions:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-agent-enhanced
+  namespace: my-app-namespace
+rules:
+# Same rules as ClusterRole but applied per namespace
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# ... other rules
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-agent-enhanced
+  namespace: my-app-namespace
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-agent-enhanced
+subjects:
+- kind: ServiceAccount
+  name: argocd-agent-agent
+  namespace: default  # Agent's namespace
+```
 
 ## Supported Operations
 
@@ -223,6 +420,34 @@ Error: Timeout communicating to the agent
 ```
 **Solution**: Check agent connectivity and resource availability.
 
+#### RBAC Permission Denied
+```
+Status: 403 Forbidden
+Error: deployments.apps is forbidden: User "system:serviceaccount:default:argocd-agent-agent" cannot get resource "deployments" in API group "apps"
+```
+**Solution**: The agent lacks the necessary RBAC permissions to access the requested resource. 
+
+1. **Identify Missing Permissions**: Check the error message to identify which resource and verb are missing
+2. **Update Agent RBAC**: Add the required permissions to the agent's ClusterRole or Role
+3. **Apply Enhanced RBAC**: Use the enhanced RBAC examples provided in the [RBAC Requirements](#rbac-requirements) section
+
+```bash
+# Quick fix: Grant broad permissions (use with caution)
+kubectl create clusterrole argocd-agent-enhanced --verb=get,list,watch,create,update,patch,delete --resource=*.*
+kubectl patch clusterrolebinding argocd-agent-agent --type='merge' -p='{"roleRef":{"name":"argocd-agent-enhanced"}}'
+
+# Restart agent pod to pick up new permissions
+kubectl rollout restart deployment/argocd-agent-agent
+```
+
+#### Resource Not Found vs Permission Denied
+The agent returns different error codes based on the issue:
+- **404 Not Found**: Resource exists but is not managed by Argo CD
+- **403 Forbidden**: Agent lacks RBAC permissions to access the resource  
+- **500 Internal Server Error**: Agent has permissions but Kubernetes API call failed
+
+**Solution**: Check both RBAC permissions and whether the resource has Argo CD tracking labels/annotations.
+
 ### Debugging
 
 #### Check Principal Logs
@@ -260,6 +485,14 @@ curl -k --cert client.crt --key client.key \
 - Regularly audit resource access patterns
 - Implement network policies for additional security
 - Use dedicated service accounts with minimal permissions
+
+### RBAC Management
+- **Start Minimal**: Begin with default RBAC and add permissions as needed based on application requirements
+- **Application-Specific**: Create separate RBAC configurations for different application types or environments
+- **Version Control**: Store RBAC configurations in Git and apply them through GitOps workflows
+- **Test Permissions**: Verify RBAC changes in non-production environments before applying to production
+- **Monitor Access**: Use audit logs to track resource access patterns and identify unused permissions
+- **Automated Updates**: Consider using tools to automatically generate RBAC based on application manifests
 
 ## Related Documentation
 
