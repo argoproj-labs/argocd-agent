@@ -246,7 +246,7 @@ The recommended approach for production deployments is to use ConfigMap entries 
 #### Enable Resource Proxy
 - **Command Line Flag**: `--enable-resource-proxy`
 - **Environment Variable**: `ARGOCD_AGENT_ENABLE_RESOURCE_PROXY`
-- **ConfigMap Entry**: *(Not available in ConfigMap)*
+- **ConfigMap Entry**: `agent.resource-proxy.enabled`
 - **Description**: Enable the resource proxy to allow access to live resources on this agent cluster from the principal
 - **Type**: Boolean
 - **Default**: `true`
