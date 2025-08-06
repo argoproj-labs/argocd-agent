@@ -34,6 +34,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
@@ -149,5 +150,5 @@ func (m *Manager) Stop() error {
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("component", "ClusterManager")
+	return logging.ComponentLogger("ClusterManager")
 }

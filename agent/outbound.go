@@ -16,6 +16,7 @@ package agent
 
 import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -26,7 +27,7 @@ import (
 // addAppCreationToQueue processes a new application event originating from the
 // AppInformer and puts it in the send queue.
 func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
-	logCtx := log().WithField("event", "NewApp").WithField("application", app.QualifiedName())
+	logCtx := log().WithField(logfields.Event, "NewApp").WithField(logfields.Application, app.QualifiedName())
 	logCtx.Debugf("New app event")
 
 	a.resources.Add(resources.NewResourceKeyFromApp(app))
@@ -55,13 +56,13 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 	}
 
 	q.Add(a.emitter.ApplicationEvent(event.Create, app))
-	logCtx.WithField("sendq_len", q.Len()).WithField("sendq_name", defaultQueueName).Debugf("Added app create event to send queue")
+	logCtx.WithField(logfields.SendQueueLen, q.Len()).WithField(logfields.SendQueueName, defaultQueueName).Debugf("Added app create event to send queue")
 }
 
 // addAppUpdateToQueue processes an application update event originating from
 // the AppInformer and puts it in the agent's send queue.
 func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.Application) {
-	logCtx := log().WithField("event", "UpdateApp").WithField("application", old.QualifiedName())
+	logCtx := log().WithField(logfields.Event, "UpdateApp").WithField(logfields.Application, old.QualifiedName())
 	a.watchLock.Lock()
 	defer a.watchLock.Unlock()
 	if a.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
@@ -101,15 +102,15 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	q.Add(a.emitter.ApplicationEvent(eventType, new))
 	// q.Add(ev)
 	logCtx.
-		WithField("sendq_len", q.Len()).
-		WithField("sendq_name", defaultQueueName).
+		WithField(logfields.SendQueueLen, q.Len()).
+		WithField(logfields.SendQueueName, defaultQueueName).
 		Debugf("Added event of type %s to send queue", eventType)
 }
 
 // addAppDeletionToQueue processes an application delete event originating from
 // the AppInformer and puts it in the send queue.
 func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
-	logCtx := log().WithField("event", "DeleteApp").WithField("application", app.QualifiedName())
+	logCtx := log().WithField(logfields.Event, "DeleteApp").WithField(logfields.Application, app.QualifiedName())
 	logCtx.Debugf("Delete app event")
 
 	a.resources.Remove(resources.NewResourceKeyFromApp(app))
@@ -128,13 +129,13 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	}
 
 	q.Add(a.emitter.ApplicationEvent(event.Delete, app))
-	logCtx.WithField("sendq_len", q.Len()).Debugf("Added app delete event to send queue")
+	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added app delete event to send queue")
 }
 
 // deleteNamespaceCallback is called when the user deletes the agent namespace.
 // Since there is no namespace we can remove the queue associated with this agent.
 func (a *Agent) deleteNamespaceCallback(outbound *corev1.Namespace) {
-	logCtx := log().WithField("event", "DeleteNamespace").WithField("agent", outbound.Name)
+	logCtx := log().WithField(logfields.Event, "DeleteNamespace").WithField(logfields.Agent, outbound.Name)
 
 	if !a.queues.HasQueuePair(outbound.Name) {
 		return
@@ -185,7 +186,7 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 	}
 
 	q.Add(a.emitter.AppProjectEvent(event.Create, appProject))
-	logCtx.WithField("sendq_len", q.Len()).Debugf("Added appProject create event to send queue")
+	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject create event to send queue")
 }
 
 // addAppProjectUpdateToQueue processes an appProject update event originating from the
@@ -223,7 +224,7 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 	}
 
 	q.Add(a.emitter.AppProjectEvent(event.SpecUpdate, new))
-	logCtx.WithField("sendq_len", q.Len()).Debugf("Added appProject spec update event to send queue")
+	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject spec update event to send queue")
 }
 
 // addAppProjectDeletionToQueue processes an appProject delete event originating from the
@@ -258,5 +259,5 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 	}
 
 	q.Add(a.emitter.AppProjectEvent(event.Delete, appProject))
-	logCtx.WithField("sendq_len", q.Len()).Debugf("Added appProject delete event to send queue")
+	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject delete event to send queue")
 }

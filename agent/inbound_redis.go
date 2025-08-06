@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	rediscache "github.com/go-redis/cache/v9"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
@@ -182,7 +183,7 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 
 	ch := pubsub.Channel()
 
-	logCtx = logCtx.WithField("channel-name", channelName)
+	logCtx = logCtx.WithField(logfields.ChannelName, channelName)
 	for {
 		select {
 
@@ -207,7 +208,7 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 			// If the connection has not been active for X minutes, close the connection
 			if time.Since(*lastPing) >= principalRedisConnectionTimeout {
 				pubsub.Close()
-				logCtx.WithField("lastPing", lastPing).Trace("closing redis connection due to inactivity")
+				logCtx.WithField(logfields.LastPing, lastPing).Trace("closing redis connection due to inactivity")
 				return
 			}
 

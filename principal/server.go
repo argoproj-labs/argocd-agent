@@ -35,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/issuer"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
@@ -694,7 +695,7 @@ func (s *Server) TokenIssuerForE2EOnly() issuer.Issuer {
 }
 
 func log() *logrus.Entry {
-	return logrus.WithField("module", "server")
+	return logging.ModuleLogger("server")
 }
 
 func (s *Server) AuthMethodsForE2EOnly() *auth.Methods {
