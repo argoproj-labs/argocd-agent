@@ -68,7 +68,25 @@ argocd-agent principal \
 
 ### Agent Configuration
 
-**No additional configuration is required on the agent side.** The agent automatically processes resource requests received from the principal through the standard event queue mechanism.
+The resource proxy is **enabled by default** on the agent and requires no additional configuration in most cases. However, it can be disabled if live resource access is not needed.
+
+#### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ARGOCD_AGENT_ENABLE_RESOURCE_PROXY` | `true` | Enable/disable resource proxy processing on the agent |
+
+#### Command Line Options
+
+```bash
+# Disable resource proxy on the agent
+argocd-agent agent --enable-resource-proxy=false
+
+# Enable resource proxy (default behavior)
+argocd-agent agent --enable-resource-proxy=true
+```
+
+**Note**: When disabled, the agent will not process resource requests from the principal, making live resource viewing unavailable for applications on this agent cluster.
 
 ## RBAC Requirements
 
@@ -496,6 +514,8 @@ curl -k --cert client.crt --key client.key \
 
 ## Related Documentation
 
+- [Agent Configuration](../configuration/agent/configuration.md#resource-proxy-configuration) - Agent resource proxy configuration options
+- [Principal Configuration](../configuration/principal/configuration.md#resource-proxy-configuration) - Principal resource proxy configuration options
 - [Application Synchronization](./applications.md) - How Applications are managed
 - [Agent Modes](../concepts/agent-modes/) - Understanding managed vs autonomous modes
 - [Architecture](../concepts/architecture.md) - Overall system architecture 

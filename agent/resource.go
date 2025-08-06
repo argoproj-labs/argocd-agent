@@ -33,6 +33,11 @@ var ErrUnmanaged = errors.New("resource not managed by app")
 //     scoped.
 //   - Request for a list of available APIs
 func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
+	// If resource proxy is disabled, we return an error immediately.
+	if !a.enableResourceProxy {
+		return fmt.Errorf("resource proxy is disabled in agent configuration")
+	}
+
 	rreq, err := ev.ResourceRequest()
 	if err != nil {
 		return err

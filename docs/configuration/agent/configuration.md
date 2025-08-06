@@ -241,6 +241,21 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Default**: `""` (empty)
 - **Example**: `"redis-password"`
 
+### Resource Proxy Configuration
+
+#### Enable Resource Proxy
+- **Command Line Flag**: `--enable-resource-proxy`
+- **Environment Variable**: `ARGOCD_AGENT_ENABLE_RESOURCE_PROXY`
+- **ConfigMap Entry**: `agent.resource-proxy.enable`
+- **Description**: Enable the resource proxy to allow access to live resources on this agent cluster from the principal
+- **Type**: Boolean
+- **Default**: `true`
+- **Example**: `"true"`
+- **Use Cases for Disabling**:
+  - Security policies that require restricted resource access
+  - Performance optimization when live resource viewing is not needed
+  - Troubleshooting resource proxy related issues
+
 ### Kubernetes Configuration
 
 #### Kubeconfig
@@ -272,7 +287,8 @@ argocd-agent agent \
   --server-port=8443 \
   --agent-mode=autonomous \
   --namespace=argocd \
-  --log-level=info
+  --log-level=info \
+  --enable-resource-proxy=true
 ```
 
 ### Using Environment Variables
@@ -282,6 +298,7 @@ export ARGOCD_AGENT_REMOTE_PORT=8443
 export ARGOCD_AGENT_MODE=autonomous
 export ARGOCD_AGENT_NAMESPACE=argocd
 export ARGOCD_AGENT_LOG_LEVEL=info
+export ARGOCD_AGENT_ENABLE_RESOURCE_PROXY=true
 argocd-agent agent
 ```
 
@@ -313,4 +330,20 @@ The ConfigMap should be mounted to the agent container and the parameters will b
 - Store sensitive configuration like credentials in Kubernetes Secrets, not ConfigMaps
 - Use mutual TLS (`mtls`) authentication when possible for enhanced security
 - Regularly rotate TLS certificates and authentication credentials
-- Restrict network access to the agent's metrics and health endpoints 
+- Restrict network access to the agent's metrics and health endpoints
+- Consider disabling resource proxy (`--enable-resource-proxy=false`) if live resource access is not required for enhanced security isolation
+
+## Resource Proxy Considerations
+
+When the resource proxy is **enabled** (default):
+- Users can view live resources for applications on this agent cluster through the Argo CD UI
+- The agent processes resource requests from the principal and proxies them to the local Kubernetes API
+- All resource access is limited to resources managed by Argo CD applications
+
+When the resource proxy is **disabled**:
+- Live resource viewing will not work for applications on this agent cluster
+- The Argo CD UI will show application status but not allow inspection of individual resources
+- Application synchronization and management operations continue to work normally
+- Reduces attack surface and network communication between principal and agent
+
+For detailed information about how the resource proxy works and additional configuration options, see the [Live Resources](../../user-guide/live-resources.md) user guide. 

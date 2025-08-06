@@ -140,6 +140,12 @@ spec:
               secretKeyRef:
                 name: argocd-redis
                 key: auth
+          - name: ARGOCD_AGENT_ENABLE_RESOURCE_PROXY
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.resource-proxy.enable
+                optional: true
           image: argocd-agent
           imagePullPolicy: Always
           name: argocd-agent-agent

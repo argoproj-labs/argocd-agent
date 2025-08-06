@@ -39,29 +39,30 @@ import (
 // NewAgentRunCommand returns a new agent run command.
 func NewAgentRunCommand() *cobra.Command {
 	var (
-		serverAddress     string
-		serverPort        int
-		logLevel          string
-		logFormat         string
-		insecure          bool
-		rootCASecretName  string
-		rootCAPath        string
-		kubeConfig        string
-		kubeContext       string
-		namespace         string
-		agentMode         string
-		creds             string
-		tlsSecretName     string
-		tlsClientCrt      string
-		tlsClientKey      string
-		enableWebSocket   bool
-		metricsPort       int
-		healthzPort       int
-		enableCompression bool
-		pprofPort         int
-		redisAddr         string
-		redisUsername     string
-		redisPassword     string
+		serverAddress       string
+		serverPort          int
+		logLevel            string
+		logFormat           string
+		insecure            bool
+		rootCASecretName    string
+		rootCAPath          string
+		kubeConfig          string
+		kubeContext         string
+		namespace           string
+		agentMode           string
+		creds               string
+		tlsSecretName       string
+		tlsClientCrt        string
+		tlsClientKey        string
+		enableWebSocket     bool
+		metricsPort         int
+		healthzPort         int
+		enableCompression   bool
+		pprofPort           int
+		redisAddr           string
+		redisUsername       string
+		redisPassword       string
+		enableResourceProxy bool
 
 		// Time interval for agent to principal ping
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
@@ -172,6 +173,8 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithRedisUsername(redisUsername))
 			agentOpts = append(agentOpts, agent.WithRedisPassword(redisPassword))
 
+			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
+
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
 			}
@@ -257,6 +260,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().IntVar(&pprofPort, "pprof-port",
 		env.NumWithDefault("ARGOCD_AGENT_PPROF_PORT", cmdutil.ValidPort, 0),
 		"Port the pprof server will listen on")
+	command.Flags().BoolVar(&enableResourceProxy, "enable-resource-proxy",
+		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_RESOURCE_PROXY", true),
+		"Enable resource proxy")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

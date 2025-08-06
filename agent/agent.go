@@ -90,6 +90,9 @@ type Agent struct {
 
 	// redisProxyMsgHandler manages redis connection state for agent
 	redisProxyMsgHandler *redisProxyMsgHandler
+
+	// enableResourceProxy determines if the agent should proxy resources to the principal
+	enableResourceProxy bool
 }
 
 const defaultQueueName = "default"
@@ -121,6 +124,8 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.namespace = namespace
 	a.mode = types.AgentModeAutonomous
 	a.redisProxyMsgHandler = &redisProxyMsgHandler{}
+	// Resource proxy is enabled by default.
+	a.enableResourceProxy = true
 
 	for _, o := range opts {
 		err := o(a)
