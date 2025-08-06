@@ -44,6 +44,7 @@ nav:
     - Managing AppProjects: user-guide/appprojects.md
     - Adding an agent: user-guide/adding-agents.md
     - Accessing live resources on workload clusters: user-guide/live-resources.md
+    - Migration from classical multi-cluster Argo CD: user-guide/migration.md
   - Configuration:
     - Principal: 
         - Configuration parameters: configuration/principal/configuration.md
