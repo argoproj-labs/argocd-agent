@@ -507,6 +507,16 @@ func Test_processAppProjectEvent(t *testing.T) {
 			},
 			Spec: v1alpha1.AppProjectSpec{
 				SourceRepos: []string{"foo"},
+				Destinations: []v1alpha1.ApplicationDestination{
+					{
+						Name:   "original-cluster",
+						Server: "https://original.server.com",
+					},
+					{
+						Name:   "another-cluster",
+						Server: "https://another.server.com",
+					},
+				},
 			},
 		}
 
@@ -534,6 +544,16 @@ func Test_processAppProjectEvent(t *testing.T) {
 		createdProject, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), projName, v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, projName, createdProject.Name)
+
+		// Check that SourceNamespaces is set to the agent name
+		assert.Equal(t, []string{"foo"}, createdProject.Spec.SourceNamespaces)
+
+		// Check that all destinations are updated to point to the agent cluster
+		assert.Len(t, createdProject.Spec.Destinations, 2)
+		for _, dest := range createdProject.Spec.Destinations {
+			assert.Equal(t, "foo", dest.Name)
+			assert.Equal(t, "*", dest.Server)
+		}
 	})
 
 	t.Run("Update appProject in autonomous mode", func(t *testing.T) {
@@ -544,6 +564,12 @@ func Test_processAppProjectEvent(t *testing.T) {
 			},
 			Spec: v1alpha1.AppProjectSpec{
 				SourceRepos: []string{"foo"},
+				Destinations: []v1alpha1.ApplicationDestination{
+					{
+						Name:   "original-cluster",
+						Server: "https://original.server.com",
+					},
+				},
 			},
 		}
 
@@ -554,6 +580,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 
 		updatedProject := project.DeepCopy()
 		updatedProject.Spec.Description = "updated"
+		updatedProject.Name = "test" // Use original name (will be prefixed)
 		ev.SetData(cloudevents.ApplicationJSON, updatedProject)
 
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
@@ -567,13 +594,21 @@ func Test_processAppProjectEvent(t *testing.T) {
 		_, err = s.processRecvQueue(context.Background(), "foo", wq)
 		assert.NoError(t, err)
 
-		projName, err := agentPrefixedProjectName(project.Name, "foo")
+		projName, err := agentPrefixedProjectName(updatedProject.Name, "foo")
 		assert.Nil(t, err)
 
-		// Check that the AppProject was created with the prefixed name
+		// Check that the AppProject was updated with the correct changes
 		got, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), projName, v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, updatedProject.Spec.Description, got.Spec.Description)
+
+		// Check that SourceNamespaces is set to the agent name
+		assert.Equal(t, []string{"foo"}, got.Spec.SourceNamespaces)
+
+		// Check that all destinations are updated to point to the agent cluster
+		assert.Len(t, got.Spec.Destinations, 1)
+		assert.Equal(t, "foo", got.Spec.Destinations[0].Name)
+		assert.Equal(t, "*", got.Spec.Destinations[0].Server)
 	})
 
 	t.Run("Delete AppProject in managed mode", func(t *testing.T) {

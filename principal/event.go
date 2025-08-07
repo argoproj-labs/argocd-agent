@@ -293,10 +293,17 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 
 	// AppProjects coming from different autonomous agents could have the same name,
 	// so we prefix the project name with the agent name
-	if agentMode.IsAutonomous() && incoming.Name != appproject.DefaultAppProjectName {
+	if agentMode.IsAutonomous() {
 		incoming.Name, err = agentPrefixedProjectName(incoming.Name, agentName)
 		if err != nil {
 			return fmt.Errorf("could not prefix project name: %w", err)
+		}
+		// Set the source namespaces to allow the agent's namespace on the principal
+		incoming.Spec.SourceNamespaces = []string{agentName}
+		// Set all destinations to point to the agent cluster
+		for i := range incoming.Spec.Destinations {
+			incoming.Spec.Destinations[i].Name = agentName
+			incoming.Spec.Destinations[i].Server = "*"
 		}
 	}
 
