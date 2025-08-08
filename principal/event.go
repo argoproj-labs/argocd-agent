@@ -24,7 +24,6 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
-	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
@@ -150,11 +149,9 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		}
 
 		// AppProjects from the autonomous agents are prefixed with the agent name
-		if incoming.Spec.Project != appproject.DefaultAppProjectName {
-			incoming.Spec.Project, err = agentPrefixedProjectName(incoming.Spec.Project, agentName)
-			if err != nil {
-				return fmt.Errorf("could not prefix project name: %w", err)
-			}
+		incoming.Spec.Project, err = agentPrefixedProjectName(incoming.Spec.Project, agentName)
+		if err != nil {
+			return fmt.Errorf("could not prefix project name: %w", err)
 		}
 
 		// Set the destination name to the cluster mapping for the agent
