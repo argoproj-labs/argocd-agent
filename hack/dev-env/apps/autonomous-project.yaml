@@ -4,6 +4,9 @@ metadata:
   name: test-project
   namespace: argocd
 spec:
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
   destinations:
   - namespace: 'guestbook'
     name: 'in-cluster'
