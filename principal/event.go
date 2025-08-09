@@ -24,7 +24,6 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
-	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
@@ -150,11 +149,9 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		}
 
 		// AppProjects from the autonomous agents are prefixed with the agent name
-		if incoming.Spec.Project != appproject.DefaultAppProjectName {
-			incoming.Spec.Project, err = agentPrefixedProjectName(incoming.Spec.Project, agentName)
-			if err != nil {
-				return fmt.Errorf("could not prefix project name: %w", err)
-			}
+		incoming.Spec.Project, err = agentPrefixedProjectName(incoming.Spec.Project, agentName)
+		if err != nil {
+			return fmt.Errorf("could not prefix project name: %w", err)
 		}
 
 		// Set the destination name to the cluster mapping for the agent
@@ -293,10 +290,17 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 
 	// AppProjects coming from different autonomous agents could have the same name,
 	// so we prefix the project name with the agent name
-	if agentMode.IsAutonomous() && incoming.Name != appproject.DefaultAppProjectName {
+	if agentMode.IsAutonomous() {
 		incoming.Name, err = agentPrefixedProjectName(incoming.Name, agentName)
 		if err != nil {
 			return fmt.Errorf("could not prefix project name: %w", err)
+		}
+		// Set the source namespaces to allow the agent's namespace on the principal
+		incoming.Spec.SourceNamespaces = []string{agentName}
+		// Set all destinations to point to the agent cluster
+		for i := range incoming.Spec.Destinations {
+			incoming.Spec.Destinations[i].Name = agentName
+			incoming.Spec.Destinations[i].Server = "*"
 		}
 	}
 

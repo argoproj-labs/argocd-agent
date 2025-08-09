@@ -1,0 +1,16 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: test-project
+  namespace: argocd
+spec:
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
+  destinations:
+  - namespace: 'guestbook'
+    name: 'in-cluster'
+    server: 'https://kubernetes.default.svc'
+  sourceRepos:
+  - '*'
+

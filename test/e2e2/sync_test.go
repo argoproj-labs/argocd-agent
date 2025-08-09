@@ -245,6 +245,7 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 	requires.NoError(err)
 	app.Spec.Destination.Name = "agent-autonomous"
 	app.Spec.Destination.Server = ""
+	app.Spec.Project = "agent-autonomous-default"
 	requires.Equal(&app.Spec, &papp.Spec)
 
 	// Modify the application on the autonomous-agent and ensure the change is
