@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: argocd-agent-agent
+    app.kubernetes.io/part-of: argocd-agent
+    app.kubernetes.io/component: agent
+  name: argocd-agent-agent
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - list
+  - watch

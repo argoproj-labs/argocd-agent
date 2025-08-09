@@ -1,0 +1,3 @@
+Thank you for installing {{ include "argocd-agent-agent.name" . }}!
+
+Your application has been deployed to the {{ include  "argocd-agent-agent.namespace" . }} namespace.
