@@ -23,7 +23,6 @@ package logging
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -56,13 +55,8 @@ const (
 var defaultLogger *logrus.Logger
 
 func init() {
-	// Initialize the default logger with sensible defaults
-	defaultLogger = logrus.New()
-	defaultLogger.SetLevel(logrus.InfoLevel)
-	defaultLogger.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
-	})
-	defaultLogger.SetOutput(os.Stdout)
+	// Use the process-wide standard logger so that CLI flags and InitLogging() apply here too
+	defaultLogger = logrus.StandardLogger()
 }
 
 // SetupLogging configures the global logger with the provided options
