@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "test-deployment"
+  annotations:
+    "helm.sh/hook": test
+spec:
+  serviceAccountName: argocd-agent-test
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: 
+        - sh
+        - -c
+        - |
+          echo "Testing Deployment configuration..."
+          
+          # Check if deployment exists
+          if kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }}; then
+            echo "✓ Deployment exists"
+          else
+            echo "✗ Deployment not found"
+            exit 1
+          fi
+          
+          # Check deployment labels
+          DEPLOYMENT_LABELS=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          echo "DEPLOYMENT_LABELS: $DEPLOYMENT_LABELS"
+          
+          if echo "$DEPLOYMENT_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
+            echo "✓ Deployment has correct app.kubernetes.io/name label"
+          else
+            echo "✗ Deployment missing app.kubernetes.io/name label"
+            exit 1
+          fi
+          
+          if echo "$DEPLOYMENT_LABELS" | grep -q "app.kubernetes.io/part-of.*argocd-agent"; then
+            echo "✓ Deployment has correct app.kubernetes.io/part-of label"
+          else
+            echo "✗ Deployment missing app.kubernetes.io/part-of label"
+            exit 1
+          fi
+          
+          if echo "$DEPLOYMENT_LABELS" | grep -q "app.kubernetes.io/component.*agent"; then
+            echo "✓ Deployment has correct app.kubernetes.io/component label"
+          else
+            echo "✗ Deployment missing app.kubernetes.io/component label"
+            exit 1
+          fi
+          
+          # Check deployment replicas
+          REPLICAS=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.replicas}")
+          if [ "$REPLICAS" = "1" ]; then
+            echo "✓ Deployment has correct replica count: $REPLICAS"
+          else
+            echo "✗ Deployment has incorrect replica count: $REPLICAS (expected 1)"
+            exit 1
+          fi
+          
+          # Check container image
+          IMAGE=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.template.spec.containers[0].image}")
+          if [ -n "$IMAGE" ]; then
+            echo "✓ Deployment has container image: $IMAGE"
+          else
+            echo "✗ Deployment missing container image"
+            exit 1
+          fi
+          
+          # Check service account
+          SA=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.template.spec.serviceAccountName}")
+          if [ "$SA" = "argocd-agent-agent" ]; then
+            echo "✓ Deployment uses correct service account: $SA"
+          else
+            echo "✗ Deployment uses incorrect service account: $SA (expected argocd-agent-agent)"
+            exit 1
+          fi
+          
+          echo "Deployment configuration verified successfully!"
+  restartPolicy: Never

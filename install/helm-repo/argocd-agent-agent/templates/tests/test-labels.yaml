@@ -1,0 +1,190 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "test-labels"
+  annotations:
+    "helm.sh/hook": test
+spec:
+  serviceAccountName: argocd-agent-test
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: 
+        - sh
+        - -c
+        - |
+          echo "Testing Labels and Annotations..."
+          
+          # Test Deployment labels
+          echo "Testing Deployment labels..."
+          DEPLOYMENT_LABELS=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          
+          echo "DEPLOYMENT_LABELS: $DEPLOYMENT_LABELS"
+          
+          if echo "$DEPLOYMENT_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
+            echo "✓ Deployment has app.kubernetes.io/name label"
+          else
+            echo "✗ Deployment missing app.kubernetes.io/name label"
+            exit 1
+          fi
+          
+          if echo "$DEPLOYMENT_LABELS" | grep -q "app.kubernetes.io/part-of.*argocd-agent"; then
+            echo "✓ Deployment has app.kubernetes.io/part-of label"
+          else
+            echo "✗ Deployment missing app.kubernetes.io/part-of label"
+            exit 1
+          fi
+          
+          if echo "$DEPLOYMENT_LABELS" | grep -q "app.kubernetes.io/component.*agent"; then
+            echo "✓ Deployment has app.kubernetes.io/component label"
+          else
+            echo "✗ Deployment missing app.kubernetes.io/component label"
+            exit 1
+          fi
+          
+          # Test Service labels
+          echo "Testing Service labels..."
+          METRICS_SERVICE_LABELS=$(kubectl get service argocd-agent-agent-metrics -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          
+          if echo "$METRICS_SERVICE_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
+            echo "✓ Metrics service has app.kubernetes.io/name label"
+          else
+            echo "✗ Metrics service missing app.kubernetes.io/name label"
+            exit 1
+          fi
+          
+          if echo "$METRICS_SERVICE_LABELS" | grep -q "app.kubernetes.io/part-of.*argocd-agent"; then
+            echo "✓ Metrics service has app.kubernetes.io/part-of label"
+          else
+            echo "✗ Metrics service missing app.kubernetes.io/part-of label"
+            exit 1
+          fi
+          
+          if echo "$METRICS_SERVICE_LABELS" | grep -q "app.kubernetes.io/component.*agent"; then
+            echo "✓ Metrics service has app.kubernetes.io/component label"
+          else
+            echo "✗ Metrics service missing app.kubernetes.io/component label"
+            exit 1
+          fi
+          
+          HEALTHZ_SERVICE_LABELS=$(kubectl get service argocd-agent-agent-healthz -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          
+          if echo "$HEALTHZ_SERVICE_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
+            echo "✓ Healthz service has app.kubernetes.io/name label"
+          else
+            echo "✗ Healthz service missing app.kubernetes.io/name label"
+            exit 1
+          fi
+          
+          if echo "$HEALTHZ_SERVICE_LABELS" | grep -q "app.kubernetes.io/part-of.*argocd-agent"; then
+            echo "✓ Healthz service has app.kubernetes.io/part-of label"
+          else
+            echo "✗ Healthz service missing app.kubernetes.io/part-of label"
+            exit 1
+          fi
+          
+          if echo "$HEALTHZ_SERVICE_LABELS" | grep -q "app.kubernetes.io/component.*agent"; then
+            echo "✓ Healthz service has app.kubernetes.io/component label"
+          else
+            echo "✗ Healthz service missing app.kubernetes.io/component label"
+            exit 1
+          fi
+          
+          # Test RBAC labels
+          echo "Testing RBAC labels..."
+          ROLE_LABELS=$(kubectl get role argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          
+          if echo "$ROLE_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
+            echo "✓ Role has app.kubernetes.io/name label"
+          else
+            echo "✗ Role missing app.kubernetes.io/name label"
+            exit 1
+          fi
+          
+          if echo "$ROLE_LABELS" | grep -q "app.kubernetes.io/part-of.*argocd-agent"; then
+            echo "✓ Role has app.kubernetes.io/part-of label"
+          else
+            echo "✗ Role missing app.kubernetes.io/part-of label"
+            exit 1
+          fi
+          
+          if echo "$ROLE_LABELS" | grep -q "app.kubernetes.io/component.*agent"; then
+            echo "✓ Role has app.kubernetes.io/component label"
+          else
+            echo "✗ Role missing app.kubernetes.io/component label"
+            exit 1
+          fi
+          
+          CLUSTER_ROLE_LABELS=$(kubectl get clusterrole argocd-agent-agent -o jsonpath="{.metadata.labels}")
+          
+          if echo "$CLUSTER_ROLE_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
+            echo "✓ ClusterRole has app.kubernetes.io/name label"
+          else
+            echo "✗ ClusterRole missing app.kubernetes.io/name label"
+            exit 1
+          fi
+          
+          if echo "$CLUSTER_ROLE_LABELS" | grep -q "app.kubernetes.io/part-of.*argocd-agent"; then
+            echo "✓ ClusterRole has app.kubernetes.io/part-of label"
+          else
+            echo "✗ ClusterRole missing app.kubernetes.io/part-of label"
+            exit 1
+          fi
+          
+          if echo "$CLUSTER_ROLE_LABELS" | grep -q "app.kubernetes.io/component.*agent"; then
+            echo "✓ ClusterRole has app.kubernetes.io/component label"
+          else
+            echo "✗ ClusterRole missing app.kubernetes.io/component label"
+            exit 1
+          fi
+          
+          # Test ServiceAccount labels
+          SA_LABELS=$(kubectl get serviceaccount argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          
+          if echo "$SA_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
+            echo "✓ ServiceAccount has app.kubernetes.io/name label"
+          else
+            echo "✗ ServiceAccount missing app.kubernetes.io/name label"
+            exit 1
+          fi
+          
+          if echo "$SA_LABELS" | grep -q "app.kubernetes.io/part-of.*argocd-agent"; then
+            echo "✓ ServiceAccount has app.kubernetes.io/part-of label"
+          else
+            echo "✗ ServiceAccount missing app.kubernetes.io/part-of label"
+            exit 1
+          fi
+          
+          if echo "$SA_LABELS" | grep -q "app.kubernetes.io/component.*agent"; then
+            echo "✓ ServiceAccount has app.kubernetes.io/component label"
+          else
+            echo "✗ ServiceAccount missing app.kubernetes.io/component label"
+            exit 1
+          fi
+          
+          # Test ConfigMap labels
+          CM_LABELS=$(kubectl get configmap argocd-agent-params -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          
+          if echo "$CM_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
+            echo "✓ ConfigMap has app.kubernetes.io/name label"
+          else
+            echo "✗ ConfigMap missing app.kubernetes.io/name label"
+            exit 1
+          fi
+          
+          if echo "$CM_LABELS" | grep -q "app.kubernetes.io/part-of.*argocd-agent"; then
+            echo "✓ ConfigMap has app.kubernetes.io/part-of label"
+          else
+            echo "✗ ConfigMap missing app.kubernetes.io/part-of label"
+            exit 1
+          fi
+          
+          if echo "$CM_LABELS" | grep -q "app.kubernetes.io/component.*agent"; then
+            echo "✓ ConfigMap has app.kubernetes.io/component label"
+          else
+            echo "✗ ConfigMap missing app.kubernetes.io/component label"
+            exit 1
+          fi
+          
+          echo "All labels and annotations verified successfully!"
+  restartPolicy: Never

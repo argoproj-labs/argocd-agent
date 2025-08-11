@@ -1,0 +1,17 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: argocd-agent-agent
+    app.kubernetes.io/part-of: argocd-agent
+    app.kubernetes.io/component: agent
+  name: argocd-agent-agent
+  namespace: {{ include  "argocd-agent-agent.namespace" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-agent-agent
+subjects:
+- kind: ServiceAccount
+  name: argocd-agent-agent
+  namespace: {{ include "argocd-agent-agent.namespace" . }}

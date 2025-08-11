@@ -1,0 +1,20 @@
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: "test-1"
+#   # annotations:
+#     # "helm.sh/hook": test
+# spec:
+#   containers:
+#     - name: wget
+#       image: busybox
+#       command: ['wget']
+#       args: ['argocd-agent-agent-metrics:{{ .Values.metrics }}/metrics']
+#       volumeMounts:
+#         - name: argocd-agent-params
+#           mountPath: /etc/config
+#   volumes:
+#     - name: argocd-agent-params
+#       configMap:
+#         name: argocd-agent-params
+#   restartPolicy: Never
