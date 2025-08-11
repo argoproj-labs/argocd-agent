@@ -43,7 +43,7 @@ spec:
   - agent-*
   destinations:
   - name: agent-*
-    namespace: "*"
+    namespace: "guestbook"
     server: "*"
   sourceRepos:
   - "*"
@@ -55,13 +55,13 @@ When this AppProject is created on the principal, it will be automatically distr
 
 When an AppProject is sent to an agent, it undergoes transformation to make it agent-specific:
 
-1. **Destinations**: Only destinations matching the agent are kept, and they're transformed to point to the local cluster:
+1. **Destinations**: Only destinations matching the agent are kept (using glob pattern matching), and they're transformed to point to the local cluster:
 
 ```yaml
    destinations:
    - name: "in-cluster"
      server: "https://kubernetes.default.svc"
-     namespace: "*"
+     namespace: "guestbook"  # Preserves original namespace restrictions
 ```
 
 2. **Source Namespaces**: Limited to only the agent's namespace:
@@ -99,8 +99,34 @@ spec:
   - name: "in-cluster"
     namespace: "*"
     server: "https://kubernetes.default.svc"
+  # Can also have multiple destinations - all will be transformed
+  - name: "another-destination"
+    namespace: "specific-ns"
+    server: "https://kubernetes.default.svc"
   sourceNamespaces:
   - argocd
+  sourceRepos:
+  - "*"
+```
+
+When this AppProject is created on an autonomous agent named `agent-production`, it will be transformed and appear on the principal as:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: agent-production-my-project  # Prefixed with agent name
+  namespace: argocd                  # Placed in Argo CD namespace on principal
+spec:
+  destinations:
+  - name: agent-production           # All destinations point to agent
+    namespace: "*"
+    server: "*"
+  - name: agent-production
+    namespace: "specific-ns"         # Original namespace restrictions preserved
+    server: "*"
+  sourceNamespaces:
+  - agent-production                 # Agent's namespace on principal
   sourceRepos:
   - "*"
 ```
@@ -109,6 +135,12 @@ spec:
 
 When an AppProject is received from an autonomous agent, the principal applies transformations:
 
+!!! note
+    AppProjects from autonomous agents on the control plane are not used for reconciliation (there is no app controller running on the principal for these projects). Instead, they allow the Argo CD API (and UI, CLI) to determine which operations are valid to be performed on Applications that reference these AppProjects.
+
+!!! warning "Important"
+    AppProjects that are synced from autonomous agents should not be used by other Applications outside of that agent, as they may change unpredictably when the autonomous agent modifies its local AppProject configuration.
+
 1. **Name Prefixing**: The project name is prefixed with the agent name to avoid conflicts:
 
 ```
@@ -116,7 +148,41 @@ When an AppProject is received from an autonomous agent, the principal applies t
    On Principal: agent-production-my-project
 ```
 
-2. **Namespace Mapping**: The project is placed in the agent's corresponding namespace on the principal
+2. **Source Namespaces**: Transformed to allow Applications from the agent's namespace on the principal:
+
+```yaml
+   sourceNamespaces:
+   - agent-production  # The agent's namespace on the principal
+```
+
+3. **Destinations**: All destinations are transformed to point to the agent cluster:
+
+```yaml
+   destinations:
+   - name: agent-production  # The agent name
+     server: "*"
+     namespace: "*"  # Preserves original namespace restrictions
+```
+
+4. **Namespace Mapping**: The project is placed in the Argo CD namespace on the principal (same as where other AppProjects reside)
+
+## Key Transformation Differences
+
+The transformation logic differs significantly between managed and autonomous agents:
+
+### Managed Agents (Principal → Agent)
+- **Direction**: AppProject flows from principal to agent
+- **Selection**: Uses glob pattern matching on `sourceNamespaces` and `destinations` to determine which agents receive the project
+- **Destinations**: Filtered to only include destinations matching the agent, then transformed to `in-cluster`
+- **Source Namespaces**: Replaced with the single agent namespace
+- **Name**: Remains unchanged
+
+### Autonomous Agents (Agent → Principal)
+- **Direction**: AppProject flows from agent to principal  
+- **Selection**: All AppProjects created on autonomous agents are synchronized
+- **Destinations**: All destinations are transformed to point to the agent cluster (name = agent name, server = "*")
+- **Source Namespaces**: Replaced with the agent's namespace on the principal
+- **Name**: Prefixed with agent name to avoid conflicts
 
 ### Lifecycle Management
 

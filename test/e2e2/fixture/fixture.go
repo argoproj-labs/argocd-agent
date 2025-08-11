@@ -62,11 +62,33 @@ func (suite *BaseSuite) SetupSuite() {
 	requires.Nil(err)
 	suite.AutonomousAgentClient, err = NewKubeClient(config)
 	requires.Nil(err)
+
 }
 
 func (suite *BaseSuite) SetupTest() {
 	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient)
 	suite.Require().Nil(err)
+
+	// Ensure that the autonomous agent's default AppProject exists on the principal
+	project := &argoapp.AppProject{}
+	key := types.NamespacedName{Name: "default", Namespace: "argocd"}
+	err = suite.AutonomousAgentClient.Get(suite.Ctx, key, project, metav1.GetOptions{})
+	suite.Require().Nil(err)
+	now := time.Now().Format(time.RFC3339)
+	project.Annotations = map[string]string{"created": now}
+	err = suite.AutonomousAgentClient.Update(suite.Ctx, project, metav1.UpdateOptions{})
+	suite.Require().Nil(err)
+
+	suite.Require().Eventually(func() bool {
+		project := &argoapp.AppProject{}
+		key := types.NamespacedName{Name: "agent-autonomous-default", Namespace: "argocd"}
+		err := suite.PrincipalClient.Get(suite.Ctx, key, project, metav1.GetOptions{})
+		if err != nil {
+			suite.T().Log(err)
+		}
+		return err == nil && len(project.Annotations) > 0 && project.Annotations["created"] == now
+	}, 10*time.Second, 1*time.Second)
+
 	suite.T().Logf("Test begun at: %v", time.Now())
 }
 
