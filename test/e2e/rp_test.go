@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package e2e2
+package e2e
 
 import (
 	"context"
@@ -28,7 +28,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
-	"github.com/argoproj-labs/argocd-agent/test/e2e2/fixture"
+	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/stretchr/testify/suite"

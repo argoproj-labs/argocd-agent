@@ -12,52 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package e2e2
+package e2e
 
 import (
 	"testing"
 	"time"
 
-	"github.com/argoproj-labs/argocd-agent/test/e2e2/fixture"
+	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
-type SyncTestSuite struct {
+type BasicTestSuite struct {
 	fixture.BaseSuite
 }
 
-func (suite *SyncTestSuite) SetupTest() {
-	suite.BaseSuite.SetupTest()
-	requires := suite.Require()
-
-	var err error
-	var namespace corev1.Namespace
-
-	// Create the "guestbook" namespace on the managed agent cluster
-	namespace = corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "guestbook",
-		},
-	}
-	err = suite.ManagedAgentClient.Create(suite.Ctx, &namespace, metav1.CreateOptions{})
-	requires.NoError(err)
-
-	// Create the "guestbook" namespace on the autonomous agent cluster
-	namespace = corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "guestbook",
-		},
-	}
-	err = suite.AutonomousAgentClient.Create(suite.Ctx, &namespace, metav1.CreateOptions{})
-	requires.NoError(err)
-}
-
-func (suite *SyncTestSuite) Test_SyncManaged() {
+func (suite *BasicTestSuite) Test_AgentManaged() {
 	requires := suite.Require()
 
 	// Create a managed application in the principal's cluster
@@ -97,35 +70,11 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 		return err == nil
 	}, 30*time.Second, 1*time.Second)
 
-	// Check that the principal's sync status is "OutOfSync"
-	requires.Eventually(func() bool {
-		app = argoapp.Application{}
-		err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeOutOfSync
-	}, 60*time.Second, 1*time.Second)
-
-	// Sync the app
-	err = fixture.SyncApplication(suite.Ctx, principalKey, suite.PrincipalClient)
-	requires.NoError(err)
-
-	// Wait for the app on the principal to become synced
-	requires.Eventually(func() bool {
-		app := argoapp.Application{}
-		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
-	}, 60*time.Second, 1*time.Second)
-
-	// Ensure the app on the managed-agent becomes synced
-	requires.Eventually(func() bool {
-		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
-	}, 60*time.Second, 1*time.Second)
-
 	// Check that the .spec field of the managed-agent matches that of the
 	// principal
 	app = argoapp.Application{}
 	err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
+	// The destination on the agent will be set to in-cluster
 	app.Spec.Destination.Name = "in-cluster"
 	app.Spec.Destination.Server = ""
 	requires.NoError(err)
@@ -164,10 +113,10 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
 		return errors.IsNotFound(err)
-	}, 90*time.Second, 1*time.Second)
+	}, 30*time.Second, 1*time.Second)
 }
 
-func (suite *SyncTestSuite) Test_SyncAutonomous() {
+func (suite *BasicTestSuite) Test_AgentAutonomous() {
 	requires := suite.Require()
 
 	// Create an autonomous application on the autonomous-agent's cluster
@@ -200,8 +149,8 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 	err := suite.AutonomousAgentClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: app.Namespace}
 	principalKey := types.NamespacedName{Name: app.Name, Namespace: "agent-autonomous"}
+	agentKey := fixture.ToNamespacedName(&app)
 
 	// Ensure the app has been pushed to the principal
 	requires.Eventually(func() bool {
@@ -209,31 +158,6 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second)
-
-	// Check that the autonomous-agent's sync status is "OutOfSync"
-	requires.Eventually(func() bool {
-		app = argoapp.Application{}
-		err = suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeOutOfSync
-	}, 60*time.Second, 1*time.Second)
-
-	// Sync the app from the control plane
-	err = fixture.SyncApplication(suite.Ctx, principalKey, suite.PrincipalClient)
-	requires.NoError(err)
-
-	// Wait for the app on the autonomous-agent to become synced
-	requires.Eventually(func() bool {
-		app := argoapp.Application{}
-		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
-	}, 60*time.Second, 1*time.Second)
-
-	// Ensure the app on the principal becomes synced
-	requires.Eventually(func() bool {
-		app := argoapp.Application{}
-		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
-	}, 60*time.Second, 1*time.Second)
 
 	// Check that the .spec field of the principal matches that of the
 	// autonomous-agent
@@ -273,13 +197,6 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 	err = suite.AutonomousAgentClient.Delete(suite.Ctx, &app, metav1.DeleteOptions{})
 	requires.NoError(err)
 
-	// Wait for the app to be deleted from the autonomous-agent
-	requires.Eventually(func() bool {
-		app := argoapp.Application{}
-		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return errors.IsNotFound(err)
-	}, 90*time.Second, 1*time.Second)
-
 	// Ensure the app has been deleted from the principal
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
@@ -288,6 +205,6 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 	}, 30*time.Second, 1*time.Second)
 }
 
-func TestSyncTestSuite(t *testing.T) {
-	suite.Run(t, new(SyncTestSuite))
+func TestBasicTestSuite(t *testing.T) {
+	suite.Run(t, new(BasicTestSuite))
 }

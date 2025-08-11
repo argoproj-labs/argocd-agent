@@ -21,19 +21,19 @@ Both the vcluster and Argo CD installations require that LoadBalancer functional
 To setup the test environment on the cluster, execute the following command from the repository root:
 
 ```shell
-make setup-e2e2
+make setup-e2e
 ```
 
 To run the principal and agents, execute the following command from the repository root:
 
 ```shell
-make start-e2e2
+make start-e2e
 ```
 
 To run the tests, execute the following command from the repository root in a separate terminal instance:
 
 ```shell
-make test-e2e2
+make test-e2e
 ```
 
 # Writing new end-to-end tests

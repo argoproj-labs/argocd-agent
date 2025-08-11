@@ -45,28 +45,24 @@ fmt:
 .PHONY: build
 build: argocd-agent cli
 
-.PHONY: setup-e2e2
-setup-e2e2: cli
+.PHONY: setup-e2e
+setup-e2e: cli
 	./hack/dev-env/setup-vcluster-env.sh create
 	./hack/dev-env/gen-creds.sh
 	./hack/dev-env/create-agent-config.sh
 
-.PHONY: start-e2e2
-start-e2e2: cli install-goreman
-	./hack/dev-env/start-e2e2.sh
+.PHONY: start-e2e
+start-e2e: cli install-goreman
+	./hack/dev-env/start-e2e.sh
 
-.PHONY: test-e2e2
-test-e2e2:
+.PHONY: test-e2e
+test-e2e:
 	./test/run-e2e.sh
 
 .PHONY: test
 test:
 	mkdir -p test/out
 	./hack/test.sh
-
-.PHONY: test-e2e
-test-e2e:
-	go test -race -timeout 60s github.com/argoproj-labs/argocd-agent/test/e2e
 
 .PHONY: mod-vendor
 mod-vendor:

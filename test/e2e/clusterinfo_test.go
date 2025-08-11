@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package e2e2
+package e2e
 
 import (
 	"fmt"
@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/argoproj-labs/argocd-agent/test/e2e2/fixture"
+	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
