@@ -1,0 +1,149 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "test-overall"
+  annotations:
+    "helm.sh/hook": test
+spec:
+  serviceAccountName: argocd-agent-test
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: 
+        - sh
+        - -c
+        - |
+          echo "Testing Overall Chart Installation..."
+          
+          # Count and verify all resources
+          echo "Verifying resource counts..."
+          
+          # Count deployments
+          DEPLOYMENT_COUNT=$(kubectl get deployments -n {{ include "argocd-agent-agent.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          if [ "$DEPLOYMENT_COUNT" = "1" ]; then
+            echo "✓ Found $DEPLOYMENT_COUNT deployment(s)"
+          else
+            echo "✗ Expected 1 deployment, found $DEPLOYMENT_COUNT"
+            exit 1
+          fi
+          
+          # Count services
+          SERVICE_COUNT=$(kubectl get services -n {{ include "argocd-agent-agent.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          if [ "$SERVICE_COUNT" = "2" ]; then
+            echo "✓ Found $SERVICE_COUNT service(s)"
+          else
+            echo "✗ Expected 2 services, found $SERVICE_COUNT"
+            exit 1
+          fi
+          
+          # Count configmaps
+          CONFIGMAP_COUNT=$(kubectl get configmaps -n {{ include "argocd-agent-agent.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          if [ "$CONFIGMAP_COUNT" = "1" ]; then
+            echo "✓ Found $CONFIGMAP_COUNT configmap(s)"
+          else
+            echo "✗ Expected 1 configmap, found $CONFIGMAP_COUNT"
+            exit 1
+          fi
+          
+          # Count service accounts
+          SA_COUNT=$(kubectl get serviceaccounts -n {{ include "argocd-agent-agent.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          if [ "$SA_COUNT" = "1" ]; then
+            echo "✓ Found $SA_COUNT service account(s)"
+          else
+            echo "✗ Expected 1 service account, found $SA_COUNT"
+            exit 1
+          fi
+          
+          # Count roles
+          ROLE_COUNT=$(kubectl get roles -n {{ include "argocd-agent-agent.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          if [ "$ROLE_COUNT" = "1" ]; then
+            echo "✓ Found $ROLE_COUNT role(s)"
+          else
+            echo "✗ Expected 1 role, found $ROLE_COUNT"
+            exit 1
+          fi
+          
+          # Count role bindings
+          ROLEBINDING_COUNT=$(kubectl get rolebindings -n {{ include "argocd-agent-agent.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          if [ "$ROLEBINDING_COUNT" = "1" ]; then
+            echo "✓ Found $ROLEBINDING_COUNT role binding(s)"
+          else
+            echo "✗ Expected 1 role binding, found $ROLEBINDING_COUNT"
+            exit 1
+          fi
+          
+          # Count cluster roles
+          CLUSTERROLE_COUNT=$(kubectl get clusterroles -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          if [ "$CLUSTERROLE_COUNT" = "1" ]; then
+            echo "✓ Found $CLUSTERROLE_COUNT cluster role(s)"
+          else
+            echo "✗ Expected 1 cluster role, found $CLUSTERROLE_COUNT"
+            exit 1
+          fi
+          
+          # Count cluster role bindings
+          CLUSTERROLEBINDING_COUNT=$(kubectl get clusterrolebindings -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          if [ "$CLUSTERROLEBINDING_COUNT" = "1" ]; then
+            echo "✓ Found $CLUSTERROLEBINDING_COUNT cluster role binding(s)"
+          else
+            echo "✗ Expected 1 cluster role binding, found $CLUSTERROLEBINDING_COUNT"
+            exit 1
+          fi
+          
+          # Verify all resources are in the correct namespace
+          echo "Verifying namespace consistency..."
+          WRONG_NS_RESOURCES=$(kubectl get deployments,services,configmaps,secrets,serviceaccounts,roles,rolebindings -l app.kubernetes.io/part-of=argocd-agent --all-namespaces --no-headers | grep -v "{{ include "argocd-agent-agent.namespace" . }}" | grep -v "default" | wc -l)
+          if [ "$WRONG_NS_RESOURCES" = "0" ]; then
+            echo "✓ All namespaced resources are in the correct namespace"
+          else
+            echo "✗ Found $WRONG_NS_RESOURCES resource(s) in wrong namespace"
+            kubectl get all,configmaps,secrets,serviceaccounts,roles,rolebindings -l app.kubernetes.io/part-of=argocd-agent --all-namespaces --no-headers | grep -v "{{ include "argocd-agent-agent.namespace" . }}" | grep -v "default"
+            exit 1
+          fi
+          
+          # Check if deployment is ready
+          echo "Checking deployment readiness..."
+          READY_REPLICAS=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.status.readyReplicas}")
+          if [ "$READY_REPLICAS" = "1" ]; then
+            echo "✓ Deployment is ready with $READY_REPLICAS replica(s)"
+          else
+            echo "✗ Deployment not ready, ready replicas: $READY_REPLICAS"
+            exit 1
+          fi
+          
+          # Check if pods are running
+          echo "Checking pod status..."
+          RUNNING_PODS=$(kubectl get pods -n {{ include "argocd-agent-agent.namespace" . }} -l app.kubernetes.io/name=argocd-agent-agent --no-headers | grep Running | wc -l)
+          if [ "$RUNNING_PODS" = "1" ]; then
+            echo "✓ Found $RUNNING_PODS running pod(s)"
+          else
+            echo "✗ Expected 1 running pod, found $RUNNING_PODS"
+            kubectl get pods -n {{ include "argocd-agent-agent.namespace" . }} -l app.kubernetes.io/name=argocd-agent-agent
+            exit 1
+          fi
+          
+          # Wait a bit for services to get endpoints
+          echo "Waiting for services to get endpoints..."
+          sleep 10
+          
+          # Verify service endpoints
+          echo "Checking service endpoints..."
+          METRICS_ENDPOINTS=$(kubectl get endpoints argocd-agent-agent-metrics -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.subsets[0].addresses}" | wc -l)
+          if [ "$METRICS_ENDPOINTS" -gt 0 ]; then
+            echo "✓ Metrics service has endpoints"
+          else
+            echo "✗ Metrics service has no endpoints"
+            exit 1
+          fi
+          
+          HEALTHZ_ENDPOINTS=$(kubectl get endpoints argocd-agent-agent-healthz -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.subsets[0].addresses}" | wc -l)
+          if [ "$HEALTHZ_ENDPOINTS" -gt 0 ]; then
+            echo "✓ Healthz service has endpoints"
+          else
+            echo "✗ Healthz service has no endpoints"
+            exit 1
+          fi
+          
+          echo "Overall chart installation verified successfully!"
+          echo "Total resources created: $((DEPLOYMENT_COUNT + SERVICE_COUNT + CONFIGMAP_COUNT + SA_COUNT + ROLE_COUNT + ROLEBINDING_COUNT + CLUSTERROLE_COUNT + CLUSTERROLEBINDING_COUNT))"
+  restartPolicy: Never

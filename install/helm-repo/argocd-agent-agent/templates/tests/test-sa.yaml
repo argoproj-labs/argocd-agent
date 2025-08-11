@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argocd-agent-test
+  namespace: {{ include "argocd-agent-agent.namespace" . }}
+  labels:
+    app.kubernetes.io/name: argocd-agent-agent
+
+    app.kubernetes.io/component: test
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-agent-test
+  namespace: {{ include "argocd-agent-agent.namespace" . }}
+  labels:
+    app.kubernetes.io/name: argocd-agent-agent
+
+    app.kubernetes.io/component: test
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps", "secrets", "serviceaccounts", "deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-agent-test
+  namespace: {{ include "argocd-agent-agent.namespace" . }}
+  labels:
+    app.kubernetes.io/name: argocd-agent-agent
+
+    app.kubernetes.io/component: test
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-agent-test
+subjects:
+- kind: ServiceAccount
+  name: argocd-agent-test
+  namespace: {{ include "argocd-agent-agent.namespace" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-agent-test
+  labels:
+    app.kubernetes.io/name: argocd-agent-agent
+    app.kubernetes.io/component: test
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps", "secrets", "serviceaccounts", "deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-agent-test
+  labels:
+    app.kubernetes.io/name: argocd-agent-agent
+
+    app.kubernetes.io/component: test
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argocd-agent-test
+subjects:
+- kind: ServiceAccount
+  name: argocd-agent-test
+  namespace: {{ include "argocd-agent-agent.namespace" . }}

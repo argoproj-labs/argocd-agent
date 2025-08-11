@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "test-services"
+  annotations:
+    "helm.sh/hook": test
+spec:
+  serviceAccountName: argocd-agent-test
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: 
+        - sh
+        - -c
+        - |
+          echo "Testing Services configuration..."
+          
+          # Test metrics service
+          echo "Testing metrics service..."
+          if kubectl get service argocd-agent-agent-metrics -n {{ include "argocd-agent-agent.namespace" . }}; then
+            echo "✓ Metrics service exists"
+          else
+            echo "✗ Metrics service not found"
+            exit 1
+          fi
+          
+          # Check metrics service port
+          METRICS_PORT=$(kubectl get service argocd-agent-agent-metrics -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
+          if [ "$METRICS_PORT" = "8181" ]; then
+            echo "✓ Metrics service has correct port: $METRICS_PORT"
+          else
+            echo "✗ Metrics service has incorrect port: $METRICS_PORT (expected 8181)"
+            exit 1
+          fi
+          
+          # Check metrics service target port
+          METRICS_TARGET_PORT=$(kubectl get service argocd-agent-agent-metrics -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.ports[0].targetPort}")
+          if [ "$METRICS_TARGET_PORT" = "8181" ]; then
+            echo "✓ Metrics service has correct target port: $METRICS_TARGET_PORT"
+          else
+            echo "✗ Metrics service has incorrect target port: $METRICS_TARGET_PORT (expected 8181)"
+            exit 1
+          fi
+          
+          # Test healthz service
+          echo "Testing healthz service..."
+          if kubectl get service argocd-agent-agent-healthz -n {{ include "argocd-agent-agent.namespace" . }}; then
+            echo "✓ Healthz service exists"
+          else
+            echo "✗ Healthz service not found"
+            exit 1
+          fi
+          
+          # Check healthz service port
+          HEALTHZ_PORT=$(kubectl get service argocd-agent-agent-healthz -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
+          if [ "$HEALTHZ_PORT" = "8002" ]; then
+            echo "✓ Healthz service has correct port: $HEALTHZ_PORT"
+          else
+            echo "✗ Healthz service has incorrect port: $HEALTHZ_PORT (expected 8002)"
+            exit 1
+          fi
+          
+          # Check healthz service target port
+          HEALTHZ_TARGET_PORT=$(kubectl get service argocd-agent-agent-healthz -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.ports[0].targetPort}")
+          if [ "$HEALTHZ_TARGET_PORT" = "8002" ]; then
+            echo "✓ Healthz service has correct target port: $HEALTHZ_TARGET_PORT"
+          else
+            echo "✗ Healthz service has incorrect target port: $HEALTHZ_TARGET_PORT (expected 8002)"
+            exit 1
+          fi
+          
+          # Check service selectors
+          METRICS_SELECTOR=$(kubectl get service argocd-agent-agent-metrics -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.selector.app\\.kubernetes\\.io/name}")
+          if [ "$METRICS_SELECTOR" = "argocd-agent-agent" ]; then
+            echo "✓ Metrics service has correct selector: $METRICS_SELECTOR"
+          else
+            echo "✗ Metrics service has incorrect selector: $METRICS_SELECTOR (expected argocd-agent-agent)"
+            exit 1
+          fi
+          
+          HEALTHZ_SELECTOR=$(kubectl get service argocd-agent-agent-healthz -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.selector.app\\.kubernetes\\.io/name}")
+          if [ "$HEALTHZ_SELECTOR" = "argocd-agent-agent" ]; then
+            echo "✓ Healthz service has correct selector: $HEALTHZ_SELECTOR"
+          else
+            echo "✗ Healthz service has incorrect selector: $HEALTHZ_SELECTOR (expected argocd-agent-agent)"
+            exit 1
+          fi
+          
+          echo "Services configuration verified successfully!"
+  restartPolicy: Never

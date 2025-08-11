@@ -3,7 +3,9 @@ kind: Deployment
 metadata:
   labels:
     app.kubernetes.io/name: argocd-agent-agent
-  name: {{ include "argocd-agent-agent.fullname" . }}
+    app.kubernetes.io/part-of: argocd-agent
+    app.kubernetes.io/component: agent
+  name: argocd-agent-agent
   namespace: {{ include  "argocd-agent-agent.namespace" . }}
 spec:
   selector:
