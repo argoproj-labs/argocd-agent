@@ -135,6 +135,12 @@ spec:
                 name: argocd-agent-params
                 key: agent.pprof.port
                 optional: true
+          - name: REDIS_ADDR
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.redis.server.address
+                optional: true
           - name: REDIS_PASSWORD
             valueFrom:
               secretKeyRef:

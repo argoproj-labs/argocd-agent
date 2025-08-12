@@ -217,7 +217,7 @@ The recommended approach for production deployments is to use ConfigMap entries 
 #### Redis Address
 - **Command Line Flag**: `--redis-addr`
 - **Environment Variable**: `REDIS_ADDR`
-- **ConfigMap Entry**: *(Not available in ConfigMap)*
+- **ConfigMap Entry**: `agent.redis.server.address`
 - **Description**: The redis host to connect to
 - **Type**: String
 - **Default**: `"argocd-redis:6379"`

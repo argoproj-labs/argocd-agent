@@ -201,6 +201,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.redis.compression.type
                 optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.redis.server.address
+                optional: true
           - name: ARGOCD_PRINCIPAL_ENABLE_RESOURCE_PROXY
             valueFrom:
               configMapKeyRef:
