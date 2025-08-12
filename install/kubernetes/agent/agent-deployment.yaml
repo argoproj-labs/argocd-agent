@@ -139,7 +139,7 @@ spec:
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: agent.redis.server.address
+                key: agent.redis.address
                 optional: true
           - name: REDIS_PASSWORD
             valueFrom:

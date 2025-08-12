@@ -83,6 +83,6 @@ data:
   # agent.resource-proxy.enable: Whether to enable the resource proxy.
   # Default: true
   agent.resource-proxy.enable: "true"
-  # agent.redis.server.address: The address of the Redis server.
+  # agent.redis.address: The address of the Redis server.
   # Default: "argocd-redis:6379"
-  agent.redis.server.address: "argocd-redis:6379"
+  agent.redis.address: "argocd-redis:6379"
