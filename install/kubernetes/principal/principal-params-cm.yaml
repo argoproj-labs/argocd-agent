@@ -137,3 +137,6 @@ data:
   # principal.pprof.port: The port the pprof server will listen on.
   # Default: 0
   principal.pprof.port: "0"
+  # principal.redis.server.address: The address of the Redis server.
+  # Default: "argocd-redis:6379"
+  principal.redis.server.address: "argocd-redis:6379"

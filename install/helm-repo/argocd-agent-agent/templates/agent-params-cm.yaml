@@ -57,3 +57,6 @@ data:
   # agent.healthz.port: The port the health check server should listen on.
   # Default: 8002
   agent.healthz.port: {{ .Values.healthzPort | quote }}
+  # agent.redis.address: The address of the Redis server.
+  # Default: "argocd-redis:6379"
+  agent.redis.address: {{ .Values.redisAddress | quote }}

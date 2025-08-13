@@ -118,6 +118,15 @@ spec:
           echo "✗ agent.healthz.port missing"
           exit 1
         fi
+
+        # Test  agent.redis.address
+        if [ -f /etc/config/agent.redis.address ]; then
+          echo "✓ agent.redis.address exists"
+          cat /etc/config/agent.redis.address
+        else
+          echo "✗ agent.redis.address missing"
+          exit 1
+        fi
         
         echo "All ConfigMap keys verified successfully!"
       ']

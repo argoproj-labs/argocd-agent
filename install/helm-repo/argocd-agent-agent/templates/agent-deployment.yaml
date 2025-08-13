@@ -108,6 +108,12 @@ spec:
                 name: argocd-agent-params
                 key: agent.healthz.port
                 optional: true
+          - name: REDIS_ADDR
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.redis.address
+                optional: true
           name: argocd-agent-agent
           imagePullPolicy: Always
           image: "{{ .Values.image }}:{{ .Values.imageTag }}"
