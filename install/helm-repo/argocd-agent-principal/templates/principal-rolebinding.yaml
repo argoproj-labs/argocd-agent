@@ -1,0 +1,21 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  namespace: {{ .Values.namespace }}
+  name: {{ include "argocd-agent-principal.roleBindingName" . }}
+  labels:
+    {{- include "argocd-agent-principal.labels" . | nindent 4 }}
+  {{- with include "argocd-agent-principal.annotations" . }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "argocd-agent-principal.roleName" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "argocd-agent-principal.serviceAccountName" . }}
+  namespace: {{ .Values.namespace }}
+{{- end }}

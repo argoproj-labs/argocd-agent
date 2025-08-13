@@ -1,0 +1,62 @@
+1. Get the application URL by running these commands:
+{{- if eq .Values.service.type "NodePort" }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "argocd-agent-principal.serviceName" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo https://$NODE_IP:$NODE_PORT
+{{- else if eq .Values.service.type "LoadBalancer" }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+           You can watch the status of by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "argocd-agent-principal.serviceName" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "argocd-agent-principal.serviceName" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo https://$SERVICE_IP:{{ .Values.service.port }}
+{{- else if eq .Values.service.type "ClusterIP" }}
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "argocd-agent-principal.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  echo "Visit https://127.0.0.1:8443 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8443:{{ .Values.principal.listen.port }}
+{{- end }}
+
+2. The ArgoCD Agent Principal is now running with the following configuration:
+   - Listen Port: {{ .Values.principal.listen.port }}
+   - Metrics Port: {{ .Values.principal.metrics.port }}
+   - Health Check Port: {{ .Values.principal.healthz.port }}
+   - Operating Namespace: {{ .Values.principal.namespace }}
+   {{- if .Values.principal.allowedNamespaces }}
+   - Allowed Namespaces: {{ .Values.principal.allowedNamespaces }}
+   {{- end }}
+
+3. To view the logs:
+   kubectl logs -f deployment/{{ include "argocd-agent-principal.fullname" . }} -n {{ .Release.Namespace }}
+
+{{- if .Values.metricsService.enabled }}
+4. Metrics are available at:
+   kubectl port-forward svc/{{ include "argocd-agent-principal.metricsServiceName" . }} {{ .Values.metricsService.port }}:{{ .Values.metricsService.port }} -n {{ .Release.Namespace }}
+   Then visit http://localhost:{{ .Values.metricsService.port }}/metrics
+{{- end }}
+
+{{- if .Values.healthzService.enabled }}
+5. Health check is available at:
+   kubectl port-forward svc/{{ include "argocd-agent-principal.healthzServiceName" . }} {{ .Values.healthzService.port }}:{{ .Values.healthzService.port }} -n {{ .Release.Namespace }}
+   Then visit http://localhost:{{ .Values.healthzService.port }}/healthz
+{{- end }}
+
+{{- if not .Values.secrets.userpass.passwd }}
+
+WARNING: You have not set a password for user authentication.
+Please update the userpass secret or set principal.auth to use mTLS authentication.
+
+To set a password:
+  kubectl create secret generic {{ include "argocd-agent-principal.userpassSecretName" . }} \
+    --from-literal=passwd="your-encrypted-password" \
+    -n {{ .Release.Namespace }}
+{{- end }}
+
+{{- if and .Values.principal.tls.server.allowGenerate (eq .Values.principal.tls.server.allowGenerate "true") }}
+
+WARNING: TLS certificate generation is enabled. This is insecure and should only be used for development.
+For production, please provide proper TLS certificates.
+{{- end }}
+
+{{- if and .Values.principal.jwt.allowGenerate (eq .Values.principal.jwt.allowGenerate "true") }}
+
+WARNING: JWT key generation is enabled. This is insecure and should only be used for development.
+For production, please provide a proper JWT signing key.
+{{- end }}
