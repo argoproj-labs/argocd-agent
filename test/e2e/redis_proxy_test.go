@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package e2e2
+package e2e
 
 import (
 	"bufio"
@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/argoproj-labs/argocd-agent/test/e2e2/fixture"
+	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
 
 	argocdclient "github.com/argoproj/argo-cd/v3/pkg/apiclient"
 	"github.com/argoproj/argo-cd/v3/pkg/apiclient/application"

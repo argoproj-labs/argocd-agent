@@ -188,16 +188,16 @@ jobs:
           go mod download
       - name: Set up the test environment
         run: |
-          make setup-e2e2
+          make setup-e2e
       - name: Run the principal and agents
         run: |
           make all
-          make start-e2e2 2>&1 | sed -r "s/[[:cntrl:]]\[[0-9]{1,3}m//g" | tee /tmp/e2e-argocd-agent.log &
+          make start-e2e 2>&1 | sed -r "s/[[:cntrl:]]\[[0-9]{1,3}m//g" | tee /tmp/e2e-argocd-agent.log &
           sleep 10
       - name: Run the e2e tests
         run: |
           set -o pipefail
-          make test-e2e2 2>&1 | tee /tmp/test-e2e.log
+          make test-e2e 2>&1 | tee /tmp/test-e2e.log
           goreman run stop-all || echo "goreman trouble"
           sleep 30
       - name: Create Argo CD logs

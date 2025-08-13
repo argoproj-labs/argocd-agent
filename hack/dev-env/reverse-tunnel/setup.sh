@@ -145,7 +145,7 @@ echo ""
 echo "* Starting the rathole local client."
 echo "* - This may initially report an error while waiting for LoadBalancer service ('Failed to run the control channel: (...): Name or service not known. '), but it will keep trying until connection is established."
 echo "* - You can also safely ignore this warning: 'Failed to run the data channel: Failed to read cmd: early eof'"
-echo "* - This message indicates you need to run 'make start-e2e2', or that it is not currently running: 'Failed to run the data channel: Failed to connect to 127.0.0.1:6379: Connection refused (os error 111)'"
+echo "* - This message indicates you need to run 'make start-e2e', or that it is not currently running: 'Failed to run the data channel: Failed to connect to 127.0.0.1:6379: Connection refused (os error 111)'"
 echo ""
 echo "CTRL-C / Command-C to terminate rathole tunnel."
 $TEMP_DIR/client/run.sh

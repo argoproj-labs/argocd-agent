@@ -71,4 +71,4 @@ if test "${AGENT_E2E_AUTONOMOUS_CLUSTER_SERVER}" = ""; then
        export AGENT_E2E_AUTONOMOUS_CLUSTER_SERVER
 fi
 
-go test -count=1 -v -race -timeout 30m github.com/argoproj-labs/argocd-agent/test/e2e2
+go test -count=1 -v -race -timeout 30m github.com/argoproj-labs/argocd-agent/test/e2e
