@@ -3,13 +3,12 @@ This document outlines the process of setting up Argo CD Agent in a hub and spok
 ## Prerequisites
 Before proceeding with the setup, ensure you have the following:
 
-A running OpenShift/kubernetes cluster designated as the hub, with Argo CD/OpenShift GitOps Operator installed.
-
+- A running OpenShift/kubernetes cluster designated as the hub, with Argo CD/OpenShift GitOps Operator installed.
 - One or more Kubernetes clusters designated as spokes, Argo CD/OpenShift GitOps Operator installed.
-- oc configured to access both hub and spoke clusters.
+- `oc` binary configured to access both hub and spoke clusters.
 - Operator must be installed in [cluster scope](https://argocd-operator.readthedocs.io/en/stable/usage/basics/#cluster-scoped-instance) mode.
 - Apps in any Namespace must be enabled for Hub Cluster.
-- Argocd-agentctl binary (for non-production scenario)
+- `argocd-agentctl` binary (for non-production scenario)
 
 
 ## Hub Cluster Setup
@@ -70,7 +69,7 @@ spec:
       jwtAllowGenerate: true
       auth: "mtls:CN=([^,]+)"
       logLevel: "trace"
-      image: "<quay.io/user/argocd-agent:v1>"
+      image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent:latest"
   sourceNamespaces:
     - "agent-managed"
     - "agent-autonomous"  					
@@ -104,12 +103,12 @@ Creating Argo CD instance for Workload/spoke cluster.
 ### Configure Agent in managed mode
 
 Before installing agent resources create 
-Create a TLS secret containing the issued certificate for agent
+- a TLS secret containing the issued certificate for agent
 
 Create the PKI on the agent:
 Run this command while connected to principal
 ```
-argocd-agentctl pki issue agent <agent-name> --agent-context <workload context> --agent-namespace <workload namespace> --upsert
+argocd-agentctl pki issue agent <agent-name>  --principal-context <principal context> --agent-context <workload context> --agent-namespace <workload namespace> --upsert
 ```
 
 Apply the installation manifests for Argo CD-agent agent
@@ -148,7 +147,7 @@ Create a TLS secret containing the issued certificate for agent
 Create the PKI on the agent:
 Run this command while connected to principal
 ```
-argocd-agentctl pki issue agent <agent-name> --agent-context <workload context> --agent-namespace argocd --upsert
+argocd-agentctl pki issue agent <agent-name> --principal-context <principal context> --agent-context <workload context> --agent-namespace argocd --upsert
 ```
 
 Apply the installation manifests for argocd agent
@@ -188,8 +187,26 @@ time="2025-07-30T14:58:33Z" level=info msg="Loading client TLS certificate from 
 [FATAL]: Error creating remote: unable to read TLS client from secret: could not read TLS secret argocd/argocd-agent-client-tls: secrets "argocd-agent-client-tls" is forbidden: User "system:serviceaccount:argocd:argocd-agent-agent" cannot get resource "secrets" in API group "" in the namespace "argocd"
 ```
 
-update the ClusterRoleBinding to update the subject namespace to `workload-namespace`.
+update the ClusterRoleBinding to update the subject namespace to workload-namespace.
 
 ```
 kubectl patch clusterrolebinding argocd-agent-agent --type='json' -p='[{"op": "replace", "path": "/subjects/0/namespace", "value": "<workload-namespace>"}]'
+```
+
+2. If appProject if not present in agent cluster, create using the below source
+```
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+spec:
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  destinations:
+    - namespace: '*'
+      server: '*'
+  sourceRepos:
+    - '*'
 ```
