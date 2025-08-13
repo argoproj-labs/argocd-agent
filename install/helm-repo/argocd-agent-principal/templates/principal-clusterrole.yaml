@@ -1,0 +1,36 @@
+{{- if and .Values.rbac.create .Values.rbac.createClusterRole }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "argocd-agent-principal.clusterRoleName" . }}
+  labels:
+    {{- include "argocd-agent-principal.labels" . | nindent 4 }}
+  {{- with include "argocd-agent-principal.annotations" . }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+rules:
+- apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  - appprojects
+  - applicationsets
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - delete
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+{{- end }}
