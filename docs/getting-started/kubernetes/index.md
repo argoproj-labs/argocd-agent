@@ -1,6 +1,6 @@
 # Getting Started with Kubernetes
 
-This comprehensive guide will walk you through setting up argocd-agent on Kubernetes, including installing Argo CD on both the control plane and workload clusters, deploying the principal and agent components, and connecting your first agent.
+This comprehensive guide will walk you through setting up argocd-agent on Kubernetes, including installing Argo CD on both the control plane and workload clusters, deploying the principal and agent components, and connecting your first agent using mutual TLS (mTLS) authentication.
 
 ## Prerequisites
 
@@ -160,6 +160,15 @@ kubectl apply -n argocd \
   --context <control-plane-context>
 ```
 
+The principal is pre-configured to use mTLS authentication by default. You can verify this configuration:
+
+```bash
+# Check the principal authentication configuration
+kubectl get configmap argocd-agent-params -n argocd --context <control-plane-context> \
+  -o jsonpath='{.data.principal\.auth}'
+# Should output: mtls:CN=([^,]+)
+```
+
 ### 3.2 Expose Principal Service
 
 The principal's gRPC service needs to be accessible from workload clusters:
@@ -259,21 +268,19 @@ For managed agents, create a namespace on the principal where the agent's Applic
 kubectl create namespace my-first-agent --context <control-plane-context>
 ```
 
-### 5.4 Create Agent Authentication Secret
+### 5.3 Verify Certificate Installation
+
+The agent client certificate should already be installed from step 5.2. Verify it exists:
 
 ```bash
-# Get the password from the agent configuration (or use the one you set)
-AGENT_PASSWORD=$(kubectl get secret cluster-my-first-agent -n argocd --context <control-plane-context> \
-  -o jsonpath='{.data.config}' | base64 -d | jq -r '.password')
+# Verify the client certificate secret exists
+kubectl get secret argocd-agent-client-tls -n argocd --context <workload-cluster-context>
 
-# Create userpass credentials file
-kubectl create secret generic argocd-agent-agent-userpass \
-  --from-literal=credentials="userpass:my-first-agent:${AGENT_PASSWORD}" \
-  --namespace argocd \
-  --context <workload-cluster-context>
+# Verify the CA certificate secret exists
+kubectl get secret argocd-agent-ca -n argocd --context <workload-cluster-context>
 ```
 
-### 5.5 Deploy Agent
+### 5.4 Deploy Agent
 
 ```bash
 kubectl apply -n argocd \
@@ -281,9 +288,9 @@ kubectl apply -n argocd \
   --context <workload-cluster-context>
 ```
 
-### 5.6 Configure Agent Connection
+### 5.5 Configure Agent Connection
 
-Update the agent configuration to connect to your principal:
+Update the agent configuration to connect to your principal using mTLS authentication:
 
 ```bash
 kubectl patch configmap argocd-agent-params -n argocd --context <workload-cluster-context> \
@@ -291,7 +298,7 @@ kubectl patch configmap argocd-agent-params -n argocd --context <workload-cluste
     \"agent.server.address\":\"<principal-external-ip>\",
     \"agent.server.port\":\"8443\",
     \"agent.mode\":\"managed\",
-    \"agent.creds\":\"userpass:/app/config/creds/userpass.creds\"
+    \"agent.creds\":\"mtls:any\"
   }}"
 
 # Restart the agent to apply changes
@@ -307,7 +314,7 @@ kubectl rollout restart deployment argocd-agent-agent -n argocd --context <workl
 kubectl logs -n argocd deployment/argocd-agent-agent --context <workload-cluster-context>
 
 # Expected output:
-# INFO[0001] Starting argocd-agent (agent) v0.1.0 (ns=argocd, mode=managed, auth=userpass)
+# INFO[0001] Starting argocd-agent (agent) v0.1.0 (ns=argocd, mode=managed, auth=mtls)
 # INFO[0002] Authentication successful  
 # INFO[0003] Connected to argocd-agent-principal v0.1.0
 ```
@@ -402,8 +409,8 @@ kubectl run debug --rm -it --image=busybox --context <workload-cluster-context> 
 # Verify certificates
 kubectl get secrets -n argocd --context <workload-cluster-context> | grep tls
 
-# Check authentication
-kubectl get secret argocd-agent-agent-userpass -n argocd --context <workload-cluster-context> -o yaml
+# Check client certificate
+kubectl get secret argocd-agent-client-tls -n argocd --context <workload-cluster-context> -o yaml
 ```
 
 **Principal Service Not Accessible**:
