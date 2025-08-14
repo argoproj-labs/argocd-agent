@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -247,7 +248,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	requires := suite.Require()
 
 	ctx := context.Background()
-	deploymentActionKey := "resource.customizations.actions.apps_Deployment"
+	deploymentActionKey := "resource.customizations.actions.Service"
 
 	updateResourceAction := func(updateFn func(argocdCM *corev1.ConfigMap)) {
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
@@ -371,7 +372,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		actions, err := argoClient.ListResourceActions(&app, "apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
+		actions, err := argoClient.ListResourceActions(&app, "", "v1", "Service", "guestbook", "kustomize-guestbook-ui")
 		requires.NoError(err)
 
 		for _, action := range actions {
@@ -382,10 +383,24 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 		return false
 	}, 30*time.Second, 1*time.Second)
 
-	// Execute the action
-	err = argoClient.RunResourceAction(&app, "test",
-		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
+	argocdCM := &corev1.ConfigMap{}
+	err = suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: "argocd"}, argocdCM, metav1.GetOptions{})
 	requires.NoError(err)
+
+	fmt.Printf("argocdCM: %+v\n", argocdCM.Data[deploymentActionKey])
+
+	requires.Eventually(func() bool {
+		fmt.Printf("Running action\n")
+		err = argoClient.RunResourceAction(&app, "test",
+			"", "v1", "Service", "guestbook", "kustomize-guestbook-ui")
+		if err != nil {
+			if strings.Contains(err.Error(), "built-in script does not exist") {
+				return false
+			}
+			return true
+		}
+		return true
+	}, 20*time.Second, 5*time.Second)
 
 	// Check if a new resource is created after running the resource action
 	requires.Eventually(func() bool {
@@ -416,37 +431,37 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 
 func getCustomResourceAction() string {
 	return `discovery.lua: |
-    actions = {}
-    actions["test"] = {}
-    return actions
+  actions = {}
+  actions["test"] = {}
+  return actions
 definitions:
-  - name: test
-    action.lua: |
-      -- Create a new ConfigMap
-      cm = {}
-      cm.apiVersion = "v1"
-      cm.kind = "ConfigMap"
-      cm.metadata = {}
-      cm.metadata.name = "test-cm"
-      cm.metadata.namespace = obj.metadata.namespace     
-      cm.data = {}
-      cm.data.testKey = "testValue"
-      impactedResource1 = {}
-      impactedResource1.operation = "create"
-      impactedResource1.resource = cm
-      	  
-      -- Patch the original Object
-      if obj.metadata.labels == nil then
-        obj.metadata.labels = {}
-      end
-      obj.metadata.labels["test-label"] = "test"
-      impactedResource2 = {}
-      impactedResource2.operation = "patch"
-      impactedResource2.resource = obj
-      result = {}
-      result[1] = impactedResource1
-      result[2] = impactedResource2
-      return result`
+- name: test
+  action.lua: |
+    -- Create a new ConfigMap
+    cm = {}
+    cm.apiVersion = "v1"
+    cm.kind = "ConfigMap"
+    cm.metadata = {}
+    cm.metadata.name = "test-cm"
+    cm.metadata.namespace = obj.metadata.namespace     
+    cm.data = {}
+    cm.data.testKey = "testValue"
+    impactedResource1 = {}
+    impactedResource1.operation = "create"
+    impactedResource1.resource = cm
+    
+    -- Patch the original Object
+    if obj.metadata.labels == nil then
+      obj.metadata.labels = {}
+    end
+    obj.metadata.labels["test-label"] = "test"
+    impactedResource2 = {}
+    impactedResource2.operation = "patch"
+    impactedResource2.resource = obj
+    result = {}
+    result[1] = impactedResource1
+    result[2] = impactedResource2
+    return result`
 }
 
 func TestResourceProxyTestSuite(t *testing.T) {
