@@ -35,6 +35,64 @@ It's perfectly fine to run a mixed-mode scenario, where some of the agents run i
 
 If in doubt, it's recommended to start using the [managed mode](../concepts/agent-modes/managed.md) for your agents.
 
+## Argo CD Component Placement
+
+The *argocd-agent* architecture requires specific Argo CD components to be deployed on different clusters. Understanding this placement is crucial for a successful setup.
+
+### Control Plane Cluster Components
+
+The control plane cluster hosts the centralized Argo CD components that provide the unified interface and management capabilities:
+
+| Component | Purpose | Required |
+|-----------|---------|----------|
+| **argocd-server** | Web UI and API server | ✅ Yes |
+| **argocd-repo-server** | Git repository access and manifest generation | ✅ Yes |
+| **argocd-redis** | Caching and session storage | ✅ Yes |
+| **argocd-dex-server** | SSO and authentication (optional) | ⚠️ Optional |
+| **argocd-application-controller** | Application reconciliation | ❌ **Not supported** |
+| **argocd-applicationset-controller** | ApplicationSet management | ❌ **Out of scope** |
+
+!!! warning "Application Controller on Control Plane"
+    Running the Argo CD application controller on the control plane cluster is **not currently supported** and is out of scope for this documentation. The application controller must run on workload clusters where it can directly access and manage Kubernetes resources.
+
+### Workload Cluster Components
+
+Each workload cluster runs the components responsible for actual application deployment and resource management:
+
+| Component | Purpose | Required |
+|-----------|---------|----------|
+| **argocd-application-controller** | Reconciles applications and manages resources | ✅ Yes |
+| **argocd-repo-server** | Local Git repository access for the controller | ✅ Yes |
+| **argocd-redis** | Local caching for the application controller | ✅ Yes |
+| **argocd-server** | Web UI and API (runs on control plane) | ❌ No |
+| **argocd-dex-server** | Authentication (handled by control plane) | ❌ No |
+| **argocd-applicationset-controller** | ApplicationSet processing | ⚠️ Mode-dependent |
+
+!!! note "ApplicationSet Controller Placement"
+    - **Managed mode**: ApplicationSet controller is **not deployed** on workload clusters, as ApplicationSets are managed centrally
+    - **Autonomous mode**: ApplicationSet controller **may be deployed** if agents need to create their own ApplicationSets
+
+### Component Communication Flow
+
+```
+Control Plane Cluster                    Workload Cluster
+┌─────────────────────┐                 ┌─────────────────────┐
+│                     │                 │                     │
+│ ┌─────────────────┐ │                 │ ┌─────────────────┐ │
+│ │   argocd-server │ │◄────────────────┤ │     Agent       │ │
+│ │                 │ │  Resource Proxy │ │                 │ │
+│ └─────────────────┘ │                 │ └─────────────────┘ │
+│                     │                 │         │           │
+│ ┌─────────────────┐ │                 │         ▼           │
+│ │   Principal     │ │◄────────────────┤ ┌─────────────────┐ │
+│ │                 │ │   gRPC/mTLS     │ │ App Controller  │ │
+│ └─────────────────┘ │                 │ │                 │ │
+│                     │                 │ └─────────────────┘ │
+└─────────────────────┘                 └─────────────────────┘
+```
+
+The control plane components provide centralized management, while workload cluster components handle the actual deployment and reconciliation of applications in their respective environments.
+
 ## Requirements
 
 ### Clusters
