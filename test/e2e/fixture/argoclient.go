@@ -215,6 +215,50 @@ func (c *ArgoRestClient) RunResourceAction(app *v1alpha1.Application, action, gr
 	return nil
 }
 
+// ListResourceActions lists available actions for the given resource and returns their names.
+func (c *ArgoRestClient) ListResourceActions(app *v1alpha1.Application, group, version, kind, namespace, name string) ([]string, error) {
+	reqURL := c.url(
+		"appNamespace", app.Namespace,
+		"project", app.Spec.Project,
+		"namespace", namespace,
+		"resourceName", name,
+		"group", group,
+		"version", version,
+		"kind", kind,
+	)
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions", app.Name)
+
+	resp, err := c.Do(&http.Request{Method: http.MethodGet, URL: reqURL, Header: make(http.Header)})
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("expected HTTP 200, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Minimal struct to capture action names
+	var payload struct {
+		Actions []struct {
+			Name string `json:"name"`
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(payload.Actions))
+	for _, a := range payload.Actions {
+		names = append(names, a.Name)
+	}
+	return names, nil
+}
+
 // url constructs a URL for hitting an Argo CD API endpoint.
 func (c *ArgoRestClient) url(params ...string) *url.URL {
 	u := &url.URL{Scheme: "https", Host: c.endpoint}

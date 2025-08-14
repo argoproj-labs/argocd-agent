@@ -370,6 +370,18 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	}, 60*time.Second, 1*time.Second)
 	requires.NoError(err)
 
+	requires.Eventually(func() bool {
+		actions, err := argoClient.ListResourceActions(&app, "apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
+		requires.NoError(err)
+
+		for _, action := range actions {
+			if action == "test" {
+				return true
+			}
+		}
+		return false
+	}, 30*time.Second, 1*time.Second)
+
 	// Execute the action
 	err = argoClient.RunResourceAction(&app, "test",
 		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
