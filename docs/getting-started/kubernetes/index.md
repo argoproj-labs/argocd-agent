@@ -2,6 +2,9 @@
 
 This comprehensive guide will walk you through setting up argocd-agent on Kubernetes, including installing Argo CD on both the control plane and workload clusters, deploying the principal and agent components, and connecting your first agent using mutual TLS (mTLS) authentication.
 
+!!! info "Component Placement Overview"
+    Before proceeding, make sure you understand [which Argo CD components run where](../index.md#argo-cd-component-placement). This guide follows those placement requirements strictly.
+
 ## Prerequisites
 
 Before starting, ensure you have:
@@ -74,8 +77,11 @@ This configuration includes:
 - ✅ **argocd-dex-server** (SSO, if needed)  
 - ✅ **argocd-redis** (state storage)
 - ✅ **argocd-repo-server** (Git repository access)
-- ❌ **argocd-application-controller** (runs on workload clusters)
+- ❌ **argocd-application-controller** (runs on workload clusters only)
 - ❌ **argocd-applicationset-controller** (not yet supported)
+
+!!! warning "Critical Component Placement"
+    The **argocd-application-controller** must **never** be deployed on the control plane cluster. It can only run on workload clusters where it has direct access to manage Kubernetes resources. Running it on the control plane is not supported and is out of scope for this project.
 
 ### 1.3 Configure Apps-in-Any-Namespace
 
@@ -229,12 +235,15 @@ kubectl apply -n argocd \
 
 This configuration includes:
 
-- ✅ **argocd-application-controller** (reconciles applications)
-- ✅ **argocd-repo-server** (Git access)
-- ✅ **argocd-redis** (local state)
-- ❌ **argocd-server** (runs on control plane)
-- ❌ **argocd-dex-server** (runs on control plane)
+- ✅ **argocd-application-controller** (reconciles applications - **required on workload clusters**)
+- ✅ **argocd-repo-server** (Git access for the application controller)
+- ✅ **argocd-redis** (local state for the application controller)
+- ❌ **argocd-server** (runs on control plane only)
+- ❌ **argocd-dex-server** (runs on control plane only)
 - ❌ **argocd-applicationset-controller** (managed agents don't create their own ApplicationSets)
+
+!!! info "Why Application Controller Runs Here"
+    The **argocd-application-controller** runs on workload clusters because it needs direct access to the Kubernetes API to create, update, and delete resources. The argocd-agent facilitates communication between the control plane and these controllers, enabling centralized management while maintaining local execution.
 
 ## Step 5: Create and Connect Your First Agent
 
