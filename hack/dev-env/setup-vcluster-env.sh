@@ -69,43 +69,25 @@ check_for_openshift() {
 
 # wait_for_pods looks all Pods running in k8s context $1, and keeps waiting until running count == $2. 
 wait_for_pods() {
-
-    set +e
-
-    count=0
-    while [ true ]
-    do
-
-        echo "  -> Waiting for $1 pods to be running. Expecting $2 running pods."
-
-
-        kubectl get pods --context="$1" -n argocd
-        RUNNING_PODS=`kubectl get pods --context="$1" -n argocd | grep "Running" | wc -l | tr -d '[:space:]'`
-
-        if [[ "$RUNNING_PODS" == "$2" ]]; then
-            break
-        fi
-	echo "$RUNNING_PODS running."
-
-        count=$((count+1))
-        if [[ $count -eq 60 ]]; then
-            echo "  -> Timed out waiting for pods to be running."
-            echo "    -> Pods:"
-            kubectl describe pods --context="$1" -n argocd
-            echo "    -> Deployments:"
-            kubectl describe deployments --context="$1" -n argocd
-            echo "    -> Stateful Sets:"
-            kubectl describe statefulsets --context="$1" -n argocd
-            echo "  -> Exiting due to timeout waiting for pods to be running."
-            exit 1
-        fi
-
-        sleep 10
-    done
-
-    echo "  -> Done waiting for $1 pods."
-
-    set -e
+    context="$1"
+    component="$2"
+    case "$component" in
+    "principal")
+        kubectl --context $context -n argocd rollout status --watch deployments argocd-server
+        kubectl --context $context -n argocd rollout status --watch deployments argocd-repo-server
+        kubectl --context $context -n argocd rollout status --watch deployments argocd-dex-server
+        kubectl --context $context -n argocd rollout status --watch deployments argocd-redis
+        ;;
+    "agent")
+        kubectl --context $context -n argocd rollout status --watch statefulsets argocd-application-controller
+        kubectl --context $context -n argocd rollout status --watch deployments argocd-repo-server
+        kubectl --context $context -n argocd rollout status --watch deployments argocd-redis
+        ;;
+     *)
+        echo "Unknown component: $component"
+        exit 1
+        ;;
+     esac
 }
 
 
@@ -247,9 +229,9 @@ apply() {
     kubectl --context vcluster-agent-managed create ns agent-managed || true
 
     echo "-> Waiting for all the Argo CD/vCluster pods to be running on vclusters"
-    wait_for_pods vcluster-control-plane 5
-    wait_for_pods vcluster-agent-autonomous 4
-    wait_for_pods vcluster-agent-managed 4
+    wait_for_pods vcluster-control-plane principal
+    wait_for_pods vcluster-agent-autonomous agent
+    wait_for_pods vcluster-agent-managed agent
 
     echo "-> Service configuration on control plane"
     kubectl --context vcluster-control-plane -n argocd get services
