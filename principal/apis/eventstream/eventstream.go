@@ -132,7 +132,7 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 	}
 	c.start = time.Now()
 
-	s.clusterMgr.UpdateClusterConnectionInfo(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
+	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
 
 	c.logCtx.Info("An agent connected to the subscription stream")
 	return c, nil
@@ -144,7 +144,7 @@ func (s *Server) onDisconnect(c *client) {
 	defer c.lock.Unlock()
 	c.end = time.Now()
 
-	s.clusterMgr.UpdateClusterConnectionInfo(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
+	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
 
 	c.wg.Done()
 }

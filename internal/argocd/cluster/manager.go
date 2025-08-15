@@ -133,7 +133,7 @@ func (m *Manager) Start() error {
 	// To avoid this we need to re-save same info before cache is expired.
 	go func() {
 		for {
-			go m.refreshClusterConnectionInfo()
+			go m.refreshClusterInfo()
 			time.Sleep(3 * time.Minute)
 		}
 	}()

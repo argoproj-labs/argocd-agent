@@ -3,9 +3,13 @@ package agent
 import (
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -370,4 +374,52 @@ func Test_addAppProjectDeletionToQueue(t *testing.T) {
 		assert.Equal(t, event.Delete.String(), ev.Type())
 		require.False(t, a.projectManager.IsManaged("test-project"))
 	})
+}
+
+func Test_addClusterCacheInfoUpdateToQueue(t *testing.T) {
+	a := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	miniRedis, err := miniredis.Run()
+	require.NoError(t, err)
+	require.NotNil(t, miniRedis)
+	defer miniRedis.Close()
+	err = WithRedisHost(miniRedis.Addr())(a)
+	require.NoError(t, err)
+
+	// Create the required Redis secret
+	secret := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{Name: common.RedisInitialCredentials},
+		Data:       map[string][]byte{common.RedisInitialCredentialsKey: []byte("password123")},
+	}
+	_, err = a.kubeClient.Clientset.CoreV1().Secrets("argocd").Create(a.context, secret, v1.CreateOptions{})
+	require.NoError(t, err)
+
+	// First populate the cache with dummy data
+	clusterMgr, err := cluster.NewManager(a.context, a.namespace, miniRedis.Addr(), cacheutil.RedisCompressionGZip, a.kubeClient.Clientset)
+	require.NoError(t, err)
+	err = clusterMgr.MapCluster("test-agent", &v1alpha1.Cluster{
+		Name:   "test-cluster",
+		Server: "https://kubernetes.default.svc",
+	})
+	require.NoError(t, err)
+
+	// Set dummy cluster cache stats
+	clusterMgr.SetClusterCacheStats(v1alpha1.ClusterInfo{
+		ApplicationsCount: 5,
+		CacheInfo: v1alpha1.ClusterCacheInfo{
+			APIsCount:      10,
+			ResourcesCount: 100,
+		},
+	}, "test-agent")
+
+	// Should not have an event in queue
+	require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+
+	// Add a cluster cache info update event to the queue
+	a.addClusterCacheInfoUpdateToQueue("periodic_sync")
+
+	// Should have an event in queue
+	require.Equal(t, 1, a.queues.SendQ(defaultQueueName).Len())
 }

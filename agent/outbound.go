@@ -15,11 +15,16 @@
 package agent
 
 import (
+	"errors"
+	"time"
+
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -105,6 +110,13 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 		WithField(logfields.SendQueueLen, q.Len()).
 		WithField(logfields.SendQueueName, defaultQueueName).
 		Debugf("Added event of type %s to send queue", eventType)
+
+	// When sync status changed to Synced, trigger a cluster cache info update event
+	// so that the principal can be informed of the cache update.
+	if a.mode == types.AgentModeManaged && old.Status.Sync.Status != new.Status.Sync.Status &&
+		new.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced {
+		go a.addClusterCacheInfoUpdateToQueue("application_synced")
+	}
 }
 
 // addAppDeletionToQueue processes an application delete event originating from
@@ -260,4 +272,51 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 
 	q.Add(a.emitter.AppProjectEvent(event.Delete, appProject))
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject delete event to send queue")
+}
+
+// addClusterCacheInfoUpdateToQueue processes a cluster cache info update event
+// and puts it in the send queue.
+func (a *Agent) addClusterCacheInfoUpdateToQueue(reason string) {
+	logCtx := log().WithFields(logrus.Fields{
+		"event":  "addClusterCacheInfoUpdateToQueue",
+		"reason": reason,
+	})
+
+	clusterServer := "https://kubernetes.default.svc"
+	var clusterInfo *v1alpha1.ClusterInfo
+	var err error
+
+	// If the reason is application_synced, application_created or application_deleted,
+	// we wait for 20 seconds to ensure that updated info is sent to principal.
+	// It is because the cluster cache is not updated immediately by Argo CD.
+	// Instead it is updated in next clusterInfoUpdater cycle.
+	if reason != "periodic_sync" {
+		time.Sleep(20 * time.Second)
+	}
+
+	// Get the updated cluster info from agent's cache.
+	clusterInfo, err = cluster.GetClusterInfo(a.context, a.kubeClient.Clientset, a.namespace, clusterServer, a.redisProxyMsgHandler.redisAddress, cacheutil.RedisCompressionGZip)
+	if err != nil {
+		if !errors.Is(err, cacheutil.ErrCacheMiss) {
+			logCtx.WithError(err).Errorf("Failed to get cluster info from cache")
+		}
+		return
+	}
+
+	// Send the event to principal to update the cluster cache info.
+	q := a.queues.SendQ(defaultQueueName)
+	if q != nil {
+		clusterInfoEvent := a.emitter.ClusterCacheInfoUpdateEvent(event.ClusterCacheInfoUpdate, clusterInfo)
+		q.Add(clusterInfoEvent)
+		logCtx.WithFields(logrus.Fields{
+			"sendq_len":         q.Len(),
+			"sendq_name":        defaultQueueName,
+			"applicationsCount": clusterInfo.ApplicationsCount,
+			"apisCount":         clusterInfo.CacheInfo.APIsCount,
+			"resourcesCount":    clusterInfo.CacheInfo.ResourcesCount,
+			"reason":            reason,
+		}).Infof("Added ClusterCacheInfoUpdate event to send queue")
+	} else {
+		logCtx.Error("Default queue not found, unable to send ClusterCacheInfoUpdate event")
+	}
 }
