@@ -182,9 +182,21 @@ func (c *ArgoRestClient) RunResourceAction(app *v1alpha1.Application, action, gr
 		"version", version,
 		"kind", kind,
 	)
-	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions", app.Name)
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions/v2", app.Name)
 
-	reqBody, err := json.Marshal(action)
+	// Based on Argo CD Swagger: https://cd.apps.argoproj.io/swagger-ui#tag/ApplicationService/operation/ApplicationService_RunResourceActionV2
+	requestBody := map[string]interface{}{
+		"action":       action,
+		"appNamespace": app.Namespace,
+		"group":        group,
+		"kind":         kind,
+		"name":         name,
+		"namespace":    namespace,
+		"project":      app.Spec.Project,
+		"resourceName": name,
+		"version":      version,
+	}
+	reqBody, err := json.Marshal(requestBody)
 	if err != nil {
 		return err
 	}
