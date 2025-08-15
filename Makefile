@@ -30,6 +30,8 @@ GO_BIN_DIR=$(shell go env GOPATH)/bin
 GIT_COMMIT=$(shell git rev-parse HEAD)
 VERSION=$(shell cat VERSION)
 
+ARGOCD_AGENT_IN_CLUSTER?=${ARGOCD_AGENT_IN_CLUSTER}
+
 VERSION_PACKAGE=github.com/argoproj-labs/argocd-agent/internal/version
 override LDFLAGS += -extldflags "-static"
 override LDFLAGS += \
@@ -48,8 +50,14 @@ build: argocd-agent cli
 .PHONY: setup-e2e
 setup-e2e: cli
 	./hack/dev-env/setup-vcluster-env.sh create
+ifneq (${ARGOCD_AGENT_IN_CLUSTER},'')
+	./hack/dev-env/deploy.sh deploy
+endif
 	./hack/dev-env/gen-creds.sh
 	./hack/dev-env/create-agent-config.sh
+ifneq (${ARGOCD_AGENT_IN_CLUSTER},'')
+	./hack/dev-env/restart-all.sh
+endif
 
 .PHONY: start-e2e
 start-e2e: cli install-goreman
