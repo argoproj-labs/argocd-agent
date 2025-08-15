@@ -51,6 +51,7 @@ setup-e2e: cli
 	./hack/dev-env/gen-creds.sh
 	./hack/dev-env/create-agent-config.sh
 
+.PHONY: teardown-e2e
 teardown-e2e:
 	./hack/dev-env/setup-vcluster-env.sh delete
 
