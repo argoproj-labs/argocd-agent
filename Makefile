@@ -48,8 +48,14 @@ build: argocd-agent cli
 .PHONY: setup-e2e
 setup-e2e: cli
 	./hack/dev-env/setup-vcluster-env.sh create
+ifneq (${ARGOCD_AGENT_IN_CLUSTER},'')
+	./hack/dev-env/deploy.sh deploy
+endif
 	./hack/dev-env/gen-creds.sh
 	./hack/dev-env/create-agent-config.sh
+ifneq (${ARGOCD_AGENT_IN_CLUSTER},'')
+	./hack/dev-env/restart-all.sh
+endif
 
 .PHONY: start-e2e
 start-e2e: cli install-goreman
