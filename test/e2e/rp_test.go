@@ -370,9 +370,25 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	}, 60*time.Second, 1*time.Second)
 	requires.NoError(err)
 
-	// Execute the action
-	err = argoClient.RunResourceAction(&app, "test",
+	requires.Eventually(func() bool {
+		actions, err := argoClient.ListResourceActions(&app, "apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
+		requires.NoError(err)
+
+		for _, action := range actions {
+			if action == "Test" {
+				return true
+			}
+		}
+		return false
+	}, 30*time.Second, 1*time.Second)
+
+	argocdCM := &corev1.ConfigMap{}
+	err = suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: "argocd"}, argocdCM, metav1.GetOptions{})
+	requires.NoError(err)
+
+	err = argoClient.RunResourceAction(&app, "Test",
 		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
+
 	requires.NoError(err)
 
 	// Check if a new resource is created after running the resource action
@@ -403,38 +419,38 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 }
 
 func getCustomResourceAction() string {
-	return `discovery.lua: |
+	return `  discovery.lua: |
     actions = {}
-    actions["test"] = {}
+    actions["Test"] = {}
     return actions
-definitions:
-  - name: test
-    action.lua: |
-      -- Create a new ConfigMap
-      cm = {}
-      cm.apiVersion = "v1"
-      cm.kind = "ConfigMap"
-      cm.metadata = {}
-      cm.metadata.name = "test-cm"
-      cm.metadata.namespace = obj.metadata.namespace     
-      cm.data = {}
-      cm.data.testKey = "testValue"
-      impactedResource1 = {}
-      impactedResource1.operation = "create"
-      impactedResource1.resource = cm
-      	  
-      -- Patch the original Object
-      if obj.metadata.labels == nil then
-        obj.metadata.labels = {}
-      end
-      obj.metadata.labels["test-label"] = "test"
-      impactedResource2 = {}
-      impactedResource2.operation = "patch"
-      impactedResource2.resource = obj
-      result = {}
-      result[1] = impactedResource1
-      result[2] = impactedResource2
-      return result`
+  definitions:
+    - name: Test
+      action.lua: |
+        -- Create a new ConfigMap
+        cm = {}
+        cm.apiVersion = "v1"
+        cm.kind = "ConfigMap"
+        cm.metadata = {}
+        cm.metadata.name = "test-cm"
+        cm.metadata.namespace = obj.metadata.namespace     
+        cm.data = {}
+        cm.data.testKey = "testValue"
+        impactedResource1 = {}
+        impactedResource1.operation = "create"
+        impactedResource1.resource = cm
+        
+        -- Patch the original Object
+        if obj.metadata.labels == nil then
+          obj.metadata.labels = {}
+        end
+        obj.metadata.labels["test-label"] = "test"
+        impactedResource2 = {}
+        impactedResource2.operation = "patch"
+        impactedResource2.resource = obj
+        result = {}
+        result[1] = impactedResource1
+        result[2] = impactedResource2
+        return result`
 }
 
 func TestResourceProxyTestSuite(t *testing.T) {

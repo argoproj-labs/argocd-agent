@@ -182,9 +182,21 @@ func (c *ArgoRestClient) RunResourceAction(app *v1alpha1.Application, action, gr
 		"version", version,
 		"kind", kind,
 	)
-	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions", app.Name)
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions/v2", app.Name)
 
-	reqBody, err := json.Marshal(action)
+	// Based on Argo CD Swagger: https://cd.apps.argoproj.io/swagger-ui#tag/ApplicationService/operation/ApplicationService_RunResourceActionV2
+	requestBody := map[string]interface{}{
+		"action":       action,
+		"appNamespace": app.Namespace,
+		"group":        group,
+		"kind":         kind,
+		"name":         name,
+		"namespace":    namespace,
+		"project":      app.Spec.Project,
+		"resourceName": name,
+		"version":      version,
+	}
+	reqBody, err := json.Marshal(requestBody)
 	if err != nil {
 		return err
 	}
@@ -213,6 +225,50 @@ func (c *ArgoRestClient) RunResourceAction(app *v1alpha1.Application, action, gr
 	}
 
 	return nil
+}
+
+// ListResourceActions lists available actions for the given resource and returns their names.
+func (c *ArgoRestClient) ListResourceActions(app *v1alpha1.Application, group, version, kind, namespace, name string) ([]string, error) {
+	reqURL := c.url(
+		"appNamespace", app.Namespace,
+		"project", app.Spec.Project,
+		"namespace", namespace,
+		"resourceName", name,
+		"group", group,
+		"version", version,
+		"kind", kind,
+	)
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions", app.Name)
+
+	resp, err := c.Do(&http.Request{Method: http.MethodGet, URL: reqURL, Header: make(http.Header)})
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("expected HTTP 200, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Minimal struct to capture action names
+	var payload struct {
+		Actions []struct {
+			Name string `json:"name"`
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(payload.Actions))
+	for _, a := range payload.Actions {
+		names = append(names, a.Name)
+	}
+	return names, nil
 }
 
 // url constructs a URL for hitting an Argo CD API endpoint.
