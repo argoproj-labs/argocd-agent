@@ -51,6 +51,9 @@ setup-e2e: cli
 	./hack/dev-env/gen-creds.sh
 	./hack/dev-env/create-agent-config.sh
 
+teardown-e2e:
+	./hack/dev-env/setup-vcluster-env.sh delete
+
 .PHONY: start-e2e
 start-e2e: cli install-goreman
 	./hack/dev-env/start-e2e.sh
