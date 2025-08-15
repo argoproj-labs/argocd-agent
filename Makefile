@@ -30,8 +30,6 @@ GO_BIN_DIR=$(shell go env GOPATH)/bin
 GIT_COMMIT=$(shell git rev-parse HEAD)
 VERSION=$(shell cat VERSION)
 
-ARGOCD_AGENT_IN_CLUSTER?=${ARGOCD_AGENT_IN_CLUSTER}
-
 VERSION_PACKAGE=github.com/argoproj-labs/argocd-agent/internal/version
 override LDFLAGS += -extldflags "-static"
 override LDFLAGS += \
