@@ -78,12 +78,14 @@ wait_for_pods() {
 
         echo "  -> Waiting for $1 pods to be running. Expecting $2 running pods."
 
-        kubectl get pods --context="$1" -A
-        RUNNING_PODS=`kubectl get pods --context="$1" -A | grep "Running" | wc -l | tr -d '[:space:]'`
+
+        kubectl get pods --context="$1" -n argocd
+        RUNNING_PODS=`kubectl get pods --context="$1" -n argocd | grep "Running" | wc -l | tr -d '[:space:]'`
 
         if [[ "$RUNNING_PODS" == "$2" ]]; then
             break
         fi
+	echo "$RUNNING_PODS running."
 
         count=$((count+1))
         if [[ $count -eq 60 ]]; then
