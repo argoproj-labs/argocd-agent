@@ -377,6 +377,11 @@ func (s *Server) processRedisEventResponse(ctx context.Context, logCtx *logrus.E
 		// PushFromSubscribe is asynchronous, so we can't use event id tracker to find the corresponding channel.
 		// - We instead use connection id, which maps directly to the connection from Argo CD
 		trAgent, evChan := s.redisProxy.ConnectionIDTracker.Tracked(resReq.ConnectionUUID)
+		if evChan == nil {
+			logCtx.Debug("connection UUID is no longer in connectionIDTracker, likely the principal connection has closed")
+			return nil
+		}
+
 		if trAgent != agentName {
 			err := fmt.Errorf("agent mismap between event and tracking for PushFromSubscribe: '%s' '%s' '%s'", trAgent, agentName, resReq.ConnectionUUID)
 			return err
