@@ -160,7 +160,7 @@ func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alph
 		}
 		return created, nil
 	}
-	return nil, nil
+	return nil, err
 }
 
 func (m *AppProjectManager) Get(ctx context.Context, name, namespace string) (*v1alpha1.AppProject, error) {
