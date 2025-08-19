@@ -458,6 +458,11 @@ func (rp *RedisProxy) handleAgentSubscribe(connState *connectionState, channelNa
 		// Forward all events from 'subscriptionChannel' to 'connectionUUIDEventsChannel'
 		go func() {
 			defer close(connState.connectionUUIDEventsChannel)
+			defer func() {
+				if err := rp.ConnectionIDTracker.StopTracking(connState.connUUID); err != nil {
+					logCtx.WithError(err).Error("connection ID tracker reported an unexpected error. At this stage of the goroutine lifecycle, the resource should still necessarily be tracked.")
+				}
+			}()
 
 			for {
 				select {
