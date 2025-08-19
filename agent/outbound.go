@@ -55,6 +55,11 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 		return
 	}
 
+	// In autonomous mode, drop ownerReferences to avoid propagating them to the control-plane
+	if a.mode.IsAutonomous() {
+		app = app.DeepCopy()
+		app.OwnerReferences = nil
+	}
 	q.Add(a.emitter.ApplicationEvent(event.Create, app))
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).WithField(logfields.SendQueueName, defaultQueueName).Debugf("Added app create event to send queue")
 }
@@ -99,6 +104,11 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 		eventType = event.StatusUpdate
 	}
 
+	// In autonomous mode, drop ownerReferences to avoid propagating them to the control-plane
+	if a.mode.IsAutonomous() {
+		new = new.DeepCopy()
+		new.OwnerReferences = nil
+	}
 	q.Add(a.emitter.ApplicationEvent(eventType, new))
 	// q.Add(ev)
 	logCtx.
@@ -185,6 +195,11 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 		return
 	}
 
+	// In autonomous mode, drop ownerReferences to avoid propagating them to the control-plane
+	if a.mode.IsAutonomous() {
+		appProject = appProject.DeepCopy()
+		appProject.OwnerReferences = nil
+	}
 	q.Add(a.emitter.AppProjectEvent(event.Create, appProject))
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject create event to send queue")
 }
@@ -223,6 +238,11 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 		return
 	}
 
+	// In autonomous mode, drop ownerReferences to avoid propagating them to the control-plane
+	if a.mode.IsAutonomous() {
+		new = new.DeepCopy()
+		new.OwnerReferences = nil
+	}
 	q.Add(a.emitter.AppProjectEvent(event.SpecUpdate, new))
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject spec update event to send queue")
 }
