@@ -48,6 +48,14 @@ func Test_CreateApplication(t *testing.T) {
 	app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{
 		Name:      "test",
 		Namespace: "default",
+		OwnerReferences: []v1.OwnerReference{
+			{
+				APIVersion: "argoproj.io/v1alpha1",
+				Kind:       "ApplicationSet",
+				Name:       "owner",
+				UID:        "uid-1",
+			},
+		},
 	}}
 	t.Run("Discard event in unmanaged mode", func(t *testing.T) {
 		napp, err := a.createApplication(app)
@@ -72,6 +80,7 @@ func Test_CreateApplication(t *testing.T) {
 		napp, err := a.createApplication(app)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
+		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
 	})
 
 }
@@ -87,6 +96,14 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 	incomingApp := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{
 		Name:      "test",
 		Namespace: "argocd",
+		OwnerReferences: []v1.OwnerReference{
+			{
+				APIVersion: "argoproj.io/v1alpha1",
+				Kind:       "ApplicationSet",
+				Name:       "owner",
+				UID:        "uid-1",
+			},
+		},	
 	}}
 
 	// oldApp is the app that is already present on the agent
@@ -540,6 +557,14 @@ func Test_UpdateApplication(t *testing.T) {
 			Name:            "test",
 			Namespace:       "default",
 			ResourceVersion: "12345",
+			OwnerReferences: []v1.OwnerReference{
+				{
+					APIVersion: "argoproj.io/v1alpha1",
+					Kind:       "ApplicationSet",
+					Name:       "owner",
+					UID:        "uid-1",
+				},
+			},
 		}}
 	t.Run("Discard event because version has been seen already", func(t *testing.T) {
 		defer a.appManager.ClearIgnored()
@@ -561,6 +586,7 @@ func Test_UpdateApplication(t *testing.T) {
 		napp, err := a.updateApplication(app)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
+		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
 	})
 
 	t.Run("Update application using update in managed mode", func(t *testing.T) {
@@ -575,6 +601,7 @@ func Test_UpdateApplication(t *testing.T) {
 		napp, err := a.updateApplication(app)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
+		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
 	})
 
 	t.Run("Update application using patch in autonomous mode", func(t *testing.T) {
@@ -620,6 +647,14 @@ func Test_CreateAppProject(t *testing.T) {
 		ObjectMeta: v1.ObjectMeta{
 			Name:      "test",
 			Namespace: "default",
+			OwnerReferences: []v1.OwnerReference{
+				{
+					APIVersion: "argoproj.io/v1alpha1",
+					Kind:       "Application",
+					Name:       "owner",
+					UID:        "uid-1",
+				},
+			},
 		}, Spec: v1alpha1.AppProjectSpec{
 			SourceNamespaces: []string{"default", "argocd"},
 		},
@@ -648,6 +683,7 @@ func Test_CreateAppProject(t *testing.T) {
 		napp, err := a.createAppProject(project)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
+		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app project")
 	})
 
 	t.Run("Create appproject", func(t *testing.T) {
@@ -658,6 +694,7 @@ func Test_CreateAppProject(t *testing.T) {
 		napp, err := a.createAppProject(project)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
+		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app project")
 	})
 
 }
@@ -674,6 +711,14 @@ func Test_UpdateAppProject(t *testing.T) {
 			Name:            "test",
 			Namespace:       "argocd",
 			ResourceVersion: "12345",
+			OwnerReferences: []v1.OwnerReference{
+				{
+					APIVersion: "argoproj.io/v1alpha1",
+					Kind:       "Application",
+					Name:       "owner",
+					UID:        "uid-1",
+				},
+			},
 		},
 		Spec: v1alpha1.AppProjectSpec{
 			SourceNamespaces: []string{"default", "argocd"},
@@ -693,6 +738,7 @@ func Test_UpdateAppProject(t *testing.T) {
 		napp, err := a.updateAppProject(project)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
+		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app project")
 	})
 
 	t.Run("Create the appproject if it doesn't exist", func(t *testing.T) {
@@ -703,6 +749,7 @@ func Test_UpdateAppProject(t *testing.T) {
 		napp, err := a.updateAppProject(project)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
+		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app project")
 	})
 
 }
