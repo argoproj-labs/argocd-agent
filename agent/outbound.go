@@ -99,7 +99,6 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 		eventType = event.StatusUpdate
 	}
 
-
 	q.Add(a.emitter.ApplicationEvent(eventType, new))
 	// q.Add(ev)
 	logCtx.
@@ -186,7 +185,6 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 		return
 	}
 
-
 	q.Add(a.emitter.AppProjectEvent(event.Create, appProject))
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject create event to send queue")
 }
@@ -224,7 +222,6 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 		logCtx.Error("Default queue disappeared!")
 		return
 	}
-
 
 	q.Add(a.emitter.AppProjectEvent(event.SpecUpdate, new))
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject spec update event to send queue")
