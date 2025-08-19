@@ -6,7 +6,19 @@ This section of the documentation gives a broad overview about *argocd-agent*'s 
 
 In the classical Argo CD multi-cluster architecture, scaling out can become a tedious and difficult task. Usually, scaling out comes with a couple of generic challenges, as well as environment specific ones.
 
-**TODO**: Describe the problem in more detail here.
+The main challenges with traditional multi-cluster Argo CD deployments include:
+
+**Resource consumption grows exponentially**: As the number of managed clusters increases, the central Argo CD instance must maintain persistent connections, cache cluster resources, and perform continuous resource watching for every cluster. This leads to significant memory consumption, CPU utilization, and network bandwidth requirements that scale poorly.
+
+**Complex connection management**: Each workload cluster requires dedicated network ingress configuration, authentication credentials, and firewall rules from the central Argo CD instance. Managing hundreds or thousands of these connections becomes operationally complex and error-prone.
+
+**Single point of failure**: The central Argo CD instance becomes a critical dependency for all workload clusters. Any maintenance, outage, or performance issues with the control plane affects GitOps operations across the entire multi-cluster environment.
+
+**Network dependency and latency**: All GitOps operations depend on consistent, low-latency connectivity between the control plane and workload clusters. Network partitions, high latency, or bandwidth constraints can halt application deployments and synchronization across the fleet.
+
+**Security surface area**: The control plane must store and manage credentials for every workload cluster, creating a concentrated security risk. Additionally, workload clusters must expose their Kubernetes API endpoints to the control plane, increasing the attack surface.
+
+**Geographic and infrastructure diversity**: Managing clusters across different cloud providers, regions, edge locations, or air-gapped environments requires complex networking setups and often results in suboptimal performance due to network constraints.
 
 ## Architectural diagram
 

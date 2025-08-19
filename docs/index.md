@@ -52,6 +52,8 @@ For existing Argo CD users considering migration, check out our [Migration Guide
 
 ## Community and Support
 
+The argocd-agent project lives and thrives through its community. We are deeply grateful for any contributions and participation, whether you're reporting bugs, suggesting features, improving documentation, or contributing code. Every voice matters in shaping the future of distributed GitOps, and we welcome contributors of all experience levels to join us in building something meaningful together.
+
 - **[GitHub Discussions](https://github.com/argoproj-labs/argocd-agent/discussions)** - Ask questions, share ideas, and connect with other users
 - **[#argo-cd-agent](https://cloud-native.slack.com/archives/C07L5SX6A9J)** on CNCF Slack - Real-time community chat
 - **[Issue Tracker](https://github.com/argoproj-labs/argocd-agent/issues)** - Bug reports and feature requests
@@ -65,4 +67,4 @@ We assume familiarity with Argo CD concepts, Kubernetes, and GitOps principles. 
 
 ## License
 
-argocd-agent is open source software released under the [Apache 2.0 License](https://github.com/argoproj-labs/argocd-agent/blob/main/LICENSE).
+argocd-agent is Free and Open Source software released under the [Apache 2.0 License](https://github.com/argoproj-labs/argocd-agent/blob/main/LICENSE).
