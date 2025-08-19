@@ -586,7 +586,7 @@ func Test_UpdateApplication(t *testing.T) {
 		napp, err := a.updateApplication(app)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
-		require.Empty(t, app.OwnerReferences, "OwnerReferences should not be applied on managed app")
+		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
 	})
 
 	t.Run("Update application using update in managed mode", func(t *testing.T) {
@@ -601,7 +601,7 @@ func Test_UpdateApplication(t *testing.T) {
 		napp, err := a.updateApplication(app)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
-		require.Empty(t, app.OwnerReferences, "OwnerReferences should not be applied on managed app")
+		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
 	})
 
 	t.Run("Update application using patch in autonomous mode", func(t *testing.T) {
