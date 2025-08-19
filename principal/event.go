@@ -154,6 +154,10 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return fmt.Errorf("could not prefix project name: %w", err)
 		}
 
+		// In autonomous mode, Drop ownerReferences from the agent-side resource
+		// Having ownerReferences can lead to garbage-collection of the resource on the control plane, if owner is missing
+		incoming.OwnerReferences = nil
+
 		// Set the destination name to the cluster mapping for the agent
 		cluster := s.clusterMgr.Mapping(agentName)
 		if cluster == nil {
@@ -297,6 +301,11 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 		}
 		// Set the source namespaces to allow the agent's namespace on the principal
 		incoming.Spec.SourceNamespaces = []string{agentName}
+
+		// In autonomous mode, Drop ownerReferences from the incoming resource
+		// This can lead to garbage-collection of the resource on the control plane, if owner is missing For example, AppSet
+		incoming.OwnerReferences = nil
+
 		// Set all destinations to point to the agent cluster
 		for i := range incoming.Spec.Destinations {
 			incoming.Spec.Destinations[i].Name = agentName

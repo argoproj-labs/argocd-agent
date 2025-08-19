@@ -104,12 +104,15 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 
 	var exists, sourceUIDMatch bool
 
-	// Source UID annotation is not present for apps on the autonomous agent since it is the source of truth.
 	if a.mode == types.AgentModeManaged {
+		// Source UID annotation is not present for apps on the autonomous agent since it is the source of truth.
 		exists, sourceUIDMatch, err = a.appManager.CompareSourceUID(a.context, incomingApp)
 		if err != nil {
 			return fmt.Errorf("failed to compare the source UID of app: %w", err)
 		}
+		// In managed mode, Drop ownerReferences from the incoming resource
+		// This can lead to garbage-collection of the resource on the agent cluster, if referenced owner is missing. For example, AppSet
+		incomingApp.OwnerReferences = nil
 	}
 
 	switch ev.Type() {
@@ -193,6 +196,12 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 	exists, sourceUIDMatch, err := a.projectManager.CompareSourceUID(a.context, incomingAppProject)
 	if err != nil {
 		return fmt.Errorf("failed to validate source UID of appProject: %w", err)
+	}
+
+	if a.mode == types.AgentModeManaged {
+		// In managed mode, Drop ownerReferences from the incoming resource
+		// This can lead to garbage-collection of the resource on the agent cluster, if referenced owner is missing. For example, AppSet
+		incomingAppProject.OwnerReferences = nil
 	}
 
 	switch ev.Type() {

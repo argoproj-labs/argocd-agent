@@ -146,6 +146,14 @@ func Test_CreateEvents(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test",
 				Namespace: "argocd",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "argoproj.io/v1alpha1",
+						Kind:       "ApplicationSet",
+						Name:       "test",
+						UID:        "test",
+					},
+				},
 			},
 			Spec: v1alpha1.ApplicationSpec{
 				Project: "test",
@@ -183,6 +191,8 @@ func Test_CreateEvents(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, napp)
 		assert.Equal(t, "HEAD", napp.Spec.Source.TargetRevision)
+		// OwnerReferences should be dropped on the control-plane application
+		assert.Empty(t, napp.OwnerReferences)
 		// Check that the destination is set to the cluster mapping
 		assert.Equal(t, "foo", napp.Spec.Destination.Name)
 		assert.Equal(t, "", napp.Spec.Destination.Server)
@@ -200,6 +210,14 @@ func Test_CreateEvents(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test",
 				Namespace: "argocd",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "argoproj.io/v1alpha1",
+						Kind:       "ApplicationSet",
+						Name:       "test",
+						UID:        "test",
+					},
+				},
 			},
 			Spec: v1alpha1.ApplicationSpec{
 				Source: &v1alpha1.ApplicationSource{
@@ -219,6 +237,7 @@ func Test_CreateEvents(t *testing.T) {
 		}
 		exapp := app.DeepCopy()
 		exapp.Namespace = "foo"
+		exapp.OwnerReferences = nil
 		fac := kube.NewKubernetesFakeClientWithApps(exapp)
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
@@ -237,6 +256,7 @@ func Test_CreateEvents(t *testing.T) {
 		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
 		assert.NoError(t, err)
 		require.NotNil(t, napp)
+		assert.Empty(t, napp.OwnerReferences)
 		// Check that the destination is set to the cluster mapping
 		assert.Equal(t, "foo", napp.Spec.Destination.Name)
 		assert.Equal(t, "", napp.Spec.Destination.Server)
@@ -250,6 +270,14 @@ func Test_UpdateEvents(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test",
 				Namespace: "argocd",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "argoproj.io/v1alpha1",
+						Kind:       "ApplicationSet",
+						Name:       "test",
+						UID:        "test",
+					},
+				},
 			},
 			Spec: v1alpha1.ApplicationSpec{
 				Project: "default",
@@ -308,6 +336,8 @@ func Test_UpdateEvents(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, napp)
 		assert.Equal(t, "HEAD", napp.Spec.Source.TargetRevision)
+		// OwnerReferences should be dropped on spec update in autonomous mode
+		assert.Empty(t, napp.OwnerReferences)
 		// Check that the destination is set to the cluster mapping
 		assert.Equal(t, "foo", napp.Spec.Destination.Name)
 		assert.Equal(t, "", napp.Spec.Destination.Server)
@@ -504,6 +534,14 @@ func Test_processAppProjectEvent(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test",
 				Namespace: "argocd",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "argoproj.io/v1alpha1",
+						Kind:       "ApplicationSet",
+						Name:       "owner",
+						UID:        "uid-1",
+					},
+				},
 			},
 			Spec: v1alpha1.AppProjectSpec{
 				SourceRepos: []string{"foo"},
@@ -544,6 +582,8 @@ func Test_processAppProjectEvent(t *testing.T) {
 		createdProject, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), projName, v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, projName, createdProject.Name)
+		// OwnerReferences should be dropped on the control-plane appProject
+		assert.Empty(t, createdProject.OwnerReferences)
 
 		// Check that SourceNamespaces is set to the agent name
 		assert.Equal(t, []string{"foo"}, createdProject.Spec.SourceNamespaces)
@@ -579,6 +619,8 @@ func Test_processAppProjectEvent(t *testing.T) {
 		ev.SetType(event.SpecUpdate.String())
 
 		updatedProject := project.DeepCopy()
+		// include owner refs in update payload and ensure they are dropped
+		updatedProject.OwnerReferences = []v1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "ApplicationSet", Name: "owner2", UID: "uid-2"}}
 		updatedProject.Spec.Description = "updated"
 		updatedProject.Name = "test" // Use original name (will be prefixed)
 		ev.SetData(cloudevents.ApplicationJSON, updatedProject)
@@ -601,6 +643,8 @@ func Test_processAppProjectEvent(t *testing.T) {
 		got, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("argocd").Get(context.TODO(), projName, v1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, updatedProject.Spec.Description, got.Spec.Description)
+		// OwnerReferences should be dropped on update as well
+		assert.Empty(t, got.OwnerReferences)
 
 		// Check that SourceNamespaces is set to the agent name
 		assert.Equal(t, []string{"foo"}, got.Spec.SourceNamespaces)
