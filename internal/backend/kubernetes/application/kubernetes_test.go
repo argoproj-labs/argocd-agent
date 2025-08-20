@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,7 @@ import (
 	"github.com/wI2L/jsondiff"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 func Test_NewKubernetes(t *testing.T) {
@@ -110,19 +112,57 @@ func Test_Create(t *testing.T) {
 
 func Test_Get(t *testing.T) {
 	apps := mkApps()
+	ctx := context.TODO()
 	t.Run("Get existing app", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
-		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Get(context.TODO(), "app", "ns1")
+
+		inf, err := informer.NewInformer[*v1alpha1.Application](
+			ctx,
+			informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, options v1.ListOptions) (runtime.Object, error) {
+				return fakeAppC.ArgoprojV1alpha1().Applications("").List(ctx, options)
+			}),
+			informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
+				return fakeAppC.ArgoprojV1alpha1().Applications("").Watch(ctx, options)
+			}),
+		)
+		require.NoError(t, err)
+
+		go inf.Start(ctx)
+		require.NoError(t, inf.WaitForSync(ctx))
+
+		// Create the backend with the informer
+		backend := NewKubernetesBackend(fakeAppC, "", inf, true)
+
+		app, err := backend.Get(ctx, "app", "ns1")
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
+		assert.Equal(t, "app", app.Name)
+		assert.Equal(t, "ns1", app.Namespace)
+
 	})
 	t.Run("Get non-existing app", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
-		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Get(context.TODO(), "foo", "ns1")
-		assert.ErrorContains(t, err, "not found")
-		assert.Equal(t, &v1alpha1.Application{}, app)
+		inf, err := informer.NewInformer[*v1alpha1.Application](
+			ctx,
+			informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, options v1.ListOptions) (runtime.Object, error) {
+				return fakeAppC.ArgoprojV1alpha1().Applications("").List(ctx, options)
+			}),
+			informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
+				return fakeAppC.ArgoprojV1alpha1().Applications("").Watch(ctx, options)
+			}),
+		)
+		require.NoError(t, err)
+		// Start the informer
+		go inf.Start(ctx)
+		require.NoError(t, inf.WaitForSync(ctx))
+
+		// Create the backend with the informer
+		backend := NewKubernetesBackend(fakeAppC, "", inf, true)
+
+		app, err := backend.Get(ctx, "nonexistent", "ns1")
+		require.Error(t, err)
+		require.Nil(t, app)
+
 	})
 }
 
