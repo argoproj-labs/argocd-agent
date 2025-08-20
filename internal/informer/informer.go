@@ -28,6 +28,7 @@ import (
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
@@ -56,6 +57,9 @@ type Informer[T runtime.Object] struct {
 	evHandler cache.ResourceEventHandlerRegistration
 
 	resType reflect.Type
+
+	// groupResource is the group and resource of the watched objects.
+	groupResource schema.GroupResource
 
 	// logger is this informer's logger.
 	logger *logrus.Entry
@@ -109,6 +113,13 @@ func NewInformer[T runtime.Object](ctx context.Context, opts ...InformerOption[T
 	i := &Informer[T]{}
 	var r T
 	i.resType = reflect.TypeOf(r)
+
+	// groupResource is the group and resource of the watched objects.
+	i.groupResource = schema.GroupResource{
+		Group:    "argoproj.io",
+		Resource: "applications",
+	}
+
 	i.logger = logrus.NewEntry(logrus.StandardLogger()).WithFields(logrus.Fields{
 		"type":   i.resType,
 		"module": "Informer",
@@ -286,4 +297,9 @@ func (i *Informer[T]) WaitForSync(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// Lister returns a GenericLister that can be used to list and get cached resources.
+func (i *Informer[T]) Lister() cache.GenericLister {
+	return cache.NewGenericLister(i.informer.GetIndexer(), i.groupResource)
 }
