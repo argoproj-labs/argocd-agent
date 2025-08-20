@@ -30,6 +30,7 @@ import (
 	appclientset "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
 )
 
 var _ backend.Application = &KubernetesBackend{}
@@ -43,18 +44,24 @@ type KubernetesBackend struct {
 	appClient appclientset.Interface
 	// appInformer is used to watch for change events for Argo CD Application resources on the cluster
 	appInformer informer.InformerInterface
+	// appLister is used to list Argo CD Application resources from the cache
+	appLister cache.GenericLister
 	// namespace is not currently read, is not guaranteed to be non-empty, and is not guaranteed to contain the source of Argo CD Application CRs in all cases
 	namespace string
 	usePatch  bool
 }
 
 func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appInformer informer.InformerInterface, usePatch bool) *KubernetesBackend {
-	return &KubernetesBackend{
+	be := &KubernetesBackend{
 		appClient:   appClient,
 		appInformer: appInformer,
 		usePatch:    usePatch,
 		namespace:   namespace,
 	}
+	if specificInformer, ok := appInformer.(*informer.Informer[*v1alpha1.Application]); ok {
+		be.appLister = specificInformer.Lister()
+	}
+	return be
 }
 
 func (be *KubernetesBackend) List(ctx context.Context, selector backend.ApplicationSelector) ([]v1alpha1.Application, error) {
@@ -82,7 +89,15 @@ func (be *KubernetesBackend) Create(ctx context.Context, app *v1alpha1.Applicati
 }
 
 func (be *KubernetesBackend) Get(ctx context.Context, name string, namespace string) (*v1alpha1.Application, error) {
-	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Get(ctx, name, v1.GetOptions{})
+	obj, err := be.appLister.ByNamespace(namespace).Get(name)
+	if err != nil {
+		return nil, err
+	}
+	app, ok := obj.(*v1alpha1.Application)
+	if !ok {
+		return nil, fmt.Errorf("object is not an Application: %T", obj)
+	}
+	return app, nil
 }
 
 func (be *KubernetesBackend) Delete(ctx context.Context, name string, namespace string, deletionPropagation *backend.DeletionPropagation) error {
