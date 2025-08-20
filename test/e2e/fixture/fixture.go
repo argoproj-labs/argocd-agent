@@ -21,12 +21,14 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj/argo-cd/v3/common"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -249,6 +251,54 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 			continue
 		}
 		err = EnsureDeletion(ctx, managedAgentClient, &appProject)
+		if err != nil {
+			return err
+		}
+	}
+
+	repoLabelSelector := metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
+		},
+	}
+	repoListOpts := metav1.ListOptions{
+		LabelSelector: labels.SelectorFromSet(repoLabelSelector.MatchLabels).String(),
+	}
+
+	// Delete all repositories from the principal
+	repoList := corev1.SecretList{}
+	err = principalClient.List(ctx, "argocd", &repoList, repoListOpts)
+	if err != nil {
+		return err
+	}
+	for _, repo := range repoList.Items {
+		err = EnsureDeletion(ctx, principalClient, &repo)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete all repositories from the autonomous agent
+	repoList = corev1.SecretList{}
+	err = autonomousAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
+	if err != nil {
+		return err
+	}
+	for _, repo := range repoList.Items {
+		err = EnsureDeletion(ctx, autonomousAgentClient, &repo)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete all repositories from the managed agent
+	repoList = corev1.SecretList{}
+	err = managedAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
+	if err != nil {
+		return err
+	}
+	for _, repo := range repoList.Items {
+		err = EnsureDeletion(ctx, managedAgentClient, &repo)
 		if err != nil {
 			return err
 		}

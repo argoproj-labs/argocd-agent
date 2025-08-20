@@ -37,6 +37,7 @@ import (
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const cloudEventSpecVersion = "1.0"
@@ -78,6 +79,7 @@ const (
 	TargetRedis                  EventTarget = "redis"
 	TargetResourceResync         EventTarget = "resourceResync"
 	TargetClusterCacheInfoUpdate EventTarget = "clusterCacheInfoUpdate"
+	TargetRepository             EventTarget = "repository"
 )
 
 const (
@@ -194,6 +196,19 @@ func (evs EventSource) ClusterCacheInfoUpdateEvent(evType EventType, clusterInfo
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetDataSchema(TargetClusterCacheInfoUpdate.String())
 	_ = cev.SetData(cloudevents.ApplicationJSON, clusterInfo)
+	return &cev
+}
+
+func (evs EventSource) RepositoryEvent(evType EventType, repository *corev1.Secret) *cloudevents.Event {
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(evType.String())
+	cev.SetExtension(eventID, createEventID(repository.ObjectMeta))
+	cev.SetExtension(resourceID, createResourceID(repository.ObjectMeta))
+	cev.SetDataSchema(TargetRepository.String())
+
+	_ = cev.SetData(cloudevents.ApplicationJSON, repository)
 	return &cev
 }
 
@@ -566,6 +581,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetApplication
 	case TargetAppProject.String():
 		return TargetAppProject
+	case TargetRepository.String():
+		return TargetRepository
 	case TargetResource.String():
 		return TargetResource
 	case TargetEventAck.String():
@@ -624,6 +641,12 @@ func (ev Event) AppProject() (*v1alpha1.AppProject, error) {
 	proj := &v1alpha1.AppProject{}
 	err := ev.event.DataAs(proj)
 	return proj, err
+}
+
+func (ev Event) Repository() (*corev1.Secret, error) {
+	repo := &corev1.Secret{}
+	err := ev.event.DataAs(repo)
+	return repo, err
 }
 
 // ResourceRequest gets the resource request payload from an event

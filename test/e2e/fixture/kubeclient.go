@@ -342,3 +342,26 @@ func (c KubeClient) EnsureAppProjectUpdate(ctx context.Context, key types.Namesp
 		}
 	}
 }
+
+// EnsureRepositoryUpdate ensures the argocd repository with the given key is
+// updated by retrying if there is a conflicting change.
+func (c KubeClient) EnsureRepositoryUpdate(ctx context.Context, key types.NamespacedName, modify func(*corev1.Secret) error, options metav1.UpdateOptions) error {
+	var err error
+	for {
+		var repo corev1.Secret
+		err = c.Get(ctx, key, &repo, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		err = modify(&repo)
+		if err != nil {
+			return err
+		}
+
+		err = c.Update(ctx, &repo, options)
+		if !errors.IsConflict(err) {
+			return err
+		}
+	}
+}

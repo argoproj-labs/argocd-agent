@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 type ApplicationSelector struct {
@@ -43,11 +44,18 @@ type AppProjectSelector struct {
 	// Labels is not currently implemented.
 	Labels map[string]string
 
-	// Namespaces is used by the 'List' AppProject interface function to restrict the list of AppProjects returned to a specific set of Namespaces.
-	Namespaces []string
+	// Namespace is used by the 'List' AppProject interface function to restrict the list of AppProjects returned to a Namespace.
+	Namespace string
 
 	// Names is not currently implemented.
 	Names []string
+}
+
+type RepositorySelector struct {
+	// Namespace is used by the 'List' Repository interface function to restrict the list of Repositories returned to a specific Namespaces.
+	Namespace string
+
+	Labels map[string]string
 }
 
 // DeletionPropagation is based on the kubernetes DeletionPropagation API, and follows its behaviours for deletion propagation,
@@ -90,6 +98,19 @@ type AppProject interface {
 	Delete(ctx context.Context, name string, namespace string, deletionPropagation *DeletionPropagation) error
 	Update(ctx context.Context, app *v1alpha1.AppProject) (*v1alpha1.AppProject, error)
 	Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.AppProject, error)
+	SupportsPatch() bool
+	StartInformer(ctx context.Context) error
+	EnsureSynced(duration time.Duration) error
+}
+
+// Repository defines a generic interface to store/track Argo CD Repository secrets.
+type Repository interface {
+	List(ctx context.Context, selector RepositorySelector) ([]corev1.Secret, error)
+	Create(ctx context.Context, app *corev1.Secret) (*corev1.Secret, error)
+	Get(ctx context.Context, name string, namespace string) (*corev1.Secret, error)
+	Delete(ctx context.Context, name string, namespace string, deletionPropagation *DeletionPropagation) error
+	Update(ctx context.Context, app *corev1.Secret) (*corev1.Secret, error)
+	Patch(ctx context.Context, name string, namespace string, patch []byte) (*corev1.Secret, error)
 	SupportsPatch() bool
 	StartInformer(ctx context.Context) error
 	EnsureSynced(duration time.Duration) error

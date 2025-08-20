@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -55,14 +54,10 @@ type ApplicationManager struct {
 	mode manager.ManagerMode
 	// namespace is not guaranteed to have a value in all cases. For instance, this value is empty for principal when the principal is running on cluster.
 	namespace string
-	// managedApps is a list of apps we manage, key is qualified name in form '(namespace of Application CR)/(name of Application CR)', value is not used.
-	// - acquire 'lock' before accessing
-	managedApps map[string]bool
-	// observedApp, key is qualified name of the application, value is the Application's .metadata.resourceValue field
-	// - acquire 'lock' before accessing
-	observedApp map[string]string
-	// lock should be acquired before accessing managedApps/observedApps
-	lock sync.RWMutex
+	// ManagedResources is a list of apps we manage, key is qualified name in form '(namespace of Application CR)/(name of Application CR)', value is not used.
+	manager.ManagedResources
+	// ObservedResources, key is qualified name of the application, value is the Application's .metadata.resourceValue field
+	manager.ObservedResources
 }
 
 // ApplicationManagerOption is a callback function to set an option to the Application
@@ -98,8 +93,8 @@ func NewApplicationManager(be backend.Application, namespace string, opts ...App
 		o(m)
 	}
 	m.applicationBackend = be
-	m.observedApp = make(map[string]string)
-	m.managedApps = make(map[string]bool)
+	m.ObservedResources = manager.NewObservedResources()
+	m.ManagedResources = manager.NewManagedResources()
 	m.namespace = namespace
 
 	if m.role == manager.ManagerRolePrincipal && m.mode != manager.ManagerModeUnset {
