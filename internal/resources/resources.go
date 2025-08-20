@@ -23,11 +23,13 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
 	applicationKind = "Application"
 	appProjectKind  = "AppProject"
+	repositoryKind  = "Repository"
 )
 
 // ResourceKey uniquely identifies a resource in the cluster
@@ -68,6 +70,17 @@ func NewResourceKeyFromAppProject(appProject *v1alpha1.AppProject) ResourceKey {
 	return newResourceKey(appProjectKind, appProject.Name, appProject.Namespace, string(appProject.UID))
 }
 
+func NewResourceKeyFromRepository(repo *corev1.Secret) ResourceKey {
+	// sourceUID annotation indicates that the repository was created from a source.
+	// So, consider the source UID instead of the resource UID.
+	sourceUID, ok := repo.Annotations[manager.SourceUIDAnnotation]
+	if ok {
+		return newResourceKey(repositoryKind, repo.Name, repo.Namespace, sourceUID)
+	}
+
+	return newResourceKey(repositoryKind, repo.Name, repo.Namespace, string(repo.UID))
+}
+
 func newResourceKey(kind, name, namespace, uid string) ResourceKey {
 	return ResourceKey{
 		Kind:      kind,
@@ -105,6 +118,10 @@ func (r *AgentResources) Add(agent string, key ResourceKey) {
 func (r *AgentResources) Remove(agent string, key ResourceKey) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.resources[agent] == nil {
+		return
+	}
 
 	r.resources[agent].Remove(key)
 

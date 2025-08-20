@@ -28,6 +28,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/dynamic"
 )
@@ -57,6 +58,8 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 		err = a.processIncomingApplication(ev)
 	case event.TargetAppProject:
 		err = a.processIncomingAppProject(ev)
+	case event.TargetRepository:
+		err = a.processIncomingRepository(ev)
 	case event.TargetResource:
 		err = a.processIncomingResourceRequest(ev)
 	case event.TargetResourceResync:
@@ -256,6 +259,88 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 		err = a.deleteAppProject(incomingAppProject)
 		if err != nil {
 			logCtx.Errorf("Error deleting appproject: %v", err)
+		}
+	default:
+		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
+	}
+
+	return err
+}
+
+func (a *Agent) processIncomingRepository(ev *event.Event) error {
+	logCtx := log().WithFields(logrus.Fields{
+		"method": "processIncomingEvents",
+	})
+
+	incomingRepo, err := ev.Repository()
+	if err != nil {
+		return err
+	}
+
+	var exists, sourceUIDMatch bool
+
+	// Source UID annotation is not present for repos on the autonomous agent since it is the source of truth.
+	if a.mode == types.AgentModeManaged {
+		exists, sourceUIDMatch, err = a.repoManager.CompareSourceUID(a.context, incomingRepo)
+		if err != nil {
+			return fmt.Errorf("failed to compare the source UID of app: %w", err)
+		}
+	}
+
+	switch ev.Type() {
+	case event.Create:
+		if exists {
+			if sourceUIDMatch {
+				logCtx.Debug("Received a Create event for an existing repository. Updating the existing repository")
+				_, err := a.updateRepository(incomingRepo)
+				if err != nil {
+					return fmt.Errorf("could not update the existing repository: %w", err)
+				}
+				return nil
+			} else {
+				logCtx.Debug("Repository already exists with a different source UID. Deleting the existing repository")
+				if err := a.deleteRepository(incomingRepo); err != nil {
+					return fmt.Errorf("could not delete existing repository prior to creation: %w", err)
+				}
+			}
+		}
+
+		_, err = a.createRepository(incomingRepo)
+		if err != nil {
+			logCtx.Errorf("Error creating repository: %v", err)
+		}
+
+	case event.SpecUpdate:
+		if !exists {
+			logCtx.Debug("Received an Update event for a repository that doesn't exist. Creating the incoming repository")
+			if _, err := a.createRepository(incomingRepo); err != nil {
+				return fmt.Errorf("could not create incoming repository: %w", err)
+			}
+			return nil
+		}
+
+		if !sourceUIDMatch {
+			logCtx.Debug("Source UID mismatch between the incoming repository and existing repository. Deleting the existing repository")
+			if err := a.deleteRepository(incomingRepo); err != nil {
+				return fmt.Errorf("could not delete existing repository prior to creation: %w", err)
+			}
+
+			logCtx.Debug("Creating the incoming repository after deleting the existing repository")
+			if _, err := a.createRepository(incomingRepo); err != nil {
+				return fmt.Errorf("could not create incoming repository after deleting existing repository: %w", err)
+			}
+			return nil
+		}
+
+		_, err = a.updateRepository(incomingRepo)
+		if err != nil {
+			logCtx.Errorf("Error updating repository: %v", err)
+		}
+
+	case event.Delete:
+		err = a.deleteRepository(incomingRepo)
+		if err != nil {
+			logCtx.Errorf("Error deleting repository: %v", err)
 		}
 	default:
 		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
@@ -560,5 +645,100 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 	if err != nil {
 		log().Warnf("Could not unmanage appProject %s: %v", project.Name, err)
 	}
+	return nil
+}
+
+// createRepository creates a Repository upon an event in the agent's work queue.
+func (a *Agent) createRepository(incoming *corev1.Secret) (*corev1.Secret, error) {
+	logCtx := log().WithFields(logrus.Fields{
+		"method": "CreateRepository",
+		"repo":   incoming.Name,
+	})
+
+	// In modes other than "managed", we don't process new repository events
+	// that are incoming.
+	if a.mode.IsAutonomous() {
+		logCtx.Info("Discarding this event, because agent is not in managed mode")
+		return nil, event.NewEventDiscardedErr("cannot create repository: agent is not in managed mode")
+	}
+
+	// If we receive a new Repository event for a Repository we already manage, it usually
+	// means that we're out-of-sync from the control plane.
+	if a.repoManager.IsManaged(incoming.Name) {
+		logCtx.Trace("Repository is already managed on this agent. Updating the existing Repository")
+		return a.updateRepository(incoming)
+	}
+
+	logCtx.Infof("Creating a new repository on behalf of an incoming event")
+
+	if incoming.Annotations == nil {
+		incoming.Annotations = make(map[string]string)
+	}
+
+	// Get rid of some fields that we do not want to have on the repository as we start fresh.
+	delete(incoming.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
+
+	created, err := a.repoManager.Create(a.context, incoming)
+	if apierrors.IsAlreadyExists(err) {
+		logCtx.Debug("repository already exists")
+		return created, nil
+	}
+
+	return created, err
+}
+
+func (a *Agent) updateRepository(incoming *corev1.Secret) (*corev1.Secret, error) {
+	incoming.SetNamespace(a.namespace)
+	logCtx := log().WithFields(logrus.Fields{
+		"method":          "UpdateRepository",
+		"repo":            incoming.Name,
+		"resourceVersion": incoming.ResourceVersion,
+	})
+
+	if !a.repoManager.IsManaged(incoming.Name) {
+		logCtx.Trace("Repository is not managed on this agent. Creating the new Repository")
+		return a.createRepository(incoming)
+	}
+
+	if a.repoManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
+		logCtx.Tracef("Discarding this event, because agent has seen this version %s already", incoming.ResourceVersion)
+		return nil, event.NewEventDiscardedErr("the version %s has already been seen by this agent", incoming.ResourceVersion)
+	} else {
+		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
+	}
+
+	logCtx.Infof("Updating repository")
+
+	return a.repoManager.UpdateManagedRepository(a.context, incoming)
+}
+
+func (a *Agent) deleteRepository(repo *corev1.Secret) error {
+	repo.SetNamespace(a.namespace)
+	logCtx := log().WithFields(logrus.Fields{
+		"method": "DeleteRepository",
+		"repo":   repo.Name,
+	})
+
+	if !a.repoManager.IsManaged(repo.Name) {
+		return fmt.Errorf("repository %s is not managed", repo.Name)
+	}
+
+	logCtx.Infof("Deleting repository")
+
+	deletionPropagation := backend.DeletePropagationBackground
+	err := a.repoManager.Delete(a.context, repo.Name, repo.Namespace, &deletionPropagation)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logCtx.Debug("repository is not found, perhaps it is already deleted")
+			return nil
+		}
+		return err
+	}
+
+	err = a.repoManager.Unmanage(repo.Name)
+	if err != nil {
+		log().Warnf("Could not unmanage repository %s: %v", repo.Name, err)
+	}
+
 	return nil
 }
