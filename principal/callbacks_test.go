@@ -845,6 +845,7 @@ func TestServer_syncRepositoryUpdatesToAgents(t *testing.T) {
 			events:         event.NewEventSource("test"),
 			projectManager: projectManager,
 			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
 			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged, "agent2": types.AgentModeManaged},
 		}
 
