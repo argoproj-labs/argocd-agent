@@ -305,7 +305,7 @@ func Test_CompareSourceUIDForAppProject(t *testing.T) {
 		require.False(t, uidMatch)
 	})
 
-	t.Run("should return an error if there is no UID annotation", func(t *testing.T) {
+	t.Run("shouldn't return an error if there is no UID annotation", func(t *testing.T) {
 		oldAppProject.Annotations = map[string]string{}
 		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldAppProject, nil)
 		m, err := NewAppProjectManager(mockedBackend, "")
@@ -316,9 +316,8 @@ func Test_CompareSourceUIDForAppProject(t *testing.T) {
 		incoming.UID = ktypes.UID("new_uid")
 
 		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.NotNil(t, err)
 		require.True(t, exists)
-		require.EqualError(t, err, "source UID Annotation is not found for appProject: test")
+		require.Nil(t, err)
 		require.False(t, uidMatch)
 	})
 

@@ -355,7 +355,7 @@ func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1al
 	// If there is an existing appProject with the same name/namespace, compare its source UID with the incoming appProject.
 	sourceUID, ok := existing.Annotations[manager.SourceUIDAnnotation]
 	if !ok {
-		return true, false, fmt.Errorf("source UID Annotation is not found for appProject: %s", incoming.Name)
+		return true, false, nil
 	}
 
 	return true, string(incoming.UID) == sourceUID, nil

@@ -209,6 +209,7 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 	}
 
 	// Depending on the role, the namespace of the resource may be different.
+	// For AppProject/Repository, the namespace is always the agent's namespace.
 	namespace := reqUpdate.Namespace
 	if r.role == manager.ManagerRolePrincipal && reqUpdate.Kind == "Application" {
 		namespace = agentName
@@ -221,6 +222,8 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 		if !apierrors.IsNotFound(err) {
 			return err
 		}
+
+		logCtx.Tracef("rescource not found on the source namespace %s", namespace)
 
 		// The resource doesn't exist on the source. So, send a delete event to remove the orphaned resource from the peer.
 		return r.handleDeletedResource(logCtx, reqUpdate)
