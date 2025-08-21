@@ -329,6 +329,12 @@ func (a *Agent) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to sync applications: %w", err)
 	}
 
+	// Wait for the appProject informer to be synced
+	err = a.projectManager.EnsureSynced(waitForSyncedDuration)
+	if err != nil {
+		return fmt.Errorf("failed to sync appProjects: %w", err)
+	}
+
 	// The namespace informer lives in its own go routine
 	go func() {
 		if err := a.namespaceManager.StartInformer(a.context); err != nil {

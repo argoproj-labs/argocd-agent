@@ -162,11 +162,6 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 
 	a.resources.Add(resources.NewResourceKeyFromAppProject(appProject))
 
-	// Only send the creation event when we're in autonomous mode
-	if !a.mode.IsAutonomous() {
-		return
-	}
-
 	// Update events trigger a new event sometimes, too. If we've already seen
 	// the appProject, we just ignore the request then.
 	if a.projectManager.IsManaged(appProject.Name) {
@@ -176,6 +171,11 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 
 	if err := a.projectManager.Manage(appProject.Name); err != nil {
 		logCtx.Errorf("Could not manage appProject: %v", err)
+		return
+	}
+
+	// Only send the creation event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
 		return
 	}
 
