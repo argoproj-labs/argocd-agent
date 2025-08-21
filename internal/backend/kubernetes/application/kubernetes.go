@@ -97,7 +97,8 @@ func (be *KubernetesBackend) Get(ctx context.Context, name string, namespace str
 	if !ok {
 		return nil, fmt.Errorf("object is not an Application: %T", obj)
 	}
-	return app, nil
+	// Return a deep copy to prevent mutations
+	return app.DeepCopy(), nil
 }
 
 func (be *KubernetesBackend) Delete(ctx context.Context, name string, namespace string, deletionPropagation *backend.DeletionPropagation) error {
