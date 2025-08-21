@@ -18,12 +18,14 @@ import (
 	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // newAppCallback is executed when a new application event was emitted from
@@ -138,8 +140,8 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 	s.resources.Add(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
 
-	// Check if this AppProject was created by an autonomous agent by examining its name prefix
-	if s.isAppProjectFromAutonomousAgent(outbound.Name) {
+	// Check if this AppProject was created by an autonomous agent
+	if isResourceFromAutonomousAgent(outbound) {
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
@@ -182,8 +184,8 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		"appproject_name": old.Name,
 	})
 
-	// Check if this AppProject was created by an autonomous agent by examining its name prefix
-	if s.isAppProjectFromAutonomousAgent(new.Name) {
+	// Check if this AppProject was created by an autonomous agent
+	if isResourceFromAutonomousAgent(new) {
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
@@ -228,7 +230,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
 
 	// Check if this AppProject was created by an autonomous agent by examining its name prefix
-	if s.isAppProjectFromAutonomousAgent(outbound.Name) {
+	if isResourceFromAutonomousAgent(outbound) {
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
@@ -303,20 +305,46 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 			continue
 		}
 
-		matched := false
-		for _, dst := range appProject.Spec.Destinations {
-			if glob.Match(dst.Name, agentName) {
-				matched = true
-				break
-			}
-		}
-
-		if matched && glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP) {
+		if doesAgentMatchWithProject(agentName, appProject) {
 			agents[agentName] = true
 		}
 	}
 
 	return agents
+}
+
+// doesAgentMatchWithProject checks if the agent name matches the given AppProject.
+// We match the agent to an AppProject if:
+// 1. The destination name is not empty and matches the agent name OR
+// 2. The destination server is a wildcard AND
+// 3. The agent name is not denied by any of the destination names
+// Ref: https://github.com/argoproj/argo-cd/blob/master/pkg/apis/application/v1alpha1/app_project_types.go#L477
+func doesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
+	destinationMatched := false
+
+	for _, dst := range appProject.Spec.Destinations {
+		if isDenyPattern(dst.Name) {
+			// Return immediately if the agent name is denied by any of the destination names
+			if glob.Match(dst.Name[1:], agentName) {
+				return false
+			}
+			continue
+		}
+
+		dstNameMatched := dst.Name != "" && glob.Match(dst.Name, agentName)
+		dstServerMatched := dst.Server == "*"
+		if dstNameMatched || dstServerMatched {
+			destinationMatched = true // Continue matching to look for deny patterns
+		}
+	}
+
+	// Must match both destination and source namespace requirements
+	return destinationMatched &&
+		glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
+}
+
+func isDenyPattern(pattern string) bool {
+	return strings.HasPrefix(pattern, "!")
 }
 
 // syncAppProjectUpdatesToAgents sends the AppProject update events to the relevant clusters.
@@ -366,11 +394,15 @@ func (s *Server) syncAppProjectUpdatesToAgents(old, new *v1alpha1.AppProject, lo
 }
 
 // AgentSpecificAppProject returns an agent specific version of the given AppProject
+// We don't have to check for deny patterns because we only construct the agent specific AppProject
+// if the agent name matches the AppProject's destinations.
 func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alpha1.AppProject {
 	// Only keep the destinations that are relevant to the given agent
 	filteredDst := []v1alpha1.ApplicationDestination{}
 	for _, dst := range appProject.Spec.Destinations {
-		if glob.Match(dst.Name, agent) {
+		dstNameMatched := dst.Name != "" && glob.Match(dst.Name, agent)
+		dstServerMatched := dst.Server == "*"
+		if dstNameMatched || dstServerMatched {
 			dst.Name = "in-cluster"
 			dst.Server = "https://kubernetes.default.svc"
 
@@ -388,15 +420,13 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alp
 	return appProject
 }
 
-// isAppProjectFromAutonomousAgent checks if an AppProject was created by an autonomous agent
-// by examining if its name is prefixed with an autonomous agent name (pattern: "{agentName}-{projectName}")
-func (s *Server) isAppProjectFromAutonomousAgent(projectName string) bool {
-	for agentName, mode := range s.namespaceMap {
-		if mode == types.AgentModeAutonomous &&
-			strings.HasPrefix(projectName, agentName+"-") {
-			return true
-		}
+// isResourceFromAutonomousAgent checks if a Kubernetes resource was created by an autonomous agent
+// by examining if it has the source UID annotation.
+func isResourceFromAutonomousAgent(resource metav1.Object) bool {
+	annotations := resource.GetAnnotations()
+	if annotations == nil {
+		return false
 	}
-
-	return false
+	_, ok := annotations[manager.SourceUIDAnnotation]
+	return ok
 }
