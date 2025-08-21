@@ -433,29 +433,27 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 }
 
 // doesAgentMatchWithProject checks if the agent name matches the given AppProject.
-// We match by name OR server if either is present. If both are present, we match by name.
-// Deny patterns take precedence over allow patterns.
+// We match the agent to an AppProject if:
+// 1. The destination name is not empty and matches the agent name OR
+// 2. The destination server is a wildcard AND
+// 3. The agent name is not denied by any of the destination names
+// Ref: https://github.com/argoproj/argo-cd/blob/master/pkg/apis/application/v1alpha1/app_project_types.go#L477
 func doesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
 	destinationMatched := false
 
 	for _, dst := range appProject.Spec.Destinations {
-		// If the destination name is not empty, we need to match it with the agent name
-		if dst.Name != "" {
-			// Check if the user has denied this agent
-			if isDenyPattern(dst.Name) {
-				// Check if this deny pattern matches the agent name
-				if glob.Match(dst.Name[1:], agentName) {
-					return false
-				}
-			} else {
-				// Check if the agent name matches the destination name. Continue matching...
-				if glob.Match(dst.Name, agentName) {
-					destinationMatched = true
-				}
+		if isDenyPattern(dst.Name) {
+			// Return immediately if the agent name is denied by any of the destination names
+			if glob.Match(dst.Name[1:], agentName) {
+				return false
 			}
-		} else if dst.Server == "*" {
-			// The server must be a wildcard if name is empty. Continue matching...
-			destinationMatched = true
+			continue
+		}
+
+		dstNameMatched := dst.Name != "" && glob.Match(dst.Name, agentName)
+		dstServerMatched := dst.Server == "*"
+		if dstNameMatched || dstServerMatched {
+			destinationMatched = true // Continue matching to look for deny patterns
 		}
 	}
 
@@ -621,9 +619,9 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alp
 	// Only keep the destinations that are relevant to the given agent
 	filteredDst := []v1alpha1.ApplicationDestination{}
 	for _, dst := range appProject.Spec.Destinations {
-		nameMatched := dst.Name != "" && glob.Match(dst.Name, agent)
-		serverMatched := dst.Name == "" && dst.Server == "*"
-		if nameMatched || serverMatched {
+		dstNameMatched := dst.Name != "" && glob.Match(dst.Name, agent)
+		dstServerMatched := dst.Server == "*"
+		if dstNameMatched || dstServerMatched {
 			dst.Name = "in-cluster"
 			dst.Server = "https://kubernetes.default.svc"
 

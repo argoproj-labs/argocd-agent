@@ -686,6 +686,19 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 			want: true,
 		},
 		{
+			name:      "wildcard server with a different name",
+			agentName: "any-agent",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "different-name", Server: "*", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: true, // Should match wildcard server
+		},
+		{
 			name:      "agent matches destination name with wildcard",
 			agentName: "agent-staging",
 			appProject: v1alpha1.AppProject{
@@ -793,20 +806,6 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 			want: false,
 		},
 		{
-			name:      "default AppProject with server but no name - requires wildcard",
-			agentName: "any-agent",
-			appProject: v1alpha1.AppProject{
-				ObjectMeta: metav1.ObjectMeta{Name: "default"},
-				Spec: v1alpha1.AppProjectSpec{
-					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "", Server: "https://kubernetes.default.svc", Namespace: "*"},
-					},
-					SourceNamespaces: []string{"*"},
-				},
-			},
-			want: false, // server is not "*"
-		},
-		{
 			name:      "multiple deny patterns - first match wins",
 			agentName: "prod-sensitive-agent",
 			appProject: v1alpha1.AppProject{
@@ -847,6 +846,78 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 				},
 			},
 			want: false, // No positive pattern to match
+		},
+		{
+			name:      "deny pattern doesn't match - should continue to positive patterns",
+			agentName: "dev-agent",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "!prod-*", Namespace: "default"}, // Deny doesn't match
+						{Name: "dev-*", Namespace: "default"},   // Positive matches
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: true, // Should match positive pattern after deny doesn't match
+		},
+		{
+			name:      "multiple deny patterns none match - positive pattern wins",
+			agentName: "test-agent",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "!prod-*", Namespace: "default"},    // Doesn't match
+						{Name: "!staging-*", Namespace: "default"}, // Doesn't match
+						{Name: "*", Namespace: "default"},          // Matches
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: true,
+		},
+		{
+			name:      "mixed destinations with deny pattern",
+			agentName: "dev-agent",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "!admin-*", Namespace: "default"},      // Name deny (doesn't match)
+						{Name: "", Server: "*", Namespace: "default"}, // Server wildcard
+						{Name: "dev-*", Namespace: "default"},         // Name allow (matches)
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: true, // Should pass deny check and match positive patterns
+		},
+
+		{
+			name:      "deny pattern in first destination, positive in second",
+			agentName: "prod-cluster",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "!prod-cluster", Namespace: "default"}, // Exact deny match
+						{Name: "*", Namespace: "default"},             // Would allow all
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: false, // Deny pattern matches exactly, should reject immediately
+		},
+		{
+			name:      "deny pattern with different namespace requirements",
+			agentName: "restricted-agent",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "!restricted-*", Namespace: "default"}, // Deny pattern matches
+					},
+					SourceNamespaces: []string{"restricted-agent"}, // Namespace would match
+				},
+			},
+			want: false, // Should be denied even though namespace matches
 		},
 	}
 
