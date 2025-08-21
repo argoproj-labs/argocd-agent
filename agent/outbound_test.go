@@ -220,8 +220,8 @@ func Test_addAppProjectCreationToQueue(t *testing.T) {
 		// Should not have an event in queue in managed mode
 		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
 
-		// AppProject should be not be managed by now
-		assert.False(t, a.projectManager.IsManaged("test-project"))
+		// AppProject should be be managed by now
+		assert.True(t, a.projectManager.IsManaged("test-project"))
 	})
 
 	t.Run("Add appProject that is already managed", func(t *testing.T) {
