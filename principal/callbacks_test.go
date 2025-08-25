@@ -15,17 +15,25 @@
 package principal
 
 import (
+	"context"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestMapAppProjectToAgents(t *testing.T) {
@@ -599,4 +607,572 @@ func TestIsAppProjectFromAutonomousAgent(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestServer_newRepositoryCallback(t *testing.T) {
+	tests := []struct {
+		name             string
+		repositorySecret *corev1.Secret
+		namespaceMap     map[string]types.AgentMode
+		projectSetup     func(*mocks.AppProject)
+		expectEvents     bool
+		expectedAgents   []string
+		shouldError      bool
+	}{
+		{
+			name: "successful repository creation with single agent",
+			repositorySecret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-repo",
+					Namespace: "argocd",
+					UID:       "repo-uid-123",
+				},
+				Data: map[string][]byte{
+					"project": []byte("default"),
+					"url":     []byte("https://github.com/example/repo.git"),
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeAutonomous,
+			},
+			projectSetup: func(mockProjectBackend *mocks.AppProject) {
+				project := &v1alpha1.AppProject{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "default",
+						Namespace: "argocd",
+					},
+					Spec: v1alpha1.AppProjectSpec{
+						Destinations: []v1alpha1.ApplicationDestination{
+							{Name: "agent1"},
+						},
+						SourceNamespaces: []string{"agent1"},
+					},
+				}
+				mockProjectBackend.On("Get", mock.Anything, "default", "argocd").Return(project, nil)
+			},
+			expectEvents:   true,
+			expectedAgents: []string{"agent1"},
+			shouldError:    false,
+		},
+		{
+			name: "repository without project data should skip",
+			repositorySecret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-repo",
+					Namespace: "argocd",
+					UID:       "repo-uid-123",
+				},
+				Data: map[string][]byte{
+					"url": []byte("https://github.com/example/repo.git"),
+					// no "project" key
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+			},
+			projectSetup:   func(mockProjectBackend *mocks.AppProject) {},
+			expectEvents:   false,
+			expectedAgents: []string{},
+			shouldError:    false,
+		},
+		{
+			name: "repository with multiple matching agents",
+			repositorySecret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "multi-agent-repo",
+					Namespace: "argocd",
+					UID:       "repo-uid-456",
+				},
+				Data: map[string][]byte{
+					"project": []byte("multi-agent-project"),
+					"url":     []byte("https://github.com/example/multi-repo.git"),
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeManaged,
+				"agent3": types.AgentModeAutonomous, // should be ignored
+			},
+			projectSetup: func(mockProjectBackend *mocks.AppProject) {
+				project := &v1alpha1.AppProject{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "multi-agent-project",
+						Namespace: "argocd",
+					},
+					Spec: v1alpha1.AppProjectSpec{
+						Destinations: []v1alpha1.ApplicationDestination{
+							{Name: "agent*"},
+						},
+						SourceNamespaces: []string{"agent1", "agent2"},
+					},
+				}
+				mockProjectBackend.On("Get", mock.Anything, "multi-agent-project", "argocd").Return(project, nil)
+			},
+			expectEvents:   true,
+			expectedAgents: []string{"agent1", "agent2"},
+			shouldError:    false,
+		},
+		{
+			name: "project not found should return early",
+			repositorySecret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "orphaned-repo",
+					Namespace: "argocd",
+					UID:       "repo-uid-789",
+				},
+				Data: map[string][]byte{
+					"project": []byte("nonexistent-project"),
+					"url":     []byte("https://github.com/example/orphaned.git"),
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+			},
+			projectSetup: func(mockProjectBackend *mocks.AppProject) {
+				mockProjectBackend.On("Get", mock.Anything, "nonexistent-project", "argocd").Return(nil, assert.AnError)
+			},
+			expectEvents:   false,
+			expectedAgents: []string{},
+			shouldError:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup mock project backend
+			mockProjectBackend := &mocks.AppProject{}
+			tt.projectSetup(mockProjectBackend)
+
+			// Create project manager with mock backend
+			projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+			require.NoError(t, err)
+
+			// Create server with dependencies
+			s := &Server{
+				ctx:            context.Background(),
+				queues:         queue.NewSendRecvQueues(),
+				events:         event.NewEventSource("test"),
+				namespaceMap:   tt.namespaceMap,
+				projectManager: projectManager,
+				resources:      resources.NewAgentResources(),
+				repoToAgents:   NewMapToSet(),
+				projectToRepos: NewMapToSet(),
+			}
+
+			// Create queues for agents
+			for agentName := range tt.namespaceMap {
+				err := s.queues.Create(agentName)
+				require.NoError(t, err)
+			}
+
+			// Execute the function under test
+			s.newRepositoryCallback(tt.repositorySecret)
+
+			if tt.expectEvents {
+				// Verify events were sent to expected agents
+				var eventsReceived []string
+				for _, agentName := range tt.expectedAgents {
+					q := s.queues.SendQ(agentName)
+					require.NotNil(t, q)
+
+					if q.Len() > 0 {
+						ev, shutdown := q.Get()
+						require.False(t, shutdown)
+						require.NotNil(t, ev)
+
+						// Verify event type is repository create
+						assert.Equal(t, event.Create.String(), ev.Type())
+
+						eventsReceived = append(eventsReceived, agentName)
+						q.Done(ev)
+					}
+				}
+
+				assert.ElementsMatch(t, tt.expectedAgents, eventsReceived, "Events should be sent to expected agents")
+
+				// Verify projectToRepos mapping was updated
+				repoSet := s.projectToRepos.Get(string(tt.repositorySecret.Data["project"]))
+				assert.True(t, repoSet[tt.repositorySecret.Name], "Repository should be added to project mapping")
+
+				// Verify repoToAgents mapping was updated for each agent
+				for _, agentName := range tt.expectedAgents {
+					agentSet := s.repoToAgents.Get(tt.repositorySecret.Name)
+					assert.True(t, agentSet[agentName], "Agent should be added to repository mapping")
+				}
+			} else {
+				// Verify no events were sent
+				for agentName := range tt.namespaceMap {
+					q := s.queues.SendQ(agentName)
+					require.NotNil(t, q)
+					assert.Equal(t, 0, q.Len(), "No events should be sent when not expected")
+				}
+			}
+
+			// Verify mock expectations
+			mockProjectBackend.AssertExpectations(t)
+		})
+	}
+}
+
+func TestServer_syncRepositoryUpdatesToAgents(t *testing.T) {
+	// Helper to create a secret with project
+	createSecret := func(project string) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte(project), "url": []byte("https://example.com/repo.git")},
+		}
+	}
+
+	// Helper to create a project with agent destinations
+	createProject := func(name string, agents ...string) *v1alpha1.AppProject {
+		var destinations []v1alpha1.ApplicationDestination
+		for _, agent := range agents {
+			destinations = append(destinations, v1alpha1.ApplicationDestination{Name: agent})
+		}
+		return &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd"},
+			Spec:       v1alpha1.AppProjectSpec{Destinations: destinations, SourceNamespaces: agents},
+		}
+	}
+
+	// Helper to setup server and execute function
+	executeTest := func(t *testing.T, mockBackend *mocks.AppProject, oldSecret, newSecret *corev1.Secret, existingMapping map[string]bool) (deleteEvents, updateEvents []string, finalMapping map[string]bool) {
+		projectManager, _ := appproject.NewAppProjectManager(mockBackend, "argocd")
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			projectManager: projectManager,
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged, "agent2": types.AgentModeManaged},
+		}
+
+		// Setup existing mapping and queues
+		for agent := range existingMapping {
+			s.repoToAgents.Add("test-repo", agent)
+		}
+		s.queues.Create("agent1")
+		s.queues.Create("agent2")
+
+		// Execute function
+		logCtx := logrus.WithField("test", "syncRepositoryUpdatesToAgents")
+		s.syncRepositoryUpdatesToAgents(oldSecret, newSecret, logCtx)
+
+		// Collect events
+		for _, agent := range []string{"agent1", "agent2"} {
+			if q := s.queues.SendQ(agent); q != nil {
+				for q.Len() > 0 {
+					ev, _ := q.Get()
+					switch ev.Type() {
+					case event.Delete.String():
+						deleteEvents = append(deleteEvents, agent)
+					case event.SpecUpdate.String():
+						updateEvents = append(updateEvents, agent)
+					}
+					q.Done(ev)
+				}
+			}
+		}
+
+		return deleteEvents, updateEvents, s.repoToAgents.Get("test-repo")
+	}
+
+	t.Run("repository changes project - agents migrate", func(t *testing.T) {
+		// Repository moves from "old-project" (agent1) to "new-project" (agent2)
+		mockBackend := &mocks.AppProject{}
+		mockBackend.On("Get", mock.Anything, "old-project", "argocd").Return(createProject("old-project", "agent1"), nil)
+		mockBackend.On("Get", mock.Anything, "new-project", "argocd").Return(createProject("new-project", "agent2"), nil)
+
+		oldSecret := createSecret("old-project")
+		newSecret := createSecret("new-project")
+		existingMapping := map[string]bool{"agent1": true}
+
+		deleteEvents, updateEvents, finalMapping := executeTest(t, mockBackend, oldSecret, newSecret, existingMapping)
+
+		// agent1 should get delete event, agent2 should get update event
+		assert.ElementsMatch(t, []string{"agent1"}, deleteEvents)
+		assert.ElementsMatch(t, []string{"agent2"}, updateEvents)
+		assert.Equal(t, map[string]bool{"agent2": true}, finalMapping)
+		mockBackend.AssertExpectations(t)
+	})
+
+	t.Run("repository updated within same project", func(t *testing.T) {
+		// Repository URL changes but stays in same project - both agents get updates
+		mockBackend := &mocks.AppProject{}
+		project := createProject("same-project", "agent1", "agent2")
+		mockBackend.On("Get", mock.Anything, "same-project", "argocd").Return(project, nil).Twice()
+
+		oldSecret := createSecret("same-project")
+		newSecret := createSecret("same-project")
+		newSecret.Data["url"] = []byte("https://different-url.com/repo.git") // Change URL
+		existingMapping := map[string]bool{"agent1": true, "agent2": true}
+
+		deleteEvents, updateEvents, finalMapping := executeTest(t, mockBackend, oldSecret, newSecret, existingMapping)
+
+		// No deletes, both agents get updates
+		assert.Empty(t, deleteEvents)
+		assert.ElementsMatch(t, []string{"agent1", "agent2"}, updateEvents)
+		assert.Equal(t, map[string]bool{"agent1": true, "agent2": true}, finalMapping)
+		mockBackend.AssertExpectations(t)
+	})
+
+	t.Run("old project deleted - uses cached mapping", func(t *testing.T) {
+		// Old project no longer exists, function uses cached repo-to-agents mapping
+		mockBackend := &mocks.AppProject{}
+		mockBackend.On("Get", mock.Anything, "deleted-project", "argocd").Return(nil, errors.NewNotFound(schema.GroupResource{}, "deleted-project"))
+		mockBackend.On("Get", mock.Anything, "new-project", "argocd").Return(createProject("new-project", "agent2"), nil)
+
+		oldSecret := createSecret("deleted-project")
+		newSecret := createSecret("new-project")
+		existingMapping := map[string]bool{"agent1": true} // Cached from when project existed
+
+		deleteEvents, updateEvents, finalMapping := executeTest(t, mockBackend, oldSecret, newSecret, existingMapping)
+
+		// Cached agent1 gets delete, new agent2 gets update
+		assert.ElementsMatch(t, []string{"agent1"}, deleteEvents)
+		assert.ElementsMatch(t, []string{"agent2"}, updateEvents)
+		assert.Equal(t, map[string]bool{"agent2": true}, finalMapping)
+		mockBackend.AssertExpectations(t)
+	})
+
+	t.Run("new project lookup fails", func(t *testing.T) {
+		// Can't fetch new project - only cleanup happens, no new agents get the repo
+		mockBackend := &mocks.AppProject{}
+		mockBackend.On("Get", mock.Anything, "old-project", "argocd").Return(createProject("old-project", "agent1"), nil)
+		mockBackend.On("Get", mock.Anything, "bad-project", "argocd").Return(nil, assert.AnError)
+
+		oldSecret := createSecret("old-project")
+		newSecret := createSecret("bad-project")
+		existingMapping := map[string]bool{"agent1": true}
+
+		deleteEvents, updateEvents, finalMapping := executeTest(t, mockBackend, oldSecret, newSecret, existingMapping)
+
+		// Only cleanup happens
+		assert.ElementsMatch(t, []string{"agent1"}, deleteEvents)
+		assert.Empty(t, updateEvents)
+		assert.Empty(t, finalMapping)
+		mockBackend.AssertExpectations(t)
+	})
+
+	t.Run("old secret missing project field", func(t *testing.T) {
+		// Malformed old secret - function should return early
+		s := &Server{events: event.NewEventSource("test"), queues: queue.NewSendRecvQueues()}
+		s.queues.Create("agent1")
+
+		oldSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "argocd"},
+			Data:       map[string][]byte{"url": []byte("https://example.com/repo.git")}, // No project field
+		}
+		newSecret := createSecret("new-project")
+		logCtx := logrus.WithField("test", "missing-project")
+
+		s.syncRepositoryUpdatesToAgents(oldSecret, newSecret, logCtx)
+
+		// No events should be sent
+		q := s.queues.SendQ("agent1")
+		assert.Equal(t, 0, q.Len())
+	})
+
+	t.Run("new secret missing project field", func(t *testing.T) {
+		mockBackend := &mocks.AppProject{}
+		mockBackend.On("Get", mock.Anything, "old-project", "argocd").Return(createProject("old-project", "agent1"), nil)
+
+		projectManager, _ := appproject.NewAppProjectManager(mockBackend, "argocd")
+		s := &Server{
+			events:         event.NewEventSource("test"),
+			queues:         queue.NewSendRecvQueues(),
+			projectManager: projectManager,
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+		}
+		s.queues.Create("agent1")
+
+		oldSecret := createSecret("old-project")
+
+		// Malformed new secret - function should return early
+		newSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "argocd"},
+			Data:       map[string][]byte{"url": []byte("https://example.com/repo.git")}, // No project field
+		}
+		logCtx := logrus.WithField("test", "missing-project")
+
+		s.syncRepositoryUpdatesToAgents(oldSecret, newSecret, logCtx)
+
+		// No events should be sent
+		q := s.queues.SendQ("agent1")
+		assert.Equal(t, 0, q.Len())
+	})
+}
+
+func TestServer_deleteRepositoryCallback(t *testing.T) {
+	// Helper to create a secret with project
+	createSecret := func(name, project string) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte(project), "url": []byte("https://example.com/repo.git")},
+		}
+	}
+
+	// Helper to create a project with agent destinations
+	createProject := func(name string, agents ...string) *v1alpha1.AppProject {
+		var destinations []v1alpha1.ApplicationDestination
+		for _, agent := range agents {
+			destinations = append(destinations, v1alpha1.ApplicationDestination{Name: agent})
+		}
+		return &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd"},
+			Spec:       v1alpha1.AppProjectSpec{Destinations: destinations, SourceNamespaces: agents},
+		}
+	}
+
+	// Helper to setup server and execute function
+	executeTest := func(t *testing.T, mockBackend *mocks.AppProject, secret *corev1.Secret, existingRepoMapping, existingProjectMapping map[string]bool) (deleteEvents []string, finalRepoMapping map[string]bool, finalProjectMapping map[string]bool) {
+		projectManager, _ := appproject.NewAppProjectManager(mockBackend, "argocd")
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			projectManager: projectManager,
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			resources:      resources.NewAgentResources(),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged, "agent2": types.AgentModeManaged},
+		}
+
+		// Setup existing mappings
+		for agent := range existingRepoMapping {
+			s.repoToAgents.Add(secret.Name, agent)
+		}
+		for repo := range existingProjectMapping {
+			s.projectToRepos.Add(string(secret.Data["project"]), repo)
+		}
+
+		// Setup queues
+		s.queues.Create("agent1")
+		s.queues.Create("agent2")
+
+		// Execute function
+		s.deleteRepositoryCallback(secret)
+
+		// Collect events
+		for _, agent := range []string{"agent1", "agent2"} {
+			if q := s.queues.SendQ(agent); q != nil {
+				for q.Len() > 0 {
+					ev, _ := q.Get()
+					if ev.Type() == event.Delete.String() {
+						deleteEvents = append(deleteEvents, agent)
+					}
+					q.Done(ev)
+				}
+			}
+		}
+
+		return deleteEvents, s.repoToAgents.Get(secret.Name), s.projectToRepos.Get(string(secret.Data["project"]))
+	}
+
+	t.Run("deletes repository from active project", func(t *testing.T) {
+		// Repository exists in active project - should send delete events to project's agents
+		mockBackend := &mocks.AppProject{}
+		mockBackend.On("Get", mock.Anything, "active-project", "argocd").Return(createProject("active-project", "agent1", "agent2"), nil)
+
+		secret := createSecret("test-repo", "active-project")
+		existingRepoMapping := map[string]bool{"agent1": true, "agent2": true}
+		existingProjectMapping := map[string]bool{"test-repo": true}
+
+		deleteEvents, finalRepoMapping, finalProjectMapping := executeTest(t, mockBackend, secret, existingRepoMapping, existingProjectMapping)
+
+		// Both agents should get delete events
+		assert.ElementsMatch(t, []string{"agent1", "agent2"}, deleteEvents)
+		// Repository should be removed from all mappings
+		assert.Empty(t, finalRepoMapping)
+		assert.Empty(t, finalProjectMapping)
+		mockBackend.AssertExpectations(t)
+	})
+
+	t.Run("deletes repository using cached mapping when project deleted", func(t *testing.T) {
+		// Project no longer exists - should use cached repo-to-agents mapping
+		mockBackend := &mocks.AppProject{}
+		mockBackend.On("Get", mock.Anything, "deleted-project", "argocd").Return(nil, errors.NewNotFound(schema.GroupResource{}, "deleted-project"))
+
+		secret := createSecret("test-repo", "deleted-project")
+		existingRepoMapping := map[string]bool{"agent1": true} // Cached from when project existed
+		existingProjectMapping := map[string]bool{"test-repo": true}
+
+		deleteEvents, finalRepoMapping, finalProjectMapping := executeTest(t, mockBackend, secret, existingRepoMapping, existingProjectMapping)
+
+		// Cached agent should get delete event
+		assert.ElementsMatch(t, []string{"agent1"}, deleteEvents)
+		// Repository should be removed from all mappings
+		assert.Empty(t, finalRepoMapping)
+		assert.Empty(t, finalProjectMapping)
+		mockBackend.AssertExpectations(t)
+	})
+
+	t.Run("handles project lookup failure", func(t *testing.T) {
+		// Project lookup fails with non-NotFound error - should return early
+		mockBackend := &mocks.AppProject{}
+		mockBackend.On("Get", mock.Anything, "bad-project", "argocd").Return(nil, assert.AnError)
+
+		secret := createSecret("test-repo", "bad-project")
+		existingRepoMapping := map[string]bool{"agent1": true}
+		existingProjectMapping := map[string]bool{"test-repo": true}
+
+		deleteEvents, finalRepoMapping, finalProjectMapping := executeTest(t, mockBackend, secret, existingRepoMapping, existingProjectMapping)
+
+		// No events should be sent due to error
+		assert.Empty(t, deleteEvents)
+		// Mappings should remain unchanged
+		assert.Equal(t, map[string]bool{"agent1": true}, finalRepoMapping)
+		assert.Equal(t, map[string]bool{"test-repo": true}, finalProjectMapping)
+		mockBackend.AssertExpectations(t)
+	})
+
+	t.Run("handles no matching agents", func(t *testing.T) {
+		// Project exists but has no matching agents
+		mockBackend := &mocks.AppProject{}
+		mockBackend.On("Get", mock.Anything, "empty-project", "argocd").Return(createProject("empty-project"), nil) // No agents
+
+		secret := createSecret("test-repo", "empty-project")
+		existingRepoMapping := map[string]bool{} // No existing mapping
+		existingProjectMapping := map[string]bool{"test-repo": true}
+
+		deleteEvents, _, finalProjectMapping := executeTest(t, mockBackend, secret, existingRepoMapping, existingProjectMapping)
+
+		// No events should be sent
+		assert.Empty(t, deleteEvents)
+		// Project mapping should still be cleaned up
+		assert.Empty(t, finalProjectMapping)
+		mockBackend.AssertExpectations(t)
+	})
+
+	t.Run("handles missing project field", func(t *testing.T) {
+		// Repository secret missing project field - should return early
+		s := &Server{
+			events:         event.NewEventSource("test"),
+			queues:         queue.NewSendRecvQueues(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+		}
+		s.queues.Create("agent1")
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "argocd"},
+			Data:       map[string][]byte{"url": []byte("https://example.com/repo.git")}, // No project field
+		}
+
+		// Setup some existing state that should remain unchanged
+		s.repoToAgents.Add("test-repo", "agent1")
+		s.projectToRepos.Add("some-project", "test-repo")
+
+		s.deleteRepositoryCallback(secret)
+
+		// No events should be sent
+		q := s.queues.SendQ("agent1")
+		assert.Equal(t, 0, q.Len())
+		// State should remain unchanged
+		assert.Equal(t, map[string]bool{"agent1": true}, s.repoToAgents.Get("test-repo"))
+		assert.Equal(t, map[string]bool{"test-repo": true}, s.projectToRepos.Get("some-project"))
+	})
 }

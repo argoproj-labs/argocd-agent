@@ -24,6 +24,8 @@ import (
 	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // newAppCallback is executed when a new application event was emitted from
@@ -170,6 +172,9 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s to send queue, total length now %d", outbound.Name, q.Len())
 	}
+
+	// Reconcile repositories that reference this project.
+	s.syncRepositoriesForProject(outbound.Name, outbound.Namespace, logCtx)
 }
 
 func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha1.AppProject) {
@@ -211,6 +216,9 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 	}
 
 	s.syncAppProjectUpdatesToAgents(old, new, logCtx)
+
+	// The project rules could have been updated. Reconcile repositories that reference this project.
+	s.syncRepositoriesForProject(new.Name, new.Namespace, logCtx)
 
 	if s.metrics != nil {
 		s.metrics.AppProjectUpdated.Inc()
@@ -265,6 +273,118 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	}
 }
 
+func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
+	logCtx := log().WithFields(logrus.Fields{
+		"component": "EventCallback",
+		"event":     "repository_create",
+		"repo_name": outbound.Name,
+	})
+
+	logCtx.Info("New repository event")
+
+	projectName, ok := outbound.Data["project"]
+	if !ok {
+		logCtx.Error("Repository secret is not project scoped")
+		return
+	}
+
+	s.projectToRepos.Add(string(projectName), outbound.Name)
+
+	project, err := s.projectManager.Get(s.ctx, string(projectName), outbound.Namespace)
+	if err != nil {
+		logCtx.WithError(err).Error("failed to get the project referenced by the repository secret")
+		return
+	}
+
+	agents := s.mapAppProjectToAgents(*project)
+	if len(agents) == 0 {
+		logCtx.Tracef("No matching agents found for project %s", projectName)
+		return
+	}
+
+	for agent := range agents {
+		q := s.queues.SendQ(agent)
+		if q == nil {
+			logCtx.Errorf("Queue pair not found for agent %s", agent)
+			continue
+		}
+		s.resources.Add(agent, resources.NewResourceKeyFromRepository(outbound))
+
+		ev := s.events.RepositoryEvent(event.Create, outbound)
+		q.Add(ev)
+
+		s.repoToAgents.Add(outbound.Name, agent)
+		logCtx.Tracef("Added repository %s to send queue, total length now %d", outbound.Name, q.Len())
+	}
+}
+
+func (s *Server) updateRepositoryCallback(old, new *corev1.Secret) {
+	logCtx := log().WithFields(logrus.Fields{
+		"component": "EventCallback",
+		"event":     "repository_update",
+		"repo_name": old.Name,
+	})
+
+	logCtx.Info("Update repository event")
+
+	s.syncRepositoryUpdatesToAgents(old, new, logCtx)
+}
+
+func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
+	logCtx := log().WithFields(logrus.Fields{
+		"component": "EventCallback",
+		"event":     "repository_delete",
+		"repo_name": outbound.Name,
+	})
+
+	logCtx.Info("Delete repository event")
+
+	projectName, ok := outbound.Data["project"]
+	if !ok {
+		logCtx.Error("Repository secret is not project scoped")
+		return
+	}
+
+	var agents map[string]bool
+
+	project, err := s.projectManager.Get(s.ctx, string(projectName), outbound.Namespace)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			logCtx.WithError(err).Error("failed to get the project referenced by the repository secret")
+			return
+		}
+
+		logCtx.Tracef("Project %s is deleted. Using cached repo-agents mapping to delete repository", projectName)
+
+		// Project is deleted. Use the cached repo-agents map to avoid orphaned repositories on the agent clusters.
+		agents = s.repoToAgents.Get(outbound.Name)
+	} else {
+		agents = s.mapAppProjectToAgents(*project)
+	}
+
+	s.projectToRepos.Delete(string(projectName), outbound.Name)
+	if len(agents) == 0 {
+		logCtx.Tracef("No matching agents found for project %s", projectName)
+		return
+	}
+
+	for agent := range agents {
+		q := s.queues.SendQ(agent)
+		if q == nil {
+			logCtx.Errorf("Queue pair not found for agent %s", agent)
+			continue
+		}
+
+		s.resources.Remove(agent, resources.NewResourceKeyFromRepository(outbound))
+
+		ev := s.events.RepositoryEvent(event.Delete, outbound)
+		q.Add(ev)
+
+		s.repoToAgents.Delete(outbound.Name, agent)
+		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added repository delete event to send queue")
+	}
+}
+
 // deleteNamespaceCallback is called when the user deletes the agent namespace.
 // Since there is no namespace we can remove the queue associated with this agent.
 func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {
@@ -303,20 +423,24 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 			continue
 		}
 
-		matched := false
-		for _, dst := range appProject.Spec.Destinations {
-			if glob.Match(dst.Name, agentName) {
-				matched = true
-				break
-			}
-		}
-
-		if matched && glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP) {
+		if doesAgentMatchWithProject(agentName, appProject) {
 			agents[agentName] = true
 		}
 	}
 
 	return agents
+}
+
+func doesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
+	matched := false
+	for _, dst := range appProject.Spec.Destinations {
+		if glob.Match(dst.Name, agentName) {
+			matched = true
+			break
+		}
+	}
+
+	return matched && glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
 }
 
 // syncAppProjectUpdatesToAgents sends the AppProject update events to the relevant clusters.
@@ -362,6 +486,106 @@ func (s *Server) syncAppProjectUpdatesToAgents(old, new *v1alpha1.AppProject, lo
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s update event to send queue", new.Name)
+	}
+}
+
+// syncRepositoryUpdatesToAgents sends the repository update events to the relevant agents.
+// It sends delete events to the agents that no longer match the given project.
+func (s *Server) syncRepositoryUpdatesToAgents(old, new *corev1.Secret, logCtx *logrus.Entry) {
+	oldAgents := map[string]bool{}
+	newAgents := map[string]bool{}
+
+	oldProjectName, ok := old.Data["project"]
+	if !ok {
+		logCtx.Error("Repository secret is not project scoped")
+		return
+	}
+
+	oldproject, err := s.projectManager.Get(s.ctx, string(oldProjectName), old.Namespace)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			logCtx.WithError(err).Error("failed to get the project that was previously referenced by the repository secret")
+			return
+		}
+	} else {
+		oldAgents = s.mapAppProjectToAgents(*oldproject)
+	}
+
+	// Add the agents that were previously synced for this repository
+	for agent := range s.repoToAgents.Get(old.Name) {
+		oldAgents[agent] = true
+	}
+
+	newProjectName, ok := new.Data["project"]
+	if !ok {
+		logCtx.Error("Repository secret is not project scoped")
+		return
+	}
+
+	newProject, err := s.projectManager.Get(s.ctx, string(newProjectName), new.Namespace)
+	if err != nil {
+		logCtx.WithError(err).Error("failed to get the project that is currently referenced by the repository secret")
+	} else {
+		newAgents = s.mapAppProjectToAgents(*newProject)
+	}
+
+	if oldproject != nil && newProject != nil && oldproject.Name != newProject.Name {
+		// The project name has changed. Delete the repository from the old project.
+		s.projectToRepos.Delete(oldproject.Name, new.Name)
+		s.projectToRepos.Add(newProject.Name, new.Name)
+	}
+
+	// Delete the repository from agents that no longer match the new project
+	for agent := range oldAgents {
+		// If the agent is still in the newAgents map, it means the repository is still valid for the agent
+		if _, ok := newAgents[agent]; ok {
+			continue
+		}
+
+		q := s.queues.SendQ(agent)
+		if q == nil {
+			logCtx.Errorf("Queue pair not found for agent %s", agent)
+			continue
+		}
+
+		ev := s.events.RepositoryEvent(event.Delete, new)
+		q.Add(ev)
+
+		s.repoToAgents.Delete(new.Name, agent)
+
+		logCtx.Tracef("Sent a repository delete event for an agent that no longer matches the project")
+	}
+
+	// Update the repositories in the existing agents
+	for agent := range newAgents {
+
+		q := s.queues.SendQ(agent)
+		if q == nil {
+			logCtx.Errorf("Queue pair not found for agent %s", agent)
+			continue
+		}
+
+		ev := s.events.RepositoryEvent(event.SpecUpdate, new)
+		q.Add(ev)
+
+		s.repoToAgents.Add(new.Name, agent)
+
+		logCtx.Tracef("Added repository %s update event to send queue", new.Name)
+	}
+}
+
+func (s *Server) syncRepositoriesForProject(projectName, ns string, logCtx *logrus.Entry) {
+	repositories := s.projectToRepos.Get(projectName)
+	for repoName := range repositories {
+		logCtx.Tracef("Syncing repository %s for project %s", repoName, projectName)
+
+		repo, err := s.kubeClient.Clientset.CoreV1().Secrets(ns).Get(s.ctx, repoName, metav1.GetOptions{})
+		if err != nil {
+			logCtx.WithError(err).Error("failed to get the repository secret")
+			continue
+		}
+
+		s.syncRepositoryUpdatesToAgents(repo, repo, logCtx)
 	}
 }
 
