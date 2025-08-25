@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
@@ -47,6 +48,8 @@ import (
 
 	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
+	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
 	ty "k8s.io/apimachinery/pkg/types"
 )
 
@@ -94,6 +97,9 @@ type Agent struct {
 
 	// enableResourceProxy determines if the agent should proxy resources to the principal
 	enableResourceProxy bool
+
+	cacheRefreshInterval time.Duration
+	clusterCache         *appstatecache.Cache
 }
 
 const defaultQueueName = "default"
@@ -273,6 +279,13 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		connMap: map[string]connectionEntry{},
 	}
 
+	clusterCache, err := cluster.NewClusterCacheInstance(ctx, client.Clientset,
+		a.namespace, a.redisProxyMsgHandler.redisAddress, cacheutil.RedisCompressionGZip)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
+	}
+	a.clusterCache = clusterCache
+
 	return a, nil
 }
 
@@ -351,6 +364,23 @@ func (a *Agent) Start(ctx context.Context) error {
 		log().Infof("Starting healthz server on %s", healthzAddr)
 		//nolint:errcheck
 		go http.ListenAndServe(healthzAddr, nil)
+	}
+
+	// Start the background process of periodic sync of cluster cache info.
+	// This will send periodic updates of Application, Resource and API counts to principal.
+	if a.mode == types.AgentModeManaged {
+		go func() {
+			ticker := time.NewTicker(a.cacheRefreshInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					a.addClusterCacheInfoUpdateToQueue()
+				case <-a.context.Done():
+					return
+				}
+			}
+		}()
 	}
 
 	if a.remote != nil {

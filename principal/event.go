@@ -90,6 +90,8 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 
 	case event.TargetResourceResync:
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
+	case event.TargetClusterCacheInfoUpdate:
+		err = s.processClusterCacheInfoUpdateEvent(agentName, ev)
 	default:
 		err = fmt.Errorf("unknown target: '%s'", target)
 	}
@@ -355,6 +357,28 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 	}
 
 	return nil
+}
+
+// processClusterCacheInfoUpdateEvent processes the clusterCacheInfoUpdate event received from the agent.
+// It updates the cluster cache stats in the principal's cluster cache.
+func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloudevents.Event) error {
+	clusterInfo := &event.ClusterCacheInfo{}
+	err := ev.DataAs(clusterInfo)
+	if err != nil {
+		return err
+	}
+
+	agentMode := s.agentMode(agentName)
+	log().WithFields(logrus.Fields{
+		"module":      "QueueProcessor",
+		"client":      agentName,
+		"mode":        agentMode.String(),
+		"event":       ev.Type(),
+		"resource_id": event.ResourceID(ev),
+		"event_id":    event.EventID(ev),
+	}).Infof("Processing clusterCacheInfoUpdate event")
+
+	return s.clusterMgr.SetClusterCacheStats(clusterInfo, agentName)
 }
 
 // processRedisEventResponse proceses (redis) messages received from agents:
