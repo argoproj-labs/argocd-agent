@@ -59,9 +59,13 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	var status error
 
 	// Extract required information from the resource request
-	gvr, name, namespace := rreqEventToGvk(rreq)
+	gvr, name, namespace, subresource := rreqEventToGvk(rreq)
 
-	logCtx.Infof("Processing resource request for resource of type %s named %s/%s", gvr.String(), namespace, name)
+	if subresource != "" {
+		logCtx.Infof("Processing resource request for subresource %s of resource %s named %s/%s", subresource, gvr.String(), namespace, name)
+	} else {
+		logCtx.Infof("Processing resource request for resource of type %s named %s/%s", gvr.String(), namespace, name)
+	}
 
 	switch rreq.Method {
 	case http.MethodGet:
@@ -70,8 +74,13 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 		// or a list of APIs instead.
 		if name != "" {
 			if gvr.Resource != "" {
-				logCtx.Debugf("Fetching managed resource %s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
-				unres, err = a.getManagedResource(ctx, gvr, name, namespace)
+				if subresource != "" {
+					logCtx.Debugf("Fetching subresource %s of managed resource %s/%s/%s", subresource, gvr.Group, gvr.Version, gvr.Resource)
+					unres, err = a.getManagedResourceSubresource(ctx, gvr, name, namespace, subresource)
+				} else {
+					logCtx.Debugf("Fetching managed resource %s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
+					unres, err = a.getManagedResource(ctx, gvr, name, namespace)
+				}
 			}
 		} else {
 			if gvr.Resource != "" {
@@ -82,9 +91,17 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 			}
 		}
 	case http.MethodPost:
-		unres, err = a.processIncomingPostResourceRequest(ctx, rreq, gvr)
+		if subresource != "" {
+			unres, err = a.processIncomingPostSubresourceRequest(ctx, rreq, gvr, subresource)
+		} else {
+			unres, err = a.processIncomingPostResourceRequest(ctx, rreq, gvr)
+		}
 	case http.MethodPatch:
-		unres, err = a.processIncomingPatchResourceRequest(ctx, rreq, gvr)
+		if subresource != "" {
+			unres, err = a.processIncomingPatchSubresourceRequest(ctx, rreq, gvr, subresource)
+		} else {
+			unres, err = a.processIncomingPatchResourceRequest(ctx, rreq, gvr)
+		}
 	case http.MethodDelete:
 		err = a.processIncomingDeleteResourceRequest(ctx, rreq, gvr)
 	default:
@@ -187,13 +204,63 @@ func (a *Agent) processIncomingDeleteResourceRequest(ctx context.Context, req *e
 
 // rreqEventToGvk returns a GroupVersionResource object, name and namespace for
 // the resource requested in rreq.
-func rreqEventToGvk(rreq *event.ResourceRequest) (gvr schema.GroupVersionResource, name string, namespace string) {
+func rreqEventToGvk(rreq *event.ResourceRequest) (gvr schema.GroupVersionResource, name string, namespace string, subresource string) {
 	gvr.Group = rreq.Group
 	gvr.Resource = rreq.Resource
 	gvr.Version = rreq.Version
 	name = rreq.Name
 	namespace = rreq.Namespace
+	subresource = rreq.Subresource
 	return
+}
+
+// getManagedResourceSubresource retrieves a subresource of a single resource from the cluster
+// and returns it as unstructured data. The resource to be returned must be managed by Argo CD.
+func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.GroupVersionResource, name, namespace, subresource string) (*unstructured.Unstructured, error) {
+	// First check if the parent resource is managed
+	_, err := a.getManagedResource(ctx, gvr, name, namespace)
+	if err != nil {
+		return nil, err
+	}
+	
+	// If parent is managed, fetch the subresource using a direct REST call
+	// The dynamic client doesn't directly support subresources, so we build the path manually
+	var path string
+	if namespace != "" {
+		if gvr.Group == "" {
+			// Core API: /api/v1/namespaces/{namespace}/{resource}/{name}/{subresource}
+			path = fmt.Sprintf("/api/%s/namespaces/%s/%s/%s/%s", gvr.Version, namespace, gvr.Resource, name, subresource)
+		} else {
+			// Named group API: /apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}/{subresource}
+			path = fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s/%s", gvr.Group, gvr.Version, namespace, gvr.Resource, name, subresource)
+		}
+	} else {
+		if gvr.Group == "" {
+			// Core API cluster-scoped: /api/v1/{resource}/{name}/{subresource}
+			path = fmt.Sprintf("/api/%s/%s/%s/%s", gvr.Version, gvr.Resource, name, subresource)
+		} else {
+			// Named group API cluster-scoped: /apis/{group}/{version}/{resource}/{name}/{subresource}
+			path = fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, name, subresource)
+		}
+	}
+	
+	// Use the discovery client's RESTClient to make the request
+	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
+	req := restClient.Get().AbsPath(path)
+	
+	// Execute the request
+	bytes, err := req.DoRaw(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subresource %s: %w", subresource, err)
+	}
+	
+	// Convert the raw response to unstructured
+	result := &unstructured.Unstructured{}
+	if err := json.Unmarshal(bytes, &result.Object); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
+	}
+	
+	return result, nil
 }
 
 // getManagedResource retrieves a single resource from the cluster
@@ -378,4 +445,101 @@ func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructur
 	// If we reach this point, we are certain that neither the inspected
 	// resource nor any of its owners belong to an Argo CD application.
 	return false, nil
+}
+
+// processIncomingPostSubresourceRequest handles POST requests for subresources
+func (a *Agent) processIncomingPostSubresourceRequest(ctx context.Context, rreq *event.ResourceRequest, gvr schema.GroupVersionResource, subresource string) (*unstructured.Unstructured, error) {
+	// First check if the parent resource is managed
+	_, err := a.getManagedResource(ctx, gvr, rreq.Name, rreq.Namespace)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Build the path for the subresource
+	var path string
+	if rreq.Namespace != "" {
+		if gvr.Group == "" {
+			path = fmt.Sprintf("/api/%s/namespaces/%s/%s/%s/%s", gvr.Version, rreq.Namespace, gvr.Resource, rreq.Name, subresource)
+		} else {
+			path = fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s/%s", gvr.Group, gvr.Version, rreq.Namespace, gvr.Resource, rreq.Name, subresource)
+		}
+	} else {
+		if gvr.Group == "" {
+			path = fmt.Sprintf("/api/%s/%s/%s/%s", gvr.Version, gvr.Resource, rreq.Name, subresource)
+		} else {
+			path = fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, rreq.Name, subresource)
+		}
+	}
+	
+	// Use the discovery client's RESTClient to make the request
+	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
+	req := restClient.Post().AbsPath(path).Body(rreq.Body)
+	
+	// Execute the request
+	bytes, err := req.DoRaw(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to post to subresource %s: %w", subresource, err)
+	}
+	
+	// Convert the raw response to unstructured
+	result := &unstructured.Unstructured{}
+	if err := json.Unmarshal(bytes, &result.Object); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
+	}
+	
+	return result, nil
+}
+
+// processIncomingPatchSubresourceRequest handles PATCH requests for subresources
+func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, rreq *event.ResourceRequest, gvr schema.GroupVersionResource, subresource string) (*unstructured.Unstructured, error) {
+	// First check if the parent resource is managed
+	_, err := a.getManagedResource(ctx, gvr, rreq.Name, rreq.Namespace)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Build the path for the subresource
+	var path string
+	if rreq.Namespace != "" {
+		if gvr.Group == "" {
+			path = fmt.Sprintf("/api/%s/namespaces/%s/%s/%s/%s", gvr.Version, rreq.Namespace, gvr.Resource, rreq.Name, subresource)
+		} else {
+			path = fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s/%s", gvr.Group, gvr.Version, rreq.Namespace, gvr.Resource, rreq.Name, subresource)
+		}
+	} else {
+		if gvr.Group == "" {
+			path = fmt.Sprintf("/api/%s/%s/%s/%s", gvr.Version, gvr.Resource, rreq.Name, subresource)
+		} else {
+			path = fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, rreq.Name, subresource)
+		}
+	}
+	
+	// Use the discovery client's RESTClient to make the request
+	// Determine patch type from content-type header if available
+	patchType := k8stypes.MergePatchType
+	if rreq.Params != nil && rreq.Params["content-type"] != "" {
+		switch rreq.Params["content-type"] {
+		case "application/json-patch+json":
+			patchType = k8stypes.JSONPatchType
+		case "application/strategic-merge-patch+json":
+			patchType = k8stypes.StrategicMergePatchType
+		}
+	}
+	
+	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
+	req := restClient.Patch(patchType).AbsPath(path).Body(rreq.Body)
+	
+	// Execute the request
+	bytes, err := req.DoRaw(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to patch subresource %s: %w", subresource, err)
+	}
+	
+	// Convert the raw response to unstructured
+	result := &unstructured.Unstructured{}
+	if err := json.Unmarshal(bytes, &result.Object); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
+	}
+	
+	return result, nil
 }
