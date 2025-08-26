@@ -222,7 +222,7 @@ func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.Gr
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// If parent is managed, fetch the subresource using a direct REST call
 	// The dynamic client doesn't directly support subresources, so we build the path manually
 	var path string
@@ -243,23 +243,23 @@ func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.Gr
 			path = fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, name, subresource)
 		}
 	}
-	
+
 	// Use the discovery client's RESTClient to make the request
 	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
 	req := restClient.Get().AbsPath(path)
-	
+
 	// Execute the request
 	bytes, err := req.DoRaw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get subresource %s: %w", subresource, err)
 	}
-	
+
 	// Convert the raw response to unstructured
 	result := &unstructured.Unstructured{}
 	if err := json.Unmarshal(bytes, &result.Object); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
 	}
-	
+
 	return result, nil
 }
 
@@ -454,7 +454,7 @@ func (a *Agent) processIncomingPostSubresourceRequest(ctx context.Context, rreq 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Build the path for the subresource
 	var path string
 	if rreq.Namespace != "" {
@@ -470,23 +470,23 @@ func (a *Agent) processIncomingPostSubresourceRequest(ctx context.Context, rreq 
 			path = fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, rreq.Name, subresource)
 		}
 	}
-	
+
 	// Use the discovery client's RESTClient to make the request
 	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
 	req := restClient.Post().AbsPath(path).Body(rreq.Body)
-	
+
 	// Execute the request
 	bytes, err := req.DoRaw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to post to subresource %s: %w", subresource, err)
 	}
-	
+
 	// Convert the raw response to unstructured
 	result := &unstructured.Unstructured{}
 	if err := json.Unmarshal(bytes, &result.Object); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
 	}
-	
+
 	return result, nil
 }
 
@@ -497,7 +497,7 @@ func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, rreq
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Build the path for the subresource
 	var path string
 	if rreq.Namespace != "" {
@@ -513,7 +513,7 @@ func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, rreq
 			path = fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, rreq.Name, subresource)
 		}
 	}
-	
+
 	// Use the discovery client's RESTClient to make the request
 	// Determine patch type from content-type header if available
 	patchType := k8stypes.MergePatchType
@@ -525,21 +525,21 @@ func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, rreq
 			patchType = k8stypes.StrategicMergePatchType
 		}
 	}
-	
+
 	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
 	req := restClient.Patch(patchType).AbsPath(path).Body(rreq.Body)
-	
+
 	// Execute the request
 	bytes, err := req.DoRaw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to patch subresource %s: %w", subresource, err)
 	}
-	
+
 	// Convert the raw response to unstructured
 	result := &unstructured.Unstructured{}
 	if err := json.Unmarshal(bytes, &result.Object); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
 	}
-	
+
 	return result, nil
 }
