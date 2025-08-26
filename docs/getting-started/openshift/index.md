@@ -3,11 +3,11 @@ This document outlines the process of setting up Argo CD Agent in a hub and spok
 ## Prerequisites
 Before proceeding with the setup, ensure you have the following:
 
-- A running OpenShift/kubernetes cluster designated as the hub, with Argo CD/OpenShift GitOps Operator installed.
+- A running OpenShift/Kubernetes cluster designated as the hub, with Argo CD/OpenShift GitOps Operator installed.
 - One or more Kubernetes clusters designated as spokes, Argo CD/OpenShift GitOps Operator installed.
 - `oc` binary configured to access both hub and spoke clusters.
 - Operator must be installed in [cluster scope](https://argocd-operator.readthedocs.io/en/stable/usage/basics/#cluster-scoped-instance) mode.
-- Apps in any Namespace must be enabled for Hub Cluster.
+- [Apps in any Namespace](https://argocd-operator.readthedocs.io/en/latest/usage/apps-in-any-namespace/) must be enabled for Hub Cluster.
 - `argocd-agentctl` binary (for non-production scenario)
 
 
@@ -15,7 +15,7 @@ Before proceeding with the setup, ensure you have the following:
 
 Hub cluster will be installed in argocd namespace
 
-Before you install the principal's manifest, you will need to create three
+Before you install the principal's manifest, you will need to
 - Create a TLS secret containing the public CA certificate used by Argo CD-agent components
 - Create a TLS secret containing the certificate and private key used by the principal's gRPC service
 - Create a TLS secret containing the certificate and private key used by the principal's resource proxy
@@ -85,7 +85,7 @@ oc create secret generic argocd-redis -n argocd --from-literal=auth="$(oc get se
 
 ## Setting up agent workload cluster 
 
-### Configure Argo-CD for Agent 
+### Configure Argo CD for Agent 
  
 Argo CD instance on Agent cluster
 
@@ -98,6 +98,11 @@ Creating Argo CD instance for Workload/spoke cluster.
   spec:
     server:
       enabled: false
+```
+
+Create redis secret using below command for agent deployment 
+```
+kubectl create secret generic argocd-redis -n <workload namespace> --from-literal=auth="$(kubectl get secret argocd-redis-initial-password -n <argocd-namespace> -o jsonpath='{.data.admin\.password}' | base64 -d)"
 ```
 
 ### Configure Agent in managed mode
@@ -117,15 +122,22 @@ oc apply -n $(workload-namespace) -k 'https://github.com/argoproj-labs/argocd-ag
 ```
 This should create all the required agent related resources.
 
+Note: If installation is done on other than `default` namespace, run the following command to update cluster-role with correct namespace
+
+```
+kubectl patch clusterrolebinding argocd-agent-agent --type='json' -p='[{"op": "replace", "path": "/subjects/0/namespace", "value": "<workload-namespace>"}]'
+```
+
+
 Update the configMap with name `argocd-agent-params`  with parameters related to agent.mode,agent.creds, agent.namespace, agent.server.address.	
 ```
   agent.keep-alive-ping-interval: 50s
   agent.mode: managed
   agent.creds: mtls:any
   agent.tls.client.insecure: "false"
-  agent.tls.root-ca-path: "/app/config/tls/ca.crt"
-  agent.tls.client.cert-path: "/app/config/tls/tls.crt"
-  agent.tls.client.key-path: "/app/config/tls/tls.key"
+  agent.tls.root-ca-path: ""
+  agent.tls.client.cert-path: ""
+  agent.tls.client.key-path: ""
   agent.log.level: info
   agent.namespace: <workload-namespace>
   agent.server.address: <argocd-principal-server>
@@ -155,6 +167,13 @@ Apply the installation manifests for argocd agent
 oc apply -n argocd -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main'
 ```
 This should create all the required agent related resources.
+
+Note: If installation is done on other than `default` namespace, run the following command to update cluster-role with correct namespace
+
+```
+kubectl patch clusterrolebinding argocd-agent-agent --type='json' -p='[{"op": "replace", "path": "/subjects/0/namespace", "value": "<workload-namespace>"}]'
+```
+
 
 Update the configMap with name `argocd-agent-params`  with parameters related to agent.mode,agent.creds, agent.namespace, agent.server.address.
 ```
@@ -193,20 +212,9 @@ update the ClusterRoleBinding to update the subject namespace to workload-namesp
 kubectl patch clusterrolebinding argocd-agent-agent --type='json' -p='[{"op": "replace", "path": "/subjects/0/namespace", "value": "<workload-namespace>"}]'
 ```
 
-2. If appProject if not present in agent cluster, create using the below source
+2. If facing error with appProject
+
 ```
-apiVersion: argoproj.io/v1alpha1
-kind: AppProject
-metadata:
-  name: default
-  namespace: argocd
-spec:
-  clusterResourceWhitelist:
-    - group: '*'
-      kind: '*'
-  destinations:
-    - namespace: '*'
-      server: '*'
-  sourceRepos:
-    - '*'
+Unable to create application: app is not allowed in project "default", or the project does not exist
 ```
+refer to doc for [AppProject Synchronization](https://argocd-agent.readthedocs.io/latest/user-guide/appprojects/#managed-agent-mode).
