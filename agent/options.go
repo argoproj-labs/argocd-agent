@@ -16,6 +16,7 @@ package agent
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -96,6 +97,13 @@ func WithRedisPassword(password string) AgentOption {
 func WithEnableResourceProxy(enable bool) AgentOption {
 	return func(o *Agent) error {
 		o.enableResourceProxy = enable
+		return nil
+	}
+}
+
+func WithCacheRefreshInterval(interval time.Duration) AgentOption {
+	return func(o *Agent) error {
+		o.cacheRefreshInterval = interval
 		return nil
 	}
 }

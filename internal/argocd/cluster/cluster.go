@@ -15,20 +15,26 @@
 package cluster
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/redis/go-redis/v9"
+	"github.com/sirupsen/logrus"
 
 	"github.com/argoproj/argo-cd/v3/common"
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
-// UpdateClusterConnectionInfo updates cluster info with connection state and time in mapped cluster
-func (m *Manager) UpdateClusterConnectionInfo(agentName, status string, t time.Time) {
+// SetAgentConnectionStatus updates cluster info with connection state and time in mapped cluster at principal.
+// This is called when the agent is connected or disconnected with the principal.
+func (m *Manager) SetAgentConnectionStatus(agentName, status appv1.ConnectionStatus, modifiedAt time.Time) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -39,67 +45,140 @@ func (m *Manager) UpdateClusterConnectionInfo(agentName, status string, t time.T
 		return
 	}
 
-	// Create Redis client and cache
-	redisOptions := &redis.Options{Addr: m.redisAddress}
-
-	if err := common.SetOptionalRedisPasswordFromKubeConfig(m.ctx, m.kubeclient, m.namespace, redisOptions); err != nil {
-		log().Errorf("Failed to fetch & set redis password for namespace %s: %v", m.namespace, err)
-	}
-	redisClient := redis.NewClient(redisOptions)
-
-	cache := appstatecache.NewCache(cacheutil.NewCache(
-		cacheutil.NewRedisCache(redisClient, time.Minute, m.redisCompressionType)), time.Minute)
-
 	state := "disconnected"
 	if status == appv1.ConnectionStatusSuccessful {
 		state = "connected"
 	}
 
-	// update the info
-	if err := cache.SetClusterInfo(cluster.Server,
+	// Update the cluster connection state and time in mapped cluster at principal.
+	if err := m.setClusterInfo(cluster.Server, agentName, cluster.Name,
 		&appv1.ClusterInfo{
 			ConnectionState: appv1.ConnectionState{
 				Status:     status,
 				Message:    fmt.Sprintf("Agent: '%s' is %s with principal", agentName, state),
-				ModifiedAt: &metav1.Time{Time: t}}},
-	); err != nil {
-		log().Errorf("Failed to update connection info in Cluster: '%s' mapped with Agent: '%s'. Error: %v", cluster.Name, agentName, err)
+				ModifiedAt: &metav1.Time{Time: modifiedAt},
+			},
+		}); err != nil {
+		log().Errorf("failed to refresh connection info in cluster: '%s' mapped with agent: '%s'. Error: %v", cluster.Name, agentName, err)
 		return
 	}
 
 	log().Infof("Updated connection status to '%s' in Cluster: '%s' mapped with Agent: '%s'", status, cluster.Name, agentName)
 }
 
-// refreshClusterConnectionInfo gets latest cluster info from cache and re-saves it to avoid deletion of info
-// by ArgoCD after cache expiration time duration (i.e. 10 Minute)
-func (m *Manager) refreshClusterConnectionInfo() {
+// refreshClusterInfo gets latest cluster info from cache and re-saves it to avoid deletion of info
+// by Argo CD after cache expiration time duration (i.e. 10 minutes)
+func (m *Manager) refreshClusterInfo() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	// iterate through all clusters
+	if m.clusterCache == nil {
+		log().Warn("Cluster cache is not available, skipping refresh")
+		return
+	}
+
+	// Iterate through all clusters.
 	for agentName, cluster := range m.clusters {
-		// Create Redis client and cache
-		redisOptions := &redis.Options{Addr: m.redisAddress}
-
-		if err := common.SetOptionalRedisPasswordFromKubeConfig(m.ctx, m.kubeclient, m.namespace, redisOptions); err != nil {
-			log().Errorf("Failed to fetch & set redis password for namespace %s: %v", m.namespace, err)
-		}
-		redisClient := redis.NewClient(redisOptions)
-
-		cache := appstatecache.NewCache(cacheutil.NewCache(
-			cacheutil.NewRedisCache(redisClient, time.Minute, m.redisCompressionType)), time.Minute)
-
-		// fetch latest info
 		clusterInfo := &appv1.ClusterInfo{}
-		if err := cache.GetClusterInfo(cluster.Server, clusterInfo); err != nil {
-			log().Errorf("Failed to get connection info from Cluster: '%s' mapped with Agent: '%s'. Error: %v", cluster.Name, agentName, err)
-			return
+
+		if err := m.clusterCache.GetClusterInfo(cluster.Server, clusterInfo); err != nil {
+			if !errors.Is(err, cacheutil.ErrCacheMiss) {
+				log().Errorf("failed to get connection info from cluster: '%s' mapped with agent: '%s'. Error: %v", cluster.Name, agentName, err)
+			}
+			continue
 		}
 
-		// re-save same info
-		if err := cache.SetClusterInfo(cluster.Server, clusterInfo); err != nil {
-			log().Errorf("Failed to refresh connection info in Cluster: '%s' mapped with Agent: '%s'. Error: %v", cluster.Name, agentName, err)
-			return
+		// Re-save same info.
+		if err := m.setClusterInfo(cluster.Server, agentName, cluster.Name, clusterInfo); err != nil {
+			log().Errorf("failed to refresh connection info in cluster: '%s' mapped with agent: '%s'. Error: %v", cluster.Name, agentName, err)
+			continue
 		}
 	}
+}
+
+// SetClusterCacheStats updates cluster cache info with Application, Resource and API counts in principal.
+// This is called when principal receives clusterCacheInfoUpdate event from agent.
+func (m *Manager) SetClusterCacheStats(clusterInfo *event.ClusterCacheInfo, agentName string) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	// Check if we have a mapping for the requested agent.
+	cluster := m.mapping(agentName)
+	if cluster == nil {
+		log().Errorf("agent %s is not mapped to any cluster", agentName)
+		return fmt.Errorf("agent %s is not mapped to any cluster", agentName)
+	}
+
+	existingClusterInfo := &appv1.ClusterInfo{}
+	if m.clusterCache != nil {
+		if err := m.clusterCache.GetClusterInfo(cluster.Server, existingClusterInfo); err != nil {
+			if !errors.Is(err, cacheutil.ErrCacheMiss) {
+				log().Errorf("failed to get existing cluster info for cluster: '%s' mapped with agent: '%s'. Error: %v", cluster.Name, agentName, err)
+			}
+		}
+	}
+
+	// Create new cluster info with cache stats
+	newClusterInfo := &appv1.ClusterInfo{
+		ApplicationsCount: clusterInfo.ApplicationsCount,
+		CacheInfo: appv1.ClusterCacheInfo{
+			APIsCount:      clusterInfo.APIsCount,
+			ResourcesCount: clusterInfo.ResourcesCount,
+		},
+	}
+
+	// Preserve existing cluster connection status
+	if existingClusterInfo.ConnectionState != (appv1.ConnectionState{}) {
+		newClusterInfo.ConnectionState = existingClusterInfo.ConnectionState
+		if existingClusterInfo.CacheInfo.LastCacheSyncTime != nil {
+			newClusterInfo.CacheInfo.LastCacheSyncTime = existingClusterInfo.CacheInfo.LastCacheSyncTime
+		}
+	}
+
+	// Set the info in mapped cluster at principal.
+	if err := m.setClusterInfo(cluster.Server, agentName, cluster.Name, newClusterInfo); err != nil {
+		log().Errorf("failed to update cluster cache stats in cluster: '%s' mapped with agent: '%s'. Error: %v", cluster.Name, agentName, err)
+		return err
+	}
+
+	log().WithFields(logrus.Fields{
+		"applicationsCount": clusterInfo.ApplicationsCount,
+		"apisCount":         clusterInfo.APIsCount,
+		"resourcesCount":    clusterInfo.ResourcesCount,
+		"cluster":           cluster.Name,
+		"agent":             agentName,
+	}).Infof("Updated cluster cache stats in cluster.")
+
+	return nil
+}
+
+// setClusterInfo saves the given ClusterInfo in the cache.
+func (m *Manager) setClusterInfo(clusterServer, agentName, clusterName string, clusterInfo *appv1.ClusterInfo) error {
+	// Check if cluster cache is available
+	if m.clusterCache == nil {
+		return fmt.Errorf("cluster cache is not available")
+	}
+
+	// Save the given cluster info in cache.
+	if err := m.clusterCache.SetClusterInfo(clusterServer, clusterInfo); err != nil {
+		return fmt.Errorf("failed to refresh connection info in cluster: '%s' mapped with agent: '%s': %v", clusterName, agentName, err)
+	}
+	return nil
+}
+
+// NewClusterCacheInstance creates a new cache instance with Redis connection
+func NewClusterCacheInstance(ctx context.Context, kubeclient kubernetes.Interface,
+	namespace, redisAddress string, redisCompressionType cacheutil.RedisCompressionType) (*appstatecache.Cache, error) {
+	redisOptions := &redis.Options{Addr: redisAddress}
+
+	if err := common.SetOptionalRedisPasswordFromKubeConfig(ctx, kubeclient, namespace, redisOptions); err != nil {
+		return nil, fmt.Errorf("failed to set redis password for namespace %s: %v", namespace, err)
+	}
+
+	redisClient := redis.NewClient(redisOptions)
+
+	clusterCache := appstatecache.NewCache(cacheutil.NewCache(
+		cacheutil.NewRedisCache(redisClient, 0, redisCompressionType)), 0)
+
+	return clusterCache, nil
 }

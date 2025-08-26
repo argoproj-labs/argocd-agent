@@ -15,11 +15,14 @@
 package agent
 
 import (
+	"errors"
+
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -260,4 +263,44 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 
 	q.Add(a.emitter.AppProjectEvent(event.Delete, appProject))
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject delete event to send queue")
+}
+
+// addClusterCacheInfoUpdateToQueue processes a cluster cache info update event
+// and puts it in the send queue.
+func (a *Agent) addClusterCacheInfoUpdateToQueue() {
+	logCtx := log().WithFields(logrus.Fields{
+		"event": "addClusterCacheInfoUpdateToQueue",
+	})
+
+	clusterServer := "https://kubernetes.default.svc"
+	clusterInfo := &v1alpha1.ClusterInfo{}
+
+	// Get the updated cluster info from agent's cache.
+	if err := a.clusterCache.GetClusterInfo(clusterServer, clusterInfo); err != nil {
+		if !errors.Is(err, cacheutil.ErrCacheMiss) {
+			logCtx.WithError(err).Errorf("Failed to get cluster info from cache")
+		}
+		return
+	}
+
+	// Send the event to principal to update the cluster cache info.
+	q := a.queues.SendQ(defaultQueueName)
+	if q != nil {
+		clusterInfoEvent := a.emitter.ClusterCacheInfoUpdateEvent(event.ClusterCacheInfoUpdate, &event.ClusterCacheInfo{
+			ApplicationsCount: clusterInfo.ApplicationsCount,
+			APIsCount:         clusterInfo.CacheInfo.APIsCount,
+			ResourcesCount:    clusterInfo.CacheInfo.ResourcesCount,
+		})
+
+		q.Add(clusterInfoEvent)
+		logCtx.WithFields(logrus.Fields{
+			"sendq_len":         q.Len(),
+			"sendq_name":        defaultQueueName,
+			"applicationsCount": clusterInfo.ApplicationsCount,
+			"apisCount":         clusterInfo.CacheInfo.APIsCount,
+			"resourcesCount":    clusterInfo.CacheInfo.ResourcesCount,
+		}).Infof("Added ClusterCacheInfoUpdate event to send queue")
+	} else {
+		logCtx.Error("Default queue not found, unable to send ClusterCacheInfoUpdate event")
+	}
 }

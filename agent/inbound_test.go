@@ -103,7 +103,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 				Name:       "owner",
 				UID:        "uid-1",
 			},
-		},	
+		},
 	}}
 
 	// oldApp is the app that is already present on the agent
