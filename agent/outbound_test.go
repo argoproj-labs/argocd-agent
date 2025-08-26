@@ -1,11 +1,17 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -370,4 +376,46 @@ func Test_addAppProjectDeletionToQueue(t *testing.T) {
 		assert.Equal(t, event.Delete.String(), ev.Type())
 		require.False(t, a.projectManager.IsManaged("test-project"))
 	})
+}
+
+func Test_addClusterCacheInfoUpdateToQueue(t *testing.T) {
+	miniRedis, err := miniredis.Run()
+	require.NoError(t, err)
+	require.NotNil(t, miniRedis)
+	defer miniRedis.Close()
+
+	kubec := kube.NewKubernetesFakeClientWithApps("argocd")
+	remote, err := client.NewRemote("127.0.0.1", 8080)
+	require.NoError(t, err)
+
+	a, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithRedisHost(miniRedis.Addr()))
+	require.NoError(t, err)
+
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	// First populate the cache with dummy data
+	clusterMgr, err := cluster.NewManager(a.context, a.namespace, miniRedis.Addr(), cacheutil.RedisCompressionGZip, a.kubeClient.Clientset)
+	require.NoError(t, err)
+	err = clusterMgr.MapCluster("test-agent", &v1alpha1.Cluster{
+		Name:   "test-cluster",
+		Server: "https://kubernetes.default.svc",
+	})
+	require.NoError(t, err)
+
+	// Set dummy cluster cache stats
+	clusterMgr.SetClusterCacheStats(&event.ClusterCacheInfo{
+		ApplicationsCount: 5,
+		APIsCount:         10,
+		ResourcesCount:    100,
+	}, "test-agent")
+
+	// Should not have an event in queue
+	require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+
+	// Add a cluster cache info update event to the queue
+	a.addClusterCacheInfoUpdateToQueue()
+
+	// Should have an event in queue
+	require.Equal(t, 1, a.queues.SendQ(defaultQueueName).Len())
 }

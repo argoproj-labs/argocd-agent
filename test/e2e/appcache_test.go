@@ -30,8 +30,9 @@ import (
 )
 
 const (
-	PrincipalName    = "principal"
-	AgentManagedName = "agent-managed"
+	PrincipalName       = "principal"
+	AgentManagedName    = "agent-managed"
+	AgentAutonomousName = "agent-autonomous"
 )
 
 type CacheTestSuite struct {
@@ -183,10 +184,18 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterOfflineChanges() {
 	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 }
 
-func createApp(ctx context.Context, client fixture.KubeClient, requires *require.Assertions) argoapp.Application {
+func createApp(ctx context.Context, client fixture.KubeClient, requires *require.Assertions, opts ...struct{ Name, Namespace string }) argoapp.Application {
+	// If opts are provided, use them, otherwise use default values
+	name := "guestbook"
+	namespace := "guestbook"
+	if len(opts) > 0 {
+		name = opts[0].Name
+		namespace = opts[0].Namespace
+	}
+
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "guestbook",
+			Name:      name,
 			Namespace: AgentManagedName,
 		},
 		Spec: argoapp.ApplicationSpec{
@@ -198,7 +207,7 @@ func createApp(ctx context.Context, client fixture.KubeClient, requires *require
 			},
 			Destination: argoapp.ApplicationDestination{
 				Server:    "https://kubernetes.default.svc",
-				Namespace: "guestbook",
+				Namespace: namespace,
 			},
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{

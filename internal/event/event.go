@@ -66,16 +66,18 @@ const (
 	ResponseSyncedResource     EventType = TypePrefix + ".response-synced-resource"
 	EventRequestUpdate         EventType = TypePrefix + ".request-update"
 	EventRequestResourceResync EventType = TypePrefix + ".request-resource-resync"
+	ClusterCacheInfoUpdate     EventType = TypePrefix + ".cluster-cache-info-update"
 )
 
 const (
-	TargetUnknown        EventTarget = "unknown"
-	TargetApplication    EventTarget = "application"
-	TargetAppProject     EventTarget = "appproject"
-	TargetEventAck       EventTarget = "eventProcessed"
-	TargetResource       EventTarget = "resource"
-	TargetRedis          EventTarget = "redis"
-	TargetResourceResync EventTarget = "resourceResync"
+	TargetUnknown                EventTarget = "unknown"
+	TargetApplication            EventTarget = "application"
+	TargetAppProject             EventTarget = "appproject"
+	TargetEventAck               EventTarget = "eventProcessed"
+	TargetResource               EventTarget = "resource"
+	TargetRedis                  EventTarget = "redis"
+	TargetResourceResync         EventTarget = "resourceResync"
+	TargetClusterCacheInfoUpdate EventTarget = "clusterCacheInfoUpdate"
 )
 
 const (
@@ -173,6 +175,25 @@ func (evs EventSource) AppProjectEvent(evType EventType, appProject *v1alpha1.Ap
 	cev.SetDataSchema(TargetAppProject.String())
 	// TODO: Handle this error situation?
 	_ = cev.SetData(cloudevents.ApplicationJSON, appProject)
+	return &cev
+}
+
+type ClusterCacheInfo struct {
+	ApplicationsCount int64 `json:"applicationsCount"`
+	APIsCount         int64 `json:"apisCount"`
+	ResourcesCount    int64 `json:"resourcesCount"`
+}
+
+func (evs EventSource) ClusterCacheInfoUpdateEvent(evType EventType, clusterInfo *ClusterCacheInfo) *cloudevents.Event {
+	reqUUID := uuid.NewString()
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(evType.String())
+	cev.SetExtension(eventID, reqUUID)
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetDataSchema(TargetClusterCacheInfoUpdate.String())
+	_ = cev.SetData(cloudevents.ApplicationJSON, clusterInfo)
 	return &cev
 }
 
@@ -556,6 +577,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetResourceResync
 	case TargetRedis.String():
 		return TargetRedis
+	case TargetClusterCacheInfoUpdate.String():
+		return TargetClusterCacheInfoUpdate
 	}
 	return ""
 }
