@@ -33,6 +33,11 @@ const (
 	PrincipalRedisServerPasswordKey    = "AGENT_E2E_PRINCIPAL_REDIS_PASSWORD"
 	AgentManagedRedisServerAddressKey  = "AGENT_E2E_AGENT_MANAGED_REDIS_SERVER_ADDRESS"
 	AgentManagedRedisServerPasswordKey = "AGENT_E2E_AGENT_MANAGED_REDIS_PASSWORD"
+
+	PrincipalName         = "principal"
+	AgentManagedName      = "agent-managed"
+	AgentAutonomousName   = "agent-autonomous"
+	AgentClusterServerURL = "https://kubernetes.default.svc"
 )
 
 // HasConnectionStatus checks if the connection info for a given server matches
@@ -57,7 +62,7 @@ func HasConnectionStatus(serverName string, expected appv1.ConnectionState) bool
 func HasClusterCacheInfoSynced(serverName string) bool {
 	principalClusterInfo, err := GetPrincipalClusterInfo(serverName)
 	if err != nil {
-		fmt.Println("HasConnectionStatus: error", err)
+		fmt.Println("HasClusterCacheInfoSynced: error", err)
 		return false
 	}
 
@@ -82,6 +87,7 @@ func HasApplicationsCount(expected int64) bool {
 		fmt.Println("HasApplicationsCount: error", err)
 		return false
 	}
+	fmt.Printf("HasApplicationsCount expected: %d, actual: %d\n", expected, agentCacheInfo.ApplicationsCount)
 	return agentCacheInfo.ApplicationsCount == expected
 }
 
@@ -100,19 +106,10 @@ func verifyConnectionModificationTime(actualTime *metav1.Time, expectedTime *met
 
 // GetManagedAgentClusterInfo retrieves cluster info from managed agent's Redis server
 func GetManagedAgentClusterInfo() (appv1.ClusterInfo, error) {
-	// Create Redis client and cache
-	redisOptions := &redis.Options{Addr: os.Getenv(AgentManagedRedisServerAddressKey),
-		Password: os.Getenv(AgentManagedRedisServerPasswordKey)}
-
-	redisClient := redis.NewClient(redisOptions)
-	cache := appstatecache.NewCache(cacheutil.NewCache(
-		cacheutil.NewRedisCache(redisClient, time.Minute, cacheutil.RedisCompressionGZip)), time.Minute)
-
-	clusterServer := "https://kubernetes.default.svc"
 
 	// Fetch cluster info from redis cache
 	clusterInfo := appv1.ClusterInfo{}
-	err := cache.GetClusterInfo(clusterServer, &clusterInfo)
+	err := getCacheInstance(AgentManagedName).GetClusterInfo(AgentClusterServerURL, &clusterInfo)
 	if err != nil {
 		// Treat missing cache key error (means no apps exist yet) as zero-value info
 		if err == cacheutil.ErrCacheMiss {
@@ -127,17 +124,28 @@ func GetManagedAgentClusterInfo() (appv1.ClusterInfo, error) {
 
 // GetPrincipalClusterInfo retrieves cluster info from principal's Redis server
 func GetPrincipalClusterInfo(server string) (appv1.ClusterInfo, error) {
-	// Create Redis client and cache
-	redisOptions := &redis.Options{Addr: os.Getenv(PrincipalRedisServerAddressKey),
-		Password: os.Getenv(PrincipalRedisServerPasswordKey)}
+	var clusterInfo appv1.ClusterInfo
+	err := getCacheInstance(PrincipalName).GetClusterInfo(server, &clusterInfo)
+	return clusterInfo, err
+}
+
+// getCacheInstance creates a new cache instance for the given source
+func getCacheInstance(source string) *appstatecache.Cache {
+	redisOptions := &redis.Options{}
+	switch source {
+	case PrincipalName:
+		redisOptions.Addr = os.Getenv(PrincipalRedisServerAddressKey)
+		redisOptions.Password = os.Getenv(PrincipalRedisServerPasswordKey)
+	case AgentManagedName:
+		redisOptions.Addr = os.Getenv(AgentManagedRedisServerAddressKey)
+		redisOptions.Password = os.Getenv(AgentManagedRedisServerPasswordKey)
+	default:
+		panic(fmt.Sprintf("invalid source: %s", source))
+	}
 
 	redisClient := redis.NewClient(redisOptions)
 	cache := appstatecache.NewCache(cacheutil.NewCache(
 		cacheutil.NewRedisCache(redisClient, 0, cacheutil.RedisCompressionGZip)), 0)
 
-	// fetch cluster info
-	var clusterInfo appv1.ClusterInfo
-	err := cache.GetClusterInfo(server, &clusterInfo)
-
-	return clusterInfo, err
+	return cache
 }
