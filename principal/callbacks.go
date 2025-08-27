@@ -15,6 +15,7 @@
 package principal
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -434,26 +435,51 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 
 // doesAgentMatchWithProject checks if the agent name matches the given AppProject.
 // We match the agent to an AppProject if:
-// 1. The destination name is not empty and matches the agent name OR
-// 2. The destination server is a wildcard AND
+// 1. The agent name matches any one of the destination names OR
+// 2. The agent name is empty but the agent name is present in the server URL parameter AND
 // 3. The agent name is not denied by any of the destination names
 // Ref: https://github.com/argoproj/argo-cd/blob/master/pkg/apis/application/v1alpha1/app_project_types.go#L477
 func doesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
 	destinationMatched := false
 
+	logCtx := log().WithFields(logrus.Fields{
+		"agent_name":  agentName,
+		"app_project": appProject.Name,
+	})
+
 	for _, dst := range appProject.Spec.Destinations {
-		if isDenyPattern(dst.Name) {
-			// Return immediately if the agent name is denied by any of the destination names
-			if glob.Match(dst.Name[1:], agentName) {
-				return false
-			}
-			continue
+		// Return immediately if the agent name is denied by any of the destination names
+		if dst.Name != "" && isDenyPattern(dst.Name) && glob.Match(dst.Name[1:], agentName) {
+			return false
 		}
 
-		dstNameMatched := dst.Name != "" && glob.Match(dst.Name, agentName)
-		dstServerMatched := dst.Server == "*"
-		if dstNameMatched || dstServerMatched {
-			destinationMatched = true // Continue matching to look for deny patterns
+		// Some AppProjects (e.g. default) may not always have a name so we need to check the server URL
+		if dst.Name == "" && dst.Server != "" {
+			if dst.Server == "*" {
+				destinationMatched = true
+				continue
+			}
+
+			// Server URL will be the resource proxy URL https://<rp-hostname>:<port>?agentName=<agent-name>
+			server, err := url.Parse(dst.Server)
+			if err != nil {
+				logCtx.WithError(err).Errorf("Invalid server URL: %s", dst.Server)
+				continue
+			}
+
+			serverAgentName := server.Query().Get("agentName")
+			if serverAgentName == "" {
+				continue
+			}
+
+			if glob.Match(serverAgentName, agentName) {
+				destinationMatched = true
+			}
+		}
+
+		// Match the agent name to the destination name and continue looking for deny patterns
+		if dst.Name != "" && glob.Match(dst.Name, agentName) {
+			destinationMatched = true
 		}
 	}
 
@@ -619,12 +645,22 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alp
 	// Only keep the destinations that are relevant to the given agent
 	filteredDst := []v1alpha1.ApplicationDestination{}
 	for _, dst := range appProject.Spec.Destinations {
-		dstNameMatched := dst.Name != "" && glob.Match(dst.Name, agent)
-		dstServerMatched := dst.Server == "*"
-		if dstNameMatched || dstServerMatched {
+		nameMatches := dst.Name != "" && glob.Match(dst.Name, agent)
+		serverMatches := false
+
+		// Handle server-only destinations (like default project)
+		if dst.Name == "" && dst.Server != "" {
+			if dst.Server == "*" {
+				serverMatches = true
+			} else if server, err := url.Parse(dst.Server); err == nil {
+				serverAgentName := server.Query().Get("agentName")
+				serverMatches = serverAgentName != "" && glob.Match(serverAgentName, agent)
+			}
+		}
+
+		if nameMatches || serverMatches {
 			dst.Name = "in-cluster"
 			dst.Server = "https://kubernetes.default.svc"
-
 			filteredDst = append(filteredDst, dst)
 		}
 	}

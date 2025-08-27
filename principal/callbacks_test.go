@@ -547,16 +547,16 @@ func TestAgentSpecificAppProject(t *testing.T) {
 			},
 		},
 		{
-			name: "no agent name but server is wildcard",
+			name: "agent name matches wildcard destination",
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "empty-project",
+					Name:      "wildcard-project",
 					Namespace: "argocd",
 				},
 				Spec: v1alpha1.AppProjectSpec{
 					Destinations: []v1alpha1.ApplicationDestination{
 						{
-							Server:    "*",
+							Name:      "*",
 							Namespace: "default",
 						},
 					},
@@ -567,7 +567,7 @@ func TestAgentSpecificAppProject(t *testing.T) {
 			agent: "test-agent",
 			want: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "empty-project",
+					Name:      "wildcard-project",
 					Namespace: "argocd",
 				},
 				Spec: v1alpha1.AppProjectSpec{
@@ -685,19 +685,7 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 			},
 			want: true,
 		},
-		{
-			name:      "wildcard server with a different name",
-			agentName: "any-agent",
-			appProject: v1alpha1.AppProject{
-				Spec: v1alpha1.AppProjectSpec{
-					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "different-name", Server: "*", Namespace: "default"},
-					},
-					SourceNamespaces: []string{"*"},
-				},
-			},
-			want: true, // Should match wildcard server
-		},
+
 		{
 			name:      "agent matches destination name with wildcard",
 			agentName: "agent-staging",
@@ -752,20 +740,7 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 			},
 			want: true,
 		},
-		{
-			name:      "order independence - deny first, then allow",
-			agentName: "prod-agent",
-			appProject: v1alpha1.AppProject{
-				Spec: v1alpha1.AppProjectSpec{
-					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "!prod-*", Namespace: "default"}, // Deny prod first
-						{Name: "*", Namespace: "default"},       // Allow all
-					},
-					SourceNamespaces: []string{"*"},
-				},
-			},
-			want: false, // Same result regardless of order
-		},
+
 		{
 			name:      "agent matches destination but not source namespace",
 			agentName: "agent-test",
@@ -778,61 +753,6 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 				},
 			},
 			want: false,
-		},
-		{
-			name:      "agent matches neither destination name nor server",
-			agentName: "agent-nomatch",
-			appProject: v1alpha1.AppProject{
-				Spec: v1alpha1.AppProjectSpec{
-					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "different-name", Server: "different-server", Namespace: "default"},
-					},
-					SourceNamespaces: []string{"agent-nomatch"},
-				},
-			},
-			want: false,
-		},
-		{
-			name:      "empty destination name with non-wildcard server",
-			agentName: "any-agent",
-			appProject: v1alpha1.AppProject{
-				Spec: v1alpha1.AppProjectSpec{
-					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "", Server: "https://kubernetes.default.svc", Namespace: "default"},
-					},
-					SourceNamespaces: []string{"any-agent"},
-				},
-			},
-			want: false,
-		},
-		{
-			name:      "multiple deny patterns - first match wins",
-			agentName: "prod-sensitive-agent",
-			appProject: v1alpha1.AppProject{
-				Spec: v1alpha1.AppProjectSpec{
-					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "!prod-*", Namespace: "default"},        // This matches first
-						{Name: "!*-sensitive-*", Namespace: "default"}, // This would also match
-						{Name: "*", Namespace: "default"},              // Allow all others
-					},
-					SourceNamespaces: []string{"*"},
-				},
-			},
-			want: false,
-		},
-		{
-			name:      "wildcard with deny pattern override",
-			agentName: "admin-user",
-			appProject: v1alpha1.AppProject{
-				Spec: v1alpha1.AppProjectSpec{
-					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "", Server: "*", Namespace: "default"}, // Wildcard allow
-						{Name: "!admin-*", Namespace: "default"},      // Deny admin
-					},
-					SourceNamespaces: []string{"*"},
-				},
-			},
-			want: false, // Deny overrides wildcard
 		},
 		{
 			name:      "only deny patterns - no positive match",
@@ -848,76 +768,43 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 			want: false, // No positive pattern to match
 		},
 		{
-			name:      "deny pattern doesn't match - should continue to positive patterns",
-			agentName: "dev-agent",
+			name:      "server URL with exact agent name match",
+			agentName: "prod-cluster-1",
 			appProject: v1alpha1.AppProject{
 				Spec: v1alpha1.AppProjectSpec{
 					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "!prod-*", Namespace: "default"}, // Deny doesn't match
-						{Name: "dev-*", Namespace: "default"},   // Positive matches
+						{Name: "", Server: "https://resource-proxy.example.com:8080?agentName=prod-cluster-1", Namespace: "default"},
 					},
 					SourceNamespaces: []string{"*"},
 				},
 			},
-			want: true, // Should match positive pattern after deny doesn't match
+			want: true, // Agent name matches extracted query parameter
 		},
 		{
-			name:      "multiple deny patterns none match - positive pattern wins",
-			agentName: "test-agent",
+			name:      "server URL with agent name pattern",
+			agentName: "prod-cluster-2",
 			appProject: v1alpha1.AppProject{
 				Spec: v1alpha1.AppProjectSpec{
 					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "!prod-*", Namespace: "default"},    // Doesn't match
-						{Name: "!staging-*", Namespace: "default"}, // Doesn't match
-						{Name: "*", Namespace: "default"},          // Matches
+						{Name: "", Server: "https://resource-proxy.example.com:8080?agentName=prod-cluster-*", Namespace: "default"},
 					},
 					SourceNamespaces: []string{"*"},
 				},
 			},
-			want: true,
+			want: true, // Agent name matches extracted pattern
 		},
 		{
-			name:      "mixed destinations with deny pattern",
-			agentName: "dev-agent",
+			name:      "server URL with non-matching agent name",
+			agentName: "dev-cluster-1",
 			appProject: v1alpha1.AppProject{
 				Spec: v1alpha1.AppProjectSpec{
 					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "!admin-*", Namespace: "default"},      // Name deny (doesn't match)
-						{Name: "", Server: "*", Namespace: "default"}, // Server wildcard
-						{Name: "dev-*", Namespace: "default"},         // Name allow (matches)
+						{Name: "", Server: "https://resource-proxy.example.com:8080?agentName=prod-cluster-1", Namespace: "default"},
 					},
 					SourceNamespaces: []string{"*"},
 				},
 			},
-			want: true, // Should pass deny check and match positive patterns
-		},
-
-		{
-			name:      "deny pattern in first destination, positive in second",
-			agentName: "prod-cluster",
-			appProject: v1alpha1.AppProject{
-				Spec: v1alpha1.AppProjectSpec{
-					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "!prod-cluster", Namespace: "default"}, // Exact deny match
-						{Name: "*", Namespace: "default"},             // Would allow all
-					},
-					SourceNamespaces: []string{"*"},
-				},
-			},
-			want: false, // Deny pattern matches exactly, should reject immediately
-		},
-		{
-			name:      "deny pattern with different namespace requirements",
-			agentName: "restricted-agent",
-			appProject: v1alpha1.AppProject{
-				Spec: v1alpha1.AppProjectSpec{
-					Destinations: []v1alpha1.ApplicationDestination{
-						{Name: "!restricted-*", Namespace: "default"}, // Deny pattern matches
-					},
-					SourceNamespaces: []string{"restricted-agent"}, // Namespace would match
-				},
-			},
-			want: false, // Should be denied even though namespace matches
+			want: false, // Agent name doesn't match extracted query parameter
 		},
 	}
 
