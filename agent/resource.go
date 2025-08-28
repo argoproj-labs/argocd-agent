@@ -17,21 +17,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 )
 
 const ownerLookupRecursionLimit = 5
-
-const (
-	paramDryRun          = "dryRun"
-	paramFieldValidation = "fieldValidation"
-	paramFieldManager    = "fieldManager"
-	paramForce           = "force"
-
-	contentTypeJSONPatch           = "application/json-patch+json"
-	contentTypeStrategicMergePatch = "application/strategic-merge-patch+json"
-)
 
 var ErrUnmanaged = errors.New("resource not managed by app")
 
@@ -155,8 +144,16 @@ func (a *Agent) processIncomingPostResourceRequest(ctx context.Context, req *eve
 	}
 
 	createOpts := v1.CreateOptions{}
-	if err := applyCommonRequestParams(req.Params, &createOpts); err != nil {
-		return nil, err
+	if params, ok := req.Params["dryRun"]; ok {
+		createOpts.DryRun = []string{params}
+	}
+
+	if fieldValidation, ok := req.Params["fieldValidation"]; ok {
+		createOpts.FieldValidation = fieldValidation
+	}
+
+	if fieldMgr, ok := req.Params["fieldManager"]; ok {
+		createOpts.FieldManager = fieldMgr
 	}
 
 	client := a.kubeClient.DynamicClient.Resource(gvr)
@@ -165,8 +162,24 @@ func (a *Agent) processIncomingPostResourceRequest(ctx context.Context, req *eve
 
 func (a *Agent) processIncomingPatchResourceRequest(ctx context.Context, req *event.ResourceRequest, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
 	patchOpts := v1.PatchOptions{}
-	if err := applyCommonRequestParams(req.Params, &patchOpts); err != nil {
-		return nil, err
+	if params, ok := req.Params["dryRun"]; ok {
+		patchOpts.DryRun = []string{params}
+	}
+
+	if force, ok := req.Params["force"]; ok {
+		forceBool, err := strconv.ParseBool(force)
+		if err != nil {
+			return nil, err
+		}
+		patchOpts.Force = &forceBool
+	}
+
+	if fieldValidation, ok := req.Params["fieldValidation"]; ok {
+		patchOpts.FieldValidation = fieldValidation
+	}
+
+	if fieldMgr, ok := req.Params["fieldManager"]; ok {
+		patchOpts.FieldManager = fieldMgr
 	}
 
 	client := a.kubeClient.DynamicClient.Resource(gvr)
@@ -200,56 +213,6 @@ func rreqEventToGvk(rreq *event.ResourceRequest) (gvr schema.GroupVersionResourc
 	namespace = rreq.Namespace
 	subresource = rreq.Subresource
 	return
-}
-
-// getNamespacedResourceInterface returns a resource interface that handles both namespaced and cluster-scoped resources
-func getNamespacedResourceInterface(client dynamic.NamespaceableResourceInterface, namespace string) dynamic.ResourceInterface {
-	if namespace != "" {
-		return client.Namespace(namespace)
-	}
-	return client
-}
-
-// applyCommonRequestParams applies common request parameters from the request to options
-func applyCommonRequestParams(params map[string]string, opts interface{}) error {
-	if params == nil {
-		return nil
-	}
-
-	switch o := opts.(type) {
-	case *v1.CreateOptions:
-		if dryRun, ok := params[paramDryRun]; ok {
-			o.DryRun = []string{dryRun}
-		}
-		if fieldValidation, ok := params[paramFieldValidation]; ok {
-			o.FieldValidation = fieldValidation
-		}
-		if fieldManager, ok := params[paramFieldManager]; ok {
-			o.FieldManager = fieldManager
-		}
-	case *v1.PatchOptions:
-		if dryRun, ok := params[paramDryRun]; ok {
-			o.DryRun = []string{dryRun}
-		}
-		if fieldValidation, ok := params[paramFieldValidation]; ok {
-			o.FieldValidation = fieldValidation
-		}
-		if fieldManager, ok := params[paramFieldManager]; ok {
-			o.FieldManager = fieldManager
-		}
-		if force, ok := params[paramForce]; ok {
-			forceBool, err := strconv.ParseBool(force)
-			if err != nil {
-				return fmt.Errorf("invalid force parameter: %w", err)
-			}
-			o.Force = &forceBool
-		}
-	case *v1.DeleteOptions:
-		if dryRun, ok := params[paramDryRun]; ok {
-			o.DryRun = []string{dryRun}
-		}
-	}
-	return nil
 }
 
 // buildSubresourcePath constructs the API path for a subresource
@@ -316,7 +279,12 @@ func (a *Agent) getManagedResource(ctx context.Context, gvr schema.GroupVersionR
 	var res *unstructured.Unstructured
 
 	rif := a.kubeClient.DynamicClient.Resource(gvr)
-	res, err = getNamespacedResourceInterface(rif, namespace).Get(ctx, name, v1.GetOptions{})
+
+	if namespace != "" {
+		res, err = rif.Namespace(namespace).Get(ctx, name, v1.GetOptions{})
+	} else {
+		res, err = rif.Get(ctx, name, v1.GetOptions{})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +321,12 @@ func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersi
 	}
 
 	rif := a.kubeClient.DynamicClient.Resource(gvr)
-	res, err = getNamespacedResourceInterface(rif, namespace).List(ctx, v1.ListOptions{})
+
+	if namespace != "" {
+		res, err = rif.Namespace(namespace).List(ctx, v1.ListOptions{})
+	} else {
+		res, err = rif.List(ctx, v1.ListOptions{})
+	}
 
 	return res, err
 }
@@ -515,9 +488,9 @@ func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, rreq
 	patchType := k8stypes.MergePatchType
 	if rreq.Params != nil && rreq.Params["content-type"] != "" {
 		switch rreq.Params["content-type"] {
-		case contentTypeJSONPatch:
+		case "application/json-patch+json":
 			patchType = k8stypes.JSONPatchType
-		case contentTypeStrategicMergePatch:
+		case "application/strategic-merge-patch+json":
 			patchType = k8stypes.StrategicMergePatchType
 		}
 	}
