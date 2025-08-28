@@ -17,9 +17,21 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 )
 
 const ownerLookupRecursionLimit = 5
+
+const (
+	paramDryRun          = "dryRun"
+	paramFieldValidation = "fieldValidation"
+	paramFieldManager    = "fieldManager"
+	paramForce           = "force"
+
+	contentTypeJSONPatch           = "application/json-patch+json"
+	contentTypeStrategicMergePatch = "application/strategic-merge-patch+json"
+)
 
 var ErrUnmanaged = errors.New("resource not managed by app")
 
@@ -143,16 +155,8 @@ func (a *Agent) processIncomingPostResourceRequest(ctx context.Context, req *eve
 	}
 
 	createOpts := v1.CreateOptions{}
-	if params, ok := req.Params["dryRun"]; ok {
-		createOpts.DryRun = []string{params}
-	}
-
-	if fieldValidation, ok := req.Params["fieldValidation"]; ok {
-		createOpts.FieldValidation = fieldValidation
-	}
-
-	if fieldMgr, ok := req.Params["fieldManager"]; ok {
-		createOpts.FieldManager = fieldMgr
+	if err := applyCommonRequestParams(req.Params, &createOpts); err != nil {
+		return nil, err
 	}
 
 	client := a.kubeClient.DynamicClient.Resource(gvr)
@@ -161,24 +165,8 @@ func (a *Agent) processIncomingPostResourceRequest(ctx context.Context, req *eve
 
 func (a *Agent) processIncomingPatchResourceRequest(ctx context.Context, req *event.ResourceRequest, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
 	patchOpts := v1.PatchOptions{}
-	if params, ok := req.Params["dryRun"]; ok {
-		patchOpts.DryRun = []string{params}
-	}
-
-	if force, ok := req.Params["force"]; ok {
-		forceBool, err := strconv.ParseBool(force)
-		if err != nil {
-			return nil, err
-		}
-		patchOpts.Force = &forceBool
-	}
-
-	if fieldValidation, ok := req.Params["fieldValidation"]; ok {
-		patchOpts.FieldValidation = fieldValidation
-	}
-
-	if fieldMgr, ok := req.Params["fieldManager"]; ok {
-		patchOpts.FieldManager = fieldMgr
+	if err := applyCommonRequestParams(req.Params, &patchOpts); err != nil {
+		return nil, err
 	}
 
 	client := a.kubeClient.DynamicClient.Resource(gvr)
@@ -214,6 +202,90 @@ func rreqEventToGvk(rreq *event.ResourceRequest) (gvr schema.GroupVersionResourc
 	return
 }
 
+// getNamespacedResourceInterface returns a resource interface that handles both namespaced and cluster-scoped resources
+func getNamespacedResourceInterface(client dynamic.NamespaceableResourceInterface, namespace string) dynamic.ResourceInterface {
+	if namespace != "" {
+		return client.Namespace(namespace)
+	}
+	return client
+}
+
+// applyCommonRequestParams applies common request parameters from the request to options
+func applyCommonRequestParams(params map[string]string, opts interface{}) error {
+	if params == nil {
+		return nil
+	}
+
+	switch o := opts.(type) {
+	case *v1.CreateOptions:
+		if dryRun, ok := params[paramDryRun]; ok {
+			o.DryRun = []string{dryRun}
+		}
+		if fieldValidation, ok := params[paramFieldValidation]; ok {
+			o.FieldValidation = fieldValidation
+		}
+		if fieldManager, ok := params[paramFieldManager]; ok {
+			o.FieldManager = fieldManager
+		}
+	case *v1.PatchOptions:
+		if dryRun, ok := params[paramDryRun]; ok {
+			o.DryRun = []string{dryRun}
+		}
+		if fieldValidation, ok := params[paramFieldValidation]; ok {
+			o.FieldValidation = fieldValidation
+		}
+		if fieldManager, ok := params[paramFieldManager]; ok {
+			o.FieldManager = fieldManager
+		}
+		if force, ok := params[paramForce]; ok {
+			forceBool, err := strconv.ParseBool(force)
+			if err != nil {
+				return fmt.Errorf("invalid force parameter: %w", err)
+			}
+			o.Force = &forceBool
+		}
+	case *v1.DeleteOptions:
+		if dryRun, ok := params[paramDryRun]; ok {
+			o.DryRun = []string{dryRun}
+		}
+	}
+	return nil
+}
+
+// buildSubresourcePath constructs the API path for a subresource
+func (a *Agent) buildSubresourcePath(gvr schema.GroupVersionResource, name, namespace, subresource string) string {
+	if namespace != "" {
+		if gvr.Group == "" {
+			// Core API: /api/v1/namespaces/{namespace}/{resource}/{name}/{subresource}
+			return fmt.Sprintf("/api/%s/namespaces/%s/%s/%s/%s", gvr.Version, namespace, gvr.Resource, name, subresource)
+		}
+		// Named group API: /apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}/{subresource}
+		return fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s/%s", gvr.Group, gvr.Version, namespace, gvr.Resource, name, subresource)
+	}
+
+	if gvr.Group == "" {
+		// Core API cluster-scoped: /api/v1/{resource}/{name}/{subresource}
+		return fmt.Sprintf("/api/%s/%s/%s/%s", gvr.Version, gvr.Resource, name, subresource)
+	}
+	// Named group API cluster-scoped: /apis/{group}/{version}/{resource}/{name}/{subresource}
+	return fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, name, subresource)
+}
+
+// executeSubresourceRequest executes a REST request and unmarshals the response
+func (a *Agent) executeSubresourceRequest(ctx context.Context, req *rest.Request, subresource string) (*unstructured.Unstructured, error) {
+	bytes, err := req.DoRaw(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &unstructured.Unstructured{}
+	if err := json.Unmarshal(bytes, &result.Object); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
+	}
+
+	return result, nil
+}
+
 // getManagedResourceSubresource retrieves a subresource of a single resource from the cluster
 // and returns it as unstructured data. The resource to be returned must be managed by Argo CD.
 func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.GroupVersionResource, name, namespace, subresource string) (*unstructured.Unstructured, error) {
@@ -223,41 +295,14 @@ func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.Gr
 		return nil, err
 	}
 
-	// If parent is managed, fetch the subresource using a direct REST call
-	// The dynamic client doesn't directly support subresources, so we build the path manually
-	var path string
-	if namespace != "" {
-		if gvr.Group == "" {
-			// Core API: /api/v1/namespaces/{namespace}/{resource}/{name}/{subresource}
-			path = fmt.Sprintf("/api/%s/namespaces/%s/%s/%s/%s", gvr.Version, namespace, gvr.Resource, name, subresource)
-		} else {
-			// Named group API: /apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}/{subresource}
-			path = fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s/%s", gvr.Group, gvr.Version, namespace, gvr.Resource, name, subresource)
-		}
-	} else {
-		if gvr.Group == "" {
-			// Core API cluster-scoped: /api/v1/{resource}/{name}/{subresource}
-			path = fmt.Sprintf("/api/%s/%s/%s/%s", gvr.Version, gvr.Resource, name, subresource)
-		} else {
-			// Named group API cluster-scoped: /apis/{group}/{version}/{resource}/{name}/{subresource}
-			path = fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, name, subresource)
-		}
-	}
-
-	// Use the discovery client's RESTClient to make the request
+	// Build the path and execute the request
+	path := a.buildSubresourcePath(gvr, name, namespace, subresource)
 	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
 	req := restClient.Get().AbsPath(path)
 
-	// Execute the request
-	bytes, err := req.DoRaw(ctx)
+	result, err := a.executeSubresourceRequest(ctx, req, subresource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get subresource %s: %w", subresource, err)
-	}
-
-	// Convert the raw response to unstructured
-	result := &unstructured.Unstructured{}
-	if err := json.Unmarshal(bytes, &result.Object); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
 	}
 
 	return result, nil
@@ -271,12 +316,7 @@ func (a *Agent) getManagedResource(ctx context.Context, gvr schema.GroupVersionR
 	var res *unstructured.Unstructured
 
 	rif := a.kubeClient.DynamicClient.Resource(gvr)
-
-	if namespace != "" {
-		res, err = rif.Namespace(namespace).Get(ctx, name, v1.GetOptions{})
-	} else {
-		res, err = rif.Get(ctx, name, v1.GetOptions{})
-	}
+	res, err = getNamespacedResourceInterface(rif, namespace).Get(ctx, name, v1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -313,12 +353,7 @@ func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersi
 	}
 
 	rif := a.kubeClient.DynamicClient.Resource(gvr)
-
-	if namespace != "" {
-		res, err = rif.Namespace(namespace).List(ctx, v1.ListOptions{})
-	} else {
-		res, err = rif.List(ctx, v1.ListOptions{})
-	}
+	res, err = getNamespacedResourceInterface(rif, namespace).List(ctx, v1.ListOptions{})
 
 	return res, err
 }
@@ -455,36 +490,14 @@ func (a *Agent) processIncomingPostSubresourceRequest(ctx context.Context, rreq 
 		return nil, err
 	}
 
-	// Build the path for the subresource
-	var path string
-	if rreq.Namespace != "" {
-		if gvr.Group == "" {
-			path = fmt.Sprintf("/api/%s/namespaces/%s/%s/%s/%s", gvr.Version, rreq.Namespace, gvr.Resource, rreq.Name, subresource)
-		} else {
-			path = fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s/%s", gvr.Group, gvr.Version, rreq.Namespace, gvr.Resource, rreq.Name, subresource)
-		}
-	} else {
-		if gvr.Group == "" {
-			path = fmt.Sprintf("/api/%s/%s/%s/%s", gvr.Version, gvr.Resource, rreq.Name, subresource)
-		} else {
-			path = fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, rreq.Name, subresource)
-		}
-	}
-
-	// Use the discovery client's RESTClient to make the request
+	// Build the path and execute the request
+	path := a.buildSubresourcePath(gvr, rreq.Name, rreq.Namespace, subresource)
 	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
 	req := restClient.Post().AbsPath(path).Body(rreq.Body)
 
-	// Execute the request
-	bytes, err := req.DoRaw(ctx)
+	result, err := a.executeSubresourceRequest(ctx, req, subresource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to post to subresource %s: %w", subresource, err)
-	}
-
-	// Convert the raw response to unstructured
-	result := &unstructured.Unstructured{}
-	if err := json.Unmarshal(bytes, &result.Object); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
 	}
 
 	return result, nil
@@ -498,47 +511,25 @@ func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, rreq
 		return nil, err
 	}
 
-	// Build the path for the subresource
-	var path string
-	if rreq.Namespace != "" {
-		if gvr.Group == "" {
-			path = fmt.Sprintf("/api/%s/namespaces/%s/%s/%s/%s", gvr.Version, rreq.Namespace, gvr.Resource, rreq.Name, subresource)
-		} else {
-			path = fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s/%s", gvr.Group, gvr.Version, rreq.Namespace, gvr.Resource, rreq.Name, subresource)
-		}
-	} else {
-		if gvr.Group == "" {
-			path = fmt.Sprintf("/api/%s/%s/%s/%s", gvr.Version, gvr.Resource, rreq.Name, subresource)
-		} else {
-			path = fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, rreq.Name, subresource)
-		}
-	}
-
-	// Use the discovery client's RESTClient to make the request
 	// Determine patch type from content-type header if available
 	patchType := k8stypes.MergePatchType
 	if rreq.Params != nil && rreq.Params["content-type"] != "" {
 		switch rreq.Params["content-type"] {
-		case "application/json-patch+json":
+		case contentTypeJSONPatch:
 			patchType = k8stypes.JSONPatchType
-		case "application/strategic-merge-patch+json":
+		case contentTypeStrategicMergePatch:
 			patchType = k8stypes.StrategicMergePatchType
 		}
 	}
 
+	// Build the path and execute the request
+	path := a.buildSubresourcePath(gvr, rreq.Name, rreq.Namespace, subresource)
 	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
 	req := restClient.Patch(patchType).AbsPath(path).Body(rreq.Body)
 
-	// Execute the request
-	bytes, err := req.DoRaw(ctx)
+	result, err := a.executeSubresourceRequest(ctx, req, subresource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to patch subresource %s: %w", subresource, err)
-	}
-
-	// Convert the raw response to unstructured
-	result := &unstructured.Unstructured{}
-	if err := json.Unmarshal(bytes, &result.Object); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
 	}
 
 	return result, nil
