@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -537,6 +538,43 @@ func TestAgentSpecificAppProject(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "agent name matches wildcard destination",
+			appProject: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "wildcard-project",
+					Namespace: "argocd",
+				},
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{
+							Name:      "*",
+							Namespace: "default",
+						},
+					},
+					SourceNamespaces: []string{"*"},
+					Roles:            []v1alpha1.ProjectRole{},
+				},
+			},
+			agent: "test-agent",
+			want: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "wildcard-project",
+					Namespace: "argocd",
+				},
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{
+							Name:      "in-cluster",
+							Server:    "https://kubernetes.default.svc",
+							Namespace: "default",
+						},
+					},
+					SourceNamespaces: []string{"test-agent"},
+					Roles:            []v1alpha1.ProjectRole{},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -547,55 +585,224 @@ func TestAgentSpecificAppProject(t *testing.T) {
 	}
 }
 
-func TestIsAppProjectFromAutonomousAgent(t *testing.T) {
+func TestIsResourceFromAutonomousAgent(t *testing.T) {
 	tests := []struct {
-		name         string
-		projectName  string
-		namespaceMap map[string]types.AgentMode
-		want         bool
+		name    string
+		project v1alpha1.AppProject
+		want    bool
 	}{
 		{
-			name:        "project matches autonomous agent prefix",
-			projectName: "agent1-myproject",
-			namespaceMap: map[string]types.AgentMode{
-				"agent1": types.AgentModeAutonomous,
-				"agent2": types.AgentModeManaged,
-				"agent3": types.AgentModeAutonomous,
+			name: "project with SourceUID annotation is autonomous",
+			project: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-project",
+					Annotations: map[string]string{
+						manager.SourceUIDAnnotation: "some-uid",
+					},
+				},
 			},
 			want: true,
 		},
 		{
-			name:        "project doesn't match any autonomous agent prefix",
-			projectName: "someproject",
-			namespaceMap: map[string]types.AgentMode{
-				"agent1": types.AgentModeAutonomous,
-				"agent2": types.AgentModeManaged,
+			name: "project without annotations is not autonomous",
+			project: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-project",
+				},
 			},
 			want: false,
 		},
 		{
-			name:        "project matches managed agent prefix (not autonomous)",
-			projectName: "agent2-project",
-			namespaceMap: map[string]types.AgentMode{
-				"agent1": types.AgentModeAutonomous,
-				"agent2": types.AgentModeManaged,
+			name: "project with empty annotations is not autonomous",
+			project: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-project",
+					Annotations: map[string]string{},
+				},
 			},
 			want: false,
 		},
 		{
-			name:        "multiple dashes in project name",
-			projectName: "agent1-my-complex-project-name",
-			namespaceMap: map[string]types.AgentMode{
-				"agent1": types.AgentModeAutonomous,
+			name: "project with other annotations but no SourceUID is not autonomous",
+			project: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-project",
+					Annotations: map[string]string{
+						"other-annotation": "value",
+					},
+				},
 			},
-			want: true,
+			want: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Server{namespaceMap: tt.namespaceMap}
-			got := s.isAppProjectFromAutonomousAgent(tt.projectName)
+			got := isResourceFromAutonomousAgent(&tt.project)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestDoesAgentMatchWithProject(t *testing.T) {
+	tests := []struct {
+		name       string
+		agentName  string
+		appProject v1alpha1.AppProject
+		want       bool
+	}{
+		{
+			name:      "agent matches destination name",
+			agentName: "agent-prod",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "agent-prod", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"agent-prod"},
+				},
+			},
+			want: true,
+		},
+		{
+			name:      "empty destination name with wildcard server",
+			agentName: "any-agent",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "", Server: "*", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"any-agent"},
+				},
+			},
+			want: true,
+		},
+
+		{
+			name:      "agent matches destination name with wildcard",
+			agentName: "agent-staging",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "agent-*", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"agent-*"},
+				},
+			},
+			want: true,
+		},
+		{
+			name:      "deny pattern matches agent - should reject",
+			agentName: "prod-agent",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "!prod-*", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: false,
+		},
+		{
+			name:      "deny pattern with positive pattern - deny takes precedence",
+			agentName: "prod-agent",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "*", Namespace: "default"},       // Allow all
+						{Name: "!prod-*", Namespace: "default"}, // Deny prod
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: false,
+		},
+		{
+			name:      "deny pattern with positive pattern - allow others",
+			agentName: "dev-agent",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "*", Namespace: "default"},       // Allow all
+						{Name: "!prod-*", Namespace: "default"}, // Deny prod
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: true,
+		},
+
+		{
+			name:      "agent matches destination but not source namespace",
+			agentName: "agent-test",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "agent-test", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"different-namespace"},
+				},
+			},
+			want: false,
+		},
+		{
+			name:      "only deny patterns - no positive match",
+			agentName: "dev-agent",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "!prod-*", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: false, // No positive pattern to match
+		},
+		{
+			name:      "server URL with exact agent name match",
+			agentName: "prod-cluster-1",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "", Server: "https://resource-proxy.example.com:8080?agentName=prod-cluster-1", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: true, // Agent name matches extracted query parameter
+		},
+		{
+			name:      "server URL with agent name pattern",
+			agentName: "prod-cluster-2",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "", Server: "https://resource-proxy.example.com:8080?agentName=prod-cluster-*", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: true, // Agent name matches extracted pattern
+		},
+		{
+			name:      "server URL with non-matching agent name",
+			agentName: "dev-cluster-1",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "", Server: "https://resource-proxy.example.com:8080?agentName=prod-cluster-1", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"*"},
+				},
+			},
+			want: false, // Agent name doesn't match extracted query parameter
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := doesAgentMatchWithProject(tt.agentName, tt.appProject)
 			assert.Equal(t, tt.want, got)
 		})
 	}
