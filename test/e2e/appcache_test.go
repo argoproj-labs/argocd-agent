@@ -29,12 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-const (
-	PrincipalName       = "principal"
-	AgentManagedName    = "agent-managed"
-	AgentAutonomousName = "agent-autonomous"
-)
-
 type CacheTestSuite struct {
 	fixture.BaseSuite
 }
@@ -48,22 +42,22 @@ func (suite *CacheTestSuite) TearDownTest() {
 }
 
 func (suite *CacheTestSuite) SetupTest() {
-	if !fixture.IsProcessRunning(PrincipalName) {
+	if !fixture.IsProcessRunning(fixture.PrincipalName) {
 		// Start the principal if it is not running and wait for it to be ready
-		suite.Require().NoError(fixture.StartProcess(PrincipalName))
-		fixture.CheckReadiness(suite.T(), PrincipalName)
+		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName))
+		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	} else {
 		// If principal is already running, verify that it is ready
-		fixture.CheckReadiness(suite.T(), PrincipalName)
+		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	}
 
-	if !fixture.IsProcessRunning(AgentManagedName) {
+	if !fixture.IsProcessRunning(fixture.AgentManagedName) {
 		// Start the agent if it is not running and wait for it to be ready
-		suite.Require().NoError(fixture.StartProcess(AgentManagedName))
-		fixture.CheckReadiness(suite.T(), AgentManagedName)
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName))
+		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	} else {
 		// If agent is already running, verify that it is ready
-		fixture.CheckReadiness(suite.T(), AgentManagedName)
+		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	}
 
 	suite.BaseSuite.SetupTest()
@@ -113,17 +107,17 @@ func (suite *CacheTestSuite) Test_RevertDisconnectedManagedClusterChanges() {
 
 	// Case 1: Agent is disconnected with principal, now modify the application directly in the managed-cluster,
 	// but changes should be reverted, to be in sync with last known state of principal application
-	requires.NoError(fixture.StopProcess(PrincipalName))
+	requires.NoError(fixture.StopProcess(fixture.PrincipalName))
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(PrincipalName)
+		return !fixture.IsProcessRunning(fixture.PrincipalName)
 	}, 30*time.Second, 1*time.Second)
 
 	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
 	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 
 	// Case 2: Agent is reconnected with principal and now changes done in principal should reflect in managed-cluster
-	requires.NoError(fixture.StartProcess(PrincipalName))
-	fixture.CheckReadiness(suite.T(), PrincipalName)
+	requires.NoError(fixture.StartProcess(fixture.PrincipalName))
+	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
 	updateAppInfo(suite.Ctx, suite.PrincipalClient, principalKey, []string{"a", "b"}, requires)
 	validateAppInfoUpdated(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
@@ -143,8 +137,8 @@ func (suite *CacheTestSuite) Test_CacheRecreatedOnRestart() {
 
 	// Case 1: Agent is restarted, now make direct changes in the managed-cluster,
 	// but they should be reverted to be in sync with last known state of principal app
-	fixture.RestartAgent(suite.T(), AgentManagedName)
-	fixture.CheckReadiness(suite.T(), AgentManagedName)
+	fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
+	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 
 	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
 	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
@@ -169,18 +163,18 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterOfflineChanges() {
 	// Agent in not running, but still make changes in the managed-cluster application manifest.
 	// When agent is restarted, these changes should be reverted to be in sync with principal.
 	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning(AgentManagedName)
+		return fixture.IsProcessRunning(fixture.AgentManagedName)
 	}, 60*time.Second, 1*time.Second)
 
-	requires.NoError(fixture.StopProcess(AgentManagedName))
+	requires.NoError(fixture.StopProcess(fixture.AgentManagedName))
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(AgentManagedName)
+		return !fixture.IsProcessRunning(fixture.AgentManagedName)
 	}, 60*time.Second, 1*time.Second)
 
 	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
 
-	requires.NoError(fixture.StartProcess(AgentManagedName))
-	fixture.CheckReadiness(suite.T(), AgentManagedName)
+	requires.NoError(fixture.StartProcess(fixture.AgentManagedName))
+	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 }
 
@@ -196,7 +190,7 @@ func createApp(ctx context.Context, client fixture.KubeClient, requires *require
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: AgentManagedName,
+			Namespace: fixture.AgentManagedName,
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -206,7 +200,7 @@ func createApp(ctx context.Context, client fixture.KubeClient, requires *require
 				Path:           "kustomize-guestbook",
 			},
 			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
+				Server:    fixture.AgentClusterServerURL,
 				Namespace: namespace,
 			},
 			SyncPolicy: &argoapp.SyncPolicy{

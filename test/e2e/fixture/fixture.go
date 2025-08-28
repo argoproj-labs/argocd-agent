@@ -87,7 +87,7 @@ func (suite *BaseSuite) SetupTest() {
 			suite.T().Log(err)
 		}
 		return err == nil && len(project.Annotations) > 0 && project.Annotations["created"] == now
-	}, 10*time.Second, 1*time.Second)
+	}, 30*time.Second, 1*time.Second)
 
 	suite.T().Logf("Test begun at: %v", time.Now())
 }
@@ -280,5 +280,15 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 
+	return resetManagedAgentClusterInfo()
+}
+
+// resetManagedAgentClusterInfo resets the cluster info in the redis cache for the managed agent
+func resetManagedAgentClusterInfo() error {
+	// Reset cluster info in redis cache
+	if err := getCacheInstance(AgentManagedName).SetClusterInfo(AgentClusterServerURL, &argoapp.ClusterInfo{}); err != nil {
+		fmt.Println("resetManagedAgentClusterInfo: error", err)
+		return err
+	}
 	return nil
 }

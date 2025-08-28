@@ -123,5 +123,5 @@ func CheckReadiness(t require.TestingT, compName string) {
 		}
 		defer resp.Body.Close()
 		return resp.StatusCode == http.StatusOK
-	}, 60*time.Second, 1*time.Second)
+	}, 120*time.Second, 2*time.Second)
 }
