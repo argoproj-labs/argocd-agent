@@ -20,8 +20,10 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
+	"github.com/argoproj/argo-cd/v3/common"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -452,6 +454,371 @@ func (suite *ResyncTestSuite) Test_ResyncOnConnectionLostAutonomousMode() {
 	}, 30*time.Second, 1*time.Second)
 }
 
+// Update the AppProject rules when the principal is down and ensure that the
+// repository is deleted from the workload cluster when the principal is restarted
+func (suite *ResyncTestSuite) Test_RepositoryResync_OnAppProjectUpdate() {
+	requires := suite.Require()
+
+	// Create an appProject on the principal's cluster
+	appProject := suite.createAppProject()
+	projKey := fixture.ToNamespacedName(appProject)
+
+	// Create a repository on the principal's cluster
+	repo := suite.createRepository()
+	key := fixture.ToNamespacedName(repo)
+
+	// Stop the principal and update the AppProject rules
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Update the AppProject rules to not match any agent
+	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, projKey, func(a *argoapp.AppProject) error {
+		a.Spec.Destinations = []argoapp.ApplicationDestination{}
+		return nil
+	}, metav1.UpdateOptions{})
+	requires.NoError(err)
+
+	// Start the principal and ensure that the repository and the appProject are deleted from the managed-agent
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		return errors.IsNotFound(err)
+	}, 30*time.Second, 1*time.Second)
+
+	requires.Eventually(func() bool {
+		repository := corev1.Secret{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		return errors.IsNotFound(err)
+	}, 30*time.Second, 1*time.Second)
+
+}
+
+// Create a Repository when the principal is down and ensure that the
+// repository is created on the workload cluster when the principal is restarted
+func (suite *ResyncTestSuite) Test_RepositoryResync_OnCreation() {
+	requires := suite.Require()
+
+	// Stop the principal process
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Create an appProject on the control plane cluster
+	appProject := sampleAppProject()
+
+	err = suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	projKey := fixture.ToNamespacedName(appProject)
+
+	// Create a repository on the control plane cluster
+	sourceRepo := sampleRepository()
+
+	err = suite.PrincipalClient.Create(suite.Ctx, sourceRepo, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	// Start the principal and ensure that the repository is created on the workload cluster
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Ensure the appProject has been created on the workload cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
+
+	key := fixture.ToNamespacedName(sourceRepo)
+	// Ensure the repository has been created on the workload cluster
+	requires.Eventually(func() bool {
+		repository := corev1.Secret{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
+}
+
+// Update the Repository when the principal is down and ensure that the
+// repository is updated on the workload cluster when the principal is restarted
+func (suite *ResyncTestSuite) Test_RepositoryResync_OnUpdate() {
+	requires := suite.Require()
+
+	// Create an appProject on the control plane cluster
+	_ = suite.createAppProject()
+
+	// Create a repository on the control plane cluster
+	sourceRepo := suite.createRepository()
+	key := fixture.ToNamespacedName(sourceRepo)
+
+	// Stop the principal and update the AppProject rules
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Update the repository secret
+	newURL := "https://github.com/example/repo2.git"
+	err = suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, key, func(s *corev1.Secret) error {
+		s.Data["url"] = []byte(newURL)
+		return nil
+	}, metav1.UpdateOptions{})
+	requires.NoError(err)
+
+	// Start the principal and ensure that the repository is updated on the workload cluster
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	// Ensure the repository is updated on the workload cluster
+	requires.Eventually(func() bool {
+		repository := corev1.Secret{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		return err == nil && string(repository.Data["url"]) == newURL
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Delete the Repository when the principal is down and ensure that the
+// repository is deleted from the workload cluster when the principal is restarted
+func (suite *ResyncTestSuite) Test_RepositoryResync_OnDeletion() {
+	requires := suite.Require()
+
+	// Create an appProject on the control plane cluster
+	appProject := suite.createAppProject()
+	projKey := fixture.ToNamespacedName(appProject)
+
+	// Create a repository on the control plane cluster
+	sourceRepo := suite.createRepository()
+
+	key := fixture.ToNamespacedName(sourceRepo)
+	// Ensure the repository has been pushed to the workload cluster
+	requires.Eventually(func() bool {
+		repository := corev1.Secret{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
+
+	// Stop the principal and update the AppProject rules
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the repository
+	err = suite.PrincipalClient.Delete(suite.Ctx, sourceRepo, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// Start the principal and ensure that the repository is deleted from the workload cluster
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	// Ensure the appProject is still present on the workload cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Create an AppProject when the principal is down and ensure that the
+// AppProject is created on the workload cluster when the principal is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResync_OnCreate() {
+	requires := suite.Require()
+
+	// Stop the principal
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Create an appProject on the control plane cluster
+	appProject := sampleAppProject()
+
+	err = suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	// Start the principal and ensure that the appProject is created on the workload cluster
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	projKey := fixture.ToNamespacedName(appProject)
+
+	// Ensure the appProject has been created on the workload cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
+
+}
+
+// Update the AppProject when the principal is down and ensure that the
+// AppProject is updated on the workload cluster when the principal is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResync_OnUpdate() {
+	requires := suite.Require()
+
+	// Create an appProject on the control plane cluster
+	appProject := suite.createAppProject()
+	projKey := fixture.ToNamespacedName(appProject)
+
+	// Stop the principal
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Update the appProject spec
+	des := "updated from e2e test"
+	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, projKey, func(a *argoapp.AppProject) error {
+		a.Spec.Description = des
+		return nil
+	}, metav1.UpdateOptions{})
+	requires.NoError(err)
+
+	// Start the principal and ensure that the appProject is updated on the workload cluster
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	// Ensure the appProject is updated on the workload cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		return err == nil && appProject.Spec.Description == des
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Delete the AppProject when the principal is down and ensure that the
+// AppProject is deleted from the workload cluster when the principal is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResync_OnDeletion() {
+	requires := suite.Require()
+
+	// Create an appProject on the control plane cluster
+	appProject := suite.createAppProject()
+	projKey := fixture.ToNamespacedName(appProject)
+
+	// Stop the principal
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the appProject
+	err = suite.PrincipalClient.Delete(suite.Ctx, appProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// Start the principal and ensure that the appProject is deleted from the workload cluster
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	// Ensure the appProject is deleted from the workload cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		return errors.IsNotFound(err)
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Delete the AppProject from the control plane when the agent is down
+// and ensure that the AppProject is created again when the agent is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResync_DeleteOnAgentDelete() {
+	requires := suite.Require()
+
+	appProject := suite.createAppProject()
+	projKey := fixture.ToNamespacedName(appProject)
+
+	// Stop the agent
+	err := fixture.StopProcess("agent-managed")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("agent-managed")
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the appProject from the control plane
+	err = suite.PrincipalClient.Delete(suite.Ctx, appProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// Start the agent and ensure that the appProject is created on the workload cluster
+	err = fixture.StartProcess("agent-managed")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return fixture.IsProcessRunning("agent-managed")
+	}, 30*time.Second, 1*time.Second)
+
+	// Ensure the appProject has been created on the workload cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Create an AppProject on the workload cluster when the agent is down
+// and ensure that the AppProject is deleted when the agent is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResync_CreateOnAgentDelete() {
+	requires := suite.Require()
+
+	// Stop the agent
+	err := fixture.StopProcess("agent-managed")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("agent-managed")
+	}, 30*time.Second, 1*time.Second)
+
+	// Create an appProject on the control plane cluster
+	appProject := sampleAppProject()
+	err = suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	projKey := fixture.ToNamespacedName(appProject)
+
+	// Start the agent and ensure that the appProject is created on the workload cluster
+	err = fixture.StartProcess("agent-managed")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return fixture.IsProcessRunning("agent-managed")
+	}, 30*time.Second, 1*time.Second)
+
+	// Ensure the appProject has been created on the workload cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+}
+
 func (suite *ResyncTestSuite) createAutonomousApp() *argoapp.Application {
 	requires := suite.Require()
 	// Create an autonomous application on the autonomous-agent's cluster
@@ -562,6 +929,81 @@ func (suite *ResyncTestSuite) createManagedApp() *argoapp.Application {
 	requires.Equal(&app.Spec, &mapp.Spec)
 
 	return &app
+}
+
+func (suite *ResyncTestSuite) createAppProject() *argoapp.AppProject {
+	requires := suite.Require()
+
+	// Create an AppProject on the control plane cluster
+	appProject := sampleAppProject()
+
+	err := suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	projKey := fixture.ToNamespacedName(appProject)
+
+	// Ensure the AppProject has been pushed to the workload cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+
+	return appProject
+}
+
+func (suite *ResyncTestSuite) createRepository() *corev1.Secret {
+	requires := suite.Require()
+
+	// Create a repository on the principal's cluster
+	sourceRepo := sampleRepository()
+
+	err := suite.PrincipalClient.Create(suite.Ctx, sourceRepo, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	key := fixture.ToNamespacedName(sourceRepo)
+	// Ensure the repository has been pushed to the managed-agent
+	requires.Eventually(func() bool {
+		repository := corev1.Secret{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
+
+	return sourceRepo
+}
+
+func sampleAppProject() *argoapp.AppProject {
+	return &argoapp.AppProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sample",
+			Namespace: "argocd",
+		},
+		Spec: argoapp.AppProjectSpec{
+			Destinations: []argoapp.ApplicationDestination{
+				{
+					Namespace: "*",
+					Name:      "agent-*",
+				},
+			},
+			SourceNamespaces: []string{"agent-*"},
+		},
+	}
+}
+
+func sampleRepository() *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sample",
+			Namespace: "argocd",
+			Labels: map[string]string{
+				common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
+			},
+		},
+		Data: map[string][]byte{
+			"project": []byte("sample"),
+			"url":     []byte("https://github.com/example/repo.git"),
+		},
+	}
 }
 
 func TestResyncTestSuite(t *testing.T) {

@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -423,24 +424,12 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 			continue
 		}
 
-		if doesAgentMatchWithProject(agentName, appProject) {
+		if appproject.DoesAgentMatchWithProject(agentName, appProject) {
 			agents[agentName] = true
 		}
 	}
 
 	return agents
-}
-
-func doesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
-	matched := false
-	for _, dst := range appProject.Spec.Destinations {
-		if glob.Match(dst.Name, agentName) {
-			matched = true
-			break
-		}
-	}
-
-	return matched && glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
 }
 
 // syncAppProjectUpdatesToAgents sends the AppProject update events to the relevant clusters.

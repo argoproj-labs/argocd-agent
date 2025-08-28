@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -358,6 +359,19 @@ func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1al
 	}
 
 	return true, string(incoming.UID) == sourceUID, nil
+}
+
+// DoesAgentMatchWithProject checks if the agent name matches the AppProject's destinations and source namespaces
+func DoesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
+	matched := false
+	for _, dst := range appProject.Spec.Destinations {
+		if glob.Match(dst.Name, agentName) {
+			matched = true
+			break
+		}
+	}
+
+	return matched && glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
 }
 
 func log() *logrus.Entry {

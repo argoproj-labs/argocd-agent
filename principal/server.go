@@ -596,6 +596,14 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 	})
 
 	if s.resyncStatus.isResynced(agent.Name()) {
+		if agent.Mode() == types.AgentModeManaged.String() {
+			// When the agent is down, the informer could've dropped events since it doesn't know anything about the agent.
+			// So, we send the current state of AppProjects/Repositories to the agent after it reconnects.
+			logCtx.Trace("Sending current state of AppProjects and Repositories to the agent")
+			if err := s.sendCurrentStateToAgent(agent.Name()); err != nil {
+				return fmt.Errorf("failed to send current state to agent: %v", err)
+			}
+		}
 		logCtx.Trace("Skipping resync messages since the principal has synced with this agent before")
 		return nil
 	}
@@ -668,6 +676,10 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			}
 		}
 
+		if !appproject.DoesAgentMatchWithProject(agent, appProject) {
+			continue
+		}
+
 		agentAppProject := AgentSpecificAppProject(appProject, agent)
 		sendQ.Add(s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject))
 
@@ -697,7 +709,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			continue
 		}
 
-		if !doesAgentMatchWithProject(agent, project) {
+		if !appproject.DoesAgentMatchWithProject(agent, project) {
 			continue
 		}
 
