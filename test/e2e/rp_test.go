@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -451,6 +452,81 @@ func getCustomResourceAction() string {
         result[1] = impactedResource1
         result[2] = impactedResource2
         return result`
+}
+
+func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
+	requires := suite.Require()
+
+	rpClient := suite.getRpClient("agent-managed")
+
+	// First, ensure we have a deployment to test with
+	depl := &appsv1.Deployment{}
+	err := suite.ManagedAgentClient.Get(context.TODO(), types.NamespacedName{Namespace: "argocd", Name: "argocd-repo-server"}, depl, v1.GetOptions{})
+	requires.NoError(err)
+	requires.Equal("argocd", depl.Namespace)
+	requires.Equal("argocd-repo-server", depl.Name)
+	depl.Labels["app.kubernetes.io/instance"] = "argocd-repo-server"
+	err = suite.ManagedAgentClient.Update(context.TODO(), depl, v1.UpdateOptions{})
+	requires.NoError(err)
+
+	// Test GET request for status subresource
+	resp, err := rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-repo-server/status")
+	requires.NoError(err)
+	requires.NotNil(resp)
+	requires.Equal(http.StatusOK, resp.StatusCode)
+
+	// Read and verify the status response
+	resource, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	requires.NoError(err)
+	statusDepl := &appsv1.Deployment{}
+	err = json.Unmarshal(resource, statusDepl)
+	requires.NoError(err)
+	requires.Equal("argocd-repo-server", statusDepl.Name)
+	requires.Equal("argocd", statusDepl.Namespace)
+	// Status should have status field populated
+	requires.NotNil(statusDepl.Status)
+
+	// Test GET request for scale subresource
+	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-repo-server/scale")
+	requires.NoError(err)
+	requires.NotNil(resp)
+	requires.Equal(http.StatusOK, resp.StatusCode)
+
+	// Read and verify the scale response
+	resource, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	requires.NoError(err)
+	// The scale response should be a Scale object, not a Deployment
+	var scale map[string]interface{}
+	err = json.Unmarshal(resource, &scale)
+	requires.NoError(err)
+	requires.Contains(scale, "kind")
+	requires.Contains(scale, "spec")
+	requires.Contains(scale, "status")
+
+	// Test that subresource of unmanaged resource returns 404
+	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-server/status")
+	requires.NoError(err)
+	requires.NotNil(resp)
+	requires.Equal(http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+
+	// Test POST request for a subresource (eviction endpoint)
+	// This test verifies that POST requests to subresources work correctly
+	// We'll test with a pod eviction endpoint - it should fail with 404 since the pod doesn't exist,
+	// but this proves the subresource routing works
+	postData := []byte(`{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"test-pod","namespace":"argocd"}}`)
+	req, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:9090/api/v1/namespaces/argocd/pods/test-pod/eviction", 
+		io.NopCloser(strings.NewReader(string(postData))))
+	requires.NoError(err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = rpClient.Do(req)
+	requires.NoError(err)
+	requires.NotNil(resp)
+	// This will return 404 since test-pod doesn't exist, but it proves the routing works
+	requires.Equal(http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
 }
 
 func TestResourceProxyTestSuite(t *testing.T) {

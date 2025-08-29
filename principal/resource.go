@@ -29,8 +29,8 @@ import (
 
 // resourceRequestRegexp is the regexp used to match requests for retrieving a
 // resource or a list of resources from the server. It makes use of named
-// capture groups.
-const resourceRequestRegexp = `^/(?:api|apis|(?:api|apis/(?P<group>[^\/]+))/(?P<version>v[^\/]+)(?:/(?:namespaces/(?P<namespace>[^\/]+)/)?)?(?:(?P<resource>[^\/]+)(?:/(?P<name>[^\/]+))?)?)$`
+// capture groups. It also supports Kubernetes subresources.
+const resourceRequestRegexp = `^/(?:api|apis|(?:api|apis/(?P<group>[^\/]+))/(?P<version>v[^\/]+)(?:/(?:namespaces/(?P<namespace>[^\/]+)/)?)?(?:(?P<resource>[^\/]+)(?:/(?P<name>[^\/]+)(?:/(?P<subresource>[^\/]+))?)?)?)$`
 
 // requestTimeout is the timeout that's being applied to requests for any live
 // resource.
@@ -104,7 +104,7 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Create the event
-	sentEv, err := s.events.NewResourceRequestEvent(gvr, params.Get("namespace"), params.Get("name"), r.Method, reqBody, reqParams)
+	sentEv, err := s.events.NewResourceRequestEvent(gvr, params.Get("namespace"), params.Get("name"), params.Get("subresource"), r.Method, reqBody, reqParams)
 	if err != nil {
 		logCtx.Errorf("Could not create event: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -132,8 +132,11 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 
 	requestedName := params.Get("name")
 	requestedNamespace := params.Get("namespace")
+	requestedSubresource := params.Get("subresource")
 
-	if requestedName != "" {
+	if requestedSubresource != "" {
+		logCtx.Infof("Proxying request for subresource %s of resource %s named %s/%s", requestedSubresource, gvr.String(), requestedNamespace, requestedName)
+	} else if requestedName != "" {
 		logCtx.Infof("Proxying request for resource of type %s named %s/%s", gvr.String(), requestedNamespace, requestedName)
 	} else {
 		logCtx.Infof("Proxying request for resources of type %s in namespace %s", gvr.String(), requestedNamespace)
