@@ -18,13 +18,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -55,14 +55,11 @@ type AppProjectManager struct {
 	mode manager.ManagerMode
 	// namespace is not guaranteed to have a value in all cases. For instance, this value is empty for principal when the principal is running on cluster.
 	namespace string
-	// managedAppProjects is a list of apps we manage, key is name of AppProjects CR, value is not used.
-	// - acquire 'lock' before accessing
-	managedAppProjects map[string]bool
-	// observedApp, key is qualified name of the AppProject, value is the AppProjects's .metadata.resourceValue field
-	// - acquire 'lock' before accessing
-	observedAppProjects map[string]string
-	// lock should be acquired before accessing managedAppProjects/observedAppProjects
-	lock sync.RWMutex
+
+	// ManagedResources is a list of AppProjects we manage, key is name of AppProjects CR, value is not used.
+	manager.ManagedResources
+	// ObservedResources, key is qualified name of the AppProject, value is the AppProjects's .metadata.resourceValue field
+	manager.ObservedResources
 }
 
 // AppProjectManagerOption is a callback function to set an option to the AppProject manager
@@ -77,9 +74,8 @@ func NewAppProjectManager(be backend.AppProject, namespace string, opts ...AppPr
 	}
 	m.namespace = namespace
 	m.appprojectBackend = be
-	m.observedAppProjects = make(map[string]string)
-	m.managedAppProjects = make(map[string]bool)
-
+	m.ObservedResources = manager.NewObservedResources()
+	m.ManagedResources = manager.NewManagedResources()
 	if m.role == manager.ManagerRolePrincipal && m.mode != manager.ManagerModeUnset {
 		return nil, fmt.Errorf("mode should be unset when role is principal")
 	}
@@ -165,6 +161,10 @@ func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alph
 
 func (m *AppProjectManager) Get(ctx context.Context, name, namespace string) (*v1alpha1.AppProject, error) {
 	return m.appprojectBackend.Get(ctx, name, namespace)
+}
+
+func (m *AppProjectManager) List(ctx context.Context, selector backend.AppProjectSelector) ([]v1alpha1.AppProject, error) {
+	return m.appprojectBackend.List(ctx, selector)
 }
 
 // UpdateAppProject updates the AppProject resource on the agent's backend.
@@ -359,6 +359,19 @@ func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1al
 	}
 
 	return true, string(incoming.UID) == sourceUID, nil
+}
+
+// DoesAgentMatchWithProject checks if the agent name matches the AppProject's destinations and source namespaces
+func DoesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
+	matched := false
+	for _, dst := range appProject.Spec.Destinations {
+		if glob.Match(dst.Name, agentName) {
+			matched = true
+			break
+		}
+	}
+
+	return matched && glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
 }
 
 func log() *logrus.Entry {

@@ -27,6 +27,7 @@ import (
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
+	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
@@ -34,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
@@ -72,6 +74,7 @@ type Agent struct {
 	remote           *client.Remote
 	appManager       *application.ApplicationManager
 	projectManager   *appproject.AppProjectManager
+	repoManager      *repository.RepositoryManager
 	namespaceManager *kubenamespace.KubernetesBackend
 	mode             types.AgentMode
 	// queues is a queue of create/update/delete events to send to the principal
@@ -248,6 +251,27 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, err
 	}
 
+	repoInformerOptions := []informer.InformerOption[*corev1.Secret]{
+		informer.WithListHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return client.Clientset.CoreV1().Secrets(a.namespace).List(ctx, opts)
+		}),
+		informer.WithWatchHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return client.Clientset.CoreV1().Secrets(a.namespace).Watch(ctx, opts)
+		}),
+		informer.WithAddHandler[*corev1.Secret](a.handleRepositoryCreation),
+		informer.WithUpdateHandler[*corev1.Secret](a.handleRepositoryUpdate),
+		informer.WithDeleteHandler[*corev1.Secret](a.handleRepositoryDeletion),
+		informer.WithFilters(kuberepository.DefaultFilterChain(a.namespace)),
+	}
+
+	repoInformer, err := informer.NewInformer(ctx, repoInformerOptions...)
+	if err != nil {
+		return nil, fmt.Errorf("could not instantiate repository informer: %w", err)
+	}
+
+	repoBackened := kuberepository.NewKubernetesBackend(client.Clientset, a.namespace, repoInformer, true)
+	a.repoManager = repository.NewManager(repoBackened, a.namespace, true)
+
 	nsInformerOpts := []informer.InformerOption[*corev1.Namespace]{
 		informer.WithListHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 			return client.Clientset.CoreV1().Namespaces().List(ctx, opts)
@@ -342,6 +366,12 @@ func (a *Agent) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to sync applications: %w", err)
 	}
 
+	// Wait for the appProject informer to be synced
+	err = a.projectManager.EnsureSynced(waitForSyncedDuration)
+	if err != nil {
+		return fmt.Errorf("failed to sync appProjects: %w", err)
+	}
+
 	// The namespace informer lives in its own go routine
 	go func() {
 		if err := a.namespaceManager.StartInformer(a.context); err != nil {
@@ -355,6 +385,20 @@ func (a *Agent) Start(ctx context.Context) error {
 		return fmt.Errorf("unable to sync Namespace informer: %w", err)
 	}
 	log().Infof("Namespace informer synced and ready")
+
+	// Start the Repository backend in the background
+	go func() {
+		if err := a.repoManager.StartBackend(a.context); err != nil {
+			log().WithError(err).Error("Repository backend has exited non-successfully")
+		} else {
+			log().Info("Repository backend has exited")
+		}
+	}()
+
+	if err = a.repoManager.EnsureSynced(waitForSyncedDuration); err != nil {
+		return fmt.Errorf("unable to sync Repository informer: %w", err)
+	}
+	log().Infof("Repository informer synced and ready")
 
 	if a.options.healthzPort > 0 {
 		// Endpoint to check if the agent is up and running
