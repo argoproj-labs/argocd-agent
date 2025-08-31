@@ -1101,8 +1101,78 @@ func TestBuildSubresourcePath(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			path := agent.buildSubresourcePath(tc.gvr, tc.resName, tc.namespace, tc.subresource)
+			path, err := agent.buildSubresourcePath(tc.gvr, tc.resName, tc.namespace, tc.subresource)
+			assert.NoError(t, err)
 			assert.Equal(t, tc.expected, path)
+		})
+	}
+}
+
+func TestBuildSubresourcePathValidation(t *testing.T) {
+	agent := &Agent{}
+	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+
+	testCases := []struct {
+		name        string
+		resName     string
+		namespace   string
+		subresource string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "Path traversal in subresource",
+			resName:     "valid-name",
+			namespace:   "default",
+			subresource: "../../etc/passwd",
+			expectError: true,
+			errorMsg:    "subresource contains invalid path traversal sequence",
+		},
+		{
+			name:        "Path separator in resource name",
+			resName:     "invalid/name",
+			namespace:   "default",
+			subresource: "status",
+			expectError: true,
+			errorMsg:    "resource name contains invalid path separator",
+		},
+		{
+			name:        "Path traversal in namespace",
+			resName:     "valid-name",
+			namespace:   "../system",
+			subresource: "status",
+			expectError: true,
+			errorMsg:    "namespace contains invalid path traversal sequence",
+		},
+		{
+			name:        "Empty resource name",
+			resName:     "",
+			namespace:   "default",
+			subresource: "status",
+			expectError: true,
+			errorMsg:    "resource name cannot be empty",
+		},
+		{
+			name:        "Empty subresource",
+			resName:     "valid-name",
+			namespace:   "default",
+			subresource: "",
+			expectError: true,
+			errorMsg:    "subresource cannot be empty",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := agent.buildSubresourcePath(gvr, tc.resName, tc.namespace, tc.subresource)
+			if tc.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errorMsg)
+				assert.Empty(t, path)
+			} else {
+				assert.NoError(t, err)
+				assert.NotEmpty(t, path)
+			}
 		})
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
@@ -215,23 +216,50 @@ func rreqEventToGvk(rreq *event.ResourceRequest) (gvr schema.GroupVersionResourc
 	return
 }
 
+// validatePathComponent checks for path traversal attempts in URL components
+func validatePathComponent(component, componentName string) error {
+	if component == "" {
+		return fmt.Errorf("%s cannot be empty", componentName)
+	}
+	if strings.Contains(component, "..") {
+		return fmt.Errorf("%s contains invalid path traversal sequence: %s", componentName, component)
+	}
+	if strings.Contains(component, "/") {
+		return fmt.Errorf("%s contains invalid path separator: %s", componentName, component)
+	}
+	return nil
+}
+
 // buildSubresourcePath constructs the API path for a subresource
-func (a *Agent) buildSubresourcePath(gvr schema.GroupVersionResource, name, namespace, subresource string) string {
+func (a *Agent) buildSubresourcePath(gvr schema.GroupVersionResource, name, namespace, subresource string) (string, error) {
+	// Validate all path components to prevent path traversal attacks
+	if err := validatePathComponent(name, "resource name"); err != nil {
+		return "", err
+	}
+	if err := validatePathComponent(subresource, "subresource"); err != nil {
+		return "", err
+	}
+	if namespace != "" {
+		if err := validatePathComponent(namespace, "namespace"); err != nil {
+			return "", err
+		}
+	}
+
 	if namespace != "" {
 		if gvr.Group == "" {
 			// Core API: /api/v1/namespaces/{namespace}/{resource}/{name}/{subresource}
-			return fmt.Sprintf("/api/%s/namespaces/%s/%s/%s/%s", gvr.Version, namespace, gvr.Resource, name, subresource)
+			return fmt.Sprintf("/api/%s/namespaces/%s/%s/%s/%s", gvr.Version, namespace, gvr.Resource, name, subresource), nil
 		}
 		// Named group API: /apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}/{subresource}
-		return fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s/%s", gvr.Group, gvr.Version, namespace, gvr.Resource, name, subresource)
+		return fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s/%s", gvr.Group, gvr.Version, namespace, gvr.Resource, name, subresource), nil
 	}
 
 	if gvr.Group == "" {
 		// Core API cluster-scoped: /api/v1/{resource}/{name}/{subresource}
-		return fmt.Sprintf("/api/%s/%s/%s/%s", gvr.Version, gvr.Resource, name, subresource)
+		return fmt.Sprintf("/api/%s/%s/%s/%s", gvr.Version, gvr.Resource, name, subresource), nil
 	}
 	// Named group API cluster-scoped: /apis/{group}/{version}/{resource}/{name}/{subresource}
-	return fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, name, subresource)
+	return fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, name, subresource), nil
 }
 
 // executeSubresourceRequest executes a REST request and unmarshals the response
@@ -259,7 +287,10 @@ func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.Gr
 	}
 
 	// Build the path and execute the request
-	path := a.buildSubresourcePath(gvr, name, namespace, subresource)
+	path, err := a.buildSubresourcePath(gvr, name, namespace, subresource)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subresource path: %w", err)
+	}
 	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
 	req := restClient.Get().AbsPath(path)
 
@@ -464,7 +495,10 @@ func (a *Agent) processIncomingPostSubresourceRequest(ctx context.Context, rreq 
 	}
 
 	// Build the path and execute the request
-	path := a.buildSubresourcePath(gvr, rreq.Name, rreq.Namespace, subresource)
+	path, err := a.buildSubresourcePath(gvr, rreq.Name, rreq.Namespace, subresource)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subresource path: %w", err)
+	}
 	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
 	req := restClient.Post().AbsPath(path).Body(rreq.Body)
 
@@ -496,7 +530,10 @@ func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, rreq
 	}
 
 	// Build the path and execute the request
-	path := a.buildSubresourcePath(gvr, rreq.Name, rreq.Namespace, subresource)
+	path, err := a.buildSubresourcePath(gvr, rreq.Name, rreq.Namespace, subresource)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subresource path: %w", err)
+	}
 	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
 	req := restClient.Patch(patchType).AbsPath(path).Body(rreq.Body)
 
