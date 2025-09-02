@@ -6,7 +6,7 @@ Before proceeding with the setup, ensure you have the following:
 - A running OpenShift/Kubernetes cluster designated as the hub, with Argo CD/OpenShift GitOps Operator installed.
 - One or more Kubernetes clusters designated as spokes, Argo CD/OpenShift GitOps Operator installed.
 - `oc` binary configured to access both hub and spoke clusters.
-- Operator must be installed in [cluster scope](https://argocd-operator.readthedocs.io/en/stable/usage/basics/#cluster-scoped-instance) mode.
+- Argo CD instance must be [cluster scoped](https://argocd-operator.readthedocs.io/en/stable/usage/basics/#cluster-scoped-instance).
 - [Apps in any Namespace](https://argocd-operator.readthedocs.io/en/latest/usage/apps-in-any-namespace/) must be enabled for Hub Cluster.
 - `argocd-agentctl` binary (for non-production scenario)
 
