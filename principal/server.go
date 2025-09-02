@@ -680,7 +680,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			continue
 		}
 
-		agentAppProject := AgentSpecificAppProject(appProject, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent)
 		sendQ.Add(s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject))
 
 		projectMap[string(appProject.Name)] = appProject

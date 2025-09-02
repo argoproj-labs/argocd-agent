@@ -15,14 +15,12 @@
 package principal
 
 import (
-	"strings"
-
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -141,8 +139,8 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 	s.resources.Add(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
 
-	// Check if this AppProject was created by an autonomous agent by examining its name prefix
-	if s.isAppProjectFromAutonomousAgent(outbound.Name) {
+	// Check if this AppProject was created by an autonomous agent
+	if isResourceFromAutonomousAgent(outbound) {
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
@@ -168,7 +166,7 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := AgentSpecificAppProject(*outbound, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent)
 		ev := s.events.AppProjectEvent(event.Create, &agentAppProject)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s to send queue, total length now %d", outbound.Name, q.Len())
@@ -188,8 +186,8 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		"appproject_name": old.Name,
 	})
 
-	// Check if this AppProject was created by an autonomous agent by examining its name prefix
-	if s.isAppProjectFromAutonomousAgent(new.Name) {
+	// Check if this AppProject was created by an autonomous agent
+	if isResourceFromAutonomousAgent(new) {
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
@@ -237,7 +235,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
 
 	// Check if this AppProject was created by an autonomous agent by examining its name prefix
-	if s.isAppProjectFromAutonomousAgent(outbound.Name) {
+	if isResourceFromAutonomousAgent(outbound) {
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
@@ -263,7 +261,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := AgentSpecificAppProject(*outbound, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		q.Add(ev)
 		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added appProject delete event to send queue")
@@ -452,7 +450,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(old, new *v1alpha1.AppProject, lo
 			continue
 		}
 
-		agentAppProject := AgentSpecificAppProject(*new, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		q.Add(ev)
 		logCtx.Tracef("Sent a delete event for an AppProject for a removed cluster")
@@ -471,7 +469,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(old, new *v1alpha1.AppProject, lo
 			continue
 		}
 
-		agentAppProject := AgentSpecificAppProject(*new, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s update event to send queue", new.Name)
@@ -578,38 +576,13 @@ func (s *Server) syncRepositoriesForProject(projectName, ns string, logCtx *logr
 	}
 }
 
-// AgentSpecificAppProject returns an agent specific version of the given AppProject
-func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alpha1.AppProject {
-	// Only keep the destinations that are relevant to the given agent
-	filteredDst := []v1alpha1.ApplicationDestination{}
-	for _, dst := range appProject.Spec.Destinations {
-		if glob.Match(dst.Name, agent) {
-			dst.Name = "in-cluster"
-			dst.Server = "https://kubernetes.default.svc"
-
-			filteredDst = append(filteredDst, dst)
-		}
+// isResourceFromAutonomousAgent checks if a Kubernetes resource was created by an autonomous agent
+// by examining if it has the source UID annotation.
+func isResourceFromAutonomousAgent(resource metav1.Object) bool {
+	annotations := resource.GetAnnotations()
+	if annotations == nil {
+		return false
 	}
-	appProject.Spec.Destinations = filteredDst
-
-	// Only allow Applications to be managed from the agent namespace
-	appProject.Spec.SourceNamespaces = []string{agent}
-
-	// Remove the roles since they are not relevant on the workload cluster
-	appProject.Spec.Roles = []v1alpha1.ProjectRole{}
-
-	return appProject
-}
-
-// isAppProjectFromAutonomousAgent checks if an AppProject was created by an autonomous agent
-// by examining if its name is prefixed with an autonomous agent name (pattern: "{agentName}-{projectName}")
-func (s *Server) isAppProjectFromAutonomousAgent(projectName string) bool {
-	for agentName, mode := range s.namespaceMap {
-		if mode == types.AgentModeAutonomous &&
-			strings.HasPrefix(projectName, agentName+"-") {
-			return true
-		}
-	}
-
-	return false
+	_, ok := annotations[manager.SourceUIDAnnotation]
+	return ok
 }

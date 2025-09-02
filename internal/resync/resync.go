@@ -209,6 +209,7 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 	}
 
 	// Depending on the role, the namespace of the resource may be different.
+	// For AppProject/Repository, the namespace is always the agent's namespace.
 	namespace := reqUpdate.Namespace
 	if r.role == manager.ManagerRolePrincipal && reqUpdate.Kind == "Application" {
 		namespace = agentName
@@ -221,6 +222,8 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 		if !apierrors.IsNotFound(err) {
 			return err
 		}
+
+		logCtx.Trace("Resource not found on the source namespace")
 
 		// The resource doesn't exist on the source. So, send a delete event to remove the orphaned resource from the peer.
 		return r.handleDeletedResource(logCtx, reqUpdate)
@@ -253,10 +256,10 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 
 	logCtx.Trace("Checksums do not match. Sending a specUpdate event")
 
-	return r.handleUpdatedResource(logCtx, reqUpdate, res)
+	return r.handleUpdatedResource(logCtx, reqUpdate, res, agentName)
 }
 
-func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured) error {
+func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured, agentName string) error {
 	resBytes, err := res.MarshalJSON()
 	if err != nil {
 		return err
@@ -281,7 +284,8 @@ func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *
 			return err
 		}
 
-		ev := r.events.AppProjectEvent(event.SpecUpdate, appProject)
+		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName)
+		ev := r.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		logCtx.Trace("Sending a request to update the appProject")
 		r.sendQ.Add(ev)
 	default:
