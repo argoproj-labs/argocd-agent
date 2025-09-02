@@ -256,10 +256,10 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 
 	logCtx.Trace("Checksums do not match. Sending a specUpdate event")
 
-	return r.handleUpdatedResource(logCtx, reqUpdate, res)
+	return r.handleUpdatedResource(logCtx, reqUpdate, res, agentName)
 }
 
-func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured) error {
+func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured, agentName string) error {
 	resBytes, err := res.MarshalJSON()
 	if err != nil {
 		return err
@@ -284,7 +284,8 @@ func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *
 			return err
 		}
 
-		ev := r.events.AppProjectEvent(event.SpecUpdate, appProject)
+		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName)
+		ev := r.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		logCtx.Trace("Sending a request to update the appProject")
 		r.sendQ.Add(ev)
 	default:

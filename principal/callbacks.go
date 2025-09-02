@@ -15,15 +15,12 @@
 package principal
 
 import (
-	"net/url"
-	"strings"
-
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -169,7 +166,7 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := AgentSpecificAppProject(*outbound, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent)
 		ev := s.events.AppProjectEvent(event.Create, &agentAppProject)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s to send queue, total length now %d", outbound.Name, q.Len())
@@ -264,7 +261,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := AgentSpecificAppProject(*outbound, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		q.Add(ev)
 		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added appProject delete event to send queue")
@@ -425,71 +422,12 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 			continue
 		}
 
-		if doesAgentMatchWithProject(agentName, appProject) {
+		if appproject.DoesAgentMatchWithProject(agentName, appProject) {
 			agents[agentName] = true
 		}
 	}
 
 	return agents
-}
-
-// doesAgentMatchWithProject checks if the agent name matches the given AppProject.
-// We match the agent to an AppProject if:
-// 1. The agent name matches any one of the destination names OR
-// 2. The agent name is empty but the agent name is present in the server URL parameter AND
-// 3. The agent name is not denied by any of the destination names
-// Ref: https://github.com/argoproj/argo-cd/blob/master/pkg/apis/application/v1alpha1/app_project_types.go#L477
-func doesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
-	destinationMatched := false
-
-	logCtx := log().WithFields(logrus.Fields{
-		"agent_name":  agentName,
-		"app_project": appProject.Name,
-	})
-
-	for _, dst := range appProject.Spec.Destinations {
-		// Return immediately if the agent name is denied by any of the destination names
-		if dst.Name != "" && isDenyPattern(dst.Name) && glob.Match(dst.Name[1:], agentName) {
-			return false
-		}
-
-		// Some AppProjects (e.g. default) may not always have a name so we need to check the server URL
-		if dst.Name == "" && dst.Server != "" {
-			if dst.Server == "*" {
-				destinationMatched = true
-				continue
-			}
-
-			// Server URL will be the resource proxy URL https://<rp-hostname>:<port>?agentName=<agent-name>
-			server, err := url.Parse(dst.Server)
-			if err != nil {
-				logCtx.WithError(err).Errorf("Invalid server URL: %s", dst.Server)
-				continue
-			}
-
-			serverAgentName := server.Query().Get("agentName")
-			if serverAgentName == "" {
-				continue
-			}
-
-			if glob.Match(serverAgentName, agentName) {
-				destinationMatched = true
-			}
-		}
-
-		// Match the agent name to the destination name and continue looking for deny patterns
-		if dst.Name != "" && glob.Match(dst.Name, agentName) {
-			destinationMatched = true
-		}
-	}
-
-	// Must match both destination and source namespace requirements
-	return destinationMatched &&
-		glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
-}
-
-func isDenyPattern(pattern string) bool {
-	return strings.HasPrefix(pattern, "!")
 }
 
 // syncAppProjectUpdatesToAgents sends the AppProject update events to the relevant clusters.
@@ -512,7 +450,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(old, new *v1alpha1.AppProject, lo
 			continue
 		}
 
-		agentAppProject := AgentSpecificAppProject(*new, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		q.Add(ev)
 		logCtx.Tracef("Sent a delete event for an AppProject for a removed cluster")
@@ -531,7 +469,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(old, new *v1alpha1.AppProject, lo
 			continue
 		}
 
-		agentAppProject := AgentSpecificAppProject(*new, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s update event to send queue", new.Name)
@@ -636,43 +574,6 @@ func (s *Server) syncRepositoriesForProject(projectName, ns string, logCtx *logr
 
 		s.syncRepositoryUpdatesToAgents(repo, repo, logCtx)
 	}
-}
-
-// AgentSpecificAppProject returns an agent specific version of the given AppProject
-// We don't have to check for deny patterns because we only construct the agent specific AppProject
-// if the agent name matches the AppProject's destinations.
-func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alpha1.AppProject {
-	// Only keep the destinations that are relevant to the given agent
-	filteredDst := []v1alpha1.ApplicationDestination{}
-	for _, dst := range appProject.Spec.Destinations {
-		nameMatches := dst.Name != "" && glob.Match(dst.Name, agent)
-		serverMatches := false
-
-		// Handle server-only destinations (like default project)
-		if dst.Name == "" && dst.Server != "" {
-			if dst.Server == "*" {
-				serverMatches = true
-			} else if server, err := url.Parse(dst.Server); err == nil {
-				serverAgentName := server.Query().Get("agentName")
-				serverMatches = serverAgentName != "" && glob.Match(serverAgentName, agent)
-			}
-		}
-
-		if nameMatches || serverMatches {
-			dst.Name = "in-cluster"
-			dst.Server = "https://kubernetes.default.svc"
-			filteredDst = append(filteredDst, dst)
-		}
-	}
-	appProject.Spec.Destinations = filteredDst
-
-	// Only allow Applications to be managed from the agent namespace
-	appProject.Spec.SourceNamespaces = []string{agent}
-
-	// Remove the roles since they are not relevant on the workload cluster
-	appProject.Spec.Roles = []v1alpha1.ProjectRole{}
-
-	return appProject
 }
 
 // isResourceFromAutonomousAgent checks if a Kubernetes resource was created by an autonomous agent

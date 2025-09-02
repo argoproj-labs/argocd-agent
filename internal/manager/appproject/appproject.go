@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
@@ -361,17 +363,94 @@ func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1al
 	return true, string(incoming.UID) == sourceUID, nil
 }
 
-// DoesAgentMatchWithProject checks if the agent name matches the AppProject's destinations and source namespaces
+// DoesAgentMatchWithProject checks if the agent name matches the given AppProject.
+// We match the agent to an AppProject if:
+// 1. The agent name matches any one of the destination names OR
+// 2. The agent name is empty but the agent name is present in the server URL parameter AND
+// 3. The agent name is not denied by any of the destination names
+// Ref: https://github.com/argoproj/argo-cd/blob/master/pkg/apis/application/v1alpha1/app_project_types.go#L477
 func DoesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
-	matched := false
+	destinationMatched := false
+
 	for _, dst := range appProject.Spec.Destinations {
-		if glob.Match(dst.Name, agentName) {
-			matched = true
-			break
+		// Return immediately if the agent name is denied by any of the destination names
+		if dst.Name != "" && isDenyPattern(dst.Name) && glob.Match(dst.Name[1:], agentName) {
+			return false
+		}
+
+		// Some AppProjects (e.g. default) may not always have a name so we need to check the server URL
+		if dst.Name == "" && dst.Server != "" {
+			if dst.Server == "*" {
+				destinationMatched = true
+				continue
+			}
+
+			// Server URL will be the resource proxy URL https://<rp-hostname>:<port>?agentName=<agent-name>
+			server, err := url.Parse(dst.Server)
+			if err != nil {
+				continue
+			}
+
+			serverAgentName := server.Query().Get("agentName")
+			if serverAgentName == "" {
+				continue
+			}
+
+			if glob.Match(serverAgentName, agentName) {
+				destinationMatched = true
+			}
+		}
+
+		// Match the agent name to the destination name and continue looking for deny patterns
+		if dst.Name != "" && glob.Match(dst.Name, agentName) {
+			destinationMatched = true
 		}
 	}
 
-	return matched && glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
+	// Must match both destination and source namespace requirements
+	return destinationMatched &&
+		glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
+}
+
+func isDenyPattern(pattern string) bool {
+	return strings.HasPrefix(pattern, "!")
+}
+
+// AgentSpecificAppProject returns an agent specific version of the given AppProject
+// We don't have to check for deny patterns because we only construct the agent specific AppProject
+// if the agent name matches the AppProject's destinations.
+func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alpha1.AppProject {
+	// Only keep the destinations that are relevant to the given agent
+	filteredDst := []v1alpha1.ApplicationDestination{}
+	for _, dst := range appProject.Spec.Destinations {
+		nameMatches := dst.Name != "" && glob.Match(dst.Name, agent)
+		serverMatches := false
+
+		// Handle server-only destinations (like default project)
+		if dst.Name == "" && dst.Server != "" {
+			if dst.Server == "*" {
+				serverMatches = true
+			} else if server, err := url.Parse(dst.Server); err == nil {
+				serverAgentName := server.Query().Get("agentName")
+				serverMatches = serverAgentName != "" && glob.Match(serverAgentName, agent)
+			}
+		}
+
+		if nameMatches || serverMatches {
+			dst.Name = "in-cluster"
+			dst.Server = "https://kubernetes.default.svc"
+			filteredDst = append(filteredDst, dst)
+		}
+	}
+	appProject.Spec.Destinations = filteredDst
+
+	// Only allow Applications to be managed from the agent namespace
+	appProject.Spec.SourceNamespaces = []string{agent}
+
+	// Remove the roles since they are not relevant on the workload cluster
+	appProject.Spec.Roles = []v1alpha1.ProjectRole{}
+
+	return appProject
 }
 
 func log() *logrus.Entry {
