@@ -42,23 +42,12 @@ func StartHTTP2DowngradingProxy(t *testing.T, addr string, target string, agentC
 }
 
 func downgradeToHTTP1Handler(target string, agentCert tls.Certificate) http.Handler {
-	printHeaders := func(header http.Header) {
-		for name, values := range header {
-			for _, value := range values {
-				fmt.Printf("%s: %s\n", name, value)
-			}
-		}
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		fmt.Printf("Intercepting a %s request to %s\n", req.Method, req.URL)
 
 		// Check if this is a gRPC request
 		isGRPC := req.Header.Get("Content-Type") == "application/grpc"
 		fmt.Printf("Is gRPC request: %t, Protocol: %s\n", isGRPC, req.Proto)
-
-		fmt.Println("Request Headers:")
-		printHeaders(req.Header)
 
 		// Downgrade all requests to HTTP/1.1
 		if req.Proto == "HTTP/2.0" {
