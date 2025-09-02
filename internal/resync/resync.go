@@ -223,7 +223,7 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 			return err
 		}
 
-		logCtx.Tracef("rescource not found on the source namespace %s", namespace)
+		logCtx.Trace("Resource not found on the source namespace")
 
 		// The resource doesn't exist on the source. So, send a delete event to remove the orphaned resource from the peer.
 		return r.handleDeletedResource(logCtx, reqUpdate)
