@@ -27,6 +27,7 @@ export ARGOCD_AGENT_REMOTE_PORT=${ARGOCD_AGENT_REMOTE_PORT:-8443}
 E2E_ENV_FILE="/tmp/argocd-agent-e2e"
 if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
+    export ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=${ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET:-false}
 fi
 
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
