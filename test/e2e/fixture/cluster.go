@@ -15,35 +15,44 @@
 package fixture
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"time"
 
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
 	"github.com/redis/go-redis/v9"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
-	ManagedAgentServerKey              = "AGENT_E2E_MANAGED_CLUSTER_SERVER"
-	AutonomousAgentServerKey           = "AGENT_E2E_AUTONOMOUS_CLUSTER_SERVER"
-	PrincipalRedisServerAddressKey     = "AGENT_E2E_PRINCIPAL_REDIS_SERVER_ADDRESS"
-	PrincipalRedisServerPasswordKey    = "AGENT_E2E_PRINCIPAL_REDIS_PASSWORD"
-	AgentManagedRedisServerAddressKey  = "AGENT_E2E_AGENT_MANAGED_REDIS_SERVER_ADDRESS"
-	AgentManagedRedisServerPasswordKey = "AGENT_E2E_AGENT_MANAGED_REDIS_PASSWORD"
-
 	PrincipalName         = "principal"
 	AgentManagedName      = "agent-managed"
 	AgentAutonomousName   = "agent-autonomous"
 	AgentClusterServerURL = "https://kubernetes.default.svc"
 )
 
+type ClusterDetails struct {
+	// Managed agent Redis configuration
+	ManagedAgentRedisAddr     string
+	ManagedAgentRedisPassword string
+
+	// Principal Redis configuration
+	PrincipalRedisAddr     string
+	PrincipalRedisPassword string
+
+	// Cluster server addresses
+	ManagedClusterAddr    string
+	AutonomousClusterAddr string
+}
+
 // HasConnectionStatus checks if the connection info for a given server matches
 // the expected connection state in principal cluster.
-func HasConnectionStatus(serverName string, expected appv1.ConnectionState) bool {
-	actual, err := GetPrincipalClusterInfo(serverName)
+func HasConnectionStatus(agentName string, expected appv1.ConnectionState, clusterDetails *ClusterDetails) bool {
+	actual, err := GetPrincipalClusterInfo(agentName, clusterDetails)
 
 	if err != nil {
 		fmt.Println("HasConnectionStatus: error", err)
@@ -59,14 +68,14 @@ func HasConnectionStatus(serverName string, expected appv1.ConnectionState) bool
 }
 
 // HasClusterCacheInfoSynced checks if the cluster cache info is synced between principal and agent
-func HasClusterCacheInfoSynced(serverName string) bool {
-	principalClusterInfo, err := GetPrincipalClusterInfo(serverName)
+func HasClusterCacheInfoSynced(agentName string, clusterDetails *ClusterDetails) bool {
+	principalClusterInfo, err := GetPrincipalClusterInfo(agentName, clusterDetails)
 	if err != nil {
 		fmt.Println("HasClusterCacheInfoSynced: error", err)
 		return false
 	}
 
-	agentClusterInfo, err := GetManagedAgentClusterInfo()
+	agentClusterInfo, err := GetManagedAgentClusterInfo(clusterDetails)
 	if err != nil {
 		fmt.Println("HasClusterCacheInfoSynced: error", err)
 		return false
@@ -81,8 +90,8 @@ func HasClusterCacheInfoSynced(serverName string) bool {
 		principalClusterInfo.CacheInfo.ResourcesCount == agentClusterInfo.CacheInfo.ResourcesCount
 }
 
-func HasApplicationsCount(expected int64) bool {
-	agentCacheInfo, err := GetManagedAgentClusterInfo()
+func HasApplicationsCount(expected int64, clusterDetails *ClusterDetails) bool {
+	agentCacheInfo, err := GetManagedAgentClusterInfo(clusterDetails)
 	if err != nil {
 		fmt.Println("HasApplicationsCount: error", err)
 		return false
@@ -105,11 +114,11 @@ func verifyConnectionModificationTime(actualTime *metav1.Time, expectedTime *met
 }
 
 // GetManagedAgentClusterInfo retrieves cluster info from managed agent's Redis server
-func GetManagedAgentClusterInfo() (appv1.ClusterInfo, error) {
+func GetManagedAgentClusterInfo(clusterDetails *ClusterDetails) (appv1.ClusterInfo, error) {
 
 	// Fetch cluster info from redis cache
 	clusterInfo := appv1.ClusterInfo{}
-	err := getCacheInstance(AgentManagedName).GetClusterInfo(AgentClusterServerURL, &clusterInfo)
+	err := getCacheInstance(AgentManagedName, clusterDetails).GetClusterInfo(AgentClusterServerURL, &clusterInfo)
 	if err != nil {
 		// Treat missing cache key error (means no apps exist yet) as zero-value info
 		if err == cacheutil.ErrCacheMiss {
@@ -123,22 +132,40 @@ func GetManagedAgentClusterInfo() (appv1.ClusterInfo, error) {
 }
 
 // GetPrincipalClusterInfo retrieves cluster info from principal's Redis server
-func GetPrincipalClusterInfo(server string) (appv1.ClusterInfo, error) {
+func GetPrincipalClusterInfo(agentName string, clusterDetails *ClusterDetails) (appv1.ClusterInfo, error) {
 	var clusterInfo appv1.ClusterInfo
-	err := getCacheInstance(PrincipalName).GetClusterInfo(server, &clusterInfo)
+
+	server := ""
+	switch agentName {
+	case AgentManagedName:
+		server = clusterDetails.ManagedClusterAddr
+	case AgentAutonomousName:
+		server = clusterDetails.AutonomousClusterAddr
+	default:
+		return appv1.ClusterInfo{}, fmt.Errorf("invalid agent name: %s", agentName)
+	}
+
+	err := getCacheInstance(PrincipalName, clusterDetails).GetClusterInfo(server, &clusterInfo)
+	if err != nil {
+		// Treat missing cache key error (means no apps exist yet) as zero-value info
+		if err == cacheutil.ErrCacheMiss {
+			return appv1.ClusterInfo{}, nil
+		}
+		return clusterInfo, err
+	}
 	return clusterInfo, err
 }
 
 // getCacheInstance creates a new cache instance for the given source
-func getCacheInstance(source string) *appstatecache.Cache {
+func getCacheInstance(source string, clusterDetails *ClusterDetails) *appstatecache.Cache {
 	redisOptions := &redis.Options{}
 	switch source {
 	case PrincipalName:
-		redisOptions.Addr = os.Getenv(PrincipalRedisServerAddressKey)
-		redisOptions.Password = os.Getenv(PrincipalRedisServerPasswordKey)
+		redisOptions.Addr = clusterDetails.PrincipalRedisAddr
+		redisOptions.Password = clusterDetails.PrincipalRedisPassword
 	case AgentManagedName:
-		redisOptions.Addr = os.Getenv(AgentManagedRedisServerAddressKey)
-		redisOptions.Password = os.Getenv(AgentManagedRedisServerPasswordKey)
+		redisOptions.Addr = clusterDetails.ManagedAgentRedisAddr
+		redisOptions.Password = clusterDetails.ManagedAgentRedisPassword
 	default:
 		panic(fmt.Sprintf("invalid source: %s", source))
 	}
@@ -148,4 +175,144 @@ func getCacheInstance(source string) *appstatecache.Cache {
 		cacheutil.NewRedisCache(redisClient, 0, cacheutil.RedisCompressionGZip)), 0)
 
 	return cache
+}
+
+// getClusterConfigurations gets the cluster configurations from the managed and principal clusters
+func getClusterConfigurations(ctx context.Context, managedAgentClient KubeClient, principalClient KubeClient, clusterDetails *ClusterDetails) error {
+	// Get managed agent Redis config
+	if err := getManagedAgentRedisConfig(ctx, managedAgentClient, clusterDetails); err != nil {
+		return err
+	}
+
+	// Get principal Redis config
+	if err := getPrincipalRedisConfig(ctx, principalClient, clusterDetails); err != nil {
+		return err
+	}
+
+	// Get cluster server addresses
+	if err := getClusterServerAddresses(ctx, principalClient, clusterDetails); err != nil {
+		return err
+	}
+	return nil
+}
+
+// getManagedAgentRedisConfig gets the managed agent Redis config from the managed cluster
+func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClient, clusterDetails *ClusterDetails) error {
+	// Fetch Redis service to get the address
+	service := &corev1.Service{}
+	serviceKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
+	err := managedAgentClient.Get(ctx, serviceKey, service, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get Redis service: %w", err)
+	}
+
+	// Get Redis address from LoadBalancer ingress
+	var redisAddr string
+	if len(service.Status.LoadBalancer.Ingress) > 0 {
+		ingress := service.Status.LoadBalancer.Ingress[0]
+		if ingress.IP != "" {
+			redisAddr = fmt.Sprintf("%s:6379", ingress.IP)
+		} else if ingress.Hostname != "" {
+			redisAddr = fmt.Sprintf("%s:6379", ingress.Hostname)
+		}
+	}
+	if redisAddr == "" {
+		return fmt.Errorf("could not get Redis server address from LoadBalancer ingress")
+	}
+	clusterDetails.ManagedAgentRedisAddr = redisAddr
+
+	// Fetch Redis secret to get the password
+	secret := &corev1.Secret{}
+	secretKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
+	err = managedAgentClient.Get(ctx, secretKey, secret, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get Redis secret: %w", err)
+	}
+
+	// Decode the password from base64
+	authData, exists := secret.Data["auth"]
+	if !exists {
+		return fmt.Errorf("auth field is not found in Redis secret")
+	}
+
+	clusterDetails.ManagedAgentRedisPassword = string(authData)
+
+	return nil
+}
+
+// getPrincipalRedisConfig gets the principal Redis config from the principal cluster
+func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, clusterDetails *ClusterDetails) error {
+	// Fetch Redis service to get the address
+	service := &corev1.Service{}
+	serviceKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
+	err := principalClient.Get(ctx, serviceKey, service, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get Principal Redis service: %w", err)
+	}
+
+	// Get Redis address from LoadBalancer ingress
+	var redisAddr string
+	if len(service.Status.LoadBalancer.Ingress) > 0 {
+		ingress := service.Status.LoadBalancer.Ingress[0]
+		if ingress.IP != "" {
+			redisAddr = fmt.Sprintf("%s:6379", ingress.IP)
+		} else if ingress.Hostname != "" {
+			redisAddr = fmt.Sprintf("%s:6379", ingress.Hostname)
+		}
+	}
+	if redisAddr == "" {
+		return fmt.Errorf("could not get Principal Redis server address from LoadBalancer ingress")
+	}
+	clusterDetails.PrincipalRedisAddr = redisAddr
+
+	// Fetch Redis secret to get the password
+	secret := &corev1.Secret{}
+	secretKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
+	err = principalClient.Get(ctx, secretKey, secret, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get Principal Redis secret: %w", err)
+	}
+
+	// Decode the password from base64
+	authData, exists := secret.Data["auth"]
+	if !exists {
+		return fmt.Errorf("auth field is not found in Principal Redis secret")
+	}
+
+	clusterDetails.PrincipalRedisPassword = string(authData)
+
+	return nil
+}
+
+// getClusterServerAddresses gets the cluster server addresses from the principal cluster
+func getClusterServerAddresses(ctx context.Context, principalClient KubeClient, clusterDetails *ClusterDetails) error {
+	// Fetch managed cluster server address
+	managedSecret := &corev1.Secret{}
+	managedSecretKey := types.NamespacedName{Name: "cluster-agent-managed", Namespace: "argocd"}
+	err := principalClient.Get(ctx, managedSecretKey, managedSecret, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get managed cluster secret: %w", err)
+	}
+
+	serverData, exists := managedSecret.Data["server"]
+	if !exists {
+		return fmt.Errorf("server field is not found in managed cluster secret")
+	}
+	clusterDetails.ManagedClusterAddr = string(serverData)
+
+	// Fetch autonomous cluster server address
+	autonomousSecret := &corev1.Secret{}
+	autonomousSecretKey := types.NamespacedName{Name: "cluster-agent-autonomous", Namespace: "argocd"}
+	err = principalClient.Get(ctx, autonomousSecretKey, autonomousSecret, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get autonomous cluster secret: %w", err)
+	}
+
+	serverData, exists = autonomousSecret.Data["server"]
+	if !exists {
+		return fmt.Errorf("server field is not found in autonomous cluster secret")
+	}
+	clusterDetails.AutonomousClusterAddr = string(serverData)
+
+	return nil
 }

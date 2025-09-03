@@ -43,6 +43,7 @@ type BaseSuite struct {
 	PrincipalClient       KubeClient
 	ManagedAgentClient    KubeClient
 	AutonomousAgentClient KubeClient
+	ClusterDetails        *ClusterDetails
 }
 
 func (suite *BaseSuite) SetupSuite() {
@@ -65,10 +66,14 @@ func (suite *BaseSuite) SetupSuite() {
 	suite.AutonomousAgentClient, err = NewKubeClient(config)
 	requires.Nil(err)
 
+	// Set cluster configurations
+	suite.ClusterDetails = &ClusterDetails{}
+	err = getClusterConfigurations(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, suite.ClusterDetails)
+	requires.Nil(err)
 }
 
 func (suite *BaseSuite) SetupTest() {
-	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient)
+	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient, suite.ClusterDetails)
 	suite.Require().Nil(err)
 
 	// Ensure that the autonomous agent's default AppProject exists on the principal
@@ -96,7 +101,7 @@ func (suite *BaseSuite) SetupTest() {
 
 func (suite *BaseSuite) TearDownTest() {
 	suite.T().Logf("Test ended at: %v", time.Now())
-	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient)
+	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient, suite.ClusterDetails)
 	suite.Require().Nil(err)
 }
 
@@ -148,7 +153,7 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 	return fmt.Errorf("EnsureDeletion: timeout waiting for deletion of %s/%s", key.Namespace, key.Name)
 }
 
-func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient KubeClient, autonomousAgentClient KubeClient) error {
+func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient KubeClient, autonomousAgentClient KubeClient, clusterDetails *ClusterDetails) error {
 
 	var list argoapp.ApplicationList
 	var err error
@@ -330,13 +335,13 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 
-	return resetManagedAgentClusterInfo()
+	return resetManagedAgentClusterInfo(clusterDetails)
 }
 
 // resetManagedAgentClusterInfo resets the cluster info in the redis cache for the managed agent
-func resetManagedAgentClusterInfo() error {
+func resetManagedAgentClusterInfo(clusterDetails *ClusterDetails) error {
 	// Reset cluster info in redis cache
-	if err := getCacheInstance(AgentManagedName).SetClusterInfo(AgentClusterServerURL, &argoapp.ClusterInfo{}); err != nil {
+	if err := getCacheInstance(AgentManagedName, clusterDetails).SetClusterInfo(AgentClusterServerURL, &argoapp.ClusterInfo{}); err != nil {
 		fmt.Println("resetManagedAgentClusterInfo: error", err)
 		return err
 	}
