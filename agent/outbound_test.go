@@ -1,11 +1,18 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -214,8 +221,8 @@ func Test_addAppProjectCreationToQueue(t *testing.T) {
 		// Should not have an event in queue in managed mode
 		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
 
-		// AppProject should be not be managed by now
-		assert.False(t, a.projectManager.IsManaged("test-project"))
+		// AppProject should be managed by now
+		assert.True(t, a.projectManager.IsManaged("test-project"))
 	})
 
 	t.Run("Add appProject that is already managed", func(t *testing.T) {
@@ -369,5 +376,252 @@ func Test_addAppProjectDeletionToQueue(t *testing.T) {
 		ev, _ := a.queues.SendQ(defaultQueueName).Get()
 		assert.Equal(t, event.Delete.String(), ev.Type())
 		require.False(t, a.projectManager.IsManaged("test-project"))
+	})
+}
+
+func Test_addClusterCacheInfoUpdateToQueue(t *testing.T) {
+	miniRedis, err := miniredis.Run()
+	require.NoError(t, err)
+	require.NotNil(t, miniRedis)
+	defer miniRedis.Close()
+
+	kubec := kube.NewKubernetesFakeClientWithApps("argocd")
+	remote, err := client.NewRemote("127.0.0.1", 8080)
+	require.NoError(t, err)
+
+	a, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithRedisHost(miniRedis.Addr()))
+	require.NoError(t, err)
+
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	// First populate the cache with dummy data
+	clusterMgr, err := cluster.NewManager(a.context, a.namespace, miniRedis.Addr(), cacheutil.RedisCompressionGZip, a.kubeClient.Clientset)
+	require.NoError(t, err)
+	err = clusterMgr.MapCluster("test-agent", &v1alpha1.Cluster{
+		Name:   "test-cluster",
+		Server: "https://kubernetes.default.svc",
+	})
+	require.NoError(t, err)
+
+	// Set dummy cluster cache stats
+	clusterMgr.SetClusterCacheStats(&event.ClusterCacheInfo{
+		ApplicationsCount: 5,
+		APIsCount:         10,
+		ResourcesCount:    100,
+	}, "test-agent")
+
+	// Should not have an event in queue
+	require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+
+	// Add a cluster cache info update event to the queue
+	a.addClusterCacheInfoUpdateToQueue()
+
+	// Should have an event in queue
+	require.Equal(t, 1, a.queues.SendQ(defaultQueueName).Len())
+}
+
+func Test_handleRepositoryCreation(t *testing.T) {
+	a := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	t.Run("Skip repository event in autonomous mode", func(t *testing.T) {
+		repo := &corev1.Secret{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-repo",
+				Namespace: "argocd",
+			},
+		}
+
+		// Set to autonomous mode
+		a.mode = types.AgentModeAutonomous
+		defer func() {
+			a.mode = types.AgentModeManaged // Reset to default
+		}()
+
+		initialResourceCount := a.resources.Len()
+		a.handleRepositoryCreation(repo)
+
+		// Should not add to resources or manage
+		assert.Equal(t, initialResourceCount, a.resources.Len())
+		assert.False(t, a.repoManager.IsManaged("test-repo"))
+	})
+
+	t.Run("Skip already managed repository in managed mode", func(t *testing.T) {
+		repo := &corev1.Secret{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "existing-repo",
+				Namespace: "argocd",
+			},
+		}
+
+		// Set to managed mode
+		a.mode = types.AgentModeManaged
+
+		// Pre-manage the repository
+		err := a.repoManager.Manage("existing-repo")
+		require.NoError(t, err)
+		defer a.repoManager.ClearManaged()
+
+		initialResourceCount := a.resources.Len()
+		a.handleRepositoryCreation(repo)
+
+		assert.Equal(t, initialResourceCount+1, a.resources.Len())
+		assert.True(t, a.repoManager.IsManaged("existing-repo"))
+	})
+
+	t.Run("Successfully handle new repository in managed mode", func(t *testing.T) {
+		repo := &corev1.Secret{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "new-repo",
+				Namespace: "argocd",
+			},
+		}
+
+		// Set to managed mode
+		a.mode = types.AgentModeManaged
+		defer a.repoManager.ClearManaged()
+
+		initialResourceCount := a.resources.Len()
+		a.handleRepositoryCreation(repo)
+
+		// Should add to resources and manage
+		assert.Equal(t, initialResourceCount+1, a.resources.Len())
+		assert.True(t, a.repoManager.IsManaged("new-repo"))
+	})
+}
+
+func Test_handleRepositoryUpdate(t *testing.T) {
+	a := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	oldRepo := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "test-repo",
+			Namespace:       "argocd",
+			ResourceVersion: "1",
+		},
+	}
+
+	newRepo := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "test-repo",
+			Namespace:       "argocd",
+			ResourceVersion: "2",
+		},
+	}
+
+	t.Run("Skip repository update in autonomous mode", func(t *testing.T) {
+		// Set to autonomous mode
+		a.mode = types.AgentModeAutonomous
+		defer func() {
+			a.mode = types.AgentModeManaged // Reset to default
+		}()
+
+		// Should not panic or cause issues
+		a.handleRepositoryUpdate(oldRepo, newRepo)
+
+		// Should not be managed
+		assert.False(t, a.repoManager.IsManaged("test-repo"))
+	})
+
+	t.Run("Skip ignored change in managed mode", func(t *testing.T) {
+		// Set to managed mode
+		a.mode = types.AgentModeManaged
+
+		// Pre-manage the repository and ignore the change
+		err := a.repoManager.Manage("test-repo")
+		require.NoError(t, err)
+		err = a.repoManager.IgnoreChange("test-repo", "2")
+		require.NoError(t, err)
+		defer a.repoManager.ClearManaged()
+
+		// Should skip due to ignored change
+		a.handleRepositoryUpdate(oldRepo, newRepo)
+
+		// Should still be managed but no further action taken
+		assert.True(t, a.repoManager.IsManaged("test-repo"))
+	})
+
+	t.Run("Skip update for unmanaged repository", func(t *testing.T) {
+		// Set to managed mode
+		a.mode = types.AgentModeManaged
+
+		// Repository is not managed
+		assert.False(t, a.repoManager.IsManaged("test-repo"))
+
+		// Should skip because repository is not managed
+		a.handleRepositoryUpdate(oldRepo, newRepo)
+
+		// Should still not be managed
+		assert.False(t, a.repoManager.IsManaged("test-repo"))
+	})
+
+	t.Run("Process valid repository update", func(t *testing.T) {
+		// Set to managed mode
+		a.mode = types.AgentModeManaged
+
+		// Pre-manage the repository
+		err := a.repoManager.Manage("test-repo")
+		require.NoError(t, err)
+		defer a.repoManager.ClearManaged()
+
+		// Should process the update successfully
+		a.handleRepositoryUpdate(oldRepo, newRepo)
+
+		// Should still be managed
+		assert.True(t, a.repoManager.IsManaged("test-repo"))
+	})
+}
+
+func Test_handleRepositoryDeletion(t *testing.T) {
+	a := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	repo := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-repo",
+			Namespace: "argocd",
+		},
+	}
+
+	t.Run("Skip repository deletion in autonomous mode", func(t *testing.T) {
+		// Set to autonomous mode
+		a.mode = types.AgentModeAutonomous
+		defer func() {
+			a.mode = types.AgentModeManaged // Reset to default
+		}()
+
+		// Add repository to resources first
+		a.resources.Add(resources.NewResourceKeyFromRepository(repo))
+		initialResourceCount := a.resources.Len()
+
+		a.handleRepositoryDeletion(repo)
+
+		// Should not remove from resources even in autonomous mode
+		assert.Equal(t, initialResourceCount, a.resources.Len())
+		// Should not be managed
+		assert.False(t, a.repoManager.IsManaged("test-repo"))
+	})
+
+	t.Run("Skip deletion for unmanaged repository", func(t *testing.T) {
+		// Set to managed mode
+		a.mode = types.AgentModeManaged
+
+		// Add repository to resources
+		a.resources.Add(resources.NewResourceKeyFromRepository(repo))
+		initialResourceCount := a.resources.Len()
+
+		// Repository is not managed
+		assert.False(t, a.repoManager.IsManaged("test-repo"))
+
+		a.handleRepositoryDeletion(repo)
+
+		// Should remove from resources but skip unmanage
+		assert.Equal(t, initialResourceCount-1, a.resources.Len())
+		assert.False(t, a.repoManager.IsManaged("test-repo"))
 	})
 }

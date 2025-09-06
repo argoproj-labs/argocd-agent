@@ -567,7 +567,7 @@ func Test_ManageApp(t *testing.T) {
 		assert.True(t, appm.IsManaged("foo"))
 		appm.ClearManaged()
 		assert.False(t, appm.IsManaged("foo"))
-		assert.Len(t, appm.managedApps, 0)
+		assert.Equal(t, 0, appm.ManagedResources.Len())
 	})
 
 	t.Run("Mark app as unmanaged", func(t *testing.T) {
@@ -598,7 +598,7 @@ func Test_IgnoreChange(t *testing.T) {
 		assert.True(t, appm.IsChangeIgnored("foo", "1"))
 		appm.ClearIgnored()
 		assert.False(t, appm.IsChangeIgnored("foo", "1"))
-		assert.Len(t, appm.managedApps, 0)
+		assert.Equal(t, 0, appm.ObservedResources.Len())
 	})
 
 	t.Run("Unignore a change", func(t *testing.T) {

@@ -67,6 +67,9 @@ func NewAgentRunCommand() *cobra.Command {
 		// Time interval for agent to principal ping
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
 		keepAlivePingInterval time.Duration
+
+		// Time interval for agent to refresh cluster cache info in principal
+		cacheRefreshInterval time.Duration
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -174,6 +177,7 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithRedisPassword(redisPassword))
 
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
+			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
@@ -263,6 +267,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&enableResourceProxy, "enable-resource-proxy",
 		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_RESOURCE_PROXY", true),
 		"Enable resource proxy")
+	command.Flags().DurationVar(&cacheRefreshInterval, "cache-refresh-interval",
+		env.DurationWithDefault("ARGOCD_AGENT_CACHE_REFRESH_INTERVAL", nil, 10*time.Second),
+		"Interval to refresh cluster cache info in principal")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

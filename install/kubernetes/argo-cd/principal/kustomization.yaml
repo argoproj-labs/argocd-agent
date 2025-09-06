@@ -2,32 +2,6 @@ resources:
 - https://github.com/argoproj/argo-cd/manifests/cluster-install?ref=stable
 
 patches:
-# Get rid of everything related to the repository server
-# TODO: The API server might require the repository server for some things.
-- patch: |-
-    $patch: delete
-    apiVersion: apps/v1
-    kind: Deployment
-    metadata:
-      name: argocd-repo-server
-- patch: |-
-    $patch: delete
-    apiVersion: v1
-    kind: Service
-    metadata:
-      name: argocd-repo-server
-- patch: |-
-    $patch: delete
-    apiVersion: networking.k8s.io/v1
-    kind: NetworkPolicy
-    metadata:
-      name: argocd-repo-server-network-policy
-- patch: |-
-    $patch: delete
-    apiVersion: v1
-    kind: ServiceAccount
-    metadata:
-      name: argocd-repo-server
 # Get rid of everything related to the application controller
 - patch: |-
     $patch: delete

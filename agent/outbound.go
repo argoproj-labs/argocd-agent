@@ -15,11 +15,14 @@
 package agent
 
 import (
+	"errors"
+
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -162,11 +165,6 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 
 	a.resources.Add(resources.NewResourceKeyFromAppProject(appProject))
 
-	// Only send the creation event when we're in autonomous mode
-	if !a.mode.IsAutonomous() {
-		return
-	}
-
 	// Update events trigger a new event sometimes, too. If we've already seen
 	// the appProject, we just ignore the request then.
 	if a.projectManager.IsManaged(appProject.Name) {
@@ -176,6 +174,11 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 
 	if err := a.projectManager.Manage(appProject.Name); err != nil {
 		logCtx.Errorf("Could not manage appProject: %v", err)
+		return
+	}
+
+	// Only send the creation event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
 		return
 	}
 
@@ -198,11 +201,6 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 		"sendq_name": defaultQueueName,
 	})
 
-	// Only send the update event when we're in autonomous mode
-	if !a.mode.IsAutonomous() {
-		return
-	}
-
 	a.watchLock.Lock()
 	defer a.watchLock.Unlock()
 
@@ -214,6 +212,11 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 	// If the appProject is not managed, we ignore this event.
 	if !a.projectManager.IsManaged(new.Name) {
 		logCtx.Errorf("Received update event for unmanaged appProject")
+		return
+	}
+
+	// Only send the update event when we're in autonomous mode
+	if !a.mode.IsAutonomous() {
 		return
 	}
 
@@ -260,4 +263,121 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 
 	q.Add(a.emitter.AppProjectEvent(event.Delete, appProject))
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject delete event to send queue")
+}
+
+// addClusterCacheInfoUpdateToQueue processes a cluster cache info update event
+// and puts it in the send queue.
+func (a *Agent) addClusterCacheInfoUpdateToQueue() {
+	logCtx := log().WithFields(logrus.Fields{
+		"event": "addClusterCacheInfoUpdateToQueue",
+	})
+
+	clusterServer := "https://kubernetes.default.svc"
+	clusterInfo := &v1alpha1.ClusterInfo{}
+
+	// Get the updated cluster info from agent's cache.
+	if err := a.clusterCache.GetClusterInfo(clusterServer, clusterInfo); err != nil {
+		if !errors.Is(err, cacheutil.ErrCacheMiss) {
+			logCtx.WithError(err).Errorf("Failed to get cluster info from cache")
+		}
+		return
+	}
+
+	// Send the event to principal to update the cluster cache info.
+	q := a.queues.SendQ(defaultQueueName)
+	if q != nil {
+		clusterInfoEvent := a.emitter.ClusterCacheInfoUpdateEvent(event.ClusterCacheInfoUpdate, &event.ClusterCacheInfo{
+			ApplicationsCount: clusterInfo.ApplicationsCount,
+			APIsCount:         clusterInfo.CacheInfo.APIsCount,
+			ResourcesCount:    clusterInfo.CacheInfo.ResourcesCount,
+		})
+
+		q.Add(clusterInfoEvent)
+		logCtx.WithFields(logrus.Fields{
+			"sendq_len":         q.Len(),
+			"sendq_name":        defaultQueueName,
+			"applicationsCount": clusterInfo.ApplicationsCount,
+			"apisCount":         clusterInfo.CacheInfo.APIsCount,
+			"resourcesCount":    clusterInfo.CacheInfo.ResourcesCount,
+		}).Infof("Added ClusterCacheInfoUpdate event to send queue")
+	} else {
+		logCtx.Error("Default queue not found, unable to send ClusterCacheInfoUpdate event")
+	}
+}
+
+func (a *Agent) handleRepositoryCreation(repo *corev1.Secret) {
+	logCtx := log().WithFields(logrus.Fields{
+		"event":      "NewRepository",
+		"repository": repo.Name,
+	})
+
+	logCtx.Debugf("New repository event")
+
+	if a.mode.IsAutonomous() {
+		logCtx.Debugf("Skipping repository event because the agent is not in managed mode")
+		return
+	}
+
+	a.resources.Add(resources.NewResourceKeyFromRepository(repo))
+
+	if a.repoManager.IsManaged(repo.Name) {
+		logCtx.Debugf("Skipping repository event because the repository is already managed")
+		return
+	}
+
+	if err := a.repoManager.Manage(repo.Name); err != nil {
+		logCtx.Errorf("Could not manage repository: %v", err)
+		return
+	}
+}
+
+func (a *Agent) handleRepositoryUpdate(old, new *corev1.Secret) {
+	logCtx := log().WithFields(logrus.Fields{
+		"event":      "UpdateRepository",
+		"repository": new.Name,
+	})
+
+	a.watchLock.Lock()
+	defer a.watchLock.Unlock()
+
+	if a.mode.IsAutonomous() {
+		logCtx.Debugf("Skipping repository event because the agent is not in managed mode")
+		return
+	}
+
+	if a.repoManager.IsChangeIgnored(new.Name, new.ResourceVersion) {
+		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
+		return
+	}
+
+	if !a.repoManager.IsManaged(new.Name) {
+		logCtx.Debugf("Skipping repository event because the repository is already managed")
+		return
+	}
+}
+
+func (a *Agent) handleRepositoryDeletion(repo *corev1.Secret) {
+	logCtx := log().WithFields(logrus.Fields{
+		"event":      "DeleteRepository",
+		"repository": repo.Name,
+	})
+
+	logCtx.Debugf("Delete repository event")
+
+	if a.mode.IsAutonomous() {
+		logCtx.Debugf("Skipping repository event because the agent is not in managed mode")
+		return
+	}
+
+	a.resources.Remove(resources.NewResourceKeyFromRepository(repo))
+
+	if !a.repoManager.IsManaged(repo.Name) {
+		logCtx.Debugf("Skipping repository event because the repository is not managed")
+		return
+	}
+
+	if err := a.repoManager.Unmanage(repo.Name); err != nil {
+		logCtx.Errorf("Could not unmanage repository: %v", err)
+		return
+	}
 }

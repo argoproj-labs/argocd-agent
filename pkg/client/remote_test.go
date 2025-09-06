@@ -37,7 +37,7 @@ func Test_Connect(t *testing.T) {
 	basePath := path.Join(tempDir, "certs")
 	testcerts.WriteSelfSignedCert(t, "rsa", basePath, x509.Certificate{SerialNumber: big.NewInt(1)})
 
-	s, err := principal.NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(), "default",
+	s, err := principal.NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps("default"), "default",
 		principal.WithGRPC(true),
 		principal.WithListenerPort(0),
 		principal.WithTLSKeyPairFromPath(basePath+".crt", basePath+".key"),

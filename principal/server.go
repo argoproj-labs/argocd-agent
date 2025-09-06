@@ -27,9 +27,11 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
+	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
@@ -39,6 +41,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
@@ -48,6 +51,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/redisproxy"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
+	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/prometheus/client_golang/prometheus"
@@ -82,6 +86,14 @@ type Server struct {
 	projectManager *appproject.AppProjectManager
 
 	namespaceManager *kubenamespace.KubernetesBackend
+
+	// key: repo name, value: set of agents using the repo
+	repoToAgents *MapToSet
+
+	// key: project name, value: set of repositories using the project
+	projectToRepos *MapToSet
+
+	repoManager *repository.RepositoryManager
 	// At present, 'watchLock' is only acquired on calls to 'updateAppCallback'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
 	watchLock sync.RWMutex
 	// clientMap is not currently used
@@ -168,6 +180,8 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		resources:       resources.NewAgentResources(),
 		notifyOnConnect: make(chan types.Agent),
 		eventWriters:    event.NewEventWritersMap(),
+		repoToAgents:    NewMapToSet(),
+		projectToRepos:  NewMapToSet(),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
@@ -281,6 +295,27 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 	s.namespaceManager = kubenamespace.NewKubernetesBackend(nsInformer)
+
+	repoInformerOpts := []informer.InformerOption[*corev1.Secret]{
+		informer.WithListHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return kubeClient.Clientset.CoreV1().Secrets(namespace).List(ctx, opts)
+		}),
+		informer.WithWatchHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return kubeClient.Clientset.CoreV1().Secrets(namespace).Watch(ctx, opts)
+		}),
+		informer.WithAddHandler[*corev1.Secret](s.newRepositoryCallback),
+		informer.WithUpdateHandler[*corev1.Secret](s.updateRepositoryCallback),
+		informer.WithDeleteHandler[*corev1.Secret](s.deleteRepositoryCallback),
+		informer.WithFilters(kuberepository.DefaultFilterChain(s.namespace)),
+	}
+
+	repoInformer, err := informer.NewInformer(ctx, repoInformerOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	repoBackened := kuberepository.NewKubernetesBackend(kubeClient.Clientset, namespace, repoInformer, false)
+	s.repoManager = repository.NewManager(repoBackened, namespace, false)
 
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
@@ -438,6 +473,14 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 			return fmt.Errorf("unable to start RedisProxy: %w", err)
 		}
 	}
+	// The repository informer lives in its own go routine
+	go func() {
+		if err := s.repoManager.StartBackend(s.ctx); err != nil {
+			log().WithError(err).Error("Repository informer has exited non-successfully")
+		} else {
+			log().Info("Repository informer has exited")
+		}
+	}()
 
 	s.events = event.NewEventSource(s.options.serverName)
 
@@ -450,6 +493,11 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		return fmt.Errorf("unable to sync AppProject informer: %w", err)
 	}
 	log().Infof("AppProject informer synced and ready")
+
+	if err := s.repoManager.EnsureSynced(waitForSyncedDuration); err != nil {
+		return fmt.Errorf("unable to sync Repository informer: %w", err)
+	}
+	log().Infof("Repository informer synced and ready")
 
 	// Start resource proxy if it is enabled
 	if s.resourceProxy != nil {
@@ -548,6 +596,14 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 	})
 
 	if s.resyncStatus.isResynced(agent.Name()) {
+		if agent.Mode() == types.AgentModeManaged.String() {
+			// When the agent is down, the informer could've dropped events since it doesn't know anything about the agent.
+			// So, we send the current state of AppProjects/Repositories to the agent after it reconnects.
+			logCtx.Trace("Sending current state of AppProjects and Repositories to the agent")
+			if err := s.sendCurrentStateToAgent(agent.Name()); err != nil {
+				return fmt.Errorf("failed to send current state to agent: %v", err)
+			}
+		}
 		logCtx.Trace("Skipping resync messages since the principal has synced with this agent before")
 		return nil
 	}
@@ -582,6 +638,14 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 		sendQ.Add(ev)
 		logCtx.Trace("Sent a request for SyncedResourceList")
 	} else {
+		// When the principal restarts, the infomer might start processing the events before the agent is connected.
+		// This may lead to principal dropping those events since it doesn't know anything about the agent yet.
+		// So, we send the current state of AppProjects and Repositories to the agent. This ensures that the agent is in sync with the principal.
+		logCtx.Trace("Sending current state of AppProjects and Repositories to the agent")
+		if err := s.sendCurrentStateToAgent(agent.Name()); err != nil {
+			return fmt.Errorf("failed to send current state to agent: %v", err)
+		}
+
 		// In managed mode, principal is the source of truth and the it should request resource resync
 		ev, err := s.events.RequestResourceResyncEvent()
 		if err != nil {
@@ -593,6 +657,68 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 	}
 
 	s.resyncStatus.resynced(agent.Name())
+	return nil
+}
+
+func (s *Server) sendCurrentStateToAgent(agent string) error {
+	sendQ := s.queues.SendQ(agent)
+	// Send all the AppProjects to the agent
+	appProjects, err := s.projectManager.List(s.ctx, backend.AppProjectSelector{Namespace: s.namespace})
+	if err != nil {
+		return fmt.Errorf("failed to list AppProjects: %v", err)
+	}
+
+	projectMap := map[string]v1alpha1.AppProject{}
+	for _, appProject := range appProjects {
+		if appProject.Annotations != nil {
+			if _, ok := appProject.Annotations[manager.SourceUIDAnnotation]; ok {
+				continue
+			}
+		}
+
+		if !appproject.DoesAgentMatchWithProject(agent, appProject) {
+			continue
+		}
+
+		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent)
+		sendQ.Add(s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject))
+
+		projectMap[string(appProject.Name)] = appProject
+	}
+
+	// Send all the Repositories to the agent
+	repositories, err := s.repoManager.List(s.ctx, backend.RepositorySelector{
+		Namespace: s.namespace,
+		Labels: map[string]string{
+			common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list Repositories: %v", err)
+	}
+
+	for _, repository := range repositories {
+		projectNameBytes, ok := repository.Data["project"]
+		if !ok {
+			continue
+		}
+
+		projectName := string(projectNameBytes)
+		project, ok := projectMap[projectName]
+		if !ok {
+			continue
+		}
+
+		if !appproject.DoesAgentMatchWithProject(agent, project) {
+			continue
+		}
+
+		s.projectToRepos.Add(projectName, repository.Name)
+		s.repoToAgents.Add(repository.Name, agent)
+
+		sendQ.Add(s.events.RepositoryEvent(event.SpecUpdate, &repository))
+	}
+
 	return nil
 }
 

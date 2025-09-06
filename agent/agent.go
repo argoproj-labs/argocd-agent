@@ -22,10 +22,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
+	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
@@ -33,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
@@ -47,6 +50,8 @@ import (
 
 	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
+	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
 	ty "k8s.io/apimachinery/pkg/types"
 )
 
@@ -69,6 +74,7 @@ type Agent struct {
 	remote           *client.Remote
 	appManager       *application.ApplicationManager
 	projectManager   *appproject.AppProjectManager
+	repoManager      *repository.RepositoryManager
 	namespaceManager *kubenamespace.KubernetesBackend
 	mode             types.AgentMode
 	// queues is a queue of create/update/delete events to send to the principal
@@ -94,6 +100,9 @@ type Agent struct {
 
 	// enableResourceProxy determines if the agent should proxy resources to the principal
 	enableResourceProxy bool
+
+	cacheRefreshInterval time.Duration
+	clusterCache         *appstatecache.Cache
 }
 
 const defaultQueueName = "default"
@@ -242,6 +251,27 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, err
 	}
 
+	repoInformerOptions := []informer.InformerOption[*corev1.Secret]{
+		informer.WithListHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return client.Clientset.CoreV1().Secrets(a.namespace).List(ctx, opts)
+		}),
+		informer.WithWatchHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return client.Clientset.CoreV1().Secrets(a.namespace).Watch(ctx, opts)
+		}),
+		informer.WithAddHandler[*corev1.Secret](a.handleRepositoryCreation),
+		informer.WithUpdateHandler[*corev1.Secret](a.handleRepositoryUpdate),
+		informer.WithDeleteHandler[*corev1.Secret](a.handleRepositoryDeletion),
+		informer.WithFilters(kuberepository.DefaultFilterChain(a.namespace)),
+	}
+
+	repoInformer, err := informer.NewInformer(ctx, repoInformerOptions...)
+	if err != nil {
+		return nil, fmt.Errorf("could not instantiate repository informer: %w", err)
+	}
+
+	repoBackened := kuberepository.NewKubernetesBackend(client.Clientset, a.namespace, repoInformer, true)
+	a.repoManager = repository.NewManager(repoBackened, a.namespace, true)
+
 	nsInformerOpts := []informer.InformerOption[*corev1.Namespace]{
 		informer.WithListHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 			return client.Clientset.CoreV1().Namespaces().List(ctx, opts)
@@ -272,6 +302,13 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.redisProxyMsgHandler.connections = &connectionEntries{
 		connMap: map[string]connectionEntry{},
 	}
+
+	clusterCache, err := cluster.NewClusterCacheInstance(ctx, client.Clientset,
+		a.namespace, a.redisProxyMsgHandler.redisAddress, cacheutil.RedisCompressionGZip)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
+	}
+	a.clusterCache = clusterCache
 
 	return a, nil
 }
@@ -329,6 +366,12 @@ func (a *Agent) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to sync applications: %w", err)
 	}
 
+	// Wait for the appProject informer to be synced
+	err = a.projectManager.EnsureSynced(waitForSyncedDuration)
+	if err != nil {
+		return fmt.Errorf("failed to sync appProjects: %w", err)
+	}
+
 	// The namespace informer lives in its own go routine
 	go func() {
 		if err := a.namespaceManager.StartInformer(a.context); err != nil {
@@ -343,6 +386,20 @@ func (a *Agent) Start(ctx context.Context) error {
 	}
 	log().Infof("Namespace informer synced and ready")
 
+	// Start the Repository backend in the background
+	go func() {
+		if err := a.repoManager.StartBackend(a.context); err != nil {
+			log().WithError(err).Error("Repository backend has exited non-successfully")
+		} else {
+			log().Info("Repository backend has exited")
+		}
+	}()
+
+	if err = a.repoManager.EnsureSynced(waitForSyncedDuration); err != nil {
+		return fmt.Errorf("unable to sync Repository informer: %w", err)
+	}
+	log().Infof("Repository informer synced and ready")
+
 	if a.options.healthzPort > 0 {
 		// Endpoint to check if the agent is up and running
 		http.HandleFunc("/healthz", a.healthzHandler)
@@ -351,6 +408,23 @@ func (a *Agent) Start(ctx context.Context) error {
 		log().Infof("Starting healthz server on %s", healthzAddr)
 		//nolint:errcheck
 		go http.ListenAndServe(healthzAddr, nil)
+	}
+
+	// Start the background process of periodic sync of cluster cache info.
+	// This will send periodic updates of Application, Resource and API counts to principal.
+	if a.mode == types.AgentModeManaged {
+		go func() {
+			ticker := time.NewTicker(a.cacheRefreshInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					a.addClusterCacheInfoUpdateToQueue()
+				case <-a.context.Done():
+					return
+				}
+			}
+		}()
 	}
 
 	if a.remote != nil {
