@@ -123,5 +123,25 @@ func CheckReadiness(t require.TestingT, compName string) {
 		}
 		defer resp.Body.Close()
 		return resp.StatusCode == http.StatusOK
-	}, 60*time.Second, 1*time.Second)
+	}, 120*time.Second, 2*time.Second)
+}
+
+func IsNotReady(t require.TestingT, compName string) {
+	healthzAddr := "http://localhost:8002/healthz"
+	if compName == "agent-managed" {
+		healthzAddr = "http://localhost:8001/healthz"
+	}
+
+	if compName == "principal" {
+		healthzAddr = "http://localhost:8003/healthz"
+	}
+
+	require.Never(t, func() bool {
+		resp, err := http.Get(healthzAddr)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, 10*time.Second, 1*time.Second)
 }

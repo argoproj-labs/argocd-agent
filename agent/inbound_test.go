@@ -32,8 +32,10 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
 )
@@ -543,6 +545,152 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 		require.False(t, a.appManager.IsManaged(incomingAppProject.Name))
 	})
+
+	// Missing Source UID Annotation scenarios - when existing AppProject lacks the source UID annotation
+	t.Run("Create: Existing AppProject without source UID annotation should be deleted and recreated", func(t *testing.T) {
+		// Setup separate backend for this test to avoid mock conflicts
+		beMissing := backend_mocks.NewAppProject(t)
+		var err error
+		a.projectManager, err = appproject.NewAppProjectManager(beMissing, "argocd", appproject.WithAllowUpsert(true))
+		require.NoError(t, err)
+
+		// Setup for missing source UID scenario
+		existingAppProject := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				UID:       ktypes.UID("existing_uid"),
+			},
+		}
+
+		// Configure separate backend
+		getMockMissing := beMissing.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingAppProject, nil)
+		createMockMissing := beMissing.On("Create", mock.Anything, mock.Anything).Return(createdAppProject, nil)
+		deleteMockMissing := beMissing.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+		defer func() {
+			getMockMissing.Unset()
+			createMockMissing.Unset()
+			deleteMockMissing.Unset()
+		}()
+
+		a.projectManager.Manage(existingAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), event.TargetAppProject)
+		err = a.processIncomingAppProject(ev)
+
+		// The process should succeed after deleting the existing AppProject and creating the new one
+		require.NoError(t, err)
+
+		// Verify the sequence: Get (to compare UID), Delete (existing), Create (new)
+		expectedCalls := []string{"Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range beMissing.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Verify the created AppProject has the correct source UID annotation
+		appInterface := beMissing.Calls[2].ReturnArguments[0]
+		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
+		require.True(t, ok)
+		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Update: Existing AppProject without source UID annotation should be deleted and recreated", func(t *testing.T) {
+		// Setup separate backend for this test to avoid mock conflicts
+		beMissing := backend_mocks.NewAppProject(t)
+		var err error
+		a.projectManager, err = appproject.NewAppProjectManager(beMissing, "argocd", appproject.WithAllowUpsert(true))
+		require.NoError(t, err)
+
+		// Setup for missing source UID scenario
+		existingAppProject := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				UID:       ktypes.UID("existing_uid"),
+			},
+		}
+
+		// Configure separate backend
+		getMockMissing := beMissing.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingAppProject, nil)
+		createMockMissing := beMissing.On("Create", mock.Anything, mock.Anything).Return(createdAppProject, nil)
+		deleteMockMissing := beMissing.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+		defer func() {
+			getMockMissing.Unset()
+			createMockMissing.Unset()
+			deleteMockMissing.Unset()
+		}()
+
+		a.projectManager.Manage(existingAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), event.TargetAppProject)
+		err = a.processIncomingAppProject(ev)
+
+		// The process should succeed after deleting the existing AppProject and creating the new one
+		require.NoError(t, err)
+
+		// Verify the sequence: Get (to compare UID), Delete (existing), Create (new)
+		expectedCalls := []string{"Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range beMissing.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Verify the created AppProject has the correct source UID annotation
+		appInterface := beMissing.Calls[2].ReturnArguments[0]
+		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
+		require.True(t, ok)
+		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Delete: Existing AppProject without source UID annotation should be deleted", func(t *testing.T) {
+		// Setup separate backend for this test to avoid mock conflicts
+		beMissing := backend_mocks.NewAppProject(t)
+		var err error
+		a.projectManager, err = appproject.NewAppProjectManager(beMissing, "argocd", appproject.WithAllowUpsert(true))
+		require.NoError(t, err)
+
+		// Setup for missing source UID scenario
+		existingAppProject := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				UID:       ktypes.UID("existing_uid"),
+			},
+		}
+
+		// Configure separate backend
+		getMockMissing := beMissing.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingAppProject, nil)
+		deleteMockMissing := beMissing.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+		defer func() {
+			getMockMissing.Unset()
+			deleteMockMissing.Unset()
+		}()
+
+		a.projectManager.Manage(existingAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		ev := event.New(evs.AppProjectEvent(event.Delete, incomingAppProject), event.TargetAppProject)
+		err = a.processIncomingAppProject(ev)
+
+		// Delete events should succeed after deleting the existing AppProject
+		require.NoError(t, err)
+
+		// Verify the sequence: Get (to compare UID), Delete (existing)
+		expectedCalls := []string{"Get", "Delete"}
+		gotCalls := []string{}
+		for _, call := range beMissing.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
 }
 
 func Test_UpdateApplication(t *testing.T) {
@@ -752,6 +900,375 @@ func Test_UpdateAppProject(t *testing.T) {
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app project")
 	})
 
+}
+
+func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
+	evs := event.NewEventSource("test")
+
+	// incomingRepo is the repository sent by the principal
+	incomingRepo := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-repo",
+			Namespace: "argocd",
+		},
+		Type: "Opaque",
+		Data: map[string][]byte{
+			"url": []byte("https://github.com/test/repo"),
+		},
+	}
+
+	// oldRepo is the repository that is already present on the agent
+	oldRepo := incomingRepo.DeepCopy()
+
+	incomingRepo.UID = ktypes.UID("new_uid")
+
+	// createdRepo is the repository that is finally created on the cluster.
+	createdRepo := incomingRepo.DeepCopy()
+	createdRepo.UID = ktypes.UID("random_uid")
+	createdRepo.Annotations = map[string]string{
+		// the final version of the repo should have the source UID from the incomingRepo
+		manager.SourceUIDAnnotation: string(incomingRepo.UID),
+	}
+
+	createAgent := func(t *testing.T) (*Agent, *backend_mocks.Repository) {
+		t.Helper()
+		a := newAgent(t)
+		a.mode = types.AgentModeManaged
+		be := backend_mocks.NewRepository(t)
+		a.repoManager = repository.NewManager(be, "argocd", true)
+		return a, be
+	}
+
+	t.Run("Create: Old repository with diff UID must be deleted before creating the incoming repository", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.repoManager.Manage(oldRepo.Name)
+		defer a.repoManager.ClearManaged()
+
+		// Set up mock expectations
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdRepo, nil)
+		defer createMock.Unset()
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		defer deleteMock.Unset()
+
+		ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), event.TargetRepository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID, delete old repo, and create a new repo.
+		expectedCalls := []string{"Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new repo has the updated source UID annotation.
+		repoInterface := be.Calls[2].ReturnArguments[0]
+		latestRepo, ok := repoInterface.(*corev1.Secret)
+		require.True(t, ok)
+		require.Equal(t, string(incomingRepo.UID), latestRepo.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Create: Old repository with the same UID must be updated", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.repoManager.Manage(oldRepo.Name)
+		defer a.repoManager.ClearManaged()
+
+		// The incoming repo's UID matches with the UID in the annotation
+		newRepo := incomingRepo.DeepCopy()
+		newRepo.UID = ktypes.UID("old_uid")
+		newRepo.Labels = map[string]string{
+			"name": "test",
+		}
+
+		// Set up mock expectations
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+		supportsPatchMock := be.On("SupportsPatch").Return(false)
+		defer supportsPatchMock.Unset()
+
+		updatedRepo := newRepo.DeepCopy()
+		updatedRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: string(newRepo.UID),
+		}
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(updatedRepo, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.RepositoryEvent(event.Create, newRepo), event.TargetRepository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		repoInterface := be.Calls[3].ReturnArguments[0]
+		latestRepo, ok := repoInterface.(*corev1.Secret)
+		require.True(t, ok)
+		require.Equal(t, newRepo.Labels, latestRepo.Labels)
+
+		require.Equal(t, string(newRepo.UID), latestRepo.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Update: Old repository with diff UID must be deleted and a new repository must be created", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.repoManager.Manage(oldRepo.Name)
+		defer a.repoManager.ClearManaged()
+
+		// Set up mock expectations
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdRepo, nil)
+		defer createMock.Unset()
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		defer deleteMock.Unset()
+
+		// Create an Update event for the new repository
+		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), event.TargetRepository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID, delete old repo, and create a new repo.
+		expectedCalls := []string{"Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new repository has the same source UID annotation as the incoming repository.
+		repoInterface := be.Calls[2].ReturnArguments[0]
+
+		latestRepo, ok := repoInterface.(*corev1.Secret)
+		require.True(t, ok)
+		require.Equal(t, string(incomingRepo.UID), latestRepo.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Update: incoming repository must be created if it doesn't exist while handling update event", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		newRepo := incomingRepo.DeepCopy()
+
+		// Set up mock expectations
+		notFoundError := kerrors.NewNotFound(schema.GroupResource{
+			Group: "", Resource: "secret"}, newRepo.Name)
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
+		defer getMock.Unset()
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdRepo, nil)
+		defer createMock.Unset()
+
+		// Create an Update event for the new repository
+		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, newRepo), event.TargetRepository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		expectedCalls := []string{"Get", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new repository has the same source UID annotation as the incoming repository.
+		repoInterface := be.Calls[1].ReturnArguments[0]
+		latestRepo, ok := repoInterface.(*corev1.Secret)
+		require.True(t, ok)
+		require.Equal(t, createdRepo, latestRepo)
+		require.Equal(t, string(newRepo.UID), latestRepo.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Delete: Old repository with diff UID must be deleted", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.repoManager.Manage(oldRepo.Name)
+		defer a.repoManager.ClearManaged()
+
+		// Set up mock expectations
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		defer deleteMock.Unset()
+
+		// Create a delete event for the new repository
+		ev := event.New(evs.RepositoryEvent(event.Delete, incomingRepo), event.TargetRepository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID and delete old repository
+		expectedCalls := []string{"Get", "Delete"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+		require.False(t, a.repoManager.IsManaged(incomingRepo.Name))
+	})
+
+	t.Run("Unknown event type should not do anything", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+
+		// Even for unknown event types, CompareSourceUID is called in managed mode
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+
+		// Create an unknown event type
+		ev := event.New(evs.RepositoryEvent(event.EventType("Unknown"), incomingRepo), event.TargetRepository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		// Only the Get call for CompareSourceUID should be made, no other backend operations
+		expectedCalls := []string{"Get"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+}
+
+func Test_CreateRepository(t *testing.T) {
+	a := newAgent(t)
+	be := backend_mocks.NewRepository(t)
+	repoMgr := repository.NewManager(be, "argocd", true)
+	repoMgr.ManagedResources = manager.NewManagedResources()
+	repoMgr.ObservedResources = manager.NewObservedResources()
+	a.repoManager = repoMgr
+	require.NotNil(t, a)
+	repo := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "default",
+		},
+		Type: "Opaque",
+		Data: map[string][]byte{
+			"url": []byte("https://github.com/test/repo"),
+		},
+	}
+	t.Run("Discard event in unmanaged mode", func(t *testing.T) {
+		nrepo, err := a.createRepository(repo)
+		require.Nil(t, nrepo)
+		require.ErrorContains(t, err, "not in managed mode")
+	})
+
+	t.Run("Repository already managed calls updateRepository", func(t *testing.T) {
+		defer a.repoManager.Unmanage(repo.Name)
+		a.mode = types.AgentModeManaged
+		a.repoManager.Manage(repo.Name)
+
+		// Mock the backend calls that updateRepository makes
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&corev1.Secret{}, nil)
+		defer getMock.Unset()
+		supportsPatchMock := be.On("SupportsPatch").Return(false)
+		defer supportsPatchMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(&corev1.Secret{}, nil)
+		defer updateMock.Unset()
+
+		nrepo, err := a.createRepository(repo)
+		require.NoError(t, err)
+		require.NotNil(t, nrepo)
+	})
+
+	t.Run("Create repository", func(t *testing.T) {
+		defer a.repoManager.Unmanage(repo.Name)
+		a.mode = types.AgentModeManaged
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(&corev1.Secret{}, nil)
+		defer createMock.Unset()
+		nrepo, err := a.createRepository(repo)
+		require.NoError(t, err)
+		require.NotNil(t, nrepo)
+	})
+}
+
+func Test_UpdateRepository(t *testing.T) {
+	a := newAgent(t)
+	be := backend_mocks.NewRepository(t)
+	repoMgr := repository.NewManager(be, "argocd", true)
+	repoMgr.ManagedResources = manager.NewManagedResources()
+	repoMgr.ObservedResources = manager.NewObservedResources()
+	a.repoManager = repoMgr
+	require.NotNil(t, a)
+	repo := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "test",
+			Namespace:       "default",
+			ResourceVersion: "12345",
+		},
+		Type: "Opaque",
+		Data: map[string][]byte{
+			"url": []byte("https://github.com/test/repo"),
+		},
+	}
+	t.Run("Discard event because version has been seen already", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+		a.repoManager.Manage(repo.Name)
+		defer a.repoManager.Unmanage(repo.Name)
+		defer a.repoManager.ClearIgnored()
+		a.repoManager.IgnoreChange(repo.Name, "12345")
+		nrepo, err := a.updateRepository(repo)
+		require.Nil(t, nrepo)
+		require.ErrorContains(t, err, "has already been seen")
+	})
+
+	t.Run("Update repository using patch in managed mode", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+		a.repoManager.Manage(repo.Name)
+		defer a.repoManager.Unmanage(repo.Name)
+
+		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&corev1.Secret{}, nil)
+		defer getEvent.Unset()
+		supportsPatchEvent := be.On("SupportsPatch").Return(true)
+		defer supportsPatchEvent.Unset()
+		patchEvent := be.On("Patch", mock.Anything, "test", "argocd", mock.Anything).Return(&corev1.Secret{}, nil)
+		defer patchEvent.Unset()
+		nrepo, err := a.updateRepository(repo)
+		require.NoError(t, err)
+		require.NotNil(t, nrepo)
+	})
+
+	t.Run("Update repository using update in managed mode", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+		a.repoManager.Manage(repo.Name)
+		defer a.repoManager.Unmanage(repo.Name)
+
+		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&corev1.Secret{}, nil)
+		defer getEvent.Unset()
+		supportsPatchEvent := be.On("SupportsPatch").Return(false)
+		defer supportsPatchEvent.Unset()
+		updateEvent := be.On("Update", mock.Anything, mock.Anything).Return(&corev1.Secret{}, nil)
+		defer updateEvent.Unset()
+		nrepo, err := a.updateRepository(repo)
+		require.NoError(t, err)
+		require.NotNil(t, nrepo)
+	})
 }
 
 func Test_processIncomingResourceResyncEvent(t *testing.T) {

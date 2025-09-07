@@ -24,10 +24,12 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 	"github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -124,7 +126,7 @@ func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, inco
 		// The incoming app is not found locally
 		reqUpdate = event.NewRequestUpdate(incoming.Name, incoming.Namespace, incoming.Kind, "", nil)
 	} else {
-		reqUpdate, err = newRequestUpdateFromObject(res)
+		reqUpdate, err = newRequestUpdateFromObject(res, incoming.Kind)
 		if err != nil {
 			return fmt.Errorf("failed to construct a request update for resource: %s", res.GetName())
 		}
@@ -177,7 +179,7 @@ func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resourc
 		return fmt.Errorf("failed to get resource: %v", err)
 	}
 
-	reqUpdate, err := newRequestUpdateFromObject(res)
+	reqUpdate, err := newRequestUpdateFromObject(res, resource.Kind)
 	if err != nil {
 		return fmt.Errorf("failed to construct a request update from resource %s: %w", resource.Name, err)
 	}
@@ -207,8 +209,9 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 	}
 
 	// Depending on the role, the namespace of the resource may be different.
+	// For AppProject/Repository, the namespace is always the agent's namespace.
 	namespace := reqUpdate.Namespace
-	if r.role == manager.ManagerRolePrincipal {
+	if r.role == manager.ManagerRolePrincipal && reqUpdate.Kind == "Application" {
 		namespace = agentName
 	}
 
@@ -220,8 +223,23 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 			return err
 		}
 
+		logCtx.Trace("Resource not found on the source namespace")
+
 		// The resource doesn't exist on the source. So, send a delete event to remove the orphaned resource from the peer.
 		return r.handleDeletedResource(logCtx, reqUpdate)
+	}
+
+	// If the resource is AppProject/Repository, we need to ensure that it is still relevant with the current AppProject rules
+	if reqUpdate.Kind == "AppProject" || reqUpdate.Kind == "Repository" {
+		err, isRelevant := r.isAppProjectRelevant(ctx, logCtx, agentName, reqUpdate, res)
+		if err != nil {
+			return err
+		}
+
+		if !isRelevant {
+			logCtx.Trace("AppProject/Repository no longer relevant to the agent. Sent a delete event to remove the resource")
+			return nil
+		}
 	}
 
 	// The resource exists on the source. Compare the checksum and check if we need to send a SpecUpdate event.
@@ -238,10 +256,10 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 
 	logCtx.Trace("Checksums do not match. Sending a specUpdate event")
 
-	return r.handleUpdatedResource(logCtx, reqUpdate, res)
+	return r.handleUpdatedResource(logCtx, reqUpdate, res, agentName)
 }
 
-func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured) error {
+func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured, agentName string) error {
 	resBytes, err := res.MarshalJSON()
 	if err != nil {
 		return err
@@ -266,7 +284,8 @@ func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *
 			return err
 		}
 
-		ev := r.events.AppProjectEvent(event.SpecUpdate, appProject)
+		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName)
+		ev := r.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		logCtx.Trace("Sending a request to update the appProject")
 		r.sendQ.Add(ev)
 	default:
@@ -274,6 +293,86 @@ func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *
 	}
 
 	return nil
+}
+
+// isAppProjectRelevant checks if the incoming AppProject/Repository is still relevant to the agent based on the AppProject rules.
+// If the AppProject/Repository is no longer relevant to the agent, it sends a delete event to remove the orphaned resource from the peer.
+func (r *RequestHandler) isAppProjectRelevant(ctx context.Context, logCtx *logrus.Entry, agentName string, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured) (error, bool) {
+	resBytes, err := res.MarshalJSON()
+	if err != nil {
+		return err, false
+	}
+
+	switch reqUpdate.Kind {
+	case "AppProject":
+		appProject := &v1alpha1.AppProject{}
+		err := json.Unmarshal(resBytes, appProject)
+		if err != nil {
+			return err, false
+		}
+
+		if appproject.DoesAgentMatchWithProject(agentName, *appProject) {
+			// The AppProject is still relevant to the agent
+			logCtx.Trace("AppProject is still relevant to the agent")
+			return nil, true
+		}
+
+		// The AppProject is no longer relevant to the agent. Send a delete event to remove the orphaned resource from the peer.
+		ev := r.events.AppProjectEvent(event.Delete, appProject)
+		logCtx.Trace("Sending a request to delete the orphaned appProject")
+		r.sendQ.Add(ev)
+		return nil, false
+
+	case "Repository":
+		repository := &corev1.Secret{}
+		err := json.Unmarshal(resBytes, repository)
+		if err != nil {
+			return err, false
+		}
+
+		projectNameBytes := repository.Data["project"]
+		projectName := string(projectNameBytes)
+		if projectName == "" {
+			return fmt.Errorf("project name not found for repository: %s", repository.GetName()), false
+		}
+
+		gvr, err := getGroupVersionResource("AppProject")
+		if err != nil {
+			return err, false
+		}
+
+		resClient := r.dynClient.Resource(gvr)
+		unres, err := resClient.Namespace(repository.GetNamespace()).Get(ctx, projectName, v1.GetOptions{})
+		if err != nil {
+			return err, false
+		}
+
+		unresBytes, err := unres.MarshalJSON()
+		if err != nil {
+			return err, false
+		}
+
+		appProject := &v1alpha1.AppProject{}
+		err = json.Unmarshal(unresBytes, appProject)
+		if err != nil {
+			return err, false
+		}
+
+		if appproject.DoesAgentMatchWithProject(agentName, *appProject) {
+			// The AppProject is still relevant to the agent
+			logCtx.Trace("AppProject is still relevant to the agent. Checking the repository for updates")
+			return nil, true
+		}
+
+		// The Repository is no longer relevant to the agent. Send a delete event to remove the orphaned resource from the peer.
+		ev := r.events.RepositoryEvent(event.Delete, repository)
+		logCtx.Trace("Sending a request to delete the orphaned repository")
+		r.sendQ.Add(ev)
+		return nil, false
+
+	default:
+		return fmt.Errorf("unknown resource Kind: %s", reqUpdate.Kind), false
+	}
 }
 
 func (r *RequestHandler) handleDeletedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate) error {
@@ -307,7 +406,7 @@ func (r *RequestHandler) handleDeletedResource(logCtx *logrus.Entry, reqUpdate *
 	}
 }
 
-func newRequestUpdateFromObject(res *unstructured.Unstructured) (*event.RequestUpdate, error) {
+func newRequestUpdateFromObject(res *unstructured.Unstructured, kind string) (*event.RequestUpdate, error) {
 	// RequestUpdate is always sent by the peer. So, the object must have the source UID annotation
 	annotations := res.GetAnnotations()
 	sourceUID, ok := annotations[manager.SourceUIDAnnotation]
@@ -320,7 +419,7 @@ func newRequestUpdateFromObject(res *unstructured.Unstructured) (*event.RequestU
 		return nil, fmt.Errorf("failed to generate checksum for resource %s/%s: %w", res.GetKind(), res.GetName(), err)
 	}
 
-	reqUpdate := event.NewRequestUpdate(res.GetName(), res.GetNamespace(), res.GetKind(), sourceUID, checksum[:])
+	reqUpdate := event.NewRequestUpdate(res.GetName(), res.GetNamespace(), kind, sourceUID, checksum[:])
 	return reqUpdate, nil
 }
 
@@ -338,6 +437,12 @@ func getGroupVersionResource(kind string) (schema.GroupVersionResource, error) {
 			Resource: "appprojects",
 			Version:  "v1alpha1",
 		}, nil
+	case "Repository":
+		return schema.GroupVersionResource{
+			Group:    "",
+			Resource: "secrets",
+			Version:  "v1",
+		}, nil
 	default:
 		return schema.GroupVersionResource{}, fmt.Errorf("unexpected Kind: %s", kind)
 	}
@@ -346,9 +451,18 @@ func getGroupVersionResource(kind string) (schema.GroupVersionResource, error) {
 func generateSpecChecksum(resObj *unstructured.Unstructured) ([]byte, error) {
 	res := resObj.DeepCopy()
 
-	resSpec, ok := res.Object["spec"]
-	if !ok {
-		return nil, fmt.Errorf("spec field not found for resource: %s", res.GetName())
+	var resSpec interface{}
+	var ok bool
+	if res.GetKind() == "Secret" {
+		resSpec, ok = res.Object["data"]
+		if !ok {
+			return nil, fmt.Errorf("data field not found for resource: %s", res.GetName())
+		}
+	} else {
+		resSpec, ok = res.Object["spec"]
+		if !ok {
+			return nil, fmt.Errorf("spec field not found for resource: %s", res.GetName())
+		}
 	}
 
 	specMap, ok := resSpec.(map[string]interface{})

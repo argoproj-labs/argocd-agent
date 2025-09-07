@@ -21,12 +21,14 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj/argo-cd/v3/common"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -41,6 +43,7 @@ type BaseSuite struct {
 	PrincipalClient       KubeClient
 	ManagedAgentClient    KubeClient
 	AutonomousAgentClient KubeClient
+	ClusterDetails        *ClusterDetails
 }
 
 func (suite *BaseSuite) SetupSuite() {
@@ -63,10 +66,14 @@ func (suite *BaseSuite) SetupSuite() {
 	suite.AutonomousAgentClient, err = NewKubeClient(config)
 	requires.Nil(err)
 
+	// Set cluster configurations
+	suite.ClusterDetails = &ClusterDetails{}
+	err = getClusterConfigurations(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, suite.ClusterDetails)
+	requires.Nil(err)
 }
 
 func (suite *BaseSuite) SetupTest() {
-	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient)
+	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient, suite.ClusterDetails)
 	suite.Require().Nil(err)
 
 	// Ensure that the autonomous agent's default AppProject exists on the principal
@@ -87,14 +94,14 @@ func (suite *BaseSuite) SetupTest() {
 			suite.T().Log(err)
 		}
 		return err == nil && len(project.Annotations) > 0 && project.Annotations["created"] == now
-	}, 10*time.Second, 1*time.Second)
+	}, 30*time.Second, 1*time.Second)
 
 	suite.T().Logf("Test begun at: %v", time.Now())
 }
 
 func (suite *BaseSuite) TearDownTest() {
 	suite.T().Logf("Test ended at: %v", time.Now())
-	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient)
+	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient, suite.ClusterDetails)
 	suite.Require().Nil(err)
 }
 
@@ -146,7 +153,7 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 	return fmt.Errorf("EnsureDeletion: timeout waiting for deletion of %s/%s", key.Namespace, key.Name)
 }
 
-func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient KubeClient, autonomousAgentClient KubeClient) error {
+func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient KubeClient, autonomousAgentClient KubeClient, clusterDetails *ClusterDetails) error {
 
 	var list argoapp.ApplicationList
 	var err error
@@ -254,6 +261,54 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		}
 	}
 
+	repoLabelSelector := metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
+		},
+	}
+	repoListOpts := metav1.ListOptions{
+		LabelSelector: labels.SelectorFromSet(repoLabelSelector.MatchLabels).String(),
+	}
+
+	// Delete all repositories from the principal
+	repoList := corev1.SecretList{}
+	err = principalClient.List(ctx, "argocd", &repoList, repoListOpts)
+	if err != nil {
+		return err
+	}
+	for _, repo := range repoList.Items {
+		err = EnsureDeletion(ctx, principalClient, &repo)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete all repositories from the autonomous agent
+	repoList = corev1.SecretList{}
+	err = autonomousAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
+	if err != nil {
+		return err
+	}
+	for _, repo := range repoList.Items {
+		err = EnsureDeletion(ctx, autonomousAgentClient, &repo)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete all repositories from the managed agent
+	repoList = corev1.SecretList{}
+	err = managedAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
+	if err != nil {
+		return err
+	}
+	for _, repo := range repoList.Items {
+		err = EnsureDeletion(ctx, managedAgentClient, &repo)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Remove known finalizer-containing resources from guestbook ns (before we delete the NS in the next step)
 	deploymentList := appsv1.DeploymentList{}
 	err = managedAgentClient.List(ctx, "guestbook", &deploymentList, metav1.ListOptions{})
@@ -280,5 +335,15 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 
+	return resetManagedAgentClusterInfo(clusterDetails)
+}
+
+// resetManagedAgentClusterInfo resets the cluster info in the redis cache for the managed agent
+func resetManagedAgentClusterInfo(clusterDetails *ClusterDetails) error {
+	// Reset cluster info in redis cache
+	if err := getCacheInstance(AgentManagedName, clusterDetails).SetClusterInfo(AgentClusterServerURL, &argoapp.ClusterInfo{}); err != nil {
+		fmt.Println("resetManagedAgentClusterInfo: error", err)
+		return err
+	}
 	return nil
 }

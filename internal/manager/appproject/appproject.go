@@ -18,13 +18,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -55,14 +57,11 @@ type AppProjectManager struct {
 	mode manager.ManagerMode
 	// namespace is not guaranteed to have a value in all cases. For instance, this value is empty for principal when the principal is running on cluster.
 	namespace string
-	// managedAppProjects is a list of apps we manage, key is name of AppProjects CR, value is not used.
-	// - acquire 'lock' before accessing
-	managedAppProjects map[string]bool
-	// observedApp, key is qualified name of the AppProject, value is the AppProjects's .metadata.resourceValue field
-	// - acquire 'lock' before accessing
-	observedAppProjects map[string]string
-	// lock should be acquired before accessing managedAppProjects/observedAppProjects
-	lock sync.RWMutex
+
+	// ManagedResources is a list of AppProjects we manage, key is name of AppProjects CR, value is not used.
+	manager.ManagedResources
+	// ObservedResources, key is qualified name of the AppProject, value is the AppProjects's .metadata.resourceValue field
+	manager.ObservedResources
 }
 
 // AppProjectManagerOption is a callback function to set an option to the AppProject manager
@@ -77,9 +76,8 @@ func NewAppProjectManager(be backend.AppProject, namespace string, opts ...AppPr
 	}
 	m.namespace = namespace
 	m.appprojectBackend = be
-	m.observedAppProjects = make(map[string]string)
-	m.managedAppProjects = make(map[string]bool)
-
+	m.ObservedResources = manager.NewObservedResources()
+	m.ManagedResources = manager.NewManagedResources()
 	if m.role == manager.ManagerRolePrincipal && m.mode != manager.ManagerModeUnset {
 		return nil, fmt.Errorf("mode should be unset when role is principal")
 	}
@@ -165,6 +163,10 @@ func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alph
 
 func (m *AppProjectManager) Get(ctx context.Context, name, namespace string) (*v1alpha1.AppProject, error) {
 	return m.appprojectBackend.Get(ctx, name, namespace)
+}
+
+func (m *AppProjectManager) List(ctx context.Context, selector backend.AppProjectSelector) ([]v1alpha1.AppProject, error) {
+	return m.appprojectBackend.List(ctx, selector)
 }
 
 // UpdateAppProject updates the AppProject resource on the agent's backend.
@@ -355,10 +357,100 @@ func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1al
 	// If there is an existing appProject with the same name/namespace, compare its source UID with the incoming appProject.
 	sourceUID, ok := existing.Annotations[manager.SourceUIDAnnotation]
 	if !ok {
-		return true, false, fmt.Errorf("source UID Annotation is not found for appProject: %s", incoming.Name)
+		return true, false, nil
 	}
 
 	return true, string(incoming.UID) == sourceUID, nil
+}
+
+// DoesAgentMatchWithProject checks if the agent name matches the given AppProject.
+// We match the agent to an AppProject if:
+// 1. The agent name matches any one of the destination names OR
+// 2. The agent name is empty but the agent name is present in the server URL parameter AND
+// 3. The agent name is not denied by any of the destination names
+// Ref: https://github.com/argoproj/argo-cd/blob/master/pkg/apis/application/v1alpha1/app_project_types.go#L477
+func DoesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
+	destinationMatched := false
+
+	for _, dst := range appProject.Spec.Destinations {
+		// Return immediately if the agent name is denied by any of the destination names
+		if dst.Name != "" && isDenyPattern(dst.Name) && glob.Match(dst.Name[1:], agentName) {
+			return false
+		}
+
+		// Some AppProjects (e.g. default) may not always have a name so we need to check the server URL
+		if dst.Name == "" && dst.Server != "" {
+			if dst.Server == "*" {
+				destinationMatched = true
+				continue
+			}
+
+			// Server URL will be the resource proxy URL https://<rp-hostname>:<port>?agentName=<agent-name>
+			server, err := url.Parse(dst.Server)
+			if err != nil {
+				continue
+			}
+
+			serverAgentName := server.Query().Get("agentName")
+			if serverAgentName == "" {
+				continue
+			}
+
+			if glob.Match(serverAgentName, agentName) {
+				destinationMatched = true
+			}
+		}
+
+		// Match the agent name to the destination name and continue looking for deny patterns
+		if dst.Name != "" && glob.Match(dst.Name, agentName) {
+			destinationMatched = true
+		}
+	}
+
+	// Must match both destination and source namespace requirements
+	return destinationMatched &&
+		glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
+}
+
+func isDenyPattern(pattern string) bool {
+	return strings.HasPrefix(pattern, "!")
+}
+
+// AgentSpecificAppProject returns an agent specific version of the given AppProject
+// We don't have to check for deny patterns because we only construct the agent specific AppProject
+// if the agent name matches the AppProject's destinations.
+func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alpha1.AppProject {
+	// Only keep the destinations that are relevant to the given agent
+	filteredDst := []v1alpha1.ApplicationDestination{}
+	for _, dst := range appProject.Spec.Destinations {
+		nameMatches := dst.Name != "" && glob.Match(dst.Name, agent)
+		serverMatches := false
+
+		// Handle server-only destinations (like default project)
+		if dst.Name == "" && dst.Server != "" {
+			if dst.Server == "*" {
+				serverMatches = true
+			} else if server, err := url.Parse(dst.Server); err == nil {
+				serverAgentName := server.Query().Get("agentName")
+				serverMatches = serverAgentName != "" && glob.Match(serverAgentName, agent)
+			}
+		}
+
+		if nameMatches || serverMatches {
+			dst.Name = "in-cluster"
+			dst.Server = "https://kubernetes.default.svc"
+			filteredDst = append(filteredDst, dst)
+		}
+	}
+	appProject.Spec.Destinations = filteredDst
+
+	// Only allow Applications to be managed from the agent namespace
+	appProject.Spec.SourceNamespaces = []string{agent}
+
+	// Remove the roles since they are not relevant on the workload cluster
+	appProject.Spec.Roles = []v1alpha1.ProjectRole{}
+
+	return appProject
 }
 
 func log() *logrus.Entry {
