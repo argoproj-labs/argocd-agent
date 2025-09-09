@@ -41,7 +41,7 @@ import (
 )
 
 func Test_CreateApplication(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	be := backend_mocks.NewApplication(t)
 	var err error
 	a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true))
@@ -88,7 +88,7 @@ func Test_CreateApplication(t *testing.T) {
 }
 
 func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.mode = types.AgentModeManaged
 	evs := event.NewEventSource("test")
 	var be *backend_mocks.Application
@@ -345,7 +345,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 }
 
 func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.mode = types.AgentModeManaged
 	evs := event.NewEventSource("test")
 	var be *backend_mocks.AppProject
@@ -694,7 +694,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 }
 
 func Test_UpdateApplication(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	be := backend_mocks.NewApplication(t)
 	var err error
 	a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true))
@@ -785,7 +785,7 @@ func Test_UpdateApplication(t *testing.T) {
 }
 
 func Test_CreateAppProject(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	be := backend_mocks.NewAppProject(t)
 	var err error
 	a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true))
@@ -848,7 +848,7 @@ func Test_CreateAppProject(t *testing.T) {
 }
 
 func Test_UpdateAppProject(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	be := backend_mocks.NewAppProject(t)
 	var err error
 	a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true))
@@ -932,7 +932,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 
 	createAgent := func(t *testing.T) (*Agent, *backend_mocks.Repository) {
 		t.Helper()
-		a := newAgent(t)
+		a, _ := newAgent(t)
 		a.mode = types.AgentModeManaged
 		be := backend_mocks.NewRepository(t)
 		a.repoManager = repository.NewManager(be, "argocd", true)
@@ -1156,7 +1156,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 }
 
 func Test_CreateRepository(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	be := backend_mocks.NewRepository(t)
 	repoMgr := repository.NewManager(be, "argocd", true)
 	repoMgr.ManagedResources = manager.NewManagedResources()
@@ -1209,7 +1209,7 @@ func Test_CreateRepository(t *testing.T) {
 }
 
 func Test_UpdateRepository(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	be := backend_mocks.NewRepository(t)
 	repoMgr := repository.NewManager(be, "argocd", true)
 	repoMgr.ManagedResources = manager.NewManagedResources()
@@ -1272,7 +1272,7 @@ func Test_UpdateRepository(t *testing.T) {
 }
 
 func Test_processIncomingResourceResyncEvent(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.kubeClient.RestConfig = &rest.Config{}
 	a.namespace = "test"
 	a.context = context.Background()

@@ -32,6 +32,7 @@ import (
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
@@ -216,10 +217,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	appInformerOpts := []informer.InformerOption[*v1alpha1.Application]{
 		informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, opts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, config.SkipSyncSelector())
 		}),
 		informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, opts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, config.SkipSyncSelector())
 		}),
 		informer.WithAddHandler[*v1alpha1.Application](s.newAppCallback),
 		informer.WithUpdateHandler[*v1alpha1.Application](s.updateAppCallback),
@@ -234,10 +235,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
 		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, opts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, config.SkipSyncSelector())
 		}),
 		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, opts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, config.SkipSyncSelector())
 		}),
 		informer.WithAddHandler[*v1alpha1.AppProject](s.newAppProjectCallback),
 		informer.WithUpdateHandler[*v1alpha1.AppProject](s.updateAppProjectCallback),
@@ -298,10 +299,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	repoInformerOpts := []informer.InformerOption[*corev1.Secret]{
 		informer.WithListHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.Clientset.CoreV1().Secrets(namespace).List(ctx, opts)
+			return kubeClient.Clientset.CoreV1().Secrets(namespace).List(ctx, config.SkipSyncSelector())
 		}),
 		informer.WithWatchHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.Clientset.CoreV1().Secrets(namespace).Watch(ctx, opts)
+			return kubeClient.Clientset.CoreV1().Secrets(namespace).Watch(ctx, config.SkipSyncSelector())
 		}),
 		informer.WithAddHandler[*corev1.Secret](s.newRepositoryCallback),
 		informer.WithUpdateHandler[*corev1.Secret](s.updateRepositoryCallback),
@@ -804,8 +805,16 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 // defaultAppFilterChain returns the default filter chain for server s to use
 func (s *Server) defaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 	c := filter.NewFilterChain[*v1alpha1.Application]()
+	// Admit based on namespace of the application
 	c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
 		return glob.MatchStringInList(s.options.namespaces, res.Namespace, glob.REGEXP)
+	})
+	// Ignore applications that have the skip sync label
+	c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
+		if v, ok := res.Labels[config.SkipSyncLabel]; ok && v == "true" {
+			return false
+		}
+		return true
 	})
 	return c
 }
