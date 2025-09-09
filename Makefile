@@ -12,7 +12,7 @@ MKDOCS_RUN_ARGS?=
 
 # Binary names
 BIN_NAME_ARGOCD_AGENT=argocd-agent
-BIN_NAME_CLI=argocd-agentctl
+BIN_NAME_CLI?=argocd-agentctl
 BIN_ARCH?=$(shell go env GOARCH)
 BIN_OS?=$(shell go env GOOS)
 LDFLAGS?=
@@ -157,6 +157,14 @@ lint: install-lint-toolchain
 .PHONY: argocd-agent
 argocd-agent:
 	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_AGENT) -ldflags '$(LDFLAGS)' ./cmd/argocd-agent
+
+.PHONY: cli-all
+cli-all:
+	BIN_ARCH=amd64 BIN_OS=linux BIN_NAME_CLI=$(BIN_NAME_CLI)_linux-amd64 make cli
+	BIN_ARCH=arm64 BIN_OS=linux BIN_NAME_CLI=$(BIN_NAME_CLI)_linux-arm64 make cli
+	BIN_ARCH=arm BIN_OS=linux BIN_NAME_CLI=$(BIN_NAME_CLI)_linux-arm make cli
+	BIN_ARCH=amd64 BIN_OS=darwin BIN_NAME_CLI=$(BIN_NAME_CLI)_darwin-amd64 make cli
+	BIN_ARCH=arm64 BIN_OS=darwin BIN_NAME_CLI=$(BIN_NAME_CLI)_darwin-arm64 make cli
 
 .PHONY: cli
 cli:
