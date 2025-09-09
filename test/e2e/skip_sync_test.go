@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type SkipSyncTestSuite struct {
@@ -39,7 +40,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "skip-sync-app",
-			Namespace: "argocd",
+			Namespace: "agent-managed",
 			Labels: map[string]string{
 				config.SkipSyncLabel: "true",
 			},
@@ -51,8 +52,8 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync() {
 				Path:    "guestbook",
 			},
 			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "default",
+				Name:      "agent-managed",
+				Namespace: "guestbook",
 			},
 		},
 	}
@@ -67,7 +68,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync() {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, appKey, &app, metav1.GetOptions{})
 		return err == nil
-	}, 15*time.Second, 1*time.Second, "Application with skip sync label should not be synced to agent")
+	}, 5*time.Second, 1*time.Second, "Application with skip sync label should not be synced to agent")
 
 	// Verify the Application still exists on the principal
 	principalApp := argoapp.Application{}
@@ -83,7 +84,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_False() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "no-skip-sync-app",
-			Namespace: "argocd",
+			Namespace: "agent-managed",
 			Labels: map[string]string{
 				config.SkipSyncLabel: "false",
 			},
@@ -104,7 +105,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_False() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	appKey := fixture.ToNamespacedName(&app)
+	appKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
 
 	// Ensure the Application IS pushed to the managed-agent (skip sync is false)
 	requires.Eventually(func() bool {
@@ -147,7 +148,7 @@ func (suite *SkipSyncTestSuite) Test_AppProject_SkipSync() {
 		appProject := argoapp.AppProject{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
 		return err == nil
-	}, 15*time.Second, 1*time.Second, "AppProject with skip sync label should not be synced to agent")
+	}, 5*time.Second, 1*time.Second, "AppProject with skip sync label should not be synced to agent")
 
 	// Verify the AppProject still exists on the principal
 	principalProject := argoapp.AppProject{}
@@ -214,7 +215,7 @@ func (suite *SkipSyncTestSuite) Test_Repository_SkipSync() {
 		repository := corev1.Secret{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, repoKey, &repository, metav1.GetOptions{})
 		return err == nil
-	}, 15*time.Second, 1*time.Second, "Repository with skip sync label should not be synced to agent")
+	}, 5*time.Second, 1*time.Second, "Repository with skip sync label should not be synced to agent")
 
 	// Verify the Repository still exists on the principal
 	principalRepo := corev1.Secret{}
@@ -230,7 +231,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_Update() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "update-skip-sync-app",
-			Namespace: "argocd",
+			Namespace: "agent-managed",
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -239,8 +240,8 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_Update() {
 				Path:    "guestbook",
 			},
 			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "default",
+				Name:      "agent-managed",
+				Namespace: "guestbook",
 			},
 		},
 	}
@@ -248,17 +249,18 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_Update() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	appKey := fixture.ToNamespacedName(&app)
+	appKeyPrincipal := fixture.ToNamespacedName(&app)
+	appKeyAgent := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
 
 	// Ensure the Application IS pushed to the managed-agent initially
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, appKey, &app, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, appKeyAgent, &app, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "Application should be synced to agent initially")
 
 	// Update the Application to add the skip sync label
-	err = suite.PrincipalClient.EnsureApplicationUpdate(suite.Ctx, appKey, func(app *argoapp.Application) error {
+	err = suite.PrincipalClient.EnsureApplicationUpdate(suite.Ctx, appKeyPrincipal, func(app *argoapp.Application) error {
 		if app.Labels == nil {
 			app.Labels = make(map[string]string)
 		}
@@ -270,13 +272,13 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_Update() {
 	// Ensure the Application is removed from the managed-agent after the update
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, appKey, &app, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, appKeyAgent, &app, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second, "Application should be removed from agent after adding skip sync label")
 
 	// Verify the Application still exists on the principal with the skip sync label
 	principalApp := argoapp.Application{}
-	err = suite.PrincipalClient.Get(suite.Ctx, appKey, &principalApp, metav1.GetOptions{})
+	err = suite.PrincipalClient.Get(suite.Ctx, appKeyPrincipal, &principalApp, metav1.GetOptions{})
 	requires.NoError(err)
 	requires.Equal("update-skip-sync-app", principalApp.Name)
 	requires.Equal("true", principalApp.Labels[config.SkipSyncLabel])
