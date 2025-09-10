@@ -432,6 +432,7 @@ func (c *ArgoRestClient) ListApplications() (*v1alpha1.ApplicationList, error) {
 func (c *ArgoRestClient) DeleteApplication(name string) error {
 	reqURL := c.url()
 	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s", name)
+	reqURL.RawQuery = "cascade=false"
 
 	req, err := http.NewRequest(http.MethodDelete, reqURL.String(), nil)
 	if err != nil {
