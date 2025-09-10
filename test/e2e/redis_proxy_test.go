@@ -168,7 +168,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 
 		for idx := range podList.Items {
 			pod := podList.Items[idx]
-			if strings.Contains(pod.Name, "kustomize-guestbook-ui") && newPod.Name != oldPod.Name {
+			if strings.Contains(pod.Name, "kustomize-guestbook-ui") && pod.Name != oldPod.Name {
 				newPod = pod
 				break
 			}
@@ -363,7 +363,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 
 		for idx := range podList.Items {
 			pod := podList.Items[idx]
-			if strings.Contains(pod.Name, "kustomize-guestbook-ui") && newPod.Name != oldPod.Name {
+			if strings.Contains(pod.Name, "kustomize-guestbook-ui") && pod.Name != oldPod.Name {
 				newPod = pod
 				break
 			}
