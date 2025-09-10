@@ -162,9 +162,9 @@ Run this command while connected to principal
 argocd-agentctl pki issue agent <agent-name> --principal-context <principal context> --agent-context <workload context> --agent-namespace argocd --upsert
 ```
 
-Apply the installation manifests for argocd agent
+Apply the installation manifests for argocd agent replacing <release-branch> with the release that you wish to use:
 ```
-oc apply -n argocd -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main'
+oc apply -n argocd -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=<release-branch>'
 ```
 This should create all the required agent related resources.
 
