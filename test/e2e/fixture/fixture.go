@@ -90,9 +90,6 @@ func (suite *BaseSuite) SetupTest() {
 		project := &argoapp.AppProject{}
 		key := types.NamespacedName{Name: "agent-autonomous-default", Namespace: "argocd"}
 		err := suite.PrincipalClient.Get(suite.Ctx, key, project, metav1.GetOptions{})
-		if err != nil {
-			suite.T().Log(err)
-		}
 		return err == nil && len(project.Annotations) > 0 && project.Annotations["created"] == now
 	}, 30*time.Second, 1*time.Second)
 
@@ -239,7 +236,6 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
-		fmt.Println("Deleting appProject", appProject.Name)
 		err = EnsureDeletion(ctx, principalClient, &appProject)
 		if err != nil {
 			return err
