@@ -11,8 +11,8 @@ resources:
 
 images:
 - name: argocd-agent
-  newName: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
-  newTag: latest
+  newName: quay.io/argoprojlabs/argocd-agent
+  newTag: v0.4.1
 - name: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
   newName: quay.io/argoprojlabs/argocd-agent
   newTag: v0.4.0
