@@ -59,11 +59,11 @@ fi
 echo "*** generating new manifests"
 (
 	cd install/kubernetes/agent
-	kustomize edit set image ghcr.io/argoproj-labs/argocd-agent/argocd-agent=quay.io/argoprojlabs/argocd-agent:${TARGET_TAG}
+	kustomize edit set image argocd-agent=quay.io/argoprojlabs/argocd-agent:${TARGET_TAG}
 )
 (
 	cd install/kubernetes/principal
-	kustomize edit set image ghcr.io/argoproj-labs/argocd-agent/argocd-agent=quay.io/argoprojlabs/argocd-agent:${TARGET_TAG}
+	kustomize edit set image argocd-agent=quay.io/argoprojlabs/argocd-agent:${TARGET_TAG}
 )
 
 echo "*** committing changes to release branch"
