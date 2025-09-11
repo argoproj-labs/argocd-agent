@@ -107,7 +107,9 @@ Mix and match modes across your fleet—some clusters managed, others autonomous
 
 ## 🚧 Current Status
 
-> **🌱 Early Days**: argocd-agent is in active development and not yet ready for production use. We're building in the open to collaborate with the community and gather feedback early.
+> **🚀 Approaching GA**: argocd-agent has matured significantly and is on a solid path toward general availability. While not yet feature-complete, the project has seen serious development efforts and no breaking changes are expected before GA. We encourage users to install and run argocd-agent in their environments.
+>
+> **🤝 Community Driven**: We depend on feedback and bug reports from the community to become better. Your real-world usage, issue reports, and feature requests are essential for making argocd-agent production-ready for everyone.
 
 **What works today:**
 - ✅ Basic hub-and-spoke architecture  
@@ -144,16 +146,18 @@ We're building argocd-agent together! Whether you're a GitOps veteran or just ge
 - [**Architecture Deep Dive**](https://argocd-agent.readthedocs.io/latest/concepts/components-terminology/) - Understanding the internals
 - [**Configuration Guide**](https://argocd-agent.readthedocs.io/latest/configuration/) - Detailed setup instructions
 
-## 🏢 Production Ready?
+## 🏢 Ready to Deploy?
 
-argocd-agent is **not yet production-ready** but we're working hard to get there! If you're interested in:
+argocd-agent is evolving into a **stable and reliable** project ready for adoption! The project has reached a state mature enough where users are encouraged to install and run it. We continue working toward GA, and we kindly ask for help from everyone to battle-test it.
 
-- **🧪 Testing in dev/staging environments**
-- **🤝 Contributing to development**  
-- **💼 Enterprise partnerships**
-- **🗣️ Speaking about your use case**
+**Help us by:**
 
-We'd love to hear from you! [**Start a discussion**](https://github.com/argoproj-labs/argocd-agent/discussions) or reach out on Slack.
+- **🤝 Contributing to development** - Help us reach GA faster
+- **💡 Giving feedback** - Together, we can build a better product
+- **💼 Adoption** - Give it a spin, in any of your environments
+- **🗣️ Sharing your success stories** - We love hearing about your use cases
+
+Ready to get started? [**Jump into our getting started guide**](https://argocd-agent.readthedocs.io/latest/getting-started/) or [**start a discussion**](https://github.com/argoproj-labs/argocd-agent/discussions) to share your plans!
 
 ## 📜 License
 
