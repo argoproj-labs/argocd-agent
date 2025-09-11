@@ -15,29 +15,30 @@
 package config
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestSkipSyncSelector(t *testing.T) {
-	selector := SkipSyncSelector()
+func TestDefaultLabelSelector(t *testing.T) {
+	selector := DefaultLabelSelector()
 
 	// The selector should exclude resources with the skip sync label set to "true"
-	expectedLabelSelector := "argocd-agent.argoproj-labs.io/ignore-sync!=true"
+	expectedLabelSelector := fmt.Sprintf("%s!=true", SkipSyncLabel)
 
 	assert.Equal(t, expectedLabelSelector, selector.LabelSelector,
-		"SkipSyncSelector should create a label selector that excludes resources with skip sync label set to true")
+		"DefaultLabelSelector should create a label selector that excludes resources with skip sync label set to true")
 
 	// Verify it's a proper ListOptions
 	assert.IsType(t, v1.ListOptions{}, selector,
-		"SkipSyncSelector should return a v1.ListOptions")
+		"DefaultLabelSelector should return a v1.ListOptions")
 }
 
-func TestSkipSyncSelector_Integration(t *testing.T) {
+func TestDefaultLabelSelector_Integration(t *testing.T) {
 	// This test verifies that the selector would work correctly with Kubernetes API
-	selector := SkipSyncSelector()
+	selector := DefaultLabelSelector()
 
 	// The selector should be non-empty
 	assert.NotEmpty(t, selector.LabelSelector,

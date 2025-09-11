@@ -6,8 +6,8 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// SkipSyncSelector returns a ListOptions that excludes resources with the skip sync label
-func SkipSyncSelector() v1.ListOptions {
+// DefaultLabelSelector returns a ListOptions with the default label selector
+func DefaultLabelSelector() v1.ListOptions {
 	return v1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s!=%s", SkipSyncLabel, "true"),
 	}

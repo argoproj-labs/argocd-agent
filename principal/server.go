@@ -217,10 +217,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	appInformerOpts := []informer.InformerOption[*v1alpha1.Application]{
 		informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, config.SkipSyncSelector())
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, config.SkipSyncSelector())
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithAddHandler[*v1alpha1.Application](s.newAppCallback),
 		informer.WithUpdateHandler[*v1alpha1.Application](s.updateAppCallback),
@@ -235,10 +235,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
 		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, config.SkipSyncSelector())
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, config.SkipSyncSelector())
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithAddHandler[*v1alpha1.AppProject](s.newAppProjectCallback),
 		informer.WithUpdateHandler[*v1alpha1.AppProject](s.updateAppProjectCallback),
@@ -299,10 +299,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	repoInformerOpts := []informer.InformerOption[*corev1.Secret]{
 		informer.WithListHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.Clientset.CoreV1().Secrets(namespace).List(ctx, config.SkipSyncSelector())
+			return kubeClient.Clientset.CoreV1().Secrets(namespace).List(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithWatchHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.Clientset.CoreV1().Secrets(namespace).Watch(ctx, config.SkipSyncSelector())
+			return kubeClient.Clientset.CoreV1().Secrets(namespace).Watch(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithAddHandler[*corev1.Secret](s.newRepositoryCallback),
 		informer.WithUpdateHandler[*corev1.Secret](s.updateRepositoryCallback),
