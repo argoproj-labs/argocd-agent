@@ -62,19 +62,19 @@ kubectl create namespace argocd --context <control-plane-context>
 
 ### 1.2 Install Argo CD on Control Plane
 
-Install a customized Argo CD instance that excludes components that will run on workload clusters:
+Install a customized Argo CD instance that excludes components that will run on workload clusters replacing <release-branch> with the release you wish to use:
 
 ```bash
 # Apply the principal-specific Argo CD configuration
 kubectl apply -n argocd \
-  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/principal?ref=main' \
+  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/principal?ref=<release-branch>' \
   --context <control-plane-context>
 ```
 
 This configuration includes:
 
 - ✅ **argocd-server** (API and UI)
-- ✅ **argocd-dex-server** (SSO, if needed)  
+- ✅ **argocd-dex-server** (SSO, if needed)
 - ✅ **argocd-redis** (state storage)
 - ✅ **argocd-repo-server** (Git repository access)
 - ❌ **argocd-application-controller** (runs on workload clusters only)
@@ -160,9 +160,11 @@ argocd-agentctl jwt create-key \
 
 ### 3.1 Deploy Principal Component
 
+Change <release-branch> to the release you wish to use:
+
 ```bash
 kubectl apply -n argocd \
-  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/principal?ref=main' \
+  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/principal?ref=<release-branch>' \
   --context <control-plane-context>
 ```
 
@@ -184,7 +186,7 @@ The principal's gRPC service needs to be accessible from workload clusters:
 kubectl patch svc argocd-agent-principal -n argocd --context <control-plane-context> \
   --patch '{"spec":{"type":"LoadBalancer"}}'
 
-# Option 2: NodePort  
+# Option 2: NodePort
 kubectl patch svc argocd-agent-principal -n argocd --context <control-plane-context> \
   --patch '{"spec":{"type":"NodePort","ports":[{"port":8443,"nodePort":30443}]}}'
 ```
@@ -221,15 +223,17 @@ kubectl create namespace argocd --context <workload-cluster-context>
 
 ### 4.3 Install Argo CD on Workload Cluster
 
+Replace <release-branch> with the release you wish to use:
+
 ```bash
 # For managed agents
 kubectl apply -n argocd \
-  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-managed?ref=main' \
+  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-managed?ref=<release-branch>' \
   --context <workload-cluster-context>
 
 # For autonomous agents (alternative)
 # kubectl apply -n argocd \
-#   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous?ref=main' \
+#   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous?ref=<release-branch>' \
 #   --context <workload-cluster-context>
 ```
 
@@ -291,9 +295,11 @@ kubectl get secret argocd-agent-ca -n argocd --context <workload-cluster-context
 
 ### 5.4 Deploy Agent
 
+Replace <release-branch> with the version of the release you wish to use:
+
 ```bash
 kubectl apply -n argocd \
-  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main' \
+  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=<release-branch>' \
   --context <workload-cluster-context>
 ```
 
@@ -324,7 +330,7 @@ kubectl logs -n argocd deployment/argocd-agent-agent --context <workload-cluster
 
 # Expected output:
 # INFO[0001] Starting argocd-agent (agent) v0.1.0 (ns=argocd, mode=managed, auth=mtls)
-# INFO[0002] Authentication successful  
+# INFO[0002] Authentication successful
 # INFO[0003] Connected to argocd-agent-principal v0.1.0
 ```
 
@@ -389,7 +395,7 @@ Access the Argo CD UI to see your agent and its applications!
 
 ### Security Hardening
 1. **Replace development certificates** with production-grade PKI
-2. **Configure proper RBAC** in Argo CD  
+2. **Configure proper RBAC** in Argo CD
 3. **Set up network policies** to restrict traffic
 4. **Enable audit logging** for compliance
 
