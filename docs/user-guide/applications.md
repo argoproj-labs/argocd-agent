@@ -282,6 +282,79 @@ Both principal and agents implement resync mechanisms to handle restarts and con
 - **Agent**: Verify Application backend is running and synced
 - **Network**: Ensure stable gRPC connection between principal and agents
 
+## Skip Sync Label
+
+The skip sync label allows you to prevent specific Applications from being synchronized between the principal and agents. This is useful when you want to create Applications that should only exist on one side of the synchronization.
+
+### Label Details
+
+- **Label Key**: `argocd-agent.argoproj-labs.io/ignore-sync`
+- **Label Value**: `"true"` (must be the exact string "true", case-sensitive)
+- **Scope**: Works for both managed and autonomous agent modes
+
+### Usage Examples
+
+#### Preventing Application Sync to Agent (Managed Mode)
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: principal-only-app
+  namespace: production-cluster
+  labels:
+    argocd-agent.argoproj-labs.io/ignore-sync: "true"  # Skip sync to agent
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook
+```
+
+This Application will remain only on the principal cluster and will not be sent to the `production-cluster` agent, even though it's created in that agent's namespace.
+
+#### Preventing Application Sync to Principal (Autonomous Mode)
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-only-app
+  namespace: argocd
+  labels:
+    argocd-agent.argoproj-labs.io/ignore-sync: "true"  # Skip sync to principal
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook
+```
+
+This Application will remain only on the autonomous agent cluster and will not be synchronized back to the principal.
+
+### Important Notes
+
+1. **Case Sensitivity**: The label value must be exactly `"true"` (lowercase). Values like `"TRUE"`, `"True"`, `"false"`, or empty strings will **not** trigger the skip sync behavior.
+
+2. **Label Removal**: If you remove the skip sync label from an existing Application, it will begin synchronizing according to the normal rules for your agent mode.
+
+3. **Namespace Rules Still Apply**: The skip sync label doesn't override namespace-based filtering. Applications must still be in allowed namespaces to be processed.
+
+### Use Cases
+
+- **Principal-Only Applications**: Applications that manage the control plane infrastructure itself
+- **Agent-Only Applications**: Local utilities or monitoring applications specific to a workload cluster
+- **Temporary Isolation**: Temporarily preventing sync during maintenance or testing
+- **Staged Rollouts**: Controlling which Applications are synchronized during gradual agent deployments
+
 ## Security Considerations
 
 ### Access Control

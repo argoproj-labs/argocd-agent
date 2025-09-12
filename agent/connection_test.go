@@ -24,7 +24,7 @@ import (
 )
 
 func TestResyncOnStart(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.emitter = event.NewEventSource("test")
 	a.kubeClient.RestConfig = &rest.Config{}
 	logCtx := log()
