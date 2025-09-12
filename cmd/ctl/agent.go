@@ -15,7 +15,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -26,7 +25,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -39,7 +37,6 @@ import (
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v3/util/db"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -103,10 +100,8 @@ func generateAgentClientCert(agentName string, clt *kube.KubernetesClient) (clie
 
 func NewAgentCreateCommand() *cobra.Command {
 	var (
-		rpServer   string
-		rpUsername string
-		rpPassword string
-		addLabels  []string
+		rpServer  string
+		addLabels []string
 	)
 	command := &cobra.Command{
 		Short: "Create a new agent configuration",
@@ -150,35 +145,6 @@ func NewAgentCreateCommand() *cobra.Command {
 				cmdutil.Fatal("Agent %s exists.", agentName)
 			}
 
-			// Get desired credentials from the user
-			if rpUsername == "" {
-				var err error
-				reader := bufio.NewReader(os.Stdin)
-				fmt.Print("Username: ")
-				rpUsername, err = reader.ReadString('\n')
-				if err != nil {
-					cmdutil.Fatal("%v", err)
-				}
-			}
-			if rpUsername != "" && rpPassword == "" {
-				fmt.Print("Password: ")
-				pass1, err := term.ReadPassword(int(syscall.Stdin))
-				fmt.Println()
-				if err != nil {
-					cmdutil.Fatal("%v", err)
-				}
-				fmt.Print("Repeat password: ")
-				pass2, err := term.ReadPassword(int(syscall.Stdin))
-				fmt.Println()
-				if err != nil {
-					cmdutil.Fatal("%v", err)
-				}
-				if string(pass1) != string(pass2) {
-					cmdutil.Fatal("Passwords don't match.")
-				}
-				rpPassword = string(pass1)
-			}
-
 			clientCert, clientKey, caData, err := generateAgentClientCert(agentName, clt)
 			if err != nil {
 				cmdutil.Fatal("%v", err)
@@ -195,8 +161,6 @@ func NewAgentCreateCommand() *cobra.Command {
 						KeyData:  []byte(clientKey),
 						CAData:   []byte(caData),
 					},
-					Username: rpUsername,
-					Password: rpPassword,
 				},
 			}
 
@@ -219,8 +183,6 @@ func NewAgentCreateCommand() *cobra.Command {
 		},
 	}
 	command.Flags().StringVar(&rpServer, "resource-proxy-server", "argocd-agent-resource-proxy:9090", "Address of principal's resource-proxy")
-	command.Flags().StringVar(&rpUsername, "resource-proxy-username", "", "The username for the resource-proxy")
-	command.Flags().StringVar(&rpPassword, "resource-proxy-password", "", "The password for the resource-proxy")
 	command.Flags().StringSliceVarP(&addLabels, "label", "l", []string{}, "Additional labels for the agent")
 	return command
 }
