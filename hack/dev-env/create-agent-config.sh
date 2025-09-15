@@ -80,8 +80,6 @@ for agent in ${AGENTS}; do
 	if ! ${AGENTCTL} agent inspect ${agent} >/dev/null 2>&1; then
 		echo "  -> Creating cluster secret for agent configuration"
 		${AGENTCTL} agent create ${agent} \
-			--resource-proxy-username ${agent} \
-			--resource-proxy-password ${agent} \
 			--resource-proxy-server ${ARGOCD_AGENT_RESOURCE_PROXY}:9090
 	else
 		echo "  -> Reusing existing cluster secret for agent configuration"
