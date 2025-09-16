@@ -957,28 +957,18 @@ func (ewm *EventWritersMap) Remove(agentName string) {
 
 type ContainerLogRequest struct {
 	// UUID for request/response correlation
-	UUID string `json:"uuid"`
-
-	// Pod identification
-	Namespace string `json:"namespace"`
-	PodName   string `json:"podName"`
-
-	// Container specification
-	Container string `json:"container,omitempty"` // Optional, defaults to first container
-
-	// Log streaming parameters
-	Follow       bool   `json:"follow,omitempty"`       // Stream continuously
-	TailLines    *int64 `json:"tailLines,omitempty"`    // Number of lines from end
-	SinceSeconds *int64 `json:"sinceSeconds,omitempty"` // Relative time
-	SinceTime    string `json:"sinceTime,omitempty"`    // Absolute timestamp (RFC3339)
-	Timestamps   bool   `json:"timestamps,omitempty"`   // Include timestamps
-	Previous     bool   `json:"previous,omitempty"`     // Previous container logs
-
-	// Additional parameters from K8s logs API
-	InsecureSkipTLSVerifyBackend bool   `json:"insecureSkipTLSVerifyBackend,omitempty"` // Skip TLS verification
-	LimitBytes                   *int64 `json:"limitBytes,omitempty"`                   // Limit output bytes
-	Pretty                       bool   `json:"pretty,omitempty"`                       // Pretty print output
-	Stream                       string `json:"stream,omitempty"`                       // "All", "Stdout", or "Stderr"
+	UUID                         string `json:"uuid"`
+	Namespace                    string `json:"namespace"`
+	PodName                      string `json:"podName"`
+	Container                    string `json:"container,omitempty"`
+	Follow                       bool   `json:"follow,omitempty"`
+	TailLines                    *int64 `json:"tailLines,omitempty"`
+	SinceSeconds                 *int64 `json:"sinceSeconds,omitempty"`
+	SinceTime                    string `json:"sinceTime,omitempty"`
+	Timestamps                   bool   `json:"timestamps,omitempty"`
+	Previous                     bool   `json:"previous,omitempty"`
+	InsecureSkipTLSVerifyBackend bool   `json:"insecureSkipTLSVerifyBackend,omitempty"`
+	LimitBytes                   *int64 `json:"limitBytes,omitempty"`
 }
 
 // NewLogRequestEvent creates a cloud event for requesting logs
@@ -1035,18 +1025,6 @@ func (evs EventSource) NewLogRequestEvent(namespace, podName, method string, par
 			logReq.LimitBytes = &bytes
 		}
 	}
-
-	if pretty := params["pretty"]; pretty == "true" {
-		logReq.Pretty = true
-	}
-
-	if stream := params["stream"]; stream != "" {
-		// Validate stream parameter - must be "All", "Stdout", or "Stderr"
-		if stream == "All" || stream == "Stdout" || stream == "Stderr" {
-			logReq.Stream = stream
-		}
-	}
-
 	cev := cloudevents.NewEvent()
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
