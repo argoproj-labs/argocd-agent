@@ -16,11 +16,13 @@ package principal
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
@@ -988,4 +990,195 @@ func TestServer_deleteRepositoryCallback(t *testing.T) {
 		assert.Equal(t, map[string]bool{"agent1": true}, s.repoToAgents.Get("test-repo"))
 		assert.Equal(t, map[string]bool{"test-repo": true}, s.projectToRepos.Get("some-project"))
 	})
+}
+
+func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
+	tests := []struct {
+		name            string
+		app             *v1alpha1.Application
+		expectedDeleted bool // Whether deletion was expected (agent-initiated)
+		shouldRecreate  bool // Whether app should be recreated (unauthorized deletion)
+		shouldError     bool // Whether recreation should fail
+		setupMocks      func(*mocks.Application)
+	}{
+		{
+			name: "legitimate deletion from autonomous agent - should allow",
+			app: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "autonomous-agent",
+					UID:       "app-uid-123",
+					Annotations: map[string]string{
+						manager.SourceUIDAnnotation: "source-uid-456",
+					},
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Project: "default",
+				},
+			},
+			expectedDeleted: true,
+			shouldRecreate:  false,
+			shouldError:     false,
+			setupMocks: func(mockBackend *mocks.Application) {
+				// No mocks needed - deletion should proceed normally
+			},
+		},
+		{
+			name: "unauthorized deletion by user - should recreate",
+			app: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "autonomous-agent",
+					UID:       "app-uid-123",
+					Annotations: map[string]string{
+						manager.SourceUIDAnnotation: "source-uid-456",
+					},
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Project: "default",
+				},
+			},
+			expectedDeleted: false,
+			shouldRecreate:  true,
+			shouldError:     false,
+			setupMocks: func(mockBackend *mocks.Application) {
+				// Mock successful recreation
+				mockBackend.On("Create", mock.Anything, mock.MatchedBy(func(app *v1alpha1.Application) bool {
+					return app.Name == "test-app" &&
+						app.Namespace == "autonomous-agent" &&
+						app.ResourceVersion == "" &&
+						app.DeletionTimestamp == nil
+				})).Return(&v1alpha1.Application{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-app",
+						Namespace: "autonomous-agent",
+						UID:       "new-uid-789",
+					},
+				}, nil)
+			},
+		},
+		{
+			name: "unauthorized deletion with recreation failure",
+			app: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "autonomous-agent",
+					UID:       "app-uid-123",
+					Annotations: map[string]string{
+						manager.SourceUIDAnnotation: "source-uid-456",
+					},
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Project: "default",
+				},
+			},
+			expectedDeleted: false,
+			shouldRecreate:  true,
+			shouldError:     true,
+			setupMocks: func(mockBackend *mocks.Application) {
+				// Mock recreation failure
+				mockBackend.On("Create", mock.Anything, mock.Anything).Return(nil, errors.NewInternalError(fmt.Errorf("creation failed")))
+			},
+		},
+		{
+			name: "non-autonomous agent app - should not affect normal flow",
+			app: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "managed-agent",
+					UID:       "app-uid-123",
+					// No SourceUIDAnnotation - not from autonomous agent
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Project: "default",
+				},
+			},
+			expectedDeleted: false,
+			shouldRecreate:  false,
+			shouldError:     false,
+			setupMocks: func(mockBackend *mocks.Application) {
+				// No mocks needed - should follow normal deletion flow
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup mocks
+			mockAppBackend := &mocks.Application{}
+			tt.setupMocks(mockAppBackend)
+
+			// Create application manager with mock backend
+			appManager, err := application.NewApplicationManager(mockAppBackend, "argocd")
+			require.NoError(t, err)
+
+			// Create server with dependencies
+			s := &Server{
+				ctx:               context.Background(),
+				queues:            queue.NewSendRecvQueues(),
+				events:            event.NewEventSource("test"),
+				resources:         resources.NewAgentResources(),
+				appManager:        appManager,
+				expectedDeletions: make(map[string]bool),
+			}
+
+			// Create send queue for the agent
+			err = s.queues.Create(tt.app.Namespace)
+			require.NoError(t, err)
+
+			// Pre-mark deletion as expected if needed
+			if tt.expectedDeleted {
+				appKey := fmt.Sprintf("%s/%s", tt.app.Namespace, tt.app.Name)
+				s.markExpectedDeletion(appKey)
+			}
+
+			// Execute the callback
+			s.deleteAppCallback(tt.app)
+
+			// Verify behavior
+			if tt.shouldRecreate {
+				// If recreation was expected, verify the Create call was made
+				mockAppBackend.AssertExpectations(t)
+			}
+
+			// Verify queue state
+			sendQ := s.queues.SendQ(tt.app.Namespace)
+			if tt.shouldRecreate {
+				// If we recreated, callback should have returned early - no events in queue
+				assert.Equal(t, 0, sendQ.Len(), "Queue should be empty when recreation happens")
+			} else if !isResourceFromAutonomousAgent(tt.app) {
+				// If not autonomous agent app, normal deletion flow should add event to queue
+				assert.Equal(t, 1, sendQ.Len(), "Queue should contain delete event for normal apps")
+			}
+
+			// Verify expected deletion tracking is cleaned up
+			appKey := fmt.Sprintf("%s/%s", tt.app.Namespace, tt.app.Name)
+			s.expectedDeletionsLock.RLock()
+			_, stillTracked := s.expectedDeletions[appKey]
+			s.expectedDeletionsLock.RUnlock()
+			assert.False(t, stillTracked, "Expected deletion should be cleaned up after processing")
+
+			mockAppBackend.AssertExpectations(t)
+		})
+	}
+}
+
+// TestServer_ExpectedDeletionTracking tests the core deletion tracking functionality
+func TestServer_ExpectedDeletionTracking(t *testing.T) {
+	s := &Server{
+		expectedDeletions: make(map[string]bool),
+	}
+
+	appKey := "autonomous-agent/test-app"
+	// Initially not expected
+	assert.False(t, s.isExpectedDeletion(appKey))
+
+	// Mark as expected
+	s.markExpectedDeletion(appKey)
+
+	// Should now be expected and consumed
+	assert.True(t, s.isExpectedDeletion(appKey))
+
+	// Should be cleaned up after check
+	assert.False(t, s.isExpectedDeletion(appKey))
 }

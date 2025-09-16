@@ -644,6 +644,39 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 	return false
 }
 
+// RevertAutonomousAppChanges compares the actual spec with expected spec stored in cache,
+// if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as principal.
+func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app *v1alpha1.Application) bool {
+	logCtx := log().WithFields(logrus.Fields{
+		"component":       "RevertAutonomousAppChanges",
+		"application":     app.QualifiedName(),
+		"resourceVersion": app.ResourceVersion,
+	})
+
+	sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
+	if !exists {
+		return false
+	}
+
+	if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID), logCtx); ok {
+		logCtx.Debugf("Application: %s is available in agent cache", app.Name)
+
+		if diff := reflect.DeepEqual(cachedAppSpec, app.Spec); !diff {
+			app.Spec = cachedAppSpec
+			logCtx.Infof("Reverting modifications to the application: %s", app.Name)
+			if _, err := m.UpdateAutonomousApp(ctx, app.Namespace, app); err != nil {
+				logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", app.Name, err)
+				return false
+			}
+			return true
+		}
+	} else {
+		logCtx.Debugf("Application: %s is not available in agent cache", app.Name)
+	}
+
+	return false
+}
+
 func log() *logrus.Entry {
 	return logrus.WithField("component", "AppManager")
 }
