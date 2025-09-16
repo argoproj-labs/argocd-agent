@@ -63,6 +63,14 @@ func (a *Agent) startLogStreamIfNew(logReq *event.ContainerLogRequest, logCtx *l
 		a.inflightMu.Unlock()
 	}()
 
+	logCtx.WithFields(logrus.Fields{
+		"uuid":      logReq.UUID,
+		"namespace": logReq.Namespace,
+		"pod":       logReq.PodName,
+		"container": logReq.Container,
+		"follow":    logReq.Follow,
+	}).Info("Processing log request")
+
 	if logReq.Follow {
 		// Handle live logs with early ACK
 		return a.handleLiveStreaming(ctx, logReq, logCtx)
@@ -213,8 +221,8 @@ func (a *Agent) streamLogsToCompletion(
 	logCtx *logrus.Entry,
 ) error {
 	const (
-		chunkMax   = 64 * 1024             // 64KiB chunks
-		flushEvery = 50 * time.Millisecond // keep UI latency small
+		chunkMax   = 64 * 1024
+		flushEvery = 50 * time.Millisecond
 	)
 
 	br := bufio.NewReader(rc)
@@ -272,7 +280,6 @@ func (a *Agent) streamLogsToCompletion(
 		// Add each processed line to the buffer
 		for _, processedLine := range processedLines {
 			wire := processedLine
-			// append to chunk buffer, splitting if a single line is larger than remaining space
 			for len(wire) > 0 {
 				space := chunkMax - len(buf)
 				if space == 0 {
@@ -552,35 +559,28 @@ func (a *Agent) processLogLine(line string) ([]string, error) {
 
 // extractTimestamp extracts timestamp from a log line for resume capability
 func extractTimestamp(line string) *time.Time {
-	// Look for RFC3339 timestamp at the beginning of the line
-	// Format: 2023-12-07T10:30:45.123456789Z
-	if len(line) < 20 {
+	if len(line) < 20 { // "2006-01-02T15:04:05Z" is 20 chars
 		return nil
 	}
-
-	// Find the first space or tab after potential timestamp
-	spaceIdx := strings.IndexAny(line, " \t")
-	if spaceIdx == -1 || spaceIdx > 35 { // RFC3339 with nanoseconds is max ~35 chars
+	// Grab the first token (up to whitespace). k8s puts a space after the timestamp.
+	space := strings.IndexAny(line, " \t")
+	if space == -1 {
+		// Fall back: try whole line (cheap fast-fail)
+		space = len(line)
+	}
+	// Guard against absurdly long "tokens"
+	const maxTSLen = 40 // a tad higher than needed; RFC3339Nano+offset is 35
+	if space > maxTSLen {
 		return nil
 	}
+	token := line[:space]
 
-	timestampStr := strings.TrimSpace(line[:spaceIdx])
-
-	// Try parsing common timestamp formats
-	formats := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02T15:04:05.000000000Z",
-		"2006-01-02T15:04:05.000000Z",
-		"2006-01-02T15:04:05.000Z",
-		"2006-01-02T15:04:05Z",
+	// Try the common RFC3339 flavors (covers with/without fractional seconds and offsets)
+	if ts, err := time.Parse(time.RFC3339Nano, token); err == nil {
+		return &ts
 	}
-
-	for _, format := range formats {
-		if ts, err := time.Parse(format, timestampStr); err == nil {
-			return &ts
-		}
+	if ts, err := time.Parse(time.RFC3339, token); err == nil {
+		return &ts
 	}
-
 	return nil
 }
