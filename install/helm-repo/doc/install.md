@@ -66,9 +66,9 @@ serverPort: "443"
 metricsPort: "8181"
 tlsClientInSecure: "false"
 healthzPort: "8002"
-tlsClientKeyPath: "/app/config/tls/tls.key"
-tlsClientCertPath: "/app/config/tls/tls.crt"
-tlsRootCAPath: "/app/config/tls/ca.crt"
+tlsClientKeyPath: ""
+tlsClientCertPath: ""
+tlsRootCAPath: ""
 ```
 
 Parameter Descriptions:
@@ -159,19 +159,19 @@ The port the health check server should listen on.
 
 tlsClientKeyPath: 
 
-Default: "/app/config/tls/tls.key"
+Default: ""
 
 Path to a file containing the agent's TLS client certificate.
 
 tlsClientCertPath: 
 
-Default: "/app/config/tls/tls.crt"
+Default: ""
 
 Path to a file containing the agent's TLS client private key.
 
 tlsRootCAPath: 
 
-Default: "/app/config/tls/ca.crt"
+Default: ""
 
 The path to a file containing the certificates for the TLS root certificate authority used to validate the remote principal. 
 
