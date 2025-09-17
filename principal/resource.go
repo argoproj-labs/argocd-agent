@@ -114,9 +114,9 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 	requestedName := params.Get("name")
 	requestedNamespace := params.Get("namespace")
 	requestedSubresource := params.Get("subresource")
-	sentEv := &cloudevents.Event{}
 
 	// Create the event
+	var sentEv *cloudevents.Event
 	if requestedSubresource == "log" {
 		if requestedNamespace == "" || requestedName == "" {
 			logCtx.Error("Missing required parameters: namespace and pod are required")
