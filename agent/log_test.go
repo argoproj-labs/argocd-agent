@@ -25,6 +25,7 @@ type MockLogStreamClient struct {
 	*mock.MockLogStreamServer
 	sentData []*logstreamapi.LogStreamData
 	sendFunc func(data *logstreamapi.LogStreamData) error
+	mu       sync.RWMutex
 }
 
 func NewMockLogStreamClient(ctx context.Context) *MockLogStreamClient {
@@ -39,7 +40,9 @@ func NewMockLogStreamClient(ctx context.Context) *MockLogStreamClient {
 
 func (m *MockLogStreamClient) Send(data *logstreamapi.LogStreamData) error {
 	// For client-side testing, we track sent data
+	m.mu.Lock()
 	m.sentData = append(m.sentData, data)
+	m.mu.Unlock()
 	return m.sendFunc(data)
 }
 
@@ -65,19 +68,29 @@ func (m *MockLogStreamClient) RecvMsg(msg interface{}) error {
 
 func (m *MockLogStreamClient) CloseAndRecv() (*logstreamapi.LogStreamResponse, error) {
 	// Simulate closing and receiving a response
+	m.mu.RLock()
+	linesReceived := len(m.sentData)
+	m.mu.RUnlock()
 	return &logstreamapi.LogStreamResponse{
 		RequestUuid:   "test-uuid",
 		Status:        200,
-		LinesReceived: int32(len(m.sentData)),
+		LinesReceived: int32(linesReceived),
 	}, nil
 }
 
 func (m *MockLogStreamClient) GetSentData() []*logstreamapi.LogStreamData {
-	return m.sentData
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	// Return a copy to avoid race conditions
+	result := make([]*logstreamapi.LogStreamData, len(m.sentData))
+	copy(result, m.sentData)
+	return result
 }
 
 func (m *MockLogStreamClient) Reset() {
+	m.mu.Lock()
 	m.sentData = make([]*logstreamapi.LogStreamData, 0)
+	m.mu.Unlock()
 }
 
 func (m *MockLogStreamClient) SetSendFunc(fn func(data *logstreamapi.LogStreamData) error) {
