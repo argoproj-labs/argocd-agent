@@ -13,4 +13,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-agent-principal
-  namespace: default
+  namespace: argocd
