@@ -28,6 +28,7 @@ import (
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
@@ -171,10 +172,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 
 	// appListFunc and watchFunc are anonymous functions for the informer
 	appListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(a.namespace).List(ctx, opts)
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(a.namespace).List(ctx, config.DefaultLabelSelector())
 	}
 	appWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(a.namespace).Watch(ctx, opts)
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(a.namespace).Watch(ctx, config.DefaultLabelSelector())
 	}
 
 	appInformerOptions := []informer.InformerOption[*v1alpha1.Application]{
@@ -213,11 +214,11 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	appManagerOpts = append(appManagerOpts, application.WithAllowUpsert(allowUpsert))
 
 	projListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).List(ctx, opts)
+		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).List(ctx, config.DefaultLabelSelector())
 	}
 
 	projWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).Watch(ctx, opts)
+		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).Watch(ctx, config.DefaultLabelSelector())
 	}
 
 	projInformerOptions := []informer.InformerOption[*v1alpha1.AppProject]{
@@ -253,10 +254,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 
 	repoInformerOptions := []informer.InformerOption[*corev1.Secret]{
 		informer.WithListHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return client.Clientset.CoreV1().Secrets(a.namespace).List(ctx, opts)
+			return client.Clientset.CoreV1().Secrets(a.namespace).List(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithWatchHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return client.Clientset.CoreV1().Secrets(a.namespace).Watch(ctx, opts)
+			return client.Clientset.CoreV1().Secrets(a.namespace).Watch(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithAddHandler[*corev1.Secret](a.handleRepositoryCreation),
 		informer.WithUpdateHandler[*corev1.Secret](a.handleRepositoryUpdate),

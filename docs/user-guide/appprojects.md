@@ -240,6 +240,106 @@ The transformation logic differs significantly between managed and autonomous ag
 2. **Check Case Sensitivity**: Ensure agent names match the expected case
 3. **Verify Wildcards**: Confirm wildcard patterns are correctly specified
 
+## Skip Sync Label
+
+The skip sync label allows you to prevent specific AppProjects from being synchronized between the principal and agents. This is useful when you want to create AppProjects that should only exist on one side of the synchronization.
+
+### Label Details
+
+- **Label Key**: `argocd-agent.argoproj-labs.io/ignore-sync`
+- **Label Value**: `"true"` (must be the exact string "true", case-sensitive)
+- **Scope**: Works for both managed and autonomous agent modes
+
+### Usage Examples
+
+#### Preventing AppProject Sync to Agent (Managed Mode)
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: principal-only-project
+  namespace: argocd
+  labels:
+    argocd-agent.argoproj-labs.io/ignore-sync: "true"  # Skip sync to agents
+spec:
+  destinations:
+  - name: "in-cluster"
+    namespace: "*"
+    server: "https://kubernetes.default.svc"
+  sourceNamespaces:
+  - argocd
+  sourceRepos:
+  - "*"
+```
+
+This AppProject will remain only on the principal cluster and will not be distributed to any agents, regardless of matching patterns in `sourceNamespaces` and `destinations`.
+
+#### Preventing AppProject Sync to Principal (Autonomous Mode)
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: agent-only-project
+  namespace: argocd
+  labels:
+    argocd-agent.argoproj-labs.io/ignore-sync: "true"  # Skip sync to principal
+spec:
+  destinations:
+  - name: "in-cluster"
+    namespace: "*"
+    server: "https://kubernetes.default.svc"
+  sourceNamespaces:
+  - argocd
+  sourceRepos:
+  - "*"
+```
+
+This AppProject will remain only on the autonomous agent cluster and will not be synchronized back to the principal.
+
+### Important Notes
+
+1. **Case Sensitivity**: The label value must be exactly `"true"` (lowercase). Values like `"TRUE"`, `"True"`, `"false"`, or empty strings will **not** trigger the skip sync behavior.
+
+2. **Distribution Override**: In managed mode, the skip sync label overrides the normal distribution logic based on `sourceNamespaces` and `destinations` patterns. Projects with this label will not be sent to any agents.
+
+3. **Label Removal**: If you remove the skip sync label from an existing AppProject, it will begin synchronizing according to the normal rules for your agent mode.
+
+### Use Cases
+
+- **Principal-Only Projects**: Projects that define permissions for control plane operations
+- **Agent-Only Projects**: Projects specific to local workload cluster requirements
+- **Administrative Projects**: Projects used for cluster management that shouldn't be distributed
+- **Temporary Isolation**: Preventing sync during maintenance, testing, or gradual rollouts
+
+### Repository Skip Sync Support
+
+The skip sync label also works for **Repository secrets** (Argo CD repository configurations stored as Kubernetes secrets). Repository secrets with the `argocd-agent.argoproj-labs.io/ignore-sync: "true"` label will not be synchronized between the principal and agents.
+
+#### Example: Repository Secret with Skip Sync
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: private-repo
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+    argocd-agent.argoproj-labs.io/ignore-sync: "true"  # Skip sync
+data:
+  project: <base64-encoded-project-name>
+  url: <base64-encoded-repo-url>
+  # ... other repository configuration
+```
+
+This is useful for repositories that should only be available on specific clusters, such as:
+
+- **Principal-only repositories**: Internal configuration repositories
+- **Agent-only repositories**: Cluster-specific private repositories
+- **Environment-specific repositories**: Repositories containing sensitive configuration for specific environments
+
 ## Security Considerations
 
 - **Managed Mode**: Only the principal can create AppProjects, maintaining central control

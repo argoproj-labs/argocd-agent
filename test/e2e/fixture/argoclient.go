@@ -331,3 +331,125 @@ func GetArgoCDServerEndpoint(k8sClient KubeClient) (string, error) {
 
 	return argoEndpoint, nil
 }
+
+// CreateApplication creates a new application in ArgoCD
+func (c *ArgoRestClient) CreateApplication(app *v1alpha1.Application) (*v1alpha1.Application, error) {
+	reqURL := c.url()
+	reqURL.Path = "/api/v1/applications"
+	appBytes, err := json.Marshal(app)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal application: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, reqURL.String(), bytes.NewBuffer(appBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create application: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to create application: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var createdApp v1alpha1.Application
+	if err := json.NewDecoder(resp.Body).Decode(&createdApp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal created application: %w", err)
+	}
+
+	return &createdApp, nil
+}
+
+// GetApplication retrieves an application by its name
+func (c *ArgoRestClient) GetApplication(name string) (*v1alpha1.Application, error) {
+	reqURL := c.url()
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s", name)
+
+	req, err := http.NewRequest(http.MethodGet, reqURL.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("application '%s' not found", name)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to get application: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var app v1alpha1.Application
+	if err := json.NewDecoder(resp.Body).Decode(&app); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal application: %w", err)
+	}
+
+	return &app, nil
+}
+
+// ListApplications lists all applications
+func (c *ArgoRestClient) ListApplications() (*v1alpha1.ApplicationList, error) {
+	reqURL := c.url()
+	reqURL.Path = "/api/v1/applications"
+
+	req, err := http.NewRequest(http.MethodGet, reqURL.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list applications: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to list applications: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var appList v1alpha1.ApplicationList
+	if err := json.NewDecoder(resp.Body).Decode(&appList); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal application list: %w", err)
+	}
+
+	return &appList, nil
+}
+
+// DeleteApplication deletes an application by its name
+func (c *ArgoRestClient) DeleteApplication(name string) error {
+	reqURL := c.url()
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s", name)
+	reqURL.RawQuery = "cascade=false"
+
+	req, err := http.NewRequest(http.MethodDelete, reqURL.String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json") // content-type
+
+	resp, err := c.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to delete application: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete application: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}

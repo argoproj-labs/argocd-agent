@@ -16,7 +16,6 @@ package e2e
 
 import (
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -77,12 +76,14 @@ var message = "Agent: '%s' is %s with principal"
 func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 	requires := suite.Require()
 
+	clusterDetail := suite.ClusterDetails
+
 	// Verify that connection status has been updated when agent is already connected
 	requires.Eventually(func() bool {
-		return fixture.HasConnectionStatus(os.Getenv(fixture.ManagedAgentServerKey), appv1.ConnectionState{
+		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
-		})
+		}, clusterDetail)
 	}, 30*time.Second, 1*time.Second)
 
 	// Stop the agent
@@ -91,11 +92,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 
 	// Verify that connection status is updated when agent is disconnected
 	requires.Eventually(func() bool {
-		return fixture.HasConnectionStatus(os.Getenv(fixture.ManagedAgentServerKey), appv1.ConnectionState{
+		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
 			Status:     appv1.ConnectionStatusFailed,
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
-		})
+		}, clusterDetail)
 	}, 30*time.Second, 1*time.Second)
 
 	// Restart the agent
@@ -105,23 +106,24 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 
 	// Verify that connection status is updated again when agent is re-connected
 	requires.Eventually(func() bool {
-		return fixture.HasConnectionStatus(os.Getenv(fixture.ManagedAgentServerKey), appv1.ConnectionState{
+		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
 			Status:     appv1.ConnectionStatusSuccessful,
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
-		})
+		}, clusterDetail)
 	}, 30*time.Second, 1*time.Second)
 }
 
 func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 	requires := suite.Require()
+	clusterDetail := suite.ClusterDetails
 
 	// Verify the connection status is updated when agent is already connected
 	requires.Eventually(func() bool {
-		return fixture.HasConnectionStatus(os.Getenv(fixture.AutonomousAgentServerKey), appv1.ConnectionState{
+		return fixture.HasConnectionStatus(fixture.AgentAutonomousName, appv1.ConnectionState{
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf(message, fixture.AgentAutonomousName, "connected"),
-		})
+		}, clusterDetail)
 	}, 30*time.Second, 1*time.Second)
 
 	// Stop the agent
@@ -130,11 +132,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 
 	// Verify that connection status is updated when agent is disconnected
 	requires.Eventually(func() bool {
-		return fixture.HasConnectionStatus(os.Getenv(fixture.AutonomousAgentServerKey), appv1.ConnectionState{
+		return fixture.HasConnectionStatus(fixture.AgentAutonomousName, appv1.ConnectionState{
 			Status:     appv1.ConnectionStatusFailed,
 			Message:    fmt.Sprintf(message, fixture.AgentAutonomousName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
-		})
+		}, clusterDetail)
 	}, 30*time.Second, 1*time.Second)
 
 	// Restart the agent
@@ -144,11 +146,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 
 	// Verify that connection status is updated again when agent is re-connected
 	requires.Eventually(func() bool {
-		return fixture.HasConnectionStatus(os.Getenv(fixture.AutonomousAgentServerKey), appv1.ConnectionState{
+		return fixture.HasConnectionStatus(fixture.AgentAutonomousName, appv1.ConnectionState{
 			Status:     appv1.ConnectionStatusSuccessful,
 			Message:    fmt.Sprintf(message, fixture.AgentAutonomousName, "connected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
-		})
+		}, clusterDetail)
 	}, 30*time.Second, 1*time.Second)
 }
 
@@ -156,9 +158,10 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 // It checks that the cluster cache info is correctly propagated from agent to principal.
 func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	requires := suite.Require()
+	clusterDetail := suite.ClusterDetails
 
 	// We need to know the number of existing applications before running test
-	agentCacheInfo, err := fixture.GetManagedAgentClusterInfo()
+	agentCacheInfo, err := fixture.GetManagedAgentClusterInfo(clusterDetail)
 	requires.NoError(err)
 	appCountBefore := agentCacheInfo.ApplicationsCount
 
@@ -172,11 +175,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// Verify that cluster cache info has been updated for first application in agent cluster by Argo CD
 	// and then agent updated principal with this information
 	requires.Eventually(func() bool {
-		return fixture.HasApplicationsCount(appCountBefore + 1)
+		return fixture.HasApplicationsCount(appCountBefore+1, clusterDetail)
 	}, 90*time.Second, 5*time.Second)
 
 	requires.Eventually(func() bool {
-		return fixture.HasClusterCacheInfoSynced(os.Getenv(fixture.ManagedAgentServerKey))
+		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
 	}, 90*time.Second, 5*time.Second)
 
 	// Step 3:
@@ -189,11 +192,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// Verify that cluster cache info has been updated by Argo CD for second application in agent cluster
 	// and then agent again updated principal with this new information
 	requires.Eventually(func() bool {
-		return fixture.HasApplicationsCount(appCountBefore + 2)
+		return fixture.HasApplicationsCount(appCountBefore+2, clusterDetail)
 	}, 90*time.Second, 5*time.Second)
 
 	requires.Eventually(func() bool {
-		return fixture.HasClusterCacheInfoSynced(os.Getenv(fixture.ManagedAgentServerKey))
+		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
 	}, 90*time.Second, 5*time.Second)
 
 	// Step 5:
@@ -210,37 +213,37 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// Verify that cluster cache info has been updated again by Argo CD after deleting the first application
 	// and then agent again updated principal with this new information
 	requires.Eventually(func() bool {
-		return fixture.HasApplicationsCount(appCountBefore + 1)
+		return fixture.HasApplicationsCount(appCountBefore+1, clusterDetail)
 	}, 90*time.Second, 5*time.Second)
 
 	requires.Eventually(func() bool {
-		return fixture.HasClusterCacheInfoSynced(os.Getenv(fixture.ManagedAgentServerKey))
+		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
 	}, 90*time.Second, 5*time.Second)
 
 	// Step 7:
 	// Verify that existing agent connection status is preserved when cluster cache info is updated
 	requires.Eventually(func() bool {
-		return fixture.HasConnectionStatus(os.Getenv(fixture.ManagedAgentServerKey), appv1.ConnectionState{
+		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
-		})
+		}, clusterDetail)
 	}, 30*time.Second, 1*time.Second)
 
 	// Step 8:
 	// Disconnect agent and verify that connection status is changed to Failed
 	requires.NoError(fixture.StopProcess(fixture.AgentManagedName))
 	requires.Eventually(func() bool {
-		return fixture.HasConnectionStatus(os.Getenv(fixture.ManagedAgentServerKey), appv1.ConnectionState{
+		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
 			Status:     appv1.ConnectionStatusFailed,
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
-		})
+		}, clusterDetail)
 	}, 60*time.Second, 2*time.Second)
 
 	// Step 9:
 	// Since agent is disconnected, cluster cache info should reset to default
 	requires.Eventually(func() bool {
-		ci, err := fixture.GetPrincipalClusterInfo(os.Getenv(fixture.ManagedAgentServerKey))
+		ci, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, clusterDetail)
 		if err != nil {
 			return false
 		}
@@ -253,14 +256,14 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 
 	requires.Eventually(func() bool {
-		return fixture.HasConnectionStatus(os.Getenv(fixture.ManagedAgentServerKey), appv1.ConnectionState{
+		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
 			Status:     appv1.ConnectionStatusSuccessful,
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
-		})
+		}, clusterDetail)
 	}, 60*time.Second, 2*time.Second)
 
 	requires.Eventually(func() bool {
-		return fixture.HasClusterCacheInfoSynced(os.Getenv(fixture.ManagedAgentServerKey))
+		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
 	}, 90*time.Second, 5*time.Second)
 }

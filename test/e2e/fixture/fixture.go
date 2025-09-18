@@ -43,6 +43,7 @@ type BaseSuite struct {
 	PrincipalClient       KubeClient
 	ManagedAgentClient    KubeClient
 	AutonomousAgentClient KubeClient
+	ClusterDetails        *ClusterDetails
 }
 
 func (suite *BaseSuite) SetupSuite() {
@@ -65,10 +66,14 @@ func (suite *BaseSuite) SetupSuite() {
 	suite.AutonomousAgentClient, err = NewKubeClient(config)
 	requires.Nil(err)
 
+	// Set cluster configurations
+	suite.ClusterDetails = &ClusterDetails{}
+	err = getClusterConfigurations(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, suite.ClusterDetails)
+	requires.Nil(err)
 }
 
 func (suite *BaseSuite) SetupTest() {
-	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient)
+	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient, suite.ClusterDetails)
 	suite.Require().Nil(err)
 
 	// Ensure that the autonomous agent's default AppProject exists on the principal
@@ -85,9 +90,6 @@ func (suite *BaseSuite) SetupTest() {
 		project := &argoapp.AppProject{}
 		key := types.NamespacedName{Name: "agent-autonomous-default", Namespace: "argocd"}
 		err := suite.PrincipalClient.Get(suite.Ctx, key, project, metav1.GetOptions{})
-		if err != nil {
-			suite.T().Log(err)
-		}
 		return err == nil && len(project.Annotations) > 0 && project.Annotations["created"] == now
 	}, 30*time.Second, 1*time.Second)
 
@@ -96,25 +98,25 @@ func (suite *BaseSuite) SetupTest() {
 
 func (suite *BaseSuite) TearDownTest() {
 	suite.T().Logf("Test ended at: %v", time.Now())
-	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient)
+	err := CleanUp(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient, suite.ClusterDetails)
 	suite.Require().Nil(err)
 }
 
 // EnsureDeletion will issue a delete for a namespace-scoped K8s resource, then wait for it to no longer exist
 func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) error {
-	err := kclient.Delete(ctx, obj, metav1.DeleteOptions{})
-	if errors.IsNotFound(err) {
-		// object is already deleted
-		return nil
-	} else if err != nil {
-		return err
-	}
-
 	// Wait for the object to be deleted  for 60 seconds
 	// - Primarily this will be waiting for the finalizer to be removed, so that the object is deleted
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
 	for count := 0; count < 60; count++ {
-		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
+		err := kclient.Delete(ctx, obj, metav1.DeleteOptions{})
+		if errors.IsNotFound(err) {
+			// object is already deleted
+			return nil
+		} else if err != nil {
+			return err
+		}
+
+		err = kclient.Get(ctx, key, obj, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return nil
 		} else if err == nil {
@@ -148,26 +150,13 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 	return fmt.Errorf("EnsureDeletion: timeout waiting for deletion of %s/%s", key.Namespace, key.Name)
 }
 
-func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient KubeClient, autonomousAgentClient KubeClient) error {
+func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient KubeClient, autonomousAgentClient KubeClient, clusterDetails *ClusterDetails) error {
 
 	var list argoapp.ApplicationList
 	var err error
 
 	// Remove any previously configured env variables from the config file
 	os.Remove(EnvVariablesFromE2EFile)
-
-	// Delete all managed applications from the principal
-	list = argoapp.ApplicationList{}
-	err = principalClient.List(ctx, "agent-managed", &list, metav1.ListOptions{})
-	if err != nil {
-		return err
-	}
-	for _, app := range list.Items {
-		err = EnsureDeletion(ctx, principalClient, &app)
-		if err != nil {
-			return err
-		}
-	}
 
 	// Delete all applications from the autonomous agent
 	list = argoapp.ApplicationList{}
@@ -177,6 +166,19 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 	}
 	for _, app := range list.Items {
 		err = EnsureDeletion(ctx, autonomousAgentClient, &app)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete all managed applications from the principal
+	list = argoapp.ApplicationList{}
+	err = principalClient.List(ctx, "agent-managed", &list, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, app := range list.Items {
+		err = EnsureDeletion(ctx, principalClient, &app)
 		if err != nil {
 			return err
 		}
@@ -208,24 +210,8 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		}
 	}
 
-	// Delete all appProjects from the principal
-	appProjectList := argoapp.AppProjectList{}
-	err = principalClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
-	if err != nil {
-		return err
-	}
-	for _, appProject := range appProjectList.Items {
-		if appProject.Name == appproject.DefaultAppProjectName {
-			continue
-		}
-		err = EnsureDeletion(ctx, principalClient, &appProject)
-		if err != nil {
-			return err
-		}
-	}
-
 	// Delete all appProjects from the autonomous agent
-	appProjectList = argoapp.AppProjectList{}
+	appProjectList := argoapp.AppProjectList{}
 	err = autonomousAgentClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
 	if err != nil {
 		return err
@@ -235,6 +221,22 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 			continue
 		}
 		err = EnsureDeletion(ctx, autonomousAgentClient, &appProject)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete all appProjects from the principal
+	appProjectList = argoapp.AppProjectList{}
+	err = principalClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, appProject := range appProjectList.Items {
+		if appProject.Name == appproject.DefaultAppProjectName {
+			continue
+		}
+		err = EnsureDeletion(ctx, principalClient, &appProject)
 		if err != nil {
 			return err
 		}
@@ -330,13 +332,13 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 
-	return resetManagedAgentClusterInfo()
+	return resetManagedAgentClusterInfo(clusterDetails)
 }
 
 // resetManagedAgentClusterInfo resets the cluster info in the redis cache for the managed agent
-func resetManagedAgentClusterInfo() error {
+func resetManagedAgentClusterInfo(clusterDetails *ClusterDetails) error {
 	// Reset cluster info in redis cache
-	if err := getCacheInstance(AgentManagedName).SetClusterInfo(AgentClusterServerURL, &argoapp.ClusterInfo{}); err != nil {
+	if err := getCacheInstance(AgentManagedName, clusterDetails).SetClusterInfo(AgentClusterServerURL, &argoapp.ClusterInfo{}); err != nil {
 		fmt.Println("resetManagedAgentClusterInfo: error", err)
 		return err
 	}

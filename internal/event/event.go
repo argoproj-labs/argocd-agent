@@ -278,6 +278,8 @@ type ResourceRequest struct {
 	Namespace string `json:"namespace,omitempty"`
 	// Name of the requested resource
 	Name string `json:"name"`
+	// Subresource of the requested resource (e.g., status, scale, log)
+	Subresource string `json:"subresource,omitempty"`
 	// HTTP method of the request
 	Method string `json:"method,omitempty"`
 	// Body for write requests e.g. POST, PATCH, etc.
@@ -388,12 +390,13 @@ func (evs EventSource) NewRedisResponseEvent(reqUUID string, connectionUUID stri
 //
 // The event's resource ID and event ID will be set to a randomly generated
 // UUID, because we'll have
-func (evs EventSource) NewResourceRequestEvent(gvr v1.GroupVersionResource, namespace, name, method string, body []byte, params map[string]string) (*cloudevents.Event, error) {
+func (evs EventSource) NewResourceRequestEvent(gvr v1.GroupVersionResource, namespace, name, subresource, method string, body []byte, params map[string]string) (*cloudevents.Event, error) {
 	reqUUID := uuid.NewString()
 	rr := &ResourceRequest{
 		UUID:                 reqUUID,
 		Namespace:            namespace,
 		Name:                 name,
+		Subresource:          subresource,
 		GroupVersionResource: gvr,
 		Method:               method,
 		Body:                 body,

@@ -1053,3 +1053,126 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildSubresourcePath(t *testing.T) {
+	agent := &Agent{}
+	
+	testCases := []struct {
+		name        string
+		gvr         schema.GroupVersionResource
+		resName     string
+		namespace   string
+		subresource string
+		expected    string
+	}{
+		{
+			name:        "Core API namespaced resource",
+			gvr:         schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			resName:     "my-pod",
+			namespace:   "default",
+			subresource: "status",
+			expected:    "/api/v1/namespaces/default/pods/my-pod/status",
+		},
+		{
+			name:        "Named group API namespaced resource",
+			gvr:         schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+			resName:     "my-deployment",
+			namespace:   "production",
+			subresource: "scale",
+			expected:    "/apis/apps/v1/namespaces/production/deployments/my-deployment/scale",
+		},
+		{
+			name:        "Core API cluster-scoped resource",
+			gvr:         schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
+			resName:     "node1",
+			namespace:   "",
+			subresource: "status",
+			expected:    "/api/v1/nodes/node1/status",
+		},
+		{
+			name:        "Named group API cluster-scoped resource",
+			gvr:         schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"},
+			resName:     "admin",
+			namespace:   "",
+			subresource: "status",
+			expected:    "/apis/rbac.authorization.k8s.io/v1/clusterroles/admin/status",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := agent.buildSubresourcePath(tc.gvr, tc.resName, tc.namespace, tc.subresource)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, path)
+		})
+	}
+}
+
+func TestBuildSubresourcePathValidation(t *testing.T) {
+	agent := &Agent{}
+	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+
+	testCases := []struct {
+		name        string
+		resName     string
+		namespace   string
+		subresource string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "Path traversal in subresource",
+			resName:     "valid-name",
+			namespace:   "default",
+			subresource: "../../etc/passwd",
+			expectError: true,
+			errorMsg:    "subresource contains invalid path traversal sequence",
+		},
+		{
+			name:        "Path separator in resource name",
+			resName:     "invalid/name",
+			namespace:   "default",
+			subresource: "status",
+			expectError: true,
+			errorMsg:    "resource name contains invalid path separator",
+		},
+		{
+			name:        "Path traversal in namespace",
+			resName:     "valid-name",
+			namespace:   "../system",
+			subresource: "status",
+			expectError: true,
+			errorMsg:    "namespace contains invalid path traversal sequence",
+		},
+		{
+			name:        "Empty resource name",
+			resName:     "",
+			namespace:   "default",
+			subresource: "status",
+			expectError: true,
+			errorMsg:    "resource name cannot be empty",
+		},
+		{
+			name:        "Empty subresource",
+			resName:     "valid-name",
+			namespace:   "default",
+			subresource: "",
+			expectError: true,
+			errorMsg:    "subresource cannot be empty",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := agent.buildSubresourcePath(gvr, tc.resName, tc.namespace, tc.subresource)
+			if tc.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errorMsg)
+				assert.Empty(t, path)
+			} else {
+				assert.NoError(t, err)
+				assert.NotEmpty(t, path)
+			}
+		})
+	}
+}

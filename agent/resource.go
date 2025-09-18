@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 )
 
 const ownerLookupRecursionLimit = 5
@@ -59,9 +61,13 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	var status error
 
 	// Extract required information from the resource request
-	gvr, name, namespace := rreqEventToGvk(rreq)
+	gvr, name, namespace, subresource := rreqEventToGvk(rreq)
 
-	logCtx.Infof("Processing resource request for resource of type %s named %s/%s", gvr.String(), namespace, name)
+	if subresource != "" {
+		logCtx.Infof("Processing resource request for subresource %s of resource %s named %s/%s", subresource, gvr.String(), namespace, name)
+	} else {
+		logCtx.Infof("Processing resource request for resource of type %s named %s/%s", gvr.String(), namespace, name)
+	}
 
 	switch rreq.Method {
 	case http.MethodGet:
@@ -70,8 +76,13 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 		// or a list of APIs instead.
 		if name != "" {
 			if gvr.Resource != "" {
-				logCtx.Debugf("Fetching managed resource %s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
-				unres, err = a.getManagedResource(ctx, gvr, name, namespace)
+				if subresource != "" {
+					logCtx.Debugf("Fetching subresource %s of managed resource %s/%s/%s", subresource, gvr.Group, gvr.Version, gvr.Resource)
+					unres, err = a.getManagedResourceSubresource(ctx, gvr, name, namespace, subresource)
+				} else {
+					logCtx.Debugf("Fetching managed resource %s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
+					unres, err = a.getManagedResource(ctx, gvr, name, namespace)
+				}
 			}
 		} else {
 			if gvr.Resource != "" {
@@ -82,9 +93,17 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 			}
 		}
 	case http.MethodPost:
-		unres, err = a.processIncomingPostResourceRequest(ctx, rreq, gvr)
+		if subresource != "" {
+			unres, err = a.processIncomingPostSubresourceRequest(ctx, rreq, gvr, subresource)
+		} else {
+			unres, err = a.processIncomingPostResourceRequest(ctx, rreq, gvr)
+		}
 	case http.MethodPatch:
-		unres, err = a.processIncomingPatchResourceRequest(ctx, rreq, gvr)
+		if subresource != "" {
+			unres, err = a.processIncomingPatchSubresourceRequest(ctx, rreq, gvr, subresource)
+		} else {
+			unres, err = a.processIncomingPatchResourceRequest(ctx, rreq, gvr)
+		}
 	case http.MethodDelete:
 		err = a.processIncomingDeleteResourceRequest(ctx, rreq, gvr)
 	default:
@@ -187,13 +206,100 @@ func (a *Agent) processIncomingDeleteResourceRequest(ctx context.Context, req *e
 
 // rreqEventToGvk returns a GroupVersionResource object, name and namespace for
 // the resource requested in rreq.
-func rreqEventToGvk(rreq *event.ResourceRequest) (gvr schema.GroupVersionResource, name string, namespace string) {
+func rreqEventToGvk(rreq *event.ResourceRequest) (gvr schema.GroupVersionResource, name string, namespace string, subresource string) {
 	gvr.Group = rreq.Group
 	gvr.Resource = rreq.Resource
 	gvr.Version = rreq.Version
 	name = rreq.Name
 	namespace = rreq.Namespace
+	subresource = rreq.Subresource
 	return
+}
+
+// validatePathComponent checks for path traversal attempts in URL components
+func validatePathComponent(component, componentName string) error {
+	if component == "" {
+		return fmt.Errorf("%s cannot be empty", componentName)
+	}
+	if strings.Contains(component, "..") {
+		return fmt.Errorf("%s contains invalid path traversal sequence: %s", componentName, component)
+	}
+	if strings.Contains(component, "/") {
+		return fmt.Errorf("%s contains invalid path separator: %s", componentName, component)
+	}
+	return nil
+}
+
+// buildSubresourcePath constructs the API path for a subresource
+func (a *Agent) buildSubresourcePath(gvr schema.GroupVersionResource, name, namespace, subresource string) (string, error) {
+	// Validate all path components to prevent path traversal attacks
+	if err := validatePathComponent(name, "resource name"); err != nil {
+		return "", err
+	}
+	if err := validatePathComponent(subresource, "subresource"); err != nil {
+		return "", err
+	}
+	if namespace != "" {
+		if err := validatePathComponent(namespace, "namespace"); err != nil {
+			return "", err
+		}
+	}
+
+	if namespace != "" {
+		if gvr.Group == "" {
+			// Core API: /api/v1/namespaces/{namespace}/{resource}/{name}/{subresource}
+			return fmt.Sprintf("/api/%s/namespaces/%s/%s/%s/%s", gvr.Version, namespace, gvr.Resource, name, subresource), nil
+		}
+		// Named group API: /apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}/{subresource}
+		return fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s/%s", gvr.Group, gvr.Version, namespace, gvr.Resource, name, subresource), nil
+	}
+
+	if gvr.Group == "" {
+		// Core API cluster-scoped: /api/v1/{resource}/{name}/{subresource}
+		return fmt.Sprintf("/api/%s/%s/%s/%s", gvr.Version, gvr.Resource, name, subresource), nil
+	}
+	// Named group API cluster-scoped: /apis/{group}/{version}/{resource}/{name}/{subresource}
+	return fmt.Sprintf("/apis/%s/%s/%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource, name, subresource), nil
+}
+
+// executeSubresourceRequest executes a REST request and unmarshals the response
+func (a *Agent) executeSubresourceRequest(ctx context.Context, req *rest.Request, subresource string) (*unstructured.Unstructured, error) {
+	bytes, err := req.DoRaw(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &unstructured.Unstructured{}
+	if err := json.Unmarshal(bytes, &result.Object); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal subresource response: %w", err)
+	}
+
+	return result, nil
+}
+
+// getManagedResourceSubresource retrieves a subresource of a single resource from the cluster
+// and returns it as unstructured data. The resource to be returned must be managed by Argo CD.
+func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.GroupVersionResource, name, namespace, subresource string) (*unstructured.Unstructured, error) {
+	// First check if the parent resource is managed
+	_, err := a.getManagedResource(ctx, gvr, name, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build the path and execute the request
+	path, err := a.buildSubresourcePath(gvr, name, namespace, subresource)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subresource path: %w", err)
+	}
+	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
+	req := restClient.Get().AbsPath(path)
+
+	result, err := a.executeSubresourceRequest(ctx, req, subresource)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subresource %s: %w", subresource, err)
+	}
+
+	return result, nil
 }
 
 // getManagedResource retrieves a single resource from the cluster
@@ -378,4 +484,63 @@ func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructur
 	// If we reach this point, we are certain that neither the inspected
 	// resource nor any of its owners belong to an Argo CD application.
 	return false, nil
+}
+
+// processIncomingPostSubresourceRequest handles POST requests for subresources
+func (a *Agent) processIncomingPostSubresourceRequest(ctx context.Context, rreq *event.ResourceRequest, gvr schema.GroupVersionResource, subresource string) (*unstructured.Unstructured, error) {
+	// First check if the parent resource is managed
+	_, err := a.getManagedResource(ctx, gvr, rreq.Name, rreq.Namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build the path and execute the request
+	path, err := a.buildSubresourcePath(gvr, rreq.Name, rreq.Namespace, subresource)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subresource path: %w", err)
+	}
+	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
+	req := restClient.Post().AbsPath(path).Body(rreq.Body)
+
+	result, err := a.executeSubresourceRequest(ctx, req, subresource)
+	if err != nil {
+		return nil, fmt.Errorf("failed to post to subresource %s: %w", subresource, err)
+	}
+
+	return result, nil
+}
+
+// processIncomingPatchSubresourceRequest handles PATCH requests for subresources
+func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, rreq *event.ResourceRequest, gvr schema.GroupVersionResource, subresource string) (*unstructured.Unstructured, error) {
+	// First check if the parent resource is managed
+	_, err := a.getManagedResource(ctx, gvr, rreq.Name, rreq.Namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	// Determine patch type from content-type header if available
+	patchType := k8stypes.MergePatchType
+	if rreq.Params != nil && rreq.Params["content-type"] != "" {
+		switch rreq.Params["content-type"] {
+		case "application/json-patch+json":
+			patchType = k8stypes.JSONPatchType
+		case "application/strategic-merge-patch+json":
+			patchType = k8stypes.StrategicMergePatchType
+		}
+	}
+
+	// Build the path and execute the request
+	path, err := a.buildSubresourcePath(gvr, rreq.Name, rreq.Namespace, subresource)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subresource path: %w", err)
+	}
+	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
+	req := restClient.Patch(patchType).AbsPath(path).Body(rreq.Body)
+
+	result, err := a.executeSubresourceRequest(ctx, req, subresource)
+	if err != nil {
+		return nil, fmt.Errorf("failed to patch subresource %s: %w", subresource, err)
+	}
+
+	return result, nil
 }

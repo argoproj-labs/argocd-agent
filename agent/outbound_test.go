@@ -20,7 +20,7 @@ import (
 )
 
 func Test_addAppCreationToQueue(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
@@ -86,7 +86,7 @@ func Test_addAppCreationToQueue(t *testing.T) {
 }
 
 func Test_addAppUpdateToQueue(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
@@ -126,7 +126,7 @@ func Test_addAppUpdateToQueue(t *testing.T) {
 }
 
 func Test_addAppDeletionToQueue(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
@@ -153,7 +153,7 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 		require.False(t, a.appManager.IsManaged("agent/guestbook"))
 	})
 	t.Run("Deletion event for unmanaged application", func(t *testing.T) {
-		a := newAgent(t)
+		a, _ := newAgent(t)
 		a.remote.SetClientID("agent")
 		a.mode = types.AgentModeAutonomous
 
@@ -167,7 +167,7 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 }
 
 func Test_deleteNamespaceCallback(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 	err := a.queues.Create("agent")
@@ -188,7 +188,7 @@ func Test_deleteNamespaceCallback(t *testing.T) {
 }
 
 func Test_addAppProjectCreationToQueue(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
@@ -255,7 +255,7 @@ func Test_addAppProjectCreationToQueue(t *testing.T) {
 }
 
 func Test_addAppProjectUpdateToQueue(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
@@ -337,7 +337,7 @@ func Test_addAppProjectUpdateToQueue(t *testing.T) {
 }
 
 func Test_addAppProjectDeletionToQueue(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
@@ -422,7 +422,7 @@ func Test_addClusterCacheInfoUpdateToQueue(t *testing.T) {
 }
 
 func Test_handleRepositoryCreation(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
@@ -493,7 +493,7 @@ func Test_handleRepositoryCreation(t *testing.T) {
 }
 
 func Test_handleRepositoryUpdate(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
@@ -577,7 +577,7 @@ func Test_handleRepositoryUpdate(t *testing.T) {
 }
 
 func Test_handleRepositoryDeletion(t *testing.T) {
-	a := newAgent(t)
+	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
