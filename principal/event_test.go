@@ -128,6 +128,7 @@ func Test_CreateEvents(t *testing.T) {
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil))
+		s.Start(context.Background(), make(chan error))
 		s.clusterMgr.MapCluster("argocd", &v1alpha1.Cluster{Name: "argocd", Server: "https://argocd.com"})
 		require.NoError(t, err)
 		s.setAgentMode("argocd", types.AgentModeAutonomous)
@@ -247,6 +248,7 @@ func Test_CreateEvents(t *testing.T) {
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		s.Start(context.Background(), make(chan error))
 		require.NoError(t, err)
 		s.clusterMgr.MapCluster("foo", &v1alpha1.Cluster{Name: "foo", Server: "https://foo.com"})
 		s.setAgentMode("foo", types.AgentModeAutonomous)
@@ -327,6 +329,7 @@ func Test_UpdateEvents(t *testing.T) {
 		wq.On("Done", &ev)
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
 		require.NoError(t, err)
+		s.Start(context.Background(), make(chan error))
 		s.setAgentMode("foo", types.AgentModeAutonomous)
 		s.clusterMgr.MapCluster("foo", &v1alpha1.Cluster{Name: "foo", Server: "https://foo.com"})
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
@@ -446,6 +449,7 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 			wq.On("Done", &ev)
 			s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
 			require.NoError(t, err)
+
 			s.setAgentMode("foo", types.AgentModeManaged)
 
 			_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Create(context.Background(), delApp, v1.CreateOptions{})
