@@ -626,9 +626,9 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 	sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
 	if exists && m.mode == manager.ManagerModeManaged {
 		if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID), logCtx); ok {
-			logCtx.Debugf("Application: %s is available in agent cache", app.Name)
+			logCtx.Debugf("Application %s is available in agent cache", app.Name)
 
-			if diff := reflect.DeepEqual(cachedAppSpec, app.Spec); !diff {
+			if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
 				app.Spec = cachedAppSpec
 				logCtx.Infof("Reverting modifications done in application: %s", app.Name)
 				if _, err := m.UpdateManagedApp(ctx, app); err != nil {
@@ -638,7 +638,7 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 				return true
 			}
 		} else {
-			logCtx.Debugf("Application: %s is not available in agent cache", app.Name)
+			logCtx.Errorf("Application %s is not available in agent cache", app.Name)
 		}
 	}
 	return false
@@ -659,9 +659,9 @@ func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app
 	}
 
 	if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID), logCtx); ok {
-		logCtx.Debugf("Application: %s is available in agent cache", app.Name)
+		logCtx.Debugf("Application %s is available in agent cache", app.Name)
 
-		if diff := reflect.DeepEqual(cachedAppSpec, app.Spec); !diff {
+		if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
 			app.Spec = cachedAppSpec
 			logCtx.Infof("Reverting modifications to the application: %s", app.Name)
 			if _, err := m.UpdateAutonomousApp(ctx, app.Namespace, app); err != nil {
@@ -671,7 +671,7 @@ func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app
 			return true
 		}
 	} else {
-		logCtx.Debugf("Application: %s is not available in agent cache", app.Name)
+		logCtx.Errorf("Application %s is not available in agent cache", app.Name)
 	}
 
 	return false
