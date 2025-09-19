@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
+	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
@@ -37,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 func TestMapAppProjectToAgents(t *testing.T) {
@@ -1181,4 +1183,209 @@ func TestServer_ExpectedDeletionTracking(t *testing.T) {
 
 	// Should be cleaned up after check
 	assert.False(t, s.isExpectedDeletion(appKey))
+}
+
+func TestServer_updateAppCallback(t *testing.T) {
+	t.Run("managed agent update sends event to queue", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
+			appManager:   appManager,
+		}
+
+		err = s.queues.Create("managed-agent")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-app", Namespace: "managed-agent", ResourceVersion: "1"},
+		}
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-app", Namespace: "managed-agent", ResourceVersion: "2"},
+		}
+
+		s.updateAppCallback(oldApp, newApp)
+
+		sendQ := s.queues.SendQ("managed-agent")
+		assert.Equal(t, 1, sendQ.Len())
+
+		if sendQ.Len() > 0 {
+			ev, _ := sendQ.Get()
+			assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+			sendQ.Done(ev)
+		}
+	})
+
+	t.Run("resource version already marked as ignored", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
+			appManager:   appManager,
+		}
+
+		err = s.queues.Create("managed-agent")
+		require.NoError(t, err)
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-app", Namespace: "managed-agent", ResourceVersion: "1"},
+		}
+
+		err = s.appManager.IgnoreChange("managed-agent/test-app", "1")
+		require.NoError(t, err)
+
+		s.updateAppCallback(app, app)
+		sendQ := s.queues.SendQ("managed-agent")
+		assert.Equal(t, 0, sendQ.Len(), "Call with ignored version should not queue events")
+	})
+
+	t.Run("autonomous agent without cache entry processes normally", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
+			appManager:   appManager,
+		}
+
+		err = s.queues.Create("autonomous-agent")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
+				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+			},
+		}
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
+				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+			},
+		}
+
+		s.updateAppCallback(oldApp, newApp)
+
+		sendQ := s.queues.SendQ("autonomous-agent")
+		assert.Equal(t, 1, sendQ.Len())
+	})
+
+	t.Run("updates to autonomous apps are reverted", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd", application.WithRole(manager.ManagerRolePrincipal))
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
+			appManager:   appManager,
+		}
+
+		err = s.queues.Create("autonomous-agent")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
+				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
+				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "random-project",
+			},
+		}
+
+		sourceUID := k8stypes.UID(oldApp.Annotations[manager.SourceUIDAnnotation])
+		cache.SetApplicationSpec(sourceUID, oldApp.Spec, log())
+		defer cache.DeleteApplicationSpec(sourceUID, log())
+
+		mockBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
+		mockBackend.On("SupportsPatch").Return(true)
+		mockBackend.On("Patch", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
+
+		s.updateAppCallback(oldApp, newApp)
+
+		sendQ := s.queues.SendQ("autonomous-agent")
+		assert.Equal(t, 0, sendQ.Len())
+	})
+
+	t.Run("autonomous agent finalizer removal during deletion", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
+			appManager:   appManager,
+		}
+
+		err = s.queues.Create("autonomous-agent")
+		require.NoError(t, err)
+
+		deletionTime := metav1.Now()
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
+				Annotations:       map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+				DeletionTimestamp: &deletionTime,
+				Finalizers:        []string{"resources-finalizer.argocd.argoproj.io"},
+			},
+		}
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
+				Annotations:       map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+				DeletionTimestamp: &deletionTime,
+				Finalizers:        []string{"resources-finalizer.argocd.argoproj.io"},
+			},
+		}
+
+		appWithoutFinalizers := newApp.DeepCopy()
+		appWithoutFinalizers.Finalizers = nil
+
+		got := &v1alpha1.Application{}
+		mockBackend.On("Get", mock.Anything, "test-app", "autonomous-agent").Return(newApp, nil)
+		mockBackend.On("SupportsPatch").Return(false)
+		mockBackend.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			got = args.Get(1).(*v1alpha1.Application)
+		}).Return(appWithoutFinalizers, nil)
+
+		s.updateAppCallback(oldApp, newApp)
+
+		assert.Equal(t, appWithoutFinalizers, got)
+		sendQ := s.queues.SendQ("autonomous-agent")
+		assert.Equal(t, 1, sendQ.Len())
+	})
 }

@@ -74,8 +74,19 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		"application_name": old.Name,
 	})
 
-	// Revert modifications on autonomous agent applications
 	if isResourceFromAutonomousAgent(new) {
+		// Remove finalizers from autonomous agent applications if it is being deleted
+		if new.DeletionTimestamp != nil && len(new.Finalizers) > 0 {
+			updated, err := s.appManager.RemoveFinalizers(s.ctx, new)
+			if err != nil {
+				logCtx.WithError(err).Error("Failed to remove finalizers from autonomous application")
+			} else {
+				logCtx.Debug("Removed finalizers from autonomous application to allow deletion")
+				new = updated
+			}
+		}
+
+		// Revert modifications on autonomous agent applications
 		if s.appManager.RevertAutonomousAppChanges(s.ctx, new) {
 			logCtx.Trace("Modifications to the application are reverted")
 			return
