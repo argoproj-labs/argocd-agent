@@ -645,7 +645,7 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 }
 
 // RevertAutonomousAppChanges compares the actual spec with expected spec stored in cache,
-// if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as principal.
+// if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as agent cluster.
 func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app *v1alpha1.Application) bool {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "RevertAutonomousAppChanges",
