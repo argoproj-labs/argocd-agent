@@ -178,6 +178,86 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterOfflineChanges() {
 	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 }
 
+// This test validates the scenario when a user creates an application in autonomous-agent and it is synced to the control-plane.
+// Now if user tries to directly change the application on the control-plane, then principal should revert those changes.
+func (suite *CacheTestSuite) Test_RevertAutonomousAppChanges() {
+	requires := suite.Require()
+
+	// Create an autonomous app on the workload cluster and ensure it is synced to the control-plane
+	app := createAutonomousApp(suite.Ctx, suite.AutonomousAgentClient, requires)
+
+	agentKey := fixture.ToNamespacedName(&app)
+	principalKey := types.NamespacedName{Name: app.Name, Namespace: "agent-autonomous"}
+
+	principalApp := argoapp.Application{}
+	requires.Eventually(func() bool {
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalApp, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+
+	// Case 1: Modify the application directly on the control-plane and the changes
+	// should be reverted to be in sync with the autonomous agent.
+
+	suite.PrincipalClient.EnsureApplicationUpdate(suite.Ctx, principalKey, func(app *argoapp.Application) error {
+		app.Spec.Info = []argoapp.Info{{Name: "a", Value: "b"}}
+		return nil
+	}, metav1.UpdateOptions{})
+
+	requires.Eventually(func() bool {
+		principalApp = argoapp.Application{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalApp, metav1.GetOptions{})
+		return err == nil && len(principalApp.Spec.Info) == 0
+	}, 30*time.Second, 1*time.Second)
+
+	// Case 2:  Modify the application on the workload cluster and
+	// ensure new updates are propagated to the control-plane.
+	updateAppInfo(suite.Ctx, suite.AutonomousAgentClient, agentKey, []string{"a", "b"}, requires)
+	validateAppInfoUpdated(suite.Ctx, suite.PrincipalClient, principalKey, []string{"a", "b"}, requires)
+
+	// Case 3: Again modify the application directly on the control-plane,
+	// but this time application is reverted to state of Case 2.
+	updateAppInfo(suite.Ctx, suite.PrincipalClient, principalKey, []string{"x", "y"}, requires)
+	requires.NoError(suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{}))
+
+	requires.Eventually(func() bool {
+		principalApp = argoapp.Application{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalApp, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		return len(principalApp.Spec.Info) == 1 && principalApp.Spec.Info[0].Name == "a" && principalApp.Spec.Info[0].Value == "b"
+	}, 30*time.Second, 1*time.Second)
+}
+
+// This test validates the scenario when a user creates an application in autonomous-agent and it is synced to the control-plane.
+// Now if user tries to delete the application on the control-plane, then principal should recreate it immediately.
+func (suite *CacheTestSuite) Test_RevertAutonomousAppDeletion() {
+	requires := suite.Require()
+
+	// Create an autonomous app on the workload cluster and ensure it is synced to the control-plane
+	app := createAutonomousApp(suite.Ctx, suite.AutonomousAgentClient, requires)
+
+	principalKey := types.NamespacedName{Name: app.Name, Namespace: "agent-autonomous"}
+
+	principalApp := argoapp.Application{}
+	requires.Eventually(func() bool {
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalApp, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the application directly on the control-plane and the application
+	// should be recreated to be in sync with the autonomous agent.
+
+	err := suite.PrincipalClient.Delete(suite.Ctx, &principalApp, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		principalApp = argoapp.Application{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalApp, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+}
+
 func createApp(ctx context.Context, client fixture.KubeClient, requires *require.Assertions, opts ...struct{ Name, Namespace string }) argoapp.Application {
 	// If opts are provided, use them, otherwise use default values
 	name := "guestbook"
@@ -202,6 +282,34 @@ func createApp(ctx context.Context, client fixture.KubeClient, requires *require
 			Destination: argoapp.ApplicationDestination{
 				Server:    fixture.AgentClusterServerURL,
 				Namespace: namespace,
+			},
+			SyncPolicy: &argoapp.SyncPolicy{
+				SyncOptions: argoapp.SyncOptions{
+					"CreateNamespace=true",
+				},
+			},
+		},
+	}
+	requires.NoError(client.Create(ctx, &app, metav1.CreateOptions{}))
+	return app
+}
+
+func createAutonomousApp(ctx context.Context, client fixture.KubeClient, requires *require.Assertions) argoapp.Application {
+	app := argoapp.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "guestbook",
+			Namespace: "argocd",
+		},
+		Spec: argoapp.ApplicationSpec{
+			Project: "default",
+			Source: &argoapp.ApplicationSource{
+				RepoURL:        "https://github.com/argoproj/argocd-example-apps",
+				TargetRevision: "HEAD",
+				Path:           "kustomize-guestbook",
+			},
+			Destination: argoapp.ApplicationDestination{
+				Server:    fixture.AgentClusterServerURL,
+				Namespace: "guestbook",
 			},
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
@@ -178,6 +179,8 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return event.ErrEventDiscarded
 		}
 
+		cache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+
 		incoming.SetNamespace(agentName)
 		_, err := s.appManager.Create(ctx, incoming)
 		if err != nil {
@@ -198,6 +201,8 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return event.NewEventNotAllowedErr("event type not allowed when mode is not autonomous")
 		}
 
+		cache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+
 		_, err := s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
 		if err != nil {
 			return fmt.Errorf("could not update application spec for %s: %w", incoming.QualifiedName(), err)
@@ -210,6 +215,8 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
 		}
 
+		cache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+
 		_, err := s.appManager.UpdateStatus(ctx, agentName, incoming)
 		if err != nil {
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
@@ -218,6 +225,12 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	// App deletion
 	case event.Delete.String():
 		if agentMode.IsAutonomous() {
+
+			cache.DeleteApplicationSpec(incoming.UID, logCtx)
+
+			// Mark this deletion as expected and perform the deletion
+			appKey := fmt.Sprintf("%s/%s", agentName, incoming.Name)
+			s.markExpectedDeletion(appKey)
 
 			deletionPropagation := backend.DeletePropagationForeground
 			err = s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
