@@ -396,7 +396,7 @@ func Test_addClusterCacheInfoUpdateToQueue(t *testing.T) {
 	a.emitter = event.NewEventSource("principal")
 
 	// First populate the cache with dummy data
-	clusterMgr, err := cluster.NewManager(a.context, a.namespace, miniRedis.Addr(), cacheutil.RedisCompressionGZip, a.kubeClient.Clientset)
+	clusterMgr, err := cluster.NewManager(a.context, a.namespace, miniRedis.Addr(), "", cacheutil.RedisCompressionGZip, a.kubeClient.Clientset)
 	require.NoError(t, err)
 	err = clusterMgr.MapCluster("test-agent", &v1alpha1.Cluster{
 		Name:   "test-cluster",

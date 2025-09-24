@@ -63,25 +63,21 @@ type Manager struct {
 	// manager
 	filters *filter.Chain[*v1.Secret]
 
-	redisAddress         string
-	redisCompressionType cacheutil.RedisCompressionType
-	clusterCache         *appstatecache.Cache
+	clusterCache *appstatecache.Cache
 }
 
 // NewManager instantiates and initializes a new Manager.
-func NewManager(ctx context.Context, namespace, redisAddress string, redisCompressionType cacheutil.RedisCompressionType, kubeclient kubernetes.Interface) (*Manager, error) {
+func NewManager(ctx context.Context, namespace, redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType, kubeclient kubernetes.Interface) (*Manager, error) {
 	var err error
 	m := &Manager{
-		clusters:             make(map[string]*v1alpha1.Cluster),
-		namespace:            namespace,
-		kubeclient:           kubeclient,
-		ctx:                  ctx,
-		filters:              filter.NewFilterChain[*v1.Secret](),
-		redisAddress:         redisAddress,
-		redisCompressionType: redisCompressionType,
+		clusters:   make(map[string]*v1alpha1.Cluster),
+		namespace:  namespace,
+		kubeclient: kubeclient,
+		ctx:        ctx,
+		filters:    filter.NewFilterChain[*v1.Secret](),
 	}
 
-	m.clusterCache, err = NewClusterCacheInstance(ctx, kubeclient, namespace, redisAddress, redisCompressionType)
+	m.clusterCache, err = NewClusterCacheInstance(redisAddress, redisPassword, redisCompressionType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
 	}

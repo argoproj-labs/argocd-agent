@@ -15,7 +15,6 @@
 package cluster
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -24,12 +23,10 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 
-	"github.com/argoproj/argo-cd/v3/common"
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 )
 
 // SetAgentConnectionStatus updates cluster info with connection state and time in mapped cluster at principal.
@@ -167,14 +164,9 @@ func (m *Manager) setClusterInfo(clusterServer, agentName, clusterName string, c
 }
 
 // NewClusterCacheInstance creates a new cache instance with Redis connection
-func NewClusterCacheInstance(ctx context.Context, kubeclient kubernetes.Interface,
-	namespace, redisAddress string, redisCompressionType cacheutil.RedisCompressionType) (*appstatecache.Cache, error) {
-	redisOptions := &redis.Options{Addr: redisAddress}
+func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType) (*appstatecache.Cache, error) {
 
-	if err := common.SetOptionalRedisPasswordFromKubeConfig(ctx, kubeclient, namespace, redisOptions); err != nil {
-		return nil, fmt.Errorf("failed to set redis password for namespace %s: %v", namespace, err)
-	}
-
+	redisOptions := &redis.Options{Addr: redisAddress, Password: redisPassword}
 	redisClient := redis.NewClient(redisOptions)
 
 	clusterCache := appstatecache.NewCache(cacheutil.NewCache(
