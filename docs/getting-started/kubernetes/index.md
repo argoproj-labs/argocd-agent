@@ -273,15 +273,17 @@ argocd-agentctl pki issue agent my-first-agent \
   --upsert
 ```
 
-### 5.3 Create Agent Namespace on Principal
-
-For managed agents, create a namespace on the principal where the agent's Applications will be created and managed:
+### 5.3 Propagate Certificate Authority to Agent
 
 ```bash
-kubectl create namespace my-first-agent --context <control-plane-context>
+argocd-agentctl pki propagate \
+  --principal-context <control-plane-context> \
+  --principal-namespace argocd \
+  --agent-context <workload-cluster-context> \
+  --agent-namespace argocd
 ```
 
-### 5.3 Verify Certificate Installation
+### 5.4 Verify Certificate Installation
 
 The agent client certificate should already be installed from step 5.2. Verify it exists:
 
@@ -293,7 +295,15 @@ kubectl get secret argocd-agent-client-tls -n argocd --context <workload-cluster
 kubectl get secret argocd-agent-ca -n argocd --context <workload-cluster-context>
 ```
 
-### 5.4 Deploy Agent
+### 5.5 Create Agent Namespace on Principal
+
+For managed agents, create a namespace on the principal where the agent's Applications will be created and managed:
+
+```bash
+kubectl create namespace my-first-agent --context <control-plane-context>
+```
+
+### 5.6 Deploy Agent
 
 Replace <release-branch> with the version of the release you wish to use:
 
@@ -303,7 +313,7 @@ kubectl apply -n argocd \
   --context <workload-cluster-context>
 ```
 
-### 5.5 Configure Agent Connection
+### 5.7 Configure Agent Connection
 
 Update the agent configuration to connect to your principal using mTLS authentication:
 
@@ -353,9 +363,24 @@ argocd-agentctl agent list \
   --principal-namespace argocd
 ```
 
-### 6.4 Test Application Synchronization
+### 6.4 Test Application Synchronization (Managed Mode)
 
-Create a test application on the principal (managed mode):
+Propagate a default AppProject from principal to the agent:
+
+```bash
+kubectl patch appproject default -n argocd \
+  --context <control-plane-context> --type='merge' \
+  --patch='{"spec":{"sourceNamespaces":["*"],"destinations":[{"name":"*","namespace":"*","server":"*"}]}}'
+```
+
+Verify the AppProject is synchronized to the agent:
+
+```bash
+# Check that the AppProject appears on the workload cluster
+kubectl get appprojs -n argocd --context <workload-cluster-context>
+```
+
+Create a test application on the principal:
 
 ```bash
 cat <<EOF | kubectl apply -f - --context <control-plane-context>
@@ -371,7 +396,7 @@ spec:
     targetRevision: HEAD
     path: guestbook
   destination:
-    server: https://kubernetes.default.svc
+    server: https://<principal-external-ip:port>?agentName=my-first-agent # For example, https://172.18.255.200:443?agentName=my-first-agent
     namespace: guestbook
   syncPolicy:
     syncOptions:
@@ -461,6 +486,23 @@ argocd-agentctl pki issue agent my-first-agent \
 # Check certificate validity
 kubectl get secret argocd-agent-client-tls -n argocd --context <workload-cluster-context> \
   -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
+```
+
+**Missing Server Secretkey**:
+```bash
+# The application status contains:
+status:
+  conditions:
+  - lastTransitionTime: "2025-09-22T16:20:56Z"
+    message: 'error getting cluster by name "in-cluster": server.secretkey is missing'
+    type: InvalidSpecError
+```
+
+```bash
+# Create a random server.secretkey
+kubectl patch secret argocd-secret -n argocd \
+  --context <workload-cluster-context> \
+  --patch='{"data":{"server.secretkey":"'$(openssl rand -base64 32 | base64 -w 0)'"}}'
 ```
 
 ## Related Documentation

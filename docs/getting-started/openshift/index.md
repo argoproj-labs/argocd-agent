@@ -51,6 +51,14 @@ argocd-agentctl pki issue resource-proxy \
     --dns <dns names of principal>
 ```
 
+Create JWT signing key:
+
+```
+argocd-agentctl jwt create-key \
+    --principal-context <control plane context> \
+    --upsert
+```
+
 Deploy principal on hub cluster using argocd-operator/gitops-operator using Argo CD CR given below
 
 ```
@@ -66,7 +74,6 @@ spec:
       enabled: true
       allowedNamespaces:
         - "*"
-      jwtAllowGenerate: true
       auth: "mtls:CN=([^,]+)"
       logLevel: "trace"
       image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent:latest"
