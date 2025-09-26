@@ -568,6 +568,8 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		return nil, event.NewEventDiscardedErr("cannot create appproject: agent is not in managed mode")
 	}
 
+	incoming.SetNamespace(a.namespace)
+
 	// If we receive a new AppProject event for an AppProject we already manage, it usually
 	// means that we're out-of-sync from the control plane.
 	if a.projectManager.IsManaged(incoming.Name) {
@@ -597,6 +599,8 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
+	incoming.SetNamespace(a.namespace)
+
 	if !a.projectManager.IsManaged(incoming.Name) {
 		logCtx.Trace("AppProject is not managed on this agent. Creating the new AppProject")
 		return a.createAppProject(incoming)
@@ -621,6 +625,8 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 		"method":     "DeleteAppProject",
 		"appProject": project.Name,
 	})
+
+	project.SetNamespace(a.namespace)
 
 	// If we receive an update appproject event for an AppProject we don't know about yet it
 	// means that we're out-of-sync from the control plane.
@@ -654,6 +660,8 @@ func (a *Agent) createRepository(incoming *corev1.Secret) (*corev1.Secret, error
 		"method": "CreateRepository",
 		"repo":   incoming.Name,
 	})
+
+	incoming.SetNamespace(a.namespace)
 
 	// In modes other than "managed", we don't process new repository events
 	// that are incoming.
@@ -694,6 +702,8 @@ func (a *Agent) updateRepository(incoming *corev1.Secret) (*corev1.Secret, error
 		"repo":            incoming.Name,
 		"resourceVersion": incoming.ResourceVersion,
 	})
+
+	incoming.SetNamespace(a.namespace)
 
 	if !a.repoManager.IsManaged(incoming.Name) {
 		logCtx.Trace("Repository is not managed on this agent. Creating the new Repository")
