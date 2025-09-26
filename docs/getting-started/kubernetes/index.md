@@ -177,6 +177,19 @@ kubectl get configmap argocd-agent-params -n argocd --context <control-plane-con
 # Should output: mtls:CN=([^,]+)
 ```
 
+Update principal configuration:
+
+```bash
+# Allow principal to operate in agent's namespace
+kubectl patch configmap argocd-agent-params -n argocd --context <control-plane-context> \
+  --patch "{\"data\":{
+    \"principal.allowed-namespaces\":\"my-first-agent\"
+  }}"
+
+# Restart the principal to apply changes
+kubectl rollout restart deployment argocd-agent-principal -n argocd --context <control-plane-context>
+```
+
 ### 3.2 Expose Principal Service
 
 The principal's gRPC service needs to be accessible from workload clusters:
