@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package logstreamapi;
+
+option go_package = "github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi";
+
+// LogStreamData represents a line (or chunk) of log data sent from the agent
+message LogStreamData {
+  // Unique identifier matching the original request/event UUID
+  string request_uuid = 1;
+  // Log data content. Recommended to be a single line including trailing newline
+  string data = 2;
+  // End of stream indicator
+  bool eof = 3;
+  // Optional error message
+  string error = 4;
+}
+
+// LogStreamResponse is returned by principal when the agent closes the stream
+message LogStreamResponse {
+  string request_uuid = 1;
+  int32 status = 2; // 200 on success
+  string error = 3;
+  int32 lines_received = 4;
+}
+
+service LogStreamService {
+  // Agent establishes a client-streaming RPC and sends log data to principal
+  rpc StreamLogs(stream LogStreamData) returns (LogStreamResponse);
+}
+
+
