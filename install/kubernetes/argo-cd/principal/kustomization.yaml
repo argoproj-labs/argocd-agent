@@ -94,3 +94,15 @@ patches:
     kind: ClusterRoleBinding
     metadata:
       name: argocd-applicationset-controller
+- target:
+    group: rbac.authorization.k8s.io
+    version: v1
+    kind: ClusterRole
+    name: argocd-server
+  patch: |-
+    - op: add
+      path: /rules/-
+      value:
+        apiGroups: ["argoproj.io"]
+        resources: ["applications"]
+        verbs: ["update"]
