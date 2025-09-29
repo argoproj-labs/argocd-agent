@@ -106,6 +106,12 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 		return unauthenticated()
 	}
 
+	// Reject agents that use the same name as the Argo CD installation namespace
+	if agentInfo.ClientID == s.namespace {
+		logCtx.Warnf("Agent name '%s' is not allowed as it matches the Argo CD installation namespace. Please use a different agent name.", agentInfo.ClientID)
+		return unauthenticated()
+	}
+
 	// If we require client certificates, we enforce any potential rules for
 	// the certificate here, instead of at time the connection is made.
 	if s.options.requireClientCerts {
