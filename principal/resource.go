@@ -119,13 +119,23 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 	var sentEv *cloudevents.Event
 	if requestedSubresource == "log" {
 		if requestedNamespace == "" || requestedName == "" {
-			logCtx.Error("Missing required parameters: namespace and pod are required")
+			logCtx.WithFields(logrus.Fields{
+				"namespace": requestedNamespace,
+				"pod":       requestedName,
+				"params":    reqParams,
+				"agent":     agentName,
+			}).Error("Missing required parameters: namespace and pod are required")
 			http.Error(w, "Missing required parameters: namespace and pod", http.StatusBadRequest)
 			return
 		}
 		sentEv, err = s.events.NewLogRequestEvent(requestedNamespace, requestedName, r.Method, reqParams)
 		if err != nil {
-			logCtx.Errorf("Could not create container log event: %v", err)
+			logCtx.WithFields(logrus.Fields{
+				"namespace": requestedNamespace,
+				"pod":       requestedName,
+				"params":    reqParams,
+				"agent":     agentName,
+			}).Errorf("Could not create container log event: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
