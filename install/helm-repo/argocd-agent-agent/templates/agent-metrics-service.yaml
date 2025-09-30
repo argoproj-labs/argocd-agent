@@ -7,11 +7,15 @@ metadata:
       app.kubernetes.io/component: agent
   name: argocd-agent-agent-metrics
   namespace: {{ include  "argocd-agent-agent.namespace" . }}
+  {{- with .Values.service.metrics.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
 spec:
   ports:
     - name: metrics
       protocol: TCP
-      port: 8181
-      targetPort: 8181
+      port: {{ .Values.service.metrics.port }}
+      targetPort: {{ .Values.service.metrics.targetPort }}
   selector:
     app.kubernetes.io/name: argocd-agent-agent

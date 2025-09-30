@@ -1,7 +1,8 @@
+{{- if .Values.tests.enabled }}
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "test"
+  name: "test-configmap"
   annotations:
     "helm.sh/hook": test
 spec:
@@ -138,3 +139,4 @@ spec:
       configMap:
         name: argocd-agent-params
   restartPolicy: Never
+{{- end }}
