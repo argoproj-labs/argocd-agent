@@ -63,7 +63,7 @@ func TestRegisterHTTP(t *testing.T) {
 		assert.NotNil(t, sess)
 		assert.NotNil(t, sess.hw)
 		assert.NotNil(t, sess.completeCh)
-	}) 
+	})
 
 	t.Run("writer without flusher", func(t *testing.T) {
 		// Create a writer that doesn't implement http.Flusher
@@ -115,11 +115,11 @@ func TestStreamLogs(t *testing.T) {
 		// Add test data
 		mockStream.AddRecvData(&logstreamapi.LogStreamData{
 			RequestUuid: requestUUID,
-			Data:        "test log line 1\n",
+			Data:        []byte("test log line 1\n"),
 		})
 		mockStream.AddRecvData(&logstreamapi.LogStreamData{
 			RequestUuid: requestUUID,
-			Data:        "test log line 2\n",
+			Data:        []byte("test log line 2\n"),
 		})
 		mockStream.AddRecvData(&logstreamapi.LogStreamData{
 			RequestUuid: requestUUID,
@@ -167,7 +167,7 @@ func TestStreamLogs(t *testing.T) {
 		// Add data with unknown request ID
 		mockStream.AddRecvData(&logstreamapi.LogStreamData{
 			RequestUuid: "unknown-request",
-			Data:        "test log line\n",
+			Data:        []byte("test log line\n"),
 		})
 
 		// Run StreamLogs
@@ -233,7 +233,7 @@ func TestProcessLogMessage(t *testing.T) {
 	t.Run("successful log processing", func(t *testing.T) {
 		msg := &logstreamapi.LogStreamData{
 			RequestUuid: requestUUID,
-			Data:        "test log line\n",
+			Data:        []byte("test log line\n"),
 		}
 
 		err := server.processLogMessage(client, msg)
@@ -250,7 +250,7 @@ func TestProcessLogMessage(t *testing.T) {
 
 		msg := &logstreamapi.LogStreamData{
 			RequestUuid: requestUUID,
-			Data:        "", // Empty data
+			Data:        []byte{}, // Empty data
 		}
 
 		err := server.processLogMessage(client, msg)
@@ -299,7 +299,7 @@ func TestProcessLogMessage(t *testing.T) {
 	t.Run("unknown request ID", func(t *testing.T) {
 		msg := &logstreamapi.LogStreamData{
 			RequestUuid: "unknown-request",
-			Data:        "test log line\n",
+			Data:        []byte("test log line\n"),
 		}
 
 		err := server.processLogMessage(client, msg)
@@ -317,7 +317,7 @@ func TestProcessLogMessage(t *testing.T) {
 
 		msg := &logstreamapi.LogStreamData{
 			RequestUuid: requestUUID,
-			Data:        "test log line\n",
+			Data:        []byte("test log line\n"),
 		}
 
 		err := server.processLogMessage(client, msg)

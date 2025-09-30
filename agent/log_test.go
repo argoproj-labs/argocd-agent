@@ -148,56 +148,6 @@ func createTestLogRequest(follow bool) *event.ContainerLogRequest {
 	}
 }
 
-// Test processLogLine function
-func TestProcessLogLine(t *testing.T) {
-	agent := createTestAgent()
-
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-	}{
-		{
-			name:     "simple line",
-			input:    "hello world\n",
-			expected: []string{"hello world\n"},
-		},
-		{
-			name:     "line without newline",
-			input:    "hello world",
-			expected: []string{"hello world\n"},
-		},
-		{
-			name:     "line with carriage return",
-			input:    "hello\rworld\n",
-			expected: []string{"hello\n", "world\n"},
-		},
-		{
-			name:     "empty line",
-			input:    "\n",
-			expected: nil,
-		},
-		{
-			name:     "whitespace only",
-			input:    "   \n",
-			expected: nil,
-		},
-		{
-			name:     "multiple carriage returns",
-			input:    "line1\rline2\rline3\n",
-			expected: []string{"line1\n", "line2\n", "line3\n"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := agent.processLogLine(tt.input)
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 // Test extractTimestamp function
 func TestExtractTimestamp(t *testing.T) {
 	tests := []struct {
@@ -243,36 +193,6 @@ func TestExtractTimestamp(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Test createFlushFunction
-func TestCreateFlushFunction(t *testing.T) {
-	agent := createTestAgent()
-	ctx := context.Background()
-	mockStream := NewMockLogStreamClient(ctx)
-	logCtx := logrus.NewEntry(logrus.New())
-
-	buf := make([]byte, 0, 100)
-	flush := agent.createFlushFunction(mockStream, "test-uuid", &buf, logCtx)
-
-	t.Run("flush empty buffer", func(t *testing.T) {
-		err := flush("test")
-		assert.NoError(t, err)
-		assert.Len(t, mockStream.GetSentData(), 0)
-	})
-
-	t.Run("flush with data", func(t *testing.T) {
-		buf = append(buf, []byte("test data")...)
-
-		err := flush("test")
-		assert.NoError(t, err)
-
-		sentData := mockStream.GetSentData()
-		assert.Len(t, sentData, 1)
-		assert.Equal(t, "test-uuid", sentData[0].RequestUuid)
-		assert.Equal(t, "test data", sentData[0].Data)
-		assert.Len(t, buf, 0) // Buffer should be reset
-	})
 }
 
 // Test createKubernetesLogStream
@@ -425,9 +345,9 @@ func TestStreamLogs(t *testing.T) {
 		// Verify data was sent due to timer flush
 		assert.Greater(t, len(sentData), 0, "Data should be sent due to timer flush")
 
-		// Verify the function was cancelled (expected for streamLogs with finite data)
-		assert.Error(t, streamErr, "streamLogs should be cancelled")
-		assert.Equal(t, context.Canceled, streamErr, "Should be cancelled, not timeout")
+		// Verify the function ended with EOF (expected for streamLogs with finite data)
+		assert.Error(t, streamErr, "streamLogs should end with error")
+		assert.Equal(t, io.EOF, streamErr, "Should end with EOF, not timeout")
 
 		// Verify timestamp extraction worked
 		assert.NotNil(t, lastTimestamp, "Timestamp should be extracted")

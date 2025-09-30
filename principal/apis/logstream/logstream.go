@@ -10,7 +10,6 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi"
 	"github.com/sirupsen/logrus"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -132,7 +131,7 @@ func tryRecvWithCancel[T any](ctx context.Context, fn func() (T, error)) (T, err
 }
 
 // StreamLogs receives log data from agent and forwards to HTTP writer
-func (s *Server) StreamLogs(stream grpc.ClientStreamingServer[logstreamapi.LogStreamData, logstreamapi.LogStreamResponse]) error {
+func (s *Server) StreamLogs(stream logstreamapi.LogStreamService_StreamLogsServer) error {
 	c := s.newLogClient(stream.Context())
 	for {
 		msg, err := tryRecvWithCancel(c.ctx, stream.Recv) // ← cancelable
@@ -152,7 +151,7 @@ func (s *Server) StreamLogs(stream grpc.ClientStreamingServer[logstreamapi.LogSt
 		if c.requestID == "" {
 			c.requestID = msg.GetRequestUuid()
 			c.logCtx = c.logCtx.WithField("request_id", c.requestID)
-			c.logCtx.Info("🔍 LogStream started")
+			c.logCtx.Info("LogStream started")
 
 			s.mu.Lock()
 			if sess, ok := s.sessions[c.requestID]; ok {
@@ -230,8 +229,8 @@ func (s *Server) processLogMessage(c *logClient, msg *logstreamapi.LogStreamData
 	}
 
 	data := msg.GetData()
-	// Agent sends empty fram as prob, no flush needed
-	if data == "" {
+	// Agent sends empty frame as prob, no flush needed
+	if len(data) == 0 {
 		return nil
 	}
 	logCtx.WithField("data_length", len(data)).Trace("data received")
@@ -249,7 +248,7 @@ func (s *Server) processLogMessage(c *logClient, msg *logstreamapi.LogStreamData
 	}
 
 	// write + flush; on failure, null writer and cancel
-	if _, err := hw.w.Write([]byte(data)); err != nil {
+	if _, err := hw.w.Write(data); err != nil {
 		logCtx.WithError(err).Warn("HTTP write failed; canceling stream")
 		s.mu.Lock()
 		if sess := s.sessions[reqID]; sess != nil {

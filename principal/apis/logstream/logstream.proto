@@ -8,8 +8,8 @@ option go_package = "github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstrea
 message LogStreamData {
   // Unique identifier matching the original request/event UUID
   string request_uuid = 1;
-  // Log data content. Recommended to be a single line including trailing newline
-  string data = 2;
+  // Log data content.
+  bytes data = 2;
   // End of stream indicator
   bool eof = 3;
   // Optional error message
