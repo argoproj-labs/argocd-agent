@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://argoproj-labs.github.io/argocd-agent/values.schema.json",
+  "title": "argocd-agent-agent chart values",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "namespaceOverride": {
+      "type": "string",
+      "description": "Override namespace to deploy the agent into"
+    },
+
+    "tlsSecretName": {
+      "type": "string",
+      "description": "Secret name containing client TLS cert/key for agent"
+    },
+    "userPasswordSecretName": {
+      "type": "string",
+      "description": "Secret name containing optional user/password credentials"
+    },
+
+    "image": {
+      "type": "string",
+      "description": "Container image repository for the agent"
+    },
+    "imageTag": {
+      "type": "string",
+      "description": "Container image tag"
+    },
+    "imagePullPolicy": {
+      "type": "string",
+      "enum": ["Always", "IfNotPresent", "Never"],
+      "description": "Image pull policy"
+    },
+
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of replicas for the Deployment"
+    },
+
+    "resources": {
+      "type": "object",
+      "description": "Container resource requests/limits",
+      "additionalProperties": true,
+      "properties": {
+        "limits": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "cpu": { "type": "string" },
+            "memory": { "type": "string" }
+          }
+        },
+        "requests": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "cpu": { "type": "string" },
+            "memory": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "nodeSelector": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Node selector for pod scheduling"
+    },
+    "affinity": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Pod affinity/anti-affinity rules"
+    },
+    "tolerations": {
+      "type": "array",
+      "items": { "type": "object" },
+      "description": "Tolerations for tainted nodes"
+    },
+
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Annotations to add to the pod"
+    },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Labels to add to the pod"
+    },
+
+    "priorityClassName": {
+      "type": "string",
+      "description": "PriorityClass name for the pod"
+    },
+
+    "serviceAccount": {
+      "type": "object",
+      "description": "ServiceAccount configuration",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean", "default": true },
+        "name": { "type": "string" },
+        "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+
+    "agentMode": {
+      "type": "string",
+      "description": "Agent mode (e.g., 'autonomous' or 'managed')"
+    },
+    "auth": {
+      "type": "string",
+      "description": "Authentication mode (e.g., 'mtls:any')"
+    },
+    "logLevel": {
+      "type": "string",
+      "description": "Log level (debug, info, warn, error)"
+    },
+    "server": {
+      "type": "string",
+      "description": "Remote principal server address"
+    },
+    "serverPort": {
+      "type": "string",
+      "pattern": "^[0-9]+$",
+      "description": "Remote principal server port"
+    },
+    "metricsPort": {
+      "type": "string",
+      "pattern": "^[0-9]+$",
+      "description": "Agent metrics port (env/config value)"
+    },
+    "tlsClientInSecure": {
+      "type": "string",
+      "enum": ["true", "false"],
+      "description": "Whether to skip TLS verification for client (string)"
+    },
+    "healthzPort": {
+      "type": "string",
+      "pattern": "^[0-9]+$",
+      "description": "Agent healthz port (env/config value)"
+    },
+    "redisAddress": {
+      "type": "string",
+      "description": "Redis address (host:port)"
+    },
+    "tlsClientKeyPath": { "type": "string", "description": "Path to client key inside container" },
+    "tlsClientCertPath": { "type": "string", "description": "Path to client cert inside container" },
+    "tlsRootCAPath": { "type": "string", "description": "Path to Root CA inside container" },
+
+    "service": {
+      "type": "object",
+      "description": "Service configuration for metrics and healthz",
+      "additionalProperties": false,
+      "properties": {
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "targetPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
+          }
+        },
+        "healthz": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "targetPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
+          }
+        }
+      }
+    },
+
+    "probes": {
+      "type": "object",
+      "description": "Liveness and readiness probe configuration",
+      "additionalProperties": false,
+      "properties": {
+        "liveness": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "httpGet": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": { "type": "string" },
+                "port": { "type": ["string", "integer"] }
+              }
+            },
+            "initialDelaySeconds": { "type": "integer", "minimum": 0 },
+            "periodSeconds": { "type": "integer", "minimum": 1 },
+            "timeoutSeconds": { "type": "integer", "minimum": 1 },
+            "failureThreshold": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "readiness": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "httpGet": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": { "type": "string" },
+                "port": { "type": ["string", "integer"] }
+              }
+            },
+            "initialDelaySeconds": { "type": "integer", "minimum": 0 },
+            "periodSeconds": { "type": "integer", "minimum": 1 },
+            "timeoutSeconds": { "type": "integer", "minimum": 1 },
+            "failureThreshold": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    }
+  }
+}
+
+

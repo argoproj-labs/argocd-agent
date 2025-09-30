@@ -2,16 +2,80 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+# -----------------------------------------------------------------------------
+# Global/Chart-wide
+# -----------------------------------------------------------------------------
 # Override Namespace to deploy your agent
 namespaceOverride: ""
 
+# -----------------------------------------------------------------------------
+# File: templates/agent-deployment.yaml
+# -----------------------------------------------------------------------------
 # Secret names for argo-agent deployment
 tlsSecretName: "argocd-agent-client-tls"
 userPasswordSecretName: "argocd-agent-agent-userpass"
+
+# Container image settings
 image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent"
 imageTag: "latest"
+imagePullPolicy: "Always"
 
-# config-map to config parameters for argocd-agent
+# Replica count for Deployment
+replicaCount: 1
+
+# Pod resources
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Scheduling
+nodeSelector: {}
+affinity: {}
+tolerations: []
+
+# Pod metadata
+podAnnotations: {}
+podLabels: {}
+
+# Priority class
+priorityClassName: ""
+
+# ServiceAccount (created/name used by agent Deployment)
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Probes (used by the Deployment)
+probes:
+  liveness:
+    enabled: true
+    httpGet:
+      path: /healthz
+      port: healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    httpGet:
+      path: /healthz
+      port: healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+
+# -----------------------------------------------------------------------------
+# File: templates/agent-params-cm.yaml
+# -----------------------------------------------------------------------------
+# ConfigMap-driven agent parameters (consumed by Deployment env)
 agentMode: "autonomous"
 auth: "mtls:any"
 logLevel: "info"
@@ -36,3 +100,30 @@ networkPolicy:
       app.kubernetes.io/name: argocd-redis
     agentSelector:
       app.kubernetes.io/name: argocd-agent-agent
+
+
+# -----------------------------------------------------------------------------
+# File: templates/agent-metrics-service.yaml
+# and File: templates/agent-healthz-service.yaml
+# -----------------------------------------------------------------------------
+service:
+  # Used by templates/agent-metrics-service.yaml
+  metrics:
+    port: 8181
+    targetPort: 8181
+    annotations: {}
+  # Used by templates/agent-healthz-service.yaml
+  healthz:
+    port: 8002
+    targetPort: 8002
+    annotations: {}
+
+# -----------------------------------------------------------------------------
+# File: templates/tests/* 
+# configuration for tests
+# -----------------------------------------------------------------------------
+
+tests:
+  enabled: "true"
+  image: bitnamilegacy/kubectl
+  tag: "1.33.4"
