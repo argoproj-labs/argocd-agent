@@ -32,7 +32,7 @@ import (
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
-	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
@@ -157,6 +157,8 @@ type Server struct {
 	handlersOnConnect []handlersOnConnect
 
 	eventWriters *event.EventWritersMap
+
+	sourceCache *cache.SourceCache
 }
 
 type handlersOnConnect func(agent types.Agent) error
@@ -191,6 +193,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		repoToAgents:      NewMapToSet(),
 		projectToRepos:    NewMapToSet(),
 		expectedDeletions: make(map[string]bool),
+		sourceCache:       cache.NewSourceCache(),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
@@ -429,20 +432,9 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("Starting %s (server) v%s (allowed_namespaces=%v)", s.version.Name(), s.version.Version(), s.options.namespaces)
 	}
 
-	// We need to maintain a cache to keep applications in sync with last known state of
-	// autonomous-agent in case it is disconnected with agent or application on the control-plane is modified.
-	log().Infof("Recreating application spec cache from existing resources on cluster")
-	appList, err := s.appManager.List(ctx, backend.ApplicationSelector{})
-	if err != nil {
-		log().Errorf("Error while fetching list of applications: %v", err)
-	}
-
-	for _, app := range appList {
-		sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
-		if exists {
-			appCache.SetApplicationSpec(k8stypes.UID(sourceUID), app.Spec, log())
-		}
-	}
+	// We need to maintain a cache to keep resources in sync with last known state of
+	// autonomous-agent in case it is disconnected with agent or resources on the control-plane are modified.
+	s.populateSourceCache(ctx)
 
 	if s.options.serveGRPC {
 		if err := s.serveGRPC(ctx, s.metrics, errch); err != nil {
@@ -465,7 +457,7 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	go s.RunHandlersOnConnect(s.ctx)
 
-	err = s.StartEventProcessor(s.ctx)
+	err := s.StartEventProcessor(s.ctx)
 	if err != nil {
 		return nil
 	}
@@ -912,4 +904,47 @@ func (s *Server) setAgentMode(namespace string, mode types.AgentMode) {
 func (s *Server) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) populateSourceCache(ctx context.Context) {
+	log().Infof("Recreating application spec cache from existing resources on cluster")
+	appList, err := s.appManager.List(ctx, backend.ApplicationSelector{Namespaces: []string{s.namespace}})
+	if err != nil {
+		log().Errorf("Error while fetching list of applications: %v", err)
+	}
+
+	for _, app := range appList {
+		sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			s.sourceCache.Application.Set(k8stypes.UID(sourceUID), app.Spec)
+		}
+	}
+
+	log().Infof("Recreating appProject spec cache from existing resources on cluster")
+	appProjectList, err := s.projectManager.List(ctx, backend.AppProjectSelector{Namespace: s.namespace})
+	if err != nil {
+		log().Errorf("Error while fetching list of appProjects: %v", err)
+	}
+
+	for _, appProject := range appProjectList {
+		sourceUID, exists := appProject.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			s.sourceCache.AppProject.Set(k8stypes.UID(sourceUID), appProject.Spec)
+		}
+	}
+
+	log().Infof("Recreating repository spec cache from existing resources on cluster")
+	repoList, err := s.repoManager.List(ctx, backend.RepositorySelector{Namespace: s.namespace})
+	if err != nil {
+		log().Errorf("Error while fetching list of repositories: %v", err)
+	}
+
+	for _, repo := range repoList {
+		sourceUID, exists := repo.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			s.sourceCache.Repository.Set(k8stypes.UID(sourceUID), repo.Data)
+		}
+	}
+
+	log().Infof("Source cache populated successfully")
 }

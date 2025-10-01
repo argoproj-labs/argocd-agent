@@ -1263,6 +1263,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			sourceCache:  cache.NewSourceCache(),
 		}
 
 		err = s.queues.Create("autonomous-agent")
@@ -1299,6 +1300,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			sourceCache:  cache.NewSourceCache(),
 		}
 
 		err = s.queues.Create("autonomous-agent")
@@ -1324,8 +1326,8 @@ func TestServer_updateAppCallback(t *testing.T) {
 		}
 
 		sourceUID := k8stypes.UID(oldApp.Annotations[manager.SourceUIDAnnotation])
-		cache.SetApplicationSpec(sourceUID, oldApp.Spec, log())
-		defer cache.DeleteApplicationSpec(sourceUID, log())
+		s.sourceCache.Application.Set(sourceUID, oldApp.Spec)
+		defer s.sourceCache.Application.Delete(sourceUID)
 
 		mockBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
 		mockBackend.On("SupportsPatch").Return(true)
@@ -1349,6 +1351,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			sourceCache:  cache.NewSourceCache(),
 		}
 
 		err = s.queues.Create("autonomous-agent")

@@ -27,7 +27,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
-	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -622,7 +622,7 @@ func (m *ApplicationManager) List(ctx context.Context, selector backend.Applicat
 
 // RevertManagedAppChanges compares the actual spec with expected spec stored in cache,
 // if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as principal.
-func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v1alpha1.Application) bool {
+func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v1alpha1.Application, appCache *cache.ResourceCache[v1alpha1.ApplicationSpec]) bool {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "RevertManagedAppChanges",
 		"application":     app.QualifiedName(),
@@ -631,7 +631,7 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 
 	sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
 	if exists && m.mode == manager.ManagerModeManaged {
-		if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID), logCtx); ok {
+		if cachedAppSpec, ok := appCache.Get(ty.UID(sourceUID)); ok {
 			logCtx.Debugf("Application %s is available in agent cache", app.Name)
 
 			if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
@@ -652,7 +652,7 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 
 // RevertAutonomousAppChanges compares the actual spec with expected spec stored in cache,
 // if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as agent cluster.
-func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app *v1alpha1.Application) bool {
+func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app *v1alpha1.Application, appCache *cache.ResourceCache[v1alpha1.ApplicationSpec]) bool {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "RevertAutonomousAppChanges",
 		"application":     app.QualifiedName(),
@@ -664,7 +664,7 @@ func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app
 		return false
 	}
 
-	if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID), logCtx); ok {
+	if cachedAppSpec, ok := appCache.Get(ty.UID(sourceUID)); ok {
 		logCtx.Debugf("Application %s is available in agent cache", app.Name)
 
 		if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {

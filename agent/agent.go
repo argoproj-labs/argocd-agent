@@ -28,6 +28,7 @@ import (
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
+	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
@@ -49,7 +50,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 
-	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
@@ -104,6 +104,9 @@ type Agent struct {
 
 	cacheRefreshInterval time.Duration
 	clusterCache         *appstatecache.Cache
+
+	// sourceCache is a cache of resources from the source. We use it to revert any changes made to the local resources.
+	sourceCache *cache.SourceCache
 }
 
 const defaultQueueName = "default"
@@ -313,6 +316,8 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	}
 	a.clusterCache = clusterCache
 
+	a.sourceCache = cache.NewSourceCache()
+
 	return a, nil
 }
 
@@ -322,21 +327,10 @@ func (a *Agent) Start(ctx context.Context) error {
 	a.context = infCtx
 	a.cancelFn = cancelFn
 
-	// For managed-agent we need to maintain a cache to keep applications in sync with last known state of
-	// principal in case agent is disconnected with principal or application in managed-cluster is modified.
+	// For managed-agent we need to maintain a cache to keep resources in sync with last known state of
+	// principal in case agent is disconnected with principal or resources in managed-cluster are modified.
 	if a.mode == types.AgentModeManaged {
-		log().Infof("Recreating application spec cache from existing resources on cluster")
-		appList, err := a.appManager.List(ctx, backend.ApplicationSelector{Namespaces: []string{a.namespace}})
-		if err != nil {
-			log().Errorf("Error while fetching list of applications: %v", err)
-		}
-
-		for _, app := range appList {
-			sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
-			if exists {
-				appCache.SetApplicationSpec(ty.UID(sourceUID), app.Spec, log())
-			}
-		}
+		a.populateSourceCache(ctx)
 	}
 
 	if a.options.metricsPort > 0 {
@@ -484,4 +478,47 @@ func (a *Agent) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
+}
+
+func (a *Agent) populateSourceCache(ctx context.Context) {
+	log().Infof("Recreating application spec cache from existing resources on cluster")
+	appList, err := a.appManager.List(ctx, backend.ApplicationSelector{Namespaces: []string{a.namespace}})
+	if err != nil {
+		log().Errorf("Error while fetching list of applications: %v", err)
+	}
+
+	for _, app := range appList {
+		sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			a.sourceCache.Application.Set(ty.UID(sourceUID), app.Spec)
+		}
+	}
+
+	log().Infof("Recreating appProject spec cache from existing resources on cluster")
+	appProjectList, err := a.projectManager.List(ctx, backend.AppProjectSelector{Namespace: a.namespace})
+	if err != nil {
+		log().Errorf("Error while fetching list of appProjects: %v", err)
+	}
+
+	for _, appProject := range appProjectList {
+		sourceUID, exists := appProject.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			a.sourceCache.AppProject.Set(ty.UID(sourceUID), appProject.Spec)
+		}
+	}
+
+	log().Infof("Recreating repository spec cache from existing resources on cluster")
+	repoList, err := a.repoManager.List(ctx, backend.RepositorySelector{Namespace: a.namespace})
+	if err != nil {
+		log().Errorf("Error while fetching list of repositories: %v", err)
+	}
+
+	for _, repo := range repoList {
+		sourceUID, exists := repo.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			a.sourceCache.Repository.Set(ty.UID(sourceUID), repo.Data)
+		}
+	}
+
+	log().Infof("Source cache populated successfully")
 }

@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
-	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -470,7 +469,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 	if a.mode == types.AgentModeManaged {
 		// Store app spec in cache
-		appCache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+		a.sourceCache.Application.Set(incoming.UID, incoming.Spec)
 	}
 
 	created, err := a.appManager.Create(a.context, incoming)
@@ -513,7 +512,7 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 		// Update app spec in cache
 		logCtx.Tracef("Calling update spec for this event")
-		appCache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+		a.sourceCache.Application.Set(incoming.UID, incoming.Spec)
 
 		napp, err = a.appManager.UpdateManagedApp(a.context, incoming)
 	case types.AgentModeAutonomous:
@@ -550,7 +549,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
 			if a.mode == types.AgentModeManaged {
-				appCache.DeleteApplicationSpec(app.UID, logCtx)
+				a.sourceCache.Application.Delete(app.UID)
 			}
 			return nil
 		}
@@ -558,7 +557,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	}
 
 	if a.mode == types.AgentModeManaged {
-		appCache.DeleteApplicationSpec(app.UID, logCtx)
+		a.sourceCache.Application.Delete(app.UID)
 	}
 
 	err = a.appManager.Unmanage(app.QualifiedName())
@@ -594,6 +593,8 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	}
 
 	logCtx.Infof("Creating a new AppProject on behalf of an incoming event")
+
+	a.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
 
 	// Get rid of some fields that we do not want to have on the AppProject
 	// as we start fresh.
@@ -632,6 +633,8 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 
 	logCtx.Infof("Updating appProject")
 
+	a.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
+
 	logCtx.Tracef("Calling update spec for this event")
 	return a.projectManager.UpdateAppProject(a.context, incoming)
 
@@ -661,10 +664,14 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("appProject not found, perhaps it is already deleted")
+			a.sourceCache.AppProject.Delete(project.UID)
 			return nil
 		}
 		return err
 	}
+
+	a.sourceCache.AppProject.Delete(project.UID)
+
 	err = a.projectManager.Unmanage(project.Name)
 	if err != nil {
 		log().Warnf("Could not unmanage appProject %s: %v", project.Name, err)

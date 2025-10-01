@@ -19,10 +19,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -31,6 +33,7 @@ import (
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -361,6 +364,43 @@ func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1al
 	}
 
 	return true, string(incoming.UID) == sourceUID, nil
+}
+
+// RevertAppProjectChanges compares the actual spec with expected spec stored in cache,
+// if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as the source cluster.
+func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project *v1alpha1.AppProject, projectCache *cache.ResourceCache[v1alpha1.AppProjectSpec]) bool {
+	logCtx := log().WithFields(logrus.Fields{
+		"component":       "RevertAppProjectChanges",
+		"appProject":      project.Name,
+		"resourceVersion": project.ResourceVersion,
+	})
+
+	sourceUID, exists := project.Annotations[manager.SourceUIDAnnotation]
+	if !exists {
+		return false
+	}
+
+	if cachedSpec, ok := projectCache.Get(types.UID(sourceUID)); ok {
+		logCtx.Debugf("AppProject %s is available in agent cache", project.Name)
+
+		if isEqual := reflect.DeepEqual(cachedSpec, project.Spec); !isEqual {
+			project.Spec = cachedSpec
+			logCtx.Infof("Reverting modifications done in appProject: %s", project.Name)
+			if _, err := m.UpdateAppProject(ctx, project); err != nil {
+				logCtx.Errorf("Unable to revert modifications done in appProject: %s. Error: %v", project.Name, err)
+				return false
+			}
+			return true
+		} else {
+			logCtx.Trace(cachedSpec)
+			logCtx.Trace(project.Spec)
+			logCtx.Debugf("AppProject %s is already in sync with source cache", project.Name)
+		}
+	} else {
+		logCtx.Errorf("AppProject %s is not available in agent cache", project.Name)
+	}
+
+	return false
 }
 
 // DoesAgentMatchWithProject checks if the agent name matches the given AppProject.
