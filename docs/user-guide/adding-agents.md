@@ -65,7 +65,8 @@ argocd-agentctl jwt create-key \
   --upsert
 ```
 
-**Important**: Replace `<control-plane-context>`, `<principal-ip-addresses>`, and `<principal-dns-names>` with your actual values.
+!!! important
+    Replace `<control-plane-context>`, `<principal-ip-addresses>`, and `<principal-dns-names>` with your actual values.
 
 ## Step 2: Create Agent Configuration
 
@@ -75,35 +76,20 @@ Create the agent configuration on the principal cluster:
 argocd-agentctl agent create <agent-name> \
   --principal-context <control-plane-context> \
   --principal-namespace argocd \
-  --resource-proxy-server <principal-ip>:9090 \
-  --resource-proxy-username <agent-name> \
-  --resource-proxy-password <secure-password>
+  --resource-proxy-server <resource-proxy-service-name>:9090 
 ```
 
-### Interactive vs Non-Interactive Mode
+The resource proxy service's name is usually `argocd-agent-resource-proxy`.
 
-**Interactive Mode** (recommended for development):
-
-```bash
-argocd-agentctl agent create production-cluster
-# CLI will prompt for username and password
-```
-
-**Non-Interactive Mode** (for automation):
-
-```bash
-argocd-agentctl agent create production-cluster \
-  --resource-proxy-username production-cluster \
-  --resource-proxy-password "$(openssl rand -base64 32)"
-```
+!!! important
+    The value given as `resource-proxy-service-name` must match a SAN entry in your resource proxy's TLS certificate
 
 ### What This Command Does
 
 1. **Creates Cluster Secret**: Stores agent configuration as an Argo CD cluster secret
-2. **Generates Client Certificate**: Creates mTLS certificate for agent authentication  
-3. **Configures Resource Proxy**: Sets up credentials for live resource viewing
-4. **Validates Agent Name**: Ensures the agent name meets requirements
-5. **Prevents Duplicates**: Checks that the agent doesn't already exist
+2. **Generates Client Certificate**: Creates mTLS certificate for Argo CD to authenticate to the resource proxy
+3. **Validates Agent Name**: Ensures the agent name meets requirements
+4. **Prevents Duplicates**: Checks that the agent doesn't already exist
 
 ## Step 3: Issue Agent Client Certificate
 
@@ -118,6 +104,7 @@ argocd-agentctl pki issue agent <agent-name> \
 ```
 
 This command:
+
 - Generates a client certificate signed by the principal's CA
 - Stores the certificate in the agent's cluster as a Kubernetes secret
 - Configures the certificate with the agent's name as the subject
@@ -139,6 +126,7 @@ kubectl create namespace <agent-name> --context <control-plane-context>
 ### Option A: Using Kubernetes Manifests
 
 1. **Create Authentication Secret**:
+
 ```bash
 kubectl create secret generic argocd-agent-agent-userpass \
   --from-literal=credentials="userpass:<agent-name>:<password>" \
@@ -147,6 +135,7 @@ kubectl create secret generic argocd-agent-agent-userpass \
 ```
 
 2. **Deploy Agent Components**:
+
 ```bash
 kubectl apply -n argocd \
   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main' \
@@ -154,6 +143,7 @@ kubectl apply -n argocd \
 ```
 
 3. **Configure Agent Parameters**:
+
 ```bash
 kubectl patch configmap argocd-agent-params \
   --namespace argocd \
@@ -193,7 +183,7 @@ data:
   agent.server.port: "8443"
   
   # Authentication method
-  agent.creds: "userpass:/app/config/creds/userpass.creds"
+  agent.creds: "mtls:^CN=(.+)$"
   
   # TLS settings
   agent.tls.client.insecure: "false"
@@ -206,14 +196,15 @@ data:
 
 ### Authentication Methods
 
-**UserPass Authentication** (default):
-```yaml
-agent.creds: "userpass:/app/config/creds/userpass.creds"
-```
-
 **mTLS Authentication**:
 ```yaml
 agent.creds: "mtls:^CN=(.+)$"  # Regex to extract agent ID from cert subject
+```
+
+**UserPass Authentication** (deprecated):
+
+```yaml
+agent.creds: "userpass:/app/config/creds/userpass.creds"
 ```
 
 ## Step 7: Verification
@@ -309,9 +300,8 @@ for agent in "${AGENTS[@]}"; do
   
   # Create agent configuration
   argocd-agentctl agent create "$agent" \
-    --resource-proxy-username "$agent" \
-    --resource-proxy-password "$(openssl rand -base64 32)"
-  
+    --resource-proxy-server <resource-proxy-service-name>:9090
+
   # Issue client certificate
   argocd-agentctl pki issue agent "$agent" \
     --agent-context "cluster-$agent" \
@@ -336,8 +326,6 @@ argocd-agentctl agent inspect <agent-name>
 ```bash
 argocd-agentctl agent reconfigure <agent-name> \
   --resource-proxy-server <new-server-address> \
-  --resource-proxy-username <new-username> \
-  --resource-proxy-password <new-password> \
   --reissue-client-cert
 ```
 

@@ -21,24 +21,26 @@ import (
 	"testing"
 
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/runtime"
 
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
-	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
+	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/stretchr/testify/require"
 )
 
-func newAgent(t *testing.T) *Agent {
+func newAgent(t *testing.T, apps ...runtime.Object) (*Agent, *kube.KubernetesClient) {
 	t.Helper()
-	kubec := kube.NewKubernetesFakeClientWithApps("argocd")
+	kubec := fakekube.NewKubernetesFakeClientWithApps("argocd", apps...)
 	remote, err := client.NewRemote("127.0.0.1", 8080)
 	require.NoError(t, err)
 	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote))
 	require.NoError(t, err)
-	return agent
+	return agent, kubec
 }
 
 func Test_NewAgent(t *testing.T) {
-	kubec := kube.NewKubernetesFakeClientWithApps("agent")
+	kubec := fakekube.NewKubernetesFakeClientWithApps("agent")
 	agent, err := NewAgent(context.TODO(), kubec, "agent", WithRemote(&client.Remote{}))
 	require.NotNil(t, agent)
 	require.NoError(t, err)
@@ -209,7 +211,7 @@ func Test_NewAgent(t *testing.T) {
 // }
 
 func Test_Healthz(t *testing.T) {
-	agent := newAgent(t)
+	agent, _ := newAgent(t)
 	require.NotNil(t, agent)
 
 	t.Run("Healthz when agent is connected", func(t *testing.T) {

@@ -51,6 +51,14 @@ argocd-agentctl pki issue resource-proxy \
     --dns <dns names of principal>
 ```
 
+Create JWT signing key:
+
+```
+argocd-agentctl jwt create-key \
+    --principal-context <control plane context> \
+    --upsert
+```
+
 Deploy principal on hub cluster using argocd-operator/gitops-operator using Argo CD CR given below
 
 ```
@@ -64,15 +72,14 @@ spec:
   argoCDAgent:
     principal:
       enabled: true
-      allowedNamespaces: 
+      allowedNamespaces:
         - "*"
-      jwtAllowGenerate: true
       auth: "mtls:CN=([^,]+)"
       logLevel: "trace"
       image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent:latest"
   sourceNamespaces:
     - "agent-managed"
-    - "agent-autonomous"  					
+    - "agent-autonomous"
 ```
 
 The above CR should create all the necessary resource for Argo CD as well as argocd-agent principal in argocd namespace.
@@ -83,10 +90,10 @@ Create argocd-redis secret, because principal looks for it to fetch redis authen
 oc create secret generic argocd-redis -n argocd --from-literal=auth="$(oc get secret argocd-redis-initial-password -n argocd -o jsonpath='{.data.admin\.password}' | base64 -d)"
 ```
 
-## Setting up agent workload cluster 
+## Setting up agent workload cluster
 
-### Configure Argo CD for Agent 
- 
+### Configure Argo CD for Agent
+
 Argo CD instance on Agent cluster
 
 Creating Argo CD instance for Workload/spoke cluster.
@@ -100,14 +107,14 @@ Creating Argo CD instance for Workload/spoke cluster.
       enabled: false
 ```
 
-Create redis secret using below command for agent deployment 
+Create redis secret using below command for agent deployment
 ```
 kubectl create secret generic argocd-redis -n <workload namespace> --from-literal=auth="$(kubectl get secret argocd-redis-initial-password -n <argocd-namespace> -o jsonpath='{.data.admin\.password}' | base64 -d)"
 ```
 
 ### Configure Agent in managed mode
 
-Before installing agent resources create 
+Before installing agent resources create
 - a TLS secret containing the issued certificate for agent
 
 Create the PKI on the agent:
@@ -116,9 +123,9 @@ Run this command while connected to principal
 argocd-agentctl pki issue agent <agent-name>  --principal-context <principal context> --agent-context <workload context> --agent-namespace <workload namespace> --upsert
 ```
 
-Apply the installation manifests for Argo CD-agent agent
+Apply the installation manifests for Argo CD-agent agent, change <release-branch> to the release you want to deploy:
 ```
-oc apply -n $(workload-namespace) -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main'
+oc apply -n $(workload-namespace) -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=<release-branch>'
 ```
 This should create all the required agent related resources.
 
@@ -129,7 +136,7 @@ kubectl patch clusterrolebinding argocd-agent-agent --type='json' -p='[{"op": "r
 ```
 
 
-Update the configMap with name `argocd-agent-params`  with parameters related to agent.mode,agent.creds, agent.namespace, agent.server.address.	
+Update the configMap with name `argocd-agent-params`  with parameters related to agent.mode,agent.creds, agent.namespace, agent.server.address.
 ```
   agent.keep-alive-ping-interval: 50s
   agent.mode: managed
@@ -147,13 +154,13 @@ Update the configMap with name `argocd-agent-params`  with parameters related to
   agent.tls.root-ca-secret-name: argocd-agent-ca
   agent.tls.secret-name: argocd-agent-client-tls
 ```
-Also Update RBAC, rolebinding/clusterrolebinding with `workload-namespace`, if pod is facing rbac issues. 
+Also Update RBAC, rolebinding/clusterrolebinding with `workload-namespace`, if pod is facing rbac issues.
 
 
 
 ### Configure Agent in Autonomous mode
 
-Before installing agent resources create 
+Before installing agent resources create
 Create a TLS secret containing the issued certificate for agent
 
 Create the PKI on the agent:
@@ -162,9 +169,9 @@ Run this command while connected to principal
 argocd-agentctl pki issue agent <agent-name> --principal-context <principal context> --agent-context <workload context> --agent-namespace argocd --upsert
 ```
 
-Apply the installation manifests for argocd agent
+Apply the installation manifests for argocd agent replacing <release-branch> with the release that you wish to use:
 ```
-oc apply -n argocd -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main'
+oc apply -n argocd -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=<release-branch>'
 ```
 This should create all the required agent related resources.
 
@@ -179,7 +186,7 @@ Update the configMap with name `argocd-agent-params`  with parameters related to
 ```
 data:
   agent.keep-alive-ping-interval: 50s
-  agent.tls.client.insecure: 'false' 
+  agent.tls.client.insecure: 'false'
   agent.server.port: '443'
   agent.tls.root-ca-path: ''
   agent.tls.client.cert-path: ''
@@ -196,7 +203,7 @@ data:
 ```
 
 
-#### Troubleshooting 
+#### Troubleshooting
 ___
 
 1. If pod fails to come up with error

@@ -32,6 +32,8 @@ import (
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
+	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
@@ -60,6 +62,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 )
@@ -143,6 +146,11 @@ type Server struct {
 	resources *resources.AgentResources
 	// resyncStatus indicates whether an agent has been resyned after the principal restarts
 	resyncStatus *resyncStatus
+	// expectedDeletions tracks applications that are expected to be deleted (agent-initiated)
+	// This is used to differentiate between user-initiated and agent-initiated deletions
+	expectedDeletions map[string]bool
+	// expectedDeletionsLock protects the expectedDeletions map
+	expectedDeletionsLock sync.RWMutex
 	// notifyOnConnect will notify to run the handlers when an agent connects to the principal
 	notifyOnConnect chan types.Agent
 	// handlers to run when an agent connects to the principal
@@ -170,18 +178,19 @@ const defaultRedisProxyListenerAddr = "0.0.0.0:6379"
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
-		options:         defaultOptions(),
-		queues:          queue.NewSendRecvQueues(),
-		namespace:       namespace,
-		noauth:          noAuthEndpoints,
-		version:         version.New("argocd-agent"),
-		kubeClient:      kubeClient,
-		resyncStatus:    newResyncStatus(),
-		resources:       resources.NewAgentResources(),
-		notifyOnConnect: make(chan types.Agent),
-		eventWriters:    event.NewEventWritersMap(),
-		repoToAgents:    NewMapToSet(),
-		projectToRepos:  NewMapToSet(),
+		options:           defaultOptions(),
+		queues:            queue.NewSendRecvQueues(),
+		namespace:         namespace,
+		noauth:            noAuthEndpoints,
+		version:           version.New("argocd-agent"),
+		kubeClient:        kubeClient,
+		resyncStatus:      newResyncStatus(),
+		resources:         resources.NewAgentResources(),
+		notifyOnConnect:   make(chan types.Agent),
+		eventWriters:      event.NewEventWritersMap(),
+		repoToAgents:      NewMapToSet(),
+		projectToRepos:    NewMapToSet(),
+		expectedDeletions: make(map[string]bool),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
@@ -216,10 +225,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	appInformerOpts := []informer.InformerOption[*v1alpha1.Application]{
 		informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, opts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, opts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithAddHandler[*v1alpha1.Application](s.newAppCallback),
 		informer.WithUpdateHandler[*v1alpha1.Application](s.updateAppCallback),
@@ -234,10 +243,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
 		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, opts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, opts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithAddHandler[*v1alpha1.AppProject](s.newAppProjectCallback),
 		informer.WithUpdateHandler[*v1alpha1.AppProject](s.updateAppProjectCallback),
@@ -298,10 +307,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	repoInformerOpts := []informer.InformerOption[*corev1.Secret]{
 		informer.WithListHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.Clientset.CoreV1().Secrets(namespace).List(ctx, opts)
+			return kubeClient.Clientset.CoreV1().Secrets(namespace).List(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithWatchHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.Clientset.CoreV1().Secrets(namespace).Watch(ctx, opts)
+			return kubeClient.Clientset.CoreV1().Secrets(namespace).Watch(ctx, config.DefaultLabelSelector())
 		}),
 		informer.WithAddHandler[*corev1.Secret](s.newRepositoryCallback),
 		informer.WithUpdateHandler[*corev1.Secret](s.updateRepositoryCallback),
@@ -414,6 +423,21 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("Starting %s (server) v%s (allowed_namespaces=%v)", s.version.Name(), s.version.Version(), s.options.namespaces)
 	}
 
+	// We need to maintain a cache to keep applications in sync with last known state of
+	// autonomous-agent in case it is disconnected with agent or application on the control-plane is modified.
+	log().Infof("Recreating application spec cache from existing resources on cluster")
+	appList, err := s.appManager.List(ctx, backend.ApplicationSelector{})
+	if err != nil {
+		log().Errorf("Error while fetching list of applications: %v", err)
+	}
+
+	for _, app := range appList {
+		sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			appCache.SetApplicationSpec(k8stypes.UID(sourceUID), app.Spec, log())
+		}
+	}
+
 	if s.options.serveGRPC {
 		if err := s.serveGRPC(ctx, s.metrics, errch); err != nil {
 			return err
@@ -435,7 +459,7 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	go s.RunHandlersOnConnect(s.ctx)
 
-	err := s.StartEventProcessor(s.ctx)
+	err = s.StartEventProcessor(s.ctx)
 	if err != nil {
 		return nil
 	}
@@ -804,8 +828,16 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 // defaultAppFilterChain returns the default filter chain for server s to use
 func (s *Server) defaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 	c := filter.NewFilterChain[*v1alpha1.Application]()
+	// Admit based on namespace of the application
 	c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
 		return glob.MatchStringInList(s.options.namespaces, res.Namespace, glob.REGEXP)
+	})
+	// Ignore applications that have the skip sync label
+	c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
+		if v, ok := res.Labels[config.SkipSyncLabel]; ok && v == "true" {
+			return false
+		}
+		return true
 	})
 	return c
 }
@@ -818,6 +850,26 @@ func (s *Server) ListenerForE2EOnly() *Listener {
 // TokenIssuerForE2EOnly returns the token issuer of Server s
 func (s *Server) TokenIssuerForE2EOnly() issuer.Issuer {
 	return s.issuer
+}
+
+// markExpectedDeletion marks an application as expected to be deleted (agent-initiated)
+func (s *Server) markExpectedDeletion(appKey string) {
+	s.expectedDeletionsLock.Lock()
+	defer s.expectedDeletionsLock.Unlock()
+	s.expectedDeletions[appKey] = true
+	log().WithField("app_key", appKey).Trace("Marked application for expected deletion")
+}
+
+// isExpectedDeletion checks if an application deletion was expected and removes it from tracking
+func (s *Server) isExpectedDeletion(appKey string) bool {
+	s.expectedDeletionsLock.Lock()
+	defer s.expectedDeletionsLock.Unlock()
+	expected, exists := s.expectedDeletions[appKey]
+	if exists {
+		delete(s.expectedDeletions, appKey)
+		log().WithField("app_key", appKey).Trace("Expected deletion observed")
+	}
+	return expected
 }
 
 func log() *logrus.Entry {

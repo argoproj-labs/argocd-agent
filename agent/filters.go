@@ -15,6 +15,7 @@
 package agent
 
 import (
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v3/util/glob"
@@ -28,7 +29,7 @@ func (a *Agent) DefaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 
 	// Admit based on namespace of the application
 	fc.AppendAdmitFilter(func(app *v1alpha1.Application) bool {
-		if !glob.MatchStringInList(append([]string{a.namespace}, a.options.namespaces...), app.Namespace, glob.REGEXP) {
+		if !glob.MatchStringInList(append([]string{a.namespace}, a.allowedNamespaces...), app.Namespace, glob.REGEXP) {
 			log().Warnf("namespace not allowed: %s", app.QualifiedName())
 			return false
 		}
@@ -36,6 +37,14 @@ func (a *Agent) DefaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 		// 	log().Warnf("App is not managed: %s", app.QualifiedName())
 		// 	return false
 		// }
+		return true
+	})
+
+	// Ignore applications that have the skip sync label
+	fc.AppendAdmitFilter(func(app *v1alpha1.Application) bool {
+		if v, ok := app.Labels[config.SkipSyncLabel]; ok && v == "true" {
+			return false
+		}
 		return true
 	})
 

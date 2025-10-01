@@ -62,19 +62,19 @@ kubectl create namespace argocd --context <control-plane-context>
 
 ### 1.2 Install Argo CD on Control Plane
 
-Install a customized Argo CD instance that excludes components that will run on workload clusters:
+Install a customized Argo CD instance that excludes components that will run on workload clusters replacing <release-branch> with the release you wish to use:
 
 ```bash
 # Apply the principal-specific Argo CD configuration
 kubectl apply -n argocd \
-  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/principal?ref=main' \
+  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/principal?ref=<release-branch>' \
   --context <control-plane-context>
 ```
 
 This configuration includes:
 
 - ✅ **argocd-server** (API and UI)
-- ✅ **argocd-dex-server** (SSO, if needed)  
+- ✅ **argocd-dex-server** (SSO, if needed)
 - ✅ **argocd-redis** (state storage)
 - ✅ **argocd-repo-server** (Git repository access)
 - ❌ **argocd-application-controller** (runs on workload clusters only)
@@ -160,9 +160,11 @@ argocd-agentctl jwt create-key \
 
 ### 3.1 Deploy Principal Component
 
+Change <release-branch> to the release you wish to use:
+
 ```bash
 kubectl apply -n argocd \
-  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/principal?ref=main' \
+  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/principal?ref=<release-branch>' \
   --context <control-plane-context>
 ```
 
@@ -175,6 +177,19 @@ kubectl get configmap argocd-agent-params -n argocd --context <control-plane-con
 # Should output: mtls:CN=([^,]+)
 ```
 
+Update principal configuration:
+
+```bash
+# Allow principal to operate in agent's namespace
+kubectl patch configmap argocd-agent-params -n argocd --context <control-plane-context> \
+  --patch "{\"data\":{
+    \"principal.allowed-namespaces\":\"my-first-agent\"
+  }}"
+
+# Restart the principal to apply changes
+kubectl rollout restart deployment argocd-agent-principal -n argocd --context <control-plane-context>
+```
+
 ### 3.2 Expose Principal Service
 
 The principal's gRPC service needs to be accessible from workload clusters:
@@ -184,7 +199,7 @@ The principal's gRPC service needs to be accessible from workload clusters:
 kubectl patch svc argocd-agent-principal -n argocd --context <control-plane-context> \
   --patch '{"spec":{"type":"LoadBalancer"}}'
 
-# Option 2: NodePort  
+# Option 2: NodePort
 kubectl patch svc argocd-agent-principal -n argocd --context <control-plane-context> \
   --patch '{"spec":{"type":"NodePort","ports":[{"port":8443,"nodePort":30443}]}}'
 ```
@@ -221,15 +236,17 @@ kubectl create namespace argocd --context <workload-cluster-context>
 
 ### 4.3 Install Argo CD on Workload Cluster
 
+Replace <release-branch> with the release you wish to use:
+
 ```bash
 # For managed agents
 kubectl apply -n argocd \
-  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-managed?ref=main' \
+  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-managed?ref=<release-branch>' \
   --context <workload-cluster-context>
 
 # For autonomous agents (alternative)
 # kubectl apply -n argocd \
-#   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous?ref=main' \
+#   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous?ref=<release-branch>' \
 #   --context <workload-cluster-context>
 ```
 
@@ -269,15 +286,17 @@ argocd-agentctl pki issue agent my-first-agent \
   --upsert
 ```
 
-### 5.3 Create Agent Namespace on Principal
-
-For managed agents, create a namespace on the principal where the agent's Applications will be created and managed:
+### 5.3 Propagate Certificate Authority to Agent
 
 ```bash
-kubectl create namespace my-first-agent --context <control-plane-context>
+argocd-agentctl pki propagate \
+  --principal-context <control-plane-context> \
+  --principal-namespace argocd \
+  --agent-context <workload-cluster-context> \
+  --agent-namespace argocd
 ```
 
-### 5.3 Verify Certificate Installation
+### 5.4 Verify Certificate Installation
 
 The agent client certificate should already be installed from step 5.2. Verify it exists:
 
@@ -289,15 +308,25 @@ kubectl get secret argocd-agent-client-tls -n argocd --context <workload-cluster
 kubectl get secret argocd-agent-ca -n argocd --context <workload-cluster-context>
 ```
 
-### 5.4 Deploy Agent
+### 5.5 Create Agent Namespace on Principal
+
+For managed agents, create a namespace on the principal where the agent's Applications will be created and managed:
+
+```bash
+kubectl create namespace my-first-agent --context <control-plane-context>
+```
+
+### 5.6 Deploy Agent
+
+Replace <release-branch> with the version of the release you wish to use:
 
 ```bash
 kubectl apply -n argocd \
-  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main' \
+  -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=<release-branch>' \
   --context <workload-cluster-context>
 ```
 
-### 5.5 Configure Agent Connection
+### 5.7 Configure Agent Connection
 
 Update the agent configuration to connect to your principal using mTLS authentication:
 
@@ -324,7 +353,7 @@ kubectl logs -n argocd deployment/argocd-agent-agent --context <workload-cluster
 
 # Expected output:
 # INFO[0001] Starting argocd-agent (agent) v0.1.0 (ns=argocd, mode=managed, auth=mtls)
-# INFO[0002] Authentication successful  
+# INFO[0002] Authentication successful
 # INFO[0003] Connected to argocd-agent-principal v0.1.0
 ```
 
@@ -347,9 +376,24 @@ argocd-agentctl agent list \
   --principal-namespace argocd
 ```
 
-### 6.4 Test Application Synchronization
+### 6.4 Test Application Synchronization (Managed Mode)
 
-Create a test application on the principal (managed mode):
+Propagate a default AppProject from principal to the agent:
+
+```bash
+kubectl patch appproject default -n argocd \
+  --context <control-plane-context> --type='merge' \
+  --patch='{"spec":{"sourceNamespaces":["*"],"destinations":[{"name":"*","namespace":"*","server":"*"}]}}'
+```
+
+Verify the AppProject is synchronized to the agent:
+
+```bash
+# Check that the AppProject appears on the workload cluster
+kubectl get appprojs -n argocd --context <workload-cluster-context>
+```
+
+Create a test application on the principal:
 
 ```bash
 cat <<EOF | kubectl apply -f - --context <control-plane-context>
@@ -365,7 +409,7 @@ spec:
     targetRevision: HEAD
     path: guestbook
   destination:
-    server: https://kubernetes.default.svc
+    server: https://<principal-external-ip:port>?agentName=my-first-agent # For example, https://172.18.255.200:443?agentName=my-first-agent
     namespace: guestbook
   syncPolicy:
     syncOptions:
@@ -389,7 +433,7 @@ Access the Argo CD UI to see your agent and its applications!
 
 ### Security Hardening
 1. **Replace development certificates** with production-grade PKI
-2. **Configure proper RBAC** in Argo CD  
+2. **Configure proper RBAC** in Argo CD
 3. **Set up network policies** to restrict traffic
 4. **Enable audit logging** for compliance
 
@@ -455,6 +499,23 @@ argocd-agentctl pki issue agent my-first-agent \
 # Check certificate validity
 kubectl get secret argocd-agent-client-tls -n argocd --context <workload-cluster-context> \
   -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
+```
+
+**Missing Server Secretkey**:
+```bash
+# The application status contains:
+status:
+  conditions:
+  - lastTransitionTime: "2025-09-22T16:20:56Z"
+    message: 'error getting cluster by name "in-cluster": server.secretkey is missing'
+    type: InvalidSpecError
+```
+
+```bash
+# Create a random server.secretkey
+kubectl patch secret argocd-secret -n argocd \
+  --context <workload-cluster-context> \
+  --patch='{"data":{"server.secretkey":"'$(openssl rand -base64 32 | base64 -w 0)'"}}'
 ```
 
 ## Related Documentation
