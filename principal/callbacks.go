@@ -87,7 +87,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		}
 
 		// Revert modifications on autonomous agent applications
-		if s.appManager.RevertAutonomousAppChanges(s.ctx, new) {
+		if s.appManager.RevertAutonomousAppChanges(s.ctx, new, s.sourceCache.Application) {
 			logCtx.Trace("Modifications to the application are reverted")
 			return
 		}
@@ -219,8 +219,13 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 
 	// Check if this AppProject was created by an autonomous agent
 	if isResourceFromAutonomousAgent(new) {
-		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
-		return
+		logCtx.Trace("Reverting modifications on autonomous agent appProjects/////////////////")
+		// Revert modifications on autonomous agent appProjects
+		if s.projectManager.RevertAppProjectChanges(s.ctx, new, s.sourceCache.AppProject) {
+			logCtx.Trace("Modifications to the appProject are reverted*************")
+			return
+		}
+		logCtx.Trace("No revertions!!!!!!!!!!!!!")
 	}
 
 	if len(new.Finalizers) > 0 && len(new.Finalizers) != len(old.Finalizers) {
@@ -262,6 +267,14 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 		"event":           "appproject_delete",
 		"appproject_name": outbound.Name,
 	})
+
+	// Revert user-initiated deletion on autonomous agent applications
+	if isResourceFromAutonomousAgent(outbound) {
+		if s.revertUserInitiatedProjectDeletion(outbound, logCtx) {
+			logCtx.Trace("Deleted appProject is recreated")
+		}
+		return
+	}
 
 	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
 
@@ -636,6 +649,33 @@ func (s *Server) revertUserInitiatedDeletion(outbound *v1alpha1.Application, log
 	sourceUID := outbound.Annotations[manager.SourceUIDAnnotation]
 	app.SetUID(k8stypes.UID(sourceUID))
 	_, err := s.appManager.Create(s.ctx, app)
+	if err != nil {
+		logCtx.WithError(err).Error("failed to recreate application after unauthorized deletion")
+	} else {
+		logCtx.Infof("Recreated application %s after unauthorized deletion", outbound.Name)
+	}
+
+	return true
+}
+
+func (s *Server) revertUserInitiatedProjectDeletion(outbound *v1alpha1.AppProject, logCtx *logrus.Entry) bool {
+	appKey := fmt.Sprintf("%s/%s", outbound.Namespace, outbound.Name)
+
+	// Check if this deletion was expected (agent-initiated)
+	if s.isExpectedDeletion(appKey) {
+		logCtx.Debugf("Expected deletion from autonomous agent - allowing it to proceed")
+		// This is a legitimate deletion from the agent, let it proceed normally
+		return false
+	}
+
+	logCtx.Warnf("Unauthorized deletion detected for autonomous agent application - recreating")
+	// This is an unauthorized deletion (user-initiated), recreate the app
+	app := outbound.DeepCopy()
+	app.ResourceVersion = ""
+	app.DeletionTimestamp = nil
+	sourceUID := outbound.Annotations[manager.SourceUIDAnnotation]
+	app.SetUID(k8stypes.UID(sourceUID))
+	_, err := s.projectManager.Create(s.ctx, app)
 	if err != nil {
 		logCtx.WithError(err).Error("failed to recreate application after unauthorized deletion")
 	} else {

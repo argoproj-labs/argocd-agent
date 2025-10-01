@@ -81,7 +81,7 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 
 	// Revert any direct modifications done in application on managed-cluster
 	// because for managed-agent all changes should be done through principal
-	if reverted := a.appManager.RevertManagedAppChanges(a.context, new); reverted {
+	if reverted := a.appManager.RevertManagedAppChanges(a.context, new, a.sourceCache.Application); reverted {
 		logCtx.Debugf("Modifications done in application: %s are reverted", new.Name)
 		return
 	}
@@ -212,6 +212,13 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 	// If the appProject is not managed, we ignore this event.
 	if !a.projectManager.IsManaged(new.Name) {
 		logCtx.Errorf("Received update event for unmanaged appProject")
+		return
+	}
+
+	// Revert any direct modifications done to appProject on managed-cluster
+	// because for managed-agent all changes should be done through principal
+	if reverted := a.projectManager.RevertAppProjectChanges(a.context, new, a.sourceCache.AppProject); reverted {
+		logCtx.Debugf("Modifications done to appProject are reverted")
 		return
 	}
 
