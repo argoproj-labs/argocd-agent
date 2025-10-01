@@ -1,205 +1,79 @@
-# ArgoCD Agent Helm Chart: Installation and Configuration Guide
-This guide provides step-by-step instructions on how to install the argocd-agent-agent-helm Helm chart from GitHub Container Registry (GHCR) and how to configure its various parameters using the values.yaml file.
+# argocd-agent-agent
+
+![Version: 0.4.1](https://img.shields.io/badge/Version-0.4.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
+
+Argo CD Agent for connecting managed clusters to a Principal
+
+**Homepage:** <https://github.com/argoproj-labs/argocd-agent>
+
+## Maintainers
+
+| Name | Email | Url |
+| ---- | ------ | --- |
+| Argo Project Maintainers |  | <https://github.com/argoproj-labs/argocd-agent> |
+
+## Source Code
+
+* <https://github.com/argoproj-labs/argocd-agent>
+
+## Requirements
+
+Kubernetes: `>=1.24.0-0`
+
+## Values
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| affinity | object | `{}` | Affinity rules for the agent Pod. |
+| agentMode | string | `"autonomous"` | Agent mode of operation. |
+| auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
+| healthzPort | string | `"8002"` | Healthz server port exposed by the agent. |
+| image | string | `"ghcr.io/argoproj-labs/argocd-agent/argocd-agent"` | Container image repository for the agent. |
+| imagePullPolicy | string | `"Always"` | Image pull policy for the agent container. |
+| imageTag | string | `"latest"` | Container image tag for the agent. |
+| logLevel | string | `"info"` | Log level for the agent. |
+| metricsPort | string | `"8181"` | Metrics server port exposed by the agent. |
+| namespaceOverride | string | `""` | Override namespace to deploy the agent into. Leave empty to use the release namespace. |
+| nodeSelector | object | `{}` | Node selector for scheduling the agent Pod. |
+| podAnnotations | object | `{}` | Additional annotations to add to the agent Pod. |
+| podLabels | object | `{}` | Additional labels to add to the agent Pod. |
+| priorityClassName | string | `""` | PriorityClassName for the agent Pod. |
+| probes | object | `{"liveness":{"enabled":true,"failureThreshold":3,"httpGet":{"path":"/healthz","port":"healthz"},"initialDelaySeconds":10,"periodSeconds":10,"timeoutSeconds":2},"readiness":{"enabled":true,"failureThreshold":3,"httpGet":{"path":"/healthz","port":"healthz"},"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":2}}` | Liveness and readiness probe configuration. |
+| probes.liveness.enabled | bool | `true` | Enable the liveness probe. |
+| probes.liveness.failureThreshold | int | `3` | Failure threshold for liveness probe. |
+| probes.liveness.initialDelaySeconds | int | `10` | Initial delay before the first liveness probe. |
+| probes.liveness.periodSeconds | int | `10` | Frequency of liveness probes. |
+| probes.liveness.timeoutSeconds | int | `2` | Timeout for liveness probe. |
+| probes.readiness.enabled | bool | `true` | Enable the readiness probe. |
+| probes.readiness.failureThreshold | int | `3` | Failure threshold for readiness probe. |
+| probes.readiness.initialDelaySeconds | int | `5` | Initial delay before the first readiness probe. |
+| probes.readiness.periodSeconds | int | `10` | Frequency of readiness probes. |
+| probes.readiness.timeoutSeconds | int | `2` | Timeout for readiness probe. |
+| redisAddress | string | `"argocd-redis:6379"` | Redis address used by the agent. |
+| replicaCount | int | `1` | Number of replicas for the agent Deployment. |
+| resources | object | `{"limits":{"cpu":"500m","memory":"512Mi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Resource requests and limits for the agent Pod. |
+| server | string | `"principal.server.address.com"` | Principal server address (hostname or host:port). |
+| serverPort | string | `"443"` | Principal server port. |
+| service | object | `{"healthz":{"annotations":{},"port":8002,"targetPort":8002},"metrics":{"annotations":{},"port":8181,"targetPort":8181}}` | Service configuration for metrics and healthz endpoints. |
+| service.healthz.annotations | object | `{}` | Annotations to add to the healthz Service. |
+| service.healthz.port | int | `8002` | Service port for healthz. |
+| service.healthz.targetPort | int | `8002` | Target port for healthz. |
+| service.metrics.annotations | object | `{}` | Annotations to add to the metrics Service. |
+| service.metrics.port | int | `8181` | Service port for metrics. |
+| service.metrics.targetPort | int | `8181` | Target port for metrics. |
+| serviceAccount | object | `{"annotations":{},"create":true,"name":""}` | ServiceAccount configuration. |
+| serviceAccount.annotations | object | `{}` | Annotations to add to the ServiceAccount. |
+| serviceAccount.create | bool | `true` | Whether to create the ServiceAccount. |
+| serviceAccount.name | string | `""` | Name of the ServiceAccount to use. If empty, a name is generated. |
+| tests | object | `{"enabled":"true","image":"bitnamilegacy/kubectl","tag":"1.33.4"}` | Configuration for chart tests. |
+| tests.enabled | string | `"true"` | Enable chart tests. |
+| tests.image | string | `"bitnamilegacy/kubectl"` | Test image. |
+| tests.tag | string | `"1.33.4"` | Test image tag. |
+| tlsClientCertPath | string | `""` | File path to the client TLS certificate inside the container (optional). |
+| tlsClientInSecure | string | `"false"` | Whether to skip TLS verification for client connections. |
+| tlsClientKeyPath | string | `""` | File path to the client TLS key inside the container (optional). |
+| tlsRootCAPath | string | `""` | File path to the root CA certificate inside the container (optional). |
+| tlsSecretName | string | `"argocd-agent-client-tls"` | Name of the TLS Secret containing client cert/key for mTLS. |
+| tolerations | list | `[]` | Tolerations for the agent Pod. |
+| userPasswordSecretName | string | `"argocd-agent-agent-userpass"` | Name of the Secret containing agent username/password (if used). |
 
-## Prerequisites
-Before you begin, ensure you have the following:
-
-- Helm CLI (v3.8.0 or newer): Installed and configured on your local machine.
-- Kubernetes Cluster: Access to a Kubernetes cluster where you want to deploy the agent.
-
-## Helm Chart Installation
-Use the following command to install the argocd-agent-agent-helm chart.
-
-`helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0`
-
-### Namespace Handling
-
-If you run the helm install command without specifying a namespace flag, Helm will attempt to deploy resources into the `default` namespace.
-
-If the target namespace set using flag `--set namespaceOverride=argocd`, does not exist, the installation will fail. 
-
-Deploying to a Custom Namespace:
-The chart can be deployed into a specific Kubernetes namespace using `--namespace` flag, and `--create-namespace` to create a namespace if not present. Or, it can also be set using `--set namespaceOverride=agent-namespce`.
-
-```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 --namespace=argocd --create-namespace
-```
-
-OR,
-
-```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 --set namespaceOverride=argocd
-```
-
-
-## Overriding Configuration Values
-Configuration (values.yaml)
-The values.yaml file allows you to customize the behavior of the ArgoCD Agent. Here's a breakdown of the available parameters:
-
-Note:
-__Default values for argocd-agent-agent.__
-__This is a YAML-formatted file.__
-__Declare variables to be passed into your templates.__
-
-#### Namespace to deploy your agent in
-```
-namespaceOverride: ""
-```
-
-#### Secret names for argo-agent deployment
-
-```
-tlsSecretName: "argocd-agent-client-tls"
-userPasswordSecretName: "argocd-agent-agent-userpass"
-image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent"
-imageTag: "latest"
-```
-
-#### config-map to config parameters for argocd-agent
-
-```
-agentMode: "autonomous"
-auth: "mtls:any"
-logLevel: "info"
-server: "http://principal.server.address.com" 
-serverPort: "443"
-metricsPort: "8181"
-tlsClientInSecure: "false"
-healthzPort: "8002"
-tlsClientKeyPath: ""
-tlsClientCertPath: ""
-tlsRootCAPath: ""
-```
-
-Parameter Descriptions:
-
-namespaceOverride:
-
-Default: ""
-
-The Kubernetes namespace where the agent's resources (Deployment, Service, ConfigMap, etc.) will be deployed. This can be overridden by the helm install --namespace flag.
-
-tlsSecretName:
-
-Default: "argocd-agent-client-tls"
-The name of the Kubernetes Secret containing TLS client certificates for the agent.
-
-userPasswordSecretName:
-
-Default: "argocd-agent-agent-userpass"
-
-The name of the Kubernetes Secret containing user credentials if auth method is userpass.
-
-image:
-
-Default: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent"
-
-The Docker image repository for the ArgoCD Agent.
-
-imageTag:
-
-Default: "latest"
-
-The tag of the Docker image to use. It's recommended to use a specific version tag in production.
-
-agentMode:
-
-Default: "autonomous"
-
-The operating mode for the agent. Valid values are "autonomous" or "managed".
-
-auth:
-
-Default: "mtls:any"
-
-The credential identifier for the agent's authentication method. Examples: "userpass:_path_to_encrypted_creds_" or "mtls:_agent_id_regex_".
-Valid credential identifier for this agent. Must be in the
-format `<method>:<configuration>`. 
-Valid values are:
-- "userpass:_path_to_encrypted_creds_" where _path_to_encrypted_creds_ is
-  the path to the file containing encrypted credential for authenticatiion.
-- "mtls:_agent_id_regex_" where _agent_id_regex_ is the regex pattern for
-  extracting the agent ID from client cert subject.
-
-logLevel:
-
-Default: "info"
-
-The logging level for the agent. Valid values: "trace", "debug", "info", "warn", "error".
-
-server:
-
-Default: "http://principal.server.address.com"
-
-The remote address of the principal (Argo CD server) to connect to. Can be a DNS name or IP address.
-
-serverPort:
-
-Default: "443"
-
-The remote port of the principal to connect to. Note: This value must be treated as a string in the ConfigMap.
-
-metricsPort:
-
-Default: "8181"
-
-The port on which the agent's metrics server should listen. Note: This value must be treated as a string in the ConfigMap.
-
-tlsClientInSecure:
-
-Default: "false"
-
-Whether to skip validation of the remote TLS credentials. Insecure; use only for development purposes. Note: This value must be treated as a string in the ConfigMap.
-
-healthzPort:
-
-Default: "8002"
-
-The port the health check server should listen on.
-
-tlsClientKeyPath: 
-
-Default: ""
-
-Path to a file containing the agent's TLS client certificate.
-
-tlsClientCertPath: 
-
-Default: ""
-
-Path to a file containing the agent's TLS client private key.
-
-tlsRootCAPath: 
-
-Default: ""
-
-The path to a file containing the certificates for the TLS root certificate authority used to validate the remote principal. 
-
-#### Overriding Configuration Values
-You can override any of the default values in values.yaml during installation:
-
-Using --set for individual values:
-```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 \
-  --set logLevel="debug" \
-  --set agentMode="managed" \
-  --set server="https://my-argocd-server.com"
-```
-Using a custom values.yaml file:
-Create a new YAML file (e.g., my-custom-values.yaml) with only the values you want to change:
-
-### my-custom-values.yaml
-
-namespace: "production-agents"
-logLevel: "error"
-server: "https://argocd.production.com"
-
-Then, install with:
-
-```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 \
-  -f my-custom-values.yaml
-```
-Values provided via -f take precedence over the chart's default values.yaml. You can use multiple -f flags, with the rightmost file taking highest precedence.
-
-By following these steps, you should be able to successfully install and configure your ArgoCD Agent Helm chart.
