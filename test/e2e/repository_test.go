@@ -15,6 +15,7 @@
 package e2e
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -116,7 +117,15 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
-		return err == nil && string(repository.Data["url"]) == updatedRepo
+		if err != nil {
+			fmt.Println("error getting repository", err)
+			return false
+		}
+		if string(repository.Data["url"]) != updatedRepo {
+			fmt.Println("repository url does not match", string(repository.Data["url"]), updatedRepo)
+			return false
+		}
+		return true
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 
 	// Delete the repository on the principal
