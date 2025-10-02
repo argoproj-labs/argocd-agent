@@ -1,3 +1,4 @@
+{{- if .Values.tests.enabled }}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -8,7 +9,7 @@ spec:
   serviceAccountName: argocd-agent-test
   containers:
     - name: kubectl
-      image: bitnami/kubectl:latest
+      image: "{{ .Values.tests.image }}:{{ .Values.tests.tag }}"
       command: 
         - sh
         - -c
@@ -147,3 +148,4 @@ spec:
           echo "Overall chart installation verified successfully!"
           echo "Total resources created: $((DEPLOYMENT_COUNT + SERVICE_COUNT + CONFIGMAP_COUNT + SA_COUNT + ROLE_COUNT + ROLEBINDING_COUNT + CLUSTERROLE_COUNT + CLUSTERROLEBINDING_COUNT))"
   restartPolicy: Never
+{{- end }}
