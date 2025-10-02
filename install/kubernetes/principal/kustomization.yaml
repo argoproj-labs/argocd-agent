@@ -12,6 +12,7 @@ resources:
 - principal-metrics-service.yaml
 - principal-healthz-service.yaml
 - principal-userpass-secret.yaml
+ - principal-networkpolicy-redis.yaml
 
 images:
 - name: argocd-agent
