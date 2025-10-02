@@ -7,12 +7,15 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      {{- toYaml .Values.networkPolicy.redis.redisSelector | nindent 6 }}
+      {{- toYaml .Values.networkPolicy.redis.agentSelector | nindent 6 }}
   policyTypes:
-  - Ingress
-  ingress:
-  - from:
+  - Egress
+  egress:
+  - to:
     - podSelector:
         matchLabels:
-          {{- toYaml .Values.networkPolicy.redis.agentSelector | nindent 10 }}
+          {{- toYaml .Values.networkPolicy.redis.redisSelector | nindent 10 }}
+    ports:
+    - port: 6379
+      protocol: TCP
 {{- end }}
