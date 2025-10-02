@@ -40,6 +40,7 @@ func NewRootCommand() *cobra.Command {
 	command := &cobra.Command{
 		Short: "Inspect and manipulate argocd-agent configuration",
 		Long:  cliDescription,
+		Use:   "argocd-agentctl",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Usage()
 			os.Exit(1)

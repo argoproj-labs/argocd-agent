@@ -15,6 +15,7 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -49,15 +50,21 @@ func (suite *ResyncTestSuite) TearDownTest() {
 		requires.NoError(err)
 	}
 
+	fixture.CheckReadiness(suite.T(), "principal")
+
 	if !fixture.IsProcessRunning("agent-managed") {
 		err := fixture.StartProcess("agent-managed")
 		requires.NoError(err)
 	}
 
+	fixture.CheckReadiness(suite.T(), "agent-managed")
+
 	if !fixture.IsProcessRunning("agent-autonomous") {
 		err := fixture.StartProcess("agent-autonomous")
 		requires.NoError(err)
 	}
+
+	fixture.CheckReadiness(suite.T(), "agent-autonomous")
 }
 
 // Managed Mode: delete the app from the control-plane when the principal process is
@@ -587,11 +594,22 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnUpdate() {
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
+	// Wait for the principal to be ready
+	fixture.CheckReadiness(suite.T(), "principal")
+
 	// Ensure the repository is updated on the workload cluster
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
-		return err == nil && string(repository.Data["url"]) == newURL
+		if err != nil {
+			fmt.Println("error getting repository", err)
+			return false
+		}
+		if string(repository.Data["url"]) != newURL {
+			fmt.Println("repository url does not match", string(repository.Data["url"]), newURL)
+			return false
+		}
+		return true
 	}, 30*time.Second, 1*time.Second)
 }
 
@@ -946,7 +964,11 @@ func (suite *ResyncTestSuite) createAppProject() *argoapp.AppProject {
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
-		return err == nil
+		if err != nil {
+			fmt.Println("error getting appProject", err)
+			return false
+		}
+		return true
 	}, 30*time.Second, 1*time.Second)
 
 	return appProject
