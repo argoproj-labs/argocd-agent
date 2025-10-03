@@ -104,6 +104,9 @@ type Agent struct {
 
 	cacheRefreshInterval time.Duration
 	clusterCache         *appstatecache.Cache
+
+	inflightMu   sync.Mutex
+	inflightLogs map[string]context.CancelFunc
 }
 
 const defaultQueueName = "default"
