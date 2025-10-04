@@ -27,9 +27,11 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -179,6 +181,17 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		err = a.deleteApplication(incomingApp)
 		if err != nil {
 			logCtx.Errorf("Error deleting application: %v", err)
+		}
+	case event.OperationTerminate:
+		// Handle operation termination for sync operations
+		if a.mode == types.AgentModeManaged {
+			err = a.handleOperationTerminate(incomingApp)
+			if err != nil {
+				logCtx.Errorf("Error handling operation terminate: %v", err)
+			}
+		} else {
+			logCtx.Debug("Discarding operation terminate event, because agent is not in managed mode")
+			return event.NewEventDiscardedErr("operation terminate event not allowed when mode is not managed")
 		}
 	default:
 		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
@@ -740,5 +753,42 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 		log().Warnf("Could not unmanage repository %s: %v", repo.Name, err)
 	}
 
+	return nil
+}
+
+// handleOperationTerminate handles the termination of a running sync operation
+// by updating the application's operation state to Terminating
+func (a *Agent) handleOperationTerminate(app *v1alpha1.Application) error {
+	logCtx := log().WithFields(logrus.Fields{
+		"method": "handleOperationTerminate",
+		"app":    app.QualifiedName(),
+	})
+
+	logCtx.Infof("Handling operation termination for application %s", app.QualifiedName())
+
+	// Set the operation state to Terminating to signal the ArgoCD application controller
+	// to abort the running sync operation
+	app.SetNamespace(a.namespace)
+
+	// Create a patch to update the operation state to Terminating
+	patch := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      app.Name,
+			Namespace: app.Namespace,
+		},
+		Status: v1alpha1.ApplicationStatus{
+			OperationState: &v1alpha1.OperationState{
+				Phase: synccommon.OperationPhase("Terminating"),
+			},
+		},
+	}
+
+	// Update the application with the terminating state
+	updated, err := a.appManager.UpdateOperation(a.context, patch)
+	if err != nil {
+		return fmt.Errorf("failed to update application operation state to terminating: %w", err)
+	}
+
+	logCtx.Infof("Successfully updated application %s operation state to terminating", updated.QualifiedName())
 	return nil
 }

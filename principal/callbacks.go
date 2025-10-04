@@ -109,6 +109,14 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		logCtx.Error("Help! Queue pair has disappeared!")
 		return
 	}
+
+	// Check for operation termination status change
+	if s.shouldSendOperationTerminateEvent(old, new) {
+		ev := s.events.ApplicationEvent(event.OperationTerminate, new)
+		q.Add(ev)
+		logCtx.Infof("Added operation terminate event to send queue for app %s", new.QualifiedName())
+	}
+
 	ev := s.events.ApplicationEvent(event.SpecUpdate, new)
 	q.Add(ev)
 	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
@@ -643,4 +651,20 @@ func (s *Server) revertUserInitiatedDeletion(outbound *v1alpha1.Application, log
 	}
 
 	return true
+}
+
+// shouldSendOperationTerminateEvent checks if the operation state has changed to Terminating
+// and should trigger an operation terminate event to be sent to the agent
+func (s *Server) shouldSendOperationTerminateEvent(old *v1alpha1.Application, new *v1alpha1.Application) bool {
+	// Check if operation state exists in both old and new
+	if old.Status.OperationState == nil || new.Status.OperationState == nil {
+		return false
+	}
+
+	// Check if phase changed to Terminating
+	oldPhase := old.Status.OperationState.Phase
+	newPhase := new.Status.OperationState.Phase
+
+	// Only send terminate event if phase changed from non-Terminating to Terminating
+	return string(oldPhase) != "Terminating" && string(newPhase) == "Terminating"
 }
