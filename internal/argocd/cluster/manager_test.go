@@ -53,7 +53,7 @@ func Test_StartStop(t *testing.T) {
 		},
 	}
 	clt := kube.NewFakeClientsetWithResources(redisSecret)
-	m, err := NewManager(context.TODO(), "argocd", "", "", clt)
+	m, err := NewManager(context.TODO(), "argocd", "", "", "", clt)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	err = m.Start()
@@ -74,7 +74,7 @@ func Test_onClusterAdd(t *testing.T) {
 		},
 	}
 	clt := kube.NewFakeClientsetWithResources(redisSecret)
-	m, err := NewManager(context.TODO(), "argocd", "", "", clt)
+	m, err := NewManager(context.TODO(), "argocd", "", "", "", clt)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	err = m.Start()
