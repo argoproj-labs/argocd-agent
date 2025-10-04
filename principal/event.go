@@ -222,6 +222,18 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
 		logCtx.Infof("Updated application spec %s", incoming.QualifiedName())
+	// Operation terminate - forward to agent for sync operation abortion
+	case event.OperationTerminate.String():
+		if !agentMode.IsManaged() {
+			logCtx.Debug("Discarding event, because agent is not in managed mode")
+			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
+		}
+
+		cache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+
+		// Forward the terminate event to the agent without modifying the principal's state
+		// The agent will handle the operation termination
+		logCtx.Infof("Forwarding operation terminate event for application %s to agent", incoming.QualifiedName())
 	// App deletion
 	case event.Delete.String():
 		if agentMode.IsAutonomous() {
