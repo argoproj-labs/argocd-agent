@@ -259,6 +259,14 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		}
 	}
 
+	isFromSource := func(annotations map[string]string) bool {
+		if annotations == nil {
+			return false
+		}
+		_, ok := annotations[manager.SourceUIDAnnotation]
+		return ok
+	}
+
 	// Delete all appProjects from the autonomous agent
 	appProjectList := argoapp.AppProjectList{}
 	err = autonomousAgentClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
@@ -266,7 +274,8 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, appProject := range appProjectList.Items {
-		if appProject.Name == appproject.DefaultAppProjectName {
+		if appProject.Name == appproject.DefaultAppProjectName ||
+			isFromSource(appProject.GetAnnotations()) {
 			continue
 		}
 
@@ -295,7 +304,8 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, appProject := range appProjectList.Items {
-		if appProject.Name == appproject.DefaultAppProjectName {
+		if appProject.Name == appproject.DefaultAppProjectName ||
+			isFromSource(appProject.GetAnnotations()) {
 			continue
 		}
 
@@ -348,6 +358,10 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, repo := range repoList.Items {
+		if isFromSource(repo.GetAnnotations()) {
+			continue
+		}
+
 		err = EnsureDeletion(ctx, principalClient, &repo)
 		if err != nil {
 			return err

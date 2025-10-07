@@ -25,6 +25,7 @@ import (
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -91,6 +92,21 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterChanges() {
 	requires.NoError(suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{}))
 	app.Spec.Destination.Name = "in-cluster"
 	app.Spec.Destination.Server = ""
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
+
+	// Case 4: Delete the application directly from the managed-cluster,
+	// but it should be recreated to be in sync with principal
+	agentApp := argoapp.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      app.Name,
+			Namespace: "argocd",
+		},
+		Spec: app.Spec,
+	}
+
+	err := suite.ManagedAgentClient.Delete(suite.Ctx, &agentApp, metav1.DeleteOptions{})
+	requires.NoError(err)
+
 	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 }
 
@@ -289,8 +305,16 @@ func (suite *CacheTestSuite) Test_RevertAppProjectUpdatesManagedMode() {
 	requires.Eventually(func() bool {
 		got := argoapp.AppProject{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &got, metav1.GetOptions{})
-		fmt.Println("err", err)
-		fmt.Println("got", got.Spec.Description)
+		return err == nil && reflect.DeepEqual(appProject.Spec.Description, got.Spec.Description)
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the appProject from the workload cluster and ensure it is recreated to be in sync with the control-plane
+	err = suite.ManagedAgentClient.Delete(suite.Ctx, appProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		got := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &got, metav1.GetOptions{})
 		return err == nil && reflect.DeepEqual(appProject.Spec.Description, got.Spec.Description)
 	}, 30*time.Second, 1*time.Second)
 }
@@ -327,9 +351,81 @@ func (suite *CacheTestSuite) Test_RevertAppProjectUpdatesAutonomousMode() {
 	requires.Eventually(func() bool {
 		got := argoapp.AppProject{}
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &got, metav1.GetOptions{})
-		fmt.Println("err", err)
-		fmt.Println("got", got.Spec.Description)
 		return err == nil && reflect.DeepEqual(appProject.Spec.Description, got.Spec.Description)
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the appProject from the control-plane and ensure it is recreated to be in sync with the agent
+	principalAppProject := argoapp.AppProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      autonomousProjName,
+			Namespace: "argocd",
+		},
+		Spec: appProject.Spec,
+	}
+	err = suite.PrincipalClient.Delete(suite.Ctx, &principalAppProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		got := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &got, metav1.GetOptions{})
+		return err == nil && reflect.DeepEqual(appProject.Spec.Description, got.Spec.Description)
+	}, 30*time.Second, 1*time.Second)
+}
+
+func (suite *CacheTestSuite) Test_RevertRepositoryUpdatesManagedMode() {
+	requires := suite.Require()
+
+	// Create an appProject on the control-plane cluster and ensure it is synced to the workload cluster
+	appProject := sampleAppProject()
+
+	err := suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	projKey := types.NamespacedName{Name: appProject.Name, Namespace: "argocd"}
+
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		if err != nil {
+			fmt.Println("error getting appProject", err)
+			return false
+		}
+		return true
+	}, 30*time.Second, 1*time.Second)
+
+	// Create a repository on the control-plane cluster and ensure it is synced to the workload cluster
+	repository := sampleRepository()
+	err = suite.PrincipalClient.Create(suite.Ctx, repository, metav1.CreateOptions{})
+	requires.NoError(err)
+	repoKey := types.NamespacedName{Name: repository.Name, Namespace: "argocd"}
+
+	requires.Eventually(func() bool {
+		repository := corev1.Secret{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, repoKey, &repository, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+
+	// Modify the repository on the workload cluster and ensure the change is reverted to be in sync with the control-plane
+	err = suite.ManagedAgentClient.EnsureRepositoryUpdate(suite.Ctx, repoKey, func(repository *corev1.Secret) error {
+		repository.Data["url"] = []byte("https://github.com/example/repo-updated.git")
+		return nil
+	}, metav1.UpdateOptions{})
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		got := corev1.Secret{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, repoKey, &got, metav1.GetOptions{})
+		return err == nil && reflect.DeepEqual(repository.Data["url"], got.Data["url"])
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the repository from the workload cluster and ensure it is recreated to be in sync with the control-plane
+	err = suite.ManagedAgentClient.Delete(suite.Ctx, repository, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		got := corev1.Secret{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, repoKey, &got, metav1.GetOptions{})
+		return err == nil && reflect.DeepEqual(repository.Data["url"], got.Data["url"])
 	}, 30*time.Second, 1*time.Second)
 }
 
