@@ -72,10 +72,10 @@ type ServerOptions struct {
 	rootCa                 *x509.CertPool
 	clientCertSubjectMatch bool
 	redisAddress           string
-	redisPassword        string
-	redisCompressionType cacheutil.RedisCompressionType
-	healthzPort          int
-	informerSyncTimeout  time.Duration
+	redisPassword          string
+	redisCompressionType   cacheutil.RedisCompressionType
+	healthzPort            int
+	informerSyncTimeout    time.Duration
 }
 
 type ServerOption func(o *Server) error
@@ -89,7 +89,7 @@ func defaultOptions() *ServerOptions {
 		unauthMethods:       make(map[string]bool),
 		eventProcessors:     10,
 		rootCa:              x509.NewCertPool(),
-		informerSyncTimeout: 60 * time.Second
+		informerSyncTimeout: 60 * time.Second,
 	}
 }
 
