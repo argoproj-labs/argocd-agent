@@ -144,19 +144,22 @@ func Test_Serve(t *testing.T) {
 	templ := certTempl
 	fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
 
-	// We start a real (non-mocked) server
-	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	s, err := NewServer(ctx, kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 		WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 		WithGeneratedTokenSigningKey(),
 		WithListenerPort(0),
 		WithListenerAddress("127.0.0.1"),
 		WithShutDownGracePeriod(2*time.Second),
 		WithGRPC(true),
+		WithInformerSyncTimeout(5*time.Second),
 	)
 	require.NoError(t, err)
 	errch := make(chan error)
 
-	err = s.Start(context.Background(), errch)
+	err = s.Start(ctx, errch)
 	require.NoError(t, err)
 
 	// Create and register authentication method

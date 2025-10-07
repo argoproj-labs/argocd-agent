@@ -247,15 +247,32 @@ func Test_CreateEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
-		s.Start(context.Background(), make(chan error))
+
+		// Use context with timeout to prevent hanging
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// Create server with short sync timeout for testing
+		s, err := NewServer(ctx, fac, "argocd",
+			WithGeneratedTokenSigningKey(),
+			WithInformerSyncTimeout(5*time.Second),
+		)
 		require.NoError(t, err)
+
+		// Ensure cleanup
+		defer func() {
+			_ = s.Shutdown()
+		}()
+
+		err = s.Start(ctx, make(chan error))
+		require.NoError(t, err)
+
 		s.clusterMgr.MapCluster("foo", &v1alpha1.Cluster{Name: "foo", Server: "https://foo.com"})
 		s.setAgentMode("foo", types.AgentModeAutonomous)
-		got, err := s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(ctx, "foo", wq)
 		assert.Nil(t, err)
 		require.Equal(t, ev, *got)
-		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
+		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(ctx, "test", v1.GetOptions{})
 		assert.NoError(t, err)
 		require.NotNil(t, napp)
 		assert.Empty(t, napp.OwnerReferences)
@@ -327,15 +344,29 @@ func Test_UpdateEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, err := NewServer(ctx, fac, "argocd",
+			WithGeneratedTokenSigningKey(),
+			WithInformerSyncTimeout(2*time.Second),
+		)
 		require.NoError(t, err)
-		s.Start(context.Background(), make(chan error))
+
+		defer func() {
+			_ = s.Shutdown()
+		}()
+
+		err = s.Start(ctx, make(chan error))
+		require.NoError(t, err)
+
 		s.setAgentMode("foo", types.AgentModeAutonomous)
 		s.clusterMgr.MapCluster("foo", &v1alpha1.Cluster{Name: "foo", Server: "https://foo.com"})
-		got, err := s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(ctx, "foo", wq)
 		require.Equal(t, ev, *got)
 		assert.NoError(t, err)
-		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
+		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(ctx, "test", v1.GetOptions{})
 		assert.NoError(t, err)
 		require.NotNil(t, napp)
 		assert.Equal(t, "HEAD", napp.Spec.Source.TargetRevision)
@@ -412,11 +443,9 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			delApp := &v1alpha1.Application{
 				ObjectMeta: v1.ObjectMeta{
-					Name:      "test",
-					Namespace: "foo",
-					Finalizers: []string{
-						"test-finalizers",
-					},
+					Name:       "test",
+					Namespace:  "foo",
+					Finalizers: []string{},
 				},
 				Spec: v1alpha1.ApplicationSpec{
 					Source: &v1alpha1.ApplicationSource{
@@ -439,7 +468,9 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 				delApp.DeletionTimestamp = ptr.To(v1.Time{Time: time.Now()})
 			}
 
-			fac := kube.NewKubernetesFakeClientWithApps("argocd")
+			// Create fake client with the application already in it
+			fac := kube.NewKubernetesFakeClientWithApps("argocd", delApp)
+
 			ev := cloudevents.NewEvent()
 			ev.SetDataSchema("application")
 			ev.SetType(event.Delete.String())
@@ -447,31 +478,50 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 			wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 			wq.On("Get").Return(&ev, false)
 			wq.On("Done", &ev)
-			s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			s, err := NewServer(ctx, fac, "argocd",
+				WithGeneratedTokenSigningKey(),
+				WithInformerSyncTimeout(2*time.Second),
+			)
+			require.NoError(t, err)
+
+			defer func() {
+				_ = s.Shutdown()
+			}()
+
+			err = s.Start(ctx, make(chan error))
 			require.NoError(t, err)
 
 			s.setAgentMode("foo", types.AgentModeManaged)
 
-			_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Create(context.Background(), delApp, v1.CreateOptions{})
-
-			got, err := s.processRecvQueue(context.Background(), "foo", wq)
+			var cachedApp *v1alpha1.Application
+			for i := 0; i < 20; i++ {
+				cachedApp, err = s.appManager.Get(ctx, delApp.Name, delApp.Namespace)
+				if err == nil {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
 			require.NoError(t, err)
 
 			if test.deletionTimestampSetOnPrincipal {
-				// If deletionTimestamp is set on principal, the Application should be removed by the call
+				require.NotNil(t, cachedApp.DeletionTimestamp)
+			}
+
+			got, err := s.processRecvQueue(ctx, "foo", wq)
+			require.NoError(t, err)
+
+			if test.deletionTimestampSetOnPrincipal {
 				require.NoError(t, err)
 				require.Equal(t, ev, *got)
-
-				// Verify Application is deleted
-				_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Get(context.Background(), delApp.Name, v1.GetOptions{})
+				_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Get(ctx, delApp.Name, v1.GetOptions{})
 				require.True(t, apierrors.IsNotFound(err))
-
 			} else {
-				// If deletionTimestamp is NOT set on principal, the Application should NOT be removed by the call
 				require.NoError(t, err)
-
-				// Verify Application is NOT deleted
-				_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Get(context.Background(), delApp.Name, v1.GetOptions{})
+				_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Get(ctx, delApp.Name, v1.GetOptions{})
 				require.NoError(t, err)
 			}
 		})
