@@ -19,12 +19,14 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // addAppCreationToQueue processes a new application event originating from the
@@ -115,6 +117,13 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	logCtx := log().WithField(logfields.Event, "DeleteApp").WithField(logfields.Application, app.QualifiedName())
 	logCtx.Debugf("Delete app event")
+
+	if isResourceFromPrincipal(app) {
+		if manager.RevertUserInitiatedDeletion(a.context, app, a.sourceCache.Application, a.appManager, logCtx) {
+			logCtx.Trace("Deleted app is recreated")
+			return
+		}
+	}
 
 	a.resources.Remove(resources.NewResourceKeyFromApp(app))
 
@@ -248,6 +257,13 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 
 	logCtx.Debugf("Delete appProject event")
 
+	if isResourceFromPrincipal(appProject) {
+		if manager.RevertUserInitiatedDeletion(a.context, appProject, a.sourceCache.AppProject, a.projectManager, logCtx) {
+			logCtx.Trace("Deleted appProject is recreated")
+			return
+		}
+	}
+
 	a.resources.Remove(resources.NewResourceKeyFromAppProject(appProject))
 
 	// Only send the deletion event when we're in autonomous mode
@@ -347,6 +363,11 @@ func (a *Agent) handleRepositoryUpdate(old, new *corev1.Secret) {
 	a.watchLock.Lock()
 	defer a.watchLock.Unlock()
 
+	if a.repoManager.RevertRepositoryChanges(a.context, new, a.sourceCache.Repository) {
+		logCtx.Debugf("Modifications done to repository are reverted")
+		return
+	}
+
 	if a.mode.IsAutonomous() {
 		logCtx.Debugf("Skipping repository event because the agent is not in managed mode")
 		return
@@ -371,6 +392,11 @@ func (a *Agent) handleRepositoryDeletion(repo *corev1.Secret) {
 
 	logCtx.Debugf("Delete repository event")
 
+	if manager.RevertUserInitiatedDeletion(a.context, repo, a.sourceCache.Repository, a.repoManager, logCtx) {
+		logCtx.Trace("Deleted repository is recreated")
+		return
+	}
+
 	if a.mode.IsAutonomous() {
 		logCtx.Debugf("Skipping repository event because the agent is not in managed mode")
 		return
@@ -387,4 +413,15 @@ func (a *Agent) handleRepositoryDeletion(repo *corev1.Secret) {
 		logCtx.Errorf("Could not unmanage repository: %v", err)
 		return
 	}
+}
+
+// isResourceFromPrincipal checks if a Kubernetes resource was created by the principal
+// by examining if it has the source UID annotation.
+func isResourceFromPrincipal(resource metav1.Object) bool {
+	annotations := resource.GetAnnotations()
+	if annotations == nil {
+		return false
+	}
+	_, ok := annotations[manager.SourceUIDAnnotation]
+	return ok
 }

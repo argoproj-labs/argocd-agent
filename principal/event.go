@@ -227,16 +227,14 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 
 			s.sourceCache.Application.Delete(incoming.UID)
 
-			// Mark this deletion as expected and perform the deletion
-			appKey := fmt.Sprintf("%s/%s", agentName, incoming.Name)
-			s.markExpectedDeletion(appKey)
-
 			deletionPropagation := backend.DeletePropagationForeground
 			err = s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
 			if err != nil {
 				if kerrors.IsNotFound(err) {
 					return nil
 				}
+				// Restore the cache if the deletion fails
+				s.sourceCache.Application.Set(incoming.UID, incoming.Spec)
 				return fmt.Errorf("could not delete application %s: %w", incoming.QualifiedName(), err)
 			}
 			logCtx.Infof("Deleted application %s", incoming.QualifiedName())
@@ -373,6 +371,11 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 		deletionPropagation := backend.DeletePropagationForeground
 		err := s.projectManager.Delete(ctx, incoming, &deletionPropagation)
 		if err != nil {
+			if kerrors.IsNotFound(err) {
+				return nil
+			}
+			// Restore the cache if the deletion fails
+			s.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
 			return fmt.Errorf("could not delete app-project %s: %w", incoming.Name, err)
 		}
 		logCtx.Infof("Deleted app-project %s", incoming.Name)

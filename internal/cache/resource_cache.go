@@ -77,6 +77,15 @@ func (c *ResourceCache[T]) Get(sourceUID types.UID) (T, bool) {
 	return item, ok
 }
 
+// Contains checks if a resource is in the cache
+func (c *ResourceCache[T]) Contains(sourceUID types.UID) bool {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
+	_, ok := c.items[sourceUID]
+	return ok
+}
+
 // Delete removes a resource from the cache
 func (c *ResourceCache[T]) Delete(sourceUID types.UID) {
 	c.lock.Lock()
@@ -102,28 +111,4 @@ func (c *ResourceCache[T]) Len() int {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	return len(c.items)
-}
-
-// Keys returns all keys in the cache
-func (c *ResourceCache[T]) Keys() []types.UID {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-
-	keys := make([]types.UID, 0, len(c.items))
-	for key := range c.items {
-		keys = append(keys, key)
-	}
-	return keys
-}
-
-// ForEach iterates over all items in the cache
-func (c *ResourceCache[T]) ForEach(fn func(types.UID, T) bool) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-
-	for key, value := range c.items {
-		if !fn(key, value) {
-			break
-		}
-	}
 }

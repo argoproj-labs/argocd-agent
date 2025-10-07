@@ -543,21 +543,22 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 
 	logCtx.Infof("Deleting application")
 
+	if a.mode == types.AgentModeManaged {
+		a.sourceCache.Application.Delete(app.UID)
+	}
+
 	deletionPropagation := backend.DeletePropagationBackground
 	err := a.appManager.Delete(a.context, a.namespace, app, &deletionPropagation)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
-			if a.mode == types.AgentModeManaged {
-				a.sourceCache.Application.Delete(app.UID)
-			}
 			return nil
 		}
+		// Restore the cache if the deletion fails
+		if a.mode == types.AgentModeManaged {
+			a.sourceCache.Application.Set(app.UID, app.Spec)
+		}
 		return err
-	}
-
-	if a.mode == types.AgentModeManaged {
-		a.sourceCache.Application.Delete(app.UID)
 	}
 
 	err = a.appManager.Unmanage(app.QualifiedName())
@@ -659,6 +660,8 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 
 	logCtx.Infof("Deleting appProject")
 
+	a.sourceCache.AppProject.Delete(project.UID)
+
 	deletionPropagation := backend.DeletePropagationBackground
 	err := a.projectManager.Delete(a.context, project, &deletionPropagation)
 	if err != nil {
@@ -667,10 +670,10 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 			a.sourceCache.AppProject.Delete(project.UID)
 			return nil
 		}
+		// Restore the cache if the deletion fails
+		a.sourceCache.AppProject.Set(project.UID, project.Spec)
 		return err
 	}
-
-	a.sourceCache.AppProject.Delete(project.UID)
 
 	err = a.projectManager.Unmanage(project.Name)
 	if err != nil {
@@ -709,6 +712,8 @@ func (a *Agent) createRepository(incoming *corev1.Secret) (*corev1.Secret, error
 		incoming.Annotations = make(map[string]string)
 	}
 
+	a.sourceCache.Repository.Set(incoming.UID, incoming.Data)
+
 	// Get rid of some fields that we do not want to have on the repository as we start fresh.
 	delete(incoming.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 
@@ -745,6 +750,8 @@ func (a *Agent) updateRepository(incoming *corev1.Secret) (*corev1.Secret, error
 
 	logCtx.Infof("Updating repository")
 
+	a.sourceCache.Repository.Set(incoming.UID, incoming.Data)
+
 	return a.repoManager.UpdateManagedRepository(a.context, incoming)
 }
 
@@ -763,6 +770,8 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 
 	logCtx.Infof("Deleting repository")
 
+	a.sourceCache.Repository.Delete(repo.UID)
+
 	deletionPropagation := backend.DeletePropagationBackground
 	err := a.repoManager.Delete(a.context, repo.Name, repo.Namespace, &deletionPropagation)
 	if err != nil {
@@ -770,6 +779,8 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 			logCtx.Debug("repository is not found, perhaps it is already deleted")
 			return nil
 		}
+		// Restore the cache if the deletion fails
+		a.sourceCache.Repository.Set(repo.UID, repo.Data)
 		return err
 	}
 

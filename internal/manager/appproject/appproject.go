@@ -392,8 +392,6 @@ func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project
 			}
 			return true
 		} else {
-			logCtx.Trace(cachedSpec)
-			logCtx.Trace(project.Spec)
 			logCtx.Debugf("AppProject %s is already in sync with source cache", project.Name)
 		}
 	} else {

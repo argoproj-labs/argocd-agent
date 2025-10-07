@@ -15,8 +15,14 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"sync"
+
+	"github.com/sirupsen/logrus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type ManagerRole int
@@ -186,4 +192,60 @@ func (o *ObservedResources) Len() int {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return len(o.observed)
+}
+
+type kubeResource interface {
+	runtime.Object
+	metav1.Object
+}
+
+type resourceCache[R kubeResource] interface {
+	Contains(uid types.UID) bool
+}
+
+type resourceManager[R kubeResource] interface {
+	Create(ctx context.Context, obj R) (R, error)
+}
+
+// RevertUserInitiatedDeletion detects if a resource deletion was unauthorized and recreates the resource.
+// Returns true if the resource was recreated, false otherwise.
+func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
+	outbound R,
+	resCache resourceCache[R],
+	mgr resourceManager[R],
+	logCtx *logrus.Entry,
+) bool {
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"resource": outbound.GetName(),
+		"kind":     outbound.GetObjectKind().GroupVersionKind().Kind,
+	})
+
+	sourceUID, exists := outbound.GetAnnotations()[SourceUIDAnnotation]
+	if !exists {
+		logCtx.Errorf("Source UID annotation not found for resource")
+		return false
+	}
+
+	// If the resource is not in the cache, it means it was deleted by an incoming delete event.
+	// So no need to recreate it.
+	if !resCache.Contains(types.UID(sourceUID)) {
+		logCtx.Debugf("Expected deletion detected - allowing it to proceed")
+		return false
+	}
+
+	logCtx.Warnf("Unauthorized deletion detected - recreating")
+	// This is an unauthorized deletion (user-initiated), recreate the resource
+	resource := outbound.DeepCopyObject().(R)
+	resource.SetResourceVersion("")
+	resource.SetDeletionTimestamp(nil)
+	resource.SetUID(types.UID(sourceUID))
+	_, err := mgr.Create(ctx, resource)
+	if err != nil {
+		logCtx.WithError(err).Error("failed to recreate resource after unauthorized deletion")
+	} else {
+		logCtx.Infof("Recreated resource after unauthorized deletion")
+	}
+
+	return true
 }

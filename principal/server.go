@@ -146,11 +146,6 @@ type Server struct {
 	resources *resources.AgentResources
 	// resyncStatus indicates whether an agent has been resyned after the principal restarts
 	resyncStatus *resyncStatus
-	// expectedDeletions tracks applications that are expected to be deleted (agent-initiated)
-	// This is used to differentiate between user-initiated and agent-initiated deletions
-	expectedDeletions map[string]bool
-	// expectedDeletionsLock protects the expectedDeletions map
-	expectedDeletionsLock sync.RWMutex
 	// notifyOnConnect will notify to run the handlers when an agent connects to the principal
 	notifyOnConnect chan types.Agent
 	// handlers to run when an agent connects to the principal
@@ -180,20 +175,19 @@ const defaultRedisProxyListenerAddr = "0.0.0.0:6379"
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
-		options:           defaultOptions(),
-		queues:            queue.NewSendRecvQueues(),
-		namespace:         namespace,
-		noauth:            noAuthEndpoints,
-		version:           version.New("argocd-agent"),
-		kubeClient:        kubeClient,
-		resyncStatus:      newResyncStatus(),
-		resources:         resources.NewAgentResources(),
-		notifyOnConnect:   make(chan types.Agent),
-		eventWriters:      event.NewEventWritersMap(),
-		repoToAgents:      NewMapToSet(),
-		projectToRepos:    NewMapToSet(),
-		expectedDeletions: make(map[string]bool),
-		sourceCache:       cache.NewSourceCache(),
+		options:         defaultOptions(),
+		queues:          queue.NewSendRecvQueues(),
+		namespace:       namespace,
+		noauth:          noAuthEndpoints,
+		version:         version.New("argocd-agent"),
+		kubeClient:      kubeClient,
+		resyncStatus:    newResyncStatus(),
+		resources:       resources.NewAgentResources(),
+		notifyOnConnect: make(chan types.Agent),
+		eventWriters:    event.NewEventWritersMap(),
+		repoToAgents:    NewMapToSet(),
+		projectToRepos:  NewMapToSet(),
+		sourceCache:     cache.NewSourceCache(),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
@@ -852,26 +846,6 @@ func (s *Server) ListenerForE2EOnly() *Listener {
 // TokenIssuerForE2EOnly returns the token issuer of Server s
 func (s *Server) TokenIssuerForE2EOnly() issuer.Issuer {
 	return s.issuer
-}
-
-// markExpectedDeletion marks an application as expected to be deleted (agent-initiated)
-func (s *Server) markExpectedDeletion(appKey string) {
-	s.expectedDeletionsLock.Lock()
-	defer s.expectedDeletionsLock.Unlock()
-	s.expectedDeletions[appKey] = true
-	log().WithField("app_key", appKey).Trace("Marked application for expected deletion")
-}
-
-// isExpectedDeletion checks if an application deletion was expected and removes it from tracking
-func (s *Server) isExpectedDeletion(appKey string) bool {
-	s.expectedDeletionsLock.Lock()
-	defer s.expectedDeletionsLock.Unlock()
-	expected, exists := s.expectedDeletions[appKey]
-	if exists {
-		delete(s.expectedDeletions, appKey)
-		log().WithField("app_key", appKey).Trace("Expected deletion observed")
-	}
-	return expected
 }
 
 func log() *logrus.Entry {
