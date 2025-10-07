@@ -304,8 +304,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		connMap: map[string]connectionEntry{},
 	}
 
-	clusterCache, err := cluster.NewClusterCacheInstance(ctx, client.Clientset,
-		a.namespace, a.redisProxyMsgHandler.redisAddress, cacheutil.RedisCompressionGZip)
+	clusterCache, err := cluster.NewClusterCacheInstance(a.redisProxyMsgHandler.redisAddress, a.redisProxyMsgHandler.redisPassword, cacheutil.RedisCompressionGZip)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
 	}

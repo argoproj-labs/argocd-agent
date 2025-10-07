@@ -83,6 +83,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		keepAliveMinimumInterval time.Duration
 
 		redisAddress         string
+		redisPassword        string
 		redisCompressionType string
 		healthzPort          int
 	)
@@ -242,7 +243,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			opts = append(opts, principal.WithWebSocket(enableWebSocket))
 			opts = append(opts, principal.WithKeepAliveMinimumInterval(keepAliveMinimumInterval))
-			opts = append(opts, principal.WithRedis(redisAddress, redisCompressionType))
+			opts = append(opts, principal.WithRedis(redisAddress, redisPassword, redisCompressionType))
 			opts = append(opts, principal.WithHealthzPort(healthzPort))
 
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
@@ -360,6 +361,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&redisAddress, "redis-server-address",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS", nil, "argocd-redis:6379"),
 		"Redis server hostname and port (e.g. argocd-redis:6379).")
+	command.Flags().StringVar(&redisPassword, "redis-password",
+		env.StringWithDefault("REDIS_PASSWORD", nil, ""),
+		"The password to connect to redis with")
 
 	command.Flags().StringVar(&redisCompressionType, "redis-compression-type",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),

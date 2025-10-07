@@ -72,6 +72,7 @@ type ServerOptions struct {
 	rootCa                 *x509.CertPool
 	clientCertSubjectMatch bool
 	redisAddress           string
+	redisPassword          string
 	redisCompressionType   cacheutil.RedisCompressionType
 	healthzPort            int
 }
@@ -435,7 +436,7 @@ func WithKeepAliveMinimumInterval(interval time.Duration) ServerOption {
 	}
 }
 
-func WithRedis(redisAddress, redisCompressionTypeStr string) ServerOption {
+func WithRedis(redisAddress, redisPassword, redisCompressionTypeStr string) ServerOption {
 	return func(o *Server) error {
 		redisCompressionType, err := cacheutil.CompressionTypeFromString(redisCompressionTypeStr)
 		if err != nil {
@@ -443,6 +444,7 @@ func WithRedis(redisAddress, redisCompressionTypeStr string) ServerOption {
 		}
 		o.options.redisCompressionType = redisCompressionType
 		o.options.redisAddress = redisAddress
+		o.options.redisPassword = redisPassword
 
 		return nil
 	}
