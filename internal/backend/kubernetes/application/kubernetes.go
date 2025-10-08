@@ -91,7 +91,7 @@ func (be *KubernetesBackend) Create(ctx context.Context, app *v1alpha1.Applicati
 func (be *KubernetesBackend) Get(ctx context.Context, name string, namespace string) (*v1alpha1.Application, error) {
 	forUpdate, _ := ctx.Value(backend.ForUpdateContextKey).(bool)
 
-	if !forUpdate && be.appLister != nil && be.appInformer.HasSynced() {
+	if !forUpdate && be.appLister != nil && be.appInformer != nil && be.appInformer.HasSynced() {
 		namespaceLister := be.appLister.ByNamespace(namespace)
 		if namespaceLister != nil {
 			obj, err := namespaceLister.Get(name)

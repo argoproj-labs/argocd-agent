@@ -172,8 +172,9 @@ func Test_Get(t *testing.T) {
 		mockInf := &mockInformerWithInvalidType{}
 
 		backend := &KubernetesBackend{
-			appClient: fakeAppC,
-			appLister: mockInf.Lister(),
+			appClient:   fakeAppC,
+			appInformer: mockInf,
+			appLister:   mockInf.Lister(),
 		}
 
 		app, err := backend.Get(ctx, "test", "ns1")
