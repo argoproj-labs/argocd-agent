@@ -114,7 +114,6 @@ func NewInformer[T runtime.Object](ctx context.Context, opts ...InformerOption[T
 	var r T
 	i.resType = reflect.TypeOf(r)
 
-	// groupResource is the group and resource of the watched objects.
 	i.groupResource = schema.GroupResource{
 		Group:    "argoproj.io",
 		Resource: "applications",

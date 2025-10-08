@@ -66,7 +66,6 @@ func fakeInformer(t *testing.T, namespace string, objects ...runtime.Object) (*f
 		}
 	}()
 
-	// cache.WaitForCacheSync(context.Background().Done(), informer.HasSynced)
 	if err = informer.WaitForSync(context.Background()); err != nil {
 		t.Fatalf("failed to wait for informer sync: %v", err)
 	}
@@ -82,7 +81,6 @@ func fakeAppManager(t *testing.T, objects ...runtime.Object) (*fakeappclient.Cli
 	am, err := NewApplicationManager(be, "argocd")
 	assert.NoError(t, err)
 
-	// go am.StartBackend(context.Background())
 	return appC, am
 }
 
@@ -222,11 +220,6 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		be := application.NewKubernetesBackend(appC, "", ai, true)
 		mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent))
 		require.NoError(t, err)
-
-		// ctx, cancel := context.WithCancel(context.Background())
-		// defer cancel()
-		// go mgr.StartBackend(ctx)
-		// cache.WaitForCacheSync(ctx.Done(), ai.HasSynced)
 
 		updated, err := mgr.UpdateManagedApp(context.Background(), incoming)
 
