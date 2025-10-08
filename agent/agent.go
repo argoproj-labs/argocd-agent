@@ -107,6 +107,10 @@ type Agent struct {
 
 	// sourceCache is a cache of resources from the source. We use it to revert any changes made to the local resources.
 	sourceCache *cache.SourceCache
+
+	// deletions tracks valid deletions from the source.
+	// This is used to differentiate between valid and invalid deletions
+	deletions *manager.DeletionTracker
 }
 
 const defaultQueueName = "default"
@@ -132,7 +136,9 @@ type AgentOption func(*Agent) error
 // options.
 func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace string, opts ...AgentOption) (*Agent, error) {
 	a := &Agent{
-		version: version.New("argocd-agent"),
+		version:     version.New("argocd-agent"),
+		deletions:   manager.NewDeletionTracker(),
+		sourceCache: cache.NewSourceCache(),
 	}
 	a.infStopCh = make(chan struct{})
 	a.namespace = namespace
@@ -201,6 +207,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	appManagerOpts := []application.ApplicationManagerOption{
 		application.WithRole(manager.ManagerRoleAgent),
 		application.WithMode(managerMode),
+		application.WithDeletionTracker(a.deletions),
 	}
 
 	if a.options.metricsPort > 0 {
@@ -315,8 +322,6 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
 	}
 	a.clusterCache = clusterCache
-
-	a.sourceCache = cache.NewSourceCache()
 
 	return a, nil
 }

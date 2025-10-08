@@ -18,7 +18,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -79,23 +78,23 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 			},
 		}
 		mgr := &fakeManager[*argoapp.Application]{}
-		sc := cache.NewSourceCache()
-		ok := RevertUserInitiatedDeletion(context.Background(), app, sc.Application, mgr, newLogger())
+		deletions := NewDeletionTracker()
+		ok := RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
-		// With annotation but cache miss -> no recreate
+		// With annotation but valid deletion -> no recreate
 		app.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("u1"))}
 		mgr = &fakeManager[*argoapp.Application]{}
-		ok = RevertUserInitiatedDeletion(context.Background(), app, sc.Application, mgr, newLogger())
+		deletions.MarkExpected(types.UID("u1"))
+		ok = RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
-		// With annotation and cache hit -> recreate
+		// With annotation and invalid deletion -> recreate
 		app.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("u2"))}
-		sc.Application.Set(types.UID("u2"), argoapp.ApplicationSpec{})
 		mgr = &fakeManager[*argoapp.Application]{}
-		ok = RevertUserInitiatedDeletion(context.Background(), app, sc.Application, mgr, newLogger())
+		ok = RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
 		requires.True(ok)
 		requires.NotNil(mgr.created)
 		requires.Equal(types.UID("u2"), mgr.created.GetUID())
@@ -112,22 +111,22 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 				Namespace: "argocd",
 			},
 		}
-		sc := cache.NewSourceCache()
+		deletions := NewDeletionTracker()
 		mgr := &fakeManager[*argoapp.AppProject]{}
-		ok := RevertUserInitiatedDeletion(context.Background(), proj, sc.AppProject, mgr, newLogger())
+		ok := RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
 		proj.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("p1"))}
 		mgr = &fakeManager[*argoapp.AppProject]{}
-		ok = RevertUserInitiatedDeletion(context.Background(), proj, sc.AppProject, mgr, newLogger())
+		deletions.MarkExpected(types.UID("p1"))
+		ok = RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
 		proj.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("p2"))}
-		sc.AppProject.Set(types.UID("p2"), argoapp.AppProjectSpec{})
 		mgr = &fakeManager[*argoapp.AppProject]{}
-		ok = RevertUserInitiatedDeletion(context.Background(), proj, sc.AppProject, mgr, newLogger())
+		ok = RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
 		requires.True(ok)
 		requires.NotNil(mgr.created)
 		requires.Equal(types.UID("p2"), mgr.created.GetUID())
@@ -144,22 +143,22 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 				Namespace: "argocd",
 			},
 		}
-		sc := cache.NewSourceCache()
+		deletions := NewDeletionTracker()
 		mgr := &fakeManager[*corev1.Secret]{}
-		ok := RevertUserInitiatedDeletion(context.Background(), repo, sc.Repository, mgr, newLogger())
+		ok := RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
 		repo.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("r1"))}
 		mgr = &fakeManager[*corev1.Secret]{}
-		ok = RevertUserInitiatedDeletion(context.Background(), repo, sc.Repository, mgr, newLogger())
+		deletions.MarkExpected(types.UID("r1"))
+		ok = RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
 		repo.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("r2"))}
-		sc.Repository.Set(types.UID("r2"), map[string][]byte{"k": {}})
 		mgr = &fakeManager[*corev1.Secret]{}
-		ok = RevertUserInitiatedDeletion(context.Background(), repo, sc.Repository, mgr, newLogger())
+		ok = RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
 		requires.True(ok)
 		requires.NotNil(mgr.created)
 		requires.Equal(types.UID("r2"), mgr.created.GetUID())

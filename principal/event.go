@@ -224,19 +224,20 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	// App deletion
 	case event.Delete.String():
 		if agentMode.IsAutonomous() {
-
-			s.sourceCache.Application.Delete(incoming.UID)
+			s.deletions.MarkExpected(incoming.UID)
 
 			deletionPropagation := backend.DeletePropagationForeground
 			err = s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
 			if err != nil {
 				if kerrors.IsNotFound(err) {
+					s.sourceCache.Application.Delete(incoming.UID)
 					return nil
 				}
-				// Restore the cache if the deletion fails
-				s.sourceCache.Application.Set(incoming.UID, incoming.Spec)
 				return fmt.Errorf("could not delete application %s: %w", incoming.QualifiedName(), err)
 			}
+
+			s.sourceCache.Application.Delete(incoming.UID)
+
 			logCtx.Infof("Deleted application %s", incoming.QualifiedName())
 
 		} else if agentMode.IsManaged() {
@@ -366,18 +367,19 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 
 		incoming.SetNamespace(s.namespace)
 
-		s.sourceCache.AppProject.Delete(incoming.UID)
+		s.deletions.MarkExpected(incoming.UID)
 
 		deletionPropagation := backend.DeletePropagationForeground
 		err := s.projectManager.Delete(ctx, incoming, &deletionPropagation)
 		if err != nil {
 			if kerrors.IsNotFound(err) {
+				s.sourceCache.AppProject.Delete(incoming.UID)
 				return nil
 			}
-			// Restore the cache if the deletion fails
-			s.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
 			return fmt.Errorf("could not delete app-project %s: %w", incoming.Name, err)
 		}
+
+		s.sourceCache.AppProject.Delete(incoming.UID)
 		logCtx.Infof("Deleted app-project %s", incoming.Name)
 	default:
 		return fmt.Errorf("unable to process event of type %s", ev.Type())

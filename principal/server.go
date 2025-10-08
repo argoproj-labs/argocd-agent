@@ -153,7 +153,12 @@ type Server struct {
 
 	eventWriters *event.EventWritersMap
 
+	// sourceCache is a cache of resources from the source. We use it to revert any changes made to the local resources.
 	sourceCache *cache.SourceCache
+
+	// deletions tracks valid deletions from the source.
+	// This is used to differentiate between valid and invalid deletions
+	deletions *manager.DeletionTracker
 }
 
 type handlersOnConnect func(agent types.Agent) error
@@ -188,6 +193,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		repoToAgents:    NewMapToSet(),
 		projectToRepos:  NewMapToSet(),
 		sourceCache:     cache.NewSourceCache(),
+		deletions:       manager.NewDeletionTracker(),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
