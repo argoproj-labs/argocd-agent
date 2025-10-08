@@ -89,16 +89,19 @@ func (be *KubernetesBackend) Create(ctx context.Context, app *v1alpha1.Applicati
 }
 
 func (be *KubernetesBackend) Get(ctx context.Context, name string, namespace string) (*v1alpha1.Application, error) {
-	obj, err := be.appLister.ByNamespace(namespace).Get(name)
-	if err != nil {
-		return nil, err
+	if be.appLister != nil {
+		obj, err := be.appLister.ByNamespace(namespace).Get(name)
+		if err != nil {
+			return be.appClient.ArgoprojV1alpha1().Applications(namespace).Get(ctx, name, v1.GetOptions{})
+		}
+		app, ok := obj.(*v1alpha1.Application)
+		if !ok {
+			return nil, fmt.Errorf("object is not an Application: %T", obj)
+		}
+		return app.DeepCopy(), nil
 	}
-	app, ok := obj.(*v1alpha1.Application)
-	if !ok {
-		return nil, fmt.Errorf("object is not an Application: %T", obj)
-	}
-	// Return a deep copy to prevent mutations
-	return app.DeepCopy(), nil
+
+	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Get(ctx, name, v1.GetOptions{})
 }
 
 func (be *KubernetesBackend) Delete(ctx context.Context, name string, namespace string, deletionPropagation *backend.DeletionPropagation) error {

@@ -17,6 +17,7 @@ package principal
 import (
 	"crypto/tls"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -89,4 +90,18 @@ func Test_WithMinimumTLSVersion(t *testing.T) {
 			assert.Equal(t, 0, s.options.tlsMinVersion)
 		}
 	})
+}
+
+func Test_WithInformerSyncTimeout(t *testing.T) {
+	s := &Server{options: &ServerOptions{}}
+	err := WithInformerSyncTimeout(5 * time.Second)(s)
+	assert.NoError(t, err)
+	assert.Equal(t, 5*time.Second, s.options.informerSyncTimeout)
+}
+
+func Test_WithRedisProxyDisabled(t *testing.T) {
+	s := &Server{options: &ServerOptions{}}
+	err := WithRedisProxyDisabled()(s)
+	assert.NoError(t, err)
+	assert.True(t, s.options.redisProxyDisabled)
 }

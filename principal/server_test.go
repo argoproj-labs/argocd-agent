@@ -99,6 +99,34 @@ func Test_NewServer(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, s)
 	})
+
+	t.Run("Redis proxy should be nil when disabled", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.Nil(t, s.redisProxy)
+	})
+
+	t.Run("Redis proxy should be created when not disabled", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithGeneratedTokenSigningKey())
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.NotNil(t, s.redisProxy)
+	})
+
+	t.Run("Informer sync timeout should be configurable", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithGeneratedTokenSigningKey(), WithInformerSyncTimeout(10*time.Second), WithRedisProxyDisabled())
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.Equal(t, 10*time.Second, s.options.informerSyncTimeout)
+	})
+
+	t.Run("Informer sync timeout should default to 60s when not set", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.Equal(t, 60*time.Second, s.options.informerSyncTimeout)
+	})
 }
 
 func Test_handleResyncOnConnect(t *testing.T) {
@@ -180,6 +208,26 @@ func Test_RunHandlersOnConnect(t *testing.T) {
 
 	got := <-output
 	assert.Equal(t, expected, got)
+}
+
+func Test_ServerStartWithDefaultSyncTimeout(t *testing.T) {
+	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+		WithGeneratedTokenSigningKey(),
+		WithRedisProxyDisabled(),
+	)
+	require.NoError(t, err)
+	s.kubeClient.RestConfig = &rest.Config{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	errch := make(chan error, 1)
+	err = s.Start(ctx, errch)
+	require.NoError(t, err)
+
+	defer s.Shutdown()
+
+	assert.Equal(t, 60*time.Second, s.options.informerSyncTimeout)
 }
 
 func init() {

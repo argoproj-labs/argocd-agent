@@ -27,9 +27,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wI2L/jsondiff"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
 )
 
 func Test_NewKubernetes(t *testing.T) {
@@ -152,18 +155,78 @@ func Test_Get(t *testing.T) {
 			}),
 		)
 		require.NoError(t, err)
-		// Start the informer
 		go inf.Start(ctx)
 		require.NoError(t, inf.WaitForSync(ctx))
 
-		// Create the backend with the informer
 		backend := NewKubernetesBackend(fakeAppC, "", inf, true)
 
 		app, err := backend.Get(ctx, "nonexistent", "ns1")
-		require.Error(t, err)
-		require.Nil(t, app)
+		assert.ErrorContains(t, err, "not found")
+		assert.Equal(t, &v1alpha1.Application{}, app)
 
 	})
+
+	t.Run("Get returns type assertion error for invalid object", func(t *testing.T) {
+		fakeAppC := fakeappclient.NewSimpleClientset()
+
+		mockInf := &mockInformerWithInvalidType{}
+
+		backend := &KubernetesBackend{
+			appClient: fakeAppC,
+			appLister: mockInf.Lister(),
+		}
+
+		app, err := backend.Get(ctx, "test", "ns1")
+		require.Error(t, err)
+		require.Nil(t, app)
+		assert.Contains(t, err.Error(), "object is not an Application")
+	})
+}
+
+type mockInformerWithInvalidType struct{}
+
+func (m *mockInformerWithInvalidType) Start(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockInformerWithInvalidType) WaitForSync(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockInformerWithInvalidType) HasSynced() bool {
+	return true
+}
+
+func (m *mockInformerWithInvalidType) Stop() error {
+	return nil
+}
+
+func (m *mockInformerWithInvalidType) Lister() cache.GenericLister {
+	return &mockListerWithInvalidType{}
+}
+
+type mockListerWithInvalidType struct{}
+
+func (m *mockListerWithInvalidType) List(selector labels.Selector) ([]runtime.Object, error) {
+	return nil, nil
+}
+
+func (m *mockListerWithInvalidType) Get(name string) (runtime.Object, error) {
+	return &corev1.ConfigMap{}, nil
+}
+
+func (m *mockListerWithInvalidType) ByNamespace(namespace string) cache.GenericNamespaceLister {
+	return &mockNamespaceListerWithInvalidType{}
+}
+
+type mockNamespaceListerWithInvalidType struct{}
+
+func (m *mockNamespaceListerWithInvalidType) List(selector labels.Selector) ([]runtime.Object, error) {
+	return nil, nil
+}
+
+func (m *mockNamespaceListerWithInvalidType) Get(name string) (runtime.Object, error) {
+	return &corev1.ConfigMap{}, nil
 }
 
 func Test_Delete(t *testing.T) {
