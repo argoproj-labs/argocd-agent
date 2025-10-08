@@ -155,6 +155,7 @@ func Test_Serve(t *testing.T) {
 		WithShutDownGracePeriod(2*time.Second),
 		WithGRPC(true),
 		WithInformerSyncTimeout(5*time.Second),
+		WithRedisProxyDisabled(),
 	)
 	require.NoError(t, err)
 	errch := make(chan error)

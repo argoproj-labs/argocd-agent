@@ -337,7 +337,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		s.resourceProxyListenAddr = defaultResourceProxyListenerAddr
 	}
 
-	if s.options.redisAddress != "" {
+	if !s.options.redisProxyDisabled {
 		s.redisProxy = redisproxy.New(defaultRedisProxyListenerAddr, s.options.redisAddress, s.sendSynchronousRedisMessageToAgent)
 	}
 

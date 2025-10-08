@@ -76,6 +76,7 @@ type ServerOptions struct {
 	redisCompressionType   cacheutil.RedisCompressionType
 	healthzPort            int
 	informerSyncTimeout    time.Duration
+	redisProxyDisabled     bool
 }
 
 type ServerOption func(o *Server) error
@@ -421,6 +422,14 @@ func WithWebSocket(enableWebSocket bool) ServerOption {
 func WithInformerSyncTimeout(timeout time.Duration) ServerOption {
 	return func(o *Server) error {
 		o.options.informerSyncTimeout = timeout
+		return nil
+	}
+}
+
+// WithRedisProxyDisabled disables the Redis proxy for testing.
+func WithRedisProxyDisabled() ServerOption {
+	return func(o *Server) error {
+		o.options.redisProxyDisabled = true
 		return nil
 	}
 }
