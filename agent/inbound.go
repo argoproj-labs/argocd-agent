@@ -105,6 +105,9 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		return err
 	}
 
+	// Applications must exist in the same namespace as the agent
+	incomingApp.SetNamespace(a.namespace)
+
 	var exists, sourceUIDMatch bool
 
 	if a.mode == types.AgentModeManaged {
@@ -196,6 +199,9 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 		return err
 	}
 
+	// AppProjects must exist in the same namespace as the agent
+	incomingAppProject.SetNamespace(a.namespace)
+
 	exists, sourceUIDMatch, err := a.projectManager.CompareSourceUID(a.context, incomingAppProject)
 	if err != nil {
 		return fmt.Errorf("failed to validate source UID of appProject: %w", err)
@@ -276,6 +282,9 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 	if err != nil {
 		return err
 	}
+
+	// Repository secrets must exist in the same namespace as the agent
+	incomingRepo.SetNamespace(a.namespace)
 
 	var exists, sourceUIDMatch bool
 
@@ -422,7 +431,9 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 // createApplication creates an Application upon an event in the agent's work
 // queue.
 func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+	// Applications must exist in the same namespace as the agent
 	incoming.SetNamespace(a.namespace)
+
 	logCtx := log().WithFields(logrus.Fields{
 		"method": "CreateApplication",
 		"app":    incoming.QualifiedName(),
@@ -472,7 +483,9 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 }
 
 func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+	// Applications must exist in the same namespace as the agent
 	incoming.SetNamespace(a.namespace)
+
 	logCtx := log().WithFields(logrus.Fields{
 		"method":          "UpdateApplication",
 		"app":             incoming.QualifiedName(),
@@ -513,7 +526,9 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 }
 
 func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
+	// Applications must exist in the same namespace as the agent
 	app.SetNamespace(a.namespace)
+
 	logCtx := log().WithFields(logrus.Fields{
 		"method": "DeleteApplication",
 		"app":    app.QualifiedName(),
@@ -556,6 +571,9 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 // createAppProject creates an AppProject upon an event in the agent's work
 // queue.
 func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+	// AppProjects must exist in the same namespace as the agent
+	incoming.SetNamespace(a.namespace)
+
 	logCtx := log().WithFields(logrus.Fields{
 		"method":     "CreateAppProject",
 		"appProject": incoming.Name,
@@ -567,8 +585,6 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		logCtx.Trace("Discarding this event, because agent is not in managed mode")
 		return nil, event.NewEventDiscardedErr("cannot create appproject: agent is not in managed mode")
 	}
-
-	incoming.SetNamespace(a.namespace)
 
 	// If we receive a new AppProject event for an AppProject we already manage, it usually
 	// means that we're out-of-sync from the control plane.
@@ -593,13 +609,14 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 }
 
 func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+	// AppProjects must exist in the same namespace as the agent
+	incoming.SetNamespace(a.namespace)
+
 	logCtx := log().WithFields(logrus.Fields{
 		"method":          "UpdateAppProject",
 		"appProject":      incoming.Name,
 		"resourceVersion": incoming.ResourceVersion,
 	})
-
-	incoming.SetNamespace(a.namespace)
 
 	if !a.projectManager.IsManaged(incoming.Name) {
 		logCtx.Trace("AppProject is not managed on this agent. Creating the new AppProject")
@@ -621,12 +638,13 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 }
 
 func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
+	// AppProjects must exist in the same namespace as the agent
+	project.SetNamespace(a.namespace)
+
 	logCtx := log().WithFields(logrus.Fields{
 		"method":     "DeleteAppProject",
 		"appProject": project.Name,
 	})
-
-	project.SetNamespace(a.namespace)
 
 	// If we receive an update appproject event for an AppProject we don't know about yet it
 	// means that we're out-of-sync from the control plane.
@@ -656,12 +674,13 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 
 // createRepository creates a Repository upon an event in the agent's work queue.
 func (a *Agent) createRepository(incoming *corev1.Secret) (*corev1.Secret, error) {
+	// Repository secrets must exist in the same namespace as the agent
+	incoming.SetNamespace(a.namespace)
+
 	logCtx := log().WithFields(logrus.Fields{
 		"method": "CreateRepository",
 		"repo":   incoming.Name,
 	})
-
-	incoming.SetNamespace(a.namespace)
 
 	// In modes other than "managed", we don't process new repository events
 	// that are incoming.
@@ -696,14 +715,14 @@ func (a *Agent) createRepository(incoming *corev1.Secret) (*corev1.Secret, error
 }
 
 func (a *Agent) updateRepository(incoming *corev1.Secret) (*corev1.Secret, error) {
+	// Repository secrets must exist in the same namespace as the agent
 	incoming.SetNamespace(a.namespace)
+
 	logCtx := log().WithFields(logrus.Fields{
 		"method":          "UpdateRepository",
 		"repo":            incoming.Name,
 		"resourceVersion": incoming.ResourceVersion,
 	})
-
-	incoming.SetNamespace(a.namespace)
 
 	if !a.repoManager.IsManaged(incoming.Name) {
 		logCtx.Trace("Repository is not managed on this agent. Creating the new Repository")
@@ -723,7 +742,9 @@ func (a *Agent) updateRepository(incoming *corev1.Secret) (*corev1.Secret, error
 }
 
 func (a *Agent) deleteRepository(repo *corev1.Secret) error {
+	// Repository secrets must exist in the same namespace as the agent
 	repo.SetNamespace(a.namespace)
+
 	logCtx := log().WithFields(logrus.Fields{
 		"method": "DeleteRepository",
 		"repo":   repo.Name,
