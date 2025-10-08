@@ -253,7 +253,6 @@ func Test_CreateEvents(t *testing.T) {
 
 		s, err := NewServer(ctx, fac, "argocd",
 			WithGeneratedTokenSigningKey(),
-			WithInformerSyncTimeout(5*time.Second),
 			WithRedisProxyDisabled(),
 		)
 		require.NoError(t, err)
@@ -348,7 +347,6 @@ func Test_UpdateEvents(t *testing.T) {
 
 		s, err := NewServer(ctx, fac, "argocd",
 			WithGeneratedTokenSigningKey(),
-			WithInformerSyncTimeout(2*time.Second),
 			WithRedisProxyDisabled(),
 		)
 		require.NoError(t, err)
@@ -483,7 +481,6 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 
 			s, err := NewServer(ctx, fac, "argocd",
 				WithGeneratedTokenSigningKey(),
-				WithInformerSyncTimeout(2*time.Second),
 			)
 			require.NoError(t, err)
 
