@@ -17,9 +17,17 @@ package principal
 import (
 	"crypto/tls"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func Test_WithInformerSyncTimeout(t *testing.T) {
+	s := &Server{options: &ServerOptions{}}
+	err := WithInformerSyncTimeout(5 * time.Second)(s)
+	assert.NoError(t, err)
+	assert.Equal(t, 5*time.Second, s.options.informerSyncTimeout)
+}
 
 func Test_WithPort(t *testing.T) {
 	ports := []struct {
