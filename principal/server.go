@@ -508,17 +508,22 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	s.events = event.NewEventSource(s.options.serverName)
 
-	if err := s.appManager.EnsureSynced(waitForSyncedDuration); err != nil {
+	syncTimeout := s.options.informerSyncTimeout
+	if syncTimeout == 0 {
+		syncTimeout = waitForSyncedDuration
+	}
+
+	if err := s.appManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Application informer: %w", err)
 	}
 	log().Infof("Application informer synced and ready")
 
-	if err := s.projectManager.EnsureSynced(waitForSyncedDuration); err != nil {
+	if err := s.projectManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync AppProject informer: %w", err)
 	}
 	log().Infof("AppProject informer synced and ready")
 
-	if err := s.repoManager.EnsureSynced(waitForSyncedDuration); err != nil {
+	if err := s.repoManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Repository informer: %w", err)
 	}
 	log().Infof("Repository informer synced and ready")
@@ -534,11 +539,10 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("Resource proxy is disabled")
 	}
 
-	err = s.clusterMgr.Start()
-	if err != nil {
-		return err
+	if err := s.clusterMgr.Start(); err != nil {
+		return fmt.Errorf("unable to start cluster manager with informer sync timeout %v: %w", syncTimeout, err)
 	}
-	if err := s.namespaceManager.EnsureSynced(waitForSyncedDuration); err != nil {
+	if err := s.namespaceManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Namespace informer: %w", err)
 	}
 	log().Infof("Namespace informer synced and ready")
