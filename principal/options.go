@@ -75,7 +75,6 @@ type ServerOptions struct {
 	redisPassword          string
 	redisCompressionType   cacheutil.RedisCompressionType
 	healthzPort            int
-	informerSyncTimeout    time.Duration
 	redisProxyDisabled     bool
 }
 
@@ -84,13 +83,12 @@ type ServerOption func(o *Server) error
 // defaultOptions returns a set of default options for the server
 func defaultOptions() *ServerOptions {
 	return &ServerOptions{
-		port:                443,
-		address:             "",
-		tlsMinVersion:       tls.VersionTLS13,
-		unauthMethods:       make(map[string]bool),
-		eventProcessors:     10,
-		rootCa:              x509.NewCertPool(),
-		informerSyncTimeout: 60 * time.Second,
+		port:            443,
+		address:         "",
+		tlsMinVersion:   tls.VersionTLS13,
+		unauthMethods:   make(map[string]bool),
+		eventProcessors: 10,
+		rootCa:          x509.NewCertPool(),
 	}
 }
 
@@ -414,14 +412,6 @@ func WithAutoNamespaceCreate(enabled bool, pattern string, labels map[string]str
 func WithWebSocket(enableWebSocket bool) ServerOption {
 	return func(o *Server) error {
 		o.enableWebSocket = enableWebSocket
-		return nil
-	}
-}
-
-// WithInformerSyncTimeout sets the informer sync timeout duration.
-func WithInformerSyncTimeout(timeout time.Duration) ServerOption {
-	return func(o *Server) error {
-		o.options.informerSyncTimeout = timeout
 		return nil
 	}
 }
