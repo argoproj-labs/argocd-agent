@@ -90,15 +90,18 @@ func (be *KubernetesBackend) Create(ctx context.Context, app *v1alpha1.Applicati
 
 func (be *KubernetesBackend) Get(ctx context.Context, name string, namespace string) (*v1alpha1.Application, error) {
 	if be.appLister != nil {
-		obj, err := be.appLister.ByNamespace(namespace).Get(name)
-		if err != nil {
-			return be.appClient.ArgoprojV1alpha1().Applications(namespace).Get(ctx, name, v1.GetOptions{})
+		namespaceLister := be.appLister.ByNamespace(namespace)
+		if namespaceLister != nil {
+			obj, err := namespaceLister.Get(name)
+			if err != nil {
+				return be.appClient.ArgoprojV1alpha1().Applications(namespace).Get(ctx, name, v1.GetOptions{})
+			}
+			app, ok := obj.(*v1alpha1.Application)
+			if !ok {
+				return nil, fmt.Errorf("object is not an Application: %T", obj)
+			}
+			return app.DeepCopy(), nil
 		}
-		app, ok := obj.(*v1alpha1.Application)
-		if !ok {
-			return nil, fmt.Errorf("object is not an Application: %T", obj)
-		}
-		return app.DeepCopy(), nil
 	}
 
 	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Get(ctx, name, v1.GetOptions{})
