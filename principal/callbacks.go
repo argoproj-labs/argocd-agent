@@ -125,7 +125,7 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 
 	// Revert user-initiated deletion on autonomous agent applications
 	if isResourceFromAutonomousAgent(outbound) {
-		if manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.sourceCache.Application, s.appManager, logCtx) {
+		if manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.appManager, logCtx) {
 			logCtx.Trace("Deleted application is recreated")
 			return
 		}
@@ -264,7 +264,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 	// Revert user-initiated deletion on autonomous agent applications
 	if isResourceFromAutonomousAgent(outbound) {
-		if manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.sourceCache.AppProject, s.projectManager, logCtx) {
+		if manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.projectManager, logCtx) {
 			logCtx.Trace("Deleted appProject is recreated")
 			return
 		}

@@ -211,7 +211,7 @@ type resourceManager[R kubeResource] interface {
 // Returns true if the resource was recreated, false otherwise.
 func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 	outbound R,
-	resCache resourceCache[R],
+	deletions *DeletionTracker,
 	mgr resourceManager[R],
 	logCtx *logrus.Entry,
 ) bool {
@@ -227,9 +227,8 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 		return false
 	}
 
-	// If the resource is not in the cache, it means it was deleted by an incoming delete event.
-	// So no need to recreate it.
-	if !resCache.Contains(types.UID(sourceUID)) {
+	// Check if this deletion is coming from the source
+	if deletions.IsExpected(types.UID(sourceUID)) {
 		logCtx.Debugf("Expected deletion detected - allowing it to proceed")
 		return false
 	}
@@ -248,4 +247,38 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 	}
 
 	return true
+}
+
+// DeletionTracker tracks expected deletions from the source.
+type DeletionTracker struct {
+	mu       sync.RWMutex
+	expected map[types.UID]bool
+}
+
+func NewDeletionTracker() *DeletionTracker {
+	return &DeletionTracker{
+		expected: make(map[types.UID]bool),
+	}
+}
+
+func (d *DeletionTracker) MarkExpected(uid types.UID) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.expected[uid] = true
+}
+
+func (d *DeletionTracker) IsExpected(uid types.UID) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, exists := d.expected[uid]
+	if exists {
+		delete(d.expected, uid)
+	}
+	return exists
+}
+
+func (d *DeletionTracker) Unmark(uid types.UID) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.expected, uid)
 }

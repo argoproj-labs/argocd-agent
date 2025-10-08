@@ -1117,15 +1117,18 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 				resources:   resources.NewAgentResources(),
 				appManager:  appManager,
 				sourceCache: cache.NewSourceCache(),
+				deletions:   manager.NewDeletionTracker(),
 			}
 
 			// Create send queue for the agent
 			err = s.queues.Create(tt.app.Namespace)
 			require.NoError(t, err)
 
+			sourceUID := tt.app.Annotations[manager.SourceUIDAnnotation]
 			if tt.shouldRecreate {
-				sourceUID := tt.app.Annotations[manager.SourceUIDAnnotation]
-				s.sourceCache.Application.Set(k8stypes.UID(sourceUID), tt.app.Spec)
+				s.deletions.Unmark(k8stypes.UID(sourceUID))
+			} else {
+				s.deletions.MarkExpected(k8stypes.UID(sourceUID))
 			}
 
 			// Execute the callback

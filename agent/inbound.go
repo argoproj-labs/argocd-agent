@@ -178,6 +178,9 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 			logCtx.Errorf("Error updating application: %v", err)
 		}
 	case event.Delete:
+		if a.mode == types.AgentModeManaged {
+			a.deletions.MarkExpected(incomingApp.UID)
+		}
 		err = a.deleteApplication(incomingApp)
 		if err != nil {
 			logCtx.Errorf("Error deleting application: %v", err)
@@ -261,6 +264,9 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 			logCtx.Errorf("Error updating appproject: %v", err)
 		}
 	case event.Delete:
+		if a.mode == types.AgentModeManaged {
+			a.deletions.MarkExpected(incomingAppProject.UID)
+		}
 		err = a.deleteAppProject(incomingAppProject)
 		if err != nil {
 			logCtx.Errorf("Error deleting appproject: %v", err)
@@ -346,6 +352,9 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 		}
 
 	case event.Delete:
+		if a.mode == types.AgentModeManaged {
+			a.deletions.MarkExpected(incomingRepo.UID)
+		}
 		err = a.deleteRepository(incomingRepo)
 		if err != nil {
 			logCtx.Errorf("Error deleting repository: %v", err)
@@ -543,22 +552,21 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 
 	logCtx.Infof("Deleting application")
 
-	if a.mode == types.AgentModeManaged {
-		a.sourceCache.Application.Delete(app.UID)
-	}
-
 	deletionPropagation := backend.DeletePropagationBackground
 	err := a.appManager.Delete(a.context, a.namespace, app, &deletionPropagation)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
+			if a.mode == types.AgentModeManaged {
+				a.sourceCache.Application.Delete(app.UID)
+			}
 			return nil
 		}
-		// Restore the cache if the deletion fails
-		if a.mode == types.AgentModeManaged {
-			a.sourceCache.Application.Set(app.UID, app.Spec)
-		}
 		return err
+	}
+
+	if a.mode == types.AgentModeManaged {
+		a.sourceCache.Application.Delete(app.UID)
 	}
 
 	err = a.appManager.Unmanage(app.QualifiedName())
@@ -660,8 +668,6 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 
 	logCtx.Infof("Deleting appProject")
 
-	a.sourceCache.AppProject.Delete(project.UID)
-
 	deletionPropagation := backend.DeletePropagationBackground
 	err := a.projectManager.Delete(a.context, project, &deletionPropagation)
 	if err != nil {
@@ -670,10 +676,10 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 			a.sourceCache.AppProject.Delete(project.UID)
 			return nil
 		}
-		// Restore the cache if the deletion fails
-		a.sourceCache.AppProject.Set(project.UID, project.Spec)
 		return err
 	}
+
+	a.sourceCache.AppProject.Delete(project.UID)
 
 	err = a.projectManager.Unmanage(project.Name)
 	if err != nil {
@@ -770,19 +776,18 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 
 	logCtx.Infof("Deleting repository")
 
-	a.sourceCache.Repository.Delete(repo.UID)
-
 	deletionPropagation := backend.DeletePropagationBackground
 	err := a.repoManager.Delete(a.context, repo.Name, repo.Namespace, &deletionPropagation)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("repository is not found, perhaps it is already deleted")
+			a.sourceCache.Repository.Delete(repo.UID)
 			return nil
 		}
-		// Restore the cache if the deletion fails
-		a.sourceCache.Repository.Set(repo.UID, repo.Data)
 		return err
 	}
+
+	a.sourceCache.Repository.Delete(repo.UID)
 
 	err = a.repoManager.Unmanage(repo.Name)
 	if err != nil {

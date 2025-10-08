@@ -58,6 +58,8 @@ type ApplicationManager struct {
 	manager.ManagedResources
 	// ObservedResources, key is qualified name of the application, value is the Application's .metadata.resourceValue field
 	manager.ObservedResources
+	// deletions tracks valid deletions from the source.
+	deletions *manager.DeletionTracker
 }
 
 // ApplicationManagerOption is a callback function to set an option to the Application
@@ -82,6 +84,13 @@ func WithRole(role manager.ManagerRole) ApplicationManagerOption {
 func WithMode(mode manager.ManagerMode) ApplicationManagerOption {
 	return func(m *ApplicationManager) {
 		m.mode = mode
+	}
+}
+
+// WithDeletionTracker is used to track valid deletions from the source.
+func WithDeletionTracker(d *manager.DeletionTracker) ApplicationManagerOption {
+	return func(m *ApplicationManager) {
+		m.deletions = d
 	}
 }
 
@@ -258,6 +267,13 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 
 	if deletionTimestampChanged {
 		logCtx.Infof("deletionTimestamp of managed agent changed from nil to non-nil, so deleting Application")
+		// Mark this as a valid deletion so the callback does not treat it as a user-initiated deletion.
+		if m.deletions != nil {
+			if v, ok := updated.Annotations[manager.SourceUIDAnnotation]; ok {
+				m.deletions.MarkExpected(ty.UID(v))
+			}
+		}
+
 		if err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, ptr.To(backend.DeletePropagationForeground)); err != nil {
 			return nil, err
 		}

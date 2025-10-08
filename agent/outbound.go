@@ -119,7 +119,7 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	logCtx.Debugf("Delete app event")
 
 	if isResourceFromPrincipal(app) {
-		if manager.RevertUserInitiatedDeletion(a.context, app, a.sourceCache.Application, a.appManager, logCtx) {
+		if manager.RevertUserInitiatedDeletion(a.context, app, a.deletions, a.appManager, logCtx) {
 			logCtx.Trace("Deleted app is recreated")
 			return
 		}
@@ -258,7 +258,7 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 	logCtx.Debugf("Delete appProject event")
 
 	if isResourceFromPrincipal(appProject) {
-		if manager.RevertUserInitiatedDeletion(a.context, appProject, a.sourceCache.AppProject, a.projectManager, logCtx) {
+		if manager.RevertUserInitiatedDeletion(a.context, appProject, a.deletions, a.projectManager, logCtx) {
 			logCtx.Trace("Deleted appProject is recreated")
 			return
 		}
@@ -392,7 +392,7 @@ func (a *Agent) handleRepositoryDeletion(repo *corev1.Secret) {
 
 	logCtx.Debugf("Delete repository event")
 
-	if manager.RevertUserInitiatedDeletion(a.context, repo, a.sourceCache.Repository, a.repoManager, logCtx) {
+	if manager.RevertUserInitiatedDeletion(a.context, repo, a.deletions, a.repoManager, logCtx) {
 		logCtx.Trace("Deleted repository is recreated")
 		return
 	}
