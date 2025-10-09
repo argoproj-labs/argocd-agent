@@ -112,6 +112,8 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, s)
 		assert.NotNil(t, s.redisProxy)
+	})
+
 	t.Run("Informer sync timeout should be configurable", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithGeneratedTokenSigningKey(), WithInformerSyncTimeout(10*time.Second))
 		assert.NoError(t, err)
