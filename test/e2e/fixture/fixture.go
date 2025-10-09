@@ -289,14 +289,6 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		}
 	}
 
-	isFromSource := func(annotations map[string]string) bool {
-		if annotations == nil {
-			return false
-		}
-		_, ok := annotations[manager.SourceUIDAnnotation]
-		return ok
-	}
-
 	// Delete all appProjects from the autonomous agent
 	appProjectList := argoapp.AppProjectList{}
 	err = autonomousAgentClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
@@ -304,8 +296,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, appProject := range appProjectList.Items {
-		if appProject.Name == appproject.DefaultAppProjectName ||
-			isFromSource(appProject.GetAnnotations()) {
+		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
 
@@ -334,8 +325,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, appProject := range appProjectList.Items {
-		if appProject.Name == appproject.DefaultAppProjectName ||
-			isFromSource(appProject.GetAnnotations()) {
+		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
 
@@ -388,10 +378,6 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, repo := range repoList.Items {
-		if isFromSource(repo.GetAnnotations()) {
-			continue
-		}
-
 		err = EnsureDeletion(ctx, principalClient, &repo)
 		if err != nil {
 			return err
@@ -400,6 +386,19 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		// Wait for the repository to be deleted from the managed cluster
 		repo.SetNamespace("argocd")
 		err = WaitForDeletion(ctx, managedAgentClient, &repo)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Delete all repositories from the autonomous agent
+	repoList = corev1.SecretList{}
+	err = autonomousAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
+	if err != nil {
+		return err
+	}
+	for _, repo := range repoList.Items {
+		err = EnsureDeletion(ctx, autonomousAgentClient, &repo)
 		if err != nil {
 			return err
 		}

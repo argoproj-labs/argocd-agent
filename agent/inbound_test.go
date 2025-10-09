@@ -1003,6 +1003,9 @@ func Test_UpdateAppProject(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test-project",
 				Namespace: "wrong-namespace", // This should be overridden
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "uid-1",
+				},
 			},
 			Spec: v1alpha1.AppProjectSpec{
 				SourceNamespaces: []string{"default"},
@@ -1011,6 +1014,9 @@ func Test_UpdateAppProject(t *testing.T) {
 
 		// Set up project as managed
 		a.projectManager.Manage(project.Name)
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(project, nil)
+		defer getMock.Unset()
 
 		// Mock the backend Delete method and capture the namespace passed to it
 		var capturedNamespace string
@@ -1041,6 +1047,9 @@ func Test_UpdateAppProject(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test-project",
 				Namespace: "principal-namespace", // Different from agent
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "uid-1",
+				},
 			},
 			Spec: v1alpha1.AppProjectSpec{
 				SourceNamespaces: []string{"default"},
@@ -1064,6 +1073,9 @@ func Test_UpdateAppProject(t *testing.T) {
 
 		// Test Delete
 		a.projectManager.Manage(project.Name)
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(project, nil)
+		defer getMock.Unset()
 
 		var capturedDeleteNamespace string
 		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
