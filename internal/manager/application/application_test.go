@@ -56,6 +56,7 @@ func fakeInformer(t *testing.T, namespace string, objects ...runtime.Object) (*f
 			return appC.ArgoprojV1alpha1().Applications(namespace).Watch(ctx, opts)
 		}),
 		informer.WithNamespaceScope[*v1alpha1.Application](namespace),
+		informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
 	)
 	require.NoError(t, err)
 

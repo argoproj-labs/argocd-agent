@@ -108,6 +108,7 @@ func NewManager(ctx context.Context, namespace, redisAddress, redisPassword stri
 		informer.WithUpdateHandler(m.onClusterUpdated),
 		informer.WithDeleteHandler(m.onClusterDeleted),
 		informer.WithFilters(m.filters),
+		informer.WithGroupResource[*v1.Secret]("", "secrets"),
 	)
 	if err != nil {
 		return nil, err

@@ -127,6 +127,7 @@ func Test_Get(t *testing.T) {
 			informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
 				return fakeAppC.ArgoprojV1alpha1().Applications("").Watch(ctx, options)
 			}),
+			informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
 		)
 		require.NoError(t, err)
 
@@ -153,6 +154,7 @@ func Test_Get(t *testing.T) {
 			informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
 				return fakeAppC.ArgoprojV1alpha1().Applications("").Watch(ctx, options)
 			}),
+			informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
 		)
 		require.NoError(t, err)
 		go inf.Start(ctx)

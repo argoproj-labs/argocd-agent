@@ -114,11 +114,6 @@ func NewInformer[T runtime.Object](ctx context.Context, opts ...InformerOption[T
 	var r T
 	i.resType = reflect.TypeOf(r)
 
-	i.groupResource = schema.GroupResource{
-		Group:    "argoproj.io",
-		Resource: "applications",
-	}
-
 	i.logger = logrus.NewEntry(logrus.StandardLogger()).WithFields(logrus.Fields{
 		"type":   i.resType,
 		"module": "Informer",
