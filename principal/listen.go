@@ -33,6 +33,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/auth"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
@@ -218,5 +219,7 @@ func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
 	authapi.RegisterAuthenticationServer(s.grpcServer, authSrv)
 	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer(s.authenticate))
 	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues, s.eventWriters, metrics, s.clusterMgr, eventstream.WithNotifyOnConnect(s.notifyOnConnect)))
+	// Proposal: register LogStream gRPC service for data-plane (use singleton instance)
+	logstreamapi.RegisterLogStreamServiceServer(s.grpcServer, s.logStream)
 	return nil
 }
