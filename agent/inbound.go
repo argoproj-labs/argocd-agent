@@ -29,6 +29,7 @@ import (
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -178,9 +179,6 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 			logCtx.Errorf("Error updating application: %v", err)
 		}
 	case event.Delete:
-		if a.mode == types.AgentModeManaged {
-			a.deletions.MarkExpected(incomingApp.UID)
-		}
 		err = a.deleteApplication(incomingApp)
 		if err != nil {
 			logCtx.Errorf("Error deleting application: %v", err)
@@ -264,9 +262,6 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 			logCtx.Errorf("Error updating appproject: %v", err)
 		}
 	case event.Delete:
-		if a.mode == types.AgentModeManaged {
-			a.deletions.MarkExpected(incomingAppProject.UID)
-		}
 		err = a.deleteAppProject(incomingAppProject)
 		if err != nil {
 			logCtx.Errorf("Error deleting appproject: %v", err)
@@ -352,9 +347,6 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 		}
 
 	case event.Delete:
-		if a.mode == types.AgentModeManaged {
-			a.deletions.MarkExpected(incomingRepo.UID)
-		}
 		err = a.deleteRepository(incomingRepo)
 		if err != nil {
 			logCtx.Errorf("Error deleting repository: %v", err)
@@ -552,8 +544,17 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 
 	logCtx.Infof("Deleting application")
 
+	// Fetch the source UID of the existing app to mark it as expected deletion.
+	app, err := a.appManager.Get(a.context, app.Name, app.Namespace)
+	if err != nil {
+		return err
+	}
+
+	sourceUID := app.Annotations[manager.SourceUIDAnnotation]
+	a.deletions.MarkExpected(ktypes.UID(sourceUID))
+
 	deletionPropagation := backend.DeletePropagationBackground
-	err := a.appManager.Delete(a.context, a.namespace, app, &deletionPropagation)
+	err = a.appManager.Delete(a.context, a.namespace, app, &deletionPropagation)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
@@ -668,8 +669,17 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 
 	logCtx.Infof("Deleting appProject")
 
+	// Fetch the source UID of the existing appProject to mark it as expected deletion.
+	project, err := a.projectManager.Get(a.context, project.Name, project.Namespace)
+	if err != nil {
+		return err
+	}
+
+	sourceUID := project.Annotations[manager.SourceUIDAnnotation]
+	a.deletions.MarkExpected(ktypes.UID(sourceUID))
+
 	deletionPropagation := backend.DeletePropagationBackground
-	err := a.projectManager.Delete(a.context, project, &deletionPropagation)
+	err = a.projectManager.Delete(a.context, project, &deletionPropagation)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("appProject not found, perhaps it is already deleted")
@@ -776,8 +786,17 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 
 	logCtx.Infof("Deleting repository")
 
+	// Fetch the source UID of the existing repository to mark it as expected deletion.
+	repo, err := a.repoManager.Get(a.context, repo.Name, repo.Namespace)
+	if err != nil {
+		return err
+	}
+
+	sourceUID := repo.Annotations[manager.SourceUIDAnnotation]
+	a.deletions.MarkExpected(ktypes.UID(sourceUID))
+
 	deletionPropagation := backend.DeletePropagationBackground
-	err := a.repoManager.Delete(a.context, repo.Name, repo.Namespace, &deletionPropagation)
+	err = a.repoManager.Delete(a.context, repo.Name, repo.Namespace, &deletionPropagation)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("repository is not found, perhaps it is already deleted")
