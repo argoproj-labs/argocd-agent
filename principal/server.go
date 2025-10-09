@@ -337,7 +337,9 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		s.resourceProxyListenAddr = defaultResourceProxyListenerAddr
 	}
 
-	s.redisProxy = redisproxy.New(defaultRedisProxyListenerAddr, s.options.redisAddress, s.sendSynchronousRedisMessageToAgent)
+	if !s.options.redisProxyDisabled {
+		s.redisProxy = redisproxy.New(defaultRedisProxyListenerAddr, s.options.redisAddress, s.sendSynchronousRedisMessageToAgent)
+	}
 
 	// Instantiate our ResourceProxy to intercept Kubernetes requests from Argo
 	// CD's API server.

@@ -75,6 +75,7 @@ type ServerOptions struct {
 	redisPassword          string
 	redisCompressionType   cacheutil.RedisCompressionType
 	healthzPort            int
+	redisProxyDisabled     bool
 	informerSyncTimeout    time.Duration
 }
 
@@ -413,6 +414,14 @@ func WithAutoNamespaceCreate(enabled bool, pattern string, labels map[string]str
 func WithWebSocket(enableWebSocket bool) ServerOption {
 	return func(o *Server) error {
 		o.enableWebSocket = enableWebSocket
+		return nil
+	}
+}
+
+// WithRedisProxyDisabled disables the Redis proxy for testing.
+func WithRedisProxyDisabled() ServerOption {
+	return func(o *Server) error {
+		o.options.redisProxyDisabled = true
 		return nil
 	}
 }
