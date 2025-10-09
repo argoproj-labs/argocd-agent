@@ -199,10 +199,6 @@ type kubeResource interface {
 	metav1.Object
 }
 
-type resourceCache[R kubeResource] interface {
-	Contains(uid types.UID) bool
-}
-
 type resourceManager[R kubeResource] interface {
 	Create(ctx context.Context, obj R) (R, error)
 }

@@ -34,6 +34,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -382,6 +383,7 @@ func (r *RequestHandler) handleDeletedResource(logCtx *logrus.Entry, reqUpdate *
 			ObjectMeta: v1.ObjectMeta{
 				Name:      reqUpdate.Name,
 				Namespace: reqUpdate.Namespace,
+				UID:       ktypes.UID(reqUpdate.UID),
 			},
 		}
 
@@ -395,6 +397,7 @@ func (r *RequestHandler) handleDeletedResource(logCtx *logrus.Entry, reqUpdate *
 			ObjectMeta: v1.ObjectMeta{
 				Name:      reqUpdate.Name,
 				Namespace: reqUpdate.Namespace,
+				UID:       ktypes.UID(reqUpdate.UID),
 			},
 		}
 		ev := r.events.AppProjectEvent(event.Delete, appProject)

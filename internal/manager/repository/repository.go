@@ -118,6 +118,10 @@ func (m *RepositoryManager) List(ctx context.Context, selector backend.Repositor
 	return m.backend.List(ctx, selector)
 }
 
+func (m *RepositoryManager) Get(ctx context.Context, name, namespace string) (*corev1.Secret, error) {
+	return m.backend.Get(ctx, name, namespace)
+}
+
 // UpdateManagedRepository updates the Repository resource on the agent when it is in
 // managed mode.
 //

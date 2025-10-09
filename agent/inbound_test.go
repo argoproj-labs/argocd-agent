@@ -171,7 +171,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 
 		// Check if the API calls were made in the same order:
 		// compare the UID, delete old app, and create a new app.
-		expectedCalls := []string{"Get", "Delete", "Create"}
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -179,7 +179,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 
 		// Check if the new app has the updated source UID annotation.
-		appInterface := be.Calls[2].ReturnArguments[0]
+		appInterface := be.Calls[3].ReturnArguments[0]
 		latestApp, ok := appInterface.(*v1alpha1.Application)
 		require.True(t, ok)
 		require.Equal(t, string(incomingApp.UID), latestApp.Annotations[manager.SourceUIDAnnotation])
@@ -229,7 +229,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 
 		// Check if the API calls were made in the same order:
 		// compare the UID, delete old app, and create a new app.
-		expectedCalls := []string{"Get", "Delete", "Create"}
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -237,7 +237,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 
 		// Check if the new app has the updated source UID annotation.
-		appInterface := be.Calls[2].ReturnArguments[0]
+		appInterface := be.Calls[3].ReturnArguments[0]
 
 		latestApp, ok := appInterface.(*v1alpha1.Application)
 		require.True(t, ok)
@@ -334,7 +334,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 
 		// Check if the API calls were made in the same order:
 		// compare the UID and delete old app
-		expectedCalls := []string{"Get", "Delete"}
+		expectedCalls := []string{"Get", "Get", "Delete"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -414,7 +414,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 
 		// Check if the API calls were made in the same order:
 		// compare the UID, delete old appProject, and create a new appProject.
-		expectedCalls := []string{"Get", "Delete", "Create"}
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -422,7 +422,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 
 		// Check if the new app has the updated source UID annotation.
-		appInterface := be.Calls[2].ReturnArguments[0]
+		appInterface := be.Calls[3].ReturnArguments[0]
 		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
 		require.True(t, ok)
 		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
@@ -472,7 +472,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 
 		// Check if the API calls were made in the same order:
 		// compare the UID, delete old appProject, and create a new appProject.
-		expectedCalls := []string{"Get", "Delete", "Create"}
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -480,7 +480,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 
 		// Check if the new appProject has the updated source UID annotation.
-		appInterface := be.Calls[2].ReturnArguments[0]
+		appInterface := be.Calls[3].ReturnArguments[0]
 
 		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
 		require.True(t, ok)
@@ -537,7 +537,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 
 		// Check if the API calls were made in the same order:
 		// compare the UID and delete old appProject
-		expectedCalls := []string{"Get", "Delete"}
+		expectedCalls := []string{"Get", "Get", "Delete"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -584,7 +584,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify the sequence: Get (to compare UID), Delete (existing), Create (new)
-		expectedCalls := []string{"Get", "Delete", "Create"}
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
 		gotCalls := []string{}
 		for _, call := range beMissing.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -592,7 +592,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 
 		// Verify the created AppProject has the correct source UID annotation
-		appInterface := beMissing.Calls[2].ReturnArguments[0]
+		appInterface := beMissing.Calls[3].ReturnArguments[0]
 		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
 		require.True(t, ok)
 		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
@@ -635,7 +635,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify the sequence: Get (to compare UID), Delete (existing), Create (new)
-		expectedCalls := []string{"Get", "Delete", "Create"}
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
 		gotCalls := []string{}
 		for _, call := range beMissing.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -643,7 +643,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 
 		// Verify the created AppProject has the correct source UID annotation
-		appInterface := beMissing.Calls[2].ReturnArguments[0]
+		appInterface := beMissing.Calls[3].ReturnArguments[0]
 		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
 		require.True(t, ok)
 		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
@@ -684,7 +684,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify the sequence: Get (to compare UID), Delete (existing)
-		expectedCalls := []string{"Get", "Delete"}
+		expectedCalls := []string{"Get", "Get", "Delete"}
 		gotCalls := []string{}
 		for _, call := range beMissing.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -1141,7 +1141,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 
 		// Check if the API calls were made in the same order:
 		// compare the UID, delete old repo, and create a new repo.
-		expectedCalls := []string{"Get", "Delete", "Create"}
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -1149,7 +1149,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 
 		// Check if the new repo has the updated source UID annotation.
-		repoInterface := be.Calls[2].ReturnArguments[0]
+		repoInterface := be.Calls[3].ReturnArguments[0]
 		latestRepo, ok := repoInterface.(*corev1.Secret)
 		require.True(t, ok)
 		require.Equal(t, string(incomingRepo.UID), latestRepo.Annotations[manager.SourceUIDAnnotation])
@@ -1228,7 +1228,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 
 		// Check if the API calls were made in the same order:
 		// compare the UID, delete old repo, and create a new repo.
-		expectedCalls := []string{"Get", "Delete", "Create"}
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -1236,7 +1236,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 
 		// Check if the new repository has the same source UID annotation as the incoming repository.
-		repoInterface := be.Calls[2].ReturnArguments[0]
+		repoInterface := be.Calls[3].ReturnArguments[0]
 
 		latestRepo, ok := repoInterface.(*corev1.Secret)
 		require.True(t, ok)
@@ -1299,7 +1299,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 
 		// Check if the API calls were made in the same order:
 		// compare the UID and delete old repository
-		expectedCalls := []string{"Get", "Delete"}
+		expectedCalls := []string{"Get", "Get", "Delete"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
