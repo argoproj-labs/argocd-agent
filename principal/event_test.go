@@ -680,6 +680,208 @@ func Test_processAppProjectEvent(t *testing.T) {
 		require.Equal(t, ev, *got)
 		assert.ErrorContains(t, err, "event type not allowed")
 	})
+
+	t.Run("Create AppProject sets correct namespace in autonomous mode", func(t *testing.T) {
+		principalNamespace := "argocd-principal"
+		agentName := "test-agent"
+
+		project := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-project",
+				Namespace: "wrong-namespace", // This should be overridden
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceRepos: []string{"*"},
+				Destinations: []v1alpha1.ApplicationDestination{
+					{
+						Name:   "test-cluster",
+						Server: "https://test.server.com",
+					},
+				},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps(principalNamespace)
+		s, err := NewServer(context.Background(), fac, principalNamespace, WithGeneratedTokenSigningKey())
+		require.NoError(t, err)
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("appproject")
+		ev.SetType(event.Create.String())
+		err = ev.SetData(cloudevents.ApplicationJSON, project)
+		require.NoError(t, err)
+
+		err = s.processAppProjectEvent(context.Background(), agentName, &ev)
+		assert.NoError(t, err)
+
+		// Verify the project was created with the correct namespace
+		prefixedName, err := agentPrefixedProjectName(project.Name, agentName)
+		require.NoError(t, err)
+
+		createdProject, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(principalNamespace).Get(context.Background(), prefixedName, v1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, principalNamespace, createdProject.Namespace, "Project should be created in principal namespace")
+	})
+
+	t.Run("Update AppProject sets correct namespace in autonomous mode", func(t *testing.T) {
+		principalNamespace := "argocd-principal"
+		agentName := "test-agent"
+
+		// Create existing project first
+		existingProject := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-agent-test-project",
+				Namespace: principalNamespace,
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceRepos: []string{"*"},
+				Destinations: []v1alpha1.ApplicationDestination{
+					{
+						Name:   "test-cluster",
+						Server: "https://test.server.com",
+					},
+				},
+				SourceNamespaces: []string{agentName},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps(principalNamespace, existingProject)
+		s, err := NewServer(context.Background(), fac, principalNamespace, WithGeneratedTokenSigningKey())
+		require.NoError(t, err)
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		// Update project with wrong namespace
+		updatedProject := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-project",    // Original name (will be prefixed)
+				Namespace: "wrong-namespace", // This should be overridden
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				Description: "Updated description",
+				SourceRepos: []string{"*"},
+				Destinations: []v1alpha1.ApplicationDestination{
+					{
+						Name:   "test-cluster",
+						Server: "https://test.server.com",
+					},
+				},
+			},
+		}
+
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("appproject")
+		ev.SetType(event.SpecUpdate.String())
+		err = ev.SetData(cloudevents.ApplicationJSON, updatedProject)
+		require.NoError(t, err)
+
+		err = s.processAppProjectEvent(context.Background(), agentName, &ev)
+		assert.NoError(t, err)
+
+		// Verify the project was updated with the correct namespace
+		prefixedName, err := agentPrefixedProjectName(updatedProject.Name, agentName)
+		require.NoError(t, err)
+
+		updatedProjectResult, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(principalNamespace).Get(context.Background(), prefixedName, v1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, principalNamespace, updatedProjectResult.Namespace, "Project should be updated in principal namespace")
+		assert.Equal(t, "Updated description", updatedProjectResult.Spec.Description, "Project should have updated description")
+	})
+
+	t.Run("Delete AppProject uses correct namespace in autonomous mode", func(t *testing.T) {
+		principalNamespace := "argocd-principal"
+		agentName := "test-agent"
+
+		// Create existing project first
+		existingProject := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-agent-test-project",
+				Namespace: principalNamespace,
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceRepos: []string{"*"},
+				Destinations: []v1alpha1.ApplicationDestination{
+					{
+						Name:   "test-cluster",
+						Server: "https://test.server.com",
+					},
+				},
+				SourceNamespaces: []string{agentName},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps(principalNamespace, existingProject)
+		s, err := NewServer(context.Background(), fac, principalNamespace, WithGeneratedTokenSigningKey())
+		require.NoError(t, err)
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		// Delete project with wrong namespace
+		projectToDelete := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-project",    // Original name (will be prefixed)
+				Namespace: "wrong-namespace", // This should be overridden
+			},
+		}
+
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("appproject")
+		ev.SetType(event.Delete.String())
+		err = ev.SetData(cloudevents.ApplicationJSON, projectToDelete)
+		require.NoError(t, err)
+
+		err = s.processAppProjectEvent(context.Background(), agentName, &ev)
+		assert.NoError(t, err)
+
+		// Verify the project was deleted from the correct namespace
+		prefixedName, err := agentPrefixedProjectName(projectToDelete.Name, agentName)
+		require.NoError(t, err)
+
+		_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(principalNamespace).Get(context.Background(), prefixedName, v1.GetOptions{})
+		assert.True(t, err != nil, "Project should be deleted")
+	})
+
+	t.Run("Principal running in different namespace preserves correct namespace", func(t *testing.T) {
+		principalNamespace := "custom-principal-namespace"
+		agentName := "test-agent"
+
+		project := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-project",
+				Namespace: "agent-namespace", // Different from principal
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceRepos: []string{"*"},
+				Destinations: []v1alpha1.ApplicationDestination{
+					{
+						Name:   "test-cluster",
+						Server: "https://test.server.com",
+					},
+				},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps(principalNamespace)
+		s, err := NewServer(context.Background(), fac, principalNamespace, WithGeneratedTokenSigningKey())
+		require.NoError(t, err)
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("appproject")
+		ev.SetType(event.Create.String())
+		err = ev.SetData(cloudevents.ApplicationJSON, project)
+		require.NoError(t, err)
+
+		err = s.processAppProjectEvent(context.Background(), agentName, &ev)
+		assert.NoError(t, err)
+
+		// Verify the project was created with the principal's namespace, not the agent's
+		prefixedName, err := agentPrefixedProjectName(project.Name, agentName)
+		require.NoError(t, err)
+
+		createdProject, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(principalNamespace).Get(context.Background(), prefixedName, v1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, principalNamespace, createdProject.Namespace, "Project should be created in principal namespace, not agent namespace")
+	})
 }
 
 func Test_processResourceEventResponse(t *testing.T) {
