@@ -996,12 +996,11 @@ func TestServer_deleteRepositoryCallback(t *testing.T) {
 
 func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 	tests := []struct {
-		name            string
-		app             *v1alpha1.Application
-		expectedDeleted bool // Whether deletion was expected (agent-initiated)
-		shouldRecreate  bool // Whether app should be recreated (unauthorized deletion)
-		shouldError     bool // Whether recreation should fail
-		setupMocks      func(*mocks.Application)
+		name           string
+		app            *v1alpha1.Application
+		shouldRecreate bool // Whether app should be recreated (unauthorized deletion)
+		shouldError    bool // Whether recreation should fail
+		setupMocks     func(*mocks.Application)
 	}{
 		{
 			name: "legitimate deletion from autonomous agent - should allow",
@@ -1018,9 +1017,8 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 					Project: "default",
 				},
 			},
-			expectedDeleted: true,
-			shouldRecreate:  false,
-			shouldError:     false,
+			shouldRecreate: false,
+			shouldError:    false,
 			setupMocks: func(mockBackend *mocks.Application) {
 				// No mocks needed - deletion should proceed normally
 			},
@@ -1040,9 +1038,8 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 					Project: "default",
 				},
 			},
-			expectedDeleted: false,
-			shouldRecreate:  true,
-			shouldError:     false,
+			shouldRecreate: true,
+			shouldError:    false,
 			setupMocks: func(mockBackend *mocks.Application) {
 				// Mock successful recreation
 				mockBackend.On("Create", mock.Anything, mock.MatchedBy(func(app *v1alpha1.Application) bool {
@@ -1074,9 +1071,8 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 					Project: "default",
 				},
 			},
-			expectedDeleted: false,
-			shouldRecreate:  true,
-			shouldError:     true,
+			shouldRecreate: true,
+			shouldError:    true,
 			setupMocks: func(mockBackend *mocks.Application) {
 				// Mock recreation failure
 				mockBackend.On("Create", mock.Anything, mock.Anything).Return(nil, errors.NewInternalError(fmt.Errorf("creation failed")))
@@ -1095,9 +1091,8 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 					Project: "default",
 				},
 			},
-			expectedDeleted: false,
-			shouldRecreate:  false,
-			shouldError:     false,
+			shouldRecreate: false,
+			shouldError:    false,
 			setupMocks: func(mockBackend *mocks.Application) {
 				// No mocks needed - should follow normal deletion flow
 			},
@@ -1116,22 +1111,24 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 
 			// Create server with dependencies
 			s := &Server{
-				ctx:               context.Background(),
-				queues:            queue.NewSendRecvQueues(),
-				events:            event.NewEventSource("test"),
-				resources:         resources.NewAgentResources(),
-				appManager:        appManager,
-				expectedDeletions: make(map[string]bool),
+				ctx:         context.Background(),
+				queues:      queue.NewSendRecvQueues(),
+				events:      event.NewEventSource("test"),
+				resources:   resources.NewAgentResources(),
+				appManager:  appManager,
+				sourceCache: cache.NewSourceCache(),
+				deletions:   manager.NewDeletionTracker(),
 			}
 
 			// Create send queue for the agent
 			err = s.queues.Create(tt.app.Namespace)
 			require.NoError(t, err)
 
-			// Pre-mark deletion as expected if needed
-			if tt.expectedDeleted {
-				appKey := fmt.Sprintf("%s/%s", tt.app.Namespace, tt.app.Name)
-				s.markExpectedDeletion(appKey)
+			sourceUID := tt.app.Annotations[manager.SourceUIDAnnotation]
+			if tt.shouldRecreate {
+				s.deletions.Unmark(k8stypes.UID(sourceUID))
+			} else {
+				s.deletions.MarkExpected(k8stypes.UID(sourceUID))
 			}
 
 			// Execute the callback
@@ -1152,37 +1149,8 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 				// If not autonomous agent app, normal deletion flow should add event to queue
 				assert.Equal(t, 1, sendQ.Len(), "Queue should contain delete event for normal apps")
 			}
-
-			// Verify expected deletion tracking is cleaned up
-			appKey := fmt.Sprintf("%s/%s", tt.app.Namespace, tt.app.Name)
-			s.expectedDeletionsLock.RLock()
-			_, stillTracked := s.expectedDeletions[appKey]
-			s.expectedDeletionsLock.RUnlock()
-			assert.False(t, stillTracked, "Expected deletion should be cleaned up after processing")
-
-			mockAppBackend.AssertExpectations(t)
 		})
 	}
-}
-
-// TestServer_ExpectedDeletionTracking tests the core deletion tracking functionality
-func TestServer_ExpectedDeletionTracking(t *testing.T) {
-	s := &Server{
-		expectedDeletions: make(map[string]bool),
-	}
-
-	appKey := "autonomous-agent/test-app"
-	// Initially not expected
-	assert.False(t, s.isExpectedDeletion(appKey))
-
-	// Mark as expected
-	s.markExpectedDeletion(appKey)
-
-	// Should now be expected and consumed
-	assert.True(t, s.isExpectedDeletion(appKey))
-
-	// Should be cleaned up after check
-	assert.False(t, s.isExpectedDeletion(appKey))
 }
 
 func TestServer_updateAppCallback(t *testing.T) {
@@ -1263,6 +1231,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			sourceCache:  cache.NewSourceCache(),
 		}
 
 		err = s.queues.Create("autonomous-agent")
@@ -1299,6 +1268,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			sourceCache:  cache.NewSourceCache(),
 		}
 
 		err = s.queues.Create("autonomous-agent")
@@ -1324,8 +1294,8 @@ func TestServer_updateAppCallback(t *testing.T) {
 		}
 
 		sourceUID := k8stypes.UID(oldApp.Annotations[manager.SourceUIDAnnotation])
-		cache.SetApplicationSpec(sourceUID, oldApp.Spec, log())
-		defer cache.DeleteApplicationSpec(sourceUID, log())
+		s.sourceCache.Application.Set(sourceUID, oldApp.Spec)
+		defer s.sourceCache.Application.Delete(sourceUID)
 
 		mockBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
 		mockBackend.On("SupportsPatch").Return(true)
@@ -1349,6 +1319,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			sourceCache:  cache.NewSourceCache(),
 		}
 
 		err = s.queues.Create("autonomous-agent")
