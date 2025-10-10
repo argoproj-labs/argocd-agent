@@ -186,6 +186,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		informer.WithDeleteHandler[*v1alpha1.Application](a.addAppDeletionToQueue),
 		informer.WithFilters[*v1alpha1.Application](a.DefaultAppFilterChain()),
 		informer.WithNamespaceScope[*v1alpha1.Application](a.namespace),
+		informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
 	}
 
 	appProjectManagerOption := []appproject.AppProjectManagerOption{
@@ -227,6 +228,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		informer.WithAddHandler[*v1alpha1.AppProject](a.addAppProjectCreationToQueue),
 		informer.WithUpdateHandler[*v1alpha1.AppProject](a.addAppProjectUpdateToQueue),
 		informer.WithDeleteHandler[*v1alpha1.AppProject](a.addAppProjectDeletionToQueue),
+		informer.WithGroupResource[*v1alpha1.AppProject]("argoproj.io", "appprojects"),
 	}
 
 	projInformer, err := informer.NewInformer(ctx, projInformerOptions...)
@@ -263,6 +265,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		informer.WithUpdateHandler[*corev1.Secret](a.handleRepositoryUpdate),
 		informer.WithDeleteHandler[*corev1.Secret](a.handleRepositoryDeletion),
 		informer.WithFilters(kuberepository.DefaultFilterChain(a.namespace)),
+		informer.WithGroupResource[*corev1.Secret]("", "secrets"),
 	}
 
 	repoInformer, err := informer.NewInformer(ctx, repoInformerOptions...)
