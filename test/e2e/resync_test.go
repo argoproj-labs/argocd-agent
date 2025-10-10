@@ -45,7 +45,7 @@ func (suite *ResyncTestSuite) TearDownTest() {
 	}
 
 	// Ensure that all the components are running after runnings the tests
-	if !fixture.IsProcessRunning("process") {
+	if !fixture.IsProcessRunning("principal") {
 		err := fixture.StartProcess("principal")
 		requires.NoError(err)
 	}
@@ -94,9 +94,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnPrincipalStartupManaged() {
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("principal")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "principal")
 
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
@@ -137,9 +135,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupManaged() {
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("principal")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "principal")
 
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
@@ -177,9 +173,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupManaged() {
 	err = fixture.StartProcess("agent-managed")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("agent-managed")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "agent-managed")
 
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
@@ -214,9 +208,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupManaged() {
 	err = fixture.StartProcess("agent-managed")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("agent-managed")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "agent-managed")
 
 	// updates to the app on the agent side should be reverted since principal is the source of truth
 	requires.Eventually(func() bool {
@@ -253,9 +245,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupAutonomous() {
 	err = fixture.StartProcess("agent-autonomous")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("agent-autonomous")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "agent-autonomous")
 
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
@@ -336,9 +326,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnPrincipalStartupAutonomous() 
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("principal")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "principal")
 
 	requires.Eventually(func() bool {
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, principalApp, metav1.GetOptions{})
@@ -375,9 +363,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupAutonomous() {
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("principal")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "principal")
 
 	// updates to the app on the principal side should be reverted since agent is the source of truth in autonomous mode
 	requires.Eventually(func() bool {
@@ -397,6 +383,8 @@ func (suite *ResyncTestSuite) Test_ResyncOnConnectionLostManagedMode() {
 
 	// Restart the agent process so that the agent talks to the principal via Toxiproxy
 	fixture.RestartAgent(suite.T(), "agent-managed")
+
+	fixture.CheckReadiness(suite.T(), "agent-managed")
 
 	// Create a managed app
 	app := suite.createManagedApp()
@@ -434,6 +422,8 @@ func (suite *ResyncTestSuite) Test_ResyncOnConnectionLostAutonomousMode() {
 
 	// Restart the agent process so that the agent talks to the principal via Toxiproxy
 	fixture.RestartAgent(suite.T(), "agent-autonomous")
+
+	fixture.CheckReadiness(suite.T(), "agent-autonomous")
 
 	// Create an autonomous app
 	app := suite.createAutonomousApp()
@@ -493,9 +483,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnAppProjectUpdate() {
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("principal")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "principal")
 
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
@@ -542,9 +530,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnCreation() {
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("principal")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "principal")
 
 	// Ensure the appProject has been created on the workload cluster
 	requires.Eventually(func() bool {
@@ -649,6 +635,8 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnDeletion() {
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
+	fixture.CheckReadiness(suite.T(), "principal")
+
 	// Ensure the appProject is still present on the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
@@ -680,9 +668,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnCreate() {
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("principal")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "principal")
 
 	projKey := fixture.ToNamespacedName(appProject)
 
@@ -724,6 +710,8 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnUpdate() {
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
+	fixture.CheckReadiness(suite.T(), "principal")
+
 	// Ensure the appProject is updated on the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
@@ -757,6 +745,8 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnDeletion() {
 	err = fixture.StartProcess("principal")
 	requires.NoError(err)
 
+	fixture.CheckReadiness(suite.T(), "principal")
+
 	// Ensure the appProject is deleted from the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
@@ -766,7 +756,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnDeletion() {
 }
 
 // Delete the AppProject from the control plane when the agent is down
-// and ensure that the AppProject is created again when the agent is restarted
+// and ensure that the AppProject is deleted from the workload cluster when the agent is restarted
 func (suite *ResyncTestSuite) Test_AppProjectResync_DeleteOnAgentDelete() {
 	requires := suite.Require()
 
@@ -785,19 +775,21 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_DeleteOnAgentDelete() {
 	err = suite.PrincipalClient.Delete(suite.Ctx, appProject, metav1.DeleteOptions{})
 	requires.NoError(err)
 
-	// Start the agent and ensure that the appProject is created on the workload cluster
+	// AppProject should still exist on the workload cluster
+	err = suite.ManagedAgentClient.Get(suite.Ctx, projKey, appProject, metav1.GetOptions{})
+	requires.NoError(err)
+
+	// Start the agent and ensure that the appProject is deleted from the workload cluster
 	err = fixture.StartProcess("agent-managed")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("agent-managed")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "agent-managed")
 
 	// Ensure the appProject has been created on the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
-		return err == nil
+		return errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second)
 }
 
@@ -825,9 +817,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_CreateOnAgentDelete() {
 	err = fixture.StartProcess("agent-managed")
 	requires.NoError(err)
 
-	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning("agent-managed")
-	}, 30*time.Second, 1*time.Second)
+	fixture.CheckReadiness(suite.T(), "agent-managed")
 
 	// Ensure the appProject has been created on the workload cluster
 	requires.Eventually(func() bool {
