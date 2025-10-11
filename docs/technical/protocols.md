@@ -23,6 +23,7 @@ Through transport abstraction, argocd-agent can support various protocols such a
 
 ### Transport Flow
 #### Before (Current)
+```
 ┌─────────────────────────────────────┐
 │         Application Events          │  ← Create, Update, Delete, Status
 ├─────────────────────────────────────┤
@@ -34,9 +35,10 @@ Through transport abstraction, argocd-agent can support various protocols such a
 ├─────────────────────────────────────┤
 │           TLS + mTLS                │  ← Security layer
 └─────────────────────────────────────┘
-
+```
 
 #### After (Transport Abstraction)
+```
 ┌─────────────────────────────────────┐
 │         Application Events          │  ← Create, Update, Delete, Status
 ├─────────────────────────────────────┤
@@ -53,6 +55,7 @@ Through transport abstraction, argocd-agent can support various protocols such a
 ├─────────────────────────────────────┤
 │           TLS + mTLS                │  ← Security layer (common)
 └─────────────────────────────────────┘
+```
 
 ### Before Flow
 Application Layer → gRPC Protobuf → gRPC Stream → HTTP/2+mTLS
