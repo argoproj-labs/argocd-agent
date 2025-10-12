@@ -3,10 +3,10 @@
 ## Summary
 
 This proposal introduces a new **Agent Visibility UI** for Argo CD Agent.  
-Its purpose is to provide a clear and intuitive way to visualize the **connection and synchronization status** of multiple **Agents** within the Argo CD web interface.
+Its purpose is to provide a clear and intuitive way to visualize the **connection and synchronization status** of multiple **Agents**.
 
 Currently, users can only inspect Agent information using the `argocd-agentctl` CLI, making it difficult to monitor multi-cluster environments or understand Agent connectivity at a glance.  
-This proposal adds a **simple, visibility-focused UI** integrated into the existing Argo CD dashboard.
+This proposal adds a **simple, visibility-focused UI** that visualizes Agent and Principal connections within the existing Argo CD dashboard.
 
 ---
 
@@ -25,7 +25,6 @@ A native visibility UI allows operators and developers to quickly assess cluster
 
 ## Goals
 
-- Introduce a new **“Agents”** navigation item in the Argo CD sidebar.
 - Display **Principal & Agents** relationship overview.
 - Provide **Tile, List, Tree, and Detail** views for clear visualization.
 - Show key Agent data: connection, sync status, mode, namespace, and Principal linkage.
