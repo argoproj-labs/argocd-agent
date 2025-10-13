@@ -174,8 +174,10 @@ Change `spec.ports.port` from 443 to 8443 in `argocd-agent/install/kubernetes/pr
 ## Prerequisites
 
 ### Required Tools
+- go
 - kubectl (v1.20 or higher)
 - argocd-agentctl CLI tool
+- cloud-provider-kind
 
 ### Install kind
 ```bash
@@ -192,6 +194,23 @@ make build
 
 # Add to PATH (Optional)
 export PATH=$PATH:$(pwd)/dist
+```
+
+### Install Cloud Provider Kind
+```bash
+# (Option1) install brew
+brew install cloud-provider-kind
+
+# (Option2) install go
+go install sigs.k8s.io/cloud-provider-kind@latest
+
+sudo install ~/go/bin/cloud-provider-kind /usr/local/bin
+```
+
+### Start Cloud Provider Kind
+```bash
+# start background
+sudo cloud-provider-kind &
 ```
 
 <br />
@@ -281,7 +300,7 @@ kubectl rollout restart deployment argocd-agent-principal -n argocd --context ki
 ```
 
 ### Verify Principal service exposure
-Ensure the 8443 listener is properly configured on NodePort for Agent access to Principal:
+Ensure the 8443 listener is properly configured on LoadBalancer for Agent access to Principal:
 
 ```bash
 # Option 1: LoadBalancer
@@ -291,8 +310,9 @@ kubectl patch svc argocd-agent-principal -n argocd --context kind-argocd-hub \
 kubectl get svc argocd-agent-principal -n argocd --context kind-argocd-hub
 
 # Expected output:
-# NAME                     TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)          AGE
-# argocd-agent-principal   NodePort   10.96.215.149   <none>        8443:30694/TCP   5s
+# NAME                     TYPE           CLUSTER-IP      EXTERNAL-IP       PORT(S)          AGE
+# argocd-agent-principal   LoadBalancer   10.96.215.149   172.19.0.2      443:8443/TCP   5s
+
 ```
 
 ### Generate Principal certificates
