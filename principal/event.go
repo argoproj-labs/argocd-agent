@@ -348,6 +348,7 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 	// AppProject creation event will only be processed in autonomous mode
 	case event.Create.String():
 		if agentMode.IsAutonomous() {
+			incoming.SetNamespace(s.namespace)
 			_, err := s.projectManager.Create(ctx, incoming)
 			if err != nil {
 				return fmt.Errorf("could not create app-project %s: %w", incoming.Name, err)
@@ -363,6 +364,8 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 			return event.NewEventNotAllowedErr("event type not allowed when mode is not autonomous")
 		}
 
+		incoming.SetNamespace(s.namespace)
+
 		_, err := s.projectManager.UpdateAppProject(ctx, incoming)
 		if err != nil {
 			return fmt.Errorf("could not update app-project %s: %w", incoming.Name, err)
@@ -373,6 +376,8 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 		if !agentMode.IsAutonomous() {
 			return event.NewEventNotAllowedErr("event type not allowed when mode is not autonomous")
 		}
+
+		incoming.SetNamespace(s.namespace)
 
 		deletionPropagation := backend.DeletePropagationForeground
 		err := s.projectManager.Delete(ctx, incoming, &deletionPropagation)

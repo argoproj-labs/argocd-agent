@@ -98,3 +98,10 @@ func Test_WithMinimumTLSVersion(t *testing.T) {
 		}
 	})
 }
+
+func Test_WithRedisProxyDisabled(t *testing.T) {
+	s := &Server{options: &ServerOptions{}}
+	err := WithRedisProxyDisabled()(s)
+	assert.NoError(t, err)
+	assert.True(t, s.options.redisProxyDisabled)
+}

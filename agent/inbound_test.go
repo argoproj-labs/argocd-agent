@@ -900,6 +900,185 @@ func Test_UpdateAppProject(t *testing.T) {
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app project")
 	})
 
+	// Namespace handling tests
+	t.Run("CreateAppProject sets correct namespace", func(t *testing.T) {
+		agentNamespace := "agent-namespace"
+		a, _ := newAgent(t)
+		a.namespace = agentNamespace
+		a.mode = types.AgentModeManaged
+
+		be := backend_mocks.NewAppProject(t)
+		var err error
+		a.projectManager, err = appproject.NewAppProjectManager(be, agentNamespace, appproject.WithAllowUpsert(true))
+		require.NoError(t, err)
+
+		project := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-project",
+				Namespace: "wrong-namespace", // This should be overridden
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceNamespaces: []string{"default"},
+			},
+		}
+
+		// Mock the backend Create method and capture the project passed to it
+		var capturedProject *v1alpha1.AppProject
+		createMock := be.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			capturedProject = args[1].(*v1alpha1.AppProject)
+		}).Return(&v1alpha1.AppProject{}, nil)
+		defer createMock.Unset()
+
+		_, err = a.createAppProject(project)
+		require.NoError(t, err)
+
+		// Verify that the namespace was set correctly
+		require.NotNil(t, capturedProject, "Project should have been passed to backend")
+		assert.Equal(t, agentNamespace, capturedProject.Namespace, "Project namespace should be set to agent namespace")
+		assert.Equal(t, "test-project", capturedProject.Name, "Project name should remain unchanged")
+	})
+
+	t.Run("UpdateAppProject sets correct namespace", func(t *testing.T) {
+		agentNamespace := "agent-namespace"
+		a, _ := newAgent(t)
+		a.namespace = agentNamespace
+		a.mode = types.AgentModeManaged
+
+		be := backend_mocks.NewAppProject(t)
+		var err error
+		a.projectManager, err = appproject.NewAppProjectManager(be, agentNamespace,
+			appproject.WithAllowUpsert(true),
+			appproject.WithMode(manager.ManagerModeManaged),
+			appproject.WithRole(manager.ManagerRoleAgent))
+		require.NoError(t, err)
+
+		project := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:            "test-project",
+				Namespace:       "wrong-namespace", // This should be overridden
+				ResourceVersion: "12345",
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceNamespaces: []string{"default"},
+			},
+		}
+
+		// Set up project as managed
+		a.projectManager.Manage(project.Name)
+		defer a.projectManager.Unmanage(project.Name)
+
+		// Mock the backend methods
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.AppProject{}, nil)
+		defer getMock.Unset()
+
+		supportsPatchMock := be.On("SupportsPatch").Return(true)
+		defer supportsPatchMock.Unset()
+
+		// Capture the namespace passed to Patch method
+		var capturedNamespace string
+		patchMock := be.On("Patch", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			capturedNamespace = args[2].(string)
+		}).Return(&v1alpha1.AppProject{}, nil)
+		defer patchMock.Unset()
+
+		_, err = a.updateAppProject(project)
+		require.NoError(t, err)
+
+		// Verify that the namespace was set correctly in the patch call
+		assert.Equal(t, agentNamespace, capturedNamespace, "Patch should use agent namespace")
+	})
+
+	t.Run("DeleteAppProject sets correct namespace", func(t *testing.T) {
+		agentNamespace := "agent-namespace"
+		a, _ := newAgent(t)
+		a.namespace = agentNamespace
+		a.mode = types.AgentModeManaged
+
+		be := backend_mocks.NewAppProject(t)
+		var err error
+		a.projectManager, err = appproject.NewAppProjectManager(be, agentNamespace, appproject.WithAllowUpsert(true))
+		require.NoError(t, err)
+
+		project := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-project",
+				Namespace: "wrong-namespace", // This should be overridden
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceNamespaces: []string{"default"},
+			},
+		}
+
+		// Set up project as managed
+		a.projectManager.Manage(project.Name)
+
+		// Mock the backend Delete method and capture the namespace passed to it
+		var capturedNamespace string
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			capturedNamespace = args[2].(string)
+		}).Return(nil)
+		defer deleteMock.Unset()
+
+		err = a.deleteAppProject(project)
+		require.NoError(t, err)
+
+		// Verify that the namespace was set correctly
+		assert.Equal(t, agentNamespace, capturedNamespace, "Delete should use agent namespace")
+	})
+
+	t.Run("AppProject operations with custom agent namespace", func(t *testing.T) {
+		customAgentNamespace := "custom-agent-ns"
+		a, _ := newAgent(t)
+		a.namespace = customAgentNamespace
+		a.mode = types.AgentModeManaged
+
+		be := backend_mocks.NewAppProject(t)
+		var err error
+		a.projectManager, err = appproject.NewAppProjectManager(be, customAgentNamespace, appproject.WithAllowUpsert(true))
+		require.NoError(t, err)
+
+		project := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-project",
+				Namespace: "principal-namespace", // Different from agent
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceNamespaces: []string{"default"},
+			},
+		}
+
+		// Test Create
+		var capturedCreateProject *v1alpha1.AppProject
+		createMock := be.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			capturedCreateProject = args[1].(*v1alpha1.AppProject)
+		}).Return(&v1alpha1.AppProject{}, nil)
+
+		_, err = a.createAppProject(project)
+		require.NoError(t, err)
+		createMock.Unset()
+
+		// Verify that the namespace was overridden to agent namespace
+		require.NotNil(t, capturedCreateProject, "Project should have been passed to backend")
+		assert.Equal(t, customAgentNamespace, capturedCreateProject.Namespace, "Project namespace should be set to custom agent namespace")
+		assert.NotEqual(t, "principal-namespace", capturedCreateProject.Namespace, "Project namespace should not remain as principal namespace")
+
+		// Test Delete
+		a.projectManager.Manage(project.Name)
+
+		var capturedDeleteNamespace string
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			capturedDeleteNamespace = args[2].(string)
+		}).Return(nil)
+
+		err = a.deleteAppProject(project)
+		require.NoError(t, err)
+		deleteMock.Unset()
+
+		// Verify that the namespace was overridden to agent namespace
+		assert.Equal(t, customAgentNamespace, capturedDeleteNamespace, "Delete should use custom agent namespace")
+		assert.NotEqual(t, "principal-namespace", capturedDeleteNamespace, "Delete should not use principal namespace")
+	})
+
 }
 
 func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
