@@ -93,21 +93,6 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterChanges() {
 	app.Spec.Destination.Name = "in-cluster"
 	app.Spec.Destination.Server = ""
 	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
-
-	// Case 4: Delete the application directly from the managed-cluster,
-	// but it should be recreated to be in sync with principal
-	agentApp := argoapp.Application{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      app.Name,
-			Namespace: "argocd",
-		},
-		Spec: app.Spec,
-	}
-
-	err := suite.ManagedAgentClient.Delete(suite.Ctx, &agentApp, metav1.DeleteOptions{})
-	requires.NoError(err)
-
-	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 }
 
 // This test validates the scenario when agent is disconnected with principal and then user tries

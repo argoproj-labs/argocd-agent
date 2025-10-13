@@ -118,13 +118,6 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	logCtx := log().WithField(logfields.Event, "DeleteApp").WithField(logfields.Application, app.QualifiedName())
 	logCtx.Debugf("Delete app event")
 
-	if isResourceFromPrincipal(app) {
-		if manager.RevertUserInitiatedDeletion(a.context, app, a.deletions, a.appManager, logCtx) {
-			logCtx.Trace("Deleted app is recreated")
-			return
-		}
-	}
-
 	a.resources.Remove(resources.NewResourceKeyFromApp(app))
 
 	if !a.appManager.IsManaged(app.QualifiedName()) {
