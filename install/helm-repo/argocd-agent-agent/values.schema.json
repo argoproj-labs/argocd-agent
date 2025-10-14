@@ -20,17 +20,24 @@
     },
 
     "image": {
-      "type": "string",
-      "description": "Container image repository for the agent"
-    },
-    "imageTag": {
-      "type": "string",
-      "description": "Container image tag"
-    },
-    "imagePullPolicy": {
-      "type": "string",
-      "enum": ["Always", "IfNotPresent", "Never"],
-      "description": "Image pull policy"
+      "type": "object",
+      "description": "Container image configuration",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Container image repository for the agent"
+        },
+        "tag": {
+          "type": "string",
+          "description": "Container image tag"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"],
+          "description": "Image pull policy"
+        }
+      }
     },
 
     "replicaCount": {
@@ -218,6 +225,26 @@
             "timeoutSeconds": { "type": "integer", "minimum": 1 },
             "failureThreshold": { "type": "integer", "minimum": 1 }
           }
+        }
+      }
+    },
+
+    "tests": {
+      "type": "object",
+      "description": "Configuration for chart tests",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "string",
+          "description": "Enable chart tests"
+        },
+        "image": {
+          "type": "string",
+          "description": "Test image"
+        },
+        "tag": {
+          "type": "string",
+          "description": "Test image tag"
         }
       }
     }
