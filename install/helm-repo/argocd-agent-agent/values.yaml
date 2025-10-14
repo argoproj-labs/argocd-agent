@@ -7,12 +7,13 @@
 namespaceOverride: ""
 
 ## @section Image
-# -- Container image repository for the agent.
-image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent"
-# -- Container image tag for the agent.
-imageTag: "latest"
-# -- Image pull policy for the agent container.
-imagePullPolicy: "Always"
+image:
+  # -- Container image repository for the agent.
+  repository: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
+  # -- Container image tag for the agent.
+  tag: latest 
+  # -- Image pull policy for the agent container.
+  pullPolicy: "Always"
 
 ## @section Deployment
 # -- Number of replicas for the agent Deployment.

@@ -116,9 +116,8 @@ spec:
                 key: agent.redis.address
                 optional: true
           name: argocd-agent-agent
-          imagePullPolicy: Always
-          image: "{{ .Values.image }}:{{ .Values.imageTag }}"
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: 8000
               name: metrics
