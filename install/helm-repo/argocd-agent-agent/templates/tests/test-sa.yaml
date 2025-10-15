@@ -1,3 +1,4 @@
+{{- if .Values.tests.enabled }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -5,7 +6,6 @@ metadata:
   namespace: {{ include "argocd-agent-agent.namespace" . }}
   labels:
     app.kubernetes.io/name: argocd-agent-agent
-
     app.kubernetes.io/component: test
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -15,7 +15,6 @@ metadata:
   namespace: {{ include "argocd-agent-agent.namespace" . }}
   labels:
     app.kubernetes.io/name: argocd-agent-agent
-
     app.kubernetes.io/component: test
 rules:
 - apiGroups: [""]
@@ -35,7 +34,6 @@ metadata:
   namespace: {{ include "argocd-agent-agent.namespace" . }}
   labels:
     app.kubernetes.io/name: argocd-agent-agent
-
     app.kubernetes.io/component: test
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -70,7 +68,6 @@ metadata:
   name: argocd-agent-test
   labels:
     app.kubernetes.io/name: argocd-agent-agent
-
     app.kubernetes.io/component: test
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -80,3 +77,4 @@ subjects:
 - kind: ServiceAccount
   name: argocd-agent-test
   namespace: {{ include "argocd-agent-agent.namespace" . }}
+{{- end }}
