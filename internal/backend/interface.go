@@ -25,6 +25,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+type ContextKey string
+
+const ForUpdateContextKey ContextKey = "forUpdate"
+
 type ApplicationSelector struct {
 
 	// Labels is not currently implemented.

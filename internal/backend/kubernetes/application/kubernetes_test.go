@@ -21,13 +21,18 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wI2L/jsondiff"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
 )
 
 func Test_NewKubernetes(t *testing.T) {
@@ -110,20 +115,121 @@ func Test_Create(t *testing.T) {
 
 func Test_Get(t *testing.T) {
 	apps := mkApps()
+	ctx := context.TODO()
 	t.Run("Get existing app", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
-		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Get(context.TODO(), "app", "ns1")
+
+		inf, err := informer.NewInformer[*v1alpha1.Application](
+			ctx,
+			informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, options v1.ListOptions) (runtime.Object, error) {
+				return fakeAppC.ArgoprojV1alpha1().Applications("").List(ctx, options)
+			}),
+			informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
+				return fakeAppC.ArgoprojV1alpha1().Applications("").Watch(ctx, options)
+			}),
+			informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
+		)
+		require.NoError(t, err)
+
+		go inf.Start(ctx)
+		require.NoError(t, inf.WaitForSync(ctx))
+
+		// Create the backend with the informer
+		backend := NewKubernetesBackend(fakeAppC, "", inf, true)
+
+		app, err := backend.Get(ctx, "app", "ns1")
 		assert.NoError(t, err)
 		assert.NotNil(t, app)
+		assert.Equal(t, "app", app.Name)
+		assert.Equal(t, "ns1", app.Namespace)
+
 	})
 	t.Run("Get non-existing app", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
-		k := NewKubernetesBackend(fakeAppC, "", nil, true)
-		app, err := k.Get(context.TODO(), "foo", "ns1")
+		inf, err := informer.NewInformer[*v1alpha1.Application](
+			ctx,
+			informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, options v1.ListOptions) (runtime.Object, error) {
+				return fakeAppC.ArgoprojV1alpha1().Applications("").List(ctx, options)
+			}),
+			informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
+				return fakeAppC.ArgoprojV1alpha1().Applications("").Watch(ctx, options)
+			}),
+			informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
+		)
+		require.NoError(t, err)
+		go inf.Start(ctx)
+		require.NoError(t, inf.WaitForSync(ctx))
+
+		backend := NewKubernetesBackend(fakeAppC, "", inf, true)
+
+		app, err := backend.Get(ctx, "nonexistent", "ns1")
 		assert.ErrorContains(t, err, "not found")
 		assert.Equal(t, &v1alpha1.Application{}, app)
+
 	})
+
+	t.Run("Get returns type assertion error for invalid object", func(t *testing.T) {
+		fakeAppC := fakeappclient.NewSimpleClientset()
+
+		mockInf := &mockInformerWithInvalidType{}
+
+		backend := &KubernetesBackend{
+			appClient:   fakeAppC,
+			appInformer: mockInf,
+			appLister:   mockInf.Lister(),
+		}
+
+		app, err := backend.Get(ctx, "test", "ns1")
+		require.Error(t, err)
+		require.Nil(t, app)
+		assert.Contains(t, err.Error(), "object is not an Application")
+	})
+}
+
+type mockInformerWithInvalidType struct{}
+
+func (m *mockInformerWithInvalidType) Start(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockInformerWithInvalidType) WaitForSync(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockInformerWithInvalidType) HasSynced() bool {
+	return true
+}
+
+func (m *mockInformerWithInvalidType) Stop() error {
+	return nil
+}
+
+func (m *mockInformerWithInvalidType) Lister() cache.GenericLister {
+	return &mockListerWithInvalidType{}
+}
+
+type mockListerWithInvalidType struct{}
+
+func (m *mockListerWithInvalidType) List(selector labels.Selector) ([]runtime.Object, error) {
+	return nil, nil
+}
+
+func (m *mockListerWithInvalidType) Get(name string) (runtime.Object, error) {
+	return &corev1.ConfigMap{}, nil
+}
+
+func (m *mockListerWithInvalidType) ByNamespace(namespace string) cache.GenericNamespaceLister {
+	return &mockNamespaceListerWithInvalidType{}
+}
+
+type mockNamespaceListerWithInvalidType struct{}
+
+func (m *mockNamespaceListerWithInvalidType) List(selector labels.Selector) ([]runtime.Object, error) {
+	return nil, nil
+}
+
+func (m *mockNamespaceListerWithInvalidType) Get(name string) (runtime.Object, error) {
+	return &corev1.ConfigMap{}, nil
 }
 
 func Test_Delete(t *testing.T) {
