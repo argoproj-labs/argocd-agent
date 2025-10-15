@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
-	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -30,6 +29,7 @@ import (
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -470,7 +470,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 	if a.mode == types.AgentModeManaged {
 		// Store app spec in cache
-		appCache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+		a.sourceCache.Application.Set(incoming.UID, incoming.Spec)
 	}
 
 	created, err := a.appManager.Create(a.context, incoming)
@@ -513,7 +513,7 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 		// Update app spec in cache
 		logCtx.Tracef("Calling update spec for this event")
-		appCache.SetApplicationSpec(incoming.UID, incoming.Spec, logCtx)
+		a.sourceCache.Application.Set(incoming.UID, incoming.Spec)
 
 		napp, err = a.appManager.UpdateManagedApp(a.context, incoming)
 	case types.AgentModeAutonomous:
@@ -544,13 +544,22 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 
 	logCtx.Infof("Deleting application")
 
+	// Fetch the source UID of the existing app to mark it as expected deletion.
+	app, err := a.appManager.Get(a.context, app.Name, app.Namespace)
+	if err != nil {
+		return err
+	}
+
+	sourceUID := app.Annotations[manager.SourceUIDAnnotation]
+	a.deletions.MarkExpected(ktypes.UID(sourceUID))
+
 	deletionPropagation := backend.DeletePropagationBackground
-	err := a.appManager.Delete(a.context, a.namespace, app, &deletionPropagation)
+	err = a.appManager.Delete(a.context, a.namespace, app, &deletionPropagation)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
 			if a.mode == types.AgentModeManaged {
-				appCache.DeleteApplicationSpec(app.UID, logCtx)
+				a.sourceCache.Application.Delete(app.UID)
 			}
 			return nil
 		}
@@ -558,7 +567,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	}
 
 	if a.mode == types.AgentModeManaged {
-		appCache.DeleteApplicationSpec(app.UID, logCtx)
+		a.sourceCache.Application.Delete(app.UID)
 	}
 
 	err = a.appManager.Unmanage(app.QualifiedName())
@@ -594,6 +603,8 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	}
 
 	logCtx.Infof("Creating a new AppProject on behalf of an incoming event")
+
+	a.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
 
 	// Get rid of some fields that we do not want to have on the AppProject
 	// as we start fresh.
@@ -632,6 +643,8 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 
 	logCtx.Infof("Updating appProject")
 
+	a.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
+
 	logCtx.Tracef("Calling update spec for this event")
 	return a.projectManager.UpdateAppProject(a.context, incoming)
 
@@ -656,15 +669,28 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 
 	logCtx.Infof("Deleting appProject")
 
+	// Fetch the source UID of the existing appProject to mark it as expected deletion.
+	project, err := a.projectManager.Get(a.context, project.Name, project.Namespace)
+	if err != nil {
+		return err
+	}
+
+	sourceUID := project.Annotations[manager.SourceUIDAnnotation]
+	a.deletions.MarkExpected(ktypes.UID(sourceUID))
+
 	deletionPropagation := backend.DeletePropagationBackground
-	err := a.projectManager.Delete(a.context, project, &deletionPropagation)
+	err = a.projectManager.Delete(a.context, project, &deletionPropagation)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("appProject not found, perhaps it is already deleted")
+			a.sourceCache.AppProject.Delete(project.UID)
 			return nil
 		}
 		return err
 	}
+
+	a.sourceCache.AppProject.Delete(project.UID)
+
 	err = a.projectManager.Unmanage(project.Name)
 	if err != nil {
 		log().Warnf("Could not unmanage appProject %s: %v", project.Name, err)
@@ -702,6 +728,8 @@ func (a *Agent) createRepository(incoming *corev1.Secret) (*corev1.Secret, error
 		incoming.Annotations = make(map[string]string)
 	}
 
+	a.sourceCache.Repository.Set(incoming.UID, incoming.Data)
+
 	// Get rid of some fields that we do not want to have on the repository as we start fresh.
 	delete(incoming.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 
@@ -738,6 +766,8 @@ func (a *Agent) updateRepository(incoming *corev1.Secret) (*corev1.Secret, error
 
 	logCtx.Infof("Updating repository")
 
+	a.sourceCache.Repository.Set(incoming.UID, incoming.Data)
+
 	return a.repoManager.UpdateManagedRepository(a.context, incoming)
 }
 
@@ -756,15 +786,27 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 
 	logCtx.Infof("Deleting repository")
 
+	// Fetch the source UID of the existing repository to mark it as expected deletion.
+	repo, err := a.repoManager.Get(a.context, repo.Name, repo.Namespace)
+	if err != nil {
+		return err
+	}
+
+	sourceUID := repo.Annotations[manager.SourceUIDAnnotation]
+	a.deletions.MarkExpected(ktypes.UID(sourceUID))
+
 	deletionPropagation := backend.DeletePropagationBackground
-	err := a.repoManager.Delete(a.context, repo.Name, repo.Namespace, &deletionPropagation)
+	err = a.repoManager.Delete(a.context, repo.Name, repo.Namespace, &deletionPropagation)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("repository is not found, perhaps it is already deleted")
+			a.sourceCache.Repository.Delete(repo.UID)
 			return nil
 		}
 		return err
 	}
+
+	a.sourceCache.Repository.Delete(repo.UID)
 
 	err = a.repoManager.Unmanage(repo.Name)
 	if err != nil {
