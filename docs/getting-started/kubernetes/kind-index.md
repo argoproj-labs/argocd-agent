@@ -555,7 +555,7 @@ User \"system:serviceaccount:argocd:argocd-agent-agent\" cannot get resource
 ```bash
 # Create ClusterRoleBinding to agent sa
 kubectl patch clusterrole argocd-agent-agent \
-  --context kind-argocd-agent1 \
+  --context kind-$AGENT_CLUSTER_NAME \
   --type='json' \
   -p='[{"op":"add","path":"/rules/-","value":{"apiGroups":["argoproj.io"],"resources":["applications","appprojects"],"verbs":["get","list","watch","create","update","patch","delete"]}}]'
 ```
