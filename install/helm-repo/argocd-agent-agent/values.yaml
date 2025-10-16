@@ -25,14 +25,3 @@ redisAddress: "argocd-redis:6379"
 tlsClientKeyPath: "/app/config/tls/tls.key"
 tlsClientCertPath: "/app/config/tls/tls.crt"
 tlsRootCAPath: "/app/config/tls/ca.crt"
-
-networkPolicy:
-  enabled: true 
-  redis:
-    enabled: true 
-    name: allow-agent-to-redis
-    namespace: "" 
-    redisSelector:
-      app.kubernetes.io/name: argocd-redis
-    agentSelector:
-      app.kubernetes.io/name: argocd-agent-agent
