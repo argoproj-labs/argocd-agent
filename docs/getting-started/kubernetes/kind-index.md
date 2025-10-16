@@ -1,71 +1,35 @@
-# Getting Started
+# Getting Started with Kind
 
-## Table of Contents
-- [Getting Started](#getting-started)
-  - [Table of Contents](#table-of-contents)
-  - [Local Environment Architecture](#local-environment-architecture)
-  - [Architecture Overview](#architecture-overview)
-  - [Prerequisites](#prerequisites)
-    - [Required Tools](#required-tools)
-    - [Install kind](#install-kind)
-    - [Clone argocd-agent repository and build CLI](#clone-argocd-agent-repository-and-build-cli)
-  - [Define Resource Names](#define-resource-names)
-  - [Control Plane Setup](#control-plane-setup)
-    - [Create cluster](#create-cluster)
-    - [Create namespace](#create-namespace)
-    - [Install Argo CD for Control Plane](#install-argo-cd-for-control-plane)
-    - [Configure Apps-in-Any-Namespace](#configure-apps-in-any-namespace)
-    - [Expose ArgoCD UI](#expose-argocd-ui)
-    - [Initialize Certificate Authority](#initialize-certificate-authority)
-  - [Install Principal](#install-principal)
-    - [Deploy Principal components](#deploy-principal-components)
-    - [Check Principal configuration](#check-principal-configuration)
-    - [Update Principal configuration](#update-principal-configuration)
-    - [Verify Principal service exposure](#verify-principal-service-exposure)
-  - [PKI Setup](#pki-setup)
-    - [Generate Principal certificates](#generate-principal-certificates)
-    - [Generate JWT signing key](#generate-jwt-signing-key)
-    - [Verify Principal installation](#verify-principal-installation)
-  - [Workload Cluster Setup](#workload-cluster-setup)
-    - [Create cluster](#create-cluster-1)
-    - [Create namespace](#create-namespace-1)
-    - [Install Argo CD for Workload Cluster](#install-argo-cd-for-workload-cluster)
-  - [Agent Creation and Connection](#agent-creation-and-connection)
-    - [Create Agent configuration](#create-agent-configuration)
-    - [Issue Agent client certificate](#issue-agent-client-certificate)
-    - [Propagate Certificate Authority to Agent](#propagate-certificate-authority-to-agent)
-    - [Verify certificate installation](#verify-certificate-installation)
-    - [Create Agent namespace on Principal (Optional)](#create-agent-namespace-on-principal-optional)
-    - [Deploy Agent](#deploy-agent)
-    - [Configure Agent connection](#configure-agent-connection)
-  - [Verification](#verification)
-    - [Verify Agent connection](#verify-agent-connection)
-    - [Verify Agent recognition on Principal](#verify-agent-recognition-on-principal)
-    - [List connected Agents](#list-connected-agents)
-    - [Test Application Synchronization (Managed Mode)](#test-application-synchronization-managed-mode)
-    - [Access ArgoCD UI](#access-argocd-ui)
-  - [Troubleshooting](#troubleshooting)
-    - [Common Issues](#common-issues)
+## Prerequisites
 
-## Local Environment Architecture
-Following the [ArgoCD-Agent Official Guide](https://argocd-agent.readthedocs.io/latest/getting-started/kubernetes/), we'll set up a local environment using kind.
+Before starting, ensure you have:
 
-Install argocd-agent on local Kubernetes clusters using kind.
+### Tools
+- `kubectl` (v1.20 or later)
+- `argocd-agentctl` CLI tool ([download from releases](https://github.com/argoproj-labs/argocd-agent/releases))
+- `kustomize` (optional, for customization)
 
-Configure Control Plane and Workload Cluster as separate kind clusters to test a multi-cluster environment similar to actual production environments locally.
+### Agent Planning
 
+- **Unique agent names** following [DNS label standards](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names)
+- **Networking plan** for exposing the principal service to agents
+- **Decision on agent mode**: autonomous or managed for each agent
+
+### Install kind
+```bash
+brew install kind
 ```
-[Local Machine]
- |
- |-- [Kind Cluster: argocd-hub]
- |     |-- [Argo CD Server, Principal]
- |
- |-- [Kind Cluster: argocd-agent1]
-       |-- [Argo CD App Controller, Agent]
 
-[Developer's Code Editor/IDE]
-  |
-  |-- [Argo CD Source Code]
+### Clone argocd-agent repository and build CLI
+```bash
+git clone https://github.com/argoproj-labs/argocd-agent.git
+cd argocd-agent
+
+# Build argocd-agentctl CLI
+make build
+
+# Add to PATH (Optional)
+export PATH=$PATH:$(pwd)/dist
 ```
 
 ## Architecture Overview
@@ -90,32 +54,6 @@ Control Plane Cluster           Workload Cluster(s)
 │ │ └─────────────┘ │ │        │ └─────────────────┘ │
 │ └─────────────────┘ │        └─────────────────────┘
 └─────────────────────┘
-```
-
-<br />
-
-## Prerequisites
-
-### Required Tools
-- go
-- kubectl (v1.20 or higher)
-- argocd-agentctl CLI tool
-
-### Install kind
-```bash
-brew install kind
-```
-
-### Clone argocd-agent repository and build CLI
-```bash
-git clone https://github.com/argoproj-labs/argocd-agent.git
-cd argocd-agent
-
-# Build argocd-agentctl CLI
-make build
-
-# Add to PATH (Optional)
-export PATH=$PATH:$(pwd)/dist
 ```
 
 <br />
@@ -468,17 +406,10 @@ kubectl get secret argocd-agent-ca -n $NAMESPACE_NAME --context kind-$AGENT_CLUS
 # argocd-agent-ca   Opaque   1      15s
 ```
 
-### Create Agent namespace on Principal (Optional)
-
-**⚠️ Warning**: This step is unnecessary if creating Applications in the `$NAMESPACE_NAME` namespace.
-
-Create only if you want to use Agent-specific namespaces:
-
+### Create Agent namespace on Principal
 ```bash
 kubectl create namespace $AGENT_APP_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
 ```
-
-**Recommended**: Use `$NAMESPACE_NAME` namespace for simple testing.
 
 ### Deploy Agent
 ```bash
