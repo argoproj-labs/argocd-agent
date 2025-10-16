@@ -20,6 +20,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj/argo-cd/v3/common"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -150,6 +151,22 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 	return fmt.Errorf("EnsureDeletion: timeout waiting for deletion of %s/%s", key.Namespace, key.Name)
 }
 
+// WaitForDeletion will wait for a resource to be deleted
+func WaitForDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) error {
+	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
+	for count := 0; count < 60; count++ {
+		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("WaitForDeletion: timeout waiting for deletion of %s/%s", key.Namespace, key.Name)
+}
+
 func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient KubeClient, autonomousAgentClient KubeClient, clusterDetails *ClusterDetails) error {
 
 	var list argoapp.ApplicationList
@@ -158,6 +175,16 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 	// Remove any previously configured env variables from the config file
 	os.Remove(EnvVariablesFromE2EFile)
 
+	// Deletion should always propagate from the source of truth to the managed cluster
+	// Skip deletion of resources that have been created from a source
+	isFromSource := func(annotations map[string]string) bool {
+		if annotations == nil {
+			return false
+		}
+		_, ok := annotations[manager.SourceUIDAnnotation]
+		return ok
+	}
+
 	// Delete all applications from the autonomous agent
 	list = argoapp.ApplicationList{}
 	err = autonomousAgentClient.List(ctx, "argocd", &list, metav1.ListOptions{})
@@ -165,7 +192,18 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
+		if isFromSource(app.GetAnnotations()) {
+			continue
+		}
+
 		err = EnsureDeletion(ctx, autonomousAgentClient, &app)
+		if err != nil {
+			return err
+		}
+
+		// Wait for the app to be deleted from the control plane
+		app.SetNamespace("agent-autonomous")
+		err = WaitForDeletion(ctx, principalClient, &app)
 		if err != nil {
 			return err
 		}
@@ -178,7 +216,18 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
+		if isFromSource(app.GetAnnotations()) {
+			continue
+		}
+
 		err = EnsureDeletion(ctx, principalClient, &app)
+		if err != nil {
+			return err
+		}
+
+		// Wait for the app to be deleted from the managed cluster
+		app.SetNamespace("argocd")
+		err = WaitForDeletion(ctx, managedAgentClient, &app)
 		if err != nil {
 			return err
 		}
@@ -220,7 +269,20 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
+
+		if isFromSource(appProject.GetAnnotations()) {
+			continue
+		}
+
 		err = EnsureDeletion(ctx, autonomousAgentClient, &appProject)
+		if err != nil {
+			return err
+		}
+
+		// Wait for the appProject to be deleted from the control plane
+		appProject.SetName("agent-autonomous-" + appProject.Name)
+		appProject.SetNamespace("argocd")
+		err = WaitForDeletion(ctx, principalClient, &appProject)
 		if err != nil {
 			return err
 		}
@@ -236,7 +298,19 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		if appProject.Name == appproject.DefaultAppProjectName {
 			continue
 		}
+
+		if isFromSource(appProject.GetAnnotations()) {
+			continue
+		}
+
 		err = EnsureDeletion(ctx, principalClient, &appProject)
+		if err != nil {
+			return err
+		}
+
+		// Wait for the appProject to be deleted from the managed cluster
+		appProject.SetNamespace("argocd")
+		err = WaitForDeletion(ctx, managedAgentClient, &appProject)
 		if err != nil {
 			return err
 		}
@@ -275,6 +349,13 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 	}
 	for _, repo := range repoList.Items {
 		err = EnsureDeletion(ctx, principalClient, &repo)
+		if err != nil {
+			return err
+		}
+
+		// Wait for the repository to be deleted from the managed cluster
+		repo.SetNamespace("argocd")
+		err = WaitForDeletion(ctx, managedAgentClient, &repo)
 		if err != nil {
 			return err
 		}

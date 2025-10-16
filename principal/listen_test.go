@@ -152,6 +152,7 @@ func Test_Serve(t *testing.T) {
 		WithListenerAddress("127.0.0.1"),
 		WithShutDownGracePeriod(2*time.Second),
 		WithGRPC(true),
+		WithInformerSyncTimeout(5*time.Second),
 	)
 	require.NoError(t, err)
 	errch := make(chan error)

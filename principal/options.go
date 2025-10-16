@@ -72,8 +72,11 @@ type ServerOptions struct {
 	rootCa                 *x509.CertPool
 	clientCertSubjectMatch bool
 	redisAddress           string
+	redisPassword          string
 	redisCompressionType   cacheutil.RedisCompressionType
 	healthzPort            int
+	redisProxyDisabled     bool
+	informerSyncTimeout    time.Duration
 }
 
 type ServerOption func(o *Server) error
@@ -81,12 +84,13 @@ type ServerOption func(o *Server) error
 // defaultOptions returns a set of default options for the server
 func defaultOptions() *ServerOptions {
 	return &ServerOptions{
-		port:            443,
-		address:         "",
-		tlsMinVersion:   tls.VersionTLS13,
-		unauthMethods:   make(map[string]bool),
-		eventProcessors: 10,
-		rootCa:          x509.NewCertPool(),
+		port:                443,
+		address:             "",
+		tlsMinVersion:       tls.VersionTLS13,
+		unauthMethods:       make(map[string]bool),
+		eventProcessors:     10,
+		rootCa:              x509.NewCertPool(),
+		informerSyncTimeout: 60 * time.Second,
 	}
 }
 
@@ -414,6 +418,22 @@ func WithWebSocket(enableWebSocket bool) ServerOption {
 	}
 }
 
+// WithRedisProxyDisabled disables the Redis proxy for testing.
+func WithRedisProxyDisabled() ServerOption {
+	return func(o *Server) error {
+		o.options.redisProxyDisabled = true
+		return nil
+	}
+}
+
+// WithInformerSyncTimeout sets the informer sync timeout duration.
+func WithInformerSyncTimeout(timeout time.Duration) ServerOption {
+	return func(o *Server) error {
+		o.options.informerSyncTimeout = timeout
+		return nil
+	}
+}
+
 func WithResourceProxyEnabled(enabled bool) ServerOption {
 	return func(o *Server) error {
 		o.resourceProxyEnabled = enabled
@@ -435,7 +455,7 @@ func WithKeepAliveMinimumInterval(interval time.Duration) ServerOption {
 	}
 }
 
-func WithRedis(redisAddress, redisCompressionTypeStr string) ServerOption {
+func WithRedis(redisAddress, redisPassword, redisCompressionTypeStr string) ServerOption {
 	return func(o *Server) error {
 		redisCompressionType, err := cacheutil.CompressionTypeFromString(redisCompressionTypeStr)
 		if err != nil {
@@ -443,6 +463,7 @@ func WithRedis(redisAddress, redisCompressionTypeStr string) ServerOption {
 		}
 		o.options.redisCompressionType = redisCompressionType
 		o.options.redisAddress = redisAddress
+		o.options.redisPassword = redisPassword
 
 		return nil
 	}
