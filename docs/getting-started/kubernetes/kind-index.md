@@ -67,7 +67,6 @@ Control Plane Cluster           Workload Cluster(s)
 - go
 - kubectl (v1.20 or higher)
 - argocd-agentctl CLI tool
-- cloud-provider-kind
 
 ### Install kind
 ```bash
@@ -84,25 +83,6 @@ make build
 
 # Add to PATH (Optional)
 export PATH=$PATH:$(pwd)/dist
-```
-
-### Install Cloud Provider Kind
-```bash
-# (Option1) install brew
-brew install cloud-provider-kind
-
-# you can verify that it’s installed by running with this command `which cloud-provider-kind`
-
-# (Option2) install go
-go install sigs.k8s.io/cloud-provider-kind@latest
-
-sudo install ~/go/bin/cloud-provider-kind /usr/local/bin
-```
-
-### Start Cloud Provider Kind
-```bash
-# start background
-sudo cloud-provider-kind
 ```
 
 <br />
@@ -206,6 +186,9 @@ kubectl patch svc argocd-server \
 kubectl get svc argocd-server \
   -n $NAMESPACE_NAME \
   --context kind-$PRINCIPAL_CLUSTER_NAME
+
+# NAME            TYPE       CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+# argocd-server   NodePort   10.111.100.107   <none>        80:31126/TCP,443:32364/TCP   14s
 ```
 
 <br />
@@ -233,6 +216,7 @@ kubectl get configmap argocd-agent-params \
   -n $NAMESPACE_NAME \
   --context kind-$PRINCIPAL_CLUSTER_NAME \
   -o jsonpath='{.data.principal\.auth}'
+
 # Should output: mtls:CN=([^,]+)
 ```
 
@@ -256,10 +240,8 @@ kubectl get configmap argocd-agent-params \
 ```
 
 ### Verify Principal service exposure
-Ensure the 8443 listener is properly configured on LoadBalancer for Agent access to Principal:
-you have to check `cloud-provider-kind` is running
 ```bash
-# Option 1: LoadBalancer
+# Option 1: NodePort
 kubectl patch svc argocd-agent-principal \
   -n $NAMESPACE_NAME \
   --context kind-$PRINCIPAL_CLUSTER_NAME \
@@ -270,8 +252,8 @@ kubectl get svc argocd-agent-principal \
   --context kind-$PRINCIPAL_CLUSTER_NAME
 
 # Expected output:
-# NAME                     TYPE           CLUSTER-IP      EXTERNAL-IP       PORT(S)          AGE
-# argocd-agent-principal   LoadBalancer   10.96.215.149   172.19.0.2      8443:30673/TCP   5s
+# NAME                     TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)         AGE
+# argocd-agent-principal   NodePort   10.106.231.64   <none>        443:32560/TCP   26s
 
 ```
 
@@ -282,13 +264,6 @@ kubectl get svc argocd-agent-principal \
 ### Generate Principal certificates
 Issue gRPC server certificate (address for Agent connection) <br />
 ```bash
-# Check LoadBalancer IP
-PRINCIPAL_EXTERNAL_IP=$(kubectl get svc argocd-agent-principal \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
-
 # Check NodePort
 PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
 echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
@@ -370,22 +345,6 @@ kubectl logs -n $NAMESPACE_NAME deployment/argocd-agent-principal --context kind
 This document uses **Managed mode** which is easier to get started with. <br />
 For Autonomous mode, change `agent-managed` commands to `agent-autonomous` in the commands below.
 
-### Cluster Name
-```bash
-# === Define resource names ===
-export CLUSTER_USER_ID=1
-export AGENT_USER_ID=2
-
-export AGENT_POD_CIDR="10.$((244 + $AGENT_USER_ID)).0.0/16"
-export AGENT_SVC_CIDR="10.$((96 + $AGENT_USER_ID)).0.0/12"
-# export AGENT2_CIDR="10.246.0.0/16"
-
-# (optional) Check variables
-echo "Agent Pod CIDR: $AGENT_POD_CIDR"
-echo "Agent Service CIDR: $AGENT_SVC_CIDR"
-```
-
-
 ### Create cluster
 ```bash
 cat <<EOF | kind create cluster --name $AGENT_CLUSTER_NAME --config=-
@@ -398,7 +357,6 @@ networking:
 nodes:
   - role: control-plane
 EOF
-
 ```
 
 ### Create namespace
@@ -427,12 +385,6 @@ This configuration includes:
 Create Agent configuration on Principal. <br />
 
 ```bash
-PRINCIPAL_EXTERNAL_IP=$(kubectl get svc argocd-agent-principal \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
-
 # Check NodePort
 PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
 echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
@@ -491,24 +443,6 @@ Create only if you want to use Agent-specific namespaces:
 
 ```bash
 kubectl create namespace $AGENT_APP_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
-
-# Also need to create AppProject in $AGENT_APP_NAME namespace
-cat <<EOF | kubectl apply -f - --context kind-$PRINCIPAL_CLUSTER_NAME
-apiVersion: argoproj.io/v1alpha1
-kind: AppProject
-metadata:
-  name: default
-  namespace: $AGENT_APP_NAME
-spec:
-  clusterResourceWhitelist:
-  - group: '*'
-    kind: '*'
-  destinations:
-  - namespace: '*'
-    server: '*'
-  sourceRepos:
-  - '*'
-EOF
 ```
 
 **Recommended**: Use `$NAMESPACE_NAME` namespace for simple testing.
@@ -524,13 +458,6 @@ kubectl apply -n $NAMESPACE_NAME \
 Configure Agent to connect to Principal using mTLS authentication. 
 
 ```bash
-# LoadBalancer IP
-PRINCIPAL_EXTERNAL_IP=$(kubectl get svc argocd-agent-principal \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
-
 # Check NodePort
 PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
 echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
@@ -598,7 +525,7 @@ kubectl logs -n $NAMESPACE_NAME deployment/argocd-agent-principal --context kind
 Propagate a default AppProject from principal to the agent:
 
 ```bash
-kubectl patch appproject default -n $AGENT_APP_NAME \
+kubectl patch appproject default -n $NAMESPACE_NAME \
   --context kind-$PRINCIPAL_CLUSTER_NAME --type='merge' \
   --patch='{"spec":{"sourceNamespaces":["*"],"destinations":[{"name":"*","namespace":"*","server":"*"}]}}'
 ```
@@ -611,12 +538,6 @@ kubectl get appprojs -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
 ```
 
 ```bash
-PRINCIPAL_EXTERNAL_IP=$(kubectl get svc argocd-agent-principal \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
-
 # Check NodePort
 PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
 echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
@@ -630,7 +551,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: test-app-2
-  namespace: $NAMESPACE_NAME
+  namespace: $AGENT_APP_NAME
 spec:
   project: default
   source:
@@ -639,23 +560,12 @@ spec:
     path: guestbook
   destination:
     server: https://$PRINCIPAL_EXTERNAL_IP:$PRINCIPAL_NODE_PORT?agentName=$AGENT_APP_NAME
-    namespace: $NAMESPACE_NAME
+    namespace: guestbook
   syncPolicy:
     syncOptions:
     - CreateNamespace=true
 EOF
 ```
-
-Verify the application is synchronized to the agent:
-
-```bash
-# Check that the application exists on the principal
-kubectl get applications -n $AGENT_APP_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
-
-# Check that the application appears on the workload cluster
-kubectl get applications -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
-```
-
 
 Verify that the application is synchronized to the Agent.
 
@@ -687,3 +597,77 @@ kubectl -n $NAMESPACE_NAME get secret argocd-initial-admin-secret --context kind
 ![alt text](./images/image.png)
 
 <br />
+
+## Troubleshooting
+
+### Common Issues
+
+**Access Fobidden**
+```bash
+# The application status contains:
+error="applications.argoproj.io \"<agent-app-name>\" is forbidden: 
+User \"system:serviceaccount:argocd:argocd-agent-agent\" cannot get resource 
+\"applications\" in API group \"argoproj.io\" in the namespace \"<agent-app-name>\""
+```
+
+```bash
+# Create ClusterRoleBinding to agent sa
+kubectl patch clusterrole argocd-agent-agent \
+  --context kind-argocd-agent1 \
+  --type='json' \
+  -p='[{"op":"add","path":"/rules/-","value":{"apiGroups":["argoproj.io"],"resources":["applications","appprojects"],"verbs":["get","list","watch","create","update","patch","delete"]}}]'
+```
+
+Verify the application is synchronized to the agent:
+
+```bash
+# Check that the application exists on the principal
+kubectl get applications -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
+
+# Check that the application appears on the workload cluster
+kubectl get applications -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
+
+# NAME         SYNC STATUS   HEALTH STATUS
+# test-app-2   Synced        Progressing
+```
+
+
+**Missing Server Secretkey**:
+```bash
+# The application status contains:
+status:
+  conditions:
+  - lastTransitionTime: "2025-09-22T16:20:56Z"
+    message: 'error getting cluster by name "in-cluster": server.secretkey is missing'
+    type: InvalidSpecError
+```
+
+```bash
+# Create a random server.secretkey
+kubectl patch secret argocd-secret -n $NAMESPACE_NAME \
+  --context kind-$AGENT_CLUSTER_NAME \
+  --patch='{"data":{"server.secretkey":"'$(openssl rand -base64 32 | base64 -w 0)'"}}'
+```
+
+**Auth Failure**:
+```bash
+# The application status contains:
+"Auth failure: rpc error: code = Unavailable desc = connection error: desc = \"transport: Error while dialing: dial tcp $PRINCIPAL_EXTERNAL_IP:$PRINCIPAL_NODE_PORT: connect: connection timed out\" (retrying in 1.728s)"
+```
+
+```bash
+# Restart agent deployment
+kubectl patch configmap argocd-agent-params \
+  -n $NAMESPACE_NAME \
+  --context kind-$AGENT_CLUSTER_NAME \
+  --patch "{\"data\":{
+    \"agent.server.address\":\"$PRINCIPAL_EXTERNAL_IP\",
+    \"agent.server.port\":\"$PRINCIPAL_NODE_PORT\",
+    \"agent.mode\":\"managed\",
+    \"agent.creds\":\"mtls:any\"
+  }}"
+
+kubectl rollout restart deployment argocd-agent-agent \
+  -n $NAMESPACE_NAME \
+  --context kind-$AGENT_CLUSTER_NAME
+```
