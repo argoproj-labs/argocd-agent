@@ -70,7 +70,7 @@ export PRINCIPAL_CLUSTER_NAME="argocd-hub"
 export AGENT_CLUSTER_NAME="argocd-agent1"
 export AGENT_APP_NAME="agent-a"
 export NAMESPACE_NAME="argocd"
-export AGENT_MODE="agent-managed"
+export AGENT_MODE="managed" # or autonomous
 export CLUSTER_USER_ID=1
 export AGENT_USER_ID=2
 
@@ -325,7 +325,7 @@ kubectl create namespace $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
 
 ```bash
 kubectl apply -n $NAMESPACE_NAME \
-  -k install/kubernetes/argo-cd/$AGENT_MODE \
+  -k install/kubernetes/argo-cd/agent-$AGENT_MODE \
   --context kind-$AGENT_CLUSTER_NAME
 ```
 
@@ -422,7 +422,7 @@ kubectl patch configmap argocd-agent-params \
   --patch "{\"data\":{
     \"agent.server.address\":\"$PRINCIPAL_EXTERNAL_IP\",
     \"agent.server.port\":\"$PRINCIPAL_NODE_PORT\",
-    \"agent.mode\":\"managed\",
+    \"agent.mode\":\"$AGENT_MODE\",
     \"agent.creds\":\"mtls:any\"
   }}"
 
@@ -605,7 +605,7 @@ kubectl patch configmap argocd-agent-params \
   --patch "{\"data\":{
     \"agent.server.address\":\"$PRINCIPAL_EXTERNAL_IP\",
     \"agent.server.port\":\"$PRINCIPAL_NODE_PORT\",
-    \"agent.mode\":\"managed\",
+    \"agent.mode\":\"$AGENT_MODE\",
     \"agent.creds\":\"mtls:any\"
   }}"
 
