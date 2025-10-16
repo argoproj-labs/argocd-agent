@@ -6,8 +6,9 @@ Before starting, ensure you have:
 
 ### Tools
 - `kubectl` (v1.20 or later)
-- `argocd-agentctl` CLI tool ([download from releases](https://github.com/argoproj-labs/argocd-agent/releases))
+- `argocd-agentctl` CLI tool ([download from releases](https://github.com/argoproj-labs/argocd-agent/releases)) or you can install locally based on this document
 - `kustomize` (optional, for customization)
+- `kind` you can install locally based on this document
 
 ### Agent Planning
 
@@ -145,21 +146,6 @@ kubectl get configmap argocd-cmd-params-cm \
   -n "$NAMESPACE_NAME" \
   --context "kind-$PRINCIPAL_CLUSTER_NAME" \
   -o yaml | grep application.namespaces
-```
-
-### Expose ArgoCD UI
-```bash
-kubectl patch svc argocd-server \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME \
-  --patch '{"spec":{"type":"NodePort"}}'
-
-kubectl get svc argocd-server \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME
-
-# NAME            TYPE       CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
-# argocd-server   NodePort   10.111.100.107   <none>        80:31126/TCP,443:32364/TCP   14s
 ```
 
 <br />
