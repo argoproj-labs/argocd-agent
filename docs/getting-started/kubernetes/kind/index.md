@@ -56,7 +56,7 @@ SVC CIDR: 10.97.0.0/12         SVC CIDR: 10.98.0.0/12...
 This document uses **Managed mode** which is easier to get started with. <br />
 For Autonomous mode, change `agent-managed` commands to `agent-autonomous` in the commands below.
 
-### Cluster Name
+### Set Environment Values
 ```bash
 # === Define resource names ===
 export PRINCIPAL_CLUSTER_NAME="argocd-hub"
@@ -84,12 +84,10 @@ echo "Agent Pod CIDR: $AGENT_POD_CIDR"
 echo "Agent Service CIDR: $AGENT_SVC_CIDR"
 ```
 
-### Agent Name
-
 ## Control Plane Setup
 
 ### Create cluster
-- Add extraPortMappings for NodePort Binding
+Add extraPortMappings for NodePort Binding
 ```bash
 cat <<EOF | kind create cluster --name $PRINCIPAL_CLUSTER_NAME --config=-
 kind: Cluster
