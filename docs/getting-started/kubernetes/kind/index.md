@@ -127,11 +127,16 @@ kubectl apply -n $NAMESPACE_NAME \
 ```
 
 This configuration includes:
-- ✅ argocd-server (API and UI)
-- ✅ argocd-dex-server (SSO)
-- ✅ argocd-redis (state storage)
-- ✅ argocd-repo-server (Git repository access)
-- ❌ argocd-application-controller (runs only on workload clusters)
+
+- ✅ **argocd-server** (API and UI)
+- ✅ **argocd-dex-server** (SSO, if needed)
+- ✅ **argocd-redis** (state storage)
+- ✅ **argocd-repo-server** (Git repository access)
+- ❌ **argocd-application-controller** (runs on workload clusters only)
+- ❌ **argocd-applicationset-controller** (not yet supported)
+
+!!! warning "Critical Component Placement"
+    The **argocd-application-controller** must **never** be deployed on the control plane cluster. It can only run on workload clusters where it has direct access to manage Kubernetes resources. Running it on the control plane is not supported and is out of scope for this project.
 
 ### Configure Apps-in-Any-Namespace
 ```bash
@@ -330,13 +335,16 @@ kubectl apply -n $NAMESPACE_NAME \
 ```
 
 This configuration includes:
-- ✅ argocd-application-controller (application reconciliation)
-- ✅ argocd-repo-server (Git access)
-- ✅ argocd-redis (local state)
-- ❌ argocd-server (runs only on Control Plane)
-- ❌ argocd-dex-server (runs only on Control Plane)
 
-## Agent Creation and Connection
+- ✅ **argocd-application-controller** (reconciles applications - **required on workload clusters**)
+- ✅ **argocd-repo-server** (Git access for the application controller)
+- ✅ **argocd-redis** (local state for the application controller)
+- ❌ **argocd-server** (runs on control plane only)
+- ❌ **argocd-dex-server** (runs on control plane only)
+- ❌ **argocd-applicationset-controller** (managed agents don't create their own ApplicationSets)
+
+!!! info "Why Application Controller Runs Here"
+    The **argocd-application-controller** runs on workload clusters because it needs direct access to the Kubernetes API to create, update, and delete resources. The argocd-agent facilitates communication between the control plane and these controllers, enabling centralized management while maintaining local execution.
 
 ### Create Agent configuration
 Create Agent configuration on Principal. <br />
@@ -533,10 +541,6 @@ kubectl -n $NAMESPACE_NAME get secret argocd-initial-admin-secret --context kind
 - Password: Value confirmed by the command above
 - If SSL certificate warning appears in browser, click "Advanced" → "Proceed to unsafe"
 - You can verify that the Agent cluster (`agent-a`) is connected in the UI.
-
-![alt text](./images/image-1.png)
-
-![alt text](./images/image.png)
 
 <br />
 
