@@ -1,14 +1,20 @@
 # Getting Started with Kind
 
+This quick start guide walks you through setting up argocd-agent using Kind (Kubernetes in Docker).
+It provides a simple local environment to connect a principal (control plane) and agent (workload) cluster with mutual TLS (mTLS) authentication.
+
+!!! info "Component Placement Overview"
+    Before proceeding, make sure you understand [which Argo CD components run where](../../index.md#argo-cd-component-placement). This guide follows those placement requirements strictly.
+
 ## Prerequisites
 
 Before starting, ensure you have:
 
 ### Tools
 - `kubectl` (v1.20 or later)
-- `argocd-agentctl` CLI tool ([download from releases](https://github.com/argoproj-labs/argocd-agent/releases)) or you can install locally based on this document
+- `argocd-agentctl` CLI tool ([download from releases](https://github.com/argoproj-labs/argocd-agent/releases))
 - `kustomize` (optional, for customization)
-- `kind` you can install locally based on this document
+- `kind` ([Kind Installation guide](https://kind.sigs.k8s.io/docs/user/quick-start/#installation))
 
 ### Agent Planning
 
@@ -16,26 +22,13 @@ Before starting, ensure you have:
 - **Networking plan** for exposing the principal service to agents
 - **Decision on agent mode**: autonomous or managed for each agent
 
-### Install kind
-```bash
-brew install kind
-```
-
-### Clone argocd-agent repository and build CLI
-```bash
-git clone https://github.com/argoproj-labs/argocd-agent.git
-cd argocd-agent
-
-# Build argocd-agentctl CLI
-make build
-
-# Add to PATH (Optional)
-export PATH=$PATH:$(pwd)/dist
-```
-
 ## Architecture Overview
 ```
-Control Plane Cluster           Workload Cluster(s)
+    kind-argocd-hub               kind-argocd-agent1...
+  (Control Plane Cluster)       (Workload Cluster(s))
+
+Pod CIDR: 10.245.0.0/16        Pod CIDR: 10.246.0.0/16...
+SVC CIDR: 10.97.0.0/12         SVC CIDR: 10.98.0.0/12...
 ┌─────────────────────┐        ┌─────────────────────┐
 │ ┌─────────────────┐ │        │ ┌─────────────────┐ │
 │ │   Argo CD       │ │        │ │   Argo CD       │ │
@@ -78,7 +71,6 @@ export PRINCIPAL_POD_CIDR="10.$((244 + $CLUSTER_USER_ID)).0.0/16"
 export PRINCIPAL_SVC_CIDR="10.$((96 + $CLUSTER_USER_ID)).0.0/12"
 export AGENT_POD_CIDR="10.$((244 + $AGENT_USER_ID)).0.0/16"
 export AGENT_SVC_CIDR="10.$((96 + $AGENT_USER_ID)).0.0/12"
-# export AGENT2_CIDR="10.246.0.0/16"
 
 # (optional) Check variables
 echo "Principal Cluster: $PRINCIPAL_CLUSTER_NAME"
@@ -543,6 +535,24 @@ kubectl -n $NAMESPACE_NAME get secret argocd-initial-admin-secret --context kind
 - You can verify that the Agent cluster (`agent-a`) is connected in the UI.
 
 <br />
+
+## Adding Another Agent Cluster
+To add another agent, simply **increment** the `AGENT_USER_ID` by `+1` and proceed to the **Workload Cluster Setup** section below.  
+Each new agent automatically receives a **unique CIDR range** derived from its `AGENT_USER_ID` value.
+
+```bash
+export AGENT_USER_ID=$((AGENT_USER_ID + 1))
+export AGENT_POD_CIDR="10.$((244 + $AGENT_USER_ID)).0.0/16"
+export AGENT_SVC_CIDR="10.$((96 + $AGENT_USER_ID)).0.0/12"
+
+# (optional) Check variables
+echo "Agent Pod CIDR: $AGENT_POD_CIDR"
+echo "Agent Service CIDR: $AGENT_SVC_CIDR"
+```
+
+!!! info "Next step"
+    Once the new agent variables are set, continue to the [Workload Cluster Setup](#workload-cluster-setup) section to create and configure the new agent cluster.
+
 
 ## Troubleshooting
 
