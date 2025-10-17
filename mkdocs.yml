@@ -62,4 +62,5 @@ nav:
     - Documentation guidelines: contributing/docs.md 
     - Submitting PRs: contributing/prs.md
     - Code reviewing guide: contributing/review.md
+    - Logging Guidelines for Contributors: contributing/logging.md
   - FAQ: faq/index.md
