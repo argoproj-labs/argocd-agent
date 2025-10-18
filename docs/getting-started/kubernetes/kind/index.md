@@ -299,7 +299,7 @@ kubectl logs -n $NAMESPACE_NAME deployment/argocd-agent-principal --context kind
 ## Workload Cluster Setup
 
 This document uses **Managed mode** which is easier to get started with. <br />
-For Autonomous mode, change `agent-managed` commands to `agent-autonomous` in the commands below.
+For Autonomous mode, change the value `managed` to `autonomous` for the `AGENT_MODE` env variable.
 
 ### Create cluster
 ```bash
