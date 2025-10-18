@@ -157,7 +157,7 @@ kubectl patch svc argocd-agent-principal -n argocd --context <control-plane-cont
   --patch '{"spec":{"type":"LoadBalancer"}}'
 ```
 
-See [Getting Started - Principal Setup](../getting-started/kubernetes/index.md#step-2-principal-deployment) for detailed configuration options.
+See [Getting Started - Principal Setup](../getting-started/kubernetes/index.md#31-deploy-principal-component) for detailed configuration options.
 
 ## 3. Workload Cluster Migration
 
@@ -178,7 +178,7 @@ For each workload cluster:
 
 #### 3.2.1 Install Agent Components
 
-Follow the [Getting Started guide](../getting-started/kubernetes/index.md#step-3-workload-cluster-setup) to:
+Follow the [Getting Started guide](../getting-started/kubernetes/index.md#step-4-workload-cluster-setup) to:
 
 1. Install Argo CD components appropriate for your chosen mode
 2. Deploy the argocd-agent

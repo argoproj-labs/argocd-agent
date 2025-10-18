@@ -517,5 +517,5 @@ curl -k --cert client.crt --key client.key \
 - [Agent Configuration](../configuration/agent/configuration.md#resource-proxy-configuration) - Agent resource proxy configuration options
 - [Principal Configuration](../configuration/principal/configuration.md#resource-proxy-configuration) - Principal resource proxy configuration options
 - [Application Synchronization](./applications.md) - How Applications are managed
-- [Agent Modes](../concepts/agent-modes/) - Understanding managed vs autonomous modes
+- [Agent Modes](../concepts/agent-modes/index.md) - Understanding managed vs autonomous modes
 - [Architecture](../concepts/architecture.md) - Overall system architecture 
