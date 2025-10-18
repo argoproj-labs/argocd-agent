@@ -54,7 +54,7 @@ SVC CIDR: 10.97.0.0/12         SVC CIDR: 10.98.0.0/12...
 
 ## Define resource names
 This document uses **Managed mode** which is easier to get started with. <br />
-For Autonomous mode, change `agent-managed` commands to `agent-autonomous` in the commands below.
+For Autonomous mode, change the value `managed` to `autonomous` for the `AGENT_MODE` env variable.
 
 ### Set Environment Values
 ```bash
