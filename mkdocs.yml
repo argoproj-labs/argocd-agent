@@ -37,6 +37,7 @@ nav:
   - Getting started:
     - Overview: getting-started/index.md
     - Kubernetes: getting-started/kubernetes/index.md
+    - Kind: getting-started/kubernetes/kind/index.md
     - OpenShift: getting-started/openshift/index.md
     - OCM-io: getting-started/ocm-io/index.md
   - User guide:
