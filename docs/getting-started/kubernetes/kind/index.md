@@ -494,7 +494,7 @@ cat <<EOF | kubectl apply -f - --context kind-$PRINCIPAL_CLUSTER_NAME
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: test-app-2
+  name: test-app
   namespace: $AGENT_APP_NAME
 spec:
   project: default
