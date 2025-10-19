@@ -86,6 +86,7 @@ echo "Agent Service CIDR: $AGENT_SVC_CIDR"
 
 ### Set Release Version Environment Value
 You can check available release branches directly from the GitHub repository: [branches](https://github.com/argoproj-labs/argocd-agent/branches)
+The latest available release branch as of now is **release-0.4**.
 
 ```bash
 # === Define resource names ===
