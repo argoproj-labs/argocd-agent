@@ -84,6 +84,17 @@ echo "Agent Pod CIDR: $AGENT_POD_CIDR"
 echo "Agent Service CIDR: $AGENT_SVC_CIDR"
 ```
 
+### Set Release Version Environment Value
+You can check available release branches directly from the GitHub repository: [branches](https://github.com/argoproj-labs/argocd-agent/branches)
+
+```bash
+# === Define resource names ===
+export RELEASE_BRANCH="release-0.4"
+
+# (optional) Check variables
+echo "Release Branch: $RELEASE_BRANCH"
+```
+
 ## Control Plane Setup
 
 ### Create cluster
@@ -112,7 +123,7 @@ Install Principal-specific Argo CD configuration.
 
 ```bash
 kubectl apply -n $NAMESPACE_NAME \
-  -k install/kubernetes/argo-cd/principal \
+  -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/principal?ref=$RELEASE_BRANCH" \
   --context kind-$PRINCIPAL_CLUSTER_NAME
 ```
 
@@ -147,7 +158,7 @@ kubectl get configmap argocd-cmd-params-cm \
 
 ### Initialize Certificate Authority
 ```bash
-./dist/argocd-agentctl pki init \
+argocd-agentctl pki init \
   --principal-context kind-$PRINCIPAL_CLUSTER_NAME \
   --principal-namespace $NAMESPACE_NAME
 ```
@@ -157,7 +168,7 @@ kubectl get configmap argocd-cmd-params-cm \
 ### Deploy Principal components
 ```bash
 kubectl apply -n $NAMESPACE_NAME \
-  -k install/kubernetes/principal \
+  -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/principal?ref=$RELEASE_BRANCH" \
   --context kind-$PRINCIPAL_CLUSTER_NAME
 ```
 
@@ -233,7 +244,7 @@ PRINCIPAL_DNS_NAME=$(kubectl get svc argocd-agent-principal -n $NAMESPACE_NAME -
 echo "<principal-dns-name>: $PRINCIPAL_DNS_NAME"
 
 # Create pki issue
-./dist/argocd-agentctl pki issue principal \
+argocd-agentctl pki issue principal \
   --principal-context kind-$PRINCIPAL_CLUSTER_NAME \
   --principal-namespace $NAMESPACE_NAME \
   --ip 127.0.0.1,$PRINCIPAL_EXTERNAL_IP \
@@ -257,7 +268,7 @@ RESOURCE_PROXY_DNS_NAME=$(kubectl get svc argocd-agent-resource-proxy \
 echo "<resource-proxy-dns>: $RESOURCE_PROXY_DNS_NAME"
 
 # Create pki issue
-./dist/argocd-agentctl pki issue resource-proxy \
+argocd-agentctl pki issue resource-proxy \
   --principal-context kind-$PRINCIPAL_CLUSTER_NAME \
   --principal-namespace $NAMESPACE_NAME \
   --ip 127.0.0.1,$RESOURCE_PROXY_INTERNAL_IP \
@@ -267,7 +278,7 @@ echo "<resource-proxy-dns>: $RESOURCE_PROXY_DNS_NAME"
 
 ### Generate JWT signing key
 ```bash
-./dist/argocd-agentctl jwt create-key \
+argocd-agentctl jwt create-key \
   --principal-context kind-$PRINCIPAL_CLUSTER_NAME \
   --principal-namespace $NAMESPACE_NAME \
   --upsert
@@ -324,7 +335,7 @@ kubectl create namespace $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
 
 ```bash
 kubectl apply -n $NAMESPACE_NAME \
-  -k install/kubernetes/argo-cd/agent-$AGENT_MODE \
+  -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-$AGENT_MODE?ref=$RELEASE_BRANCH" \
   --context kind-$AGENT_CLUSTER_NAME
 ```
 
@@ -348,7 +359,7 @@ Create Agent configuration on Principal. <br />
 PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
 echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
 
-./dist/argocd-agentctl agent create $AGENT_APP_NAME \
+argocd-agentctl agent create $AGENT_APP_NAME \
   --principal-context kind-$PRINCIPAL_CLUSTER_NAME \
   --principal-namespace $NAMESPACE_NAME \
   --resource-proxy-server ${PRINCIPAL_EXTERNAL_IP}:9090 \
@@ -360,7 +371,7 @@ echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
 
 ```bash
 # Issue Agent client certificate
-./dist/argocd-agentctl pki issue agent $AGENT_APP_NAME \
+argocd-agentctl pki issue agent $AGENT_APP_NAME \
   --principal-context kind-$PRINCIPAL_CLUSTER_NAME \
   --agent-context kind-$AGENT_CLUSTER_NAME \
   --agent-namespace $NAMESPACE_NAME \
@@ -402,7 +413,7 @@ kubectl create namespace $AGENT_APP_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
 ### Deploy Agent
 ```bash
 kubectl apply -n $NAMESPACE_NAME \
-  -k install/kubernetes/agent \
+  -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=$RELEASE_BRANCH" \
   --context kind-$AGENT_CLUSTER_NAME
 ```
 
@@ -459,7 +470,7 @@ kubectl logs -n $NAMESPACE_NAME deployment/argocd-agent-principal --context kind
 
 ### List connected Agents
 ```bash
-./dist/argocd-agentctl agent list \
+argocd-agentctl agent list \
   --principal-context kind-$PRINCIPAL_CLUSTER_NAME \
   --principal-namespace $NAMESPACE_NAME
 ```
