@@ -5,3 +5,4 @@ vendor/
 .vscode
 build/
 __pycache__
+site/

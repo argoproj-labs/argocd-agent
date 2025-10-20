@@ -26,7 +26,8 @@ The following diagram shows a very simplified overview of *argocd-agent*'s archi
 
 ![Architectural overview](../assets/01-architecture.png)
 
-In the context of the diagram, the term "Argo CD components" means one or more Argo CD workloads (such as, application controller, applicationset controller, repository server etc) depending on the concrete setup, and the term "configuration" means the configuration required to reconcile resources with Argo CD, e.g. `Applications`, `AppProjects` etc. What this exactly means in which scenario is described in more detail [here TODO](TODO)
+In the context of the diagram, the term "Argo CD components" means one or more Argo CD workloads (such as, application controller, applicationset controller, repository server etc) depending on the concrete setup, and the term "configuration" means the configuration required to reconcile resources with Argo CD, e.g. `Applications`, `AppProjects` etc. See [Argo CD component placement](../getting-started/index.md#argo-cd-component-placement) for more details.
+
 
 As can be seen in the diagram, there is no connection between the central control plane cluster and the workload clusters except for the components of *argocd-agent*. Or in particular, a connection from the workload cluster's *agent* to the control plane's *principal* component. The reconciliation will happen local to the [workload clusters](./components-terminology.md#workload-cluster), as (at least) an Argo CD *application controller* will be running on each of them.
 
