@@ -7,7 +7,7 @@ toolchain go1.24.7
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0
 	github.com/alicebob/miniredis/v2 v2.35.0
-	github.com/argoproj/argo-cd/v3 v3.1.8
+	github.com/argoproj/argo-cd/v3 v3.1.9
 	github.com/argoproj/gitops-engine v0.7.1-0.20250905160054-e48120133eec
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
 	github.com/cloudevents/sdk-go/v2 v2.16.2
