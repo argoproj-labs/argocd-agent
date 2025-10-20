@@ -7,11 +7,15 @@ metadata:
       app.kubernetes.io/component: agent
   name: argocd-agent-agent-healthz
   namespace: {{ include  "argocd-agent-agent.namespace" . }}
+  {{- with .Values.service.healthz.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
 spec:
   ports:
     - name: healthz
       protocol: TCP
-      port: 8002
-      targetPort: 8002
+      port: {{ .Values.service.healthz.port }}
+      targetPort: {{ .Values.service.healthz.targetPort }}
   selector:
     app.kubernetes.io/name: argocd-agent-agent 

@@ -1,3 +1,4 @@
+{{- if .Values.tests.enabled }}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -8,7 +9,7 @@ spec:
   serviceAccountName: argocd-agent-test
   containers:
     - name: kubectl
-      image: bitnami/kubectl:latest
+      image: "{{ .Values.tests.image }}:{{ .Values.tests.tag }}"
       command: 
         - sh
         - -c
@@ -88,3 +89,4 @@ spec:
           
           echo "Services configuration verified successfully!"
   restartPolicy: Never
+{{- end }}

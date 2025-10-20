@@ -2,24 +2,109 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-# Override Namespace to deploy your agent
+## @section Global
+# -- Override namespace to deploy the agent into. Leave empty to use the release namespace.
 namespaceOverride: ""
 
-# Secret names for argo-agent deployment
-tlsSecretName: "argocd-agent-client-tls"
-userPasswordSecretName: "argocd-agent-agent-userpass"
-image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent"
-imageTag: "latest"
+## @section Image
+image:
+  # -- Container image repository for the agent.
+  repository: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
+  # -- Container image tag for the agent.
+  tag: latest 
+  # -- Image pull policy for the agent container.
+  pullPolicy: "Always"
 
-# config-map to config parameters for argocd-agent
+## @section Deployment
+# -- Number of replicas for the agent Deployment.
+replicaCount: 1
+# -- Name of the TLS Secret containing client cert/key for mTLS.
+tlsSecretName: "argocd-agent-client-tls"
+# -- Name of the Secret containing agent username/password (if used).
+userPasswordSecretName: "argocd-agent-agent-userpass"
+# -- Resource requests and limits for the agent Pod.
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+## @section ServiceAccount
+# -- ServiceAccount configuration.
+serviceAccount:
+  # -- Whether to create the ServiceAccount.
+  create: true
+  # -- Name of the ServiceAccount to use. If empty, a name is generated.
+  name: ""
+  # -- Annotations to add to the ServiceAccount.
+  annotations: {}
+
+## @section Pod Scheduling and Metadata
+# -- Node selector for scheduling the agent Pod.
+nodeSelector: {}
+# -- Affinity rules for the agent Pod.
+affinity: {}
+# -- Tolerations for the agent Pod.
+tolerations: []
+# -- Additional annotations to add to the agent Pod.
+podAnnotations: {}
+# -- Additional labels to add to the agent Pod.
+podLabels: {}
+# -- PriorityClassName for the agent Pod.
+priorityClassName: ""
+
+## @section Probes
+# -- Liveness and readiness probe configuration.
+probes:
+  liveness:
+    # -- Enable the liveness probe.
+    enabled: true
+    httpGet:
+      path: /healthz
+      port: healthz
+    # -- Initial delay before the first liveness probe.
+    initialDelaySeconds: 10
+    # -- Frequency of liveness probes.
+    periodSeconds: 10
+    # -- Timeout for liveness probe.
+    timeoutSeconds: 2
+    # -- Failure threshold for liveness probe.
+    failureThreshold: 3
+  readiness:
+    # -- Enable the readiness probe.
+    enabled: true
+    httpGet:
+      path: /healthz
+      port: healthz
+    # -- Initial delay before the first readiness probe.
+    initialDelaySeconds: 5
+    # -- Frequency of readiness probes.
+    periodSeconds: 10
+    # -- Timeout for readiness probe.
+    timeoutSeconds: 2
+    # -- Failure threshold for readiness probe.
+    failureThreshold: 3
+
+## @section Agent Parameters
+# -- Agent mode of operation.
 agentMode: "autonomous"
+# -- Authentication mode for connecting to the principal.
 auth: "mtls:any"
+# -- Log level for the agent.
 logLevel: "info"
-server: "principal.server.address.com" 
+# -- Principal server address (hostname or host:port).
+server: "principal.server.address.com"
+# -- Principal server port.
 serverPort: "443"
+# -- Metrics server port exposed by the agent.
 metricsPort: "8181"
+# -- Whether to skip TLS verification for client connections.
 tlsClientInSecure: "false"
+# -- Healthz server port exposed by the agent.
 healthzPort: "8002"
+# -- Redis address used by the agent.
 redisAddress: "argocd-redis:6379"
 
 tlsClientKeyPath: "/app/config/tls/tls.key"
@@ -36,3 +121,32 @@ networkPolicy:
       app.kubernetes.io/name: argocd-redis
     agentSelector:
       app.kubernetes.io/name: argocd-agent-agent
+
+
+## @section Services
+# -- Service configuration for metrics and healthz endpoints.
+service:
+  metrics:
+    # -- Service port for metrics.
+    port: 8181
+    # -- Target port for metrics.
+    targetPort: 8181
+    # -- Annotations to add to the metrics Service.
+    annotations: {}
+  healthz:
+    # -- Service port for healthz.
+    port: 8002
+    # -- Target port for healthz.
+    targetPort: 8002
+    # -- Annotations to add to the healthz Service.
+    annotations: {}
+
+## @section Tests
+# -- Configuration for chart tests.
+tests:
+  # -- Enable chart tests.
+  enabled: "true"
+  # -- Test image.
+  image: bitnamilegacy/kubectl
+  # -- Test image tag.
+  tag: "1.33.4"
