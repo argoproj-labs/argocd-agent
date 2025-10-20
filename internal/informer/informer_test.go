@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 )
@@ -231,6 +232,39 @@ func Test_InformerScope(t *testing.T) {
 		assert.Equal(t, 1, deleted)
 	})
 
+}
+
+func Test_Lister(t *testing.T) {
+	t.Run("Lister returns GenericLister", func(t *testing.T) {
+		i := newInformer(t, "", apps[0], apps[1])
+		go i.Start(context.TODO())
+		require.NoError(t, i.WaitForSync(context.TODO()))
+		defer i.Stop()
+
+		lister := i.Lister()
+		require.NotNil(t, lister)
+
+		obj, err := lister.ByNamespace("argocd").Get("test1")
+		require.NoError(t, err)
+		require.NotNil(t, obj)
+
+		app, ok := obj.(*v1alpha1.Application)
+		require.True(t, ok)
+		assert.Equal(t, "test1", app.Name)
+		assert.Equal(t, "argocd", app.Namespace)
+	})
+
+	t.Run("Lister can list objects", func(t *testing.T) {
+		i := newInformer(t, "", apps[0], apps[1])
+		go i.Start(context.TODO())
+		require.NoError(t, i.WaitForSync(context.TODO()))
+		defer i.Stop()
+
+		lister := i.Lister()
+		objs, err := lister.List(labels.Everything())
+		require.NoError(t, err)
+		assert.Len(t, objs, 2)
+	})
 }
 
 func init() {
