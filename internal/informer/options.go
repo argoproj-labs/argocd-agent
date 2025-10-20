@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 )
 
@@ -102,6 +103,17 @@ func WithFilters[T runtime.Object](fc *filter.Chain[T]) InformerOption[T] {
 func WithResyncPeriod[T runtime.Object](d time.Duration) InformerOption[T] {
 	return func(i *Informer[T]) error {
 		i.resyncPeriod = d
+		return nil
+	}
+}
+
+// WithGroupResource sets the group and resource for the informer's lister.
+func WithGroupResource[T runtime.Object](group, resource string) InformerOption[T] {
+	return func(i *Informer[T]) error {
+		i.groupResource = schema.GroupResource{
+			Group:    group,
+			Resource: resource,
+		}
 		return nil
 	}
 }

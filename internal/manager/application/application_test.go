@@ -56,8 +56,21 @@ func fakeInformer(t *testing.T, namespace string, objects ...runtime.Object) (*f
 			return appC.ArgoprojV1alpha1().Applications(namespace).Watch(ctx, opts)
 		}),
 		informer.WithNamespaceScope[*v1alpha1.Application](namespace),
+		informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
 	)
 	require.NoError(t, err)
+
+	go func() {
+		err = informer.Start(context.Background())
+		if err != nil {
+			t.Fatalf("failed to start informer: %v", err)
+		}
+	}()
+
+	if err = informer.WaitForSync(context.Background()); err != nil {
+		t.Fatalf("failed to wait for informer sync: %v", err)
+	}
+
 	return appC, informer
 }
 
@@ -210,6 +223,7 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		require.NoError(t, err)
 
 		updated, err := mgr.UpdateManagedApp(context.Background(), incoming)
+
 		require.NoError(t, err)
 		require.NotNil(t, updated)
 

@@ -49,6 +49,7 @@ func fakeProjManager(t *testing.T, namespace string, objects ...runtime.Object) 
 		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 			return client.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, opts)
 		}),
+		informer.WithGroupResource[*v1alpha1.AppProject]("argoproj.io", "appprojects"),
 	)
 	assert.NoError(t, err)
 

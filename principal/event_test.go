@@ -43,7 +43,7 @@ func Test_InvalidEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "unknown target")
@@ -57,7 +57,7 @@ func Test_InvalidEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "unable to process event of type application")
@@ -72,7 +72,7 @@ func Test_InvalidEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorContains(t, err, "failed to unmarshal")
@@ -88,7 +88,7 @@ func Test_CreateEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		assert.ErrorIs(t, err, event.ErrEventDiscarded)
@@ -127,7 +127,8 @@ func Test_CreateEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil))
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil), WithRedisProxyDisabled())
+		s.Start(context.Background(), make(chan error))
 		s.clusterMgr.MapCluster("argocd", &v1alpha1.Cluster{Name: "argocd", Server: "https://argocd.com"})
 		require.NoError(t, err)
 		s.setAgentMode("argocd", types.AgentModeAutonomous)
@@ -180,7 +181,7 @@ func Test_CreateEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil))
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.clusterMgr.MapCluster("foo", &v1alpha1.Cluster{Name: "foo", Server: "https://foo.com"})
 		s.setAgentMode("foo", types.AgentModeAutonomous)
@@ -246,14 +247,29 @@ func Test_CreateEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		s, err := NewServer(ctx, fac, "argocd",
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+		)
 		require.NoError(t, err)
+
+		defer func() {
+			_ = s.Shutdown()
+		}()
+
+		err = s.Start(ctx, make(chan error))
+		require.NoError(t, err)
+
 		s.clusterMgr.MapCluster("foo", &v1alpha1.Cluster{Name: "foo", Server: "https://foo.com"})
 		s.setAgentMode("foo", types.AgentModeAutonomous)
-		got, err := s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(ctx, "foo", wq)
 		assert.Nil(t, err)
 		require.Equal(t, ev, *got)
-		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
+		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(ctx, "test", v1.GetOptions{})
 		assert.NoError(t, err)
 		require.NotNil(t, napp)
 		assert.Empty(t, napp.OwnerReferences)
@@ -325,14 +341,29 @@ func Test_UpdateEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, err := NewServer(ctx, fac, "argocd",
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+		)
 		require.NoError(t, err)
+
+		defer func() {
+			_ = s.Shutdown()
+		}()
+
+		err = s.Start(ctx, make(chan error))
+		require.NoError(t, err)
+
 		s.setAgentMode("foo", types.AgentModeAutonomous)
 		s.clusterMgr.MapCluster("foo", &v1alpha1.Cluster{Name: "foo", Server: "https://foo.com"})
-		got, err := s.processRecvQueue(context.Background(), "foo", wq)
+		got, err := s.processRecvQueue(ctx, "foo", wq)
 		require.Equal(t, ev, *got)
 		assert.NoError(t, err)
-		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(context.TODO(), "test", v1.GetOptions{})
+		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("foo").Get(ctx, "test", v1.GetOptions{})
 		assert.NoError(t, err)
 		require.NotNil(t, napp)
 		assert.Equal(t, "HEAD", napp.Spec.Source.TargetRevision)
@@ -376,7 +407,7 @@ func Test_UpdateEvents(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeManaged)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
@@ -409,11 +440,9 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			delApp := &v1alpha1.Application{
 				ObjectMeta: v1.ObjectMeta{
-					Name:      "test",
-					Namespace: "foo",
-					Finalizers: []string{
-						"test-finalizers",
-					},
+					Name:       "test",
+					Namespace:  "foo",
+					Finalizers: []string{},
 				},
 				Spec: v1alpha1.ApplicationSpec{
 					Source: &v1alpha1.ApplicationSource{
@@ -436,7 +465,9 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 				delApp.DeletionTimestamp = ptr.To(v1.Time{Time: time.Now()})
 			}
 
-			fac := kube.NewKubernetesFakeClientWithApps("argocd")
+			// Create fake client with the application already in it
+			fac := kube.NewKubernetesFakeClientWithApps("argocd", delApp)
+
 			ev := cloudevents.NewEvent()
 			ev.SetDataSchema("application")
 			ev.SetType(event.Delete.String())
@@ -444,30 +475,49 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 			wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 			wq.On("Get").Return(&ev, false)
 			wq.On("Done", &ev)
-			s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			s, err := NewServer(ctx, fac, "argocd",
+				WithGeneratedTokenSigningKey(),
+			)
 			require.NoError(t, err)
+
+			defer func() {
+				_ = s.Shutdown()
+			}()
+
+			err = s.Start(ctx, make(chan error))
+			require.NoError(t, err)
+
 			s.setAgentMode("foo", types.AgentModeManaged)
 
-			_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Create(context.Background(), delApp, v1.CreateOptions{})
-
-			got, err := s.processRecvQueue(context.Background(), "foo", wq)
+			var cachedApp *v1alpha1.Application
+			for i := 0; i < 20; i++ {
+				cachedApp, err = s.appManager.Get(ctx, delApp.Name, delApp.Namespace)
+				if err == nil {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
 			require.NoError(t, err)
 
 			if test.deletionTimestampSetOnPrincipal {
-				// If deletionTimestamp is set on principal, the Application should be removed by the call
+				require.NotNil(t, cachedApp.DeletionTimestamp)
+			}
+
+			got, err := s.processRecvQueue(ctx, "foo", wq)
+			require.NoError(t, err)
+
+			if test.deletionTimestampSetOnPrincipal {
 				require.NoError(t, err)
 				require.Equal(t, ev, *got)
-
-				// Verify Application is deleted
-				_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Get(context.Background(), delApp.Name, v1.GetOptions{})
+				_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Get(ctx, delApp.Name, v1.GetOptions{})
 				require.True(t, apierrors.IsNotFound(err))
-
 			} else {
-				// If deletionTimestamp is NOT set on principal, the Application should NOT be removed by the call
 				require.NoError(t, err)
-
-				// Verify Application is NOT deleted
-				_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Get(context.Background(), delApp.Name, v1.GetOptions{})
+				_, err = fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(delApp.Namespace).Get(ctx, delApp.Name, v1.GetOptions{})
 				require.NoError(t, err)
 			}
 		})
@@ -478,7 +528,7 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 func Test_createNamespaceIfNotExists(t *testing.T) {
 	t.Run("Namespace creation is not enabled", func(t *testing.T) {
 		fac := kube.NewKubernetesFakeClientWithApps("argocd")
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
 		assert.False(t, created)
@@ -486,7 +536,7 @@ func Test_createNamespaceIfNotExists(t *testing.T) {
 	})
 	t.Run("Pattern matches and namespace is created", func(t *testing.T) {
 		fac := kube.NewKubernetesFakeClientWithApps("argocd")
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a-z]+$", nil))
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a-z]+$", nil), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
 		assert.True(t, created)
@@ -495,7 +545,7 @@ func Test_createNamespaceIfNotExists(t *testing.T) {
 
 	t.Run("Pattern does not match and namespace is not created", func(t *testing.T) {
 		fac := kube.NewKubernetesFakeClientWithApps("argocd")
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a]+$", nil))
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "^[a]+$", nil), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
 		assert.False(t, created)
@@ -504,7 +554,7 @@ func Test_createNamespaceIfNotExists(t *testing.T) {
 
 	t.Run("Namespace is created only once", func(t *testing.T) {
 		fac := kube.NewKubernetesFakeClientWithApps("argocd")
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil))
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		created, err := s.createNamespaceIfNotExist(context.TODO(), "test")
 		assert.True(t, created)
@@ -522,7 +572,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
 		require.Equal(t, ev, *got)
@@ -568,7 +618,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeAutonomous)
 
@@ -629,7 +679,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeAutonomous)
 
@@ -673,7 +723,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeManaged)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
@@ -950,7 +1000,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 	fakeClient := kube.NewKubernetesFakeClientWithApps(agentName)
 	fakeClient.RestConfig = &rest.Config{}
 
-	s, err := NewServer(ctx, fakeClient, agentName, WithGeneratedTokenSigningKey())
+	s, err := NewServer(ctx, fakeClient, agentName, WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 	assert.Nil(t, err)
 
 	err = s.queues.Create(agentName)
@@ -1082,7 +1132,7 @@ func Test_processClusterCacheInfoUpdateEvent(t *testing.T) {
 
 		// Create a server with fake client
 		fac := kube.NewKubernetesFakeClientWithApps("argocd")
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.setAgentMode(agentName, types.AgentModeAutonomous)
 
@@ -1110,7 +1160,7 @@ func Test_processClusterCacheInfoUpdateEvent(t *testing.T) {
 
 		// Create a server with fake client
 		fac := kube.NewKubernetesFakeClientWithApps("argocd")
-		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.setAgentMode(agentName, types.AgentModeAutonomous)
 

@@ -52,6 +52,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
 			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
 		)
 		require.NoError(t, err)
 		tlsConfig, err := s.loadTLSConfig()
@@ -62,6 +63,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "other-cert.crt"), path.Join(tempDir, "other-cert.key")),
 			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
 		)
 		require.NoError(t, err)
 		tlsConfig, err := s.loadTLSConfig()
@@ -73,6 +75,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 			WithTLSKeyPairFromPath("server_test.go", "server_test.go"),
 			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
 		)
 		require.NoError(t, err)
 		require.NotNil(t, s)
@@ -84,7 +87,7 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 
 func Test_NewServer(t *testing.T) {
 	t.Run("Instantiate new server object with non-default options", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithListenerAddress("0.0.0.0"), WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithListenerAddress("0.0.0.0"), WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		assert.NoError(t, err)
 		assert.NotNil(t, s)
 		assert.NotEqual(t, defaultOptions(), s.options)
@@ -92,9 +95,23 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("Instantiate new server object with invalid option", func(t *testing.T) {
-		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithListenerPort(-1), WithGeneratedTokenSigningKey())
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithListenerPort(-1), WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		assert.Error(t, err)
 		assert.Nil(t, s)
+	})
+
+	t.Run("Redis proxy should be nil when disabled", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.Nil(t, s.redisProxy)
+	})
+
+	t.Run("Redis proxy should be created when not disabled", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithGeneratedTokenSigningKey())
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.NotNil(t, s.redisProxy)
 	})
 
 	t.Run("Informer sync timeout should be configurable", func(t *testing.T) {
@@ -115,6 +132,7 @@ func Test_NewServer(t *testing.T) {
 func Test_handleResyncOnConnect(t *testing.T) {
 	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 		WithGeneratedTokenSigningKey(),
+		WithRedisProxyDisabled(),
 	)
 	s.kubeClient.RestConfig = &rest.Config{}
 	require.NoError(t, err)
@@ -167,6 +185,7 @@ func Test_handleResyncOnConnect(t *testing.T) {
 func Test_RunHandlersOnConnect(t *testing.T) {
 	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 		WithGeneratedTokenSigningKey(),
+		WithRedisProxyDisabled(),
 	)
 	require.NoError(t, err)
 	s.events = event.NewEventSource("test")
@@ -189,6 +208,24 @@ func Test_RunHandlersOnConnect(t *testing.T) {
 
 	got := <-output
 	assert.Equal(t, expected, got)
+}
+
+func Test_ServerStartWithDefaultSyncTimeout(t *testing.T) {
+	s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+		WithGeneratedTokenSigningKey(),
+		WithRedisProxyDisabled(),
+	)
+	require.NoError(t, err)
+	s.kubeClient.RestConfig = &rest.Config{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	errch := make(chan error, 1)
+	err = s.Start(ctx, errch)
+	require.NoError(t, err)
+
+	defer s.Shutdown()
 }
 
 func init() {
