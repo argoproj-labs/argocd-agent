@@ -21,13 +21,13 @@ graph TB
     CA --> PrincipalCert[Principal gRPC Server<br/>argocd-agent-principal-tls]
     CA --> ProxyCert[Resource Proxy Server<br/>argocd-agent-resource-proxy-tls]
     CA --> AgentCert[Agent Client Certificates<br/>argocd-agent-client-tls]
-    
+
     JWT[JWT Signing Key<br/>argocd-agent-jwt]
-    
+
     PrincipalCert --> Agent1[Agent 1]
     PrincipalCert --> Agent2[Agent 2]
     ProxyCert --> ArgoCD[Argo CD Server]
-    
+
     AgentCert --> Agent1
     JWT --> Agent1
     JWT --> Agent2
@@ -144,6 +144,106 @@ argocd-agent-ca                           kubernetes.io/tls     2      5m
 argocd-agent-principal-tls                kubernetes.io/tls     2      4m
 argocd-agent-resource-proxy-tls           kubernetes.io/tls     2      3m
 argocd-agent-jwt                          Opaque                1      2m
+```
+
+## Using cert-manager
+
+The [cert-manager](https://cert-manager.io/docs/) operator can be used to manage the Argo CD Agent PKI requirements
+with a [Certificate Authority (CA) issuer](https://cert-manager.io/docs/configuration/ca/). This is where a custom CA is used to issue
+certificates on demand.
+
+### Step 1: Initialize the PKI
+
+Create private key with openssl
+
+```
+openssl genrsa -out ca.key 4096
+```
+
+Create root certificate using the generated key:
+
+```
+openssl req -new -x509 -sha256 -days 3650 -key ca.key -out ca.crt
+```
+
+Create a CA secret in Kubernetes:
+
+```
+kubectl create secret tls argocd-agent-ca --cert=ca.crt --key=ca.key -n argocd
+```
+
+Create cert-manager issuer for the CA we generated previously:
+
+```
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: argocd-agent-ca
+  namespace: argocd
+spec:
+  ca:
+    secretName: argocd-agent-ca
+```
+
+### Step 2: Issue Principal gRPC Server Certificate
+
+Generate the server certificate for the principal's gRPC service, `argocd-agent-principal-tls`, using cert-manager Certificate.
+Make sure you update the `organizationalUnits` and `dnsNames` to reflect the values for your installation:
+
+```
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-agent-principal-tls
+  namespace: argocd
+spec:
+  secretName: argocd-agent-principal-tls
+  issuerRef:
+    name: argocd-agent-ca
+    kind: Issuer
+  commonName: principal
+  subject:
+    organizationalUnits:
+      - <Organizational Unit>
+  dnsNames:
+  - <dns-name>
+```
+
+### Step 3: Issue Resource Proxy Certificate
+
+Next generate the certificate for the resource proxy, note the `dnsNames` may not
+need to be changed here since it is an internal service unless you are using a different
+namespace then `argocd`. However update your `organizationalUnits` as desired:
+
+```
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-agent-resource-proxy-tls
+  namespace: argocd
+spec:
+  secretName: argocd-agent-resource-proxy-tls
+  issuerRef:
+    name: argocd-agent-ca
+    kind: Issuer
+  commonName: resource-proxy
+  subject:
+    organizationalUnits:
+      - <Organizational Unit>
+  dnsNames:
+  - argocd-agent-resource-proxy.argocd.svc.cluster.local
+```
+
+### Step 4: Validate the certificates
+
+Confirm that the certificates have been deployed and are ready, `READY` should be `True` for both certs as
+per this example:
+
+```
+$ kubectl get certificate -n argocd
+NAME                              READY   SECRET                            AGE
+argocd-agent-principal-tls        True    argocd-agent-principal-tls        4m8s
+argocd-agent-resource-proxy-tls   True    argocd-agent-resource-proxy-tls   64s
 ```
 
 ## Manual Certificate Management
@@ -473,7 +573,7 @@ Rotate certificates by re-issuing them with the `--upsert` flag:
 # Rotate principal certificate
 argocd-agentctl pki issue principal --upsert
 
-# Rotate resource proxy certificate  
+# Rotate resource proxy certificate
 argocd-agentctl pki issue resource-proxy --upsert
 
 # Rotate JWT signing key

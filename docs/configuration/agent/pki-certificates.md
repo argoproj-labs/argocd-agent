@@ -20,28 +20,28 @@ The agent component uses certificates for two primary purposes:
 graph TB
     Principal[Principal<br/>argocd-agent-principal-tls]
     CA[Certificate Authority<br/>argocd-agent-ca]
-    
+
     Agent1[Agent 1<br/>Workload Cluster 1]
     Agent2[Agent 2<br/>Workload Cluster 2]
-    
+
     CA --> Agent1CA[CA Certificate<br/>argocd-agent-ca]
     CA --> Agent2CA[CA Certificate<br/>argocd-agent-ca]
-    
+
     CA --> Agent1Cert[Client Certificate<br/>argocd-agent-client-tls]
     CA --> Agent2Cert[Client Certificate<br/>argocd-agent-client-tls]
-    
+
     Agent1CA --> Agent1
     Agent1Cert --> Agent1
     Agent2CA --> Agent2
     Agent2Cert --> Agent2
-    
+
     Agent1 -.->|TLS Connection| Principal
     Agent2 -.->|TLS Connection| Principal
-    
+
     classDef agent fill:#e1f5fe
     classDef cert fill:#f3e5f5
     classDef ca fill:#e8f5e8
-    
+
     class Agent1,Agent2 agent
     class Agent1Cert,Agent2Cert cert
     class CA,Agent1CA,Agent2CA ca
@@ -151,6 +151,148 @@ Expected output:
 ```
 argocd-agent-ca                           Opaque            1      5m
 argocd-agent-client-tls                   kubernetes.io/tls 2      4m
+```
+
+## Using cert-manager
+
+The cert-manager operator can be used to manage PKI certificates, this section assumes the steps
+for the Principal PKI using cert-manager have been completed.
+
+To register Agents, Agent specific certificates for both the Principal and Agent need to be minted for
+use with [Mutual TLS](https://www.cloudflare.com/learning/access-management/what-is-mutual-tls/)
+
+### Step 1: Register the Agent on the Principal
+
+To register the Agent on the Principal a certificate must be minted for the Principal to provide
+to the Agent as part of mTLS. Note the `dnsNames` used is not important
+but a consistent method should be used, for example `<cluster-name>.<CA-ROOT-DOMAIN>`
+
+Replace the `<cluster-name>` and `<Organizational Unit>` tokens to match your requirements:
+
+```
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: <cluster-name>-principal
+  namespace: argocd
+spec:
+  secretName: <cluster-name>
+  issuerRef:
+    name: argocd-agent-ca
+    kind: Issuer
+  commonName: managed-cluster
+  subject:
+    organizationalUnits:
+      - <Organizational Unit>
+  dnsNames:
+  - <cluster-name>.<CA-ROOT-DOMAIN>
+```
+
+Create the cluster secret, note that you cannot directly use the previously created certificate
+but need to transpose it into the cluster secret.
+
+Extract the fields we need into environment variables:
+
+```
+export PRINCIPAL_AGENT_CA=$(kubectl get secret <cluster-name>-principal -o jsonpath='{.data.ca\.crt}')
+export PRINCIPAL_AGENT_TLS=$(kubectl get secret <cluster-name>-principal -o jsonpath='{.data.tls\.crt}')
+export PRINCIPAL_AGENT_KEY=$(kubectl get secret <cluster-name>-principal -o jsonpath='{.data.tls\.key}')
+```
+
+To create the `<cluster-name>-cluster` secret that is needed we must first create the `config` block
+with the certs:
+
+```
+cat << EOF > config
+{
+    "username": "foo",
+    "password": "bar",
+    "tlsClientConfig": {
+        "insecure": false,
+        "certData": "${PRINCIPAL_AGENT_TLS}",
+        "keyData": "${PRINCIPAL_AGENT_KEY}",
+        "caData": "${PRINCIPAL_AGENT_CA}"
+    }
+}
+EOF
+```
+
+Now create the secret:
+
+```
+kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=name=<cluster-name> --from-literal=server=argocd-agent-resource-proxy.argocd.svc.cluster.local --from-file=config=./config
+```
+
+Then label the secret as a cluster secret:
+
+```
+oc label secret <cluster-name>-cluster argocd.argoproj.io/secret-type=cluster
+```
+
+### Step 2: Mint Certificate for Agent
+
+The Agent requires it's own certificate which will be provided to the Principal for mTLS, this will
+be minted on the Principal where the Issuer is available and then moved to the Agent.
+
+!!!note
+  It is possible to mint this certificate on the Agent itself by simply using cert-manager
+  with the identical CA secret on the Agent. However this has security implications since
+  if any cluster is compromised the CA with its key could be retrieved and a hacker could mint their own certs. Generally
+  the Agents will at times run in less secure locations/networks then the Principle so isolating
+  the CA to one location, the principal, is beneficial.
+
+```
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: <cluster-name>-agent
+  namespace: argocd
+spec:
+  secretName: <cluster-name>-agent
+  issuerRef:
+    name: argocd-agent-ca
+    kind: Issuer
+  commonName: managed-cluster
+  subject:
+    organizationalUnits:
+      - <Organizational Unit>
+  dnsNames:
+  - <cluster-name>.<CA-ROOT-DOMAIN>
+```
+
+Output the secret to a file as we need to install it on the cluster where the Agent resides:
+
+```
+kubectl get secret managed-cluster-agent -o yaml -n argocd | oc neat > <cluster-name>-agent.yaml
+```
+
+!!!note
+  The [kubectl-neat](https://github.com/itaysk/kubectl-neat) plugin is used to clean the YAML, if you do not have access to this simply omit it
+  and edit the secret after it is exported to remove the cruft:
+
+The secret `argocd-agent-ca` is also required for the Agent however want it without the key for
+the security reasons discussed earlier.
+
+!!!note
+  The command `yq` is used to modify the secret, if `yq` is not available simply edit the secret as needed.
+
+```
+kubectl get secret argocd-agent-ca -o yaml -n argocd | yq 'del(.data.["tls.key"])' -y | oc neat > argocd-agent-ca.yaml
+```
+
+Change the secret type to `Opaque` since a Kubernetes TLS secret requires a key, additionally change the name of the exported secret from `<cluster-name>-agent` to
+to `argocd-agent-client-tls`.
+
+```
+yq -i '.type = "Opaque"' ./argocd-agent-ca.yaml -y
+yq -i '.metadata.name = "argocd-agent-client-tls"' <path-to-secret>/managed-cluster-agent.yaml -y
+```
+
+On the Agent cluster apply the two secrets:
+
+```
+kubectl apply -f ./argocd-agent-ca.yaml
+kubectl apply -f <cluster-name>-agent.yaml
 ```
 
 ## Manual Certificate Management
@@ -346,10 +488,10 @@ data:
   agent.tls.secret-name: "argocd-agent-client-tls"
   agent.tls.client.cert-path: ""
   agent.tls.client.key-path: ""
-  
+
   # Authentication
   agent.creds: "userpass:/app/config/creds/userpass.creds"
-  
+
   # Connection
   agent.server.address: "<principal-address>"
   agent.server.port: "8443"
