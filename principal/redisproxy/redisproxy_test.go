@@ -51,16 +51,16 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name:          "'app|managed-resources' with only namespace",
+			name:          "'app|managed-resources' with only namespace (classic app without agent prefix)",
 			key:           "app|managed-resources|my-app|1.8.3",
 			value:         "",
-			errorExpected: true,
+			errorExpected: false,
 		},
 		{
-			name:          "'app|resources-tree' with only namespace",
+			name:          "'app|resources-tree' with only namespace (classic app without agent prefix)",
 			key:           "app|resources-tree|my-app|1.8.3.gz",
 			value:         "",
-			errorExpected: true,
+			errorExpected: false,
 		},
 		{
 			name:          "'app|resources-tree' with unexpected field format",
