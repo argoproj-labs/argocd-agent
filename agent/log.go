@@ -15,7 +15,6 @@
 package agent
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -208,111 +207,42 @@ func (a *Agent) streamLogsToCompletion(
 	logReq *event.ContainerLogRequest,
 	logCtx *logrus.Entry,
 ) error {
-	const (
-		chunkMax   = 64 * 1024
-		flushEvery = 50 * time.Millisecond
-	)
-
+	const chunkMax = 64 * 1024
 	defer rc.Close()
-
-	br := bufio.NewReader(rc)
-	ticker := time.NewTicker(flushEvery)
-	defer ticker.Stop()
-	buf := make([]byte, 0, chunkMax)
 	readBuf := make([]byte, chunkMax)
 
-	flush := func(reason string) error {
-		if len(buf) == 0 {
-			return nil
-		}
-		if err := stream.Send(&logstreamapi.LogStreamData{
-			RequestUuid: logReq.UUID,
-			Data:        buf, // bytes field recommended in proto
-		}); err != nil {
-			logCtx.WithFields(logrus.Fields{
-				"reason": reason, "bytes": len(buf), "error": err.Error(),
-			}).Warn("Send failed")
-			return err
-		}
-		buf = buf[:0]
-		return nil
-	}
-
 	for {
-		// Respect cancellations (flush pending bytes first)
+		// Respect cancellations before attempting a potentially blocking read
 		select {
 		case <-ctx.Done():
-			_ = flush("ctx_done")
 			return ctx.Err()
 		case <-stream.Context().Done():
 			return stream.Context().Err()
 		default:
 		}
 
-		n, err := br.Read(readBuf)
+		n, err := rc.Read(readBuf)
 
-		// First, handle any bytes we got (even if err == io.EOF)
 		if n > 0 {
-			remain := readBuf[:n]
-			for len(remain) > 0 {
-				space := chunkMax - len(buf)
-				if space == 0 {
-					if err := flush("full"); err != nil {
-						return err
-					}
-					space = chunkMax
-				}
-				toCopy := len(remain)
-				if toCopy > space {
-					toCopy = space
-				}
-				buf = append(buf, remain[:toCopy]...)
-				remain = remain[toCopy:]
-				if len(buf) == chunkMax {
-					if err := flush("full"); err != nil {
-						return err
-					}
-				}
+			if sendErr := stream.Send(&logstreamapi.LogStreamData{
+				RequestUuid: logReq.UUID,
+				Data:        readBuf[:n],
+			}); sendErr != nil {
+				logCtx.WithError(sendErr).Warn("Send failed")
+				return sendErr
 			}
 		}
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				_ = flush("eof")
-				// Clean end of this rc; final flush below.
-				break
+				_ = stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Eof: true})
+				return nil
 			}
-			// Real error: flush what we have, optionally notify, then return
-			_ = flush("error_before_return")
 			logCtx.WithError(err).Error("Error reading log stream")
-			_ = stream.Send(&logstreamapi.LogStreamData{
-				RequestUuid: logReq.UUID,
-				Error:       "log stream read failed",
-			})
+			_ = stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Error: "log stream read failed"})
 			return err
 		}
-
-		// Timer-based flush (fires only after a read iteration)
-		select {
-		case <-ticker.C:
-			if err := flush("timer"); err != nil {
-				return err
-			}
-		default:
-		}
 	}
-
-	// Final flush on normal EOF
-	if err := flush("final"); err != nil {
-		return err
-	}
-
-	_ = stream.Send(&logstreamapi.LogStreamData{
-		RequestUuid: logReq.UUID,
-		Eof:         true,
-	})
-
-	return nil
 }
 
 func (a *Agent) streamLogsWithResume(ctx context.Context, logReq *event.ContainerLogRequest, logCtx *logrus.Entry) {
@@ -432,120 +362,47 @@ func (a *Agent) streamLogsWithResume(ctx context.Context, logReq *event.Containe
 // It flushes raw data, using chunk size (64KB) or time-based flushing.
 // Timestamps are extracted from raw lines for retry capability.
 func (a *Agent) streamLogs(ctx context.Context, stream logstreamapi.LogStreamService_StreamLogsClient, rc io.ReadCloser, logReq *event.ContainerLogRequest, logCtx *logrus.Entry) (*time.Time, error) {
-	const (
-		chunkMax   = 64 * 1024 // 64KB chunks
-		flushEvery = 50 * time.Millisecond
-	)
-
-	br := bufio.NewReader(rc)
-	ticker := time.NewTicker(flushEvery)
-	defer ticker.Stop()
+	const chunkMax = 64 * 1024 // 64KB chunks
 	var lastTimestamp *time.Time
-	// Aggregate buffer that we cap at chunkMax
-	buf := make([]byte, 0, chunkMax)
-	// Reusable read buffer
 	readBuf := make([]byte, chunkMax)
-
-	// Simple flush function for raw data
-	flush := func(reason string) error {
-		if len(buf) == 0 {
-			return nil
-		}
-		if err := stream.Send(&logstreamapi.LogStreamData{
-			RequestUuid: logReq.UUID,
-			Data:        buf,
-		}); err != nil {
-			logCtx.WithFields(logrus.Fields{
-				"reason": reason,
-				"bytes":  len(buf),
-				"error":  err.Error(),
-			}).Warn("Send failed")
-			return err
-		}
-		buf = buf[:0] // Reset buffer
-		return nil
-	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			_ = flush("ctx_done")
 			return lastTimestamp, ctx.Err()
 		case <-stream.Context().Done():
 			return lastTimestamp, stream.Context().Err()
 		default:
 		}
 
-		// Set read timeout to avoid blocking forever
-		if tcpConn, ok := rc.(interface{ SetReadDeadline(time.Time) error }); ok {
-			_ = tcpConn.SetReadDeadline(time.Now().Add(1 * time.Second))
-		}
-
-		n, err := br.Read(readBuf)
+		n, err := rc.Read(readBuf)
 		if n > 0 {
-			if logReq.Timestamps {
-				b := readBuf[:n]
-				if end := bytes.LastIndexByte(b, '\n'); end >= 0 {
-					start := bytes.LastIndexByte(b[:end], '\n') + 1
-					line := b[start:end]
-					if len(line) > 0 && line[len(line)-1] == '\r' {
-						line = line[:len(line)-1]
-					}
-					if ts := extractTimestamp(string(line)); ts != nil {
-						lastTimestamp = ts
-					}
+			b := readBuf[:n]
+			// build timestamp for resume capability
+			if end := bytes.LastIndexByte(b, '\n'); end >= 0 {
+				start := bytes.LastIndexByte(b[:end], '\n') + 1
+				line := b[start:end]
+				if len(line) > 0 && line[len(line)-1] == '\r' {
+					line = line[:len(line)-1]
+				}
+				if ts := extractTimestamp(string(line)); ts != nil {
+					lastTimestamp = ts
 				}
 			}
-			data := readBuf[:n]
-			// Append to capped buffer, splitting if needed
-			remain := data
-			for len(remain) > 0 {
-				space := chunkMax - len(buf)
-				if space == 0 {
-					if err := flush("full"); err != nil {
-						return lastTimestamp, err
-					}
-					space = chunkMax
-				}
-				toCopy := len(remain)
-				if toCopy > space {
-					toCopy = space
-				}
-				buf = append(buf, remain[:toCopy]...)
-				remain = remain[toCopy:]
-				if len(buf) == chunkMax {
-					if err := flush("full"); err != nil {
-						return lastTimestamp, err
-					}
-				}
+			if sendErr := stream.Send(&logstreamapi.LogStreamData{
+				RequestUuid: logReq.UUID,
+				Data:        readBuf[:n],
+			}); sendErr != nil {
+				logCtx.WithError(sendErr).Warn("Send failed")
+				return lastTimestamp, sendErr
 			}
 		}
-		// Now handle the read error/result
+		// For follow=true we do not send EOF to principal, it can be temporary error like authentication or permission denied, etc.
+		// We will retry to stream logs until the context is done or backoff stops.
 		if err != nil {
 			logCtx.WithError(err).Error("Error reading log stream")
-			if errors.Is(err, io.EOF) {
-				// Final flush on EOF
-				if fErr := flush("eof"); fErr != nil {
-					return lastTimestamp, fErr
-				}
-				// Don't propagate EOF to principal for follow=true - it may be temporary due to:
-				// - Pod restart/termination
-				return lastTimestamp, err
-			}
-			_ = stream.Send(&logstreamapi.LogStreamData{
-				RequestUuid: logReq.UUID,
-				Error:       err.Error(),
-			})
+			_ = stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Error: err.Error()})
 			return lastTimestamp, err
-		}
-
-		// Time-based flush to keep UI moving
-		select {
-		case <-ticker.C:
-			if err := flush("timer"); err != nil {
-				return lastTimestamp, err
-			}
-		default:
 		}
 	}
 }
