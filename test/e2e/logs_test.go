@@ -82,21 +82,21 @@ func (suite *LogsStreamingTestSuite) Test_Logs_Static() {
 
 	// Create a managed application in the principal's cluster
 	appName := "guestbook-logs"
-	app := v1alpha1.Application{
+	app := &v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appName,
-			Namespace: "agent-managed",
+			Namespace: "argocd", // Argo CD API creates applications in the argocd namespace
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
 			Source: &v1alpha1.ApplicationSource{
-				RepoURL:        "https://github.com/argoproj/argocd-example-apps",
+				RepoURL:        "https://github.com/argoproj/argocd-example-apps.git",
+				Path:           "guestbook",
 				TargetRevision: "HEAD",
-				Path:           "kustomize-guestbook",
 			},
 			Destination: v1alpha1.ApplicationDestination{
-				Name:      "agent-managed",
-				Namespace: "guestbook",
+				Server:    "https://kubernetes.default.svc",
+				Namespace: "default",
 			},
 			SyncPolicy: &v1alpha1.SyncPolicy{
 				Automated: &v1alpha1.SyncPolicyAutomated{},
@@ -107,7 +107,7 @@ func (suite *LogsStreamingTestSuite) Test_Logs_Static() {
 		},
 	}
 
-	err := suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
+	err := suite.PrincipalClient.Create(suite.Ctx, app, metav1.CreateOptions{})
 	requires.NoError(err)
 
 	// Wait until the app is synced and healthy
