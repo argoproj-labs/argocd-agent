@@ -555,8 +555,14 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 // be returned.
 func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *v1alpha1.Application, updateFn updateTransformer, patchFn patchTransformer) (*v1alpha1.Application, error) {
 	var updated *v1alpha1.Application
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctxForUpdate := context.WithValue(ctx, backend.ForUpdateContextKey, true)
+
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		existing, ierr := m.applicationBackend.Get(ctx, incoming.Name, incoming.Namespace)
+		existing, ierr := m.applicationBackend.Get(ctxForUpdate, incoming.Name, incoming.Namespace)
 		if ierr != nil {
 			if errors.IsNotFound(ierr) && upsert {
 				updated, ierr = m.Create(ctx, incoming)

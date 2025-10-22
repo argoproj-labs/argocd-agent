@@ -236,6 +236,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		informer.WithUpdateHandler[*v1alpha1.Application](s.updateAppCallback),
 		informer.WithDeleteHandler[*v1alpha1.Application](s.deleteAppCallback),
 		informer.WithFilters[*v1alpha1.Application](appFilters),
+		informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
 	}
 
 	appManagerOpts := []application.ApplicationManagerOption{
@@ -253,6 +254,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		informer.WithAddHandler[*v1alpha1.AppProject](s.newAppProjectCallback),
 		informer.WithUpdateHandler[*v1alpha1.AppProject](s.updateAppProjectCallback),
 		informer.WithDeleteHandler[*v1alpha1.AppProject](s.deleteAppProjectCallback),
+		informer.WithGroupResource[*v1alpha1.AppProject]("argoproj.io", "appprojects"),
 	}
 
 	projManagerOpts := []appproject.AppProjectManagerOption{
@@ -299,6 +301,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 			return kubeClient.Clientset.CoreV1().Namespaces().Watch(ctx, opts)
 		}),
 		informer.WithDeleteHandler[*corev1.Namespace](s.deleteNamespaceCallback),
+		informer.WithGroupResource[*corev1.Namespace]("", "namespaces"),
 	}
 
 	nsInformer, err := informer.NewInformer(ctx, nsInformerOpts...)
@@ -318,6 +321,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		informer.WithUpdateHandler[*corev1.Secret](s.updateRepositoryCallback),
 		informer.WithDeleteHandler[*corev1.Secret](s.deleteRepositoryCallback),
 		informer.WithFilters(kuberepository.DefaultFilterChain(s.namespace)),
+		informer.WithGroupResource[*corev1.Secret]("", "secrets"),
 	}
 
 	repoInformer, err := informer.NewInformer(ctx, repoInformerOpts...)
