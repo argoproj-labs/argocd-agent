@@ -15,19 +15,10 @@
 package e2e
 
 import (
-	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/argoproj-labs/argocd-agent/internal/config"
-	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
 	v1alpha1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/gitops-engine/pkg/health"
@@ -35,46 +26,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 )
 
 type LogsStreamingTestSuite struct {
 	fixture.BaseSuite
-}
-
-// getRpClient returns a http.Client suitable to access the resource proxy
-func (suite *LogsStreamingTestSuite) getRpClient(agentName string) *http.Client {
-	requires := suite.Require()
-
-	pc, err := kubernetes.NewForConfig(suite.PrincipalClient.Config)
-	requires.NoError(err)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Read agent root CA
-	caCert, err := tlsutil.TLSCertFromSecret(ctx, pc, "argocd", config.SecretNamePrincipalCA)
-	requires.NoError(err)
-	requires.NotNil(caCert)
-	certPool := x509.NewCertPool()
-	certPool.AddCert(caCert.Leaf)
-
-	// Generate client certificate
-	ccert, ckey, err := tlsutil.GenerateClientCertificate(agentName, caCert.Leaf, caCert.PrivateKey)
-	requires.NoError(err)
-	tlsCert, err := tls.X509KeyPair([]byte(ccert), []byte(ckey))
-	requires.NoError(err)
-
-	// Build our HTTP client
-	tlsConfig := &tls.Config{
-		RootCAs:      certPool,
-		Certificates: []tls.Certificate{tlsCert},
-	}
-	client := http.Client{Transport: &http.Transport{
-		TLSClientConfig: tlsConfig,
-	}}
-
-	return &client
 }
 
 func (suite *LogsStreamingTestSuite) Test_logs_streaming() {
@@ -121,11 +76,11 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming() {
 	// Find a guestbook pod and its first container
 	var podName, containerName string
 	pods := &corev1.PodList{}
-	err = suite.ManagedAgentClient.List(suite.Ctx, "guestbook", pods, metav1.ListOptions{})
+	err = suite.ManagedAgentClient.List(suite.Ctx, "default", pods, metav1.ListOptions{})
 	requires.NoError(err)
-	requires.True(len(pods.Items) > 0, "expected at least one pod in guestbook namespace")
+	requires.True(len(pods.Items) > 0, "expected at least one pod in default namespace")
 	for _, p := range pods.Items {
-		if strings.Contains(p.Name, "kustomize-guestbook-ui") || strings.Contains(p.Name, "guestbook") {
+		if strings.Contains(p.Name, "guestbook-ui") {
 			podName = p.Name
 			if len(p.Spec.Containers) > 0 {
 				containerName = p.Spec.Containers[0].Name
@@ -136,40 +91,29 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming() {
 	requires.NotEmpty(podName, "could not find guestbook pod")
 	requires.NotEmpty(containerName, "could not determine container name")
 
-	// Call the resource proxy logs endpoint (static logs)
-	rpClient := suite.getRpClient("agent-managed")
-	q := url.Values{}
-	q.Set("container", containerName)
-	q.Set("tailLines", "100")
-	logsURL := &url.URL{Scheme: "https", Host: "127.0.0.1:9090", Path: fmt.Sprintf("/api/v1/namespaces/default/pods/%s/log", podName), RawQuery: q.Encode()}
+	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
+	requires.NoError(err)
+	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
+	requires.NoError(err)
 
-	// Retry for a short period in case logs aren’t immediately available
-	var resp *http.Response
-	var body []byte
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
+	err = argoClient.Login()
+	requires.NoError(err)
+
+	var logs string
 	requires.Eventually(func() bool {
-		r, e := rpClient.Get(logsURL.String())
+		s, e := argoClient.GetLogs(app, "default", podName, containerName, 100)
 		if e != nil {
 			return false
 		}
-		defer r.Body.Close()
-		if r.StatusCode != http.StatusOK {
+		if len(s) == 0 {
 			return false
 		}
-		b, e := io.ReadAll(r.Body)
-		if e != nil {
-			return false
-		}
-		if len(b) == 0 {
-			return false
-		}
-		resp, body = r, b
+		logs = s
 		return true
 	}, 30*time.Second, 1*time.Second)
 
-	// Final assertions
-	requires.NotNil(resp)
-	requires.Equal(http.StatusOK, resp.StatusCode)
-	requires.Greater(len(body), 0)
+	requires.Greater(len(logs), 0)
 }
 
 func TestLogsStreamingTestSuite(t *testing.T) {
