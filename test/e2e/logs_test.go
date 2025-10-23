@@ -77,7 +77,7 @@ func (suite *LogsStreamingTestSuite) getRpClient(agentName string) *http.Client 
 	return &client
 }
 
-func (suite *LogsStreamingTestSuite) Test_Logs_Static() {
+func (suite *LogsStreamingTestSuite) Test_logs_streaming() {
 	requires := suite.Require()
 
 	// Create a managed application in the principal's cluster
@@ -110,10 +110,9 @@ func (suite *LogsStreamingTestSuite) Test_Logs_Static() {
 	err := suite.PrincipalClient.Create(suite.Ctx, app, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	// Wait until the app is synced and healthy
 	requires.Eventually(func() bool {
 		a := &v1alpha1.Application{}
-		if err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, a, metav1.GetOptions{}); err != nil {
+		if err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "argocd", Name: appName}, a, metav1.GetOptions{}); err != nil {
 			return false
 		}
 		return a.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && a.Status.Health.Status == health.HealthStatusHealthy
@@ -142,7 +141,7 @@ func (suite *LogsStreamingTestSuite) Test_Logs_Static() {
 	q := url.Values{}
 	q.Set("container", containerName)
 	q.Set("tailLines", "100")
-	logsURL := &url.URL{Scheme: "https", Host: "127.0.0.1:9090", Path: fmt.Sprintf("/api/v1/namespaces/guestbook/pods/%s/log", podName), RawQuery: q.Encode()}
+	logsURL := &url.URL{Scheme: "https", Host: "127.0.0.1:9090", Path: fmt.Sprintf("/api/v1/namespaces/default/pods/%s/log", podName), RawQuery: q.Encode()}
 
 	// Retry for a short period in case logs aren’t immediately available
 	var resp *http.Response
