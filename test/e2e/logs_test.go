@@ -35,12 +35,11 @@ type LogsStreamingTestSuite struct {
 func (suite *LogsStreamingTestSuite) Test_logs_streaming() {
 	requires := suite.Require()
 
-	// Create a managed application in the principal's cluster
 	appName := "guestbook-logs"
 	app := &v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appName,
-			Namespace: "argocd", // Argo CD API creates applications in the argocd namespace
+			Namespace: "argocd",
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
@@ -73,7 +72,6 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming() {
 		return a.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && a.Status.Health.Status == health.HealthStatusHealthy
 	}, 60*time.Second, 1*time.Second)
 
-	// Find a guestbook pod and its first container
 	var podName, containerName string
 	pods := &corev1.PodList{}
 	err = suite.ManagedAgentClient.List(suite.Ctx, "default", pods, metav1.ListOptions{})
@@ -102,7 +100,7 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming() {
 
 	var logs string
 	requires.Eventually(func() bool {
-		s, e := argoClient.GetLogs(app, "default", podName, containerName, 100)
+		s, e := argoClient.GetApplicationLogs(app, "default", podName, containerName, 100)
 		if e != nil {
 			return false
 		}

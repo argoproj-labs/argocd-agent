@@ -243,7 +243,41 @@ func (c *ArgoRestClient) GetLogs(app *v1alpha1.Application, namespace, podName, 
 		q.Set("tailLines", fmt.Sprint(tailLines))
 	}
 	u.RawQuery = q.Encode()
-	u.Path = fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/log", namespace, podName)
+	u.Path = fmt.Sprintf("/api/v1/applications/%s/logs", app.Name)
+
+	resp, err := c.Do(&http.Request{Method: http.MethodGet, URL: u, Header: make(http.Header)})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return "", readErr
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("expected HTTP 200, got %d: %s", resp.StatusCode, string(body))
+	}
+	return string(body), nil
+}
+
+// GetApplicationLogs fetches logs via Argo CD's application logs endpoint.
+func (c *ArgoRestClient) GetApplicationLogs(app *v1alpha1.Application, namespace, podName, container string, tailLines int) (string, error) {
+	u := c.url(
+		"appNamespace", app.Namespace,
+		"project", app.Spec.Project,
+		"namespace", namespace,
+		"podName", podName,
+	)
+	q := u.Query()
+	if container != "" {
+		q.Set("container", container)
+	}
+	if tailLines > 0 {
+		q.Set("tailLines", fmt.Sprint(tailLines))
+	}
+	u.RawQuery = q.Encode()
+	u.Path = fmt.Sprintf("/api/v1/applications/%s/logs", app.Name)
 
 	resp, err := c.Do(&http.Request{Method: http.MethodGet, URL: u, Header: make(http.Header)})
 	if err != nil {
