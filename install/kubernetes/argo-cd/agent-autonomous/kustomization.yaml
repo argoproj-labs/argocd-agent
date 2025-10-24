@@ -133,4 +133,16 @@ patches:
     kind: Secret
     metadata:
       name: argocd-notifications-secret
+- target:
+    group: networking.k8s.io
+    version: v1
+    kind: NetworkPolicy
+    name: argocd-redis-network-policy
+  patch: |-
+    - op: add
+      path: /spec/ingress/0/from/-
+      value:
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: argocd-agent-agent
 

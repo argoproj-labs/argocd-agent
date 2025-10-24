@@ -184,3 +184,15 @@ patches:
     kind: ClusterRoleBinding
     metadata:
       name: argocd-applicationset-controller
+- target:
+    group: networking.k8s.io
+    version: v1
+    kind: NetworkPolicy
+    name: argocd-redis-network-policy
+  patch: |-
+    - op: add
+      path: /spec/ingress/0/from/-
+      value:
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: argocd-agent-agent
