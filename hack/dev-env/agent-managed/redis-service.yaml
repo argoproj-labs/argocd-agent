@@ -4,4 +4,4 @@ metadata:
   name: argocd-redis
 spec:
   type: LoadBalancer
-#  loadBalancerIP: 192.168.56.225
+  loadBalancerIP: 192.168.56.225

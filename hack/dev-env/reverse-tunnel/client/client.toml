@@ -4,11 +4,11 @@ remote_addr = "EXTERNAL-HOSTNAME:2333" # The address of the server. The port mus
 
 [client.services.one]
 token = "AUTHENTICATION_TOKEN" # Must be the same with the server to pass the validation
-local_addr = "host.docker.internal:9090" # The address of the service that needs to be forwarded
+local_addr = "127.0.0.1:9090" # The address of the service that needs to be forwarded
 
 [client.services.two]
 token = "AUTHENTICATION_TOKEN" # Must be the same with the server to pass the validation
-local_addr = "host.docker.internal:6379" # The address of the service that needs to be forwarded
+local_addr = "127.0.0.1:6379" # The address of the service that needs to be forwarded
 
 # Client Side Configuration
 [client.transport]

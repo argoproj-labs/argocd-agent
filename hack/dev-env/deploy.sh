@@ -34,15 +34,6 @@ ARGOCD_AGENT_MANAGED_CONTEXT=vcluster-agent-managed
 ARGOCD_AGENT_AUTONOMOUS_CONTEXT=vcluster-agent-autonomous
 TMPDIR=$(mktemp -d /tmp/argocd-agent.XXXXXXXX)
 
-# Portable file replace helper to avoid sed -i differences
-replace_in_file() {
-    local target="$1"; shift
-    local tmp
-    tmp=$(mktemp "${target}.XXXXXX")
-    sed "$@" "$target" > "$tmp"
-    mv "$tmp" "$target"
-}
-
 cleanup() {
 	test "$TMPDIR" != "/" -a "$TMPDIR" != "" || exit 1
 	echo "=> Removing temp path ${TMPDIR}"
@@ -56,8 +47,9 @@ cp -a ${BASEPATH}/install/kubernetes/* ${TMPDIR}
 deploy_principal() {
 	(
 		cd ${TMPDIR}/principal && kustomize edit set namespace argocd
-        replace_in_file principal-params-cm.yaml \
-            -e "s/  principal.allowed-namespaces:.*/  principal.allowed-namespaces: \"agent-*\"/"
+		sed -i'' \
+			-e "s/  principal.allowed-namespaces:.*/  principal.allowed-namespaces: \"agent-*\"/" \
+			principal-params-cm.yaml
 		kustomize build . | kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd apply -f -
 		kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd rollout restart deployment argocd-agent-principal
 	)
@@ -67,10 +59,11 @@ deploy_agent_managed() {
 	(
 		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
 		cd ${TMPDIR}/agent && kustomize edit set namespace argocd
-        replace_in_file agent-params-cm.yaml \
-            -e "s/  agent.mode:.*/  agent.mode: \"managed\"/" \
-            -e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
-            -e "s/  agent.server.address:.*/  agent.server.address: \"$principal_addr\"/"
+		sed -i'' \
+		        -e "s/  agent.mode:.*/  agent.mode: \"managed\"/" \
+			-e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
+			-e "s/  agent.server.address:.*/  agent.server.address: \"$principal_addr\"/" \
+			agent-params-cm.yaml
 		kustomize build . | kubectl --context ${ARGOCD_AGENT_MANAGED_CONTEXT} -n argocd apply -f -
 	)
 }
@@ -79,10 +72,11 @@ deploy_agent_autonomous() {
 	(
 		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
 		cd ${TMPDIR}/agent && kustomize edit set namespace argocd
-        replace_in_file agent-params-cm.yaml \
-            -e "s/  agent.mode:.*/  agent.mode: \"autonomous\"/" \
-            -e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
-            -e "s/  agent.server.address:.*/  agent.server.address: \"$principal_addr\"/"
+		sed -i'' \
+		        -e "s/  agent.mode:.*/  agent.mode: \"autonomous\"/" \
+			-e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
+			-e "s/  agent.server.address:.*/  agent.server.address: \"$principal_addr\"/" \
+			agent-params-cm.yaml
 		kustomize build . | kubectl --context ${ARGOCD_AGENT_AUTONOMOUS_CONTEXT} -n argocd apply -f -
 	)
 }
