@@ -39,18 +39,18 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming() {
 	app := &v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appName,
-			Namespace: "argocd",
+			Namespace: "agent-managed",
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
 			Source: &v1alpha1.ApplicationSource{
-				RepoURL:        "https://github.com/argoproj/argocd-example-apps.git",
-				Path:           "guestbook",
+				RepoURL:        "https://github.com/argoproj/argocd-example-apps",
+				Path:           "kustomize-guestbook",
 				TargetRevision: "HEAD",
 			},
 			Destination: v1alpha1.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "default",
+				Name:      "agent-managed",
+				Namespace: "guestbook",
 			},
 			SyncPolicy: &v1alpha1.SyncPolicy{
 				Automated: &v1alpha1.SyncPolicyAutomated{},
@@ -64,21 +64,40 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming() {
 	err := suite.PrincipalClient.Create(suite.Ctx, app, metav1.CreateOptions{})
 	requires.NoError(err)
 
+	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
+	requires.NoError(err)
+	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
+	requires.NoError(err)
+
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
+	err = argoClient.Login()
+	requires.NoError(err)
+
+	retries := 0
 	requires.Eventually(func() bool {
 		a := &v1alpha1.Application{}
-		if err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "argocd", Name: appName}, a, metav1.GetOptions{}); err != nil {
+		if err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, a, metav1.GetOptions{}); err != nil {
 			return false
 		}
-		return a.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced && a.Status.Health.Status == health.HealthStatusHealthy
+		if a.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced &&
+			a.Status.Health.Status == health.HealthStatusHealthy {
+			return true
+		}
+		if retries > 0 && retries%5 == 0 {
+			suite.T().Logf("Triggering re-sync")
+			_ = argoClient.Sync(a)
+		}
+		retries++
+		return false
 	}, 60*time.Second, 1*time.Second)
 
 	var podName, containerName string
 	pods := &corev1.PodList{}
-	err = suite.ManagedAgentClient.List(suite.Ctx, "default", pods, metav1.ListOptions{})
+	err = suite.ManagedAgentClient.List(suite.Ctx, "guestbook", pods, metav1.ListOptions{})
 	requires.NoError(err)
 	requires.True(len(pods.Items) > 0, "expected at least one pod in default namespace")
 	for _, p := range pods.Items {
-		if strings.Contains(p.Name, "guestbook-ui") {
+		if strings.Contains(p.Name, "kustomize-guestbook-ui") {
 			podName = p.Name
 			if len(p.Spec.Containers) > 0 {
 				containerName = p.Spec.Containers[0].Name
@@ -89,18 +108,9 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming() {
 	requires.NotEmpty(podName, "could not find guestbook pod")
 	requires.NotEmpty(containerName, "could not determine container name")
 
-	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
-	requires.NoError(err)
-	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
-	requires.NoError(err)
-
-	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
-	err = argoClient.Login()
-	requires.NoError(err)
-
 	var logs string
 	requires.Eventually(func() bool {
-		s, e := argoClient.GetApplicationLogs(app, "default", podName, containerName, 100)
+		s, e := argoClient.GetApplicationLogs(app, "guestbook", podName, containerName, 100)
 		if e != nil {
 			return false
 		}

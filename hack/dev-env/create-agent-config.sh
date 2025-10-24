@@ -29,15 +29,30 @@ source ${SCRIPTPATH}/utility.sh
 export ARGOCD_AGENT_PRINCIPAL_CONTEXT=vcluster-control-plane
 export ARGOCD_AGENT_PRINCIPAL_NAMESPACE=argocd
 
+is_ipv4() {
+    # simple IPv4 matcher
+    echo "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+}
+
 if test "${ARGOCD_AGENT_IN_CLUSTER}" = ""; then
-	IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+    IPADDR=$(ipconfig getifaddr en0)
+    else
+    IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+    fi
 	ARGOCD_AGENT_GRPC_SVC=$IPADDR
 	ARGOCD_AGENT_GRPC_SAN="--ip 127.0.0.1,${IPADDR}"
 	ARGOCD_AGENT_RESOURCE_PROXY=${IPADDR}
 	ARGOCD_AGENT_RESOURCE_PROXY_SAN="--ip 127.0.0.1,${IPADDR}"
 else
 	ARGOCD_AGENT_GRPC_SVC=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
-	ARGOCD_AGENT_GRPC_SAN="--ip 127.0.0.1,$ARGOCD_AGENT_GRPC_SVC"
+	# If the LB address is a hostname, use DNS SAN; if it's an IP, use IP SAN
+	if is_ipv4 "$ARGOCD_AGENT_GRPC_SVC"; then
+		ARGOCD_AGENT_GRPC_SAN="--ip 127.0.0.1,$ARGOCD_AGENT_GRPC_SVC"
+	else
+		# include localhost as IP SAN and LB hostname as DNS SAN
+		ARGOCD_AGENT_GRPC_SAN="--ip 127.0.0.1 --dns $ARGOCD_AGENT_GRPC_SVC"
+	fi
 	ARGOCD_AGENT_RESOURCE_PROXY=argocd-agent-resource-proxy
 	ARGOCD_AGENT_RESOURCE_PROXY_SAN="--dns ${ARGOCD_AGENT_RESOURCE_PROXY}"
 fi
