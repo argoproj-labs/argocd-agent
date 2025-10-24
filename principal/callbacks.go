@@ -15,8 +15,6 @@
 package principal
 
 import (
-	"fmt"
-
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
@@ -27,7 +25,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 // newAppCallback is executed when a new application event was emitted from
@@ -87,7 +84,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		}
 
 		// Revert modifications on autonomous agent applications
-		if s.appManager.RevertAutonomousAppChanges(s.ctx, new) {
+		if s.appManager.RevertAutonomousAppChanges(s.ctx, new, s.sourceCache.Application) {
 			logCtx.Trace("Modifications to the application are reverted")
 			return
 		}
@@ -128,7 +125,12 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 
 	// Revert user-initiated deletion on autonomous agent applications
 	if isResourceFromAutonomousAgent(outbound) {
-		if s.revertUserInitiatedDeletion(outbound, logCtx) {
+		reverted, err := manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.appManager, logCtx)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert invalid deletion of application")
+			return
+		}
+		if reverted {
 			logCtx.Trace("Deleted application is recreated")
 			return
 		}
@@ -219,8 +221,16 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 
 	// Check if this AppProject was created by an autonomous agent
 	if isResourceFromAutonomousAgent(new) {
-		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
-		return
+		// Revert modifications on autonomous agent appProjects
+		reverted, err := s.projectManager.RevertAppProjectChanges(s.ctx, new, s.sourceCache.AppProject)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert modifications done to appProject")
+			return
+		}
+		if reverted {
+			logCtx.Debugf("Modifications done to appProject are reverted")
+			return
+		}
 	}
 
 	if len(new.Finalizers) > 0 && len(new.Finalizers) != len(old.Finalizers) {
@@ -262,6 +272,19 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 		"event":           "appproject_delete",
 		"appproject_name": outbound.Name,
 	})
+
+	// Revert user-initiated deletion on autonomous agent applications
+	if isResourceFromAutonomousAgent(outbound) {
+		reverted, err := manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.projectManager, logCtx)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert invalid deletion of appProject")
+			return
+		}
+		if reverted {
+			logCtx.Trace("Deleted appProject is recreated")
+			return
+		}
+	}
 
 	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
 
@@ -616,31 +639,4 @@ func isResourceFromAutonomousAgent(resource metav1.Object) bool {
 	}
 	_, ok := annotations[manager.SourceUIDAnnotation]
 	return ok
-}
-
-func (s *Server) revertUserInitiatedDeletion(outbound *v1alpha1.Application, logCtx *logrus.Entry) bool {
-	appKey := fmt.Sprintf("%s/%s", outbound.Namespace, outbound.Name)
-
-	// Check if this deletion was expected (agent-initiated)
-	if s.isExpectedDeletion(appKey) {
-		logCtx.Debugf("Expected deletion from autonomous agent - allowing it to proceed")
-		// This is a legitimate deletion from the agent, let it proceed normally
-		return false
-	}
-
-	logCtx.Warnf("Unauthorized deletion detected for autonomous agent application - recreating")
-	// This is an unauthorized deletion (user-initiated), recreate the app
-	app := outbound.DeepCopy()
-	app.ResourceVersion = ""
-	app.DeletionTimestamp = nil
-	sourceUID := outbound.Annotations[manager.SourceUIDAnnotation]
-	app.SetUID(k8stypes.UID(sourceUID))
-	_, err := s.appManager.Create(s.ctx, app)
-	if err != nil {
-		logCtx.WithError(err).Error("failed to recreate application after unauthorized deletion")
-	} else {
-		logCtx.Infof("Recreated application %s after unauthorized deletion", outbound.Name)
-	}
-
-	return true
 }
