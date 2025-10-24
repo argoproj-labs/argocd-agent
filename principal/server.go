@@ -434,7 +434,10 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	// We need to maintain a cache to keep resources in sync with last known state of
 	// autonomous-agent in case it is disconnected with agent or resources on the control-plane are modified.
-	s.populateSourceCache(ctx)
+	if err := s.populateSourceCache(ctx); err != nil {
+		log().WithError(err).Error("failed to populate the source cache")
+		return err
+	}
 
 	if s.options.serveGRPC {
 		if err := s.serveGRPC(ctx, s.metrics, errch); err != nil {
@@ -886,11 +889,11 @@ func (s *Server) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *Server) populateSourceCache(ctx context.Context) {
+func (s *Server) populateSourceCache(ctx context.Context) error {
 	log().Infof("Recreating application spec cache from existing resources on cluster")
 	appList, err := s.appManager.List(ctx, backend.ApplicationSelector{Namespaces: []string{s.namespace}})
 	if err != nil {
-		log().Errorf("Error while fetching list of applications: %v", err)
+		return err
 	}
 
 	for _, app := range appList {
@@ -903,7 +906,7 @@ func (s *Server) populateSourceCache(ctx context.Context) {
 	log().Infof("Recreating appProject spec cache from existing resources on cluster")
 	appProjectList, err := s.projectManager.List(ctx, backend.AppProjectSelector{Namespace: s.namespace})
 	if err != nil {
-		log().Errorf("Error while fetching list of appProjects: %v", err)
+		return err
 	}
 
 	for _, appProject := range appProjectList {
@@ -916,7 +919,7 @@ func (s *Server) populateSourceCache(ctx context.Context) {
 	log().Infof("Recreating repository spec cache from existing resources on cluster")
 	repoList, err := s.repoManager.List(ctx, backend.RepositorySelector{Namespace: s.namespace})
 	if err != nil {
-		log().Errorf("Error while fetching list of repositories: %v", err)
+		return err
 	}
 
 	for _, repo := range repoList {
@@ -927,4 +930,5 @@ func (s *Server) populateSourceCache(ctx context.Context) {
 	}
 
 	log().Infof("Source cache populated successfully")
+	return nil
 }

@@ -79,7 +79,8 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		}
 		mgr := &fakeManager[*argoapp.Application]{}
 		deletions := NewDeletionTracker()
-		ok := RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
+		ok, err := RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
+		requires.EqualError(err, "source UID annotation not found for resource")
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
@@ -87,14 +88,16 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		app.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("u1"))}
 		mgr = &fakeManager[*argoapp.Application]{}
 		deletions.MarkExpected(types.UID("u1"))
-		ok = RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
+		ok, err = RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
+		requires.NoError(err)
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
 		// With annotation and invalid deletion -> recreate
 		app.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("u2"))}
 		mgr = &fakeManager[*argoapp.Application]{}
-		ok = RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
+		ok, err = RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
+		requires.NoError(err)
 		requires.True(ok)
 		requires.NotNil(mgr.created)
 		requires.Equal(types.UID("u2"), mgr.created.GetUID())
@@ -113,20 +116,23 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		}
 		deletions := NewDeletionTracker()
 		mgr := &fakeManager[*argoapp.AppProject]{}
-		ok := RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
+		ok, err := RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
+		requires.EqualError(err, "source UID annotation not found for resource")
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
 		proj.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("p1"))}
 		mgr = &fakeManager[*argoapp.AppProject]{}
 		deletions.MarkExpected(types.UID("p1"))
-		ok = RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
+		ok, err = RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
+		requires.NoError(err)
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
 		proj.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("p2"))}
 		mgr = &fakeManager[*argoapp.AppProject]{}
-		ok = RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
+		ok, err = RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
+		requires.NoError(err)
 		requires.True(ok)
 		requires.NotNil(mgr.created)
 		requires.Equal(types.UID("p2"), mgr.created.GetUID())
@@ -145,20 +151,23 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		}
 		deletions := NewDeletionTracker()
 		mgr := &fakeManager[*corev1.Secret]{}
-		ok := RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
+		ok, err := RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
+		requires.EqualError(err, "source UID annotation not found for resource")
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
 		repo.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("r1"))}
 		mgr = &fakeManager[*corev1.Secret]{}
 		deletions.MarkExpected(types.UID("r1"))
-		ok = RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
+		ok, err = RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
+		requires.NoError(err)
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
 		repo.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("r2"))}
 		mgr = &fakeManager[*corev1.Secret]{}
-		ok = RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
+		ok, err = RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
+		requires.NoError(err)
 		requires.True(ok)
 		requires.NotNil(mgr.created)
 		requires.Equal(types.UID("r2"), mgr.created.GetUID())

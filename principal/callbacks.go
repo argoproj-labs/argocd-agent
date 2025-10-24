@@ -125,7 +125,12 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 
 	// Revert user-initiated deletion on autonomous agent applications
 	if isResourceFromAutonomousAgent(outbound) {
-		if manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.appManager, logCtx) {
+		reverted, err := manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.appManager, logCtx)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert invalid deletion of application")
+			return
+		}
+		if reverted {
 			logCtx.Trace("Deleted application is recreated")
 			return
 		}
@@ -217,7 +222,13 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 	// Check if this AppProject was created by an autonomous agent
 	if isResourceFromAutonomousAgent(new) {
 		// Revert modifications on autonomous agent appProjects
-		if s.projectManager.RevertAppProjectChanges(s.ctx, new, s.sourceCache.AppProject) {
+		reverted, err := s.projectManager.RevertAppProjectChanges(s.ctx, new, s.sourceCache.AppProject)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert modifications done to appProject")
+			return
+		}
+		if reverted {
+			logCtx.Debugf("Modifications done to appProject are reverted")
 			return
 		}
 	}
@@ -264,7 +275,12 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 	// Revert user-initiated deletion on autonomous agent applications
 	if isResourceFromAutonomousAgent(outbound) {
-		if manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.projectManager, logCtx) {
+		reverted, err := manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.projectManager, logCtx)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert invalid deletion of appProject")
+			return
+		}
+		if reverted {
 			logCtx.Trace("Deleted appProject is recreated")
 			return
 		}

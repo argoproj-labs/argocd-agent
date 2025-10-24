@@ -335,7 +335,10 @@ func (a *Agent) Start(ctx context.Context) error {
 	// For managed-agent we need to maintain a cache to keep resources in sync with last known state of
 	// principal in case agent is disconnected with principal or resources in managed-cluster are modified.
 	if a.mode == types.AgentModeManaged {
-		a.populateSourceCache(ctx)
+		if err := a.populateSourceCache(ctx); err != nil {
+			log().WithError(err).Error("failed to populate the source cache")
+			return err
+		}
 	}
 
 	if a.options.metricsPort > 0 {
@@ -485,11 +488,11 @@ func (a *Agent) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *Agent) populateSourceCache(ctx context.Context) {
+func (a *Agent) populateSourceCache(ctx context.Context) error {
 	log().Infof("Recreating application spec cache from existing resources on cluster")
 	appList, err := a.appManager.List(ctx, backend.ApplicationSelector{Namespaces: []string{a.namespace}})
 	if err != nil {
-		log().Errorf("Error while fetching list of applications: %v", err)
+		return err
 	}
 
 	for _, app := range appList {
@@ -502,7 +505,7 @@ func (a *Agent) populateSourceCache(ctx context.Context) {
 	log().Infof("Recreating appProject spec cache from existing resources on cluster")
 	appProjectList, err := a.projectManager.List(ctx, backend.AppProjectSelector{Namespace: a.namespace})
 	if err != nil {
-		log().Errorf("Error while fetching list of appProjects: %v", err)
+		return err
 	}
 
 	for _, appProject := range appProjectList {
@@ -515,7 +518,7 @@ func (a *Agent) populateSourceCache(ctx context.Context) {
 	log().Infof("Recreating repository spec cache from existing resources on cluster")
 	repoList, err := a.repoManager.List(ctx, backend.RepositorySelector{Namespace: a.namespace})
 	if err != nil {
-		log().Errorf("Error while fetching list of repositories: %v", err)
+		return err
 	}
 
 	for _, repo := range repoList {
@@ -526,4 +529,5 @@ func (a *Agent) populateSourceCache(ctx context.Context) {
 	}
 
 	log().Infof("Source cache populated successfully")
+	return nil
 }

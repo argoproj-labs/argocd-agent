@@ -368,7 +368,8 @@ func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1al
 
 // RevertAppProjectChanges compares the actual spec with expected spec stored in cache,
 // if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as the source cluster.
-func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project *v1alpha1.AppProject, projectCache *cache.ResourceCache[v1alpha1.AppProjectSpec]) bool {
+// Returns an error if the update operation fails, and a boolean indicating if the changes were reverted.
+func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project *v1alpha1.AppProject, projectCache *cache.ResourceCache[v1alpha1.AppProjectSpec]) (bool, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "RevertAppProjectChanges",
 		"appProject":      project.Name,
@@ -377,7 +378,7 @@ func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project
 
 	sourceUID, exists := project.Annotations[manager.SourceUIDAnnotation]
 	if !exists {
-		return false
+		return false, fmt.Errorf("source UID annotation not found for resource")
 	}
 
 	if cachedSpec, ok := projectCache.Get(types.UID(sourceUID)); ok {
@@ -387,10 +388,9 @@ func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project
 			project.Spec = cachedSpec
 			logCtx.Infof("Reverting modifications done in appProject: %s", project.Name)
 			if _, err := m.UpdateAppProject(ctx, project); err != nil {
-				logCtx.Errorf("Unable to revert modifications done in appProject: %s. Error: %v", project.Name, err)
-				return false
+				return false, err
 			}
-			return true
+			return true, nil
 		} else {
 			logCtx.Debugf("AppProject %s is already in sync with source cache", project.Name)
 		}
@@ -398,7 +398,7 @@ func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project
 		logCtx.Errorf("AppProject %s is not available in agent cache", project.Name)
 	}
 
-	return false
+	return false, nil
 }
 
 // DoesAgentMatchWithProject checks if the agent name matches the given AppProject.

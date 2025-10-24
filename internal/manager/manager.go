@@ -210,7 +210,7 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 	deletions *DeletionTracker,
 	mgr resourceManager[R],
 	logCtx *logrus.Entry,
-) bool {
+) (bool, error) {
 
 	logCtx = logCtx.WithFields(logrus.Fields{
 		"resource": outbound.GetName(),
@@ -219,14 +219,13 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 
 	sourceUID, exists := outbound.GetAnnotations()[SourceUIDAnnotation]
 	if !exists {
-		logCtx.Errorf("Source UID annotation not found for resource")
-		return false
+		return false, fmt.Errorf("source UID annotation not found for resource")
 	}
 
 	// Check if this deletion is coming from the source
-	if deletions.IsExpected(types.UID(sourceUID)) {
+	if deletions.RemoveExpected(types.UID(sourceUID)) {
 		logCtx.Debugf("Expected deletion detected - allowing it to proceed")
-		return false
+		return false, nil
 	}
 
 	logCtx.Warnf("Unauthorized deletion detected - recreating")
@@ -237,12 +236,12 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 	resource.SetUID(types.UID(sourceUID))
 	_, err := mgr.Create(ctx, resource)
 	if err != nil {
-		logCtx.WithError(err).Error("failed to recreate resource after unauthorized deletion")
+		return false, err
 	} else {
 		logCtx.Infof("Recreated resource after unauthorized deletion")
 	}
 
-	return true
+	return true, nil
 }
 
 // DeletionTracker tracks expected deletions from the source.
@@ -263,7 +262,7 @@ func (d *DeletionTracker) MarkExpected(uid types.UID) {
 	d.expected[uid] = true
 }
 
-func (d *DeletionTracker) IsExpected(uid types.UID) bool {
+func (d *DeletionTracker) RemoveExpected(uid types.UID) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	_, exists := d.expected[uid]

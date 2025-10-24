@@ -219,9 +219,16 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 
 	// Revert any direct modifications done to appProject on managed-cluster
 	// because for managed-agent all changes should be done through principal
-	if reverted := a.projectManager.RevertAppProjectChanges(a.context, new, a.sourceCache.AppProject); reverted {
-		logCtx.Debugf("Modifications done to appProject are reverted")
-		return
+	if isResourceFromPrincipal(new) {
+		reverted, err := a.projectManager.RevertAppProjectChanges(a.context, new, a.sourceCache.AppProject)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert modifications done to appProject")
+			return
+		}
+		if reverted {
+			logCtx.Debugf("Modifications done to appProject are reverted")
+			return
+		}
 	}
 
 	// Only send the update event when we're in autonomous mode
@@ -251,7 +258,12 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 	logCtx.Debugf("Delete appProject event")
 
 	if isResourceFromPrincipal(appProject) {
-		if manager.RevertUserInitiatedDeletion(a.context, appProject, a.deletions, a.projectManager, logCtx) {
+		reverted, err := manager.RevertUserInitiatedDeletion(a.context, appProject, a.deletions, a.projectManager, logCtx)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert invalid deletion of appProject")
+			return
+		}
+		if reverted {
 			logCtx.Trace("Deleted appProject is recreated")
 			return
 		}
@@ -385,9 +397,16 @@ func (a *Agent) handleRepositoryDeletion(repo *corev1.Secret) {
 
 	logCtx.Debugf("Delete repository event")
 
-	if manager.RevertUserInitiatedDeletion(a.context, repo, a.deletions, a.repoManager, logCtx) {
-		logCtx.Trace("Deleted repository is recreated")
-		return
+	if isResourceFromPrincipal(repo) {
+		reverted, err := manager.RevertUserInitiatedDeletion(a.context, repo, a.deletions, a.repoManager, logCtx)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert invalid deletion of repository")
+			return
+		}
+		if reverted {
+			logCtx.Trace("Deleted repository is recreated")
+			return
+		}
 	}
 
 	if a.mode.IsAutonomous() {
