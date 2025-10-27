@@ -2,6 +2,9 @@
 
 This is **not** a guide to set-up argocd-agent for a production environment. It is rather a guide to help you get going with contributing to and hacking on argocd-agent. This guide does not intend to provide pure copy & paste instructions. Instead, it will assume a little bit of willingness to hackery on your side, as well as some core knowledge about the underlying technologies (JWT, TLS, etc)
 
+!!! warning "Important - Deprecation Notice"
+    This guide uses the userpass authentication method for simplicity in development environments. **The userpass authentication method is deprecated and not suited for use outside development environments.** For production deployments, use mTLS authentication instead.
+
 Please note that some resource names might be out-of-date (e.g. have changed names, or were removed and replaced by something else). If you notice something, please figure it out and submit a PR to this guide. Thanks!
 
 If you want to use [Open Cluster Management (OCM)](https://open-cluster-management.io/)
@@ -106,7 +109,7 @@ Keep the `ca.crt` file, as you will need it for the installation of agents, too.
 Create the principal user password secret; replace `<PASSWORD>` with the password of your choice:
 
 ```shell
-kubectl create -n argocd secret generic argocd-agent-principal-userpass --from-literal=passwd='<PASSWORD>'
+kubectl create -n argocd secret generic argocd-agent-principal-userpass --from-literal=passwd='<PASSWORD>'  # DEPRECATED: userpass auth not suited for production
 ```
 
 Now that the required secrets exist, it's time to apply the installation manifests and install the principal into the cluster:
@@ -149,7 +152,7 @@ we will use the `argocd` namespace to install all required resources into the cl
 Create the agent user password secret; replace `<CREDENTIALS>` with the credentials of your choice:
 
 ```shell
-kubectl create -n argocd secret generic argocd-agent-agent-userpass --from-literal=credentials='<CREDENTIALS>'
+kubectl create -n argocd secret generic argocd-agent-agent-userpass --from-literal=credentials='<CREDENTIALS>'  # DEPRECATED: userpass auth not suited for production
 ```
 
 Now that the required secrets exist, it's time to apply the installation manifests and install the agent into the cluster:

@@ -125,7 +125,10 @@ kubectl create namespace <agent-name> --context <control-plane-context>
 
 ### Option A: Using Kubernetes Manifests
 
-1. **Create Authentication Secret**:
+1. **Create Authentication Secret** (for userpass - deprecated):
+
+!!! warning "Deprecation Notice"
+    The userpass authentication method is deprecated and not suited for use outside development environments. Use mTLS authentication for production deployments.
 
 ```bash
 kubectl create secret generic argocd-agent-agent-userpass \
@@ -196,12 +199,15 @@ data:
 
 ### Authentication Methods
 
-**mTLS Authentication**:
+**mTLS Authentication (Recommended)**:
 ```yaml
 agent.creds: "mtls:^CN=(.+)$"  # Regex to extract agent ID from cert subject
 ```
 
-**UserPass Authentication** (deprecated):
+**UserPass Authentication [DEPRECATED]**:
+
+!!! warning "Deprecation Notice"
+    The userpass authentication method is deprecated and not suited for use outside development environments.
 
 ```yaml
 agent.creds: "userpass:/app/config/creds/userpass.creds"
