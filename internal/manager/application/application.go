@@ -27,7 +27,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
-	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -58,6 +58,8 @@ type ApplicationManager struct {
 	manager.ManagedResources
 	// ObservedResources, key is qualified name of the application, value is the Application's .metadata.resourceValue field
 	manager.ObservedResources
+	// deletions tracks valid deletions from the source.
+	deletions *manager.DeletionTracker
 }
 
 // ApplicationManagerOption is a callback function to set an option to the Application
@@ -82,6 +84,13 @@ func WithRole(role manager.ManagerRole) ApplicationManagerOption {
 func WithMode(mode manager.ManagerMode) ApplicationManagerOption {
 	return func(m *ApplicationManager) {
 		m.mode = mode
+	}
+}
+
+// WithDeletionTracker is used to track valid deletions from the source.
+func WithDeletionTracker(d *manager.DeletionTracker) ApplicationManagerOption {
+	return func(m *ApplicationManager) {
+		m.deletions = d
 	}
 }
 
@@ -258,6 +267,13 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 
 	if deletionTimestampChanged {
 		logCtx.Infof("deletionTimestamp of managed agent changed from nil to non-nil, so deleting Application")
+		// Mark this as a valid deletion so the callback does not treat it as a user-initiated deletion.
+		if m.deletions != nil {
+			if v, ok := updated.Annotations[manager.SourceUIDAnnotation]; ok {
+				m.deletions.MarkExpected(ty.UID(v))
+			}
+		}
+
 		if err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, ptr.To(backend.DeletePropagationForeground)); err != nil {
 			return nil, err
 		}
@@ -622,7 +638,7 @@ func (m *ApplicationManager) List(ctx context.Context, selector backend.Applicat
 
 // RevertManagedAppChanges compares the actual spec with expected spec stored in cache,
 // if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as principal.
-func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v1alpha1.Application) bool {
+func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v1alpha1.Application, appCache *cache.ResourceCache[v1alpha1.ApplicationSpec]) bool {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "RevertManagedAppChanges",
 		"application":     app.QualifiedName(),
@@ -631,7 +647,7 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 
 	sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
 	if exists && m.mode == manager.ManagerModeManaged {
-		if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID), logCtx); ok {
+		if cachedAppSpec, ok := appCache.Get(ty.UID(sourceUID)); ok {
 			logCtx.Debugf("Application %s is available in agent cache", app.Name)
 
 			if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
@@ -652,7 +668,7 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 
 // RevertAutonomousAppChanges compares the actual spec with expected spec stored in cache,
 // if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as agent cluster.
-func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app *v1alpha1.Application) bool {
+func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app *v1alpha1.Application, appCache *cache.ResourceCache[v1alpha1.ApplicationSpec]) bool {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "RevertAutonomousAppChanges",
 		"application":     app.QualifiedName(),
@@ -664,7 +680,7 @@ func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app
 		return false
 	}
 
-	if cachedAppSpec, ok := appCache.GetApplicationSpec(ty.UID(sourceUID), logCtx); ok {
+	if cachedAppSpec, ok := appCache.Get(ty.UID(sourceUID)); ok {
 		logCtx.Debugf("Application %s is available in agent cache", app.Name)
 
 		if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
