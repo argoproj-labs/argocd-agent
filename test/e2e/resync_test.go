@@ -1018,6 +1018,60 @@ func sampleRepository() *corev1.Secret {
 	}
 }
 
+// Test_ManagedAppRecreationOnDirectDeletion tests the scenario where:
+// 1. A managed application exists on both principal and managed agent
+// 2. The application is directly deleted from the managed agent (while agent is running)
+// 3. The principal should detect this and recreate the application automatically
+func (suite *ResyncTestSuite) Test_ManagedAppRecreationOnDirectDeletion() {
+	requires := suite.Require()
+	t := suite.T()
+
+	t.Log("Create a managed application")
+	app := suite.createManagedApp()
+	key := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+
+	t.Log("Verify application exists on both principal and managed agent")
+	// Verify on principal
+	principalApp := argoapp.Application{}
+	err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Name: app.Name, Namespace: "agent-managed"}, &principalApp, metav1.GetOptions{})
+	requires.NoError(err, "Application should exist on principal")
+
+	// Verify on managed agent
+	managedApp := argoapp.Application{}
+	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &managedApp, metav1.GetOptions{})
+	requires.NoError(err, "Application should exist on managed agent")
+
+	t.Log("Delete application directly from managed agent")
+	err = suite.ManagedAgentClient.Delete(suite.Ctx, &argoapp.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      app.Name,
+			Namespace: "argocd",
+		},
+	}, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	t.Log("Verify application is deleted from managed agent")
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		return err != nil
+	}, 10*time.Second, 1*time.Second, "Application should be deleted from managed agent")
+
+	t.Log("Verify application is automatically recreated on managed agent")
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &app, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 2*time.Second, "Application should be recreated on managed agent")
+
+	t.Log("Verify recreated application has correct spec")
+	recreatedApp := argoapp.Application{}
+	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &recreatedApp, metav1.GetOptions{})
+	requires.NoError(err)
+	requires.Equal(principalApp.Spec.Source.RepoURL, recreatedApp.Spec.Source.RepoURL, "Recreated app should have same source")
+	requires.Equal(principalApp.Spec.Destination.Namespace, recreatedApp.Spec.Destination.Namespace, "Recreated app should have same namespace")
+}
+
 func TestResyncTestSuite(t *testing.T) {
 	suite.Run(t, new(ResyncTestSuite))
 }
