@@ -140,9 +140,11 @@
       "description": "Agent metrics port (env/config value)"
     },
     "tlsClientInSecure": {
-      "type": "string",
-      "enum": ["true", "false"],
-      "description": "Whether to skip TLS verification for client (string)"
+      "anyOf": [
+        { "type": "string", "enum": ["true", "false"] },
+        { "type": "boolean" }
+      ],
+      "description": "Whether to skip TLS verification for client (can be boolean or string)"
     },
     "healthzPort": {
       "type": "string",
