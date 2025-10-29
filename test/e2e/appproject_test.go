@@ -73,8 +73,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Managed() {
 	requires.Equal("in-cluster", mappProject.Spec.Destinations[0].Name)
 	requires.Equal("https://kubernetes.default.svc", mappProject.Spec.Destinations[0].Server)
 
-	requires.Len(mappProject.Spec.SourceNamespaces, 1)
-	requires.Equal("agent-managed", mappProject.Spec.SourceNamespaces[0])
+	requires.Nil(mappProject.Spec.SourceNamespaces)
 
 	// Modify the appProject on the principal and ensure the change is propagated
 	// to the managed-agent
