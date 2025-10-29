@@ -259,6 +259,37 @@ func (suite *CacheTestSuite) Test_RevertAutonomousAppDeletion() {
 	}, 30*time.Second, 1*time.Second)
 }
 
+// This test validates the scenario when a user deletes an application directly in the managed-cluster,
+// the agent should detect the unauthorized deletion and recreate the application to match principal.
+func (suite *CacheTestSuite) Test_RevertManagedAppDeletion() {
+	requires := suite.Require()
+	t := suite.T()
+
+	// Create a managed application in the principal-cluster and ensure it is deployed into managed-cluster
+	app := createApp(suite.Ctx, suite.PrincipalClient, requires)
+	principalKey := fixture.ToNamespacedName(&app)
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, principalKey, agentKey, requires)
+
+	t.Log("Delete application directly from managed agent")
+	requires.NoError(suite.ManagedAgentClient.Delete(suite.Ctx, &argoapp.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      app.Name,
+			Namespace: "argocd",
+		},
+	}, metav1.DeleteOptions{}))
+
+	t.Log("Verify application is automatically recreated on managed agent")
+	requires.Eventually(func() bool {
+		got := argoapp.Application{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &got, metav1.GetOptions{})
+		return err == nil
+	}, 60*time.Second, 2*time.Second)
+
+	t.Log("Verify recreated application matches principal's desired spec")
+	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, t)
+}
+
 func (suite *CacheTestSuite) Test_RevertAppProjectUpdatesManagedMode() {
 	requires := suite.Require()
 

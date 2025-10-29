@@ -255,21 +255,6 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			// When we receive an 'application deleted' event from a managed agent, it should only cause the principal application to be deleted IF the principal Application is ALSO in the deletion state (deletionTimestamp is non-nil)
 			if app.DeletionTimestamp == nil {
 				logCtx.Warn("application was detected as deleted from managed agent, even though principal application is not in deletion state")
-				// In managed mode, if the application was deleted from the agent but the principal
-				// application is not in deletion state, we should recreate it by sending the
-				// application spec back to the managed agent
-				logCtx.Info("Recreating application in managed agent to maintain desired state")
-
-				// Send the application spec to the managed agent to recreate it
-				ev := s.events.ApplicationEvent(event.SpecUpdate, app)
-				q := s.queues.SendQ(agentName)
-				if q == nil {
-					logCtx.Error("Send queue not found for agent, cannot recreate application")
-					return fmt.Errorf("send queue not found for agent %s", agentName)
-				}
-				q.Add(ev)
-				logCtx.Infof("Sent application spec to managed agent %s to recreate application %s", agentName, app.Name)
-
 				return nil
 			}
 

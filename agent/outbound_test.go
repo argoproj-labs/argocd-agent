@@ -7,6 +7,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -17,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 func Test_addAppCreationToQueue(t *testing.T) {
@@ -163,6 +165,69 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 		items := a.queues.SendQ(defaultQueueName)
 		assert.Equal(t, 0, items.Len())
 		require.False(t, a.appManager.IsManaged("agent/guestbook"))
+	})
+	t.Run("Recreation of application from principal when deleted", func(t *testing.T) {
+		// Create a fresh agent for this test
+		testAgent, _ := newAgent(t)
+		testAgent.remote.SetClientID("agent")
+		testAgent.emitter = event.NewEventSource("principal")
+		testAgent.mode = types.AgentModeManaged
+
+		// Create an app with source UID annotation (from principal)
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "guestbook",
+				Namespace: "agent",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "uid-123",
+				},
+			},
+		}
+
+		// App must be already managed for event to be generated
+		_ = testAgent.appManager.Manage("agent/guestbook")
+		defer testAgent.appManager.ClearManaged()
+
+		// Don't mark the deletion as expected, so it should be recreated
+		testAgent.addAppDeletionToQueue(app)
+
+		// Should have recreated the app (no event in queue because recreation happened)
+		assert.Equal(t, 0, testAgent.queues.SendQ(defaultQueueName).Len())
+
+		// Verify the app is still managed (recreated)
+		assert.True(t, testAgent.appManager.IsManaged("agent/guestbook"))
+	})
+	t.Run("No recreation when deletion is expected from principal", func(t *testing.T) {
+		// Create a fresh agent for this test
+		testAgent, _ := newAgent(t)
+		testAgent.remote.SetClientID("agent")
+		testAgent.emitter = event.NewEventSource("principal")
+		testAgent.mode = types.AgentModeManaged
+
+		// Create an app with source UID annotation (from principal)
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "guestbook",
+				Namespace: "agent",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "uid-123",
+				},
+			},
+		}
+
+		// App must be already managed for event to be generated
+		_ = testAgent.appManager.Manage("agent/guestbook")
+		defer testAgent.appManager.ClearManaged()
+
+		// Mark the deletion as expected
+		testAgent.deletions.MarkExpected(k8stypes.UID("uid-123"))
+
+		testAgent.addAppDeletionToQueue(app)
+
+		// Should have sent delete event (not recreated)
+		assert.Equal(t, 1, testAgent.queues.SendQ(defaultQueueName).Len())
+		ev, _ := testAgent.queues.SendQ(defaultQueueName).Get()
+		assert.Equal(t, event.Delete.String(), ev.Type())
 	})
 }
 
