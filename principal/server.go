@@ -32,7 +32,7 @@ import (
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
-	appCache "github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
@@ -146,17 +146,19 @@ type Server struct {
 	resources *resources.AgentResources
 	// resyncStatus indicates whether an agent has been resyned after the principal restarts
 	resyncStatus *resyncStatus
-	// expectedDeletions tracks applications that are expected to be deleted (agent-initiated)
-	// This is used to differentiate between user-initiated and agent-initiated deletions
-	expectedDeletions map[string]bool
-	// expectedDeletionsLock protects the expectedDeletions map
-	expectedDeletionsLock sync.RWMutex
 	// notifyOnConnect will notify to run the handlers when an agent connects to the principal
 	notifyOnConnect chan types.Agent
 	// handlers to run when an agent connects to the principal
 	handlersOnConnect []handlersOnConnect
 
 	eventWriters *event.EventWritersMap
+
+	// sourceCache is a cache of resources from the source. We use it to revert any changes made to the local resources.
+	sourceCache *cache.SourceCache
+
+	// deletions tracks valid deletions from the source.
+	// This is used to differentiate between valid and invalid deletions
+	deletions *manager.DeletionTracker
 }
 
 type handlersOnConnect func(agent types.Agent) error
@@ -178,19 +180,20 @@ const defaultRedisProxyListenerAddr = "0.0.0.0:6379"
 
 func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace string, opts ...ServerOption) (*Server, error) {
 	s := &Server{
-		options:           defaultOptions(),
-		queues:            queue.NewSendRecvQueues(),
-		namespace:         namespace,
-		noauth:            noAuthEndpoints,
-		version:           version.New("argocd-agent"),
-		kubeClient:        kubeClient,
-		resyncStatus:      newResyncStatus(),
-		resources:         resources.NewAgentResources(),
-		notifyOnConnect:   make(chan types.Agent),
-		eventWriters:      event.NewEventWritersMap(),
-		repoToAgents:      NewMapToSet(),
-		projectToRepos:    NewMapToSet(),
-		expectedDeletions: make(map[string]bool),
+		options:         defaultOptions(),
+		queues:          queue.NewSendRecvQueues(),
+		namespace:       namespace,
+		noauth:          noAuthEndpoints,
+		version:         version.New("argocd-agent"),
+		kubeClient:      kubeClient,
+		resyncStatus:    newResyncStatus(),
+		resources:       resources.NewAgentResources(),
+		notifyOnConnect: make(chan types.Agent),
+		eventWriters:    event.NewEventWritersMap(),
+		repoToAgents:    NewMapToSet(),
+		projectToRepos:  NewMapToSet(),
+		sourceCache:     cache.NewSourceCache(),
+		deletions:       manager.NewDeletionTracker(),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
@@ -429,19 +432,11 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("Starting %s (server) v%s (allowed_namespaces=%v)", s.version.Name(), s.version.Version(), s.options.namespaces)
 	}
 
-	// We need to maintain a cache to keep applications in sync with last known state of
-	// autonomous-agent in case it is disconnected with agent or application on the control-plane is modified.
-	log().Infof("Recreating application spec cache from existing resources on cluster")
-	appList, err := s.appManager.List(ctx, backend.ApplicationSelector{})
-	if err != nil {
-		log().Errorf("Error while fetching list of applications: %v", err)
-	}
-
-	for _, app := range appList {
-		sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
-		if exists {
-			appCache.SetApplicationSpec(k8stypes.UID(sourceUID), app.Spec, log())
-		}
+	// We need to maintain a cache to keep resources in sync with last known state of
+	// autonomous-agent in case it is disconnected with agent or resources on the control-plane are modified.
+	if err := s.populateSourceCache(ctx); err != nil {
+		log().WithError(err).Error("failed to populate the source cache")
+		return err
 	}
 
 	if s.options.serveGRPC {
@@ -465,7 +460,7 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	go s.RunHandlersOnConnect(s.ctx)
 
-	err = s.StartEventProcessor(s.ctx)
+	err := s.StartEventProcessor(s.ctx)
 	if err != nil {
 		return nil
 	}
@@ -862,26 +857,6 @@ func (s *Server) TokenIssuerForE2EOnly() issuer.Issuer {
 	return s.issuer
 }
 
-// markExpectedDeletion marks an application as expected to be deleted (agent-initiated)
-func (s *Server) markExpectedDeletion(appKey string) {
-	s.expectedDeletionsLock.Lock()
-	defer s.expectedDeletionsLock.Unlock()
-	s.expectedDeletions[appKey] = true
-	log().WithField("app_key", appKey).Trace("Marked application for expected deletion")
-}
-
-// isExpectedDeletion checks if an application deletion was expected and removes it from tracking
-func (s *Server) isExpectedDeletion(appKey string) bool {
-	s.expectedDeletionsLock.Lock()
-	defer s.expectedDeletionsLock.Unlock()
-	expected, exists := s.expectedDeletions[appKey]
-	if exists {
-		delete(s.expectedDeletions, appKey)
-		log().WithField("app_key", appKey).Trace("Expected deletion observed")
-	}
-	return expected
-}
-
 func log() *logrus.Entry {
 	return logging.ModuleLogger("server")
 }
@@ -912,4 +887,48 @@ func (s *Server) setAgentMode(namespace string, mode types.AgentMode) {
 func (s *Server) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) populateSourceCache(ctx context.Context) error {
+	log().Infof("Recreating application spec cache from existing resources on cluster")
+	appList, err := s.appManager.List(ctx, backend.ApplicationSelector{Namespaces: []string{s.namespace}})
+	if err != nil {
+		return err
+	}
+
+	for _, app := range appList {
+		sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			s.sourceCache.Application.Set(k8stypes.UID(sourceUID), app.Spec)
+		}
+	}
+
+	log().Infof("Recreating appProject spec cache from existing resources on cluster")
+	appProjectList, err := s.projectManager.List(ctx, backend.AppProjectSelector{Namespace: s.namespace})
+	if err != nil {
+		return err
+	}
+
+	for _, appProject := range appProjectList {
+		sourceUID, exists := appProject.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			s.sourceCache.AppProject.Set(k8stypes.UID(sourceUID), appProject.Spec)
+		}
+	}
+
+	log().Infof("Recreating repository spec cache from existing resources on cluster")
+	repoList, err := s.repoManager.List(ctx, backend.RepositorySelector{Namespace: s.namespace})
+	if err != nil {
+		return err
+	}
+
+	for _, repo := range repoList {
+		sourceUID, exists := repo.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			s.sourceCache.Repository.Set(k8stypes.UID(sourceUID), repo.Data)
+		}
+	}
+
+	log().Infof("Source cache populated successfully")
+	return nil
 }

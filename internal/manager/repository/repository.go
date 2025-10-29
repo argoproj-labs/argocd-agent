@@ -18,15 +18,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -113,6 +116,10 @@ func (m *RepositoryManager) Delete(ctx context.Context, name, namespace string, 
 
 func (m *RepositoryManager) List(ctx context.Context, selector backend.RepositorySelector) ([]corev1.Secret, error) {
 	return m.backend.List(ctx, selector)
+}
+
+func (m *RepositoryManager) Get(ctx context.Context, name, namespace string) (*corev1.Secret, error) {
+	return m.backend.Get(ctx, name, namespace)
 }
 
 // UpdateManagedRepository updates the Repository resource on the agent when it is in
@@ -227,6 +234,41 @@ func (m *RepositoryManager) update(ctx context.Context, upsert bool, incoming *c
 		return ierr
 	})
 	return updated, err
+}
+
+// RevertRepositoryChanges compares the actual spec with expected spec stored in cache,
+// if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as the source cluster.
+func (m *RepositoryManager) RevertRepositoryChanges(ctx context.Context, repo *corev1.Secret, repoCache *cache.ResourceCache[map[string][]byte]) bool {
+	logCtx := log().WithFields(logrus.Fields{
+		"component":       "RevertRepositoryChanges",
+		"repository":      repo.Name,
+		"resourceVersion": repo.ResourceVersion,
+	})
+
+	sourceUID, exists := repo.Annotations[manager.SourceUIDAnnotation]
+	if !exists {
+		return false
+	}
+
+	if cachedData, ok := repoCache.Get(types.UID(sourceUID)); ok {
+		logCtx.Debugf("Repository is available in agent cache")
+
+		if isEqual := reflect.DeepEqual(cachedData, repo.Data); !isEqual {
+			repo.Data = cachedData
+			logCtx.Infof("Reverting modifications done to repository")
+			if _, err := m.UpdateManagedRepository(ctx, repo); err != nil {
+				logCtx.Errorf("Unable to revert modifications done in repository. Error: %v", err)
+				return false
+			}
+			return true
+		} else {
+			logCtx.Debugf("Repository is already in sync with source cache")
+		}
+	} else {
+		logCtx.Errorf("Repository is not available in agent cache")
+	}
+
+	return false
 }
 
 func log() *logrus.Entry {

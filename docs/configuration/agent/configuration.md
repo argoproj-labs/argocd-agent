@@ -67,9 +67,9 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Default**: `""` (empty)
 - **Format**: `<method>:<configuration>`
 - **Valid Methods**:
-  - `userpass:/path/to/creds/file` - Username/password authentication
-  - `mtls:regex_pattern` - Mutual TLS authentication with agent ID extraction
-- **Example**: `"userpass:/app/config/creds/userpass.creds"`
+  - `userpass:/path/to/creds/file` - Username/password authentication **[DEPRECATED - not suited for use outside development environments]**
+  - `mtls:regex_pattern` - Mutual TLS authentication with agent ID extraction **(Recommended)**
+- **Example**: `"mtls:^CN=(.+)$"`
 
 ### TLS Configuration
 
@@ -314,7 +314,7 @@ data:
   agent.mode: "autonomous"
   agent.namespace: "argocd"
   agent.log.level: "info"
-  agent.creds: "userpass:/app/config/creds/userpass.creds"
+  agent.creds: "mtls:^CN=(.+)$"  # Use mTLS (recommended); userpass is deprecated
   agent.tls.client.insecure: "false"
   agent.tls.root-ca-secret-name: "argocd-agent-ca"
   agent.tls.secret-name: "argocd-agent-client-tls"

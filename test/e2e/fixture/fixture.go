@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 )
 
 const (
@@ -129,8 +130,10 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 
 	// After X seconds, give up waiting for the child objects to be deleted, and remove any finalizers on the object
 	if len(obj.GetFinalizers()) > 0 {
-		obj.SetFinalizers(nil)
-		if err := kclient.Update(ctx, obj, metav1.UpdateOptions{}); err != nil {
+		err := EnsureUpdate(ctx, kclient, obj, func(obj KubeObject) {
+			obj.SetFinalizers(nil)
+		})
+		if err != nil {
 			return err
 		}
 	}
@@ -165,6 +168,33 @@ func WaitForDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) er
 		time.Sleep(1 * time.Second)
 	}
 	return fmt.Errorf("WaitForDeletion: timeout waiting for deletion of %s/%s", key.Namespace, key.Name)
+}
+
+// EnsureUpdate will ensure that the object is updated by retrying if there is a conflict.
+func EnsureUpdate(ctx context.Context, kclient KubeClient, obj KubeObject, updateFn func(obj KubeObject)) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
+		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+
+		// Apply the update function to the object
+		updateFn(obj)
+
+		err = kclient.Update(ctx, obj, metav1.UpdateOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+
+		return nil
+	})
 }
 
 func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient KubeClient, autonomousAgentClient KubeClient, clusterDetails *ClusterDetails) error {
