@@ -24,6 +24,7 @@ import (
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/stretchr/testify/suite"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -365,6 +366,18 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	})
 	requires.NoError(err)
 
+	// Wait for the pre-sync job to be removed
+	hook := batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pre-post-sync-before",
+			Namespace: "guestbook",
+		},
+	}
+	requires.Eventually(func() bool {
+		err := suite.ManagedAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&hook), &hook, metav1.GetOptions{})
+		return err != nil && errors.IsNotFound(err)
+	}, 60*time.Second, 1*time.Second)
+
 	// Check if the operation has been terminated
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
@@ -448,6 +461,18 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 		AppNamespace: &principalKey.Namespace,
 	})
 	requires.NoError(err)
+
+	// Wait for the pre-sync job to be removed
+	hook := batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pre-post-sync-before",
+			Namespace: "guestbook",
+		},
+	}
+	requires.Eventually(func() bool {
+		err := suite.AutonomousAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&hook), &hook, metav1.GetOptions{})
+		return err != nil && errors.IsNotFound(err)
+	}, 60*time.Second, 1*time.Second)
 
 	// Check if the operation has been terminated
 	requires.Eventually(func() bool {
