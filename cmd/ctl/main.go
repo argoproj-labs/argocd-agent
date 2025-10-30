@@ -49,6 +49,7 @@ func NewRootCommand() *cobra.Command {
 	configGroup := &cobra.Group{ID: "config", Title: "Configuration"}
 	command.AddGroup(configGroup)
 	command.AddCommand(NewAgentCommand())
+	command.AddCommand(NewCheckConfigCommand())
 	command.AddCommand(NewPKICommand())
 	command.AddCommand(NewJWTCommand())
 	command.AddCommand(NewVersionCommand())
