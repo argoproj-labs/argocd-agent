@@ -484,17 +484,21 @@ func Test_TerminateOperation(t *testing.T) {
 	t.Run("terminate the app by patching the status.operationState", func(t *testing.T) {
 		mockedBackend := appmock.NewApplication(t)
 
-		// Expect Patch with a JSON Patch array that adds /status/operationState with phase=Terminating
-		patched := &v1alpha1.Application{
+		existing := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "foobar",
 				Namespace: "argocd",
 			},
 			Status: v1alpha1.ApplicationStatus{
 				OperationState: &v1alpha1.OperationState{
-					Phase: synccommon.OperationTerminating,
+					Phase: synccommon.OperationRunning,
 				},
 			},
+		}
+
+		patched := existing.DeepCopy()
+		patched.Status.OperationState = &v1alpha1.OperationState{
+			Phase: synccommon.OperationTerminating,
 		}
 
 		matcher := mock.MatchedBy(func(b []byte) bool {
@@ -510,18 +514,14 @@ func Test_TerminateOperation(t *testing.T) {
 				return false
 			}
 
-			if patch[0].Path != "/status/operationState" {
+			if patch[0].Path != "/status/operationState/phase" {
 				return false
 			}
 
-			val, ok := patch[0].Value.(map[string]any)
-			if !ok {
-				return false
-			}
-			phase, _ := val["phase"].(string)
-			return phase == string(synccommon.OperationTerminating)
+			return patch[0].Value == string(synccommon.OperationTerminating)
 		})
 
+		mockedBackend.On("Get", mock.Anything, "foobar", "argocd").Return(existing, nil)
 		mockedBackend.On("Patch", mock.Anything, "foobar", "argocd", matcher).Return(patched, nil)
 
 		mgr, err := NewApplicationManager(mockedBackend, "argocd", WithRole(manager.ManagerRoleAgent), WithMode(manager.ManagerModeManaged))
