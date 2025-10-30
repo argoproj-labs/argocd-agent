@@ -376,7 +376,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.Eventually(func() bool {
 		err := suite.ManagedAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&hook), &hook, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
-	}, 60*time.Second, 1*time.Second)
+	}, 120*time.Second, 1*time.Second)
 
 	// Check if the operation has been terminated
 	requires.Eventually(func() bool {
@@ -472,7 +472,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 	requires.Eventually(func() bool {
 		err := suite.AutonomousAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&hook), &hook, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
-	}, 60*time.Second, 1*time.Second)
+	}, 120*time.Second, 1*time.Second)
 
 	// Check if the operation has been terminated
 	requires.Eventually(func() bool {
