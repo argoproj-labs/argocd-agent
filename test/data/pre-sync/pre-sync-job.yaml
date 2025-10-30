@@ -1,0 +1,17 @@
+# A pre-sync hook that keeps the sync operation pending for 20 minutes.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: before
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      containers:
+      - name: sleep
+        image: alpine:latest
+        command: ["sleep", "20m"]
+      restartPolicy: Never
+  backoffLimit: 0
