@@ -47,7 +47,8 @@ func SyncApplicationWithOperation(ctx context.Context, appKey types.NamespacedNa
 	if err != nil {
 		return err
 	}
-	app.Operation = &operation
-	err = kclient.Update(ctx, &app, metav1.UpdateOptions{})
-	return err
+
+	return EnsureUpdate(ctx, kclient, &app, func(_ KubeObject) {
+		app.Operation = &operation
+	})
 }

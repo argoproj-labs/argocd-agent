@@ -31,6 +31,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	ty "k8s.io/apimachinery/pkg/types"
@@ -343,7 +344,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		existing.Finalizers = incoming.Finalizers
 		existing.Spec = incoming.Spec
 		existing.Status = *incoming.Status.DeepCopy()
-		existing.Operation = nil
+		existing.Operation = incoming.Operation.DeepCopy()
 		logCtx.Infof("Updating")
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
@@ -361,8 +362,9 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 				DeletionGracePeriodSeconds: incoming.DeletionGracePeriodSeconds,
 				Finalizers:                 incoming.Finalizers,
 			},
-			Spec:   incoming.Spec,
-			Status: incoming.Status,
+			Spec:      incoming.Spec,
+			Status:    incoming.Status,
+			Operation: incoming.Operation,
 		}
 		source := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
@@ -370,20 +372,14 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 				DeletionGracePeriodSeconds: existing.DeletionGracePeriodSeconds,
 				Finalizers:                 existing.Finalizers,
 			},
-			Spec:   existing.Spec,
-			Status: existing.Status,
+			Spec:      existing.Spec,
+			Status:    existing.Status,
+			Operation: existing.Operation,
 		}
 		patch, err := jsondiff.Compare(source, target)
 		if err != nil {
 			return nil, err
 		}
-
-		// Append remove operation for operation field if it exists. We neither
-		// want nor need it on the control plane's resource.
-		if existing.Operation != nil {
-			patch = append(patch, jsondiff.Operation{Type: "remove", Path: "/operation"})
-		}
-
 		return patch, nil
 	})
 	if err == nil {
@@ -422,24 +418,21 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Status = *incoming.Status.DeepCopy()
+		existing.Operation = incoming.Operation
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		refresh, incomingRefresh := incoming.Annotations["argocd.argoproj.io/refresh"]
 		_, existingRefresh := existing.Annotations["argocd.argoproj.io/refresh"]
 		target := &v1alpha1.Application{
-			Status: incoming.Status,
+			Status:    incoming.Status,
+			Operation: incoming.Operation,
 		}
 		source := &v1alpha1.Application{
-			Status: existing.Status,
+			Status:    existing.Status,
+			Operation: existing.Operation,
 		}
 		patch, err := jsondiff.Compare(source, target)
 		if err != nil {
 			return nil, err
-		}
-
-		// We are not interested at keeping .operation on the control plane,
-		// because there's no controller to handle it.
-		if existing.Operation != nil {
-			patch = append(patch, jsondiff.Operation{Type: "remove", Path: "/operation"})
 		}
 
 		// If the incoming app doesn't have the refresh annotation set, we need
@@ -524,6 +517,51 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
 	}
 	return updated, err
+}
+
+// TerminateOperation aborts a running sync operation by setting .status.operationState.phase to Terminating.
+func (m *ApplicationManager) TerminateOperation(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+	incoming.SetNamespace(m.namespace)
+	logCtx := log().WithFields(logrus.Fields{
+		"component":       "TerminateOperation",
+		"application":     incoming.QualifiedName(),
+		"resourceVersion": incoming.ResourceVersion,
+		"namespace":       incoming.Namespace,
+	})
+
+	if !m.role.IsAgent() {
+		return nil, fmt.Errorf("TerminateOperation should only be called by an agent: %s", incoming.Name)
+	}
+
+	existing, err := m.applicationBackend.Get(ctx, incoming.Name, incoming.Namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application %s: %w", incoming.QualifiedName(), err)
+	}
+
+	if existing.Status.OperationState == nil {
+		return nil, fmt.Errorf("application %s has no operation state", incoming.QualifiedName())
+	}
+
+	patch := jsondiff.Patch{
+		jsondiff.Operation{
+			Type:  "add",
+			Path:  "/status/operationState/phase",
+			Value: synccommon.OperationTerminating,
+		},
+	}
+
+	jsonpatch, err := json.Marshal(&patch)
+	if err != nil {
+		return nil, fmt.Errorf("could not marshal jsonpatch: %w", err)
+	}
+
+	updated, err := m.applicationBackend.Patch(ctx, incoming.Name, incoming.Namespace, jsonpatch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to terminate operation for %s: %w", incoming.QualifiedName(), err)
+	}
+
+	logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Set operation phase to Terminating")
+	return updated, nil
 }
 
 // Delete will delete an application resource. If Delete is called by the

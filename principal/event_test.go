@@ -372,7 +372,8 @@ func Test_UpdateEvents(t *testing.T) {
 		// Check that the destination is set to the cluster mapping
 		assert.Equal(t, "foo", napp.Spec.Destination.Name)
 		assert.Equal(t, "", napp.Spec.Destination.Server)
-		assert.Nil(t, napp.Operation)
+		assert.NotNil(t, napp.Operation)
+		assert.Equal(t, upApp.Operation, napp.Operation)
 		assert.Equal(t, "foo-default", napp.Spec.Project)
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, napp.Status.Sync.Status)
 	})
