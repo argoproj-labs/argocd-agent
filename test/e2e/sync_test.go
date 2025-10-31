@@ -304,9 +304,9 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
 			Source: &argoapp.ApplicationSource{
-				RepoURL:        "https://github.com/chetan-rns/argocd-example-apps",
+				RepoURL:        "https://github.com/argoproj-labs/argocd-agent",
 				TargetRevision: "HEAD",
-				Path:           "pre-post-sync",
+				Path:           "test/data/pre-sync",
 			},
 			Destination: argoapp.ApplicationDestination{
 				Server:    "https://kubernetes.default.svc",
@@ -400,9 +400,9 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
 			Source: &argoapp.ApplicationSource{
-				RepoURL:        "https://github.com/chetan-rns/argocd-example-apps",
+				RepoURL:        "https://github.com/argoproj-labs/argocd-agent",
 				TargetRevision: "HEAD",
-				Path:           "pre-post-sync",
+				Path:           "test/data/pre-sync",
 			},
 			Destination: argoapp.ApplicationDestination{
 				Server:    "https://kubernetes.default.svc",
