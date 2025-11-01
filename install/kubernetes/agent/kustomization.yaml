@@ -8,7 +8,6 @@ resources:
 - agent-params-cm.yaml
 - agent-metrics-service.yaml
 - agent-healthz-service.yaml
-- agent-networkpolicy-redis.yaml
 
 images:
 - name: argocd-agent
