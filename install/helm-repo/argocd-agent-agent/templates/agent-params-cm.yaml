@@ -20,6 +20,12 @@ data:
   #   extracting the agent ID from client cert subject.
   # Default: ""
   agent.creds: {{ .Values.auth }}
+  # agent.tls.secret-name: Name of the secret containing the TLS certificate.
+  # Default: "argocd-agent-client-tls"
+  agent.tls.secret-name: {{ .Values.tlsSecretName | quote }}
+  # agent.tls.root-ca-secret-name: Name of the secret containing the root CA certificate.
+  # Default: "argocd-agent-principal-ca"
+  agent.tls.root-ca-secret-name: {{ .Values.tlsRootCASecretName | quote }}
   # agent.tls.client.insecure: Whether to skip the validation of the remote TLS
   # credentials. Insecure. Do only use for development purposes.
   # Default: false
@@ -60,3 +66,27 @@ data:
   # agent.redis.address: The address of the Redis server.
   # Default: "argocd-redis:6379"
   agent.redis.address: {{ .Values.redisAddress | quote }}
+  # agent.redis.username: The username for Redis authentication.
+  # Default: ""
+  agent.redis.username: {{ .Values.redisUsername | quote }}
+  # agent.keep-alive.interval: The keep-alive interval for connections
+  # Default: "30s"
+  agent.keep-alive.interval: {{ .Values.keepAliveInterval | quote }}
+  # agent.log.format: The log format for the agent (text or json).
+  # Default: "text"
+  agent.log.format: {{ .Values.logFormat | quote }}
+  # agent.websocket.enabled: Whether to enable WebSocket connections.
+  # Default: false
+  agent.websocket.enabled: {{ .Values.enableWebSocket | quote }}
+  # agent.compression.enabled: Whether to enable gRPC compression.
+  # Default: false
+  agent.compression.enabled: {{ .Values.enableCompression | quote }}
+  # agent.pprof.port: Port for pprof server (0 disables pprof).
+  # Default: 0
+  agent.pprof.port: {{ .Values.pprofPort | quote }}
+  # agent.resource-proxy.enabled: Whether to enable resource proxy.
+  # Default: true
+  agent.resource-proxy.enabled: {{ .Values.enableResourceProxy | quote }}
+  # agent.cache.refresh-interval: Cache refresh interval.
+  # Default: "10s"
+  agent.cache.refresh-interval: {{ .Values.cacheRefreshInterval | quote }}

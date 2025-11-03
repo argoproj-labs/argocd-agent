@@ -20,6 +20,8 @@ image:
 replicaCount: 1
 # -- Name of the TLS Secret containing client cert/key for mTLS.
 tlsSecretName: "argocd-agent-client-tls"
+# -- Name of the Secret containing root CA certificate.
+tlsRootCASecretName: "argocd-agent-ca"
 # -- Name of the Secret containing agent username/password (if used).
 userPasswordSecretName: "argocd-agent-agent-userpass"
 # -- Resource requests and limits for the agent Pod.
@@ -94,6 +96,8 @@ agentMode: "autonomous"
 auth: "mtls:any"
 # -- Log level for the agent.
 logLevel: "info"
+# -- Log format for the agent (text or json).
+logFormat: "text"
 # -- Principal server address (hostname or host:port).
 server: "principal.server.address.com"
 # -- Principal server port.
@@ -106,9 +110,29 @@ tlsClientInSecure: "false"
 healthzPort: "8002"
 # -- Redis address used by the agent.
 redisAddress: "argocd-redis:6379"
-
+# -- Redis username for authentication.
+redisUsername: ""
+# -- ArgoCD Redis password secret name.
+argoCdRedisSecretName: "argocd-redis"
+# -- ArgoCD Redis password key.
+argoCdRedisPasswordKey: "auth"
+# -- Whether to enable WebSocket connections.
+enableWebSocket: false
+# -- Whether to enable gRPC compression.
+enableCompression: false
+# -- Port for pprof server (0 disables pprof).
+pprofPort: 0
+# -- Whether to enable resource proxy.
+enableResourceProxy: true
+# -- Cache refresh interval.
+cacheRefreshInterval: "10s"
+# -- Keep-alive interval for connections.
+keepAliveInterval: "50s"
+# -- Path to the TLS client key.
 tlsClientKeyPath: "/app/config/tls/tls.key"
+# -- Path to the TLS client certificate.
 tlsClientCertPath: "/app/config/tls/tls.crt"
+# -- Path to the TLS root CA certificate.
 tlsRootCAPath: "/app/config/tls/ca.crt"
 
 networkPolicy:
