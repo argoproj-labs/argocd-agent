@@ -15,7 +15,6 @@
 package e2e
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -382,7 +381,6 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		fmt.Println(app.Status.OperationState.Phase, app.Status.OperationState.Message)
 		return err == nil && app.Status.OperationState != nil && app.Status.OperationState.Phase == synccommon.OperationFailed &&
 			app.Status.OperationState.Message == "Operation terminated"
 	}, 60*time.Second, 1*time.Second)
@@ -478,7 +476,6 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		fmt.Println(app.Status.OperationState.Phase, app.Status.OperationState.Message)
 		return err == nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationFailed &&
 			app.Status.OperationState.Message == "Operation terminated"

@@ -460,7 +460,6 @@ func (c *ArgoRestClient) TerminateOperation(name, namespace string) error {
 		"name", name,
 	)
 	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/operation", name)
-	reqURL.RawQuery = "cascade=false"
 
 	req, err := http.NewRequest(http.MethodDelete, reqURL.String(), nil)
 	if err != nil {
