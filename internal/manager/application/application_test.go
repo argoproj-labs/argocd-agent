@@ -26,6 +26,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/sirupsen/logrus"
+	"github.com/wI2L/jsondiff"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
+	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
@@ -278,6 +280,9 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 					Namespace: "guestbook",
 				},
 			},
+			Operation: &v1alpha1.Operation{
+				InitiatedBy: v1alpha1.OperationInitiator{Username: "incoming"},
+			},
 			Status: v1alpha1.ApplicationStatus{
 				Sync: v1alpha1.SyncStatus{
 					Status: v1alpha1.SyncStatusCodeOutOfSync,
@@ -334,7 +339,8 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		require.Contains(t, updated.Labels, "bar")
 		require.Contains(t, updated.Labels, "some")
 		require.Equal(t, updated.Spec.Source.Path, ".")
-		require.Nil(t, updated.Operation)
+		require.NotNil(t, updated.Operation)
+		require.Equal(t, incoming.Operation, updated.Operation)
 	})
 }
 
@@ -471,6 +477,74 @@ func Test_ManagerUpdateOperation(t *testing.T) {
 		updated, err := mgr.UpdateOperation(context.TODO(), incoming)
 		require.NoError(t, err)
 		require.NotNil(t, updated)
+	})
+}
+
+func Test_TerminateOperation(t *testing.T) {
+	t.Run("terminate the app by patching the status.operationState", func(t *testing.T) {
+		mockedBackend := appmock.NewApplication(t)
+
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+			},
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: synccommon.OperationRunning,
+				},
+			},
+		}
+
+		patched := existing.DeepCopy()
+		patched.Status.OperationState = &v1alpha1.OperationState{
+			Phase: synccommon.OperationTerminating,
+		}
+
+		matcher := mock.MatchedBy(func(b []byte) bool {
+			var patch jsondiff.Patch
+			if err := json.Unmarshal(b, &patch); err != nil {
+				return false
+			}
+			if len(patch) != 1 {
+				return false
+			}
+
+			if patch[0].Type != "add" {
+				return false
+			}
+
+			if patch[0].Path != "/status/operationState/phase" {
+				return false
+			}
+
+			return patch[0].Value == string(synccommon.OperationTerminating)
+		})
+
+		mockedBackend.On("Get", mock.Anything, "foobar", "argocd").Return(existing, nil)
+		mockedBackend.On("Patch", mock.Anything, "foobar", "argocd", matcher).Return(patched, nil)
+
+		mgr, err := NewApplicationManager(mockedBackend, "argocd", WithRole(manager.ManagerRoleAgent), WithMode(manager.ManagerModeManaged))
+		require.NoError(t, err)
+
+		incoming := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foobar"}}
+		updated, err := mgr.TerminateOperation(context.TODO(), incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		require.NotNil(t, updated.Status.OperationState)
+		require.Equal(t, synccommon.OperationTerminating, updated.Status.OperationState.Phase)
+	})
+
+	t.Run("should be called only by an agent", func(t *testing.T) {
+		mockedBackend := appmock.NewApplication(t)
+		mgr, err := NewApplicationManager(mockedBackend, "argocd", WithRole(manager.ManagerRolePrincipal))
+		require.NoError(t, err)
+
+		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foobar"}}
+
+		_, err = mgr.TerminateOperation(context.TODO(), app)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "TerminateOperation should only be called by an agent")
 	})
 }
 

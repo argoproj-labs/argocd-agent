@@ -178,6 +178,12 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		if err != nil {
 			logCtx.Errorf("Error updating application: %v", err)
 		}
+	case event.TerminateOperation:
+		// Terminate a running sync operation on the agent cluster
+		_, err = a.appManager.TerminateOperation(a.context, incomingApp)
+		if err != nil {
+			logCtx.Errorf("Error terminating application operation: %v", err)
+		}
 	case event.Delete:
 		err = a.deleteApplication(incomingApp)
 		if err != nil {
