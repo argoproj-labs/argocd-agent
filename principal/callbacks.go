@@ -377,6 +377,10 @@ func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
 		s.repoToAgents.Add(outbound.Name, agent)
 		logCtx.Tracef("Added repository %s to send queue, total length now %d", outbound.Name, q.Len())
 	}
+
+	if s.metrics != nil {
+		s.metrics.RepositoryCreated.Inc()
+	}
 }
 
 func (s *Server) updateRepositoryCallback(old, new *corev1.Secret) {
@@ -389,6 +393,10 @@ func (s *Server) updateRepositoryCallback(old, new *corev1.Secret) {
 	logCtx.Info("Update repository event")
 
 	s.syncRepositoryUpdatesToAgents(old, new, logCtx)
+
+	if s.metrics != nil {
+		s.metrics.RepositoryUpdated.Inc()
+	}
 }
 
 func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
@@ -443,6 +451,10 @@ func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
 
 		s.repoToAgents.Delete(outbound.Name, agent)
 		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added repository delete event to send queue")
+	}
+
+	if s.metrics != nil {
+		s.metrics.RepositoryDeleted.Inc()
 	}
 }
 
