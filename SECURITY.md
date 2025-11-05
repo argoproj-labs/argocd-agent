@@ -14,7 +14,7 @@ Only the most recent minor release (e.g. 1.0 or 1.1) will receive security fixes
 
 If you find a security vulnerability in the argocd-agent code, we appreciate your responsible disclosure to us.
 
-Please report vulnerabilities confidentially using GitHub's private security issue feature. You can create such a confidential vulnerability report [here](https://github.com/argoproj-labs/argocd-agent/security/advisories/new).
+Please report vulnerabilities confidentially using GitHub's private security issue feature. You can [create a confidential security advisory](https://github.com/argoproj-labs/argocd-agent/security/advisories/new).
 
 We will do our best to react quickly on your inquiry, and to coordinate a fix and disclosure with you. Sometimes, it might take a little longer for us to react (e.g. out of office conditions), so please bear with us in these cases.
 
