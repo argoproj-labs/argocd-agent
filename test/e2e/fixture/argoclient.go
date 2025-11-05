@@ -229,11 +229,13 @@ func (c *ArgoRestClient) RunResourceAction(app *v1alpha1.Application, action, gr
 
 // GetLogsWithOpts fetches static pod logs and allows specifying container and tailLines.
 func (c *ArgoRestClient) GetLogs(app *v1alpha1.Application, namespace, podName, container string, tailLines int) (string, error) {
+	if podName == "" {
+		return "", fmt.Errorf("pod name is required")
+	}
 	u := c.url(
 		"appNamespace", app.Namespace,
 		"project", app.Spec.Project,
 		"namespace", namespace,
-		"podName", podName,
 	)
 	q := u.Query()
 	if container != "" {
@@ -243,7 +245,7 @@ func (c *ArgoRestClient) GetLogs(app *v1alpha1.Application, namespace, podName, 
 		q.Set("tailLines", fmt.Sprint(tailLines))
 	}
 	u.RawQuery = q.Encode()
-	u.Path = fmt.Sprintf("/api/v1/applications/%s/logs", app.Name)
+	u.Path = fmt.Sprintf("/api/v1/applications/%s/pods/%s/logs", app.Name, podName)
 
 	resp, err := c.Do(&http.Request{Method: http.MethodGet, URL: u, Header: make(http.Header)})
 	if err != nil {

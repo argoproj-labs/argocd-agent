@@ -23,7 +23,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi"
-	"github.com/argoproj-labs/argocd-agent/principal/apis/logstream/mock"
+	"github.com/argoproj-labs/argocd-agent/principal/apis/logstreamapi/mock"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"

@@ -72,11 +72,11 @@ func (a *Agent) startLogStreamIfNew(logReq *event.ContainerLogRequest, logCtx *l
 	a.inflightLogs[logReq.UUID] = cancel
 	a.inflightMu.Unlock()
 
-	defer func() {
+	cleanup := func() {
 		a.inflightMu.Lock()
 		delete(a.inflightLogs, logReq.UUID)
 		a.inflightMu.Unlock()
-	}()
+	}
 
 	logCtx.WithFields(logrus.Fields{
 		"uuid":      logReq.UUID,
@@ -88,9 +88,9 @@ func (a *Agent) startLogStreamIfNew(logReq *event.ContainerLogRequest, logCtx *l
 
 	if logReq.Follow {
 		// Handle live logs with early ACK
-		return a.handleLiveStreaming(ctx, logReq, logCtx)
+		return a.handleLiveStreaming(ctx, logReq, logCtx, cleanup)
 	}
-
+	defer cleanup()
 	// Handle static logs with completion ACK
 	return a.handleStaticLogs(ctx, logReq, logCtx)
 }
@@ -145,12 +145,13 @@ func (a *Agent) handleStaticLogs(ctx context.Context, logReq *event.ContainerLog
 }
 
 // handleLiveStreaming handles live log requests (follow=true) with early ACK and resume capability
-func (a *Agent) handleLiveStreaming(ctx context.Context, logReq *event.ContainerLogRequest, logCtx *logrus.Entry) error {
+func (a *Agent) handleLiveStreaming(ctx context.Context, logReq *event.ContainerLogRequest, logCtx *logrus.Entry, cleanup func()) error {
 	// Start streaming with resume capability in background goroutine
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				logCtx.WithField("panic", r).Error("Panic in live log streaming")
+				cleanup()
 			}
 		}()
 
