@@ -52,6 +52,10 @@ type PrincipalMetrics struct {
 	AppProjectUpdated prometheus.Counter
 	AppProjectDeleted prometheus.Counter
 
+	RepositoryCreated prometheus.Counter
+	RepositoryUpdated prometheus.Counter
+	RepositoryDeleted prometheus.Counter
+
 	EventReceived prometheus.Counter
 	EventSent     prometheus.Counter
 
@@ -95,28 +99,41 @@ func NewPrincipalMetrics() *PrincipalMetrics {
 
 		ApplicationCreated: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "principal_applications_created",
-			Help: "The total number of applications created by agents",
+			Help: "The total number of applications created on the control plane",
 		}),
 		ApplicationUpdated: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "principal_applications_updated",
-			Help: "The total number of applications updated by agents",
+			Help: "The total number of applications updated on the control plane",
 		}),
 		ApplicationDeleted: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "principal_applications_deleted",
-			Help: "The total number of applications deleted by agents",
+			Help: "The total number of applications deleted on the control plane",
 		}),
 
 		AppProjectCreated: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "principal_app_projects_created",
-			Help: "The total number of app project created by agents",
+			Help: "The total number of app project created on the control plane",
 		}),
 		AppProjectUpdated: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "principal_app_projects_updated",
-			Help: "The total number of app project updated by agents",
+			Help: "The total number of app project updated on the control plane",
 		}),
 		AppProjectDeleted: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "principal_app_projects_deleted",
-			Help: "The total number of app project deleted by agents",
+			Help: "The total number of app project deleted on the control plane",
+		}),
+
+		RepositoryCreated: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_repositories_created",
+			Help: "The total number of repositories created on the control plane",
+		}),
+		RepositoryUpdated: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_repositories_updated",
+			Help: "The total number of repositories updated on the control plane",
+		}),
+		RepositoryDeleted: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_repositories_deleted",
+			Help: "The total number of repositories deleted on the control plane",
 		}),
 
 		EventReceived: promauto.NewCounter(prometheus.CounterOpts{
