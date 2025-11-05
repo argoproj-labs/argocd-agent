@@ -151,8 +151,8 @@ func (a *Agent) handleLiveStreaming(ctx context.Context, logReq *event.Container
 		defer func() {
 			if r := recover(); r != nil {
 				logCtx.WithField("panic", r).Error("Panic in live log streaming")
-				cleanup()
 			}
+			cleanup()
 		}()
 
 		streamCtx := logCtx.WithField("mode", "live_streaming")
