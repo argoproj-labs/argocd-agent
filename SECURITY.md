@@ -8,15 +8,15 @@ The `argocd-agent` project takes security very serious, and we are committed to 
 
 ## Supported Versions
 
-Only the most recent minor release (e.g. 1.0 or 1.1) will receive security fixes for the time being, and no back-ports will be made.
+Only the most recent minor version (e.g. 1.0 or 1.1) will receive security fixes, and no back-ports will be made.
 
 ## Reporting a Vulnerability
 
 If you find a security vulnerability in the argocd-agent code, we appreciate your responsible disclosure to us.
 
-Please report vulnerabilities confidentially using GitHub's private security issue feature. You can [create a confidential security advisory](https://github.com/argoproj-labs/argocd-agent/security/advisories/new).
+Please report vulnerabilities confidentially using GitHub's private security issue feature. You can [create a confidential vulnerability report](https://github.com/argoproj-labs/argocd-agent/security/advisories/new).
 
-We will do our best to react quickly on your inquiry, and to coordinate a fix and disclosure with you. Sometimes, it might take a little longer for us to react (e.g. out of office conditions), so please bear with us in these cases.
+We will do our best to react quickly on your inquiry, and to coordinate a fix and disclosure with you. Sometimes, it might take a little longer for us to react (e.g. out-of-office conditions), so please bear with us in these cases.
 
 We will publish security advisories using the GitHub Security Advisories feature, which includes issuing a CVE, to keep our community well-informed, and will credit you for your findings (unless you prefer to stay anonymous, of course).
 
