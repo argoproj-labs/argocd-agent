@@ -4,7 +4,7 @@ Policy version 1.0 (2025/11/05)
 
 ## Preface
 
-The `argocd-agent` project takes security very serious, and we are committed to continuously working on improving the security of the project.
+The `argocd-agent` project takes security very seriously, and we are committed to continuously working on improving the security of the project.
 
 ## Supported Versions
 
