@@ -256,8 +256,8 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Default**: `""` (empty)
 - **Format**: `<method>:<configuration>`
 - **Valid Methods**:
-  - `userpass:/path/to/creds/file` - Username/password authentication
-  - `mtls:regex_pattern` - Mutual TLS authentication with agent ID extraction
+  - `userpass:/path/to/creds/file` - Username/password authentication **[DEPRECATED - not suited for use outside development environments]**
+  - `mtls:regex_pattern` - Mutual TLS authentication with agent ID extraction **(Recommended)**
 - **Example**: `"mtls:CN=([^,]+)"`
 
 ### Logging and Debugging

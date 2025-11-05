@@ -64,12 +64,9 @@ When an AppProject is sent to an agent, it undergoes transformation to make it a
      namespace: "guestbook"  # Preserves original namespace restrictions
 ```
 
-2. **Source Namespaces**: Limited to only the agent's namespace:
+2. **Source Namespaces**: Removed completely since they're only used on the control plane for routing
 
-```yaml
-   sourceNamespaces:
-   - agent-production  # The specific agent namespace
-```
+   The `sourceNamespaces` field is used on the control plane to determine which agents should receive the AppProject. Once the AppProject arrives at the agent cluster, this field is removed as it's no longer needed.
 
 3. **Roles**: Removed since they're not relevant on the workload cluster
 
@@ -174,7 +171,7 @@ The transformation logic differs significantly between managed and autonomous ag
 - **Direction**: AppProject flows from principal to agent
 - **Selection**: Uses glob pattern matching on `sourceNamespaces` and `destinations` to determine which agents receive the project
 - **Destinations**: Filtered to only include destinations matching the agent, then transformed to `in-cluster`
-- **Source Namespaces**: Replaced with the single agent namespace
+- **Source Namespaces**: Removed completely since they're only used on the control plane for routing
 - **Name**: Remains unchanged
 
 ### Autonomous Agents (Agent → Principal)

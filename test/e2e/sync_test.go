@@ -19,8 +19,11 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
+	"github.com/argoproj/argo-cd/v3/pkg/apiclient/application"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/stretchr/testify/suite"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -286,6 +289,197 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 		return errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second)
+}
+
+func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
+	requires := suite.Require()
+
+	// Create an application on the principal
+	app := argoapp.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "guestbook",
+			Namespace: "agent-managed",
+		},
+		Spec: argoapp.ApplicationSpec{
+			Project: "default",
+			Source: &argoapp.ApplicationSource{
+				RepoURL:        "https://github.com/argoproj-labs/argocd-agent",
+				TargetRevision: "HEAD",
+				Path:           "test/data/pre-sync",
+			},
+			Destination: argoapp.ApplicationDestination{
+				Server:    "https://kubernetes.default.svc",
+				Namespace: "guestbook",
+			},
+			SyncPolicy: &argoapp.SyncPolicy{
+				SyncOptions: argoapp.SyncOptions{
+					"CreateNamespace=true",
+				},
+			},
+		},
+	}
+	err := suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	principalKey := fixture.ToNamespacedName(&app)
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+
+	// Ensure the app has been pushed to the managed-agent
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+
+	// Sync the app from the control plane
+	err = fixture.SyncApplication(suite.Ctx, principalKey, suite.PrincipalClient)
+	requires.NoError(err)
+
+	// Wait for the sync operation to start on the managed-agent
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
+		return err == nil && app.Status.OperationState != nil &&
+			app.Status.OperationState.Phase == synccommon.OperationRunning
+	}, 60*time.Second, 1*time.Second)
+
+	// Get the Argo server endpoint to use
+	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
+	requires.NoError(err)
+
+	// Read admin secret from principal's cluster
+	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
+	requires.NoError(err)
+
+	// Terminate the operation on the managed-agent
+	argoClient, _, closer, err := createArgoCDAPIClient(suite.Ctx, argoEndpoint, password)
+	requires.NoError(err)
+	defer closer.Close()
+
+	conn, appClient := argoClient.NewApplicationClientOrDie()
+	defer conn.Close()
+
+	_, err = appClient.TerminateOperation(suite.Ctx, &application.OperationTerminateRequest{
+		Name:         &app.Name,
+		AppNamespace: &app.Namespace,
+	})
+	requires.NoError(err)
+
+	// Wait for the pre-sync job to be removed
+	hook := batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pre-post-sync-before",
+			Namespace: "guestbook",
+		},
+	}
+	requires.Eventually(func() bool {
+		err := suite.ManagedAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&hook), &hook, metav1.GetOptions{})
+		return err != nil && errors.IsNotFound(err)
+	}, 120*time.Second, 1*time.Second)
+
+	// Check if the operation has been terminated
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
+		return err == nil && app.Status.OperationState != nil && app.Status.OperationState.Phase == synccommon.OperationFailed &&
+			app.Status.OperationState.Message == "Operation terminated"
+	}, 60*time.Second, 1*time.Second)
+}
+
+func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
+	requires := suite.Require()
+
+	// Create an application on the autonomous-agent's cluster
+	app := argoapp.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "guestbook",
+			Namespace: "argocd",
+		},
+		Spec: argoapp.ApplicationSpec{
+			Project: "default",
+			Source: &argoapp.ApplicationSource{
+				RepoURL:        "https://github.com/argoproj-labs/argocd-agent",
+				TargetRevision: "HEAD",
+				Path:           "test/data/pre-sync",
+			},
+			Destination: argoapp.ApplicationDestination{
+				Server:    "https://kubernetes.default.svc",
+				Namespace: "guestbook",
+			},
+			SyncPolicy: &argoapp.SyncPolicy{
+				SyncOptions: argoapp.SyncOptions{
+					"CreateNamespace=true",
+				},
+			},
+		},
+	}
+	err := suite.AutonomousAgentClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: app.Namespace}
+	principalKey := types.NamespacedName{Name: app.Name, Namespace: "agent-autonomous"}
+
+	// Ensure the app has been pushed to the principal
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+
+	// Sync the app from the control plane
+	err = fixture.SyncApplication(suite.Ctx, principalKey, suite.PrincipalClient)
+	requires.NoError(err)
+
+	// Wait for the sync operation to start on the principal
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
+		return err == nil && app.Status.OperationState != nil &&
+			app.Status.OperationState.Phase == synccommon.OperationRunning
+	}, 60*time.Second, 1*time.Second)
+
+	// Get the Argo server endpoint to use
+	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
+	requires.NoError(err)
+
+	// Read admin secret from principal's cluster
+	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
+	requires.NoError(err)
+
+	// Terminate the operation from the control plane
+	argoClient, _, closer, err := createArgoCDAPIClient(suite.Ctx, argoEndpoint, password)
+	requires.NoError(err)
+	defer closer.Close()
+
+	conn, appClient := argoClient.NewApplicationClientOrDie()
+	defer conn.Close()
+
+	_, err = appClient.TerminateOperation(suite.Ctx, &application.OperationTerminateRequest{
+		Name:         &principalKey.Name,
+		AppNamespace: &principalKey.Namespace,
+	})
+	requires.NoError(err)
+
+	// Wait for the pre-sync job to be removed
+	hook := batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pre-post-sync-before",
+			Namespace: "guestbook",
+		},
+	}
+	requires.Eventually(func() bool {
+		err := suite.AutonomousAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&hook), &hook, metav1.GetOptions{})
+		return err != nil && errors.IsNotFound(err)
+	}, 120*time.Second, 1*time.Second)
+
+	// Check if the operation has been terminated
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
+		return err == nil && app.Status.OperationState != nil &&
+			app.Status.OperationState.Phase == synccommon.OperationFailed &&
+			app.Status.OperationState.Message == "Operation terminated"
+	}, 60*time.Second, 1*time.Second)
 }
 
 func TestSyncTestSuite(t *testing.T) {

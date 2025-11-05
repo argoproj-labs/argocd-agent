@@ -10,9 +10,12 @@ The agent component uses certificates for two primary purposes:
 |----------------|---------|-------------|----------|
 | **CA Certificate** | Validates the principal's server certificate | `argocd-agent-ca` | ✅ |
 | **Client Certificate** | Authenticates the agent to the principal (mTLS) | `argocd-agent-client-tls` | ✅¹ |
-| **Authentication Credentials** | User/password authentication (alternative to mTLS) | `argocd-agent-agent-userpass` | ✅¹ |
+| **Authentication Credentials** | User/password authentication (alternative to mTLS) **[DEPRECATED]** | `argocd-agent-agent-userpass` | ✅¹ |
 
 ¹ Either client certificate (mTLS) or authentication credentials (userpass) is required, depending on the authentication method configured.
+
+!!! warning "Deprecation Notice"
+    The userpass authentication method is deprecated and not suited for use outside development environments. Use mTLS authentication for production deployments.
 
 ## Architecture Overview
 
@@ -51,13 +54,16 @@ graph TB
 
 The agent supports two authentication methods:
 
-### 1. UserPass Authentication (Default)
+### 1. UserPass Authentication (Default) [DEPRECATED]
+
+!!! warning "Deprecation Notice"
+    This authentication method is deprecated and not suited for use outside development environments. Use mTLS authentication for production deployments.
 
 - **Agent** presents username/password credentials
 - **Simpler setup** but requires credential management
 - **Client certificate** still needed for TLS encryption (optional validation)
 
-### 2. mTLS Authentication
+### 2. mTLS Authentication (Recommended)
 
 - **Agent** presents a client certificate for authentication
 - **More secure** as no passwords are transmitted
@@ -384,7 +390,10 @@ kubectl create secret tls argocd-agent-client-tls \
   --context <workload-cluster-context>
 ```
 
-#### Step 4: Create Authentication Credentials (UserPass Method)
+#### Step 4: Create Authentication Credentials (UserPass Method) [DEPRECATED]
+
+!!! warning "Deprecation Notice"
+    The userpass authentication method is deprecated and not suited for use outside development environments. Use mTLS authentication for production deployments.
 
 If using userpass authentication, create the credentials secret:
 
@@ -428,7 +437,10 @@ data:
   tls.key: <base64-encoded-client-private-key>
 ```
 
-#### Authentication Credentials Secret (`argocd-agent-agent-userpass`)
+#### Authentication Credentials Secret (`argocd-agent-agent-userpass`) [DEPRECATED]
+
+!!! warning "Deprecation Notice"
+    The userpass authentication method is deprecated and not suited for use outside development environments.
 
 ```yaml
 apiVersion: v1
@@ -499,7 +511,10 @@ data:
 
 ## Authentication Methods Configuration
 
-### UserPass Authentication
+### UserPass Authentication [DEPRECATED]
+
+!!! warning "Deprecation Notice"
+    The userpass authentication method is deprecated and not suited for use outside development environments. Use mTLS authentication for production deployments.
 
 Configure the agent to use username/password authentication:
 
@@ -562,13 +577,16 @@ argocd-agent agent \
 
 ### Authentication Security
 
-**UserPass Authentication:**
+**UserPass Authentication [DEPRECATED]:**
+
+!!! warning "Deprecation Notice"
+    The userpass authentication method is deprecated and not suited for use outside development environments.
 
 - Use strong, unique passwords for each agent
 - Rotate passwords regularly
 - Store passwords in encrypted secrets
 
-**mTLS Authentication:**
+**mTLS Authentication (Recommended):**
 
 - Use separate certificates for each agent
 - Implement certificate-based access control

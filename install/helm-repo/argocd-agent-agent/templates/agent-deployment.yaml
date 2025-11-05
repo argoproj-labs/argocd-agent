@@ -115,6 +115,60 @@ spec:
                 name: argocd-agent-params
                 key: agent.redis.address
                 optional: true
+          - name: ARGOCD_AGENT_KEEP_ALIVE_PING_INTERVAL
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.keep-alive.interval
+                optional: true
+          - name: REDIS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.argoCdRedisSecretName }}
+                key: {{ .Values.argoCdRedisPasswordKey }}
+                optional: true
+          - name: REDIS_USERNAME
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.redis.username
+                optional: true
+          - name: ARGOCD_PRINCIPAL_LOG_FORMAT
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.log.format
+                optional: true
+          - name: ARGOCD_AGENT_ENABLE_WEBSOCKET
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.websocket.enabled
+                optional: true
+          - name: ARGOCD_AGENT_ENABLE_COMPRESSION
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.compression.enabled
+                optional: true
+          - name: ARGOCD_AGENT_PPROF_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.pprof.port
+                optional: true
+          - name: ARGOCD_AGENT_ENABLE_RESOURCE_PROXY
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.resource-proxy.enabled
+                optional: true
+          - name: ARGOCD_AGENT_CACHE_REFRESH_INTERVAL
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.cache.refresh-interval
+                optional: true
           name: argocd-agent-agent
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
