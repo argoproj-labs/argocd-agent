@@ -35,7 +35,7 @@ func NewLogStreamServiceClient(cc grpc.ClientConnInterface) LogStreamServiceClie
 }
 
 func (c *logStreamServiceClient) StreamLogs(ctx context.Context, opts ...grpc.CallOption) (LogStreamService_StreamLogsClient, error) {
-	stream, err := c.cc.NewStream(ctx, &LogStreamService_ServiceDesc.Streams[0], "/logstreamapi.LogStreamService/StreamLogs", opts...)
+	stream, err := c.cc.NewStream(ctx, &LogStreamService_ServiceDesc.Streams[0], "/principal.apis.logstreamapi.LogStreamService/StreamLogs", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +127,7 @@ func (x *logStreamServiceStreamLogsServer) Recv() (*LogStreamData, error) {
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var LogStreamService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "logstreamapi.LogStreamService",
+	ServiceName: "principal.apis.logstreamapi.LogStreamService",
 	HandlerType: (*LogStreamServiceServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{

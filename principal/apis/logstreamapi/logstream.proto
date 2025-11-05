@@ -14,7 +14,7 @@
 
 syntax = "proto3";
 
-package logstreamapi;
+package principal.apis.logstreamapi;
 
 option go_package = "github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi";
 

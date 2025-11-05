@@ -149,11 +149,11 @@ func (a *Agent) handleStaticLogs(ctx context.Context, logReq *event.ContainerLog
 func (a *Agent) handleLiveStreaming(ctx context.Context, logReq *event.ContainerLogRequest, logCtx *logrus.Entry, cleanup func()) error {
 	// Start streaming with resume capability in background goroutine
 	go func() {
+		defer cleanup()
 		defer func() {
 			if r := recover(); r != nil {
 				logCtx.WithField("panic", r).Error("Panic in live log streaming")
 			}
-			cleanup()
 		}()
 
 		streamCtx := logCtx.WithField("mode", "live_streaming")
@@ -295,7 +295,6 @@ func (a *Agent) streamLogsWithResume(ctx context.Context, logReq *event.Containe
 				_, _ = stream.CloseAndRecv()
 				return err
 			}
-			defer rc.Close()
 
 			newLast, runErr := a.streamLogs(ctx, stream, rc, &resumeReq, logCtx)
 			if newLast != nil {
@@ -360,7 +359,7 @@ func (a *Agent) streamLogsWithResume(ctx context.Context, logReq *event.Containe
 	}
 }
 
-// streamLogsv2 streams logs until the context is done, returning the last seen timestamp.
+// streamLogs streams logs until the context is done, returning the last seen timestamp.
 // It flushes raw data, using chunk size (64KB) or time-based flushing.
 // Timestamps are extracted from raw lines for retry capability.
 func (a *Agent) streamLogs(ctx context.Context, stream logstreamapi.LogStreamService_StreamLogsClient, rc io.ReadCloser, logReq *event.ContainerLogRequest, logCtx *logrus.Entry) (*time.Time, error) {
