@@ -120,7 +120,6 @@ func (a *Agent) handleStaticLogs(ctx context.Context, logReq *event.ContainerLog
 		_, _ = stream.CloseAndRecv()
 		return err
 	}
-	defer rc.Close()
 
 	err = a.streamLogsToCompletion(ctx, stream, rc, logReq, logCtx)
 
@@ -277,8 +276,8 @@ func (a *Agent) streamLogsWithResume(ctx context.Context, logReq *event.Containe
 			if err != nil {
 				return err
 			}
-			// Send empty data to indicate the start of the stream
-			// Used for health checks
+			// Send initial empty message to establish the stream connection
+			// This allows the principal to acknowledge the stream and prepare for log data
 			err = stream.Send(&logstreamapi.LogStreamData{
 				RequestUuid: logReq.UUID,
 				Data:        []byte{},
@@ -379,7 +378,7 @@ func (a *Agent) streamLogs(ctx context.Context, stream logstreamapi.LogStreamSer
 		n, err := rc.Read(readBuf)
 		if n > 0 {
 			b := readBuf[:n]
-			// build timestamp for resume capability
+			// Extract timestamp from the last complete line in the buffer to enable resume capability.
 			if end := bytes.LastIndexByte(b, '\n'); end >= 0 {
 				start := bytes.LastIndexByte(b[:end], '\n') + 1
 				line := b[start:end]
