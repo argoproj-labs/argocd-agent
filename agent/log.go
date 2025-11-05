@@ -73,6 +73,7 @@ func (a *Agent) startLogStreamIfNew(logReq *event.ContainerLogRequest, logCtx *l
 	a.inflightMu.Unlock()
 
 	cleanup := func() {
+		cancel()
 		a.inflightMu.Lock()
 		delete(a.inflightLogs, logReq.UUID)
 		a.inflightMu.Unlock()
