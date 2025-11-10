@@ -482,8 +482,9 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alp
 	}
 	appProject.Spec.Destinations = filteredDst
 
-	// Only allow Applications to be managed from the agent namespace
-	appProject.Spec.SourceNamespaces = []string{agent}
+	// Remove sourceNamespaces since they are not relevant on the workload cluster
+	// They are only used on the control plane to determine which agents should receive the AppProject
+	appProject.Spec.SourceNamespaces = nil
 
 	// Remove the roles since they are not relevant on the workload cluster
 	appProject.Spec.Roles = []v1alpha1.ProjectRole{}

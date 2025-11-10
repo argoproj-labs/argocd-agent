@@ -21,6 +21,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -106,7 +107,14 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		logCtx.Error("Help! Queue pair has disappeared!")
 		return
 	}
-	ev := s.events.ApplicationEvent(event.SpecUpdate, new)
+
+	// Check if this update is a terminate-operation or a regular spec update
+	eventType := event.SpecUpdate
+	if isTerminateOperation(old, new) {
+		eventType = event.TerminateOperation
+	}
+
+	ev := s.events.ApplicationEvent(eventType, new)
 	q.Add(ev)
 	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
 
@@ -369,6 +377,10 @@ func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
 		s.repoToAgents.Add(outbound.Name, agent)
 		logCtx.Tracef("Added repository %s to send queue, total length now %d", outbound.Name, q.Len())
 	}
+
+	if s.metrics != nil {
+		s.metrics.RepositoryCreated.Inc()
+	}
 }
 
 func (s *Server) updateRepositoryCallback(old, new *corev1.Secret) {
@@ -381,6 +393,10 @@ func (s *Server) updateRepositoryCallback(old, new *corev1.Secret) {
 	logCtx.Info("Update repository event")
 
 	s.syncRepositoryUpdatesToAgents(old, new, logCtx)
+
+	if s.metrics != nil {
+		s.metrics.RepositoryUpdated.Inc()
+	}
 }
 
 func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
@@ -435,6 +451,10 @@ func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
 
 		s.repoToAgents.Delete(outbound.Name, agent)
 		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added repository delete event to send queue")
+	}
+
+	if s.metrics != nil {
+		s.metrics.RepositoryDeleted.Inc()
 	}
 }
 
@@ -639,4 +659,11 @@ func isResourceFromAutonomousAgent(resource metav1.Object) bool {
 	}
 	_, ok := annotations[manager.SourceUIDAnnotation]
 	return ok
+}
+
+func isTerminateOperation(old, new *v1alpha1.Application) bool {
+	return old.Status.OperationState != nil &&
+		old.Status.OperationState.Phase != synccommon.OperationTerminating &&
+		new.Status.OperationState != nil &&
+		new.Status.OperationState.Phase == synccommon.OperationTerminating
 }

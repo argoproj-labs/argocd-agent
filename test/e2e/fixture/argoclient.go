@@ -453,3 +453,30 @@ func (c *ArgoRestClient) DeleteApplication(name string) error {
 
 	return nil
 }
+
+func (c *ArgoRestClient) TerminateOperation(name, namespace string) error {
+	reqURL := c.url(
+		"appNamespace", namespace,
+		"name", name,
+	)
+	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/operation", name)
+
+	req, err := http.NewRequest(http.MethodDelete, reqURL.String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to terminate operation: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to terminate operation: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}

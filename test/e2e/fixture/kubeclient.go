@@ -26,6 +26,7 @@ import (
 
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	apps "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -84,6 +85,10 @@ func NewKubeClient(config *rest.Config) (KubeClient, error) {
 		return kclient, err
 	}
 	err = apps.AddToScheme(scheme)
+	if err != nil {
+		return kclient, err
+	}
+	err = batchv1.AddToScheme(scheme)
 	if err != nil {
 		return kclient, err
 	}
