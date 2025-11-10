@@ -180,6 +180,7 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 // - This function will also close local redis connections for principal connections that are no longer active (based on pings received)
 func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubSub, rreq *event.RedisRequest, channelName string, logCtx *logrus.Entry) {
 	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
 
 	ch := pubsub.Channel()
 
