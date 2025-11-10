@@ -15,6 +15,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -170,18 +171,18 @@ func TestExtractTimestamp(t *testing.T) {
 	}{
 		{
 			name:     "RFC3339 with nanoseconds",
-			input:    "2023-12-07T10:30:45.123456789Z some log message",
-			expected: timePtr(time.Date(2023, 12, 7, 10, 30, 45, 123456789, time.UTC)),
+			input:    "2025-12-07T10:30:45.123456789Z some log message",
+			expected: timePtr(time.Date(2025, 12, 7, 10, 30, 45, 123456789, time.UTC)),
 		},
 		{
 			name:     "RFC3339 without nanoseconds",
-			input:    "2023-12-07T10:30:45Z some log message",
-			expected: timePtr(time.Date(2023, 12, 7, 10, 30, 45, 0, time.UTC)),
+			input:    "2025-12-07T10:30:45Z some log message",
+			expected: timePtr(time.Date(2025, 12, 7, 10, 30, 45, 0, time.UTC)),
 		},
 		{
 			name:     "RFC3339 with milliseconds",
-			input:    "2023-12-07T10:30:45.123Z some log message",
-			expected: timePtr(time.Date(2023, 12, 7, 10, 30, 45, 123000000, time.UTC)),
+			input:    "2025-12-07T10:30:45.123Z some log message",
+			expected: timePtr(time.Date(2025, 12, 7, 10, 30, 45, 123000000, time.UTC)),
 		},
 		{
 			name:     "no timestamp",
@@ -190,8 +191,8 @@ func TestExtractTimestamp(t *testing.T) {
 		},
 		{
 			name:     "timestamp with tab separator",
-			input:    "2023-12-07T10:30:45Z\tsome log message",
-			expected: timePtr(time.Date(2023, 12, 7, 10, 30, 45, 0, time.UTC)),
+			input:    "2025-12-07T10:30:45Z\tsome log message",
+			expected: timePtr(time.Date(2025, 12, 7, 10, 30, 45, 0, time.UTC)),
 		},
 	}
 
@@ -290,7 +291,7 @@ func TestStreamLogsToCompletion(t *testing.T) {
 	logCtx := logrus.NewEntry(logrus.New())
 
 	// Create a test reader with some log data
-	testData := "2023-12-07T10:30:45Z line 1\n2023-12-07T10:30:46Z line 2\n"
+	testData := "2025-12-07T10:30:45Z line 1\n2025-12-07T10:30:46Z line 2\n"
 	reader := &MockReadCloser{Reader: strings.NewReader(testData)}
 
 	t.Run("successful streaming", func(t *testing.T) {
@@ -340,31 +341,44 @@ func TestStreamLogs(t *testing.T) {
 		// Start streaming in a goroutine
 		var lastTimestamp *time.Time
 		var streamErr error
-		done := make(chan struct{})
 
-		go func() {
-			defer close(done)
-			lastTimestamp, streamErr = agent.streamLogs(testCtx, mockStream, reader, logReq, logCtx)
-		}()
+		lastTimestamp, streamErr = agent.streamLogs(testCtx, mockStream, reader, logReq, logCtx)
 
-		// Wait for timer to fire (50ms flush interval + buffer)
-		time.Sleep(100 * time.Millisecond)
 		// Check if data was sent before cancelling
 		sentData := mockStream.GetSentData()
-		// Cancel context to stop the streaming (streamLogs will wait forever on EOF)
-		cancel()
-		<-done // Wait for goroutine to finish
 
 		// Verify data was sent due to timer flush
 		assert.Greater(t, len(sentData), 0, "Data should be sent due to timer flush")
 
-		// Verify the function ended with EOF (expected for streamLogs with finite data)
-		assert.Error(t, streamErr, "streamLogs should end with error")
-		assert.Equal(t, io.EOF, streamErr, "Should end with EOF, not timeout")
+		assert.Nil(t, streamErr, "Should end with EOF, not timeout")
 
 		// Verify timestamp extraction worked
 		assert.NotNil(t, lastTimestamp, "Timestamp should be extracted")
 		assert.Equal(t, 2025, lastTimestamp.Year())
+	})
+	t.Run("send failure returns timestamp and error", func(t *testing.T) {
+		testCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		mockStream := NewMockLogStreamClient(testCtx)
+		testData := "2025-12-07T10:30:45Z line 1\n2025-12-07T10:30:46Z line 2\n"
+		reader := &MockReadCloser{Reader: strings.NewReader(testData)}
+		logReq.Timestamps = true
+
+		sendErr := errors.New("stream send failed")
+		mockStream.SetSendFunc(func(data *logstreamapi.LogStreamData) error {
+			return sendErr
+		})
+
+		lastTimestamp, streamErr := agent.streamLogs(testCtx, mockStream, reader, logReq, logCtx)
+
+		require.ErrorIs(t, streamErr, sendErr)
+		require.NotNil(t, lastTimestamp, "last timestamp should be captured before send failure")
+		assert.Equal(t, 2025, lastTimestamp.Year())
+
+		sentData := mockStream.GetSentData()
+		require.Greater(t, len(sentData), 0, "expected a send attempt before failure")
+		assert.Equal(t, testData, string(sentData[0].Data))
 	})
 }
 

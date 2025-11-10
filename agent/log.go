@@ -96,14 +96,13 @@ func (a *Agent) startLogStreamIfNew(logReq *event.ContainerLogRequest, logCtx *l
 	return a.handleStaticLogs(ctx, logReq, logCtx)
 }
 
-// handleStaticLogs handles static log requests (follow=false) with completion ACK
+// handleStaticLogs handles static log requests (follow=false)
 func (a *Agent) handleStaticLogs(ctx context.Context, logReq *event.ContainerLogRequest, logCtx *logrus.Entry) error {
 	// Create gRPC stream
 	stream, err := a.createLogStream(ctx)
 	if err != nil {
 		return err
 	}
-
 	err = stream.Send(&logstreamapi.LogStreamData{
 		RequestUuid: logReq.UUID,
 		Data:        []byte{},
@@ -112,7 +111,6 @@ func (a *Agent) handleStaticLogs(ctx context.Context, logReq *event.ContainerLog
 	if err != nil {
 		return err
 	}
-
 	// Create Kubernetes log stream
 	rc, err := a.createKubernetesLogStream(ctx, logReq)
 	if err != nil {
@@ -120,18 +118,17 @@ func (a *Agent) handleStaticLogs(ctx context.Context, logReq *event.ContainerLog
 		_, _ = stream.CloseAndRecv()
 		return err
 	}
-
 	err = a.streamLogsToCompletion(ctx, stream, rc, logReq, logCtx)
-
 	if _, cerr := stream.CloseAndRecv(); cerr != nil {
 		err = cerr
 	}
-
 	if err != nil {
 		// Stop immediately on intentional server stops or auth issues
 		switch status.Code(err) {
 		case codes.Canceled, codes.NotFound:
-			return err
+			// Intentional stop (UI gone / request not found) -> do not retry
+			logCtx.WithError(err).Info("Log stream ended")
+			return nil
 		case codes.Unauthenticated, codes.PermissionDenied:
 			logCtx.WithError(err).Warn("Auth/permission failure")
 			a.SetConnected(false)
@@ -140,7 +137,6 @@ func (a *Agent) handleStaticLogs(ctx context.Context, logReq *event.ContainerLog
 			logCtx.WithError(err).Warn("Stream error")
 		}
 	}
-
 	return err
 }
 
@@ -154,11 +150,9 @@ func (a *Agent) handleLiveStreaming(ctx context.Context, logReq *event.Container
 				logCtx.WithField("panic", r).Error("Panic in live log streaming")
 			}
 		}()
-
 		streamCtx := logCtx.WithField("mode", "live_streaming")
 		a.streamLogsWithResume(ctx, logReq, streamCtx)
 	}()
-
 	// Return success immediately - this sends the ACK to Principal
 	return nil
 }
@@ -169,7 +163,6 @@ func (a *Agent) createLogStream(ctx context.Context) (logstreamapi.LogStreamServ
 	if conn == nil {
 		return nil, fmt.Errorf("gRPC connection is nil")
 	}
-
 	client := logstreamapi.NewLogStreamServiceClient(conn)
 	return client.StreamLogs(ctx)
 }
@@ -186,7 +179,6 @@ func (a *Agent) createKubernetesLogStream(ctx context.Context, logReq *event.Con
 		SinceSeconds:                 logReq.SinceSeconds,
 		LimitBytes:                   logReq.LimitBytes,
 	}
-
 	// Handle SinceTime if provided
 	if logReq.SinceTime != "" {
 		if sinceTime, err := time.Parse(time.RFC3339, logReq.SinceTime); err == nil {
@@ -194,7 +186,6 @@ func (a *Agent) createKubernetesLogStream(ctx context.Context, logReq *event.Con
 			logOptions.SinceTime = &mt
 		}
 	}
-
 	request := a.kubeClient.Clientset.CoreV1().Pods(logReq.Namespace).GetLogs(logReq.PodName, logOptions)
 	return request.Stream(ctx)
 }
@@ -251,9 +242,7 @@ func (a *Agent) streamLogsWithResume(ctx context.Context, logReq *event.Containe
 		waitForReconnect = 10 * time.Second // how long we poll IsConnected() after Unauthenticated
 		pollEvery        = 1 * time.Second
 	)
-
 	var lastTimestamp *time.Time
-
 	// Configure exponential backoff with jitter
 	b := backoff.NewExponentialBackOff()
 	b.InitialInterval = 200 * time.Millisecond
@@ -287,25 +276,18 @@ func (a *Agent) streamLogsWithResume(ctx context.Context, logReq *event.Containe
 				_, err = stream.CloseAndRecv()
 				return err
 			}
-
 			rc, err := a.createKubernetesLogStream(ctx, &resumeReq)
 			if err != nil {
 				_ = stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Eof: true, Error: err.Error()})
 				_, _ = stream.CloseAndRecv()
 				return err
 			}
-
-			newLast, runErr := a.streamLogs(ctx, stream, rc, &resumeReq, logCtx)
-			if newLast != nil {
-				lastTimestamp = newLast
+			newLastTimestamp, err := a.streamLogs(ctx, stream, rc, &resumeReq, logCtx)
+			if newLastTimestamp != nil {
+				lastTimestamp = newLastTimestamp
 			}
-			if _, cerr := stream.CloseAndRecv(); cerr != nil {
-				runErr = cerr
-			}
-
-			return runErr
+			return err
 		}
-
 		err := attempt()
 		if err == nil {
 			return
@@ -316,7 +298,6 @@ func (a *Agent) streamLogsWithResume(ctx context.Context, logReq *event.Containe
 			// Intentional stop (UI gone / request not found) -> do not retry
 			logCtx.WithError(err).Info("Log stream ended")
 			return
-
 		case codes.Unauthenticated, codes.PermissionDenied:
 			// Do NOT backoff-retry; instead block waiting for connector to become connected.
 			logCtx.WithError(err).Warn("Auth/permission failure")
@@ -361,6 +342,8 @@ func (a *Agent) streamLogsWithResume(ctx context.Context, logReq *event.Containe
 // streamLogs streams logs until the context is done, returning the last seen timestamp.
 // It flushes raw data, using chunk size (64KB) or time-based flushing.
 // Timestamps are extracted from raw lines for retry capability.
+// If an error occurs during send, it attempts to close the stream and propagate
+// the appropriate error back to the caller for retry or termination.
 func (a *Agent) streamLogs(ctx context.Context, stream logstreamapi.LogStreamService_StreamLogsClient, rc io.ReadCloser, logReq *event.ContainerLogRequest, logCtx *logrus.Entry) (*time.Time, error) {
 	const chunkMax = 64 * 1024 // 64KB chunks
 	var lastTimestamp *time.Time
@@ -374,7 +357,6 @@ func (a *Agent) streamLogs(ctx context.Context, stream logstreamapi.LogStreamSer
 			return lastTimestamp, stream.Context().Err()
 		default:
 		}
-
 		n, err := rc.Read(readBuf)
 		if n > 0 {
 			b := readBuf[:n]
@@ -393,14 +375,19 @@ func (a *Agent) streamLogs(ctx context.Context, stream logstreamapi.LogStreamSer
 				RequestUuid: logReq.UUID,
 				Data:        readBuf[:n],
 			}); sendErr != nil {
-				logCtx.WithError(sendErr).Warn("Send failed")
+				// For client side streaming, the actual gRPC error may only surface
+				// after stream closure. Attempt to close and return the final error.
+				if _, closedErr := stream.CloseAndRecv(); closedErr != nil {
+					return lastTimestamp, closedErr
+				}
 				return lastTimestamp, sendErr
 			}
 		}
-		// For follow=true we do not send EOF to principal, it can be temporary error like authentication or permission denied, etc.
-		// We will retry to stream logs until the context is done or backoff stops.
 		if err != nil {
-			logCtx.WithError(err).Error("Error reading log stream")
+			if errors.Is(err, io.EOF) {
+				_ = stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Eof: true})
+				return lastTimestamp, nil
+			}
 			_ = stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Error: err.Error()})
 			return lastTimestamp, err
 		}
