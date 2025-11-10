@@ -530,9 +530,9 @@ func (rp *RedisProxy) beginPingGoRoutineIfNeeded(connState *connectionState, age
 		logCtx = logCtx.WithField("agent-name", agentName)
 
 		logCtx.Debug("Beginning ping thread")
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
 		for {
-			ticker := time.NewTicker(1 * time.Minute)
-
 			select {
 			case <-ticker.C:
 				logCtx.Trace("sending ping on ping thread")
