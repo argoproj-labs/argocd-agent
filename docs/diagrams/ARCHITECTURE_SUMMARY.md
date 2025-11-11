@@ -1,6 +1,6 @@
 # ArgoCD Agent - Architecture Summary
 
-This document provides a high-level overview of the argocd-agent architecture, referencing the detailed D2 diagrams for deeper understanding.
+This document provides a high-level overview of the argocd-agent architecture.
 
 ## Executive Summary
 
@@ -59,13 +59,13 @@ ArgoCD Agent is a distributed agent-based architecture that extends Argo CD's Gi
 ### Autonomous Mode
 **Workload clusters are the source of truth**
 
-- Applications created on workload clusters (via Git, local API)
+- Applications created on workload clusters.
 - Agents send configuration to principal for observability
 - Control plane provides read-only view with limited operations
 - Best for GitOps purists and autonomous environments
 
 **Data Flow**:
-1. GitOps process creates Application on workload cluster
+1. User creates the Application on workload cluster
 2. Agent watches, generates CREATE event
 3. Event sent to principal via gRPC stream
 4. Principal creates mirror for observability
