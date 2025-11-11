@@ -1,0 +1,365 @@
+direction: down
+
+title: |md
+  # Managed Mode - Data Flow
+  Application lifecycle from creation to deployment
+| {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# Control Plane components
+control_plane: Control Plane Cluster {
+  icon: https://icons.terrastruct.com/azure%2F_Companies%2FKubernetes.svg
+  style.stroke: "#326CE5"
+  style.fill: "#E3F2FD"
+  style.stroke-width: 3
+
+  user: User/Operator {
+    shape: person
+    style.fill: "#FFE0B2"
+    style.stroke: "#E65100"
+  }
+
+  argocd_api: Argo CD API/UI {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+  }
+
+  k8s_api_cp: Kubernetes API {
+    shape: cylinder
+    style.fill: "#BBDEFB"
+    style.stroke: "#1976D2"
+  }
+
+  principal: Principal {
+    shape: rectangle
+    style.fill: "#C8E6C9"
+    style.stroke: "#2E7D32"
+    style.bold: true
+
+    informer_cp: K8s Informer {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Watches Applications in agent namespaces"
+    }
+
+    app_manager_cp: Application Manager {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Manages Application lifecycle"
+    }
+
+    event_processor: Event Processor {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Processes and routes events"
+    }
+
+    send_queue: Send Queue {
+      shape: queue
+      style.fill: "#81C784"
+      tooltip: "Per-agent outbound event queue"
+    }
+
+    recv_queue: Receive Queue {
+      shape: queue
+      style.fill: "#81C784"
+      tooltip: "Per-agent inbound event queue"
+    }
+
+    grpc_stream: gRPC Stream Handler {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Bidirectional stream management"
+    }
+  }
+}
+
+# Workload Cluster components
+workload_cluster: Workload Cluster {
+  icon: https://icons.terrastruct.com/azure%2F_Companies%2FKubernetes.svg
+  style.stroke: "#326CE5"
+  style.fill: "#FFF9C4"
+  style.stroke-width: 3
+
+  agent: Agent {
+    shape: rectangle
+    style.fill: "#C8E6C9"
+    style.stroke: "#2E7D32"
+    style.bold: true
+
+    grpc_client: gRPC Client {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Maintains connection to principal"
+    }
+
+    event_handler: Event Handler {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Processes incoming events"
+    }
+
+    app_manager_agent: Application Manager {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Manages local Applications"
+    }
+
+    informer_agent: K8s Informer {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Watches Application status changes"
+    }
+  }
+
+  k8s_api_wl: Kubernetes API {
+    shape: cylinder
+    style.fill: "#BBDEFB"
+    style.stroke: "#1976D2"
+  }
+
+  app_controller: Application Controller {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+    tooltip: "Argo CD reconciliation engine"
+  }
+
+  repo_server: Repo Server {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+    tooltip: "Fetches and caches manifests from Git"
+  }
+
+  deployed_app: Deployed Resources {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+    style.stroke: "#6A1B9A"
+    tooltip: "Actual application workloads"
+  }
+}
+
+# Flow 1: Create Application
+control_plane.user -> control_plane.argocd_api: "1. Create Application\n(kubectl/UI/API)" {
+  style.stroke: "#E65100"
+  style.stroke-width: 3
+}
+
+control_plane.argocd_api -> control_plane.k8s_api_cp: "2. Write to etcd\n(namespace: agent-name)" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+}
+
+control_plane.k8s_api_cp -> control_plane.principal.informer_cp: "3. Watch Event\n(Application ADDED)" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.animated: true
+}
+
+control_plane.principal.informer_cp -> control_plane.principal.event_processor: "4. Process Event\n(CREATE event)" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane.principal.event_processor -> control_plane.principal.send_queue: "5. Enqueue Event\n(CloudEvents format)" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane.principal.send_queue -> control_plane.principal.grpc_stream: "6. Dequeue & Send" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+# Secure connection
+control_plane.principal.grpc_stream -> workload_cluster.agent.grpc_client: "7. gRPC Stream\n(mTLS encrypted)\nCREATE Event" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 4
+  style.animated: true
+}
+
+workload_cluster.agent.grpc_client -> workload_cluster.agent.event_handler: "8. Receive Event" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+workload_cluster.agent.event_handler -> workload_cluster.agent.app_manager_agent: "9. Handle CREATE" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+workload_cluster.agent.app_manager_agent -> workload_cluster.k8s_api_wl: "10. Create Application\n(local cluster)" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+}
+
+workload_cluster.k8s_api_wl -> workload_cluster.app_controller: "11. Watch Event\n(New Application)" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.animated: true
+}
+
+# External systems
+git_repo: Git Repository {
+  shape: cloud
+  style.fill: "#FFECB3"
+  style.stroke: "#F57C00"
+  icon: https://icons.terrastruct.com/dev%2Fgit.svg
+}
+
+oci_registry: OCI Registry {
+  shape: cylinder
+  style.fill: "#E1F5FE"
+  style.stroke: "#0277BD"
+  icon: https://icons.terrastruct.com/dev%2Fdocker.svg
+}
+
+helm_registry: Helm Registry ⎈ {
+  shape: cylinder
+  style.fill: "#E8EAF6"
+  style.stroke: "#3F51B5"
+}
+
+workload_cluster.app_controller -> workload_cluster.repo_server: "12. Fetch Manifests\n(In-cluster)" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+}
+
+workload_cluster.repo_server -> git_repo: "13. Option A: Git Clone/Fetch\n(HTTPS/SSH)" {
+  style.stroke: "#F57C00"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_cluster.repo_server -> oci_registry: "13. Option B: OCI Pull\n(HTTPS)" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_cluster.repo_server -> helm_registry: "13. Option C: Helm Pull\n(HTTPS)" {
+  style.stroke: "#3F51B5"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_cluster.repo_server -> workload_cluster.app_controller: "14. Return Manifests\n(Cached)" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+workload_cluster.app_controller -> workload_cluster.deployed_app: "15. Reconcile & Deploy\n(GitOps sync)" {
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 3
+}
+
+# Flow 2: Status Update (return path)
+workload_cluster.deployed_app -> workload_cluster.app_controller: "16. Status Changes\n(health, sync)" {
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 2
+}
+
+workload_cluster.app_controller -> workload_cluster.k8s_api_wl: "17. Update App Status" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+}
+
+workload_cluster.k8s_api_wl -> workload_cluster.agent.informer_agent: "18. Watch Event\n(Status MODIFIED)" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.animated: true
+}
+
+workload_cluster.agent.informer_agent -> workload_cluster.agent.grpc_client: "19. Create STATUS-UPDATE\nevent" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+# Return secure connection
+workload_cluster.agent.grpc_client -> control_plane.principal.grpc_stream: "20. gRPC Stream\n(mTLS encrypted)\nSTATUS-UPDATE Event" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 4
+  style.animated: true
+}
+
+control_plane.principal.grpc_stream -> control_plane.principal.recv_queue: "21. Enqueue Event" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane.principal.recv_queue -> control_plane.principal.event_processor: "22. Dequeue & Process" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane.principal.event_processor -> control_plane.principal.app_manager_cp: "23. Update Status" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane.principal.app_manager_cp -> control_plane.k8s_api_cp: "24. Patch Application\n(status subresource)" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+}
+
+control_plane.k8s_api_cp -> control_plane.argocd_api: "25. Status Visible\n(UI/API updated)" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.animated: true
+}
+
+# Legend
+legend: |md
+  ## Event Flow Legend
+
+  **CREATE Flow (Steps 1-15)**:
+  - User creates Application on control plane
+  - Principal watches and sends to agent via gRPC
+  - Agent creates local Application
+  - App Controller fetches manifests via Repo Server
+  - Repo Server fetches from ONE source (Git OR OCI OR Helm) and caches
+  - Argo CD controller deploys workload
+
+  **STATUS Flow (Steps 16-25)**:
+  - Application status changes in workload cluster
+  - Agent watches and sends to principal via gRPC
+  - Principal updates control plane Application
+  - Status visible in UI/API
+
+  **Key Points**:
+  - Principal is source of truth for configuration (spec)
+  - Agent is source of truth for status
+  - All manifest access goes through Repo Server
+  - Each Application uses ONE source: Git, OCI Registry, OR Helm Registry
+  - Source selection based on Application spec configuration
+  - Repo Server caches manifests locally
+  - Bidirectional gRPC stream for both flows
+  - All communication is mTLS encrypted
+| {
+  near: bottom-center
+  shape: text
+  style.font-size: 11
+}
+
+notes: |md
+  ## Managed Mode Characteristics
+
+  - **Configuration Owner**: Control Plane
+  - **Status Owner**: Workload Cluster
+  - **Event Types**: CREATE, UPDATE, DELETE (spec), STATUS-UPDATE
+  - **Namespace Mapping**: Applications in namespace "agent-name" → Agent "agent-name"
+  - **Local Changes**: Reverted by agent (principal wins)
+| {
+  near: bottom-right
+  shape: text
+  style.font-size: 10
+  style.fill: "#FFF3E0"
+  style.stroke: "#E65100"
+}

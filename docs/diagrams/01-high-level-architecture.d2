@@ -1,0 +1,395 @@
+direction: right
+
+title: |md
+  # ArgoCD Agent - High Level Architecture
+  Component boundaries and network communication
+| {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# Define the control plane cluster
+control_plane: Control Plane Cluster {
+  icon: https://icons.terrastruct.com/azure%2F_Companies%2FKubernetes.svg
+  style.stroke: "#326CE5"
+  style.fill: "#E3F2FD"
+  style.stroke-width: 3
+
+  argocd_ui: Argo CD UI/API Server {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+  }
+
+  principal: Principal Component {
+    shape: rectangle
+    style.fill: "#C8E6C9"
+    style.stroke: "#2E7D32"
+    style.bold: true
+
+    grpc_server: gRPC Server {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+    }
+
+    event_manager: Event Manager {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+    }
+
+    app_manager: Application Manager {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+    }
+
+    resource_proxy: Resource Proxy {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+    }
+
+    redis_proxy: Redis Proxy {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+    }
+  }
+
+  k8s_api: Kubernetes API {
+    shape: cylinder
+    style.fill: "#BBDEFB"
+    style.stroke: "#1976D2"
+  }
+
+  etcd: etcd {
+    shape: cylinder
+    style.fill: "#BBDEFB"
+    style.stroke: "#1976D2"
+  }
+
+  redis: Redis (Optional) {
+    shape: cylinder
+    style.fill: "#FFE0B2"
+    style.stroke: "#EF6C00"
+  }
+
+  repo_server: Repo Server (Optional) {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+  }
+}
+
+# Define workload cluster 1
+workload_1: Workload Cluster 1 {
+  icon: https://icons.terrastruct.com/azure%2F_Companies%2FKubernetes.svg
+  style.stroke: "#326CE5"
+  style.fill: "#FFF9C4"
+  style.stroke-width: 3
+
+  agent_1: Agent Component {
+    shape: rectangle
+    style.fill: "#C8E6C9"
+    style.stroke: "#2E7D32"
+    style.bold: true
+
+    grpc_client: gRPC Client {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+    }
+
+    event_handler: Event Handler {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+    }
+
+    app_mgr: Application Manager {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+    }
+  }
+
+  app_controller_1: Application Controller {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+  }
+
+  k8s_api_1: Kubernetes API {
+    shape: cylinder
+    style.fill: "#BBDEFB"
+    style.stroke: "#1976D2"
+  }
+
+  workloads_1: Application Workloads {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+    style.stroke: "#6A1B9A"
+  }
+
+  local_redis: Redis (Optional) {
+    shape: cylinder
+    style.fill: "#FFE0B2"
+    style.stroke: "#EF6C00"
+  }
+
+  local_repo: Repo Server (Optional) {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+  }
+}
+
+# Define workload cluster 2
+workload_2: Workload Cluster 2 {
+  icon: https://icons.terrastruct.com/azure%2F_Companies%2FKubernetes.svg
+  style.stroke: "#326CE5"
+  style.fill: "#FFF9C4"
+  style.stroke-width: 3
+
+  agent_2: Agent Component {
+    shape: rectangle
+    style.fill: "#C8E6C9"
+    style.stroke: "#2E7D32"
+    style.bold: true
+  }
+
+  app_controller_2: Application Controller {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+  }
+
+  k8s_api_2: Kubernetes API {
+    shape: cylinder
+    style.fill: "#BBDEFB"
+    style.stroke: "#1976D2"
+  }
+
+  workloads_2: Application Workloads {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+    style.stroke: "#6A1B9A"
+  }
+
+  local_repo_2: Repo Server (Optional) {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+  }
+}
+
+# External systems
+git_repo: Git Repository {
+  shape: cloud
+  style.fill: "#FFECB3"
+  style.stroke: "#F57C00"
+  icon: https://icons.terrastruct.com/dev%2Fgit.svg
+}
+
+oci_registry: OCI Registry {
+  shape: cylinder
+  style.fill: "#E1F5FE"
+  style.stroke: "#0277BD"
+  icon: https://icons.terrastruct.com/dev%2Fdocker.svg
+}
+
+helm_registry: Helm Registry ⎈ {
+  shape: cylinder
+  style.fill: "#E8EAF6"
+  style.stroke: "#3F51B5"
+}
+
+# Secure connections (mTLS)
+workload_1.agent_1.grpc_client -> control_plane.principal.grpc_server: "Bidirectional gRPC\n(mTLS encrypted)" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 3
+  style.stroke-dash: 0
+  style.animated: true
+}
+
+workload_2.agent_2 -> control_plane.principal.grpc_server: "Bidirectional gRPC\n(mTLS encrypted)" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 3
+  style.stroke-dash: 0
+  style.animated: true
+}
+
+# Internal communication within control plane (non-encrypted)
+control_plane.principal.app_manager -> control_plane.k8s_api: "CRUD Operations\n(In-cluster)" {
+  style.stroke: "#1976D2"
+  style.stroke-dash: 5
+}
+
+control_plane.argocd_ui -> control_plane.k8s_api: "Watch/Read\n(In-cluster)" {
+  style.stroke: "#1976D2"
+  style.stroke-dash: 5
+}
+
+control_plane.k8s_api -> control_plane.etcd: "Persist State" {
+  style.stroke: "#424242"
+  style.stroke-dash: 5
+}
+
+control_plane.principal.resource_proxy -> workload_1.k8s_api_1: "Proxied K8s API\n(via agent tunnel)" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 2
+  style.animated: true
+}
+
+control_plane.principal.redis_proxy -> workload_1.local_redis: "Proxied Redis\n(via agent tunnel)" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 2
+  style.animated: true
+}
+
+# Internal communication within workload cluster 1
+workload_1.agent_1.app_mgr -> workload_1.k8s_api_1: "CRUD Operations\n(In-cluster)" {
+  style.stroke: "#1976D2"
+  style.stroke-dash: 5
+}
+
+workload_1.app_controller_1 -> workload_1.k8s_api_1: "Watch/Reconcile\n(In-cluster)" {
+  style.stroke: "#1976D2"
+  style.stroke-dash: 5
+}
+
+workload_1.app_controller_1 -> workload_1.workloads_1: "Deploy/Manage" {
+  style.stroke: "#6A1B9A"
+  style.stroke-dash: 5
+}
+
+# Internal communication within workload cluster 2
+workload_2.agent_2 -> workload_2.k8s_api_2: "CRUD Operations\n(In-cluster)" {
+  style.stroke: "#1976D2"
+  style.stroke-dash: 5
+}
+
+workload_2.app_controller_2 -> workload_2.k8s_api_2: "Watch/Reconcile\n(In-cluster)" {
+  style.stroke: "#1976D2"
+  style.stroke-dash: 5
+}
+
+workload_2.app_controller_2 -> workload_2.workloads_2: "Deploy/Manage" {
+  style.stroke: "#6A1B9A"
+  style.stroke-dash: 5
+}
+
+# Manifest source access (one of three options)
+control_plane.repo_server -> git_repo: "Option 1: Clone/Fetch\n(HTTPS/SSH)" {
+  style.stroke: "#F57C00"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+control_plane.repo_server -> oci_registry: "Option 2: Pull Manifests\n(HTTPS)" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+control_plane.repo_server -> helm_registry: "Option 3: Pull Charts\n(HTTPS)" {
+  style.stroke: "#3F51B5"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_1.local_repo -> git_repo: "Option 1: Clone/Fetch\n(HTTPS/SSH)" {
+  style.stroke: "#F57C00"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_1.local_repo -> oci_registry: "Option 2: Pull Manifests\n(HTTPS)" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_1.local_repo -> helm_registry: "Option 3: Pull Charts\n(HTTPS)" {
+  style.stroke: "#3F51B5"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_2.local_repo_2 -> git_repo: "Option 1: Clone/Fetch\n(HTTPS/SSH)" {
+  style.stroke: "#F57C00"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_2.local_repo_2 -> oci_registry: "Option 2: Pull Manifests\n(HTTPS)" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_2.local_repo_2 -> helm_registry: "Option 3: Pull Charts\n(HTTPS)" {
+  style.stroke: "#3F51B5"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_2.app_controller_2 -> workload_2.local_repo_2: "Fetch Manifests\n(In-cluster)" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+# Optional shared components
+workload_1.app_controller_1 -> control_plane.redis: "Cache Access\n(Pattern 1 - Shared)" {
+  style.stroke: "#EF6C00"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+workload_1.app_controller_1 -> control_plane.repo_server: "Manifest Rendering\n(Pattern 1 - Shared)" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+# Legend
+legend: Legend {
+  near: bottom-right
+  shape: rectangle
+  style.fill: "#F5F5F5"
+  style.stroke: "#424242"
+
+  secure: "━━━ Secure (mTLS)" {
+    shape: text
+    style.font-color: "#388E3C"
+    style.bold: true
+  }
+
+  internal: "┄┄┄ Internal (In-cluster)" {
+    shape: text
+    style.font-color: "#1976D2"
+  }
+
+  optional: "┈┈┈ Optional (Pattern dependent)" {
+    shape: text
+    style.font-color: "#EF6C00"
+  }
+}
+
+notes: |md
+  ## Key Architecture Points
+
+  - **Green boxes**: argocd-agent components
+  - **Blue boxes**: Argo CD components
+  - **Agent initiates all connections** to Principal
+  - **Bidirectional gRPC streams** for event exchange
+  - **Two integration patterns**:
+    - Pattern 1: Shared Redis/Repo (dashed orange lines)
+    - Pattern 2: Autonomous (each cluster has own components)
+  - **Manifest Sources** (one of three options per application):
+    - Option 1: Git Repository
+    - Option 2: OCI Registry
+    - Option 3: Helm Registry
+  - **Repo Server**: Fetches from ONE source based on app config; caches locally
+| {
+  near: bottom-left
+  shape: text
+  style.font-size: 12
+}

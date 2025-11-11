@@ -1,0 +1,641 @@
+direction: down
+
+title: |md
+  # Component Internals and Package Boundaries
+  Detailed view of internal architecture and responsibilities
+| {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# Principal Internal Architecture
+principal_internals: Principal Component {
+  style.fill: "#E8F5E9"
+  style.stroke: "#2E7D32"
+  style.stroke-width: 4
+
+  grpc_layer: gRPC Layer {
+    style.fill: "#C8E6C9"
+    style.stroke: "#388E3C"
+
+    listener: Listener {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "principal/listen.go"
+    }
+
+    grpc_server: gRPC Server {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Google gRPC server"
+    }
+
+    interceptors: Interceptors {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Auth, logging, metrics"
+    }
+  }
+
+  apis: API Services {
+    style.fill: "#C8E6C9"
+    style.stroke: "#388E3C"
+
+    event_stream_api: EventStream API {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "principal/apis/eventstream/"
+    }
+
+    auth_api: Auth API {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "principal/apis/auth/"
+    }
+
+    version_api: Version API {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "principal/apis/version/"
+    }
+  }
+
+  connection_mgmt: Connection Management {
+    style.fill: "#C8E6C9"
+    style.stroke: "#388E3C"
+
+    agent_tracker: Agent Tracker {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Tracks connected agents"
+    }
+
+    queue_manager: Queue Manager {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Per-agent queue pairs"
+    }
+
+    resync_tracker: Resync Tracker {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Manages resync state"
+    }
+  }
+
+  event_processing: Event Processing {
+    style.fill: "#C8E6C9"
+    style.stroke: "#388E3C"
+
+    event_callbacks: Event Callbacks {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "principal/callbacks.go"
+    }
+
+    event_router: Event Router {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Routes to correct handler"
+    }
+
+    event_validator: Event Validator {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Validates CloudEvents"
+    }
+  }
+
+  resource_mgmt: Resource Management {
+    style.fill: "#C8E6C9"
+    style.stroke: "#388E3C"
+
+    app_manager_p: Application Manager {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "internal/manager/application"
+    }
+
+    project_manager_p: AppProject Manager {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "internal/manager/appproject"
+    }
+
+    repo_manager_p: Repository Manager {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "internal/manager/repository"
+    }
+  }
+
+  proxies: Proxy Services {
+    style.fill: "#C8E6C9"
+    style.stroke: "#388E3C"
+
+    resource_proxy: Resource Proxy {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "principal/resourceproxy/"
+    }
+
+    redis_proxy: Redis Proxy {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "principal/redisproxy/"
+    }
+  }
+}
+
+# Agent Internal Architecture
+agent_internals: Agent Component {
+  style.fill: "#FFFDE7"
+  style.stroke: "#F57F17"
+  style.stroke-width: 4
+
+  connection: Connection Layer {
+    style.fill: "#FFF9C4"
+    style.stroke: "#F9A825"
+
+    grpc_client: gRPC Client {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "pkg/client/"
+    }
+
+    stream_handler: Stream Handler {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "Bidirectional stream mgmt"
+    }
+
+    reconnect_logic: Reconnect Logic {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "Exponential backoff"
+    }
+  }
+
+  event_handling: Event Handling {
+    style.fill: "#FFF9C4"
+    style.stroke: "#F9A825"
+
+    inbound_handler: Inbound Handler {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "agent/inbound.go"
+    }
+
+    outbound_handler: Outbound Handler {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "agent/outbound.go"
+    }
+
+    event_filters: Event Filters {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "agent/filters.go"
+    }
+  }
+
+  resource_sync: Resource Synchronization {
+    style.fill: "#FFF9C4"
+    style.stroke: "#F9A825"
+
+    app_manager_a: Application Manager {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "internal/manager/application"
+    }
+
+    project_manager_a: AppProject Manager {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "internal/manager/appproject"
+    }
+
+    repo_manager_a: Repository Manager {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "internal/manager/repository"
+    }
+  }
+
+  resource_handling: Resource Operations {
+    style.fill: "#FFF9C4"
+    style.stroke: "#F9A825"
+
+    resource_handler: Resource Handler {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "agent/resource.go"
+    }
+
+    redis_handler: Redis Handler {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "agent/inbound_redis.go"
+    }
+  }
+}
+
+# Shared Internal Packages
+shared_packages: Shared Internal Packages {
+  style.fill: "#E3F2FD"
+  style.stroke: "#1976D2"
+  style.stroke-width: 4
+
+  backend_layer: Backend Layer {
+    style.fill: "#BBDEFB"
+    style.stroke: "#0277BD"
+
+    backend_interface: Backend Interface {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/backend/"
+    }
+
+    k8s_app_backend: K8s Application Backend {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/backend/kubernetes/application"
+    }
+
+    k8s_project_backend: K8s AppProject Backend {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/backend/kubernetes/appproject"
+    }
+
+    k8s_repo_backend: K8s Repository Backend {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/backend/kubernetes/repository"
+    }
+
+    namespace_backend: K8s Namespace Backend {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/backend/kubernetes/namespace"
+    }
+  }
+
+  infrastructure: Infrastructure Services {
+    style.fill: "#BBDEFB"
+    style.stroke: "#0277BD"
+
+    auth: Authentication {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/auth/"
+    }
+
+    event: Event System {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/event/"
+    }
+
+    queue: Queue System {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/queue/"
+    }
+
+    cache: Cache System {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/cache/"
+    }
+
+    informer: Informer System {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/informer/"
+    }
+
+    metrics: Metrics {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/metrics/"
+    }
+
+    logging: Logging {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/logging/"
+    }
+  }
+
+  utilities: Utilities {
+    style.fill: "#BBDEFB"
+    style.stroke: "#0277BD"
+
+    tls_util: TLS Utilities {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/tlsutil/"
+    }
+
+    grpc_util: gRPC Utilities {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/grpcutil/"
+    }
+
+    kube_util: Kube Utilities {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/kube/"
+    }
+
+    issuer: Certificate Issuer {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "internal/issuer/"
+    }
+  }
+}
+
+# Kubernetes Integration
+kubernetes: Kubernetes API {
+  style.fill: "#F3E5F5"
+  style.stroke: "#6A1B9A"
+
+  k8s_client: Client-go {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+    tooltip: "k8s.io/client-go"
+  }
+
+  k8s_informers: Informer Factory {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+    tooltip: "SharedInformerFactory"
+  }
+
+  k8s_dynamic: Dynamic Client {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+    tooltip: "For resource proxy"
+  }
+}
+
+# Argo CD Integration
+argocd_integration: Argo CD Integration {
+  style.fill: "#E0F2F1"
+  style.stroke: "#00695C"
+
+  argocd_apis: Argo CD APIs {
+    shape: rectangle
+    style.fill: "#B2DFDB"
+    tooltip: "v1alpha1 Application/AppProject"
+  }
+
+  argocd_cache: Argo CD Cache {
+    shape: rectangle
+    style.fill: "#B2DFDB"
+    tooltip: "appstate cache utilities"
+  }
+
+  argocd_cluster: Argo CD Cluster {
+    shape: rectangle
+    style.fill: "#B2DFDB"
+    tooltip: "Cluster registration utilities"
+  }
+}
+
+# External Git Repository
+git_repo: Git Repository {
+  shape: cloud
+  style.fill: "#FFECB3"
+  style.stroke: "#F57C00"
+  icon: https://icons.terrastruct.com/dev%2Fgit.svg
+  tooltip: "Source of application manifests"
+}
+
+# Repo Server
+repo_server: Repo Server {
+  style.fill: "#E0F2F1"
+  style.stroke: "#00695C"
+
+  git_client: Git Client {
+    shape: rectangle
+    style.fill: "#B2DFDB"
+    tooltip: "Fetches from Git repositories"
+  }
+
+  manifest_cache: Manifest Cache {
+    shape: rectangle
+    style.fill: "#B2DFDB"
+    tooltip: "Local filesystem cache"
+  }
+}
+
+# Component interactions
+principal_internals.grpc_layer.grpc_server -> principal_internals.apis.event_stream_api: "Route requests" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 2
+}
+
+principal_internals.apis.event_stream_api -> principal_internals.connection_mgmt.queue_manager: "Manage queues" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 2
+}
+
+principal_internals.connection_mgmt.queue_manager -> principal_internals.event_processing.event_callbacks: "Process events" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 2
+}
+
+principal_internals.event_processing.event_callbacks -> principal_internals.resource_mgmt.app_manager_p: "Manage resources" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 2
+}
+
+principal_internals.resource_mgmt.app_manager_p -> shared_packages.backend_layer.k8s_app_backend: "Backend operations" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+}
+
+agent_internals.connection.grpc_client -> agent_internals.event_handling.inbound_handler: "Receive events" {
+  style.stroke: "#F9A825"
+  style.stroke-width: 2
+}
+
+agent_internals.event_handling.inbound_handler -> agent_internals.resource_sync.app_manager_a: "Apply changes" {
+  style.stroke: "#F9A825"
+  style.stroke-width: 2
+}
+
+agent_internals.resource_sync.app_manager_a -> shared_packages.backend_layer.k8s_app_backend: "Backend operations" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+}
+
+# Shared package usage
+shared_packages.backend_layer.k8s_app_backend -> kubernetes.k8s_client: "CRUD operations" {
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 2
+}
+
+shared_packages.backend_layer.k8s_app_backend -> kubernetes.k8s_informers: "Watch resources" {
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 2
+}
+
+shared_packages.infrastructure.informer -> kubernetes.k8s_informers: "Create informers" {
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 2
+}
+
+shared_packages.backend_layer.k8s_app_backend -> argocd_integration.argocd_apis: "Use Argo CD types" {
+  style.stroke: "#00695C"
+  style.stroke-width: 2
+}
+
+principal_internals.grpc_layer.interceptors -> shared_packages.infrastructure.auth: "Authenticate" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+principal_internals.connection_mgmt.queue_manager -> shared_packages.infrastructure.queue: "Queue impl" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+principal_internals.event_processing.event_callbacks -> shared_packages.infrastructure.event: "Event utilities" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+agent_internals.connection.grpc_client -> shared_packages.utilities.tls_util: "TLS config" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+# External systems
+oci_registry: OCI Registry {
+  shape: cylinder
+  style.fill: "#E1F5FE"
+  style.stroke: "#0277BD"
+  icon: https://icons.terrastruct.com/dev%2Fdocker.svg
+  tooltip: "Container image registry for OCI artifacts"
+}
+
+helm_registry: Helm Registry ⎈ {
+  shape: cylinder
+  style.fill: "#E8EAF6"
+  style.stroke: "#3F51B5"
+  tooltip: "Helm chart repository"
+}
+
+# Manifest access through repo server
+argocd_integration.argocd_apis -> repo_server.git_client: "Request manifests" {
+  style.stroke: "#00695C"
+  style.stroke-width: 2
+}
+
+repo_server.git_client -> git_repo: "Option A: Git Clone/Fetch" {
+  style.stroke: "#F57C00"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+repo_server.git_client -> oci_registry: "Option B: OCI Pull" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+repo_server.git_client -> helm_registry: "Option C: Helm Pull" {
+  style.stroke: "#3F51B5"
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+repo_server.git_client -> repo_server.manifest_cache: "Cache manifests" {
+  style.stroke: "#00695C"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+repo_server.manifest_cache -> argocd_integration.argocd_apis: "Return cached manifests" {
+  style.stroke: "#00695C"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+# Package boundaries note
+boundaries_note: |md
+  ## Package Boundaries
+
+  ### Principal (principal/)
+  - Connection management for multiple agents
+  - Event routing and queue management
+  - Proxy services for resource/redis access
+  - gRPC server implementation
+
+  ### Agent (agent/)
+  - Connection to single principal
+  - Local resource synchronization
+  - Event generation and handling
+  - Resource operations
+
+  ### Shared Internal (internal/)
+  - **backend/**: Pluggable storage backends
+  - **manager/**: Resource lifecycle management
+  - **event/**: Event processing utilities
+  - **queue/**: Queue implementations
+  - **informer/**: K8s informer wrappers
+  - **auth/**: Authentication methods
+  - **cache/**: Caching layer
+  - **metrics/**: Prometheus metrics
+
+  ### Public API (pkg/)
+  - **client/**: gRPC client library
+  - **types/**: Shared types and constants
+  - **api/**: Generated protobuf code
+| {
+  near: bottom-left
+  shape: text
+  style.font-size: 10
+}
+
+design_patterns: |md
+  ## Design Patterns
+
+  ### Manager Pattern
+  Each resource type (App, AppProject, Repository) has:
+  - Manager (business logic)
+  - Backend (storage abstraction)
+  - Informer (watch mechanism)
+
+  ### Event-Driven Architecture
+  - CloudEvents for message format
+  - Queue-based async processing
+  - Bidirectional event streams
+
+  ### Pluggable Backends
+  - Backend interface for CRUD operations
+  - Current: Kubernetes (CRDs via API)
+  - Future: Redis, SQL, etc.
+
+  ### Separation of Concerns
+  - Transport (gRPC) separated from logic
+  - Authentication as middleware
+  - Metrics/logging as cross-cutting
+| {
+  near: bottom-right
+  shape: text
+  style.font-size: 10
+  style.fill: "#E8F5E9"
+  style.stroke: "#2E7D32"
+}

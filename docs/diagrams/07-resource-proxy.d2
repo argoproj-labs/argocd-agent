@@ -1,0 +1,432 @@
+direction: down
+
+title: |md
+  # Resource Proxy and Live Resource Access
+  How control plane accesses workload cluster resources via agent tunnel
+| {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# User interaction
+user: User/Operator {
+  shape: person
+  style.fill: "#FFE0B2"
+  style.stroke: "#E65100"
+}
+
+# Control Plane components
+control_plane: Control Plane Cluster {
+  icon: https://icons.terrastruct.com/azure%2F_Companies%2FKubernetes.svg
+  style.fill: "#E3F2FD"
+  style.stroke: "#1976D2"
+  style.stroke-width: 3
+
+  argocd_ui: Argo CD UI {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+    tooltip: "User views app details"
+  }
+
+  argocd_server: Argo CD API Server {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+    tooltip: "Handles API requests"
+  }
+
+  cluster_shim: Cluster Shim {
+    shape: rectangle
+    style.fill: "#FFE0B2"
+    style.stroke: "#EF6C00"
+    tooltip: "Pretends to be cluster API"
+  }
+
+  resource_proxy: Resource Proxy {
+    shape: rectangle
+    style.fill: "#C8E6C9"
+    style.stroke: "#2E7D32"
+    style.bold: true
+
+    request_tracker: Request Tracker {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Tracks in-flight requests"
+    }
+
+    request_router: Request Router {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Routes to correct agent"
+    }
+
+    response_handler: Response Handler {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Assembles responses"
+    }
+  }
+
+  grpc_server: gRPC Server {
+    shape: rectangle
+    style.fill: "#A5D6A7"
+    style.stroke: "#388E3C"
+    tooltip: "Agent connection endpoint"
+  }
+}
+
+# Workload Cluster components
+workload_cluster: Workload Cluster {
+  icon: https://icons.terrastruct.com/azure%2F_Companies%2FKubernetes.svg
+  style.fill: "#FFF9C4"
+  style.stroke: "#F57F17"
+  style.stroke-width: 3
+
+  agent: Agent {
+    shape: rectangle
+    style.fill: "#C8E6C9"
+    style.stroke: "#2E7D32"
+    style.bold: true
+
+    grpc_client: gRPC Client {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Persistent connection"
+    }
+
+    resource_handler: Resource Handler {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Processes resource requests"
+    }
+
+    k8s_client: K8s Client {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Accesses local cluster"
+    }
+  }
+
+  k8s_api: Kubernetes API {
+    shape: cylinder
+    style.fill: "#BBDEFB"
+    style.stroke: "#1976D2"
+    tooltip: "Workload cluster API"
+  }
+
+  resources: Live Resources {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+    style.stroke: "#6A1B9A"
+    tooltip: "Pods, Services, ConfigMaps, etc."
+  }
+}
+
+# Flow: User request
+user -> control_plane.argocd_ui: "1. Click 'Live Manifest'\non Application" {
+  style.stroke: "#E65100"
+  style.stroke-width: 3
+}
+
+control_plane.argocd_ui -> control_plane.argocd_server: "2. API Request\nGET /api/v1/applications/app/resource" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+}
+
+control_plane.argocd_server -> control_plane.cluster_shim: "3. Get Resource\nfrom 'cluster'" {
+  style.stroke: "#EF6C00"
+  style.stroke-width: 2
+}
+
+control_plane.cluster_shim -> control_plane.resource_proxy.request_router: "4. Route to\nResource Proxy" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane.resource_proxy.request_router -> control_plane.resource_proxy.request_tracker: "5. Create request\nwith unique ID" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane.resource_proxy.request_tracker -> control_plane.grpc_server: "6. Send request\nto agent" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 2
+}
+
+# mTLS connection
+control_plane.grpc_server -> workload_cluster.agent.grpc_client: "7. gRPC Stream\n(mTLS encrypted)\nRESOURCE-REQUEST Event" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 4
+  style.animated: true
+}
+
+workload_cluster.agent.grpc_client -> workload_cluster.agent.resource_handler: "8. Handle request" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+workload_cluster.agent.resource_handler -> workload_cluster.agent.k8s_client: "9. Query K8s API" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+}
+
+workload_cluster.agent.k8s_client -> workload_cluster.k8s_api: "10. GET /apis/.../pods/xyz" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+workload_cluster.k8s_api -> workload_cluster.resources: "11. Read resource" {
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 2
+}
+
+# Response path
+workload_cluster.resources -> workload_cluster.k8s_api: "12. Return resource" {
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 2
+}
+
+workload_cluster.k8s_api -> workload_cluster.agent.k8s_client: "13. Resource data" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+workload_cluster.agent.k8s_client -> workload_cluster.agent.resource_handler: "14. Process response" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+}
+
+workload_cluster.agent.resource_handler -> workload_cluster.agent.grpc_client: "15. Create\nRESOURCE-RESPONSE" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+# Return via mTLS
+workload_cluster.agent.grpc_client -> control_plane.grpc_server: "16. gRPC Stream\n(mTLS encrypted)\nRESOURCE-RESPONSE Event" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 4
+  style.animated: true
+}
+
+control_plane.grpc_server -> control_plane.resource_proxy.response_handler: "17. Receive response" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 2
+}
+
+control_plane.resource_proxy.response_handler -> control_plane.resource_proxy.request_tracker: "18. Match request ID" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane.resource_proxy.request_tracker -> control_plane.cluster_shim: "19. Return resource data" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane.cluster_shim -> control_plane.argocd_server: "20. Return as K8s API\nresponse" {
+  style.stroke: "#EF6C00"
+  style.stroke-width: 2
+}
+
+control_plane.argocd_server -> control_plane.argocd_ui: "21. Display resource" {
+  style.stroke: "#0277BD"
+  style.stroke-width: 2
+}
+
+control_plane.argocd_ui -> user: "22. Show live manifest" {
+  style.stroke: "#E65100"
+  style.stroke-width: 3
+  style.animated: true
+}
+
+# Redis Proxy (similar pattern)
+redis_section: Redis Proxy (Similar Pattern) {
+  style.fill: "#FFF3E0"
+  style.stroke: "#E65100"
+  style.stroke-width: 3
+
+  argocd_controller: Argo CD Controller {
+    shape: rectangle
+    style.fill: "#B3E5FC"
+    style.stroke: "#0277BD"
+  }
+
+  redis_shim: Redis Shim {
+    shape: rectangle
+    style.fill: "#FFE0B2"
+    style.stroke: "#EF6C00"
+    tooltip: "Pretends to be Redis server"
+  }
+
+  redis_proxy: Redis Proxy {
+    shape: rectangle
+    style.fill: "#C8E6C9"
+    style.stroke: "#2E7D32"
+    tooltip: "principal/redisproxy/"
+  }
+
+  agent_redis: Agent (Redis Handler) {
+    shape: rectangle
+    style.fill: "#C8E6C9"
+    style.stroke: "#2E7D32"
+  }
+
+  redis_actual: Actual Redis {
+    shape: cylinder
+    style.fill: "#FFCCBC"
+    style.stroke: "#D84315"
+  }
+
+  argocd_controller -> redis_shim: "1. Redis command\n(RESP protocol)" {
+    style.stroke: "#0277BD"
+    style.stroke-width: 2
+  }
+
+  redis_shim -> redis_proxy: "2. Proxy request" {
+    style.stroke: "#2E7D32"
+    style.stroke-width: 2
+  }
+
+  redis_proxy -> agent_redis: "3. Via gRPC tunnel\n(mTLS)" {
+    style.stroke: "#388E3C"
+    style.stroke-width: 3
+    style.animated: true
+  }
+
+  agent_redis -> redis_actual: "4. Execute on\nworkload cluster Redis" {
+    style.stroke: "#D84315"
+    style.stroke-width: 2
+    style.stroke-dash: 5
+  }
+
+  redis_actual -> agent_redis: "5. Response" {
+    style.stroke: "#D84315"
+    style.stroke-width: 2
+    style.stroke-dash: 5
+  }
+
+  agent_redis -> redis_proxy: "6. Via gRPC tunnel" {
+    style.stroke: "#388E3C"
+    style.stroke-width: 3
+    style.animated: true
+  }
+
+  redis_proxy -> redis_shim: "7. Return response" {
+    style.stroke: "#2E7D32"
+    style.stroke-width: 2
+  }
+
+  redis_shim -> argocd_controller: "8. Redis response\n(RESP protocol)" {
+    style.stroke: "#0277BD"
+    style.stroke-width: 2
+  }
+}
+
+# Features and capabilities
+features: |md
+  ## Resource Proxy Features
+
+  ### Supported Operations
+  ✅ **GET**: Retrieve individual resources
+  ✅ **LIST**: List resources by type/namespace
+  ✅ **WATCH**: Stream resource changes (WebSocket)
+  ✅ **PATCH**: Update resources (limited operations)
+  ✅ **DELETE**: Delete resources (with permissions)
+  ✅ **EXEC**: Execute commands in pods
+  ✅ **LOGS**: Stream container logs
+
+  ### Use Cases
+  - **Live Resource Viewing**: View actual state of resources
+  - **Pod Logs**: Stream logs from workload cluster
+  - **Resource Actions**: Execute custom actions
+  - **Debugging**: Exec into pods for troubleshooting
+  - **Status Monitoring**: Real-time resource status
+
+  ### Security
+  - All requests go through mTLS tunnel
+  - Agent RBAC controls access on workload cluster
+  - Request tracking prevents request spoofing
+  - Timeout and rate limiting
+  - Audit logging of all proxy requests
+| {
+  near: bottom-left
+  shape: text
+  style.font-size: 10
+  style.fill: "#E8F5E9"
+  style.stroke: "#2E7D32"
+}
+
+technical_details: |md
+  ## Technical Details
+
+  ### Request Tracking
+  ```
+  Request ID: UUID
+  Timeout: 30s default
+  Status: Pending → Processing → Complete
+  Channel: Response channel per request
+  ```
+
+  ### Cluster Shim
+  - Implements Kubernetes REST client interface
+  - Registers as "cluster" in Argo CD
+  - No actual kubeconfig needed
+  - Routes all requests to resource proxy
+
+  ### Redis Proxy
+  - Implements Redis RESP protocol parser
+  - Bidirectional streaming for pub/sub
+  - Connection pooling per agent
+  - Transparent to Argo CD components
+
+  ### Performance
+  - **Latency**: ~100-200ms overhead vs direct
+  - **Throughput**: Limited by gRPC stream
+  - **Concurrency**: 100s of concurrent requests
+  - **Scalability**: Per-agent isolation
+
+  ### Limitations
+  - Not suitable for high-frequency polling
+  - Network dependency for all operations
+  - Additional latency vs direct cluster access
+  - Stream must be active for proxy to work
+| {
+  near: bottom-right
+  shape: text
+  style.font-size: 10
+  style.fill: "#E3F2FD"
+  style.stroke: "#1976D2"
+}
+
+architecture_note: |md
+  ## Architecture Benefits
+
+  ### Zero Ingress on Workload Clusters
+  - No need to expose Kubernetes API
+  - No VPN or network routing required
+  - Works through firewalls/NAT
+  - Minimal security surface
+
+  ### Consistent Access Pattern
+  - Same mTLS tunnel as config sync
+  - Single connection for all operations
+  - No credential sprawl
+  - Centralized access control
+
+  ### Argo CD Compatibility
+  - Works with unmodified Argo CD
+  - Standard Kubernetes client interface
+  - Transparent to end users
+  - No custom UI required
+| {
+  near: top-right
+  shape: text
+  style.font-size: 10
+  style.fill: "#FFF3E0"
+  style.stroke: "#E65100"
+}

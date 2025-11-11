@@ -1,0 +1,401 @@
+direction: right
+
+title: |md
+  # Security Boundaries and Trust Zones
+  Authentication, encryption, and network boundaries
+| {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# Internet/Untrusted Zone
+internet: Internet / Untrusted Network {
+  style.fill: "#FFCDD2"
+  style.stroke: "#C62828"
+  style.stroke-width: 3
+  style.opacity: 0.3
+
+  attacker: Potential Threats {
+    shape: cloud
+    style.fill: "#EF5350"
+    style.stroke: "#B71C1C"
+    icon: data:image/svg+xml,%3C%3Fxml%20version=%221.0%22%20encoding=%22iso-8859-1%22%3F%3E%0D%0A%3C%21--%20Generator:%20Adobe%20Illustrator%2019.0.0%2C%20SVG%20Export%20Plug-In%20.%20SVG%20Version:%206.00%20Build%200%29%20%20--%3E%0D%0A%3Csvg%20version=%221.1%22%20id=%22Capa_1%22%20xmlns=%22http:%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20xmlns:xlink=%22http:%2F%2Fwww.w3.org%2F1999%2Fxlink%22%20x=%220px%22%20y=%220px%22%0D%0A%09%20viewBox=%220%200%2060%2060%22%20style=%22enable-background:new%200%200%2060%2060%3B%22%20xml:space=%22preserve%22%3E%0D%0A%3Cpolygon%20style=%22fill:%23CC4B4C%3B%22%20points=%2252%2C23.5%2010%2C40%2010%2C22%2010%2C4%20%22%2F%3E%0D%0A%3Cpath%20style=%22fill:%23424A60%3B%22%20d=%22M9%2C0C8.448%2C0%2C8%2C0.447%2C8%2C1v3v55c0%2C0.553%2C0.448%2C1%2C1%2C1s1-0.447%2C1-1V4V1C10%2C0.447%2C9.552%2C0%2C9%2C0z%22%2F%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3Cg%3E%0D%0A%3C%2Fg%3E%0D%0A%3C%2Fsvg%3E%0D%0A
+  }
+}
+
+# Trust Zone 1: Control Plane
+control_plane_zone: Control Plane Trust Zone {
+  style.fill: "#E8F5E9"
+  style.stroke: "#2E7D32"
+  style.stroke-width: 4
+
+  control_plane: Control Plane Cluster {
+    icon: https://icons.terrastruct.com/azure%2F_Companies%2FKubernetes.svg
+    style.stroke: "#326CE5"
+    style.fill: "#E3F2FD"
+    style.stroke-width: 2
+
+    rbac_cp: RBAC / Service Accounts {
+      shape: rectangle
+      style.fill: "#FFECB3"
+      style.stroke: "#F57C00"
+      tooltip: "Kubernetes RBAC controls"
+    }
+
+    principal: Principal {
+      style.fill: "#C8E6C9"
+      style.stroke: "#2E7D32"
+
+      auth_layer: Authentication Layer {
+        shape: rectangle
+        style.fill: "#81C784"
+
+        jwt_validator: JWT Validator {
+          shape: rectangle
+          style.fill: "#A5D6A7"
+          tooltip: "Validates agent JWT tokens"
+        }
+
+        mtls_validator: mTLS Validator {
+          shape: rectangle
+          style.fill: "#A5D6A7"
+          tooltip: "Validates client certificates"
+        }
+
+        authz: Authorization {
+          shape: rectangle
+          style.fill: "#A5D6A7"
+          tooltip: "Agent-to-namespace mapping"
+        }
+      }
+
+      grpc_server: gRPC Server {
+        shape: rectangle
+        style.fill: "#A5D6A7"
+
+        tls_termination: TLS Termination {
+          shape: rectangle
+          style.fill: "#81C784"
+          tooltip: "Server certificate + client cert validation"
+        }
+      }
+
+      event_processor: Event Processor {
+        shape: rectangle
+        style.fill: "#A5D6A7"
+        tooltip: "Processes authenticated events"
+      }
+    }
+
+    k8s_api_cp: Kubernetes API {
+      shape: cylinder
+      style.fill: "#BBDEFB"
+      style.stroke: "#1976D2"
+
+      api_server_auth: API Server AuthN/AuthZ {
+        shape: rectangle
+        style.fill: "#90CAF9"
+        tooltip: "Service account token validation"
+      }
+    }
+
+    etcd: etcd {
+      shape: cylinder
+      style.fill: "#BBDEFB"
+      style.stroke: "#1976D2"
+
+      encryption_at_rest: Encryption at Rest {
+        shape: rectangle
+        style.fill: "#90CAF9"
+        tooltip: "Optional: etcd encryption"
+      }
+    }
+
+    secrets_cp: Secrets Store {
+      shape: cylinder
+      style.fill: "#FFE0B2"
+      style.stroke: "#E65100"
+      tooltip: "CA certs, JWT signing keys"
+    }
+  }
+
+  firewall_cp: Firewall / Network Policy {
+    shape: rectangle
+    style.fill: "#FFF59D"
+    style.stroke: "#F57F17"
+    tooltip: "Ingress only on principal port"
+  }
+}
+
+# Trust Zone 2: Workload Cluster 1
+workload_zone_1: Workload Cluster 1 Trust Zone {
+  style.fill: "#FFF9C4"
+  style.stroke: "#F57F17"
+  style.stroke-width: 4
+
+  workload_1: Workload Cluster 1 {
+    icon: https://icons.terrastruct.com/azure%2F_Companies%2FKubernetes.svg
+    style.stroke: "#326CE5"
+    style.fill: "#FFF9C4"
+    style.stroke-width: 2
+
+    rbac_wl1: RBAC / Service Accounts {
+      shape: rectangle
+      style.fill: "#FFECB3"
+      style.stroke: "#F57C00"
+      tooltip: "Agent needs limited permissions"
+    }
+
+    agent_1: Agent {
+      style.fill: "#C8E6C9"
+      style.stroke: "#2E7D32"
+
+      credentials: Credentials {
+        shape: rectangle
+        style.fill: "#81C784"
+
+        client_cert: Client Certificate {
+          shape: rectangle
+          style.fill: "#A5D6A7"
+          tooltip: "Signed by principal CA"
+        }
+
+        jwt_token: JWT Token {
+          shape: rectangle
+          style.fill: "#A5D6A7"
+          tooltip: "Issued by principal"
+        }
+
+        ca_cert: CA Certificate {
+          shape: rectangle
+          style.fill: "#A5D6A7"
+          tooltip: "To verify principal"
+        }
+      }
+
+      grpc_client: gRPC Client {
+        shape: rectangle
+        style.fill: "#A5D6A7"
+
+        tls_client: TLS Client {
+          shape: rectangle
+          style.fill: "#81C784"
+          tooltip: "Mutual TLS handshake"
+        }
+      }
+    }
+
+    k8s_api_wl1: Kubernetes API {
+      shape: cylinder
+      style.fill: "#BBDEFB"
+      style.stroke: "#1976D2"
+
+      api_auth_wl1: API Server AuthN/AuthZ {
+        shape: rectangle
+        style.fill: "#90CAF9"
+        tooltip: "Agent service account"
+      }
+    }
+
+    secrets_wl1: Secrets Store {
+      shape: cylinder
+      style.fill: "#FFE0B2"
+      style.stroke: "#E65100"
+      tooltip: "Agent credentials, CA cert"
+    }
+  }
+
+  firewall_wl1: Firewall / Network Policy {
+    shape: rectangle
+    style.fill: "#FFF59D"
+    style.stroke: "#F57F17"
+    tooltip: "Egress only to principal"
+  }
+}
+
+# Trust Zone 3: Workload Cluster 2
+workload_zone_2: Workload Cluster 2 Trust Zone {
+  style.fill: "#FFF9C4"
+  style.stroke: "#F57F17"
+  style.stroke-width: 4
+
+  workload_2: Workload Cluster 2 {
+    icon: https://icons.terrastruct.com/azure%2F_Companies%2FKubernetes.svg
+    style.stroke: "#326CE5"
+    style.fill: "#FFF9C4"
+    style.stroke-width: 2
+
+    agent_2: Agent {
+      style.fill: "#C8E6C9"
+      style.stroke: "#2E7D32"
+      tooltip: "Isolated from other agents"
+    }
+
+    secrets_wl2: Secrets Store {
+      shape: cylinder
+      style.fill: "#FFE0B2"
+      style.stroke: "#E65100"
+    }
+  }
+
+  firewall_wl2: Firewall / Network Policy {
+    shape: rectangle
+    style.fill: "#FFF59D"
+    style.stroke: "#F57F17"
+  }
+}
+
+# Secure connections
+workload_zone_1.workload_1.agent_1.grpc_client.tls_client -> control_plane_zone.control_plane.principal.grpc_server.tls_termination: "mTLS Tunnel" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 5
+  style.animated: true
+}
+
+workload_zone_2.workload_2.agent_2 -> control_plane_zone.control_plane.principal.grpc_server.tls_termination: "mTLS Tunnel" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 5
+  style.animated: true
+}
+
+# Authentication flow
+control_plane_zone.control_plane.principal.grpc_server.tls_termination -> control_plane_zone.control_plane.principal.auth_layer.mtls_validator: "Verify Client Cert" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane_zone.control_plane.principal.grpc_server.tls_termination -> control_plane_zone.control_plane.principal.auth_layer.jwt_validator: "Verify JWT Token" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+control_plane_zone.control_plane.principal.auth_layer.authz -> control_plane_zone.control_plane.principal.event_processor: "Authorized Events" {
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+}
+
+# Internal secure access
+control_plane_zone.control_plane.principal -> control_plane_zone.control_plane.k8s_api_cp.api_server_auth: "Service Account Token" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+workload_zone_1.workload_1.agent_1 -> workload_zone_1.workload_1.k8s_api_wl1.api_auth_wl1: "Service Account Token" {
+  style.stroke: "#1976D2"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+# Secrets access
+control_plane_zone.control_plane.principal -> control_plane_zone.control_plane.secrets_cp: "Read CA, signing keys" {
+  style.stroke: "#E65100"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+workload_zone_1.workload_1.agent_1.credentials -> workload_zone_1.workload_1.secrets_wl1: "Read credentials" {
+  style.stroke: "#E65100"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+# Blocked connections
+internet.attacker -> control_plane_zone.firewall_cp: "❌ BLOCKED\n(Firewall)" {
+  style.stroke: "#C62828"
+  style.stroke-width: 3
+  style.stroke-dash: 3
+}
+
+internet.attacker -> workload_zone_1.firewall_wl1: "❌ BLOCKED\n(No ingress)" {
+  style.stroke: "#C62828"
+  style.stroke-width: 3
+  style.stroke-dash: 3
+}
+
+# Network policies
+control_plane_zone.firewall_cp -> control_plane_zone.control_plane.principal.grpc_server: "Allow: Agent → Principal\nPort: 443/8443" {
+  style.stroke: "#388E3C"
+  style.stroke-width: 2
+}
+
+workload_zone_1.firewall_wl1 -> internet: "Allow: Egress only\nTo: Principal endpoint" {
+  style.stroke: "#F57F17"
+  style.stroke-width: 2
+}
+
+# Security boundaries
+security_notes: |md
+  ## Security Layers
+
+  ### 1. Network Security
+  - **Control Plane**: Firewall allows ingress only on principal port
+  - **Workload Clusters**: No ingress required; egress only to principal
+  - **Network Policies**: Restrict pod-to-pod communication
+  - **Zero Trust**: No cluster-to-cluster communication except via principal
+
+  ### 2. Transport Security
+  - **mTLS**: Mutual TLS for all agent-principal communication
+  - **TLS 1.3**: Modern cipher suites, forward secrecy
+  - **Certificate Validation**: Both client and server certificates validated
+  - **CA Hierarchy**: Principal acts as CA for agent certificates
+
+  ### 3. Authentication
+  - **JWT Tokens**: Agent identity verification
+  - **Client Certificates**: X.509 certificate-based authentication
+  - **Dual Authentication**: Both JWT and mTLS can be required
+
+  ### 4. Authorization
+  - **Namespace Isolation**: Each agent mapped to specific namespace(s)
+  - **RBAC**: Kubernetes RBAC for API access
+  - **Event Filtering**: Principal ensures agents only access their resources
+  - **Service Accounts**: Least privilege for components
+
+  ### 5. Data Security
+  - **Encryption in Transit**: All network communication encrypted
+  - **Encryption at Rest**: Optional etcd encryption
+  - **Secret Management**: K8s secrets for credential storage
+  - **No Credential Sharing**: Each cluster has unique credentials
+| {
+  near: bottom-left
+  shape: text
+  style.font-size: 10
+}
+
+threat_model: |md
+  ## Threat Mitigation
+
+  ✅ **Man-in-the-Middle**: Prevented by mTLS
+  ✅ **Replay Attacks**: JWT expiration, nonces
+  ✅ **Unauthorized Access**: Multi-layer authentication
+  ✅ **Lateral Movement**: Namespace isolation, RBAC
+  ✅ **Data Interception**: End-to-end encryption
+  ✅ **Agent Impersonation**: Certificate + JWT validation
+  ✅ **DDoS**: Rate limiting, connection limits
+  ✅ **Compromised Workload**: Blast radius limited to one cluster
+| {
+  near: bottom-right
+  shape: text
+  style.font-size: 10
+  style.fill: "#E8F5E9"
+  style.stroke: "#2E7D32"
+}
+
+legend: |md
+  ## Legend
+
+  🟢 **Green zones**: Trusted environments (within cluster)
+  🟡 **Yellow zones**: Semi-trusted (workload clusters)
+  🔴 **Red zone**: Untrusted (internet)
+
+  **Solid green lines**: Encrypted (mTLS) communication
+  **Dashed blue lines**: In-cluster secure communication
+  **Dashed orange lines**: Secrets access
+  **Dashed red lines**: Blocked connections
+| {
+  near: top-right
+  shape: text
+  style.font-size: 10
+}

@@ -1,0 +1,456 @@
+direction: down
+
+title: |md
+  # Resync Protocol and Failure Recovery
+  How principal and agent recover from disconnections and restarts
+| {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# Scenario 1: Agent Restart (Managed Mode)
+scenario_1: Scenario 1: Agent Restart (Managed Mode) {
+  style.fill: "#E8F5E9"
+  style.stroke: "#2E7D32"
+  style.stroke-width: 3
+
+  principal_s1: Principal (Running) {
+    style.fill: "#C8E6C9"
+    style.stroke: "#388E3C"
+
+    state_s1: Principal State {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Has all Applications in memory"
+    }
+
+    resync_tracker_s1: Resync Tracker {
+      shape: rectangle
+      style.fill: "#A5D6A7"
+      tooltip: "Marks agent as needing resync"
+    }
+  }
+
+  agent_s1: Agent (Restarted) {
+    style.fill: "#FFF9C4"
+    style.stroke: "#F9A825"
+
+    local_state_s1: Local State {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "Apps exist in K8s but memory empty"
+    }
+
+    checksum_s1: Calculate Checksum {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "SHA256 of all local apps"
+    }
+  }
+
+  step1: "1. Agent reconnects" {
+    shape: text
+    style.font-color: "#2E7D32"
+    style.bold: true
+  }
+
+  step2: "2. Principal detects new connection\n   Marks agent for resync" {
+    shape: text
+    style.font-color: "#2E7D32"
+  }
+
+  step3: "3. Principal sends:\n   REQUEST-RESOURCE-RESYNC" {
+    shape: rectangle
+    style.fill: "#81C784"
+  }
+
+  step4: "4. Agent calculates checksum\n   of local Applications" {
+    shape: text
+    style.font-color: "#F9A825"
+  }
+
+  step5: "5. Agent responds:\n   REQUEST-SYNCED-RESOURCE-LIST\n   + checksum" {
+    shape: rectangle
+    style.fill: "#FFF59D"
+  }
+
+  step6: "6. Principal compares checksums\n   Detects drift" {
+    shape: text
+    style.font-color: "#2E7D32"
+  }
+
+  step7: "7. Principal sends:\n   RESPONSE-SYNCED-RESOURCE\n   for each missing/changed app" {
+    shape: rectangle
+    style.fill: "#81C784"
+  }
+
+  step8: "8. Agent creates/updates apps\n   State synchronized ✓" {
+    shape: text
+    style.font-color: "#F9A825"
+    style.bold: true
+  }
+
+  agent_s1 -> step1 -> principal_s1.resync_tracker_s1 -> step2
+  step2 -> step3 -> agent_s1.checksum_s1 -> step4
+  step4 -> step5 -> principal_s1.state_s1 -> step6
+  step6 -> step7 -> agent_s1.local_state_s1 -> step8
+}
+
+# Scenario 2: Principal Restart (Managed Mode)
+scenario_2: Scenario 2: Principal Restart (Managed Mode) {
+  style.fill: "#E3F2FD"
+  style.stroke: "#1976D2"
+  style.stroke-width: 3
+
+  principal_s2: Principal (Restarted) {
+    style.fill: "#BBDEFB"
+    style.stroke: "#0277BD"
+
+    empty_state_s2: Empty In-Memory State {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "Memory cleared, reads from K8s"
+    }
+
+    k8s_read_s2: Read from K8s API {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "Applications still in etcd"
+    }
+  }
+
+  agent_s2: Agent (Running) {
+    style.fill: "#FFF9C4"
+    style.stroke: "#F9A825"
+
+    synced_state_s2: Synced State {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "Agent has correct apps"
+    }
+  }
+
+  step1_s2: "1. Agent reconnects to restarted principal" {
+    shape: text
+    style.font-color: "#1976D2"
+    style.bold: true
+  }
+
+  step2_s2: "2. Principal reads Applications\n   from Kubernetes API/etcd" {
+    shape: text
+    style.font-color: "#1976D2"
+  }
+
+  step3_s2: "3. Principal sends:\n   REQUEST-RESOURCE-RESYNC" {
+    shape: rectangle
+    style.fill: "#90CAF9"
+  }
+
+  step4_s2: "4. Agent responds:\n   REQUEST-SYNCED-RESOURCE-LIST\n   + checksum" {
+    shape: rectangle
+    style.fill: "#FFF59D"
+  }
+
+  step5_s2: "5. Principal validates\n   Agent has correct apps ✓" {
+    shape: text
+    style.font-color: "#1976D2"
+    style.bold: true
+  }
+
+  agent_s2.synced_state_s2 -> step1_s2 -> principal_s2.empty_state_s2
+  principal_s2.empty_state_s2 -> step2_s2 -> principal_s2.k8s_read_s2
+  principal_s2.k8s_read_s2 -> step3_s2 -> agent_s2
+  agent_s2 -> step4_s2 -> principal_s2
+  principal_s2 -> step5_s2
+}
+
+# Scenario 3: Principal Restart (Autonomous Mode)
+scenario_3: Scenario 3: Principal Restart (Autonomous Mode) {
+  style.fill: "#FFF3E0"
+  style.stroke: "#E65100"
+  style.stroke-width: 3
+
+  principal_s3: Principal (Restarted) {
+    style.fill: "#FFE0B2"
+    style.stroke: "#EF6C00"
+
+    empty_s3: Empty State {
+      shape: rectangle
+      style.fill: "#FFCC80"
+      tooltip: "No apps in K8s (autonomous)"
+    }
+
+    rebuild_s3: Rebuild State {
+      shape: rectangle
+      style.fill: "#FFCC80"
+      tooltip: "Must rebuild from agents"
+    }
+  }
+
+  agent_s3: Agent (Source of Truth) {
+    style.fill: "#FFF9C4"
+    style.stroke: "#F9A825"
+
+    authoritative_s3: Authoritative State {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "Agent has all apps"
+    }
+
+    send_all_s3: Send All Resources {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "Sends complete inventory"
+    }
+  }
+
+  step1_s3: "1. Agent reconnects" {
+    shape: text
+    style.font-color: "#E65100"
+    style.bold: true
+  }
+
+  step2_s3: "2. Principal has no apps\n   (autonomous mode)" {
+    shape: text
+    style.font-color: "#E65100"
+  }
+
+  step3_s3: "3. Principal sends:\n   REQUEST-SYNCED-RESOURCE-LIST\n   checksum: empty" {
+    shape: rectangle
+    style.fill: "#FFCC80"
+  }
+
+  step4_s3: "4. Agent detects mismatch\n   Principal needs all apps" {
+    shape: text
+    style.font-color: "#F9A825"
+  }
+
+  step5_s3: "5. Agent sends:\n   RESPONSE-SYNCED-RESOURCE\n   for EACH application" {
+    shape: rectangle
+    style.fill: "#FFF59D"
+  }
+
+  step6_s3: "6. Principal creates mirror apps\n   State rebuilt ✓" {
+    shape: text
+    style.font-color: "#E65100"
+    style.bold: true
+  }
+
+  agent_s3.authoritative_s3 -> step1_s3 -> principal_s3.empty_s3
+  principal_s3.empty_s3 -> step2_s3 -> step3_s3 -> agent_s3
+  agent_s3 -> step4_s3 -> agent_s3.send_all_s3 -> step5_s3
+  step5_s3 -> principal_s3.rebuild_s3 -> step6_s3
+}
+
+# Scenario 4: Network Partition
+scenario_4: Scenario 4: Network Partition & Recovery {
+  style.fill: "#FCE4EC"
+  style.stroke: "#C2185B"
+  style.stroke-width: 3
+
+  timeline: Timeline {
+    style.fill: "#F8BBD0"
+
+    t1: "T1: Connected" {
+      shape: rectangle
+      style.fill: "#C8E6C9"
+      tooltip: "Normal operation"
+    }
+
+    t2: "T2: Network partition" {
+      shape: rectangle
+      style.fill: "#FFCDD2"
+      tooltip: "Connection lost"
+    }
+
+    t3: "T3: Autonomous operation" {
+      shape: rectangle
+      style.fill: "#FFF9C4"
+      tooltip: "Both operate independently"
+    }
+
+    t4: "T4: Network restored" {
+      shape: rectangle
+      style.fill: "#B2DFDB"
+      tooltip: "Reconnection"
+    }
+
+    t5: "T5: Resync" {
+      shape: rectangle
+      style.fill: "#C8E6C9"
+      tooltip: "State reconciliation"
+    }
+  }
+
+  principal_s4: Principal Behavior {
+    style.fill: "#E3F2FD"
+
+    during_partition_p: "During Partition" {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "Queues events for agent"
+    }
+
+    after_reconnect_p: "After Reconnect" {
+      shape: rectangle
+      style.fill: "#90CAF9"
+      tooltip: "Triggers resync"
+    }
+  }
+
+  agent_s4: Agent Behavior {
+    style.fill: "#FFF9C4"
+
+    during_partition_a: "During Partition" {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "Continues local reconciliation"
+    }
+
+    reconnect_a: "Reconnect Logic" {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "Exponential backoff retry"
+    }
+
+    after_reconnect_a: "After Reconnect" {
+      shape: rectangle
+      style.fill: "#FFF59D"
+      tooltip: "Sends current state"
+    }
+  }
+
+  timeline.t1 -> timeline.t2 -> timeline.t3 -> timeline.t4 -> timeline.t5
+
+  timeline.t2 -> principal_s4.during_partition_p
+  timeline.t2 -> agent_s4.during_partition_a
+
+  timeline.t3 -> agent_s4.reconnect_a
+
+  timeline.t4 -> principal_s4.after_reconnect_p
+  timeline.t4 -> agent_s4.after_reconnect_a
+
+  timeline.t5 -> principal_s4.after_reconnect_p
+  timeline.t5 -> agent_s4.after_reconnect_a
+}
+
+# Checksum mechanism
+checksum_detail: Checksum Calculation {
+  style.fill: "#F3E5F5"
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 3
+
+  resource_list: "Resource List" {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+  }
+
+  sorted_keys: "Sort by:\nKind/Name/UID" {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+  }
+
+  concatenate: "Concatenate" {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+  }
+
+  sha256: "SHA256 Hash" {
+    shape: rectangle
+    style.fill: "#E1BEE7"
+  }
+
+  checksum: "Checksum\n(32 bytes)" {
+    shape: rectangle
+    style.fill: "#CE93D8"
+    style.bold: true
+  }
+
+  resource_list -> sorted_keys -> concatenate -> sha256 -> checksum
+
+  example: |md
+    Example:
+    ```
+    Resources:
+    - Application/app1/uid-123
+    - Application/app2/uid-456
+    - AppProject/proj1/uid-789
+
+    Sorted: app1, app2, proj1
+    Concatenated: "Application/app1/uid-123Application/app2/uid-456AppProject/proj1/uid-789"
+    SHA256: a3f2e9d8c7b6...
+    ```
+  | {
+    shape: text
+    style.font-size: 9
+  }
+}
+
+# Recovery guarantees
+guarantees: |md
+  ## Recovery Guarantees
+
+  ### Eventual Consistency
+  - System reaches consistent state after any failure
+  - Checksum-based detection of drift
+  - Automatic reconciliation via resync
+
+  ### Failure Modes Handled
+  ✅ Agent restart (managed/autonomous)
+  ✅ Principal restart (managed/autonomous)
+  ✅ Network partitions (temporary disconnection)
+  ✅ Missed events during downtime
+  ✅ Partial updates during connection loss
+
+  ### Resync Triggers
+  1. **Agent connects for first time**: Full sync
+  2. **Agent reconnects**: Checksum comparison
+  3. **Principal restart**: Request agent state
+  4. **Checksum mismatch**: Delta sync
+  5. **Manual trigger**: Via API/CLI
+
+  ### Performance Characteristics
+  - **Checksum calc**: O(n) where n = resources
+  - **Comparison**: O(1) - just byte comparison
+  - **Delta sync**: Only changed resources sent
+  - **Full sync**: O(n) - all resources transferred
+| {
+  near: bottom-left
+  shape: text
+  style.font-size: 10
+  style.fill: "#E8F5E9"
+  style.stroke: "#2E7D32"
+}
+
+event_types: |md
+  ## Resync Event Types
+
+  ### REQUEST-RESOURCE-RESYNC
+  - Sent by: Principal
+  - Purpose: Initiate resync process
+  - Contains: Mode (managed/autonomous)
+
+  ### REQUEST-SYNCED-RESOURCE-LIST
+  - Sent by: Agent (managed) or Principal (autonomous)
+  - Purpose: Request inventory with checksum
+  - Contains: Checksum of all resources
+
+  ### RESPONSE-SYNCED-RESOURCE
+  - Sent by: Principal (managed) or Agent (autonomous)
+  - Purpose: Send resource data
+  - Contains: Full resource spec + status
+  - Sent: For each resource needing sync
+
+  ### REQUEST-UPDATE
+  - Sent by: Either side
+  - Purpose: Request specific resource
+  - Contains: Resource identifier + checksum
+| {
+  near: bottom-right
+  shape: text
+  style.font-size: 10
+  style.fill: "#E3F2FD"
+  style.stroke: "#1976D2"
+}
