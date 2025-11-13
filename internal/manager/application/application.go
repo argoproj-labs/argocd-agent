@@ -205,8 +205,18 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		existing.Labels = incoming.Labels
 		existing.Finalizers = incoming.Finalizers
 		existing.Spec = *incoming.Spec.DeepCopy()
-		existing.Operation = incoming.Operation.DeepCopy()
-		existing.Status = *incoming.Status.DeepCopy()
+		// Don't update Operation if the app is terminating
+		if incoming.Operation != nil {
+			allowMirrorOp := true
+			if existing.Status.OperationState != nil {
+				if existing.Status.OperationState.Phase == synccommon.OperationTerminating {
+					allowMirrorOp = false
+				}
+			}
+			if allowMirrorOp {
+				existing.Operation = incoming.Operation.DeepCopy()
+			}
+		}
 
 		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
 			deletionTimestampChanged = true
@@ -232,6 +242,23 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 			deletionTimestampChanged = true
 		}
 
+		var desiredOp *v1alpha1.Operation
+		if incoming.Operation != nil {
+			allowMirrorOp := true
+			if existing.Status.OperationState != nil {
+				if existing.Status.OperationState.Phase == synccommon.OperationTerminating {
+					allowMirrorOp = false
+				}
+			}
+			if allowMirrorOp {
+				desiredOp = incoming.Operation
+			} else {
+				desiredOp = existing.Operation
+			}
+		} else {
+			desiredOp = existing.Operation
+		}
+
 		target := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Annotations: incoming.Annotations,
@@ -239,7 +266,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 				Finalizers:  incoming.Finalizers,
 			},
 			Spec:      incoming.Spec,
-			Operation: incoming.Operation,
+			Operation: desiredOp,
 		}
 		source := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
@@ -307,9 +334,6 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 // UpdateAutonomousApp updates the Application resource on the control plane side
 // when the agent is in autonomous mode. It will update changes to .spec and
 // .status fields along with syncing labels and annotations.
-//
-// Additionally, it will remove any .operation field from the incoming resource
-// before the resource is being updated on the control plane.
 //
 // This method is usually only executed by the control plane for updates that
 // are received by agents in autonomous mode.

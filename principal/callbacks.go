@@ -15,6 +15,8 @@
 package principal
 
 import (
+	"reflect"
+
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
@@ -22,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -108,13 +111,24 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 
+	var ev *cloudevents.Event
+
 	// Check if this update is a terminate-operation or a regular spec update
-	eventType := event.SpecUpdate
 	if isTerminateOperation(old, new) {
-		eventType = event.TerminateOperation
+		ev = s.events.ApplicationEvent(event.TerminateOperation, new)
+	} else {
+		// For managed agents: prevent sending operation back on regular spec updates.
+		// Allow only nil->non-nil transitions to carry operation (i.e. principal-initiated sync).
+
+		// DeepCopy to avoid mutating the informer object
+		out := new.DeepCopy()
+		if reflect.DeepEqual(old.Operation, new.Operation) && !isResourceFromAutonomousAgent(new) {
+			out.Operation = nil
+		}
+
+		ev = s.events.ApplicationEvent(event.SpecUpdate, out)
 	}
 
-	ev := s.events.ApplicationEvent(eventType, new)
 	q.Add(ev)
 	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
 
