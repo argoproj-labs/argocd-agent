@@ -15,6 +15,7 @@
 package e2e
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -339,7 +340,15 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.OperationState != nil &&
+		return err == nil && app.Operation != nil && app.Status.OperationState != nil &&
+			app.Status.OperationState.Phase == synccommon.OperationRunning
+	}, 60*time.Second, 1*time.Second)
+
+	// Wait for the sync operation to start on the principal
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
+		return err == nil && app.Operation != nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationRunning
 	}, 60*time.Second, 1*time.Second)
 
@@ -359,11 +368,55 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	conn, appClient := argoClient.NewApplicationClientOrDie()
 	defer conn.Close()
 
-	_, err = appClient.TerminateOperation(suite.Ctx, &application.OperationTerminateRequest{
-		Name:         &app.Name,
-		AppNamespace: &app.Namespace,
-	})
-	requires.NoError(err)
+	requires.Eventually(func() bool {
+		_, err := appClient.TerminateOperation(suite.Ctx, &application.OperationTerminateRequest{
+			Name:         &app.Name,
+			AppNamespace: &app.Namespace,
+		})
+
+		if err != nil {
+			if strings.Contains(err.Error(), "conflict") {
+				suite.T().Logf("Retrying terminate due to conflict: %v", err)
+				return false
+			}
+			requires.NoError(err)
+		}
+
+		return true
+	}, 60*time.Second, 1*time.Second)
+
+	// Continuously churn principal spec to simulate spec updates racing with termination on managed agent
+	// This is to ensure that the operation is terminated successfully even if the principal spec is updated.
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	go func() {
+		for {
+			select {
+			case <-stopCh:
+				return
+			default:
+				papp := argoapp.Application{}
+				err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &papp, metav1.GetOptions{})
+				if err != nil {
+					return
+				}
+
+				// Toggle a harmless Info entry to force spec updates
+				papp.Spec.Info = []argoapp.Info{
+					{
+						Name:  "e2e-churn",
+						Value: time.Now().Format(time.RFC3339Nano),
+					},
+				}
+				err = suite.PrincipalClient.Update(suite.Ctx, &papp, metav1.UpdateOptions{})
+				if err != nil {
+					return
+				}
+
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+	}()
 
 	// Wait for the pre-sync job to be removed
 	hook := batchv1.Job{
@@ -381,9 +434,12 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
+		if err == nil && app.Operation == nil && app.Status.OperationState != nil {
+			suite.T().Logf("Operation phase: %v", app.Status.OperationState.Phase)
+		}
 		return err == nil && app.Status.OperationState != nil && app.Status.OperationState.Phase == synccommon.OperationFailed &&
 			app.Status.OperationState.Message == "Operation terminated"
-	}, 60*time.Second, 1*time.Second)
+	}, 90*time.Second, 1*time.Second)
 }
 
 func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
@@ -434,7 +490,15 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.OperationState != nil &&
+		return err == nil && app.Operation != nil && app.Status.OperationState != nil &&
+			app.Status.OperationState.Phase == synccommon.OperationRunning
+	}, 60*time.Second, 1*time.Second)
+
+	// Wait for the sync operation to start on the autonomous-agent as well
+	requires.Eventually(func() bool {
+		app := argoapp.Application{}
+		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
+		return err == nil && app.Operation != nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationRunning
 	}, 60*time.Second, 1*time.Second)
 
@@ -454,11 +518,21 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 	conn, appClient := argoClient.NewApplicationClientOrDie()
 	defer conn.Close()
 
-	_, err = appClient.TerminateOperation(suite.Ctx, &application.OperationTerminateRequest{
-		Name:         &principalKey.Name,
-		AppNamespace: &principalKey.Namespace,
-	})
-	requires.NoError(err)
+	// Retry terminate to handle transient conflicts/races
+	requires.Eventually(func() bool {
+		_, err := appClient.TerminateOperation(suite.Ctx, &application.OperationTerminateRequest{
+			Name:         &principalKey.Name,
+			AppNamespace: &principalKey.Namespace,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "conflict") {
+				suite.T().Logf("Retrying terminate due to conflict: %v", err)
+				return false
+			}
+			requires.NoError(err)
+		}
+		return true
+	}, 60*time.Second, 1*time.Second)
 
 	// Wait for the pre-sync job to be removed
 	hook := batchv1.Job{
@@ -476,10 +550,10 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.OperationState != nil &&
+		return err == nil && app.Operation == nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationFailed &&
 			app.Status.OperationState.Message == "Operation terminated"
-	}, 60*time.Second, 1*time.Second)
+	}, 90*time.Second, 1*time.Second)
 }
 
 func TestSyncTestSuite(t *testing.T) {
