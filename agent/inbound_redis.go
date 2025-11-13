@@ -27,6 +27,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	rediscache "github.com/go-redis/cache/v9"
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 	"github.com/sirupsen/logrus"
 )
 
@@ -341,6 +342,9 @@ func (a *Agent) getRedisClientAndCache() (*redis.Client, *rediscache.Cache, erro
 		MaxRetries: 3,
 		TLSConfig:  tlsConfig,
 		Username:   a.redisProxyMsgHandler.redisUsername,
+		MaintNotificationsConfig: &maintnotifications.Config{
+			Mode: maintnotifications.ModeDisabled,
+		},
 	}
 
 	client := redis.NewClient(opts)
