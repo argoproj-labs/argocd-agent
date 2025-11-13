@@ -23,6 +23,7 @@ import (
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -163,9 +164,15 @@ func getCacheInstance(source string, clusterDetails *ClusterDetails) *appstateca
 	case PrincipalName:
 		redisOptions.Addr = clusterDetails.PrincipalRedisAddr
 		redisOptions.Password = clusterDetails.PrincipalRedisPassword
+		redisOptions.MaintNotificationsConfig = &maintnotifications.Config{
+			Mode: maintnotifications.ModeDisabled,
+		}
 	case AgentManagedName:
 		redisOptions.Addr = clusterDetails.ManagedAgentRedisAddr
 		redisOptions.Password = clusterDetails.ManagedAgentRedisPassword
+		redisOptions.MaintNotificationsConfig = &maintnotifications.Config{
+			Mode: maintnotifications.ModeDisabled,
+		}
 	default:
 		panic(fmt.Sprintf("invalid source: %s", source))
 	}

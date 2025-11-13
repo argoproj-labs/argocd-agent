@@ -21,6 +21,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 	"github.com/sirupsen/logrus"
 
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -166,7 +167,13 @@ func (m *Manager) setClusterInfo(clusterServer, agentName, clusterName string, c
 // NewClusterCacheInstance creates a new cache instance with Redis connection
 func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType) (*appstatecache.Cache, error) {
 
-	redisOptions := &redis.Options{Addr: redisAddress, Password: redisPassword}
+	redisOptions := &redis.Options{
+		Addr:     redisAddress,
+		Password: redisPassword,
+		MaintNotificationsConfig: &maintnotifications.Config{
+			Mode: maintnotifications.ModeDisabled,
+		},
+	}
 	redisClient := redis.NewClient(redisOptions)
 
 	clusterCache := appstatecache.NewCache(cacheutil.NewCache(
