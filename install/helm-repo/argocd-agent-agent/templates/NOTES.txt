@@ -9,7 +9,7 @@ Deployment
 ----------
 - Name: argocd-agent-agent
 - Replicas: {{ .Values.replicaCount }}
-- Image: {{ .Values.image }}:{{ .Values.imageTag }} (pullPolicy: {{ .Values.imagePullPolicy }})
+- Image: {{ .Values.image.repository }}:{{ .Values.image.tag }} (pullPolicy: {{ .Values.image.pullPolicy }})
 
 Services
 --------
