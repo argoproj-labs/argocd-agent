@@ -186,8 +186,7 @@
       "description": "Whether to enable gRPC compression"
     },
     "pprofPort": {
-      "type": "integer",
-      "minimum": 0,
+      "type": "string",
       "description": "Port for pprof server (0 disables pprof)"
     },
     "enableResourceProxy": {
@@ -196,10 +195,12 @@
     },
     "cacheRefreshInterval": {
       "type": "string",
+      "pattern": "^[0-9]+(ms|s|m|h)$",
       "description": "Cache refresh interval"
     },
     "keepAliveInterval": {
       "type": "string",
+      "pattern": "^[0-9]+(ms|s|m|h)$",
       "description": "Keep-alive interval for connections"
     },
     "tlsClientKeyPath": { "type": "string", "description": "Path to client key inside container" },

@@ -121,7 +121,7 @@ enableWebSocket: false
 # -- Whether to enable gRPC compression.
 enableCompression: false
 # -- Port for pprof server (0 disables pprof).
-pprofPort: 0
+pprofPort: "0"
 # -- Whether to enable resource proxy.
 enableResourceProxy: true
 # -- Cache refresh interval.
