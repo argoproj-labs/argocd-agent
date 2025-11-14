@@ -26,6 +26,7 @@ import (
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -430,6 +431,35 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 				return err
 			}
 		}
+	}
+
+	removeJobFinalizers := func(ctx context.Context, kclient KubeClient) error {
+		jobList := batchv1.JobList{}
+		err = kclient.List(ctx, "guestbook", &jobList, metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		for _, job := range jobList.Items {
+			if len(job.Finalizers) > 0 {
+				err := EnsureUpdate(ctx, kclient, &job, func(obj KubeObject) {
+					obj.SetFinalizers(nil)
+				})
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+
+	err = removeJobFinalizers(ctx, managedAgentClient)
+	if err != nil {
+		return err
+	}
+
+	err = removeJobFinalizers(ctx, autonomousAgentClient)
+	if err != nil {
+		return err
 	}
 
 	// Delete any left over namespaces
