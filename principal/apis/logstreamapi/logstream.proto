@@ -1,0 +1,46 @@
+// Copyright 2025 The argocd-agent Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package principal.apis.logstreamapi;
+
+option go_package = "github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi";
+
+// LogStreamData represents a line (or chunk) of log data sent from the agent
+message LogStreamData {
+  // Unique identifier matching the original request/event UUID
+  string request_uuid = 1;
+  // Log data content.
+  bytes data = 2;
+  // End of stream indicator
+  bool eof = 3;
+  // Optional error message
+  string error = 4;
+}
+
+// LogStreamResponse is returned by principal when the agent closes the stream
+message LogStreamResponse {
+  string request_uuid = 1;
+  int32 status = 2; // 200 on success
+  string error = 3;
+  int32 lines_received = 4;
+}
+
+service LogStreamService {
+  // Agent establishes a client-streaming RPC and sends log data to principal
+  rpc StreamLogs(stream LogStreamData) returns (LogStreamResponse);
+}
+
+
