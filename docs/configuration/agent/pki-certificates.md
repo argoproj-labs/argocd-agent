@@ -240,12 +240,12 @@ oc label secret <cluster-name>-cluster argocd.argoproj.io/secret-type=cluster
 The Agent requires it's own certificate which will be provided to the Principal for mTLS, this will
 be minted on the Principal where the Issuer is available and then moved to the Agent.
 
-!!!note
-  It is possible to mint this certificate on the Agent itself by simply using cert-manager
-  with the identical CA secret on the Agent. However this has security implications since
-  if any cluster is compromised the CA with its key could be retrieved and a hacker could mint their own certs. Generally
-  the Agents will at times run in less secure locations/networks then the Principle so isolating
-  the CA to one location, the principal, is beneficial.
+!!! note "Minting Certificate on Agent"
+    It is possible to mint this certificate on the Agent itself by simply using cert-manager
+    with the identical CA secret on the Agent. However this has security implications since
+    if any cluster is compromised the CA with its key could be retrieved and a hacker could mint their own certs. Generally
+    the Agents will at times run in less secure locations/networks then the Principle so isolating
+    the CA to one location, the principal, is beneficial.
 
 ```
 apiVersion: cert-manager.io/v1
@@ -272,15 +272,15 @@ Output the secret to a file as we need to install it on the cluster where the Ag
 kubectl get secret managed-cluster-agent -o yaml -n argocd | oc neat > <cluster-name>-agent.yaml
 ```
 
-!!!note
-  The [kubectl-neat](https://github.com/itaysk/kubectl-neat) plugin is used to clean the YAML, if you do not have access to this simply omit it
-  and edit the secret after it is exported to remove the cruft:
+!!! note "Using kubectl-neat"
+    The [kubectl-neat](https://github.com/itaysk/kubectl-neat) plugin is used to clean the YAML, if you do not have access to this simply omit it
+    and edit the secret after it is exported to remove the cruft:
 
 The secret `argocd-agent-ca` is also required for the Agent however want it without the key for
 the security reasons discussed earlier.
 
-!!!note
-  The command `yq` is used to modify the secret, if `yq` is not available simply edit the secret as needed.
+!!! note "Using yq"
+    The command `yq` is used to modify the secret, if `yq` is not available simply edit the secret as needed.
 
 ```
 kubectl get secret argocd-agent-ca -o yaml -n argocd | yq 'del(.data.["tls.key"])' -y | oc neat > argocd-agent-ca.yaml
