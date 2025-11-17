@@ -26,11 +26,19 @@ Kubernetes: `>=1.24.0-0`
 |-----|------|---------|-------------|
 | affinity | object | `{}` | Affinity rules for the agent Pod. |
 | agentMode | string | `"autonomous"` | Agent mode of operation. |
+| argoCdRedisPasswordKey | string | `"auth"` | ArgoCD Redis password key. |
+| argoCdRedisSecretName | string | `"argocd-redis"` | ArgoCD Redis password secret name. |
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
+| cacheRefreshInterval | string | `"10s"` | Cache refresh interval. |
+| enableCompression | bool | `false` | Whether to enable gRPC compression. |
+| enableResourceProxy | bool | `true` | Whether to enable resource proxy. |
+| enableWebSocket | bool | `false` | Whether to enable WebSocket connections. |
 | healthzPort | string | `"8002"` | Healthz server port exposed by the agent. |
 | image.pullPolicy | string | `"Always"` | Image pull policy for the agent container. |
 | image.repository | string | `"ghcr.io/argoproj-labs/argocd-agent/argocd-agent"` | Container image repository for the agent. |
 | image.tag | string | `"latest"` | Container image tag for the agent. |
+| keepAliveInterval | string | `"50s"` | Keep-alive interval for connections. |
+| logFormat | string | `"text"` | Log format for the agent (text or json). |
 | logLevel | string | `"info"` | Log level for the agent. |
 | metricsPort | string | `"8181"` | Metrics server port exposed by the agent. |
 | namespaceOverride | string | `""` | Override namespace to deploy the agent into. Leave empty to use the release namespace. |
@@ -43,6 +51,7 @@ Kubernetes: `>=1.24.0-0`
 | nodeSelector | object | `{}` | Node selector for scheduling the agent Pod. |
 | podAnnotations | object | `{}` | Additional annotations to add to the agent Pod. |
 | podLabels | object | `{}` | Additional labels to add to the agent Pod. |
+| pprofPort | string | `"0"` | Port for pprof server (0 disables pprof). |
 | priorityClassName | string | `""` | PriorityClassName for the agent Pod. |
 | probes | object | `{"liveness":{"enabled":true,"failureThreshold":3,"httpGet":{"path":"/healthz","port":"healthz"},"initialDelaySeconds":10,"periodSeconds":10,"timeoutSeconds":2},"readiness":{"enabled":true,"failureThreshold":3,"httpGet":{"path":"/healthz","port":"healthz"},"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":2}}` | Liveness and readiness probe configuration. |
 | probes.liveness.enabled | bool | `true` | Enable the liveness probe. |
@@ -56,6 +65,7 @@ Kubernetes: `>=1.24.0-0`
 | probes.readiness.periodSeconds | int | `10` | Frequency of readiness probes. |
 | probes.readiness.timeoutSeconds | int | `2` | Timeout for readiness probe. |
 | redisAddress | string | `"argocd-redis:6379"` | Redis address used by the agent. |
+| redisUsername | string | `""` | Redis username for authentication. |
 | replicaCount | int | `1` | Number of replicas for the agent Deployment. |
 | resources | object | `{"limits":{"cpu":"500m","memory":"512Mi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Resource requests and limits for the agent Pod. |
 | server | string | `"principal.server.address.com"` | Principal server address (hostname or host:port). |
@@ -71,15 +81,18 @@ Kubernetes: `>=1.24.0-0`
 | serviceAccount.annotations | object | `{}` | Annotations to add to the ServiceAccount. |
 | serviceAccount.create | bool | `true` | Whether to create the ServiceAccount. |
 | serviceAccount.name | string | `""` | Name of the ServiceAccount to use. If empty, a name is generated. |
-| tests | object | `{"enabled":"true","image":"bitnamilegacy/kubectl","tag":"1.33.4"}` | Configuration for chart tests. |
+| tests | object | `{"enabled":"true","image":"bitnamilegacy/kubectl","tag":"1.33.4"}` | Configuration for helm-chart tests. |
 | tests.enabled | string | `"true"` | Enable chart tests. |
 | tests.image | string | `"bitnamilegacy/kubectl"` | Test image. |
 | tests.tag | string | `"1.33.4"` | Test image tag. |
-| tlsClientCertPath | string | `"/app/config/tls/tls.crt"` |  |
+| tlsClientCertPath | string | `"/app/config/tls/tls.crt"` | Path to the TLS client certificate. |
 | tlsClientInSecure | string | `"false"` | Whether to skip TLS verification for client connections. |
-| tlsClientKeyPath | string | `"/app/config/tls/tls.key"` |  |
-| tlsRootCAPath | string | `"/app/config/tls/ca.crt"` |  |
+| tlsClientKeyPath | string | `"/app/config/tls/tls.key"` | Path to the TLS client key. |
+| tlsRootCAPath | string | `"/app/config/tls/ca.crt"` | Path to the TLS root CA certificate. |
+| tlsRootCASecretName | string | `"argocd-agent-ca"` | Name of the Secret containing root CA certificate. |
 | tlsSecretName | string | `"argocd-agent-client-tls"` | Name of the TLS Secret containing client cert/key for mTLS. |
 | tolerations | list | `[]` | Tolerations for the agent Pod. |
 | userPasswordSecretName | string | `"argocd-agent-agent-userpass"` | Name of the Secret containing agent username/password (if used). |
 
+----------------------------------------------
+Autogenerated from chart metadata using [helm-docs v1.13.1](https://github.com/norwoodj/helm-docs/releases/v1.13.1)

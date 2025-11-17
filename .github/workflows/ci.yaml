@@ -16,6 +16,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code_any_changed }}
       docs: ${{ steps.filter.outputs.docs_any_changed }}
+      helm: ${{ steps.filter.outputs.helm_any_changed }}
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       - uses: tj-actions/changed-files@c3a1bb2c992d77180ae65be6ae6c166cf40f857c # v45.0.3
@@ -29,6 +30,8 @@ jobs:
               - '!Dockerfile.*'
             docs:
               - 'docs/**'
+            helm:
+              - 'install/helm-repo/**'
 
   check-go:
     name: Check go modules synchronicity
@@ -237,3 +240,29 @@ jobs:
           path: /tmp/vcluster-control-plane-server.log
         if: ${{ failure() }}
 
+  validate-helm-charts:
+    name: Validate Helm charts
+    if: ${{ needs.changes.outputs.helm == 'true' }}
+    runs-on: ubuntu-22.04
+    needs:
+      - changes
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      
+      - name: Install required packages
+        run: |
+          # Install yq
+          YQ_VERSION="v4.44.3"
+          sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+      - name: Validate schema
+        working-directory: ${{ github.workspace }}
+        run: |
+          make validate-values-schema
+
+      - name: validate helm-docs generation
+        uses: losisin/helm-docs-github-action@v1.6.2 # v1.6.2 https://github.com/losisin/helm-docs-github-action
+        with:
+          fail-on-diff: true
+          version: v1.13.1

@@ -166,7 +166,7 @@ service:
     annotations: {}
 
 ## @section Tests
-# -- Configuration for chart tests.
+# -- Configuration for helm-chart tests.
 tests:
   # -- Enable chart tests.
   enabled: "true"

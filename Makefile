@@ -186,6 +186,13 @@ serve-docs:
 build-docs:
 	${DOCKER_BIN} run ${MKDOCS_RUN_ARGS} --rm -v ${current_dir}:/docs ${MKDOCS_DOCKER_IMAGE} build
 
+.PHONY: validate-values-schema
+validate-values-schema:
+	@$(current_dir)/hack/validate-values-schema.sh
+
+.PHONY: generate-helm-docs
+generate-helm-docs:
+	helm-docs
 
 .PHONY: help
 help:
