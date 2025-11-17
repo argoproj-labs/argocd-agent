@@ -252,14 +252,14 @@ jobs:
       
       - name: Install required packages
         run: |
-          # Install jq via apt-get
-          sudo apt-get update
-          sudo apt-get install -y jq
           # Install helm-docs
-          HELM_DOCS_VERSION="v1.13.1"
-          curl -sSL "https://github.com/norwoodj/helm-docs/releases/download/${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_linux_amd64.tar.gz" | tar -xz
-          sudo mv helm-docs /usr/local/bin/helm-docs
+          HELM_DOCS_VERSION="1.13.1"
+          curl -sSL -L -o /tmp/helm-docs.tar.gz "https://github.com/norwoodj/helm-docs/releases/download/v${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz"
+          file /tmp/helm-docs.tar.gz || true
+          tar -xzf /tmp/helm-docs.tar.gz -C /tmp
+          sudo mv /tmp/helm-docs /usr/local/bin/helm-docs
           sudo chmod +x /usr/local/bin/helm-docs
+          rm -f /tmp/helm-docs.tar.gz
           # Install yq
           YQ_VERSION="v4.44.3"
           sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
