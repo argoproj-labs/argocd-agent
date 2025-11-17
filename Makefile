@@ -190,6 +190,10 @@ build-docs:
 validate-values-schema:
 	@$(current_dir)/hack/validate-values-schema.sh
 
+.PHONY: generate-helm-docs
+generate-helm-docs:
+	helm-docs
+
 .PHONY: help
 help:
 	@echo "Not yet, sorry."

@@ -254,7 +254,8 @@ jobs:
         run: |
           sudo apt-get install helm-docs yq jq
       - name: Validate Helm charts
+        working-directory: ${{ github.workspace }}
         run: |
           make validate-values-schema
-          helm-docs
+          make generate-helm-docs
           git diff --exit-code -- .
