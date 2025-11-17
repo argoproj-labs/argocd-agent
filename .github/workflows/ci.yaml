@@ -16,6 +16,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code_any_changed }}
       docs: ${{ steps.filter.outputs.docs_any_changed }}
+      helm: ${{ steps.filter.outputs.helm_any_changed }}
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       - uses: tj-actions/changed-files@c3a1bb2c992d77180ae65be6ae6c166cf40f857c # v45.0.3
@@ -29,6 +30,8 @@ jobs:
               - '!Dockerfile.*'
             docs:
               - 'docs/**'
+            helm:
+              - 'install/helm-repo/**'
 
   check-go:
     name: Check go modules synchronicity
@@ -237,3 +240,21 @@ jobs:
           path: /tmp/vcluster-control-plane-server.log
         if: ${{ failure() }}
 
+  validate-helm-charts:
+    name: Validate Helm charts
+    if: ${{ needs.changes.outputs.helm == 'true' }}
+    runs-on: ubuntu-22.04
+    needs:
+      - changes
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      
+      - name: Setup Helm-docs, yq and jq
+        run: |
+          sudo apt-get install helm-docs yq jq
+      - name: Validate Helm charts
+        run: |
+          make validate-values-schema
+          helm-docs
+          git diff --exit-code -- .
