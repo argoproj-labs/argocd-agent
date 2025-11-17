@@ -250,9 +250,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       
-      - name: Setup Helm-docs, yq and jq
+      - name: Install required packages
         run: |
-          sudo apt-get install helm-docs yq jq
+          # Install jq via apt-get
+          sudo apt-get update
+          sudo apt-get install -y jq
+          # Install helm-docs
+          HELM_DOCS_VERSION="v1.13.1"
+          curl -sSL "https://github.com/norwoodj/helm-docs/releases/download/${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_linux_amd64.tar.gz" | tar -xz
+          sudo mv helm-docs /usr/local/bin/helm-docs
+          sudo chmod +x /usr/local/bin/helm-docs
+          # Install yq
+          YQ_VERSION="v4.44.3"
+          sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
       - name: Validate Helm charts
         working-directory: ${{ github.workspace }}
         run: |
