@@ -726,6 +726,11 @@ type eventMessage struct {
 	// - acquire 'lock' before accessing
 	event *cloudevents.Event
 
+	// deferredEvent holds the newest non-terminate event that arrived while a
+	// terminate-operation is the current event for this resource. This is to make
+	// sure that the terminate-operation is not overwritten by a spec-update event.
+	deferredEvent *cloudevents.Event
+
 	// retry sending the event after this time
 	retryAfter *time.Time
 
@@ -782,6 +787,24 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 
 	// Replace the old event and reset the backoff.
 	eventMsg.mu.Lock()
+	// Do not let a terminate-operation be overwritten by a spec-update event.
+	currType := ""
+	if eventMsg.event != nil {
+		currType = eventMsg.event.Type()
+	}
+	newType := ev.Type()
+	// If current is terminate-operation and new is not terminate-operation,
+	// keep current and defer the new event.
+	if currType == TerminateOperation.String() && newType != TerminateOperation.String() {
+		eventMsg.deferredEvent = ev
+		eventMsg.mu.Unlock()
+		logCtx.Trace("kept existing terminate-operation event and deferred the new event")
+		return
+	}
+	// If new is terminate-operation, defer the current event for later promotion.
+	if newType == TerminateOperation.String() && currType != TerminateOperation.String() && eventMsg.event != nil {
+		eventMsg.deferredEvent = eventMsg.event
+	}
 	eventMsg.event = ev
 	eventMsg.backoff = &defaultBackoff
 	eventMsg.retryAfter = nil
@@ -811,6 +834,26 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 	latestEvent.mu.RUnlock()
 
 	if latestEventID == EventID(ev) {
+		// If there is a deferred event (e.g., spec-update) queued behind a terminate-operation,
+		// promote the deferred event to be the current event.
+		latestEvent.mu.Lock()
+		if latestEvent.deferredEvent != nil {
+			promoted := latestEvent.deferredEvent
+			latestEvent.deferredEvent = nil
+			latestEvent.event = promoted
+			// Reset backoff and retryAfter so the deferred event is sent promptly.
+			defaultBackoff := wait.Backoff{
+				Steps:    5,
+				Duration: 5 * time.Second,
+				Factor:   2.0,
+				Jitter:   0.1,
+			}
+			latestEvent.backoff = &defaultBackoff
+			latestEvent.retryAfter = nil
+			latestEvent.mu.Unlock()
+			return
+		}
+		latestEvent.mu.Unlock()
 		delete(ew.latestEvents, resourceID)
 	}
 }

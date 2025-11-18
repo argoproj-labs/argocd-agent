@@ -48,6 +48,98 @@ func TestEventWriter(t *testing.T) {
 		},
 	}
 
+	t.Run("should prioritize terminate and defer latest spec-update", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		// Add a spec-update first
+		app1.ResourceVersion = "10"
+		specEv := es.ApplicationEvent(SpecUpdate, app1)
+		evSender.Add(specEv)
+
+		// Then add terminate; it should become current and previous spec should be deferred
+		app1.ResourceVersion = "11"
+		termEv := es.ApplicationEvent(TerminateOperation, app1)
+		evSender.Add(termEv)
+
+		latest := evSender.Get(createResourceID(app1.ObjectMeta))
+		require.NotNil(t, latest)
+		latest.mu.RLock()
+		require.Equal(t, TerminateOperation.String(), latest.event.Type())
+		require.NotNil(t, latest.deferredEvent)
+		require.Equal(t, SpecUpdate.String(), latest.deferredEvent.Type())
+		latest.mu.RUnlock()
+
+		// When we ACK the terminate, the deferred spec should be promoted
+		evSender.Remove(termEv)
+		latest = evSender.Get(createResourceID(app1.ObjectMeta))
+		require.NotNil(t, latest)
+		latest.mu.RLock()
+		require.Equal(t, SpecUpdate.String(), latest.event.Type())
+		latest.mu.RUnlock()
+	})
+
+	t.Run("should keep only the newest deferred spec-update while terminate is current", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		// Current is terminate
+		app1.ResourceVersion = "20"
+		termEv := es.ApplicationEvent(TerminateOperation, app1)
+		evSender.Add(termEv)
+
+		// Multiple spec-updates arrive while terminate is pending
+		app1.ResourceVersion = "21"
+		oldSpec := es.ApplicationEvent(SpecUpdate, app1)
+		evSender.Add(oldSpec)
+		app1.ResourceVersion = "22"
+		newSpec := es.ApplicationEvent(SpecUpdate, app1)
+		evSender.Add(newSpec)
+
+		latest := evSender.Get(createResourceID(app1.ObjectMeta))
+		require.NotNil(t, latest)
+		latest.mu.RLock()
+		require.Equal(t, TerminateOperation.String(), latest.event.Type())
+		require.NotNil(t, latest.deferredEvent)
+		require.Equal(t, EventID(newSpec), EventID(latest.deferredEvent))
+		latest.mu.RUnlock()
+
+		// ACK terminate; latest spec should be promoted
+		evSender.Remove(termEv)
+		latest = evSender.Get(createResourceID(app1.ObjectMeta))
+		require.NotNil(t, latest)
+		latest.mu.RLock()
+		require.Equal(t, SpecUpdate.String(), latest.event.Type())
+		require.Equal(t, EventID(newSpec), EventID(latest.event))
+		latest.mu.RUnlock()
+	})
+
+	t.Run("should handle consecutive terminates by upgrading current terminate", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		// First terminate
+		app1.ResourceVersion = "30"
+		term1 := es.ApplicationEvent(TerminateOperation, app1)
+		evSender.Add(term1)
+
+		// Second terminate arrives; it should replace current
+		app1.ResourceVersion = "31"
+		term2 := es.ApplicationEvent(TerminateOperation, app1)
+		evSender.Add(term2)
+
+		latest := evSender.Get(createResourceID(app1.ObjectMeta))
+		require.NotNil(t, latest)
+		latest.mu.RLock()
+		require.Equal(t, TerminateOperation.String(), latest.event.Type())
+		require.Equal(t, EventID(term2), EventID(latest.event))
+		latest.mu.RUnlock()
+
+		// ACK for the latest terminate should clear (no deferred set)
+		evSender.Remove(term2)
+		require.Nil(t, evSender.Get(createResourceID(app1.ObjectMeta)))
+	})
+
 	t.Run("should add/update/remove events from the queue", func(t *testing.T) {
 		fs := &fakeStream{}
 		evSender := NewEventWriter(fs)

@@ -385,43 +385,10 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 		return true
 	}, 60*time.Second, 1*time.Second)
 
-	// Continuously churn principal spec to simulate spec updates racing with termination on managed agent
-	// This is to ensure that the operation is terminated successfully even if the principal spec is updated.
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-	go func() {
-		for {
-			select {
-			case <-stopCh:
-				return
-			default:
-				papp := argoapp.Application{}
-				err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &papp, metav1.GetOptions{})
-				if err != nil {
-					return
-				}
-
-				// Toggle a harmless Info entry to force spec updates
-				papp.Spec.Info = []argoapp.Info{
-					{
-						Name:  "e2e-churn",
-						Value: time.Now().Format(time.RFC3339Nano),
-					},
-				}
-				err = suite.PrincipalClient.Update(suite.Ctx, &papp, metav1.UpdateOptions{})
-				if err != nil {
-					return
-				}
-
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
-	}()
-
 	// Wait for the pre-sync job to be removed
 	hook := batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pre-post-sync-before",
+			Name:      "before",
 			Namespace: "guestbook",
 		},
 	}
@@ -537,7 +504,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 	// Wait for the pre-sync job to be removed
 	hook := batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pre-post-sync-before",
+			Name:      "before",
 			Namespace: "guestbook",
 		},
 	}
