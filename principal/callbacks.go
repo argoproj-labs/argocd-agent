@@ -130,7 +130,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 	}
 
 	q.Add(ev)
-	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
+	logCtx.WithField("event_type", ev.Type()).Tracef("Added app to send queue, total length now %d", q.Len())
 
 	if s.metrics != nil {
 		s.metrics.ApplicationUpdated.Inc()
