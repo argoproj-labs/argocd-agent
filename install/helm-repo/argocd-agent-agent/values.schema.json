@@ -207,46 +207,6 @@
     "tlsClientCertPath": { "type": "string", "description": "Path to client cert inside container" },
     "tlsRootCAPath": { "type": "string", "description": "Path to Root CA inside container" },
 
-    "networkPolicy": {
-      "type": "object",
-      "description": "NetworkPolicy configuration",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Whether to enable NetworkPolicy"
-        },
-        "redis": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "type": "boolean",
-              "description": "Whether to enable Redis NetworkPolicy"
-            },
-            "name": {
-              "type": "string",
-              "description": "Name of the NetworkPolicy"
-            },
-            "namespace": {
-              "type": "string",
-              "description": "Namespace for the NetworkPolicy"
-            },
-            "redisSelector": {
-              "type": "object",
-              "additionalProperties": { "type": "string" },
-              "description": "Selector for Redis pods"
-            },
-            "agentSelector": {
-              "type": "object",
-              "additionalProperties": { "type": "string" },
-              "description": "Selector for agent pods"
-            }
-          }
-        }
-      }
-    },
-
     "service": {
       "type": "object",
       "description": "Service configuration for metrics and healthz",
