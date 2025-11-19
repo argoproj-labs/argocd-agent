@@ -814,10 +814,11 @@ func extractAgentNameFromRedisCommandKey(redisKey string, logCtx *logrus.Entry) 
 	namespaceAndName := splitByPipe[2]
 
 	// It is not possible to create a namespace name containing a '_' value, so this is a correct delimiter
+	// If the namespace/name doesn't contain '_', it's a classic (non-agent-managed) application
+	// and should be forwarded to principal redis
 	if !strings.Contains(namespaceAndName, "_") {
-		errMsg := fmt.Sprintf("unexpected lack of '_' namespace/name separate: '%s'", redisKey)
-		logCtx.Error(errMsg)
-		return "", fmt.Errorf("%s", errMsg)
+		logCtx.Debugf("Redis key without agent prefix detected: '%s'. Routing to principal redis.", redisKey)
+		return "", nil
 	}
 
 	// namespace is the agent name
