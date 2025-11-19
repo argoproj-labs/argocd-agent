@@ -42,12 +42,6 @@ Kubernetes: `>=1.24.0-0`
 | logLevel | string | `"info"` | Log level for the agent. |
 | metricsPort | string | `"8181"` | Metrics server port exposed by the agent. |
 | namespaceOverride | string | `""` | Override namespace to deploy the agent into. Leave empty to use the release namespace. |
-| networkPolicy.enabled | bool | `true` |  |
-| networkPolicy.redis.agentSelector."app.kubernetes.io/name" | string | `"argocd-agent-agent"` |  |
-| networkPolicy.redis.enabled | bool | `true` |  |
-| networkPolicy.redis.name | string | `"allow-agent-to-redis"` |  |
-| networkPolicy.redis.namespace | string | `""` |  |
-| networkPolicy.redis.redisSelector."app.kubernetes.io/name" | string | `"argocd-redis"` |  |
 | nodeSelector | object | `{}` | Node selector for scheduling the agent Pod. |
 | podAnnotations | object | `{}` | Additional annotations to add to the agent Pod. |
 | podLabels | object | `{}` | Additional labels to add to the agent Pod. |
@@ -85,10 +79,10 @@ Kubernetes: `>=1.24.0-0`
 | tests.enabled | string | `"true"` | Enable chart tests. |
 | tests.image | string | `"bitnamilegacy/kubectl"` | Test image. |
 | tests.tag | string | `"1.33.4"` | Test image tag. |
-| tlsClientCertPath | string | `"/app/config/tls/tls.crt"` | Path to the TLS client certificate. |
+| tlsClientCertPath | string | `""` | Path to the TLS client certificate. |
 | tlsClientInSecure | string | `"false"` | Whether to skip TLS verification for client connections. |
-| tlsClientKeyPath | string | `"/app/config/tls/tls.key"` | Path to the TLS client key. |
-| tlsRootCAPath | string | `"/app/config/tls/ca.crt"` | Path to the TLS root CA certificate. |
+| tlsClientKeyPath | string | `""` | Path to the TLS client key. |
+| tlsRootCAPath | string | `""` | Path to the TLS root CA certificate. |
 | tlsRootCASecretName | string | `"argocd-agent-ca"` | Name of the Secret containing root CA certificate. |
 | tlsSecretName | string | `"argocd-agent-client-tls"` | Name of the TLS Secret containing client cert/key for mTLS. |
 | tolerations | list | `[]` | Tolerations for the agent Pod. |
