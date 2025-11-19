@@ -129,11 +129,11 @@ cacheRefreshInterval: "10s"
 # -- Keep-alive interval for connections.
 keepAliveInterval: "50s"
 # -- Path to the TLS client key.
-tlsClientKeyPath: "/app/config/tls/tls.key"
+tlsClientKeyPath: ""
 # -- Path to the TLS client certificate.
-tlsClientCertPath: "/app/config/tls/tls.crt"
+tlsClientCertPath: ""
 # -- Path to the TLS root CA certificate.
-tlsRootCAPath: "/app/config/tls/ca.crt"
+tlsRootCAPath: ""
 
 ## @section Services
 # -- Service configuration for metrics and healthz endpoints.
