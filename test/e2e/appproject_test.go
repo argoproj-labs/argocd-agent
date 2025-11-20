@@ -175,18 +175,27 @@ func (suite *AppProjectTestSuite) Test_AppProject_Autonomous() {
 func (suite *AppProjectTestSuite) Test_AppProject_Default_Managed() {
 	requires := suite.Require()
 
-	// Update the default appProject on the principal's cluster
+	// Default appProject must exist on both the principal and the managed agent's cluster
 	appProject := argoapp.AppProject{}
-	key := types.NamespacedName{
+	principalKey := types.NamespacedName{
+		Name:      "default",
+		Namespace: "argocd",
+	}
+	agentKey := types.NamespacedName{
 		Name:      "default",
 		Namespace: "argocd",
 	}
 
-	err := suite.PrincipalClient.Get(suite.Ctx, key, &appProject, metav1.GetOptions{})
+	err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
 	requires.NoError(err)
 
+	agentAppProject := argoapp.AppProject{}
+	err = suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &agentAppProject, metav1.GetOptions{})
+	requires.NoError(err)
+
+	// Update the default appProject on the principal's cluster
 	testDescription := "default appProject"
-	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, key, func(appProject *argoapp.AppProject) error {
+	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, principalKey, func(appProject *argoapp.AppProject) error {
 		appProject.Spec.Description = testDescription
 		return nil
 	}, metav1.UpdateOptions{})
@@ -194,7 +203,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Default_Managed() {
 
 	// Reset the default appProject on the principal's cluster
 	defer func() {
-		err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, key, func(appProject *argoapp.AppProject) error {
+		err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, principalKey, func(appProject *argoapp.AppProject) error {
 			appProject.Spec.Description = ""
 			return nil
 		}, metav1.UpdateOptions{})
@@ -203,8 +212,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Default_Managed() {
 
 	// Ensure the default appProject has been updated on the managed agent's cluster
 	requires.Eventually(func() bool {
-		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &appProject, metav1.GetOptions{})
 		if err != nil {
 			return false
 		}
@@ -216,16 +224,26 @@ func (suite *AppProjectTestSuite) Test_AppProject_Default_Managed() {
 func (suite *AppProjectTestSuite) Test_AppProject_Default_Autonomous() {
 	requires := suite.Require()
 
-	// Update the default appProject on the autonomous agent's cluster
+	// Default appProject must exist on both the autonomous agent and the principal's cluster
 	appProject := argoapp.AppProject{}
 	key := types.NamespacedName{
 		Name:      "default",
 		Namespace: "argocd",
 	}
 
+	principalKey := types.NamespacedName{
+		Name:      "agent-autonomous-default",
+		Namespace: "argocd",
+	}
+
 	err := suite.AutonomousAgentClient.Get(suite.Ctx, key, &appProject, metav1.GetOptions{})
 	requires.NoError(err)
 
+	principalAppProject := argoapp.AppProject{}
+	err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalAppProject, metav1.GetOptions{})
+	requires.NoError(err)
+
+	// Update the default appProject on the autonomous agent's cluster
 	testDescription := "default appProject"
 	err = suite.AutonomousAgentClient.EnsureAppProjectUpdate(suite.Ctx, key, func(appProject *argoapp.AppProject) error {
 		appProject.Spec.Description = testDescription
@@ -241,11 +259,6 @@ func (suite *AppProjectTestSuite) Test_AppProject_Default_Autonomous() {
 		}, metav1.UpdateOptions{})
 		requires.NoError(err)
 	}()
-
-	principalKey := types.NamespacedName{
-		Name:      "agent-autonomous-default",
-		Namespace: "argocd",
-	}
 
 	// Ensure the default appProject has been updated on the principal's cluster
 	requires.Eventually(func() bool {
