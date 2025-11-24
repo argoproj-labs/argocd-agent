@@ -379,7 +379,7 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 		return fmt.Errorf("send queue not found for the default queue pair")
 	}
 
-	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent)
+	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent, a.namespace)
 
 	switch ev.Type() {
 	case event.SyncedResourceList:
@@ -413,8 +413,6 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 		if err != nil {
 			return err
 		}
-
-		incoming.Namespace = a.namespace
 
 		return resyncHandler.ProcessRequestUpdateEvent(a.context, a.remote.ClientID(), incoming)
 	case event.EventRequestResourceResync:

@@ -246,6 +246,7 @@ func Test_generateSpecChecksum(t *testing.T) {
 func Test_ProcessRequestUpdateEvent(t *testing.T) {
 	ctx := context.Background()
 	handler := createFakeHandler(t)
+	handler.namespace = "default"
 
 	t.Run("return nil if resource exists and checksum matches", func(t *testing.T) {
 		resource := fakeUnresApp()
@@ -328,7 +329,7 @@ func createFakeHandler(t *testing.T) *RequestHandler {
 
 	dynClient := fake.NewSimpleDynamicClient(&runtime.Scheme{})
 	res := resources.NewResources()
-	return NewRequestHandler(dynClient, queues.SendQ(agentName), evs, res, logrus.NewEntry(logrus.New()), manager.ManagerRoleAgent)
+	return NewRequestHandler(dynClient, queues.SendQ(agentName), evs, res, logrus.NewEntry(logrus.New()), manager.ManagerRoleAgent, "argocd")
 }
 
 func fakeUnresApp() *unstructured.Unstructured {
