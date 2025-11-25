@@ -15,8 +15,6 @@
 package principal
 
 import (
-	"reflect"
-
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
@@ -117,12 +115,12 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 	if isTerminateOperation(old, new) {
 		ev = s.events.ApplicationEvent(event.TerminateOperation, new)
 	} else {
-		// For managed agents: prevent sending operation back on regular spec updates.
+		// Prevent sending operation back on regular spec updates.
 		// Allow only nil->non-nil transitions to carry operation (i.e. principal-initiated sync).
 
 		// DeepCopy to avoid mutating the informer object
 		out := new.DeepCopy()
-		if reflect.DeepEqual(old.Operation, new.Operation) && !isResourceFromAutonomousAgent(new) {
+		if !(old.Operation == nil && new.Operation != nil) {
 			out.Operation = nil
 		}
 

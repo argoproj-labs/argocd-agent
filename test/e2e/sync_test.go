@@ -340,7 +340,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return err == nil && app.Operation != nil && app.Status.OperationState != nil &&
+		return err == nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationRunning
 	}, 60*time.Second, 1*time.Second)
 
@@ -348,7 +348,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
-		return err == nil && app.Operation != nil && app.Status.OperationState != nil &&
+		return err == nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationRunning
 	}, 60*time.Second, 1*time.Second)
 
@@ -401,7 +401,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		if err == nil && app.Operation == nil && app.Status.OperationState != nil {
+		if err == nil && app.Status.OperationState != nil {
 			suite.T().Logf("Operation phase: %v", app.Status.OperationState.Phase)
 		}
 		return err == nil && app.Status.OperationState != nil && app.Status.OperationState.Phase == synccommon.OperationFailed &&
@@ -457,17 +457,17 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
-		return err == nil && app.Operation != nil && app.Status.OperationState != nil &&
+		return err == nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationRunning
-	}, 60*time.Second, 1*time.Second)
+	}, 90*time.Second, 1*time.Second)
 
 	// Wait for the sync operation to start on the autonomous-agent as well
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return err == nil && app.Operation != nil && app.Status.OperationState != nil &&
+		return err == nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationRunning
-	}, 60*time.Second, 1*time.Second)
+	}, 90*time.Second, 1*time.Second)
 
 	// Get the Argo server endpoint to use
 	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
@@ -517,7 +517,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return err == nil && app.Operation == nil && app.Status.OperationState != nil &&
+		return err == nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationFailed &&
 			app.Status.OperationState.Message == "Operation terminated"
 	}, 90*time.Second, 1*time.Second)

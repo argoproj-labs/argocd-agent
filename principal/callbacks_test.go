@@ -1367,7 +1367,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 		assert.Equal(t, 1, sendQ.Len())
 	})
 
-	t.Run("include operation in event if it is different from the old one", func(t *testing.T) {
+	t.Run("include operation in event if it is initiated for the first time", func(t *testing.T) {
 		mockBackend := &mocks.Application{}
 
 		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
@@ -1386,11 +1386,6 @@ func TestServer_updateAppCallback(t *testing.T) {
 
 		oldApp := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-app", Namespace: "managed-agent", ResourceVersion: "1"},
-			Operation: &v1alpha1.Operation{
-				Sync: &v1alpha1.SyncOperation{
-					Revision: "main",
-				},
-			},
 		}
 		newApp := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-app", Namespace: "managed-agent", ResourceVersion: "2"},

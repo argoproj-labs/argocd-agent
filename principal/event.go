@@ -187,8 +187,19 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 				return fmt.Errorf("could not create application %s: %w", incoming.QualifiedName(), err)
 			}
 
+			// Check if the existing application is marked for deletion before attempting update
+			existing, err := s.appManager.Get(ctx, incoming.Name, agentName)
+			if err != nil {
+				logCtx.WithError(err).Errorf("Application should exist before attempting to update")
+				return nil
+			}
+			if existing.DeletionTimestamp != nil {
+				logCtx.Trace("Application is marked for deletion, skipping update to avoid immutable field error")
+				return nil
+			}
+
 			// Update the application if it already exists
-			_, err := s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
+			_, err = s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
 			if err != nil {
 				return fmt.Errorf("could not update application spec for %s: %w", incoming.QualifiedName(), err)
 			}
@@ -200,9 +211,20 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return event.NewEventNotAllowedErr("event type not allowed when mode is not autonomous")
 		}
 
+		// Check if the existing application is marked for deletion before attempting update
+		existing, err := s.appManager.Get(ctx, incoming.Name, agentName)
+		if err != nil {
+			logCtx.WithError(err).Errorf("Application should exist before attempting to update")
+			return nil
+		}
+		if existing.DeletionTimestamp != nil {
+			logCtx.Trace("Application is marked for deletion, skipping update to avoid immutable field error")
+			return nil
+		}
+
 		s.sourceCache.Application.Set(incoming.UID, incoming.Spec)
 
-		_, err := s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
+		_, err = s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
 		if err != nil {
 			return fmt.Errorf("could not update application spec for %s: %w", incoming.QualifiedName(), err)
 		}

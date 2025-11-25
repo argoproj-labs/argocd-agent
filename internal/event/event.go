@@ -709,9 +709,14 @@ type EventWriter struct {
 	mu sync.RWMutex
 
 	// key: resource name + UID
-	// value: latest event for a resource
+	// value: queue of unsent events for a resource
 	// - acquire 'lock' before accessing
-	latestEvents map[string]*eventMessage
+	unsentEvents map[string]*eventQueue
+
+	// key: resource name + UID
+	// value: sent event waiting for ACK
+	// - acquire 'lock' before accessing
+	sentEvents map[string]*eventMessage
 
 	// target refers to the specified gRPC stream.
 	target streamWriter
@@ -726,21 +731,20 @@ type eventMessage struct {
 	// - acquire 'lock' before accessing
 	event *cloudevents.Event
 
-	// deferredEvent holds the newest non-terminate event that arrived while a
-	// terminate-operation is the current event for this resource. This is to make
-	// sure that the terminate-operation is not overwritten by a spec-update event.
-	deferredEvent *cloudevents.Event
-
 	// retry sending the event after this time
 	retryAfter *time.Time
 
 	// config for exponential backoff
 	backoff *wait.Backoff
+
+	// track number of retries attempted
+	retryCount int
 }
 
 func NewEventWriter(target streamWriter) *EventWriter {
 	return &EventWriter{
-		latestEvents: map[string]*eventMessage{},
+		unsentEvents: map[string]*eventQueue{},
+		sentEvents:   map[string]*eventMessage{},
 		target:       target,
 		log:          logging.ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())),
 	}
@@ -775,47 +779,57 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 		return
 	}
 
-	eventMsg, exists := ew.latestEvents[resID]
-	if !exists {
-		ew.latestEvents[resID] = &eventMessage{
+	// Once an app is being deleted, no other updates matter
+	if ev.Type() == Delete.String() {
+		delete(ew.sentEvents, resID)
+		// Clear any existing unsent events and add only the DELETE event
+		eq := newEventQueue()
+		eq.add(&eventMessage{
 			event:   ev,
 			backoff: &defaultBackoff,
-		}
+		})
+		ew.unsentEvents[resID] = eq
+		logCtx.Trace("cleared all events and added DELETE event")
+		return
+	}
+
+	// Add to unsent queue with coalescing logic
+	eq, exists := ew.unsentEvents[resID]
+	if !exists {
+		eq = newEventQueue()
+		eq.add(&eventMessage{
+			event:   ev,
+			backoff: &defaultBackoff,
+		})
+		ew.unsentEvents[resID] = eq
 		logCtx.Trace("added a new event to the event writer")
 		return
 	}
 
-	// Replace the old event and reset the backoff.
-	eventMsg.mu.Lock()
-	// Do not let a terminate-operation be overwritten by a spec-update event.
-	currType := ""
-	if eventMsg.event != nil {
-		currType = eventMsg.event.Type()
-	}
-	newType := ev.Type()
-	// If current is terminate-operation and new is not terminate-operation,
-	// keep current and defer the new event.
-	if currType == TerminateOperation.String() && newType != TerminateOperation.String() {
-		eventMsg.deferredEvent = ev
-		eventMsg.mu.Unlock()
-		logCtx.Trace("kept existing terminate-operation event and deferred the new event")
-		return
-	}
-	// If new is terminate-operation, defer the current event for later promotion.
-	if newType == TerminateOperation.String() && currType != TerminateOperation.String() && eventMsg.event != nil {
-		eventMsg.deferredEvent = eventMsg.event
-	}
-	eventMsg.event = ev
-	eventMsg.backoff = &defaultBackoff
-	eventMsg.retryAfter = nil
-	eventMsg.mu.Unlock()
+	// The queue's add() coalesces events of the same type.
+	eq.add(&eventMessage{
+		event:      ev,
+		backoff:    &defaultBackoff,
+		retryAfter: nil,
+	})
+
 	logCtx.Trace("updated an existing event in the event writer")
 }
 
 func (ew *EventWriter) Get(resID string) *eventMessage {
 	ew.mu.RLock()
 	defer ew.mu.RUnlock()
-	return ew.latestEvents[resID]
+
+	// First check sent events (for retry)
+	if sent, exists := ew.sentEvents[resID]; exists {
+		return sent
+	}
+
+	// Then check unsent queue
+	if eq, exists := ew.unsentEvents[resID]; exists {
+		return eq.get()
+	}
+	return nil
 }
 
 func (ew *EventWriter) Remove(ev *cloudevents.Event) {
@@ -824,37 +838,40 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 
 	// Remove the event only if it matches both the resourceID and eventID.
 	resourceID := ResourceID(ev)
-	latestEvent, exists := ew.latestEvents[resourceID]
+	incomingEventID := EventID(ev)
+
+	// First, check and remove from sent events
+	if sent, exists := ew.sentEvents[resourceID]; exists {
+		sent.mu.RLock()
+		sentEventID := EventID(sent.event)
+		sent.mu.RUnlock()
+
+		if sentEventID == incomingEventID {
+			delete(ew.sentEvents, resourceID)
+			return
+		}
+	}
+
+	// If not in sent events, check unsent queue
+	eq, exists := ew.unsentEvents[resourceID]
 	if !exists {
 		return
 	}
 
-	latestEvent.mu.RLock()
-	latestEventID := EventID(latestEvent.event)
-	latestEvent.mu.RUnlock()
+	front := eq.get()
+	if front == nil {
+		return
+	}
 
-	if latestEventID == EventID(ev) {
-		// If there is a deferred event (e.g., spec-update) queued behind a terminate-operation,
-		// promote the deferred event to be the current event.
-		latestEvent.mu.Lock()
-		if latestEvent.deferredEvent != nil {
-			promoted := latestEvent.deferredEvent
-			latestEvent.deferredEvent = nil
-			latestEvent.event = promoted
-			// Reset backoff and retryAfter so the deferred event is sent promptly.
-			defaultBackoff := wait.Backoff{
-				Steps:    5,
-				Duration: 5 * time.Second,
-				Factor:   2.0,
-				Jitter:   0.1,
-			}
-			latestEvent.backoff = &defaultBackoff
-			latestEvent.retryAfter = nil
-			latestEvent.mu.Unlock()
-			return
+	front.mu.RLock()
+	frontEventID := EventID(front.event)
+	front.mu.RUnlock()
+
+	if frontEventID == incomingEventID {
+		eq.pop()
+		if eq.isEmpty() {
+			delete(ew.unsentEvents, resourceID)
 		}
-		latestEvent.mu.Unlock()
-		delete(ew.latestEvents, resourceID)
 	}
 }
 
@@ -873,9 +890,16 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 			return
 		default:
 			ew.mu.RLock()
-			resourceIDs := make([]string, 0, len(ew.latestEvents))
-			for resID := range ew.latestEvents {
+			// Collect all resource IDs that have either unsent or sent events
+			resourceIDs := make([]string, 0, len(ew.unsentEvents)+len(ew.sentEvents))
+			for resID := range ew.unsentEvents {
 				resourceIDs = append(resourceIDs, resID)
+			}
+			for resID := range ew.sentEvents {
+				// Only add if not already in the list
+				if _, exists := ew.unsentEvents[resID]; !exists {
+					resourceIDs = append(resourceIDs, resID)
+				}
 			}
 			ew.mu.RUnlock()
 
@@ -887,49 +911,148 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 	}
 }
 
+// sendEvent determines whether to retry a sent event or send a new unsent event
 func (ew *EventWriter) sendEvent(resID string) {
+	// Check if there's a sent event awaiting retry
+	ew.mu.RLock()
+	sentMsg, hasSent := ew.sentEvents[resID]
+	ew.mu.RUnlock()
+
+	if hasSent {
+		ew.retrySentEvent(resID, sentMsg)
+	} else {
+		ew.sendUnsentEvent(resID)
+	}
+}
+
+// retrySentEvent handles retrying an event that was already sent but not yet acknowledged
+func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 	logCtx := ew.log.WithFields(logrus.Fields{
+		"method":      "retrySentEvent",
 		"resource_id": resID,
 	})
 
-	// Check if the event is already ACK'd.
-	eventMsg := ew.Get(resID)
-	if eventMsg == nil {
-		logCtx.Trace("event is not found, perhaps it is already ACK'd")
+	// Re-verify the event is still in sentEvents
+	ew.mu.RLock()
+	currentSent, stillExists := ew.sentEvents[resID]
+	ew.mu.RUnlock()
+
+	// If event was ACK'd between check and use, skip retry
+	if !stillExists || currentSent != sentMsg {
 		return
 	}
 
+	sentMsg.mu.Lock()
+
+	// Check if it's time to retry
+	if sentMsg.retryAfter != nil && sentMsg.retryAfter.After(time.Now()) {
+		sentMsg.mu.Unlock()
+		return
+	}
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"event_id":     EventID(sentMsg.event),
+		"event_target": sentMsg.event.DataSchema(),
+		"event_type":   sentMsg.event.Type(),
+		"retry_count":  sentMsg.retryCount})
+
+	// Check if we've exhausted retries
+	maxRetries := sentMsg.backoff.Steps
+	if sentMsg.retryCount >= maxRetries {
+		logCtx.Warnf("Event failed after %d retries, giving up to unblock queue", sentMsg.retryCount)
+		sentMsg.mu.Unlock()
+
+		// Remove from sentEvents to unblock the queue
+		ew.mu.Lock()
+		delete(ew.sentEvents, resID)
+		ew.mu.Unlock()
+		return
+	}
+
+	logCtx.Trace("resending an event")
+
+	// Increment retry count and schedule next retry BEFORE attempting send
+	// This ensures proper backoff even when the send fails
+	sentMsg.retryCount++
+	retryAfter := time.Now().Add(sentMsg.backoff.Step())
+	sentMsg.retryAfter = &retryAfter
+
+	// Resend the event
+	pev, err := format.ToProto(sentMsg.event)
+	if err != nil {
+		logCtx.Errorf("Could not wire event: %v\n", err)
+		sentMsg.mu.Unlock()
+		return
+	}
+
+	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
+	sentMsg.mu.Unlock()
+
+	if err != nil {
+		logCtx.Errorf("Error while sending: %v\n", err)
+		return
+	}
+
+	logCtx.Trace("event sent to target")
+}
+
+// scheduleRetry sets the next retry time for an event using exponential backoff
+func (ew *EventWriter) scheduleRetry(eventMsg *eventMessage) {
+	eventMsg.mu.Lock()
+	defer eventMsg.mu.Unlock()
+	retryAfter := time.Now().Add(eventMsg.backoff.Step())
+	eventMsg.retryAfter = &retryAfter
+}
+
+// sendUnsentEvent pops an event from the unsent queue and sends it for the first time
+func (ew *EventWriter) sendUnsentEvent(resID string) {
+	logCtx := ew.log.WithFields(logrus.Fields{
+		"method":      "sendUnsentEvent",
+		"resource_id": resID,
+	})
+
+	// Pop event from unsent queue and atomically move to sent tracker
+	ew.mu.Lock()
+	eq, exists := ew.unsentEvents[resID]
+	if !exists || eq.isEmpty() {
+		ew.mu.Unlock()
+		return
+	}
+
+	eventMsg := eq.pop()
+	if eq.isEmpty() {
+		delete(ew.unsentEvents, resID)
+	}
+
+	if eventMsg == nil {
+		ew.mu.Unlock()
+		return
+	}
+
+	// Move to sentEvents BEFORE unlocking to prevent ACK race
+	isACK := Target(eventMsg.event) == TargetEventAck
+	if !isACK {
+		ew.sentEvents[resID] = eventMsg
+	}
+	ew.mu.Unlock()
+
+	// Schedule retry at the end for non-ACK events
+	// On success: retry happens if ACK never arrives
+	// On failure: retry happens after backoff
+	if !isACK {
+		defer ew.scheduleRetry(eventMsg)
+	}
+
+	// Send the event
+	eventMsg.mu.Lock()
 	logCtx = logCtx.WithFields(logrus.Fields{
 		"event_id":     EventID(eventMsg.event),
 		"event_target": eventMsg.event.DataSchema(),
 		"event_type":   eventMsg.event.Type()})
 
-	isACKRemoved := false
-
-	eventMsg.mu.Lock()
-	defer func() {
-		// Check if the mu is already unlocked while removing the ACK.
-		if !isACKRemoved {
-			eventMsg.mu.Unlock()
-		}
-	}()
-
-	// Check if it is time to resend the event.
-	if eventMsg.retryAfter != nil {
-		if eventMsg.retryAfter.After(time.Now()) {
-			return
-		}
-		logCtx.Trace("resending an event")
-	}
-
-	defer func() {
-		// Update the retryAfter for resending the event again
-		retryAfter := time.Now().Add(eventMsg.backoff.Step())
-		eventMsg.retryAfter = &retryAfter
-	}()
-
-	// Resend the event since it is not ACK'd.
 	pev, err := format.ToProto(eventMsg.event)
+	eventMsg.mu.Unlock()
+
 	if err != nil {
 		logCtx.Errorf("Could not wire event: %v\n", err)
 		return
@@ -944,12 +1067,27 @@ func (ew *EventWriter) sendEvent(resID string) {
 
 	logCtx.Trace("event sent to target")
 
-	// We don't have to wait for an ACK if the current event is ACK. So, remove it from the EventWriter.
-	if Target(eventMsg.event) == TargetEventAck {
-		eventMsg.mu.Unlock()
-		ew.Remove(eventMsg.event)
+	if isACK {
 		logCtx.Trace("ACK is removed from the event writer")
-		isACKRemoved = true
+	}
+}
+
+// requeueFailedSend moves event back to unsent queue when send fails
+func (ew *EventWriter) requeueFailedSend(resID string, eventMsg *eventMessage, isACK bool) {
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+
+	if !isACK {
+		delete(ew.sentEvents, resID)
+	}
+
+	// Re-add to front of unsent queue
+	if eq, exists := ew.unsentEvents[resID]; exists {
+		eq.prepend(eventMsg)
+	} else {
+		newQueue := newEventQueue()
+		newQueue.add(eventMsg)
+		ew.unsentEvents[resID] = newQueue
 	}
 }
 
@@ -993,4 +1131,77 @@ func (ewm *EventWritersMap) Remove(agentName string) {
 	defer ewm.mu.Unlock()
 
 	delete(ewm.eventWriters, agentName)
+}
+
+// eventQueue is a queue of eventMessages where the items are coalesced by type.
+type eventQueue struct {
+	mu    sync.RWMutex
+	items []*eventMessage
+}
+
+func newEventQueue() *eventQueue {
+	return &eventQueue{
+		items: []*eventMessage{},
+	}
+}
+
+// add an item to the tail of the queue.
+// If the item is the same type as the tail, replace the tail with the new item.
+func (eq *eventQueue) add(ev *eventMessage) {
+	eq.mu.Lock()
+	defer eq.mu.Unlock()
+
+	if len(eq.items) > 0 {
+		tail := eq.items[len(eq.items)-1]
+		tail.mu.Lock()
+
+		// Replace an older event with a newer one of the same type
+		if ev.event.Type() == tail.event.Type() {
+			tail.event = ev.event
+			tail.backoff = ev.backoff
+			tail.retryAfter = ev.retryAfter
+			tail.mu.Unlock()
+			return
+		}
+		tail.mu.Unlock()
+	}
+
+	eq.items = append(eq.items, ev)
+}
+
+// get the first item from the queue.
+func (eq *eventQueue) get() *eventMessage {
+	eq.mu.RLock()
+	defer eq.mu.RUnlock()
+	if len(eq.items) == 0 {
+		return nil
+	}
+
+	return eq.items[0]
+}
+
+// pop the first item from the queue.
+func (eq *eventQueue) pop() *eventMessage {
+	eq.mu.Lock()
+	defer eq.mu.Unlock()
+	if len(eq.items) == 0 {
+		return nil
+	}
+	item := eq.items[0]
+	eq.items = eq.items[1:]
+	return item
+}
+
+// prepend adds an item to the front of the queue.
+// This is used when we need to re-queue an event that failed to send.
+func (eq *eventQueue) prepend(ev *eventMessage) {
+	eq.mu.Lock()
+	defer eq.mu.Unlock()
+	eq.items = append([]*eventMessage{ev}, eq.items...)
+}
+
+func (eq *eventQueue) isEmpty() bool {
+	eq.mu.RLock()
+	defer eq.mu.RUnlock()
+	return len(eq.items) == 0
 }

@@ -21,10 +21,13 @@ import (
 	"testing"
 	"time"
 
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestEventWriter(t *testing.T) {
@@ -48,98 +51,6 @@ func TestEventWriter(t *testing.T) {
 		},
 	}
 
-	t.Run("should prioritize terminate and defer latest spec-update", func(t *testing.T) {
-		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
-
-		// Add a spec-update first
-		app1.ResourceVersion = "10"
-		specEv := es.ApplicationEvent(SpecUpdate, app1)
-		evSender.Add(specEv)
-
-		// Then add terminate; it should become current and previous spec should be deferred
-		app1.ResourceVersion = "11"
-		termEv := es.ApplicationEvent(TerminateOperation, app1)
-		evSender.Add(termEv)
-
-		latest := evSender.Get(createResourceID(app1.ObjectMeta))
-		require.NotNil(t, latest)
-		latest.mu.RLock()
-		require.Equal(t, TerminateOperation.String(), latest.event.Type())
-		require.NotNil(t, latest.deferredEvent)
-		require.Equal(t, SpecUpdate.String(), latest.deferredEvent.Type())
-		latest.mu.RUnlock()
-
-		// When we ACK the terminate, the deferred spec should be promoted
-		evSender.Remove(termEv)
-		latest = evSender.Get(createResourceID(app1.ObjectMeta))
-		require.NotNil(t, latest)
-		latest.mu.RLock()
-		require.Equal(t, SpecUpdate.String(), latest.event.Type())
-		latest.mu.RUnlock()
-	})
-
-	t.Run("should keep only the newest deferred spec-update while terminate is current", func(t *testing.T) {
-		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
-
-		// Current is terminate
-		app1.ResourceVersion = "20"
-		termEv := es.ApplicationEvent(TerminateOperation, app1)
-		evSender.Add(termEv)
-
-		// Multiple spec-updates arrive while terminate is pending
-		app1.ResourceVersion = "21"
-		oldSpec := es.ApplicationEvent(SpecUpdate, app1)
-		evSender.Add(oldSpec)
-		app1.ResourceVersion = "22"
-		newSpec := es.ApplicationEvent(SpecUpdate, app1)
-		evSender.Add(newSpec)
-
-		latest := evSender.Get(createResourceID(app1.ObjectMeta))
-		require.NotNil(t, latest)
-		latest.mu.RLock()
-		require.Equal(t, TerminateOperation.String(), latest.event.Type())
-		require.NotNil(t, latest.deferredEvent)
-		require.Equal(t, EventID(newSpec), EventID(latest.deferredEvent))
-		latest.mu.RUnlock()
-
-		// ACK terminate; latest spec should be promoted
-		evSender.Remove(termEv)
-		latest = evSender.Get(createResourceID(app1.ObjectMeta))
-		require.NotNil(t, latest)
-		latest.mu.RLock()
-		require.Equal(t, SpecUpdate.String(), latest.event.Type())
-		require.Equal(t, EventID(newSpec), EventID(latest.event))
-		latest.mu.RUnlock()
-	})
-
-	t.Run("should handle consecutive terminates by upgrading current terminate", func(t *testing.T) {
-		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
-
-		// First terminate
-		app1.ResourceVersion = "30"
-		term1 := es.ApplicationEvent(TerminateOperation, app1)
-		evSender.Add(term1)
-
-		// Second terminate arrives; it should replace current
-		app1.ResourceVersion = "31"
-		term2 := es.ApplicationEvent(TerminateOperation, app1)
-		evSender.Add(term2)
-
-		latest := evSender.Get(createResourceID(app1.ObjectMeta))
-		require.NotNil(t, latest)
-		latest.mu.RLock()
-		require.Equal(t, TerminateOperation.String(), latest.event.Type())
-		require.Equal(t, EventID(term2), EventID(latest.event))
-		latest.mu.RUnlock()
-
-		// ACK for the latest terminate should clear (no deferred set)
-		evSender.Remove(term2)
-		require.Nil(t, evSender.Get(createResourceID(app1.ObjectMeta)))
-	})
-
 	t.Run("should add/update/remove events from the queue", func(t *testing.T) {
 		fs := &fakeStream{}
 		evSender := NewEventWriter(fs)
@@ -156,7 +67,7 @@ func TestEventWriter(t *testing.T) {
 
 		// Add an Update event for the same resource
 		app1.ResourceVersion = "2"
-		ev = es.ApplicationEvent(Update, app1)
+		newEv := es.ApplicationEvent(Update, app1)
 		evSender.Add(ev)
 
 		latestEvent = evSender.Get(ResourceID(ev))
@@ -166,7 +77,7 @@ func TestEventWriter(t *testing.T) {
 
 		// Try removing an event with the same resourceID but different eventID.
 		app1.ResourceVersion = "3"
-		newEv := es.ApplicationEvent(Update, app1)
+		newEv = es.ApplicationEvent(Update, app1)
 		evSender.Remove(newEv)
 
 		// The old event should not removed from the queue.
@@ -197,7 +108,7 @@ func TestEventWriter(t *testing.T) {
 			evSender.Add(es.ApplicationEvent(e, app1))
 		}
 
-		require.Len(t, evSender.latestEvents, 2)
+		require.Len(t, evSender.unsentEvents, 2)
 		latestApp1Event := evSender.Get(createResourceID(app1.ObjectMeta))
 		require.NotNil(t, latestApp1Event)
 		require.Equal(t, createEventID(app1.ObjectMeta), EventID(latestApp1Event.event))
@@ -225,7 +136,7 @@ func TestEventWriter(t *testing.T) {
 		retryAfter := time.Now().Add(1 * time.Hour)
 		latestEvent.retryAfter = &retryAfter
 
-		evSender.sendEvent(resID)
+		evSender.retrySentEvent(resID, latestEvent)
 		require.Len(t, fs.events, 0)
 
 		// should send a valid event to the stream
@@ -234,6 +145,300 @@ func TestEventWriter(t *testing.T) {
 		evSender.sendEvent(resID)
 		require.Len(t, fs.events, 1)
 		require.Equal(t, []string{createEventID(app1.ObjectMeta)}, fs.events[resID])
+	})
+
+	t.Run("should prioritize DELETE events and clear queue", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		// Add Create and Update events
+		ev1 := es.ApplicationEvent(Create, app1)
+		evSender.Add(ev1)
+
+		app1.ResourceVersion = "2"
+		ev2 := es.ApplicationEvent(Update, app1)
+		evSender.Add(ev2)
+
+		resID := createResourceID(app1.ObjectMeta)
+		require.NotNil(t, evSender.Get(resID))
+
+		// Add DELETE event - should clear all previous events
+		app1.ResourceVersion = "3"
+		deleteEv := es.ApplicationEvent(Delete, app1)
+		evSender.Add(deleteEv)
+
+		// DELETE should be the only event in the queue
+		latestEvent := evSender.Get(resID)
+		require.NotNil(t, latestEvent)
+		require.Equal(t, 1, len(evSender.unsentEvents))
+		require.Equal(t, 1, len(evSender.unsentEvents[resID].items))
+		require.Equal(t, Delete.String(), latestEvent.event.Type())
+
+		// Sent events should also be cleared
+		require.Empty(t, evSender.sentEvents)
+	})
+
+	t.Run("should handle concurrent adds and removes", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		var wg sync.WaitGroup
+		numGoroutines := 10
+		numOpsPerGoroutine := 100
+
+		// Concurrent adds
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < numOpsPerGoroutine; j++ {
+					app := &v1alpha1.Application{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:            fmt.Sprintf("app-%d", id),
+							Namespace:       "test",
+							ResourceVersion: fmt.Sprintf("%d", j),
+							UID:             types.UID(fmt.Sprintf("%d", id)),
+						},
+					}
+					ev := es.ApplicationEvent(Update, app)
+					evSender.Add(ev)
+				}
+			}(i)
+		}
+
+		// Concurrent removes
+		for i := 0; i < numGoroutines/2; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				time.Sleep(10 * time.Millisecond)
+				for j := 0; j < numOpsPerGoroutine/2; j++ {
+					app := &v1alpha1.Application{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:            fmt.Sprintf("app-%d", id),
+							Namespace:       "test",
+							ResourceVersion: fmt.Sprintf("%d", j),
+							UID:             types.UID(fmt.Sprintf("%d", id)),
+						},
+					}
+					ev := es.ApplicationEvent(Update, app)
+					evSender.Remove(ev)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Should have events without panics or race conditions
+		require.NotEmpty(t, evSender.unsentEvents)
+	})
+
+	t.Run("should move events from unsent to sent on first send", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+
+		// Event should be in unsent queue
+		require.Contains(t, evSender.unsentEvents, resID)
+		require.NotContains(t, evSender.sentEvents, resID)
+
+		// Send the event
+		evSender.sendEvent(resID)
+
+		// Event should now be in sent map and removed from unsent
+		require.NotContains(t, evSender.unsentEvents, resID)
+		require.Contains(t, evSender.sentEvents, resID)
+	})
+
+	t.Run("should retry sent events with exponential backoff", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+
+		// Send the event once
+		evSender.sendEvent(resID)
+		require.Len(t, fs.events[resID], 1)
+
+		// Get the sent event
+		sentMsg := evSender.sentEvents[resID]
+		require.NotNil(t, sentMsg)
+		require.NotNil(t, sentMsg.retryAfter)
+		require.Equal(t, 0, sentMsg.retryCount)
+
+		// Try to retry immediately - should not send
+		evSender.retrySentEvent(resID, sentMsg)
+		require.Len(t, fs.events[resID], 1)
+
+		// Set retryAfter to past time
+		pastTime := time.Now().Add(-1 * time.Second)
+		sentMsg.retryAfter = &pastTime
+
+		// Now retry should work
+		evSender.retrySentEvent(resID, sentMsg)
+		require.Len(t, fs.events[resID], 2)
+		require.Equal(t, 1, sentMsg.retryCount)
+	})
+
+	t.Run("should give up after max retries", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+
+		// Send the event
+		evSender.sendEvent(resID)
+		sentMsg := evSender.sentEvents[resID]
+		require.NotNil(t, sentMsg)
+
+		// Exhaust retries
+		maxRetries := sentMsg.backoff.Steps
+		for i := 0; i < maxRetries; i++ {
+			pastTime := time.Now().Add(-1 * time.Second)
+			sentMsg.retryAfter = &pastTime
+			evSender.retrySentEvent(resID, sentMsg)
+		}
+
+		// After max retries, event should be removed from sentEvents
+		require.NotContains(t, evSender.sentEvents, resID)
+	})
+
+	t.Run("should not send ACK events to sentEvents", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		// Create an ACK event
+		cev := cloudevents.NewEvent()
+		cev.SetSource("test")
+		cev.SetType(EventProcessed.String())
+		cev.SetDataSchema(TargetEventAck.String())
+		cev.SetExtension(eventID, "test-ack")
+		cev.SetExtension(resourceID, "test-resource")
+
+		evSender.Add(&cev)
+		resID := "test-resource"
+
+		// Send the ACK event
+		evSender.sendEvent(resID)
+
+		// ACK should not be in sentEvents (doesn't need ACK confirmation)
+		require.NotContains(t, evSender.sentEvents, resID)
+		require.Len(t, fs.events[resID], 1)
+	})
+
+	t.Run("should handle empty resource ID gracefully", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		// Create an event manually with empty resourceID extension
+		cev := cloudevents.NewEvent()
+		cev.SetSource("test")
+		cev.SetType(Create.String())
+		cev.SetDataSchema(TargetApplication.String())
+		cev.SetExtension(eventID, "test-event-id")
+		// Explicitly set resourceID to empty string
+		cev.SetExtension(resourceID, "")
+
+		evSender.Add(&cev)
+
+		// Should not add event with empty resourceID
+		require.Empty(t, evSender.unsentEvents)
+	})
+
+	t.Run("should handle Get for non-existent resource", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		result := evSender.Get("non-existent-resource-id")
+		require.Nil(t, result)
+	})
+
+	t.Run("should return sent event before checking unsent queue in Get", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		// Reset app1 to version 1
+		app1.ResourceVersion = "1"
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+
+		// Send the event (moves to sentEvents)
+		evSender.sendEvent(resID)
+
+		// Verify the sent event has version 1
+		sentEventID := EventID(ev)
+		require.Contains(t, sentEventID, "_1")
+
+		// Add another event for the same resource with version 2
+		app1.ResourceVersion = "2"
+		ev2 := es.ApplicationEvent(Update, app1)
+		evSender.Add(ev2)
+
+		// Get should return the sent event (version 1), not the unsent one (version 2)
+		result := evSender.Get(resID)
+		require.NotNil(t, result)
+		resultEventID := EventID(result.event)
+		require.Equal(t, sentEventID, resultEventID, "Should return sent event with version 1")
+		require.Contains(t, resultEventID, "_1", "Returned event should be version 1")
+	})
+
+	t.Run("should handle SendWaitingEvents with context cancellation", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		ev := es.ApplicationEvent(Create, app1)
+		evSender.Add(ev)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Start sending in background
+		done := make(chan bool)
+		go func() {
+			evSender.SendWaitingEvents(ctx)
+			done <- true
+		}()
+
+		// Give it time to send
+		time.Sleep(200 * time.Millisecond)
+
+		// Cancel context
+		cancel()
+
+		// Should return promptly
+		select {
+		case <-done:
+			// Success - function returned
+		case <-time.After(1 * time.Second):
+			t.Fatal("SendWaitingEvents did not return after context cancellation")
+		}
+	})
+
+	t.Run("should coalesce multiple updates for same resource", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		resID := createResourceID(app1.ObjectMeta)
+
+		// Add multiple updates
+		for i := 1; i <= 5; i++ {
+			app1.ResourceVersion = fmt.Sprintf("%d", i)
+			ev := es.ApplicationEvent(Update, app1)
+			evSender.Add(ev)
+		}
+
+		// Should have coalesced to single event with latest version
+		latestEvent := evSender.Get(resID)
+		require.NotNil(t, latestEvent)
+		eventID := EventID(latestEvent.event)
+		require.Contains(t, eventID, "_5") // Should be version 5
 	})
 }
 
