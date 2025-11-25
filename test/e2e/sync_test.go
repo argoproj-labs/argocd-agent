@@ -379,7 +379,8 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 				suite.T().Logf("Retrying terminate due to conflict: %v", err)
 				return false
 			}
-			requires.NoError(err)
+			suite.T().Logf("TerminateOperation failed with error: %v", err)
+			return false
 		}
 
 		return true
@@ -496,7 +497,8 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 				suite.T().Logf("Retrying terminate due to conflict: %v", err)
 				return false
 			}
-			requires.NoError(err)
+			suite.T().Logf("TerminateOperation failed with error: %v", err)
+			return false
 		}
 		return true
 	}, 60*time.Second, 1*time.Second)

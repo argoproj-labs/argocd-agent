@@ -62,13 +62,11 @@ func TestEventWriter(t *testing.T) {
 		require.NotNil(t, latestEvent)
 		require.Equal(t, latestEvent.event, ev)
 		require.Nil(t, latestEvent.retryAfter)
-		now := time.Now()
-		latestEvent.retryAfter = &now
 
 		// Add an Update event for the same resource
 		app1.ResourceVersion = "2"
 		newEv := es.ApplicationEvent(Update, app1)
-		evSender.Add(ev)
+		evSender.Add(newEv)
 
 		latestEvent = evSender.Get(ResourceID(ev))
 		require.NotNil(t, latestEvent)
@@ -86,9 +84,12 @@ func TestEventWriter(t *testing.T) {
 		require.Equal(t, latestEvent.event, ev)
 
 		// The event will be removed only if both the resourceID and eventID matches.
+		resID := ResourceID(ev)
+		require.Equal(t, 2, len(evSender.unsentEvents[resID].items))
 		evSender.Remove(ev)
-		latestEvent = evSender.Get(ResourceID(ev))
-		require.Nil(t, latestEvent)
+		latestEvent = evSender.Get(resID)
+		require.Equal(t, 1, len(evSender.unsentEvents[resID].items))
+		require.NotEqual(t, ev, latestEvent.event)
 	})
 
 	t.Run("should handle events from multiple resources", func(t *testing.T) {
