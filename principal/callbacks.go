@@ -120,7 +120,9 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 
 		// DeepCopy to avoid mutating the informer object
 		out := new.DeepCopy()
-		if !(old.Operation == nil && new.Operation != nil) {
+		if old.Operation == nil && new.Operation != nil {
+			out.Operation = new.Operation.DeepCopy()
+		} else {
 			out.Operation = nil
 		}
 

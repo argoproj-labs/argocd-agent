@@ -1072,25 +1072,6 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	}
 }
 
-// requeueFailedSend moves event back to unsent queue when send fails
-func (ew *EventWriter) requeueFailedSend(resID string, eventMsg *eventMessage, isACK bool) {
-	ew.mu.Lock()
-	defer ew.mu.Unlock()
-
-	if !isACK {
-		delete(ew.sentEvents, resID)
-	}
-
-	// Re-add to front of unsent queue
-	if eq, exists := ew.unsentEvents[resID]; exists {
-		eq.prepend(eventMsg)
-	} else {
-		newQueue := newEventQueue()
-		newQueue.add(eventMsg)
-		ew.unsentEvents[resID] = newQueue
-	}
-}
-
 // eventWritersMap provides a thread-safe way to manage event writers.
 type EventWritersMap struct {
 	mu sync.RWMutex
@@ -1190,14 +1171,6 @@ func (eq *eventQueue) pop() *eventMessage {
 	item := eq.items[0]
 	eq.items = eq.items[1:]
 	return item
-}
-
-// prepend adds an item to the front of the queue.
-// This is used when we need to re-queue an event that failed to send.
-func (eq *eventQueue) prepend(ev *eventMessage) {
-	eq.mu.Lock()
-	defer eq.mu.Unlock()
-	eq.items = append([]*eventMessage{ev}, eq.items...)
 }
 
 func (eq *eventQueue) isEmpty() bool {
