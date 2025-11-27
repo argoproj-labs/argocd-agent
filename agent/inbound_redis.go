@@ -17,8 +17,10 @@ package agent
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +47,11 @@ type redisProxyMsgHandler struct {
 
 	// connections maintains statistics about redis connections from principal
 	connections *connectionEntries
+
+	// Redis TLS configuration
+	redisTLSEnabled  bool
+	redisTLSCAPath   string
+	redisTLSInsecure bool
 }
 
 // connectionEntries maintains statistics about redis connections from principal
@@ -334,6 +341,35 @@ func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error
 
 func (a *Agent) getRedisClientAndCache() (*redis.Client, *rediscache.Cache, error) {
 	var tlsConfig *tls.Config = nil
+
+	if a.redisProxyMsgHandler.redisTLSEnabled {
+		tlsConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+
+		if a.redisProxyMsgHandler.redisTLSInsecure {
+			log().Warn("INSECURE: Not verifying Redis TLS certificate")
+			tlsConfig.InsecureSkipVerify = true
+		} else if a.redisProxyMsgHandler.redisTLSCAPath != "" {
+			// Load CA certificate from file
+			caCertPEM, err := os.ReadFile(a.redisProxyMsgHandler.redisTLSCAPath)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to read CA certificate: %w", err)
+			}
+
+			// Create a new cert pool and add the CA cert
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caCertPEM) {
+				return nil, nil, fmt.Errorf("failed to parse CA certificate from %s", a.redisProxyMsgHandler.redisTLSCAPath)
+			}
+
+			tlsConfig.RootCAs = certPool
+			log().Debugf("Using CA certificate from %s for Redis TLS", a.redisProxyMsgHandler.redisTLSCAPath)
+		} else {
+			// No CA specified, will use system CAs
+			log().Warn("Redis TLS enabled but no CA certificate specified, using system CAs. This may fail with self-signed certificates.")
+		}
+	}
 
 	opts := &redis.Options{
 		Addr:       a.redisProxyMsgHandler.redisAddress,

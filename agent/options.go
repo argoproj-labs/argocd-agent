@@ -107,3 +107,27 @@ func WithCacheRefreshInterval(interval time.Duration) AgentOption {
 		return nil
 	}
 }
+
+// WithRedisTLSEnabled enables or disables TLS for Redis connections
+func WithRedisTLSEnabled(enabled bool) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisTLSEnabled = enabled
+		return nil
+	}
+}
+
+// WithRedisTLSCAPath sets the CA certificate path for Redis TLS
+func WithRedisTLSCAPath(caPath string) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisTLSCAPath = caPath
+		return nil
+	}
+}
+
+// WithRedisTLSInsecure enables insecure Redis TLS (for testing only)
+func WithRedisTLSInsecure(insecure bool) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisTLSInsecure = insecure
+		return nil
+	}
+}

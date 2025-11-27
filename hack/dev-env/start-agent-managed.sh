@@ -34,9 +34,37 @@ if [ -f "$E2E_ENV_FILE" ]; then
     export ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=${ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET:-false}
 fi
 
+# Check if Redis TLS certificates exist
+REDIS_TLS_ARGS=""
+if [ -f "${SCRIPTPATH}/creds/redis-tls/ca.crt" ]; then
+    echo "Redis TLS certificates found, enabling TLS for Redis connections"
+    REDIS_TLS_ARGS="--redis-tls-enabled=true \
+        --redis-tls-ca-path=${SCRIPTPATH}/creds/redis-tls/ca.crt"
+else
+    echo "Redis TLS certificates not found, running without TLS"
+    echo "Run './hack/dev-env/gen-redis-tls-certs.sh' to generate certificates"
+fi
+
+# Set Redis address for local development
+# When running locally, we need to use localhost via port-forward
+# since we can't access in-cluster DNS
+if [ -z "${ARGOCD_AGENT_REDIS_ADDRESS}" ]; then
+    # Default to localhost:6381 for local E2E testing (requires port-forward)
+    # This allows TLS certificate validation to work (localhost is in cert SANs)
+    ARGOCD_AGENT_REDIS_ADDRESS="localhost:6381"
+    echo "Using default Redis address for local development: ${ARGOCD_AGENT_REDIS_ADDRESS}"
+    echo "NOTE: Requires port-forward to Redis (automatic when using 'make start-e2e', otherwise run manually):"
+    echo "  kubectl port-forward svc/argocd-redis -n argocd 6381:6379 --context vcluster-agent-managed"
+else
+    echo "Using Redis address: ${ARGOCD_AGENT_REDIS_ADDRESS}"
+fi
+REDIS_ADDRESS_ARG="--redis-addr=${ARGOCD_AGENT_REDIS_ADDRESS}"
+
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode managed \
     --creds "mtls:any" \
+    $REDIS_TLS_ARGS \
+    $REDIS_ADDRESS_ARG \
     --server-address 127.0.0.1 \
     --insecure-tls \
     --kubecontext vcluster-agent-managed \
