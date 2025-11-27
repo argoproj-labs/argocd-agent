@@ -86,6 +86,15 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisPassword        string
 		redisCompressionType string
 		healthzPort          int
+
+		// Redis TLS configuration
+		redisTLSEnabled              bool
+		redisServerTLSCertPath       string
+		redisServerTLSKeyPath        string
+		redisServerTLSSecretName     string
+		redisUpstreamTLSCAPath       string
+		redisUpstreamTLSCASecretName string
+		redisUpstreamTLSInsecure     bool
 	)
 	var command = &cobra.Command{
 		Use:   "principal",
@@ -246,6 +255,38 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithRedis(redisAddress, redisPassword, redisCompressionType))
 			opts = append(opts, principal.WithHealthzPort(healthzPort))
 
+			// Configure Redis TLS
+			opts = append(opts, principal.WithRedisTLSEnabled(redisTLSEnabled))
+			if redisTLSEnabled {
+				// Redis proxy server TLS (for incoming connections from Argo CD)
+				if redisServerTLSCertPath != "" && redisServerTLSKeyPath != "" {
+					logrus.Infof("Loading Redis proxy server TLS configuration from files cert=%s and key=%s", redisServerTLSCertPath, redisServerTLSKeyPath)
+					opts = append(opts, principal.WithRedisServerTLSFromPath(redisServerTLSCertPath, redisServerTLSKeyPath))
+				} else if (redisServerTLSCertPath != "" && redisServerTLSKeyPath == "") || (redisServerTLSCertPath == "" && redisServerTLSKeyPath != "") {
+					cmdutil.Fatal("Both --redis-server-tls-cert and --redis-server-tls-key have to be given")
+				} else {
+					logrus.Infof("Loading Redis proxy server TLS certificate from secret %s/%s", namespace, redisServerTLSSecretName)
+					opts = append(opts, principal.WithRedisServerTLSFromSecret(kubeConfig.Clientset, namespace, redisServerTLSSecretName))
+				}
+
+				// Validate upstream TLS configuration - insecure and CA path are mutually exclusive
+				if redisUpstreamTLSInsecure && redisUpstreamTLSCAPath != "" {
+					cmdutil.Fatal("Cannot specify both --redis-upstream-tls-insecure and --redis-upstream-ca-path")
+				}
+
+				// Redis upstream TLS (for connections to principal's argocd-redis)
+				if redisUpstreamTLSInsecure {
+					logrus.Warn("INSECURE: Not verifying upstream Redis TLS certificate")
+					opts = append(opts, principal.WithRedisUpstreamTLSInsecure(true))
+				} else if redisUpstreamTLSCAPath != "" {
+					logrus.Infof("Loading Redis upstream CA certificate from file %s", redisUpstreamTLSCAPath)
+					opts = append(opts, principal.WithRedisUpstreamTLSCAFromFile(redisUpstreamTLSCAPath))
+				} else {
+					logrus.Infof("Loading Redis upstream CA certificate from secret %s/%s", namespace, redisUpstreamTLSCASecretName)
+					opts = append(opts, principal.WithRedisUpstreamTLSCAFromSecret(kubeConfig.Clientset, namespace, redisUpstreamTLSCASecretName, "tls.crt"))
+				}
+			}
+
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
 				cmdutil.Fatal("Could not create new server instance: %v", err)
@@ -374,6 +415,29 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().IntVar(&healthzPort, "healthz-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT", cmdutil.ValidPort, 8003),
 		"Port the health check server will listen on")
+
+	// Redis TLS flags
+	command.Flags().BoolVar(&redisTLSEnabled, "redis-tls-enabled",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_REDIS_TLS_ENABLED", false),
+		"Enable TLS for Redis connections")
+	command.Flags().StringVar(&redisServerTLSCertPath, "redis-server-tls-cert",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_SERVER_TLS_CERT_PATH", nil, ""),
+		"Path to TLS certificate for Redis proxy server")
+	command.Flags().StringVar(&redisServerTLSKeyPath, "redis-server-tls-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_SERVER_TLS_KEY_PATH", nil, ""),
+		"Path to TLS private key for Redis proxy server")
+	command.Flags().StringVar(&redisServerTLSSecretName, "redis-server-tls-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_SERVER_TLS_SECRET_NAME", nil, "argocd-redis-tls"),
+		"Secret name containing TLS certificate and key for Redis proxy server")
+	command.Flags().StringVar(&redisUpstreamTLSCAPath, "redis-upstream-ca-path",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_UPSTREAM_CA_PATH", nil, ""),
+		"Path to CA certificate for verifying upstream Redis TLS certificate")
+	command.Flags().StringVar(&redisUpstreamTLSCASecretName, "redis-upstream-ca-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_UPSTREAM_CA_SECRET_NAME", nil, "argocd-redis-tls"),
+		"Secret name containing CA certificate for verifying upstream Redis TLS certificate")
+	command.Flags().BoolVar(&redisUpstreamTLSInsecure, "redis-upstream-tls-insecure",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_REDIS_UPSTREAM_TLS_INSECURE", false),
+		"INSECURE: Do not verify upstream Redis TLS certificate")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

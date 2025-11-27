@@ -18,9 +18,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +61,18 @@ type RedisProxy struct {
 
 	// listener is the listener for the redis proxy
 	listener net.Listener
+
+	// TLS configuration for Redis proxy server (incoming connections from Argo CD)
+	tlsEnabled        bool
+	tlsServerCert     *x509.Certificate
+	tlsServerKey      crypto.PrivateKey
+	tlsServerCertPath string
+	tlsServerKeyPath  string
+
+	// TLS configuration for upstream Redis (connections to principal's argocd-redis)
+	upstreamTLSCA       *x509.CertPool
+	upstreamTLSCAPath   string
+	upstreamTLSInsecure bool
 }
 
 const (
@@ -79,14 +95,104 @@ func New(listenAddress string, principalRedisAddress string, sendSyncMessageToAg
 	return res
 }
 
+// SetTLSEnabled enables or disables TLS for the Redis proxy
+func (rp *RedisProxy) SetTLSEnabled(enabled bool) {
+	rp.tlsEnabled = enabled
+}
+
+// SetServerTLS sets the TLS certificate and key for the Redis proxy server
+func (rp *RedisProxy) SetServerTLS(cert *x509.Certificate, key crypto.PrivateKey) {
+	rp.tlsServerCert = cert
+	rp.tlsServerKey = key
+}
+
+// SetServerTLSFromPath sets the TLS certificate and key paths for the Redis proxy server
+func (rp *RedisProxy) SetServerTLSFromPath(certPath, keyPath string) {
+	rp.tlsServerCertPath = certPath
+	rp.tlsServerKeyPath = keyPath
+}
+
+// SetUpstreamTLSCA sets the CA certificate pool for verifying upstream Redis TLS
+func (rp *RedisProxy) SetUpstreamTLSCA(ca *x509.CertPool) {
+	rp.upstreamTLSCA = ca
+}
+
+// SetUpstreamTLSCAPath sets the CA certificate path for verifying upstream Redis TLS
+func (rp *RedisProxy) SetUpstreamTLSCAPath(caPath string) {
+	rp.upstreamTLSCAPath = caPath
+}
+
+// SetUpstreamTLSInsecure enables insecure upstream TLS (for testing only)
+func (rp *RedisProxy) SetUpstreamTLSInsecure(insecure bool) {
+	rp.upstreamTLSInsecure = insecure
+}
+
+// createServerTLSConfig creates a TLS configuration for the Redis proxy server
+func (rp *RedisProxy) createServerTLSConfig() (*tls.Config, error) {
+	var cert tls.Certificate
+	var err error
+
+	// Load certificate from path or use provided certificate
+	if rp.tlsServerCertPath != "" && rp.tlsServerKeyPath != "" {
+		cert, err = tls.LoadX509KeyPair(rp.tlsServerCertPath, rp.tlsServerKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load TLS certificate: %w", err)
+		}
+	} else if rp.tlsServerCert != nil && rp.tlsServerKey != nil {
+		// Convert cert and key to tls.Certificate
+		certDER := rp.tlsServerCert.Raw
+		// For private key, we need to marshal it
+		keyDER, err := x509.MarshalPKCS8PrivateKey(rp.tlsServerKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal private key: %w", err)
+		}
+		cert.Certificate = [][]byte{certDER}
+		cert.PrivateKey = rp.tlsServerKey
+		cert.Leaf = rp.tlsServerCert
+
+		// Try to parse the key
+		if _, err := x509.ParsePKCS8PrivateKey(keyDER); err != nil {
+			return nil, fmt.Errorf("failed to parse private key: %w", err)
+		}
+	} else {
+		return nil, fmt.Errorf("no TLS certificate configured")
+	}
+
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}, nil
+}
+
 // Start listening on redis proxy port, and handling connections
 func (rp *RedisProxy) Start() error {
 
-	l, err := net.Listen("tcp", rp.listenAddress)
-	if err != nil {
-		log().WithError(err).Error("error occurred on listening to addr: " + rp.listenAddress)
-		return err
+	var l net.Listener
+	var err error
+
+	if rp.tlsEnabled {
+		// Create TLS configuration for the listener
+		tlsConfig, err := rp.createServerTLSConfig()
+		if err != nil {
+			log().WithError(err).Error("error creating TLS config for Redis proxy server")
+			return err
+		}
+
+		l, err = tls.Listen("tcp", rp.listenAddress, tlsConfig)
+		if err != nil {
+			log().WithError(err).Error("error occurred on listening to addr with TLS: " + rp.listenAddress)
+			return err
+		}
+		log().Infof("Redis proxy started on %s with TLS", rp.listenAddress)
+	} else {
+		l, err = net.Listen("tcp", rp.listenAddress)
+		if err != nil {
+			log().WithError(err).Error("error occurred on listening to addr: " + rp.listenAddress)
+			return err
+		}
+		log().Infof("Redis proxy started on %s without TLS", rp.listenAddress)
 	}
+
 	rp.listener = l
 
 	// Start server and connection handler
@@ -100,8 +206,6 @@ func (rp *RedisProxy) Start() error {
 			go rp.handleConnection(conn)
 		}
 	}()
-
-	log().Infof("Redis proxy started on %s", rp.listenAddress)
 
 	return nil
 }
@@ -125,7 +229,7 @@ func (rp *RedisProxy) handleConnection(fromArgoCDConn net.Conn) {
 	logCtx := log().WithField("function", "redisFxn")
 	logCtx = logCtx.WithField("connUUID", connUUID)
 
-	redisConn, err := establishConnectionToPrincipalRedis(rp.principalRedisAddress, logCtx)
+	redisConn, err := rp.establishConnectionToPrincipalRedis(logCtx)
 	if err != nil {
 		logCtx.WithError(err).Error("unable to connect to principal redis")
 		return
@@ -740,25 +844,67 @@ func (are *argoCDRedisWriterInternal) writeToArgoCDRedisSocket(logCtx *logrus.En
 	return nil
 }
 
-// establishConnectionToPrincipalRedis establishes a simple TCP-IP socket connection to principal's redis. (That is, we don't use go-redis client)
-func establishConnectionToPrincipalRedis(principalRedisAddress string, logCtx *logrus.Entry) (*net.TCPConn, error) {
+// establishConnectionToPrincipalRedis establishes a TCP-IP socket connection to principal's redis, with optional TLS
+func (rp *RedisProxy) establishConnectionToPrincipalRedis(logCtx *logrus.Entry) (net.Conn, error) {
 
-	var redisConn *net.TCPConn
-
-	addr, err := net.ResolveTCPAddr("tcp", principalRedisAddress)
+	addr, err := net.ResolveTCPAddr("tcp", rp.principalRedisAddress)
 	if err != nil {
-		logCtx.WithError(err).WithField("redisAddress", principalRedisAddress).Error("Resolution error")
+		logCtx.WithError(err).WithField("redisAddress", rp.principalRedisAddress).Error("Resolution error")
 		return nil, fmt.Errorf("unable to resolve address: %w", err)
 	}
 
 	// Dial the resolved address
-	redisConn, err = net.DialTCP("tcp", nil, addr)
+	conn, err := net.DialTCP("tcp", nil, addr)
 	if err != nil {
-		logCtx.WithError(err).WithField("redisAddress", principalRedisAddress).Error("Connection error")
-		return nil, fmt.Errorf("unable to connect to redis '%s': %w", principalRedisAddress, err)
+		logCtx.WithError(err).WithField("redisAddress", rp.principalRedisAddress).Error("Connection error")
+		return nil, fmt.Errorf("unable to connect to redis '%s': %w", rp.principalRedisAddress, err)
 	}
 
-	return redisConn, nil
+	// If TLS is enabled for upstream, wrap the connection with TLS
+	if rp.tlsEnabled && (rp.upstreamTLSCA != nil || rp.upstreamTLSCAPath != "" || rp.upstreamTLSInsecure) {
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+
+		if rp.upstreamTLSInsecure {
+			logCtx.Warn("INSECURE: Not verifying upstream Redis TLS certificate")
+			tlsConfig.InsecureSkipVerify = true
+		} else if rp.upstreamTLSCA != nil {
+			tlsConfig.RootCAs = rp.upstreamTLSCA
+			logCtx.Trace("Using provided CA certificate pool for upstream Redis TLS")
+		} else if rp.upstreamTLSCAPath != "" {
+			caCert, err := os.ReadFile(rp.upstreamTLSCAPath)
+			if err != nil {
+				conn.Close()
+				return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+			}
+			caCertPool := x509.NewCertPool()
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				conn.Close()
+				return nil, fmt.Errorf("failed to append CA certificate")
+			}
+			tlsConfig.RootCAs = caCertPool
+			logCtx.Debugf("Using CA certificate from %s for upstream Redis TLS", rp.upstreamTLSCAPath)
+		}
+
+		// Extract hostname from address for SNI
+		hostname := rp.principalRedisAddress
+		if h, _, err := net.SplitHostPort(rp.principalRedisAddress); err == nil {
+			hostname = h
+		}
+		tlsConfig.ServerName = hostname
+
+		tlsConn := tls.Client(conn, tlsConfig)
+		if err := tlsConn.Handshake(); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("TLS handshake failed: %w", err)
+		}
+
+		logCtx.Trace("Established TLS connection to upstream Redis")
+		return tlsConn, nil
+	}
+
+	return conn, nil
 }
 
 // Extract agent name from the key field of 'get' or 'subscribe' redis commands

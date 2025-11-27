@@ -47,27 +47,15 @@ getExternalLoadBalancerIP() {
 
 }
 
-# Get hostname of control-plane redis
-K8S_CONTEXT="--context=vcluster-control-plane"
-K8S_NAMESPACE="-n argocd"
-getExternalLoadBalancerIP "argocd-redis"
-export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="$EXTERNAL_IP:6379"
+# Set Redis addresses to use localhost (for TLS certificate validation)
+# Port-forwards are managed by goreman (see Procfile.e2e)
+export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="localhost:6380"
+export ARGOCD_AGENT_REDIS_ADDRESS="localhost:6381"  # For managed agent
+export MANAGED_AGENT_REDIS_ADDR="localhost:6381"
+export AUTONOMOUS_AGENT_REDIS_ADDR="localhost:6382"
 
 
-# Get hostname of agent-managed redis
-K8S_CONTEXT="--context=vcluster-agent-managed"
-K8S_NAMESPACE="-n argocd"
-getExternalLoadBalancerIP "argocd-redis"
-export MANAGED_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
-
-# Get hostname of agent-autonomous redis
-K8S_CONTEXT="--context=vcluster-agent-autonomous"
-K8S_NAMESPACE="-n argocd"
-getExternalLoadBalancerIP "argocd-redis"
-export AUTONOMOUS_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
-
-
-export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed $K8S_NAMESPACE -o jsonpath='{.data.auth}' | base64 --decode)
+export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed -n argocd -o jsonpath='{.data.auth}' | base64 --decode)
 
 goreman -exit-on-stop=false -f hack/dev-env/Procfile.e2e start
 

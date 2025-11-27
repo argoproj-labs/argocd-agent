@@ -24,6 +24,8 @@ To setup the test environment on the cluster, execute the following command from
 make setup-e2e
 ```
 
+**Note:** Redis TLS is **required** and configured automatically. See the [Redis TLS](#redis-tls) section below for details.
+
 To run the principal and agents, execute the following command from the repository root:
 
 ```shell
@@ -35,6 +37,32 @@ To run the tests, execute the following command from the repository root in a se
 ```shell
 make test-e2e
 ```
+
+### Redis TLS
+
+Redis TLS is **mandatory** for E2E tests and is automatically configured by `make setup-e2e`. This includes:
+- Generating TLS certificates for all three vclusters
+- Configuring Redis to use TLS-only mode (port 6379)
+- Configuring Argo CD components to connect with TLS
+
+If you need to manually reconfigure Redis TLS (e.g., after certificate expiration or corruption):
+
+```shell
+# Regenerate certificates
+./hack/dev-env/gen-redis-tls-certs.sh
+
+# Reconfigure Redis for each vcluster
+./hack/dev-env/configure-redis-tls.sh vcluster-control-plane
+./hack/dev-env/configure-redis-tls.sh vcluster-agent-managed
+./hack/dev-env/configure-redis-tls.sh vcluster-agent-autonomous
+
+# Reconfigure Argo CD components for each vcluster
+./hack/dev-env/configure-argocd-redis-tls.sh vcluster-control-plane
+./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-managed
+./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-autonomous
+```
+
+**Note:** The principal and agents use `InsecureSkipVerify: true` in E2E tests for simplicity, as they connect to Redis via LoadBalancer addresses that aren't in the certificate SANs. TLS encryption is still enabled.
 
 # Writing new end-to-end tests
 

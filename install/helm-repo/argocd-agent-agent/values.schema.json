@@ -297,6 +297,85 @@
           "description": "Test image tag"
         }
       }
+    },
+
+    "redisTLS": {
+      "type": "object",
+      "description": "Redis TLS configuration",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "string",
+          "enum": ["true", "false"],
+          "description": "Enable TLS for Redis connections"
+        },
+        "caPath": {
+          "type": "string",
+          "description": "Path to CA certificate for verifying Redis TLS certificate"
+        },
+        "secretName": {
+          "type": "string",
+          "description": "Name of the Kubernetes Secret containing the Redis TLS CA certificate"
+        },
+        "insecure": {
+          "type": "string",
+          "enum": ["true", "false"],
+          "description": "Skip verification of Redis TLS certificate (INSECURE - for development only)"
+        }
+      }
+    },
+
+    "networkPolicy": {
+      "type": "object",
+      "description": "NetworkPolicy configuration",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable NetworkPolicy"
+        },
+        "redis": {
+          "type": "object",
+          "description": "Redis NetworkPolicy configuration",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable NetworkPolicy for Redis"
+            },
+            "name": {
+              "type": "string",
+              "description": "Redis NetworkPolicy name"
+            },
+            "namespace": {
+              "type": "string",
+              "description": "Redis namespace"
+            },
+            "agentSelector": {
+              "type": "object",
+              "description": "Agent pod selector",
+              "additionalProperties": true,
+              "properties": {
+                "app.kubernetes.io/name": {
+                  "type": "string",
+                  "description": "Agent app name selector"
+                }
+              }
+            },
+            "redisSelector": {
+              "type": "object",
+              "description": "Redis pod selector",
+              "additionalProperties": true,
+              "properties": {
+                "app.kubernetes.io/name": {
+                  "type": "string",
+                  "description": "Redis app name selector"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

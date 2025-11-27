@@ -16,8 +16,11 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -317,7 +320,28 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		connMap: map[string]connectionEntry{},
 	}
 
-	clusterCache, err := cluster.NewClusterCacheInstance(a.redisProxyMsgHandler.redisAddress, a.redisProxyMsgHandler.redisPassword, cacheutil.RedisCompressionGZip)
+	// Create TLS config for cluster cache Redis client (same as for Redis proxy)
+	var clusterCacheTLSConfig *tls.Config = nil
+	if a.redisProxyMsgHandler.redisTLSEnabled {
+		clusterCacheTLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+		if a.redisProxyMsgHandler.redisTLSInsecure {
+			clusterCacheTLSConfig.InsecureSkipVerify = true
+		} else if a.redisProxyMsgHandler.redisTLSCAPath != "" {
+			caCertPEM, err := os.ReadFile(a.redisProxyMsgHandler.redisTLSCAPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CA certificate for cluster cache: %w", err)
+			}
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caCertPEM) {
+				return nil, fmt.Errorf("failed to parse CA certificate for cluster cache from %s", a.redisProxyMsgHandler.redisTLSCAPath)
+			}
+			clusterCacheTLSConfig.RootCAs = certPool
+		}
+	}
+
+	clusterCache, err := cluster.NewClusterCacheInstance(a.redisProxyMsgHandler.redisAddress, a.redisProxyMsgHandler.redisPassword, cacheutil.RedisCompressionGZip, clusterCacheTLSConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
 	}

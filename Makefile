@@ -56,6 +56,18 @@ endif
 ifneq (${ARGOCD_AGENT_IN_CLUSTER},)
 	./hack/dev-env/restart-all.sh
 endif
+	@echo ""
+	@echo "Configuring Redis TLS (required for E2E)..."
+	./hack/dev-env/gen-redis-tls-certs.sh
+	@echo "Step 1: Enabling TLS on Redis servers (creates secrets)..."
+	./hack/dev-env/configure-redis-tls.sh vcluster-control-plane
+	./hack/dev-env/configure-redis-tls.sh vcluster-agent-managed
+	./hack/dev-env/configure-redis-tls.sh vcluster-agent-autonomous
+	@echo "Step 2: Configuring Argo CD components for Redis TLS..."
+	./hack/dev-env/configure-argocd-redis-tls.sh vcluster-control-plane
+	./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-managed
+	./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-autonomous
+	@echo " E2E environment ready with Redis TLS enabled (required)"
 
 .PHONY: teardown-e2e
 teardown-e2e:
