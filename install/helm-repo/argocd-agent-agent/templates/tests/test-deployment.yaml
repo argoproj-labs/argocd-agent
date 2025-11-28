@@ -6,7 +6,7 @@ metadata:
   annotations:
     "helm.sh/hook": test
 spec:
-  serviceAccountName: argocd-agent-test
+  serviceAccountName: {{ include "argocd-agent-agent.testResourceName" . }}
   containers:
     - name: kubectl
       image: "{{ .Values.tests.image }}:{{ .Values.tests.tag }}"
@@ -16,8 +16,11 @@ spec:
         - |
           echo "Testing Deployment configuration..."
           
+          DEPLOYMENT_NAME={{ include "argocd-agent-agent.agentDeploymentName" . | quote }}
+          SERVICE_ACCOUNT_NAME={{ include "argocd-agent-agent.serviceAccountName" . | quote }}
+
           # Check if deployment exists
-          if kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }}; then
+          if kubectl get deployment "$DEPLOYMENT_NAME" -n {{ include "argocd-agent-agent.namespace" . }}; then
             echo "✓ Deployment exists"
           else
             echo "✗ Deployment not found"
@@ -25,7 +28,7 @@ spec:
           fi
           
           # Check deployment labels
-          DEPLOYMENT_LABELS=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          DEPLOYMENT_LABELS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
           echo "DEPLOYMENT_LABELS: $DEPLOYMENT_LABELS"
           
           if echo "$DEPLOYMENT_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
@@ -50,7 +53,7 @@ spec:
           fi
           
           # Check deployment replicas
-          REPLICAS=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.replicas}")
+          REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.replicas}")
           if [ "$REPLICAS" = "1" ]; then
             echo "✓ Deployment has correct replica count: $REPLICAS"
           else
@@ -59,7 +62,7 @@ spec:
           fi
           
           # Check container image
-          IMAGE=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.template.spec.containers[0].image}")
+          IMAGE=$(kubectl get deployment "$DEPLOYMENT_NAME" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.template.spec.containers[0].image}")
           if [ -n "$IMAGE" ]; then
             echo "✓ Deployment has container image: $IMAGE"
           else
@@ -68,11 +71,11 @@ spec:
           fi
           
           # Check service account
-          SA=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.template.spec.serviceAccountName}")
-          if [ "$SA" = "argocd-agent-agent" ]; then
+          SA=$(kubectl get deployment "$DEPLOYMENT_NAME" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.spec.template.spec.serviceAccountName}")
+          if [ "$SA" = "$SERVICE_ACCOUNT_NAME" ]; then
             echo "✓ Deployment uses correct service account: $SA"
           else
-            echo "✗ Deployment uses incorrect service account: $SA (expected argocd-agent-agent)"
+            echo "✗ Deployment uses incorrect service account: $SA (expected $SERVICE_ACCOUNT_NAME)"
             exit 1
           fi
           

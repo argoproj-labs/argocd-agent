@@ -6,7 +6,7 @@ metadata:
   annotations:
     "helm.sh/hook": test
 spec:
-  serviceAccountName: argocd-agent-test
+  serviceAccountName: {{ include "argocd-agent-agent.testResourceName" . }}
   containers:
     - name: kubectl
       image: "{{ .Values.tests.image }}:{{ .Values.tests.tag }}"
@@ -15,6 +15,10 @@ spec:
         - -c
         - |
           echo "Testing Overall Chart Installation..."
+
+          DEPLOYMENT_NAME={{ include "argocd-agent-agent.agentDeploymentName" . | quote }}
+          METRICS_SERVICE={{ include "argocd-agent-agent.metricsServiceName" . | quote }}
+          HEALTHZ_SERVICE={{ include "argocd-agent-agent.healthzServiceName" . | quote }}
           
           # Count and verify all resources
           echo "Verifying resource counts..."
@@ -104,7 +108,7 @@ spec:
           
           # Check if deployment is ready
           echo "Checking deployment readiness..."
-          READY_REPLICAS=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.status.readyReplicas}")
+          READY_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.status.readyReplicas}")
           if [ "$READY_REPLICAS" = "1" ]; then
             echo "✓ Deployment is ready with $READY_REPLICAS replica(s)"
           else
@@ -129,7 +133,7 @@ spec:
           
           # Verify service endpoints
           echo "Checking service endpoints..."
-          METRICS_ENDPOINTS=$(kubectl get endpoints argocd-agent-agent-metrics -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.subsets[0].addresses}" | wc -l)
+          METRICS_ENDPOINTS=$(kubectl get endpoints "$METRICS_SERVICE" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.subsets[0].addresses}" | wc -l)
           if [ "$METRICS_ENDPOINTS" -gt 0 ]; then
             echo "✓ Metrics service has endpoints"
           else
@@ -137,7 +141,7 @@ spec:
             exit 1
           fi
           
-          HEALTHZ_ENDPOINTS=$(kubectl get endpoints argocd-agent-agent-healthz -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.subsets[0].addresses}" | wc -l)
+          HEALTHZ_ENDPOINTS=$(kubectl get endpoints "$HEALTHZ_SERVICE" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.subsets[0].addresses}" | wc -l)
           if [ "$HEALTHZ_ENDPOINTS" -gt 0 ]; then
             echo "✓ Healthz service has endpoints"
           else

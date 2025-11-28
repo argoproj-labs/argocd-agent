@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: argocd-agent-params
+  name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
   namespace: {{ include  "argocd-agent-agent.namespace" . }}
   labels:
     app.kubernetes.io/name: argocd-agent-agent

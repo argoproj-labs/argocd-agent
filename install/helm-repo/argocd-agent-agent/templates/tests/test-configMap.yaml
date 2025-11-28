@@ -137,6 +137,6 @@ spec:
   volumes:
     - name: argocd-agent-params
       configMap:
-        name: argocd-agent-params
+        name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
   restartPolicy: Never
 {{- end }}
