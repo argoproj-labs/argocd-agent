@@ -5,7 +5,7 @@ metadata:
       app.kubernetes.io/name: argocd-agent-agent
       app.kubernetes.io/part-of: argocd-agent
       app.kubernetes.io/component: agent
-  name: argocd-agent-agent-healthz
+  name: {{ include "argocd-agent-agent.healthzServiceName" . }}
   namespace: {{ include  "argocd-agent-agent.namespace" . }}
   {{- with .Values.service.healthz.annotations }}
   annotations:

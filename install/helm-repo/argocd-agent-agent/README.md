@@ -65,8 +65,8 @@ Kubernetes: `>=1.24.0-0`
 | serviceAccount.annotations | object | `{}` | Annotations to add to the ServiceAccount. |
 | serviceAccount.create | bool | `true` | Whether to create the ServiceAccount. |
 | serviceAccount.name | string | `""` | Name of the ServiceAccount to use. If empty, a name is generated. |
-| tests | object | `{"enabled":"true","image":"bitnamilegacy/kubectl","tag":"1.33.4"}` | Configuration for chart tests. |
-| tests.enabled | string | `"true"` | Enable chart tests. |
+| tests | object | `{"enabled":false,"image":"bitnamilegacy/kubectl","tag":"1.33.4"}` | Configuration for helm-chart tests. |
+| tests.enabled | bool | `false` | By default, chart tests are disabled. |
 | tests.image | string | `"bitnamilegacy/kubectl"` | Test image. |
 | tests.tag | string | `"1.33.4"` | Test image tag. |
 | tlsClientKeyPath | string | `""` | Path to the TLS client key. |

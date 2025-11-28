@@ -6,7 +6,7 @@ metadata:
   annotations:
     "helm.sh/hook": test
 spec:
-  serviceAccountName: argocd-agent-test
+  serviceAccountName: {{ include "argocd-agent-agent.testResourceName" . }}
   containers:
     - name: kubectl
       image: "{{ .Values.tests.image }}:{{ .Values.tests.tag }}"
@@ -16,9 +16,17 @@ spec:
         - |
           echo "Testing Labels and Annotations..."
           
+          DEPLOYMENT_NAME={{ include "argocd-agent-agent.agentDeploymentName" . | quote }}
+          METRICS_SERVICE={{ include "argocd-agent-agent.metricsServiceName" . | quote }}
+          HEALTHZ_SERVICE={{ include "argocd-agent-agent.healthzServiceName" . | quote }}
+          ROLE_NAME={{ include "argocd-agent-agent.roleName" . | quote }}
+          CLUSTER_ROLE_NAME={{ include "argocd-agent-agent.clusterRoleName" . | quote }}
+          SERVICE_ACCOUNT_NAME={{ include "argocd-agent-agent.serviceAccountName" . | quote }}
+          CONFIGMAP_NAME={{ include "argocd-agent-agent.paramsConfigMapName" . | quote }}
+
           # Test Deployment labels
           echo "Testing Deployment labels..."
-          DEPLOYMENT_LABELS=$(kubectl get deployment argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          DEPLOYMENT_LABELS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
           
           echo "DEPLOYMENT_LABELS: $DEPLOYMENT_LABELS"
           
@@ -45,7 +53,7 @@ spec:
           
           # Test Service labels
           echo "Testing Service labels..."
-          METRICS_SERVICE_LABELS=$(kubectl get service argocd-agent-agent-metrics -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          METRICS_SERVICE_LABELS=$(kubectl get service "$METRICS_SERVICE" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
           
           if echo "$METRICS_SERVICE_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
             echo "✓ Metrics service has app.kubernetes.io/name label"
@@ -68,7 +76,7 @@ spec:
             exit 1
           fi
           
-          HEALTHZ_SERVICE_LABELS=$(kubectl get service argocd-agent-agent-healthz -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          HEALTHZ_SERVICE_LABELS=$(kubectl get service "$HEALTHZ_SERVICE" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
           
           if echo "$HEALTHZ_SERVICE_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
             echo "✓ Healthz service has app.kubernetes.io/name label"
@@ -93,7 +101,7 @@ spec:
           
           # Test RBAC labels
           echo "Testing RBAC labels..."
-          ROLE_LABELS=$(kubectl get role argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          ROLE_LABELS=$(kubectl get role "$ROLE_NAME" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
           
           if echo "$ROLE_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
             echo "✓ Role has app.kubernetes.io/name label"
@@ -116,7 +124,7 @@ spec:
             exit 1
           fi
           
-          CLUSTER_ROLE_LABELS=$(kubectl get clusterrole argocd-agent-agent -o jsonpath="{.metadata.labels}")
+          CLUSTER_ROLE_LABELS=$(kubectl get clusterrole "$CLUSTER_ROLE_NAME" -o jsonpath="{.metadata.labels}")
           
           if echo "$CLUSTER_ROLE_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
             echo "✓ ClusterRole has app.kubernetes.io/name label"
@@ -140,7 +148,7 @@ spec:
           fi
           
           # Test ServiceAccount labels
-          SA_LABELS=$(kubectl get serviceaccount argocd-agent-agent -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          SA_LABELS=$(kubectl get serviceaccount "$SERVICE_ACCOUNT_NAME" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
           
           if echo "$SA_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
             echo "✓ ServiceAccount has app.kubernetes.io/name label"
@@ -164,7 +172,7 @@ spec:
           fi
           
           # Test ConfigMap labels
-          CM_LABELS=$(kubectl get configmap argocd-agent-params -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
+          CM_LABELS=$(kubectl get configmap "$CONFIGMAP_NAME" -n {{ include "argocd-agent-agent.namespace" . }} -o jsonpath="{.metadata.labels}")
           
           if echo "$CM_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-agent"; then
             echo "✓ ConfigMap has app.kubernetes.io/name label"
