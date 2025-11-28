@@ -16,6 +16,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -27,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -1468,7 +1470,16 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 	a.namespace = "test"
 	a.context = context.Background()
 
-	err := a.queues.Create(a.remote.ClientID())
+	subject := &auth.AuthSubject{
+		ClientID: "test",
+	}
+	subjectJSON, err := json.Marshal(subject)
+	if err != nil {
+		t.Fatalf("Failed to marshal subject: %v", err)
+	}
+	a.remote.SetClientID(string(subjectJSON))
+	fmt.Println("a.remote.ClientID()", a.remote.ClientID())
+	err = a.queues.Create(a.remote.ClientID())
 	assert.Nil(t, err)
 	a.emitter = event.NewEventSource("test")
 
