@@ -22,6 +22,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -108,15 +109,28 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 
+	var ev *cloudevents.Event
+
 	// Check if this update is a terminate-operation or a regular spec update
-	eventType := event.SpecUpdate
 	if isTerminateOperation(old, new) {
-		eventType = event.TerminateOperation
+		ev = s.events.ApplicationEvent(event.TerminateOperation, new)
+	} else {
+		// Prevent sending operation back on regular spec updates.
+		// Allow only nil->non-nil transitions to carry operation (i.e. principal-initiated sync).
+
+		// DeepCopy to avoid mutating the informer object
+		out := new.DeepCopy()
+		if old.Operation == nil && new.Operation != nil {
+			out.Operation = new.Operation.DeepCopy()
+		} else {
+			out.Operation = nil
+		}
+
+		ev = s.events.ApplicationEvent(event.SpecUpdate, out)
 	}
 
-	ev := s.events.ApplicationEvent(eventType, new)
 	q.Add(ev)
-	logCtx.Tracef("Added app to send queue, total length now %d", q.Len())
+	logCtx.WithField("event_type", ev.Type()).Tracef("Added app to send queue, total length now %d", q.Len())
 
 	if s.metrics != nil {
 		s.metrics.ApplicationUpdated.Inc()
