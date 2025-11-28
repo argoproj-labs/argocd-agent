@@ -156,8 +156,8 @@ service:
 ## @section Tests
 # -- Configuration for chart tests.
 tests:
-  # -- Enable chart tests.
-  enabled: "true"
+  # -- By default, chart tests are disabled.
+  enabled: false
   # -- Test image.
   image: bitnamilegacy/kubectl
   # -- Test image tag.
