@@ -1221,6 +1221,10 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithDeleteOnPri
 
 	fixture.CheckReadiness(suite.T(), "agent-autonomous")
 
+	agentProj := argoapp.AppProject{}
+	err = suite.AutonomousAgentClient.Get(suite.Ctx, types.NamespacedName{Name: appProject.Name, Namespace: "argocd"}, &agentProj, metav1.GetOptions{})
+	requires.NoError(err)
+
 	// The AppProject should be recreated on the control-plane cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
@@ -1229,7 +1233,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithDeleteOnPri
 			return false
 		}
 
-		expectedSpec := appProject.Spec.DeepCopy()
+		expectedSpec := agentProj.Spec.DeepCopy()
 		expectedSpec.SourceNamespaces = []string{"agent-autonomous"}
 		for i := range expectedSpec.Destinations {
 			expectedSpec.Destinations[i].Name = "agent-autonomous"
