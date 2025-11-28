@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/name: argocd-agent-agent
     app.kubernetes.io/part-of: argocd-agent
     app.kubernetes.io/component: agent
-  name: argocd-agent-agent
+  name: {{ include "argocd-agent-agent.agentDeploymentName" . }}
   namespace: {{ include  "argocd-agent-agent.namespace" . }}
 spec:
   replicas: {{ .Values.replicaCount }}
@@ -28,97 +28,97 @@ spec:
           - name: ARGOCD_AGENT_REMOTE_SERVER
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.server.address
                 optional: true
           - name: ARGOCD_AGENT_REMOTE_PORT
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.server.port
                 optional: true
           - name: ARGOCD_AGENT_LOG_LEVEL
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.log.level
                 optional: true
           - name: ARGOCD_AGENT_NAMESPACE
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.namespace
                 optional: true
           - name: ARGOCD_AGENT_TLS_SECRET_NAME
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.tls.secret-name
                 optional: true
           - name: ARGOCD_AGENT_TLS_CLIENT_CERT_PATH
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.tls.client.cert-path
                 optional: true
           - name: ARGOCD_AGENT_TLS_CLIENT_KEY_PATH
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.tls.client.key-path
                 optional: true
           - name: ARGOCD_AGENT_TLS_INSECURE
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.tls.client.insecure
                 optional: true
           - name: ARGOCD_AGENT_TLS_ROOT_CA_SECRET_NAME
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.tls.root-ca-secret-name
                 optional: true
           - name: ARGOCD_AGENT_TLS_ROOT_CA_PATH
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.tls.root-ca-path
                 optional: true
           - name: ARGOCD_AGENT_MODE
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.mode
                 optional: true
           - name: ARGOCD_AGENT_CREDS
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.creds
                 optional: true
           - name: ARGOCD_AGENT_METRICS_PORT
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.metrics.port
                 optional: true
           - name: ARGOCD_AGENT_HEALTH_CHECK_PORT
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.healthz.port
                 optional: true
           - name: REDIS_ADDR
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.redis.address
                 optional: true
           - name: ARGOCD_AGENT_KEEP_ALIVE_PING_INTERVAL
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.keep-alive.interval
                 optional: true
           - name: REDIS_PASSWORD
@@ -130,43 +130,43 @@ spec:
           - name: REDIS_USERNAME
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.redis.username
                 optional: true
           - name: ARGOCD_PRINCIPAL_LOG_FORMAT
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.log.format
                 optional: true
           - name: ARGOCD_AGENT_ENABLE_WEBSOCKET
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.websocket.enabled
                 optional: true
           - name: ARGOCD_AGENT_ENABLE_COMPRESSION
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.compression.enabled
                 optional: true
           - name: ARGOCD_AGENT_PPROF_PORT
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.pprof.port
                 optional: true
           - name: ARGOCD_AGENT_ENABLE_RESOURCE_PROXY
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.resource-proxy.enabled
                 optional: true
           - name: ARGOCD_AGENT_CACHE_REFRESH_INTERVAL
             valueFrom:
               configMapKeyRef:
-                name: argocd-agent-params
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.cache.refresh-interval
                 optional: true
           name: argocd-agent-agent
@@ -211,7 +211,7 @@ spec:
           volumeMounts:
             - name: userpass-passwd
               mountPath: /app/config/creds
-      serviceAccountName: argocd-agent-agent
+      serviceAccountName: {{ include "argocd-agent-agent.serviceAccountName" . }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
 {{ toYaml . | indent 8 }}

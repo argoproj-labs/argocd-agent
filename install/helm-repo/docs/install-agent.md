@@ -12,6 +12,8 @@ Use the following command to install the argocd-agent-agent-helm chart.
 
 `helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0`
 
+> **Resource naming:** every Kubernetes object that this chart creates is derived from your Helm release name. For example, installing with `helm install agent-prod ...` generates resource name `agent-prod-agent-helm`. Pick a release name that matches how you want the objects to appear in the cluster.
+
 ### Namespace Handling
 
 If you run the helm install command without specifying a namespace flag, Helm will attempt to deploy resources into the `default` namespace.

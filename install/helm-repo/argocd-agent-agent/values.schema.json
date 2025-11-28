@@ -285,7 +285,7 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
-          "type": "string",
+          "type": "boolean",
           "description": "Enable chart tests"
         },
         "image": {
