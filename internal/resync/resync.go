@@ -156,6 +156,7 @@ func (r *RequestHandler) ProcessIncomingResourceResyncRequest(ctx context.Contex
 			r.log.Errorf("failed to send request update for resource %s: %v", resource.Name, err)
 			continue
 		}
+		r.log.WithField(logfields.Kind, resource.Kind).WithField(logfields.Name, resource.Name).Trace("Sent a request update event")
 	}
 
 	return nil
