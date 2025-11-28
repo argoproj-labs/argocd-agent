@@ -17,6 +17,7 @@ package e2e
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -827,6 +828,418 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_CreateOnAgentDelete() {
 	}, 30*time.Second, 1*time.Second)
 }
 
+// AppProjects on both the agent and the principal must be synchronized when the principal is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestart_Autonomous() {
+	requires := suite.Require()
+
+	// Create an autonomous application on the autonomous-agent's cluster
+	appProject := suite.createAutonomousAppProject()
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: appProject.Name, Namespace: "argocd"}
+
+	// Restart the principal
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Start the principal and ensure that the appProject is still present on the workload cluster
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "principal")
+
+	agentProj := argoapp.AppProject{}
+	requires.Eventually(func() bool {
+		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &agentProj, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+
+		// For autonomous agents, the principal transforms the spec:
+		// - SourceNamespaces is set to [agentName]
+		// - All destinations are modified to point to the agent cluster
+		expectedSpec := agentProj.Spec.DeepCopy()
+		expectedSpec.SourceNamespaces = []string{"agent-autonomous"}
+		for i := range expectedSpec.Destinations {
+			expectedSpec.Destinations[i].Name = "agent-autonomous"
+			expectedSpec.Destinations[i].Server = "*"
+		}
+
+		return reflect.DeepEqual(appProject.Spec, *expectedSpec)
+	}, 30*time.Second, 1*time.Second)
+}
+
+// AppProjects on both the agent and the principal must be synchronized when the agent is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestart_Autonomous() {
+	requires := suite.Require()
+
+	// Create an autonomous application on the autonomous-agent's cluster
+	appProject := suite.createAutonomousAppProject()
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: appProject.Name, Namespace: "argocd"}
+
+	// Restart the autonomous-agent
+	err := fixture.StopProcess("agent-autonomous")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("agent-autonomous")
+	}, 30*time.Second, 1*time.Second)
+
+	// Start the agent and ensure that the appProject is still present on both the clusters
+	err = fixture.StartProcess("agent-autonomous")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "agent-autonomous")
+
+	agentProj := argoapp.AppProject{}
+	requires.Eventually(func() bool {
+		err := suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &agentProj, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+
+		expectedSpec := agentProj.Spec.DeepCopy()
+		expectedSpec.SourceNamespaces = []string{"agent-autonomous"}
+		for i := range expectedSpec.Destinations {
+			expectedSpec.Destinations[i].Name = "agent-autonomous"
+			expectedSpec.Destinations[i].Server = "*"
+		}
+
+		return reflect.DeepEqual(appProject.Spec, *expectedSpec)
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Autonomous: Updates on the principal must be reverted when the principal is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithUpdateOnPrincipal() {
+	requires := suite.Require()
+
+	// Create an autonomous application on the autonomous-agent's cluster
+	appProject := suite.createAutonomousAppProject()
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: "argocd"}
+
+	// Stop the principal
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Update the AppProject on the control-plane cluster
+	principalAppProject := appProject.DeepCopy()
+	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, principalAppProject, func(obj fixture.KubeObject) {
+		a := obj.(*argoapp.AppProject)
+		a.Spec.Description = "updated from e2e test"
+	})
+	requires.NoError(err)
+
+	// Restart the principal
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "principal")
+
+	// The changes made to the AppProject on the control-plane cluster must be reverted when the principal restarts
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		return err == nil && appProject.Spec.Description == ""
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Autonomous: Updates on the agent must be synced to the principal when the principal is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithUpdateOnAgent() {
+	requires := suite.Require()
+
+	// Create an autonomous application on the autonomous-agent's cluster
+	appProject := suite.createAutonomousAppProject()
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: "argocd"}
+
+	// Stop the principal
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Update the AppProject on the agent's cluster
+	agentAppProject := appProject.DeepCopy()
+	err = fixture.EnsureUpdate(suite.Ctx, suite.AutonomousAgentClient, agentAppProject, func(obj fixture.KubeObject) {
+		a := obj.(*argoapp.AppProject)
+		a.Spec.Description = "updated from e2e test"
+	})
+	requires.NoError(err)
+
+	// Restart the principal
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "principal")
+
+	// The changes made to the AppProject on the agent's cluster must be synced to the control-plane cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		return err == nil && appProject.Spec.Description == "updated from e2e test"
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Autonomous: Updates on the agent must be synced to the principal when the agent is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithUpdateOnAgent() {
+	requires := suite.Require()
+
+	// Create an autonomous application on the autonomous-agent's cluster
+	appProject := suite.createAutonomousAppProject()
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: "argocd"}
+
+	// Stop the autonomous-agent
+	err := fixture.StopProcess("agent-autonomous")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("agent-autonomous")
+	}, 30*time.Second, 1*time.Second)
+
+	// Update the AppProject on the autonomous-agent's cluster
+	err = fixture.EnsureUpdate(suite.Ctx, suite.AutonomousAgentClient, appProject, func(obj fixture.KubeObject) {
+		a := obj.(*argoapp.AppProject)
+		a.Spec.Description = "updated from e2e test"
+	})
+	requires.NoError(err)
+
+	// Restart the autonomous-agent
+	err = fixture.StartProcess("agent-autonomous")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "agent-autonomous")
+
+	// The changes made to the AppProject on the autonomous-agent's cluster must be synced to the control-plane cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		return err == nil && appProject.Spec.Description == "updated from e2e test"
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Autonomous: Updates on the principal must be reverted when the agent is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithUpdateOnPrincipal() {
+	requires := suite.Require()
+
+	// Create an autonomous application on the autonomous-agent's cluster
+	appProject := suite.createAutonomousAppProject()
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: "argocd"}
+
+	// Stop the autonomous-agent
+	err := fixture.StopProcess("agent-autonomous")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("agent-autonomous")
+	}, 30*time.Second, 1*time.Second)
+
+	// Update the AppProject on the principal's cluster
+	principalAppProject := appProject.DeepCopy()
+	principalAppProject.Name = principalKey.Name
+	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, principalAppProject, func(obj fixture.KubeObject) {
+		a := obj.(*argoapp.AppProject)
+		a.Spec.Description = "updated from e2e test"
+	})
+	requires.NoError(err)
+
+	// Restart the autonomous-agent
+	err = fixture.StartProcess("agent-autonomous")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "agent-autonomous")
+
+	// The changes made to the AppProject on the principal's cluster must be reverted
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		return err == nil && appProject.Spec.Description == ""
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Autonomous: Deleted AppProjects on the principal must be recreated when the principal is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithDeleteOnPrincipal() {
+	requires := suite.Require()
+
+	// Create an autonomous application on the autonomous-agent's cluster
+	appProject := suite.createAutonomousAppProject()
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: "argocd"}
+
+	// Stop the principal
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the AppProject on the control-plane cluster
+	principalAppProject := appProject.DeepCopy()
+	principalAppProject.Name = principalKey.Name
+	err = suite.PrincipalClient.Delete(suite.Ctx, principalAppProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// Restart the principal
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "principal")
+
+	// The AppProject should be recreated on the control-plane cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+
+		expectedSpec := appProject.Spec.DeepCopy()
+		expectedSpec.SourceNamespaces = []string{"agent-autonomous"}
+		for i := range expectedSpec.Destinations {
+			expectedSpec.Destinations[i].Name = "agent-autonomous"
+			expectedSpec.Destinations[i].Server = "*"
+		}
+
+		return reflect.DeepEqual(appProject.Spec, *expectedSpec)
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Autonomous: Deleted AppProjects on the agent must be removed from the principal when the principal is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithDeleteOnAgent() {
+	requires := suite.Require()
+
+	// Create an autonomous application on the autonomous-agent's cluster
+	appProject := suite.createAutonomousAppProject()
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: "argocd"}
+
+	// Stop the principal
+	err := fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the AppProject on the agent's cluster
+	err = suite.AutonomousAgentClient.Delete(suite.Ctx, appProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// Restart the principal
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "principal")
+
+	// The AppProject should be deleted from the control-plane cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		return errors.IsNotFound(err)
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Autonomous: Deleted AppProjects on the agent must be removed from the principal when the agent is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithDeleteOnAgent() {
+	requires := suite.Require()
+
+	// Create an autonomous AppProject on the autonomous-agent's cluster
+	appProject := suite.createAutonomousAppProject()
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: "argocd"}
+
+	// Stop the autonomous-agent
+	err := fixture.StopProcess("agent-autonomous")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("agent-autonomous")
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the AppProject on the autonomous-agent's cluster
+	agentAppProject := appProject.DeepCopy()
+	err = suite.AutonomousAgentClient.Delete(suite.Ctx, agentAppProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// Restart the autonomous-agent
+	err = fixture.StartProcess("agent-autonomous")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "agent-autonomous")
+
+	// The AppProject should be deleted from the control-plane cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		return errors.IsNotFound(err)
+	}, 30*time.Second, 1*time.Second)
+}
+
+// Autonomous: Deleted AppProjects on the principal must be recreated when the agent is restarted
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithDeleteOnPrincipal() {
+	requires := suite.Require()
+
+	// Create an autonomous AppProject on the autonomous-agent's cluster
+	appProject := suite.createAutonomousAppProject()
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: "argocd"}
+
+	// Stop the autonomous-agent
+	err := fixture.StopProcess("agent-autonomous")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("agent-autonomous")
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the AppProject on the principal's cluster
+	principalAppProject := appProject.DeepCopy()
+	principalAppProject.Name = principalKey.Name
+	err = suite.PrincipalClient.Delete(suite.Ctx, principalAppProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// Restart the autonomous-agent
+	err = fixture.StartProcess("agent-autonomous")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "agent-autonomous")
+
+	// The AppProject should be recreated on the control-plane cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+
+		expectedSpec := appProject.Spec.DeepCopy()
+		expectedSpec.SourceNamespaces = []string{"agent-autonomous"}
+		for i := range expectedSpec.Destinations {
+			expectedSpec.Destinations[i].Name = "agent-autonomous"
+			expectedSpec.Destinations[i].Server = "*"
+		}
+
+		return reflect.DeepEqual(appProject.Spec, *expectedSpec)
+	}, 30*time.Second, 1*time.Second)
+}
+
 func (suite *ResyncTestSuite) createAutonomousApp() *argoapp.Application {
 	requires := suite.Require()
 	// Create an autonomous application on the autonomous-agent's cluster
@@ -962,6 +1375,31 @@ func (suite *ResyncTestSuite) createAppProject() *argoapp.AppProject {
 	}, 30*time.Second, 1*time.Second)
 
 	return appProject
+}
+
+func (suite *ResyncTestSuite) createAutonomousAppProject() *argoapp.AppProject {
+	requires := suite.Require()
+
+	// Create an AppProject on the autonomous-agent's cluster
+	agentAppProject := sampleAppProject()
+
+	err := suite.AutonomousAgentClient.Create(suite.Ctx, agentAppProject, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	projKey := types.NamespacedName{Name: "agent-autonomous-" + agentAppProject.Name, Namespace: "argocd"}
+
+	// Ensure the AppProject has been pushed to the control-plane cluster
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		if err != nil {
+			fmt.Println("error getting appProject", err)
+			return false
+		}
+		return true
+	}, 30*time.Second, 1*time.Second)
+
+	return agentAppProject
 }
 
 func (suite *ResyncTestSuite) createRepository() *corev1.Secret {

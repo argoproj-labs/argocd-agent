@@ -178,13 +178,19 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 		"appproject_name": outbound.Name,
 	})
 
-	s.resources.Add(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
-
 	// Check if this AppProject was created by an autonomous agent
 	if isResourceFromAutonomousAgent(outbound) {
+		// For autonomous agents, the agent name may be different from the namespace name.
+		// SourceNamespaces[0] contains the exact agent name.
+		if len(outbound.Spec.SourceNamespaces) > 0 {
+			agentName := outbound.Spec.SourceNamespaces[0]
+			s.resources.Add(agentName, resources.NewResourceKeyFromAppProject(outbound))
+		}
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
+
+	s.resources.Add(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
 
 	// Return early if no interested agent is connected
 	if !s.queues.HasQueuePair(outbound.Namespace) {
@@ -292,15 +298,18 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 			logCtx.Trace("Deleted appProject is recreated")
 			return
 		}
-	}
 
-	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
-
-	// Check if this AppProject was created by an autonomous agent by examining its name prefix
-	if isResourceFromAutonomousAgent(outbound) {
+		// For autonomous agents, the agent name may be different from the namespace name.
+		// SourceNamespaces[0] contains the exact agent name.
+		if len(outbound.Spec.SourceNamespaces) > 0 {
+			agentName := outbound.Spec.SourceNamespaces[0]
+			s.resources.Remove(agentName, resources.NewResourceKeyFromAppProject(outbound))
+		}
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
+
+	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
 
 	if !s.queues.HasQueuePair(outbound.Namespace) {
 		if err := s.queues.Create(outbound.Namespace); err != nil {
