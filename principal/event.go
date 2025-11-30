@@ -593,6 +593,17 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 			return err
 		}
 
+		// For autonomous agents, the agent sends RequestUpdate with the local AppProject name (e.g., "sample"),
+		// but the principal stores it with a prefixed name (e.g., "agent-autonomous-sample").
+		// We need to add the prefix before looking it up locally.
+		if agentMode == types.AgentModeAutonomous && incoming.Kind == "AppProject" {
+			prefixedName, err := agentPrefixedProjectName(incoming.Name, agentName)
+			if err != nil {
+				return fmt.Errorf("could not prefix project name: %w", err)
+			}
+			incoming.Name = prefixedName
+		}
+
 		return resyncHandler.ProcessRequestUpdateEvent(ctx, agentName, incoming)
 	case event.EventRequestResourceResync.String():
 		if agentMode != types.AgentModeAutonomous {
