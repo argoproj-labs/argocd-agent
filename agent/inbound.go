@@ -15,9 +15,11 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -386,6 +388,13 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 	}
 
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent, a.namespace)
+	subject := &auth.AuthSubject{}
+	err = json.Unmarshal([]byte(a.remote.ClientID()), subject)
+	if err != nil {
+		return fmt.Errorf("failed to extract agent name from client ID: %w", err)
+	}
+
+	agentName := subject.ClientID
 
 	switch ev.Type() {
 	case event.SyncedResourceList:
@@ -398,7 +407,7 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 			return err
 		}
 
-		return resyncHandler.ProcessSyncedResourceListRequest(a.remote.ClientID(), req)
+		return resyncHandler.ProcessSyncedResourceListRequest(agentName, req)
 	case event.ResponseSyncedResource:
 		if a.mode != types.AgentModeManaged {
 			return fmt.Errorf("agent can only handle SyncedResource request in the managed mode")
@@ -409,7 +418,7 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 			return err
 		}
 
-		return resyncHandler.ProcessIncomingSyncedResource(a.context, req, a.remote.ClientID())
+		return resyncHandler.ProcessIncomingSyncedResource(a.context, req, agentName)
 	case event.EventRequestUpdate:
 		if a.mode != types.AgentModeAutonomous {
 			return fmt.Errorf("agent can only handle RequestUpdate in the autonomous mode")
@@ -420,13 +429,23 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 			return err
 		}
 
-		return resyncHandler.ProcessRequestUpdateEvent(a.context, a.remote.ClientID(), incoming)
+		// For autonomous agents, the principal stores AppProjects with a prefixed name (agent-name + "-" + project-name).
+		// When the principal sends a RequestUpdate, it uses the prefixed name. We need to strip the prefix
+		// before looking up the resource locally.
+		if incoming.Kind == "AppProject" {
+			prefix := agentName + "-"
+			if len(incoming.Name) > len(prefix) && incoming.Name[:len(prefix)] == prefix {
+				incoming.Name = incoming.Name[len(prefix):]
+			}
+		}
+
+		return resyncHandler.ProcessRequestUpdateEvent(a.context, agentName, incoming)
 	case event.EventRequestResourceResync:
 		if a.mode != types.AgentModeManaged {
 			return fmt.Errorf("agent can only handle ResourceResync request in the managed mode")
 		}
 
-		return resyncHandler.ProcessIncomingResourceResyncRequest(a.context, a.remote.ClientID())
+		return resyncHandler.ProcessIncomingResourceResyncRequest(a.context, agentName)
 	default:
 		return fmt.Errorf("invalid type of resource resync: %s", ev.Type())
 	}
