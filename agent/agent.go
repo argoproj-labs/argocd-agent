@@ -105,6 +105,8 @@ type Agent struct {
 	cacheRefreshInterval time.Duration
 	clusterCache         *appstatecache.Cache
 
+	inflightMu   sync.Mutex
+	inflightLogs map[string]context.CancelFunc
 	// sourceCache is a cache of resources from the source. We use it to revert any changes made to the local resources.
 	sourceCache *cache.SourceCache
 
@@ -136,9 +138,10 @@ type AgentOption func(*Agent) error
 // options.
 func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace string, opts ...AgentOption) (*Agent, error) {
 	a := &Agent{
-		version:     version.New("argocd-agent"),
-		deletions:   manager.NewDeletionTracker(),
-		sourceCache: cache.NewSourceCache(),
+		version:      version.New("argocd-agent"),
+		deletions:    manager.NewDeletionTracker(),
+		sourceCache:  cache.NewSourceCache(),
+		inflightLogs: make(map[string]context.CancelFunc),
 	}
 	a.infStopCh = make(chan struct{})
 	a.namespace = namespace
