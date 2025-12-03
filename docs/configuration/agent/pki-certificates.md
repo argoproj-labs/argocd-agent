@@ -258,7 +258,7 @@ spec:
   issuerRef:
     name: argocd-agent-ca
     kind: Issuer
-  commonName: managed-cluster
+  commonName: <cluster-name>
   subject:
     organizationalUnits:
       - <Organizational Unit>
@@ -269,7 +269,7 @@ spec:
 Output the secret to a file as we need to install it on the cluster where the Agent resides:
 
 ```
-kubectl get secret managed-cluster-agent -o yaml -n argocd | oc neat > <cluster-name>-agent.yaml
+kubectl get secret <cluster-name>-agent -o yaml -n argocd | oc neat > <cluster-name>-agent.yaml
 ```
 
 !!! note "Using kubectl-neat"
