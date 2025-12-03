@@ -182,11 +182,11 @@ metadata:
   name: <cluster-name>-principal
   namespace: argocd
 spec:
-  secretName: <cluster-name>
+  secretName: <cluster-name>-principal
   issuerRef:
     name: argocd-agent-ca
     kind: Issuer
-  commonName: managed-cluster
+  commonName: <cluster-name>
   subject:
     organizationalUnits:
       - <Organizational Unit>
