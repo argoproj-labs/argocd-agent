@@ -263,9 +263,11 @@ func WithCompression(flag bool) RemoteOption {
 
 func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error) {
 	r := &Remote{
-		hostname:  hostname,
-		port:      port,
-		tlsConfig: &tls.Config{},
+		hostname: hostname,
+		port:     port,
+		tlsConfig: &tls.Config{
+			ServerName: hostname,
+		},
 		backoff: wait.Backoff{
 			Duration: 1 * time.Second,
 			Factor:   2,
