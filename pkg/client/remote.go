@@ -32,6 +32,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	grpchttp1client "golang.stackrox.io/grpc-http1/client"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -353,6 +354,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 
 	// Some default options
 	opts := []grpc.DialOption{
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithConnectParams(cparams),
 		grpc.WithUserAgent("argocd-agent/v0.0.1"),
 		grpc.WithUnaryInterceptor(r.unaryAuthInterceptor),
