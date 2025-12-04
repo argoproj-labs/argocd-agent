@@ -38,7 +38,6 @@ go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode managed \
     --creds "mtls:any" \
     --server-address 127.0.0.1 \
-    --insecure-tls \
     --kubecontext vcluster-agent-managed \
     --namespace argocd \
     --log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} $ARGS \
