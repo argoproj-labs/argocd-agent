@@ -16,6 +16,7 @@ package fixture
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"time"
 
@@ -38,12 +39,14 @@ const (
 
 type ClusterDetails struct {
 	// Managed agent Redis configuration
-	ManagedAgentRedisAddr     string
-	ManagedAgentRedisPassword string
+	ManagedAgentRedisAddr       string
+	ManagedAgentRedisPassword   string
+	ManagedAgentRedisTLSEnabled bool
 
 	// Principal Redis configuration
-	PrincipalRedisAddr     string
-	PrincipalRedisPassword string
+	PrincipalRedisAddr       string
+	PrincipalRedisPassword   string
+	PrincipalRedisTLSEnabled bool
 
 	// Cluster server addresses
 	ManagedClusterAddr    string
@@ -167,11 +170,27 @@ func getCacheInstance(source string, clusterDetails *ClusterDetails) *appstateca
 		redisOptions.MaintNotificationsConfig = &maintnotifications.Config{
 			Mode: maintnotifications.ModeDisabled,
 		}
+
+		// Enable TLS if configured
+		if clusterDetails.PrincipalRedisTLSEnabled {
+			redisOptions.TLSConfig = &tls.Config{
+				MinVersion:         tls.VersionTLS12,
+				InsecureSkipVerify: true, // For E2E tests, skip verification for simplicity
+			}
+		}
 	case AgentManagedName:
 		redisOptions.Addr = clusterDetails.ManagedAgentRedisAddr
 		redisOptions.Password = clusterDetails.ManagedAgentRedisPassword
 		redisOptions.MaintNotificationsConfig = &maintnotifications.Config{
 			Mode: maintnotifications.ModeDisabled,
+		}
+
+		// Enable TLS if configured
+		if clusterDetails.ManagedAgentRedisTLSEnabled {
+			redisOptions.TLSConfig = &tls.Config{
+				MinVersion:         tls.VersionTLS12,
+				InsecureSkipVerify: true, // For E2E tests, skip verification for simplicity
+			}
 		}
 	default:
 		panic(fmt.Sprintf("invalid source: %s", source))
@@ -213,7 +232,7 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 		return fmt.Errorf("failed to get Redis service: %w", err)
 	}
 
-	// Get Redis address from LoadBalancer ingress
+	// Get Redis address from LoadBalancer ingress or spec
 	var redisAddr string
 	if len(service.Status.LoadBalancer.Ingress) > 0 {
 		ingress := service.Status.LoadBalancer.Ingress[0]
@@ -223,26 +242,37 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 			redisAddr = fmt.Sprintf("%s:6379", ingress.Hostname)
 		}
 	}
+	// Fall back to spec.loadBalancerIP for local development (vcluster)
+	if redisAddr == "" && service.Spec.LoadBalancerIP != "" {
+		redisAddr = fmt.Sprintf("%s:6379", service.Spec.LoadBalancerIP)
+	}
+	// Fall back to ClusterIP as last resort
+	if redisAddr == "" && service.Spec.ClusterIP != "" {
+		redisAddr = fmt.Sprintf("%s:6379", service.Spec.ClusterIP)
+	}
 	if redisAddr == "" {
-		return fmt.Errorf("could not get Redis server address from LoadBalancer ingress")
+		return fmt.Errorf("could not get Redis server address from LoadBalancer ingress, spec, or ClusterIP")
 	}
 	clusterDetails.ManagedAgentRedisAddr = redisAddr
 
 	// Fetch Redis secret to get the password
-	secret := &corev1.Secret{}
+	secretSecret := &corev1.Secret{}
 	secretKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
-	err = managedAgentClient.Get(ctx, secretKey, secret, metav1.GetOptions{})
+	err = managedAgentClient.Get(ctx, secretKey, secretSecret, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get Redis secret: %w", err)
 	}
 
 	// Decode the password from base64
-	authData, exists := secret.Data["auth"]
+	authData, exists := secretSecret.Data["auth"]
 	if !exists {
 		return fmt.Errorf("auth field is not found in Redis secret")
 	}
 
 	clusterDetails.ManagedAgentRedisPassword = string(authData)
+
+	// Redis TLS is enabled by default in argocd-agent
+	clusterDetails.ManagedAgentRedisTLSEnabled = true
 
 	return nil
 }
@@ -257,7 +287,7 @@ func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, cl
 		return fmt.Errorf("failed to get Principal Redis service: %w", err)
 	}
 
-	// Get Redis address from LoadBalancer ingress
+	// Get Redis address from LoadBalancer ingress or spec
 	var redisAddr string
 	if len(service.Status.LoadBalancer.Ingress) > 0 {
 		ingress := service.Status.LoadBalancer.Ingress[0]
@@ -267,26 +297,37 @@ func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, cl
 			redisAddr = fmt.Sprintf("%s:6379", ingress.Hostname)
 		}
 	}
+	// Fall back to spec.loadBalancerIP for local development (vcluster)
+	if redisAddr == "" && service.Spec.LoadBalancerIP != "" {
+		redisAddr = fmt.Sprintf("%s:6379", service.Spec.LoadBalancerIP)
+	}
+	// Fall back to ClusterIP as last resort
+	if redisAddr == "" && service.Spec.ClusterIP != "" {
+		redisAddr = fmt.Sprintf("%s:6379", service.Spec.ClusterIP)
+	}
 	if redisAddr == "" {
-		return fmt.Errorf("could not get Principal Redis server address from LoadBalancer ingress")
+		return fmt.Errorf("could not get Principal Redis server address from LoadBalancer ingress, spec, or ClusterIP")
 	}
 	clusterDetails.PrincipalRedisAddr = redisAddr
 
 	// Fetch Redis secret to get the password
-	secret := &corev1.Secret{}
-	secretKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
-	err = principalClient.Get(ctx, secretKey, secret, metav1.GetOptions{})
+	principalSecret := &corev1.Secret{}
+	principalSecretKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
+	err = principalClient.Get(ctx, principalSecretKey, principalSecret, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get Principal Redis secret: %w", err)
 	}
 
 	// Decode the password from base64
-	authData, exists := secret.Data["auth"]
+	authData, exists := principalSecret.Data["auth"]
 	if !exists {
 		return fmt.Errorf("auth field is not found in Principal Redis secret")
 	}
 
 	clusterDetails.PrincipalRedisPassword = string(authData)
+
+	// Redis TLS is enabled by default in argocd-agent
+	clusterDetails.PrincipalRedisTLSEnabled = true
 
 	return nil
 }

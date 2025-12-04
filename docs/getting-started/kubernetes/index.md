@@ -156,6 +156,130 @@ argocd-agentctl jwt create-key \
   --upsert
 ```
 
+### 2.4 Setup Redis TLS (Required)
+
+!!! warning "Redis TLS is Required"
+    Redis TLS is **enabled by default** in argocd-agent. All Redis connections must use TLS to protect sensitive data.
+
+!!! tip "Order of Operations"
+    Follow this exact order to avoid connection errors:
+    
+    1. Generate TLS certificates
+    2. Create secrets
+    3. **Configure Redis for TLS** (patches Redis deployment)
+    4. Wait for Redis pods to restart
+    5. Verify Redis TLS is working
+    
+    The Argo CD components are already pre-configured to use Redis TLS in the installation manifests.
+
+#### Generate Redis TLS Certificates
+
+```bash
+# Generate CA certificate
+openssl genrsa -out redis-ca.key 4096
+openssl req -new -x509 -days 3650 -key redis-ca.key -out redis-ca.crt \
+  -subj "/CN=Redis CA"
+
+# Generate Redis server certificate
+openssl genrsa -out redis-server.key 4096
+openssl req -new -key redis-server.key -out redis-server.csr \
+  -subj "/CN=argocd-redis"
+
+# Create SAN extension file
+cat > redis-server.ext <<EOF
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = argocd-redis
+DNS.2 = argocd-redis.argocd.svc.cluster.local
+DNS.3 = localhost
+IP.1 = 127.0.0.1
+EOF
+
+# Sign the certificate
+openssl x509 -req -in redis-server.csr -CA redis-ca.crt -CAkey redis-ca.key \
+  -CAcreateserial -out redis-server.crt -days 365 -extfile redis-server.ext
+
+```
+
+**Note:** The same certificate is used for both Redis server and the principal's Redis proxy.
+
+#### Create Redis TLS Secret
+
+```bash
+# Create single secret with all TLS materials
+kubectl create secret generic argocd-redis-tls \
+  --from-file=tls.crt=redis-server.crt \
+  --from-file=tls.key=redis-server.key \
+  --from-file=ca.crt=redis-ca.crt \
+  -n argocd \
+  --context <control-plane-context>
+```
+
+#### Configure Redis for TLS
+
+```bash
+# Add volume for TLS certificates (creates array if not exists, appends if exists)
+kubectl patch deployment argocd-redis -n argocd --context <control-plane-context> --type='json' -p='[
+  {"op": "add", "path": "/spec/template/spec/volumes/-", "value":
+    {"name": "redis-tls", "secret": {"secretName": "argocd-redis-tls"}}
+  }
+]'
+
+# Add volume mount (creates array if not exists, appends if exists)
+kubectl patch deployment argocd-redis -n argocd --context <control-plane-context> --type='json' -p='[
+  {"op": "add", "path": "/spec/template/spec/containers/0/volumeMounts/-", "value":
+    {"name": "redis-tls", "mountPath": "/app/tls"}
+  }
+]'
+
+# Update Redis args to enable TLS
+kubectl patch deployment argocd-redis -n argocd --context <control-plane-context> --type='json' -p='[
+  {"op": "replace", "path": "/spec/template/spec/containers/0/args", "value": [
+    "--save", "",
+    "--appendonly", "no",
+    "--requirepass", "$(REDIS_PASSWORD)",
+    "--tls-port", "6379",
+    "--port", "0",
+    "--tls-cert-file", "/app/tls/tls.crt",
+    "--tls-key-file", "/app/tls/tls.key",
+    "--tls-ca-cert-file", "/app/tls/ca.crt",
+    "--tls-auth-clients", "no"
+  ]}
+]'
+
+# Wait for Redis to restart
+kubectl rollout status deployment/argocd-redis -n argocd --context <control-plane-context>
+```
+
+#### Verify Redis TLS
+
+```bash
+# Get the Redis pod name
+REDIS_POD=$(kubectl get pods -n argocd --context <control-plane-context> -l app.kubernetes.io/name=argocd-redis -o jsonpath='{.items[0].metadata.name}')
+
+# Test TLS connection
+kubectl exec -it $REDIS_POD -n argocd --context <control-plane-context> -- \
+  redis-cli --tls \
+  --cert /app/tls/tls.crt \
+  --key /app/tls/tls.key \
+  --cacert /app/tls/ca.crt \
+  ping
+# Should output: PONG
+```
+
+!!! info "Automatic TLS Configuration"
+    When using the argocd-agent Kubernetes installation manifests from Step 1.2 and Step 4.3:
+    
+    - **Argo CD components** (server, repo-server, application-controller) are **pre-configured** to use Redis TLS with proper CA certificate validation via `--redis-use-tls` and `--redis-ca-certificate` flags
+    - **Principal's Redis proxy** automatically uses TLS when the `argocd-redis-tls` secret is present
+    - **Agent** connects to its local Redis with TLS enabled by default
+    
+    You only need to:
+    1. Create the TLS secret (single secret for all components)
+    2. Patch the Redis deployment (as shown above)
+    
+    No manual ConfigMap or Argo CD deployment patches are required!
+
 ## Step 3: Install Principal
 
 ### 3.1 Deploy Principal Component
@@ -261,6 +385,97 @@ This configuration includes:
 
 !!! info "Why Application Controller Runs Here"
     The **argocd-application-controller** runs on workload clusters because it needs direct access to the Kubernetes API to create, update, and delete resources. The argocd-agent facilitates communication between the control plane and these controllers, enabling centralized management while maintaining local execution.
+
+### 4.4 Setup Redis TLS on Workload Cluster
+
+!!! warning "Required"
+    Workload cluster Redis must also use TLS. The agent and Argo CD components connect with TLS enabled by default when using the installation manifests from Step 4.3.
+
+#### Generate Redis Certificate for Workload Cluster
+
+```bash
+# Generate Redis server certificate for workload cluster
+openssl genrsa -out redis-workload.key 4096
+openssl req -new -key redis-workload.key -out redis-workload.csr \
+  -subj "/CN=argocd-redis"
+
+# Create SAN extension file
+cat > redis-workload.ext <<EOF
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = argocd-redis
+DNS.2 = argocd-redis.argocd.svc.cluster.local
+DNS.3 = localhost
+IP.1 = 127.0.0.1
+EOF
+
+# Sign with the same CA (reuse redis-ca.crt and redis-ca.key from Step 2.4)
+openssl x509 -req -in redis-workload.csr -CA redis-ca.crt -CAkey redis-ca.key \
+  -CAcreateserial -out redis-workload.crt -days 365 -extfile redis-workload.ext
+```
+
+#### Create Redis TLS Secret
+
+```bash
+kubectl create secret generic argocd-redis-tls \
+  --from-file=tls.crt=redis-workload.crt \
+  --from-file=tls.key=redis-workload.key \
+  --from-file=ca.crt=redis-ca.crt \
+  -n argocd \
+  --context <workload-cluster-context>
+```
+
+#### Configure Redis for TLS
+
+```bash
+# Add volume for TLS certificates (creates array if not exists, appends if exists)
+kubectl patch deployment argocd-redis -n argocd --context <workload-cluster-context> --type='json' -p='[
+  {"op": "add", "path": "/spec/template/spec/volumes/-", "value":
+    {"name": "redis-tls", "secret": {"secretName": "argocd-redis-tls"}}
+  }
+]'
+
+# Add volume mount (creates array if not exists, appends if exists)
+kubectl patch deployment argocd-redis -n argocd --context <workload-cluster-context> --type='json' -p='[
+  {"op": "add", "path": "/spec/template/spec/containers/0/volumeMounts/-", "value":
+    {"name": "redis-tls", "mountPath": "/app/tls"}
+  }
+]'
+
+# Update Redis args to enable TLS
+kubectl patch deployment argocd-redis -n argocd --context <workload-cluster-context> --type='json' -p='[
+  {"op": "replace", "path": "/spec/template/spec/containers/0/args", "value": [
+    "--save", "",
+    "--appendonly", "no",
+    "--requirepass", "$(REDIS_PASSWORD)",
+    "--tls-port", "6379",
+    "--port", "0",
+    "--tls-cert-file", "/app/tls/tls.crt",
+    "--tls-key-file", "/app/tls/tls.key",
+    "--tls-ca-cert-file", "/app/tls/ca.crt",
+    "--tls-auth-clients", "no"
+  ]}
+]'
+
+# Wait for Redis to restart
+kubectl rollout status deployment/argocd-redis -n argocd --context <workload-cluster-context>
+```
+
+#### Verify Redis TLS
+
+```bash
+# Get the Redis pod name
+REDIS_POD=$(kubectl get pods -n argocd --context <workload-cluster-context> -l app.kubernetes.io/name=argocd-redis -o jsonpath='{.items[0].metadata.name}')
+
+# Test TLS connection
+kubectl exec -it $REDIS_POD -n argocd --context <workload-cluster-context> -- \
+  redis-cli --tls \
+  --cert /app/tls/tls.crt \
+  --key /app/tls/tls.key \
+  --cacert /app/tls/ca.crt \
+  ping
+# Should output: PONG
+```
 
 ## Step 5: Create and Connect Your First Agent
 
