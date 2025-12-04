@@ -26,9 +26,11 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
+	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -45,6 +47,22 @@ were received from a server.
 const defaultResourceRequestTimeout = 5 * time.Second
 
 func (a *Agent) processIncomingEvent(ev *event.Event) error {
+	// Extract trace context from the incoming event
+	ctx := tracing.ExtractTraceContext(a.context, ev.CloudEvent())
+
+	// Create trace span for incoming event processing, continuing the trace from principal
+	spanName := fmt.Sprintf("%s.%s", ev.Target().String(), ev.Type().String())
+	ctx, span := tracing.Tracer().Start(ctx, spanName,
+		trace.WithAttributes(
+			tracing.AttrEventType.String(string(ev.Type())),
+			tracing.AttrEventTarget.String(ev.Target().String()),
+			tracing.AttrEventID.String(ev.EventID()),
+			tracing.AttrResourceUID.String(ev.ResourceID()),
+			tracing.AttrAgentMode.String(a.mode.String()),
+			tracing.AttrComponentType.String("agent"),
+		),
+	)
+	defer span.End()
 
 	// Start measuring time for event processing
 	cp := checkpoint.NewCheckpoint("process_recv_queue")
@@ -81,6 +99,12 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	}
 
 	cp.End()
+
+	if err != nil {
+		tracing.RecordError(span, err)
+	} else {
+		tracing.SetSpanOK(span)
+	}
 
 	if a.metrics != nil {
 		if err != nil {

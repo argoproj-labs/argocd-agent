@@ -614,6 +614,10 @@ func (ev Event) Type() EventType {
 	return EventType(ev.event.Type())
 }
 
+func (ev Event) CloudEvent() *cloudevents.Event {
+	return ev.event
+}
+
 func (ev Event) Application() (*v1alpha1.Application, error) {
 	app := &v1alpha1.Application{}
 	err := ev.event.DataAs(app)
