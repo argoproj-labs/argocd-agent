@@ -211,8 +211,6 @@ with the certs:
 ```
 cat << EOF > config
 {
-    "username": "foo",
-    "password": "bar",
     "tlsClientConfig": {
         "insecure": false,
         "certData": "${PRINCIPAL_AGENT_TLS}",
@@ -226,8 +224,13 @@ EOF
 Now create the secret:
 
 ```
-kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=name=<cluster-name> --from-literal=server=argocd-agent-resource-proxy.argocd.svc.cluster.local --from-file=config=./config
+kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=name=<cluster-name> --from-literal=server=https://server=argocd-agent-resource-proxy.argocd.svc.cluster.local:9090?agentName=<managed-agent> --from-file=config=./config
 ```
+!!! note "Add unique query parameter to server"
+    Argo CD caches cluster information based on the server URL in the cluster secret. This URL
+    must be unique otherwise cache collisions can arise. Since all Agents share the same
+    resource proxy it is recommended to add a unique query parameter identifying the agent
+    as shown in this example.
 
 Then label the secret as a cluster secret:
 
