@@ -232,10 +232,11 @@ kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=na
     resource proxy it is recommended to add a unique query parameter identifying the agent
     as shown in this example.
 
-Then label the secret as a cluster secret:
+Then label the secret as a cluster secret and include the label to identify the matching agent:
 
 ```
-oc label secret <cluster-name>-cluster argocd.argoproj.io/secret-type=cluster
+kubectl label secret <cluster-name>-cluster argocd.argoproj.io/secret-type=cluster
+kubectl label argocd-agent.argoproj-labs.io/agent-name=<cluster-name>
 ```
 
 ### Step 2: Mint Certificate for Agent
@@ -294,7 +295,7 @@ to `argocd-agent-client-tls`.
 
 ```
 yq -i '.type = "Opaque"' ./argocd-agent-ca.yaml -y
-yq -i '.metadata.name = "argocd-agent-client-tls"' <path-to-secret>/managed-cluster-agent.yaml -y
+yq -i '.metadata.name = "argocd-agent-client-tls"' <path-to-secret>/<cluster-name>-agent.yaml -y
 ```
 
 On the Agent cluster apply the two secrets:
