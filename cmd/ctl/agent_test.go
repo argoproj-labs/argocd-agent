@@ -281,7 +281,7 @@ func Test_parseSecretRef(t *testing.T) {
 			name:              "empty namespace prefix",
 			secretRef:         "/my-secret",
 			defaultNamespace:  "default-ns",
-			expectedNamespace: "",
+			expectedNamespace: "default-ns",
 			expectedName:      "my-secret",
 		},
 	}
