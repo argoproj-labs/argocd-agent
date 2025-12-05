@@ -103,6 +103,9 @@ func generateAgentClientCert(agentName string, clt *kube.KubernetesClient) (clie
 func parseSecretRef(secretRef, defaultNamespace string) (namespace, name string) {
 	parts := strings.SplitN(secretRef, "/", 2)
 	if len(parts) == 2 {
+		if parts[0] == "" {
+			return defaultNamespace, parts[1]
+		}
 		return parts[0], parts[1]
 	}
 	return defaultNamespace, secretRef
