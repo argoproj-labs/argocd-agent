@@ -16,6 +16,7 @@ package principal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -1186,6 +1188,11 @@ func TestServer_updateAppCallback(t *testing.T) {
 		if sendQ.Len() > 0 {
 			ev, _ := sendQ.Get()
 			assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+			app := &v1alpha1.Application{}
+			b := ev.Data()
+			err := json.Unmarshal(b, app)
+			require.NoError(t, err)
+			assert.Equal(t, newApp, app)
 			sendQ.Done(ev)
 		}
 	})
@@ -1358,5 +1365,111 @@ func TestServer_updateAppCallback(t *testing.T) {
 		assert.Equal(t, appWithoutFinalizers, got)
 		sendQ := s.queues.SendQ("autonomous-agent")
 		assert.Equal(t, 1, sendQ.Len())
+	})
+
+	t.Run("include operation in event if it is initiated for the first time", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
+			appManager:   appManager,
+		}
+
+		err = s.queues.Create("managed-agent")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-app", Namespace: "managed-agent", ResourceVersion: "1"},
+		}
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-app", Namespace: "managed-agent", ResourceVersion: "2"},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{
+					Revision: "HEAD",
+				},
+			},
+		}
+
+		s.updateAppCallback(oldApp, newApp)
+
+		sendQ := s.queues.SendQ("managed-agent")
+		assert.Equal(t, 1, sendQ.Len())
+
+		ev, _ := sendQ.Get()
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+		app := &v1alpha1.Application{}
+		b := ev.Data()
+		err = json.Unmarshal(b, app)
+		require.NoError(t, err)
+		require.NotNil(t, app.Operation)
+		assert.Equal(t, newApp.Operation, app.Operation)
+		sendQ.Done(ev)
+
+		// Operation should be set to nil for subsequent events
+		oldApp = newApp.DeepCopy()
+		s.updateAppCallback(oldApp, newApp)
+
+		assert.Equal(t, 1, sendQ.Len())
+		ev, _ = sendQ.Get()
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+		app = &v1alpha1.Application{}
+		b = ev.Data()
+		err = json.Unmarshal(b, app)
+		require.NoError(t, err)
+		fmt.Println(app.Operation.String())
+		require.Nil(t, app.Operation)
+		sendQ.Done(ev)
+	})
+
+	t.Run("send terminate operation event if the operation is terminating", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
+			appManager:   appManager,
+		}
+
+		err = s.queues.Create("managed-agent")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-app", Namespace: "managed-agent", ResourceVersion: "1"},
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: synccommon.OperationRunning,
+				},
+			},
+		}
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-app", Namespace: "managed-agent", ResourceVersion: "2"},
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: synccommon.OperationTerminating,
+				},
+			},
+		}
+
+		s.updateAppCallback(oldApp, newApp)
+
+		sendQ := s.queues.SendQ("managed-agent")
+		assert.Equal(t, 1, sendQ.Len())
+
+		if sendQ.Len() > 0 {
+			ev, _ := sendQ.Get()
+			assert.Equal(t, event.TerminateOperation.String(), ev.Type())
+			sendQ.Done(ev)
+		}
 	})
 }

@@ -122,6 +122,13 @@ func IsRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
+
+	// Errors about immutable fields (especially deletionTimestamp) are NOT retryable
+	// Once a resource is being deleted, these fields cannot be changed no matter how many times we retry
+	if isDeletionImmutableError(err) {
+		return false
+	}
+
 	return kerrors.IsInternalError(err) ||
 		kerrors.IsInvalid(err) ||
 		kerrors.IsTooManyRequests(err) ||
@@ -135,6 +142,14 @@ func IsRetryableError(err error) bool {
 		isExceededQuotaErr(err) ||
 		isHTTP2GoawayErr(err) ||
 		errors.Is(err, syscall.ECONNRESET)
+}
+
+func isDeletionImmutableError(err error) bool {
+	// Detect errors about immutable deletionTimestamp or deletionGracePeriodSeconds
+	// These occur when trying to update a resource that's being deleted
+	errMsg := err.Error()
+	return (strings.Contains(errMsg, "deletionTimestamp") || strings.Contains(errMsg, "deletionGracePeriodSeconds")) &&
+		strings.Contains(errMsg, "field is immutable")
 }
 
 func isHTTP2GoawayErr(err error) bool {

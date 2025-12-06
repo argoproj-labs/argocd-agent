@@ -181,6 +181,7 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 			logCtx.Errorf("Error updating application: %v", err)
 		}
 	case event.TerminateOperation:
+		logCtx.Trace("Received a TerminateOperation event")
 		// Terminate a running sync operation on the agent cluster
 		_, err = a.appManager.TerminateOperation(a.context, incomingApp)
 		if err != nil {

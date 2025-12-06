@@ -205,8 +205,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		existing.Labels = incoming.Labels
 		existing.Finalizers = incoming.Finalizers
 		existing.Spec = *incoming.Spec.DeepCopy()
-		existing.Operation = incoming.Operation.DeepCopy()
-		existing.Status = *incoming.Status.DeepCopy()
+		existing.Operation = operationToUse(existing, incoming)
 
 		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
 			deletionTimestampChanged = true
@@ -239,7 +238,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 				Finalizers:  incoming.Finalizers,
 			},
 			Spec:      incoming.Spec,
-			Operation: incoming.Operation,
+			Operation: operationToUse(existing, incoming),
 		}
 		source := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
@@ -308,9 +307,6 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 // when the agent is in autonomous mode. It will update changes to .spec and
 // .status fields along with syncing labels and annotations.
 //
-// Additionally, it will remove any .operation field from the incoming resource
-// before the resource is being updated on the control plane.
-//
 // This method is usually only executed by the control plane for updates that
 // are received by agents in autonomous mode.
 func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace string, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
@@ -339,8 +335,12 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
-		existing.DeletionTimestamp = incoming.DeletionTimestamp
-		existing.DeletionGracePeriodSeconds = incoming.DeletionGracePeriodSeconds
+		if existing.DeletionTimestamp == nil {
+			existing.DeletionTimestamp = incoming.DeletionTimestamp
+		}
+		if existing.DeletionGracePeriodSeconds == nil {
+			existing.DeletionGracePeriodSeconds = incoming.DeletionGracePeriodSeconds
+		}
 		existing.Finalizers = incoming.Finalizers
 		existing.Spec = incoming.Spec
 		existing.Status = *incoming.Status.DeepCopy()
@@ -356,15 +356,17 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 
 		target := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
-				Labels:                     incoming.Labels,
-				Annotations:                incoming.Annotations,
-				DeletionTimestamp:          incoming.DeletionTimestamp,
-				DeletionGracePeriodSeconds: incoming.DeletionGracePeriodSeconds,
-				Finalizers:                 incoming.Finalizers,
+				Labels:      incoming.Labels,
+				Annotations: incoming.Annotations,
+				Finalizers:  incoming.Finalizers,
 			},
 			Spec:      incoming.Spec,
 			Status:    incoming.Status,
 			Operation: incoming.Operation,
+		}
+		if existing.DeletionTimestamp == nil && incoming.DeletionTimestamp != nil {
+			target.DeletionTimestamp = incoming.DeletionTimestamp
+			target.DeletionGracePeriodSeconds = incoming.DeletionGracePeriodSeconds
 		}
 		source := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
@@ -487,6 +489,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
+		existing.Operation = operationToUse(existing, incoming)
 		existing.Status = *incoming.Status.DeepCopy()
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		annotations := make(map[string]string)
@@ -499,7 +502,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 			ObjectMeta: v1.ObjectMeta{
 				Annotations: incoming.Annotations,
 			},
-			Operation: incoming.Operation,
+			Operation: operationToUse(existing, incoming),
 		}
 		source := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
@@ -517,6 +520,22 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
 	}
 	return updated, err
+}
+
+func operationToUse(existing, incoming *v1alpha1.Application) *v1alpha1.Operation {
+	// Preserve existing operation if the incoming operation is nil
+	if incoming.Operation == nil {
+		return existing.Operation
+	}
+
+	// Don't update Operation if the app is terminating
+	if existing.Status.OperationState != nil {
+		if existing.Status.OperationState.Phase == synccommon.OperationTerminating {
+			return existing.Operation
+		}
+	}
+
+	return incoming.Operation.DeepCopy()
 }
 
 // TerminateOperation aborts a running sync operation by setting .status.operationState.phase to Terminating.
