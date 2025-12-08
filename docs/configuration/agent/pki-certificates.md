@@ -224,7 +224,7 @@ EOF
 Now create the secret:
 
 ```
-kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=name=<cluster-name> --from-literal=server=https://server=argocd-agent-resource-proxy.argocd.svc.cluster.local:9090?agentName=<cluster-name> --from-file=config=./config
+kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=name=<cluster-name> --from-literal=server=https://argocd-agent-resource-proxy:9090?agentName=<cluster-name> --from-file=config=./config
 ```
 !!! note "Add unique query parameter to server"
     Argo CD caches cluster information based on the server URL in the cluster secret. This URL
@@ -233,10 +233,9 @@ kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=na
     as shown in this example.
 
 Then label the secret as a cluster secret and include the label to identify the matching agent:
-
 ```
 kubectl label secret <cluster-name>-cluster argocd.argoproj.io/secret-type=cluster
-kubectl label argocd-agent.argoproj-labs.io/agent-name=<cluster-name>
+kubectl label secret <cluster-name>-cluster argocd-agent.argoproj-labs.io/agent-name=<cluster-name>
 ```
 
 ### Step 2: Mint Certificate for Agent
@@ -273,7 +272,7 @@ spec:
 Output the secret to a file as we need to install it on the cluster where the Agent resides:
 
 ```
-kubectl get secret <cluster-name>-agent -o yaml -n argocd | oc neat > <cluster-name>-agent.yaml
+kubectl get secret <cluster-name>-agent -o yaml -n argocd | kubectl neat > <cluster-name>-agent.yaml
 ```
 
 !!! note "Using kubectl-neat"
