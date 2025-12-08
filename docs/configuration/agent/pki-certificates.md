@@ -224,7 +224,7 @@ EOF
 Now create the secret:
 
 ```
-kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=name=<cluster-name> --from-literal=server=https://server=argocd-agent-resource-proxy.argocd.svc.cluster.local:9090?agentName=<managed-agent> --from-file=config=./config
+kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=name=<cluster-name> --from-literal=server=https://server=argocd-agent-resource-proxy.argocd.svc.cluster.local:9090?agentName=<cluster-name> --from-file=config=./config
 ```
 !!! note "Add unique query parameter to server"
     Argo CD caches cluster information based on the server URL in the cluster secret. This URL
