@@ -175,7 +175,7 @@ but a consistent method should be used, for example `<cluster-name>.<CA-ROOT-DOM
 
 Replace the `<cluster-name>` and `<Organizational Unit>` tokens to match your requirements:
 
-```
+```yaml
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -199,7 +199,7 @@ but need to transpose it into the cluster secret.
 
 Extract the fields we need into environment variables:
 
-```
+```bash
 export PRINCIPAL_AGENT_CA=$(kubectl get secret <cluster-name>-principal -o jsonpath='{.data.ca\.crt}')
 export PRINCIPAL_AGENT_TLS=$(kubectl get secret <cluster-name>-principal -o jsonpath='{.data.tls\.crt}')
 export PRINCIPAL_AGENT_KEY=$(kubectl get secret <cluster-name>-principal -o jsonpath='{.data.tls\.key}')
@@ -208,7 +208,7 @@ export PRINCIPAL_AGENT_KEY=$(kubectl get secret <cluster-name>-principal -o json
 To create the `<cluster-name>-cluster` secret that is needed we must first create the `config` block
 with the certs:
 
-```
+```bash
 cat << EOF > config
 {
     "tlsClientConfig": {
@@ -223,7 +223,7 @@ EOF
 
 Now create the secret:
 
-```
+```bash
 kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=name=<cluster-name> --from-literal=server=https://argocd-agent-resource-proxy:9090?agentName=<cluster-name> --from-file=config=./config
 ```
 !!! note "Add unique query parameter to server"
@@ -233,7 +233,7 @@ kubectl create secret generic <cluster-name>-cluster -n argocd --from-literal=na
     as shown in this example.
 
 Then label the secret as a cluster secret and include the label to identify the matching agent:
-```
+```bash
 kubectl label secret <cluster-name>-cluster argocd.argoproj.io/secret-type=cluster
 kubectl label secret <cluster-name>-cluster argocd-agent.argoproj-labs.io/agent-name=<cluster-name>
 ```
@@ -250,7 +250,7 @@ be minted on the Principal where the Issuer is available and then moved to the A
     the Agents will at times run in less secure locations/networks then the Principle so isolating
     the CA to one location, the principal, is beneficial.
 
-```
+```yaml
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -271,7 +271,7 @@ spec:
 
 Output the secret to a file as we need to install it on the cluster where the Agent resides:
 
-```
+```bash
 kubectl get secret <cluster-name>-agent -o yaml -n argocd | kubectl neat > <cluster-name>-agent.yaml
 ```
 
@@ -285,21 +285,21 @@ the security reasons discussed earlier.
 !!! note "Using yq"
     The command `yq` is used to modify the secret, if `yq` is not available simply edit the secret as needed.
 
-```
+```bash
 kubectl get secret argocd-agent-ca -o yaml -n argocd | yq 'del(.data.["tls.key"])' -y | oc neat > argocd-agent-ca.yaml
 ```
 
 Change the secret type to `Opaque` since a Kubernetes TLS secret requires a key, additionally change the name of the exported secret from `<cluster-name>-agent` to
 to `argocd-agent-client-tls`.
 
-```
-yq -i '.type = "Opaque"' ./argocd-agent-ca.yaml -y
+```bash
+yq -i '.type = "Opaque"' argocd-agent-ca.yaml -y
 yq -i '.metadata.name = "argocd-agent-client-tls"' <path-to-secret>/<cluster-name>-agent.yaml -y
 ```
 
 On the Agent cluster apply the two secrets:
 
-```
+```bash
 kubectl apply -f ./argocd-agent-ca.yaml
 kubectl apply -f <cluster-name>-agent.yaml
 ```
