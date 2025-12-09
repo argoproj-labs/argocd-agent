@@ -23,6 +23,7 @@ GENERATE_PATHS="
 	${PROJECT_ROOT}/principal/apis/auth;authapi
 	${PROJECT_ROOT}/principal/apis/eventstream;eventstreamapi
 	${PROJECT_ROOT}/principal/apis/version;versionapi
+	${PROJECT_ROOT}/principal/apis/logstreamapi;logstreamapi
 "
 
 for p in ${GENERATE_PATHS}; do

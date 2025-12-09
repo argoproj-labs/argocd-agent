@@ -19,10 +19,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -97,24 +100,108 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			logCtx.WithError(err).Error("Uh oh")
+		}
+	}()
 
 	reqParams := map[string]string{}
 	for k, v := range r.URL.Query() {
 		reqParams[k] = v[0]
 	}
 
+	requestedName := params.Get("name")
+	requestedNamespace := params.Get("namespace")
+	requestedSubresource := params.Get("subresource")
+
 	// Create the event
-	sentEv, err := s.events.NewResourceRequestEvent(gvr, params.Get("namespace"), params.Get("name"), params.Get("subresource"), r.Method, reqBody, reqParams)
-	if err != nil {
-		logCtx.Errorf("Could not create event: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+	var sentEv *cloudevents.Event
+	if requestedSubresource == "log" {
+		if requestedNamespace == "" || requestedName == "" {
+			logCtx.WithFields(logrus.Fields{
+				"namespace": requestedNamespace,
+				"pod":       requestedName,
+				"params":    reqParams,
+				"agent":     agentName,
+			}).Error("Missing required parameters: namespace and pod are required")
+			http.Error(w, "Missing required parameters: namespace and pod", http.StatusBadRequest)
+			return
+		}
+		sentEv, err = s.events.NewLogRequestEvent(requestedNamespace, requestedName, r.Method, reqParams)
+		if err != nil {
+			logCtx.WithFields(logrus.Fields{
+				"namespace": requestedNamespace,
+				"pod":       requestedName,
+				"params":    reqParams,
+				"agent":     agentName,
+			}).Errorf("Could not create container log event: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		sentEv, err = s.events.NewResourceRequestEvent(gvr, requestedNamespace, requestedName, requestedSubresource, r.Method, reqBody, reqParams)
+		if err != nil {
+			logCtx.Errorf("Could not create event: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Remember the resource ID of the sent event
 	sentUUID := event.EventID(sentEv)
 
-	// Start tracking the event, so we can later get the response
+	if requestedSubresource != "" {
+		logCtx.Infof("Proxying request for subresource %s of resource %s named %s/%s", requestedSubresource, gvr.String(), requestedNamespace, requestedName)
+	} else if requestedName != "" {
+		logCtx.Infof("Proxying request for resource of type %s named %s/%s", gvr.String(), requestedNamespace, requestedName)
+	} else {
+		logCtx.Infof("Proxying request for resources of type %s in namespace %s", gvr.String(), requestedNamespace)
+	}
+
+	if requestedSubresource == "log" {
+		logCtx.WithFields(logrus.Fields{
+			"namespace": requestedNamespace,
+			"pod":       requestedName,
+			"params":    reqParams,
+			"agent":     agentName,
+			"uuid":      string(sentUUID),
+		}).Info("Proxying pod log request")
+		if err := s.logStream.RegisterHTTP(sentUUID, w, r); err != nil {
+			logCtx.Errorf("Could not register HTTP writer for log streaming: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Submit the event to the queue
+		logCtx.Tracef("Submitting event: %v", sentEv)
+		q.Add(sentEv)
+
+		// Decide static vs streaming based on follow=true
+		isStreaming := strings.EqualFold(reqParams["follow"], "true")
+
+		if isStreaming {
+			// Keep handler alive until client disconnects
+			logCtx.WithField("uuid", string(sentUUID)).Info("Streaming logs: waiting for client disconnect")
+			<-r.Context().Done()
+			logCtx.WithField("uuid", string(sentUUID)).Info("Client disconnected; end streaming handler")
+		} else {
+			// Static logs: wait for completion signal from logStream
+			logCtx.WithField("uuid", string(sentUUID)).Info("Static logs: waiting for completion")
+			if ok := s.logStream.WaitForCompletion(sentUUID, requestTimeout); !ok {
+				logCtx.WithField("uuid", string(sentUUID)).Warn("Static logs timeout")
+				// Best-effort: the writer may have already sent partial data.
+				// Return 504 only if nothing has been sent yet. If RegisterHTTP
+				// streams early chunks, this will be ignored by client.
+				http.Error(w, "Timeout fetching logs from agent", http.StatusGatewayTimeout)
+			}
+		}
+		// IMPORTANT: do not enter the standard eventCh loop for log requests.
+		return
+
+	}
+
+	// Start tracking the event, so we can later for non log requests and get the response
 	eventCh, err := s.resourceProxy.Track(sentUUID, agentName)
 	if err != nil {
 		logCtx.Errorf("Could not track event %s: %v", sentUUID, err)
@@ -130,26 +217,9 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 	logCtx.Tracef("Submitting event: %v", sentEv)
 	q.Add(sentEv)
 
-	requestedName := params.Get("name")
-	requestedNamespace := params.Get("namespace")
-	requestedSubresource := params.Get("subresource")
-
-	if requestedSubresource != "" {
-		logCtx.Infof("Proxying request for subresource %s of resource %s named %s/%s", requestedSubresource, gvr.String(), requestedNamespace, requestedName)
-	} else if requestedName != "" {
-		logCtx.Infof("Proxying request for resource of type %s named %s/%s", gvr.String(), requestedNamespace, requestedName)
-	} else {
-		logCtx.Infof("Proxying request for resources of type %s in namespace %s", gvr.String(), requestedNamespace)
-	}
-
 	// Wait for the event from the agent
 	ctx, cancel := context.WithTimeout(s.ctx, requestTimeout)
 	defer cancel()
-	defer func() {
-		if err := r.Body.Close(); err != nil {
-			logCtx.WithError(err).Error("Uh oh")
-		}
-	}()
 
 	// The response is being read through a channel that is kept open and
 	// written to by the resource proxy.
