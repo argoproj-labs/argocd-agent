@@ -39,6 +39,7 @@ type session struct {
 	hw         *httpWriter
 	completeCh chan bool // signaled on EOF (static logs)
 	cancelFn   context.CancelFunc
+	doneCh     chan struct{} // closed on finalization to stop watchdog goroutine
 }
 
 type httpWriter struct {
@@ -91,6 +92,7 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 		sess = &session{
 			hw:         &httpWriter{w: w, flusher: flusher},
 			completeCh: make(chan bool, 1),
+			doneCh:     make(chan struct{}),
 		}
 		s.sessions[requestUUID] = sess
 	} else {
@@ -99,12 +101,17 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 
 	//watchdog for client disconnection. When client disconnects, immediately cancel the stream
 	go func(reqID, ua, ra string, done <-chan struct{}) {
-		//wait for client disconnection
-		<-done
-		logrus.WithFields(logrus.Fields{
-			"request_id": reqID,
-			"reason":     "client_disconnected",
-		}).Info("Stream terminated due to client disconnection")
+		// Wait for either client disconnection or session finalization
+		select {
+		case <-done:
+			logrus.WithFields(logrus.Fields{
+				"request_id": reqID,
+				"reason":     "client_disconnected",
+			}).Info("Stream terminated due to client disconnection")
+		case <-sess.doneCh:
+			// Session was finalized, watchdog is no longer needed
+			return
+		}
 
 		s.mu.Lock()
 		sess := s.sessions[reqID]
@@ -312,6 +319,11 @@ func (s *Server) WaitForCompletion(requestUUID string, timeout time.Duration) bo
 
 func (s *Server) finalizeSession(requestUUID string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	sess := s.sessions[requestUUID]
+	if sess != nil && sess.doneCh != nil {
+		// Close doneCh to signal watchdog goroutine to exit
+		close(sess.doneCh)
+	}
 	delete(s.sessions, requestUUID)
+	s.mu.Unlock()
 }
