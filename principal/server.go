@@ -51,6 +51,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	logstream "github.com/argoproj-labs/argocd-agent/principal/apis/logstreamapi"
 	"github.com/argoproj-labs/argocd-agent/principal/redisproxy"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj/argo-cd/v3/common"
@@ -159,6 +160,7 @@ type Server struct {
 	// deletions tracks valid deletions from the source.
 	// This is used to differentiate between valid and invalid deletions
 	deletions *manager.DeletionTracker
+	logStream *logstream.Server
 }
 
 type handlersOnConnect func(agent types.Agent) error
@@ -380,6 +382,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	s.resources = resources.NewAgentResources()
+	s.logStream = logstream.NewServer()
 
 	return s, nil
 }

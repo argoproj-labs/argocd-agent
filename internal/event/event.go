@@ -19,6 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -81,6 +83,7 @@ const (
 	TargetResourceResync         EventTarget = "resourceResync"
 	TargetClusterCacheInfoUpdate EventTarget = "clusterCacheInfoUpdate"
 	TargetRepository             EventTarget = "repository"
+	TargetContainerLog           EventTarget = "containerlog"
 )
 
 const (
@@ -407,9 +410,9 @@ func (evs EventSource) NewResourceRequestEvent(gvr v1.GroupVersionResource, name
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(method)
-	cev.SetDataSchema(TargetResource.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
+	cev.SetDataSchema(TargetResource.String())
 	err := cev.SetData(cloudevents.ApplicationJSON, rr)
 	return &cev, err
 }
@@ -597,6 +600,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetRedis
 	case TargetClusterCacheInfoUpdate.String():
 		return TargetClusterCacheInfoUpdate
+	case TargetContainerLog.String():
+		return TargetContainerLog
 	}
 	return ""
 }
@@ -1177,4 +1182,92 @@ func (eq *eventQueue) isEmpty() bool {
 	eq.mu.RLock()
 	defer eq.mu.RUnlock()
 	return len(eq.items) == 0
+}
+
+type ContainerLogRequest struct {
+	// UUID for request/response correlation
+	UUID                         string `json:"uuid"`
+	Namespace                    string `json:"namespace"`
+	PodName                      string `json:"podName"`
+	Container                    string `json:"container,omitempty"`
+	Follow                       bool   `json:"follow,omitempty"`
+	TailLines                    *int64 `json:"tailLines,omitempty"`
+	SinceSeconds                 *int64 `json:"sinceSeconds,omitempty"`
+	SinceTime                    string `json:"sinceTime,omitempty"`
+	Timestamps                   bool   `json:"timestamps,omitempty"`
+	Previous                     bool   `json:"previous,omitempty"`
+	InsecureSkipTLSVerifyBackend bool   `json:"insecureSkipTLSVerifyBackend,omitempty"`
+	LimitBytes                   *int64 `json:"limitBytes,omitempty"`
+}
+
+// NewLogRequestEvent creates a cloud event for requesting logs
+func (evs EventSource) NewLogRequestEvent(namespace, podName, method string, params map[string]string) (*cloudevents.Event, error) {
+	reqUUID := uuid.NewString()
+
+	// Parse log-specific parameters
+	logReq := &ContainerLogRequest{
+		UUID:      reqUUID,
+		Namespace: namespace,
+		PodName:   podName,
+	}
+
+	if container, ok := params["container"]; ok {
+		logReq.Container = container
+	}
+
+	// Parse query parameters
+	if follow := params["follow"]; strings.EqualFold(follow, "true") {
+		logReq.Follow = true
+	}
+
+	if tailLines := params["tailLines"]; tailLines != "" {
+		if lines, err := strconv.ParseInt(tailLines, 10, 64); err == nil {
+			logReq.TailLines = &lines
+		}
+	}
+
+	if sinceSeconds := params["sinceSeconds"]; sinceSeconds != "" {
+		if seconds, err := strconv.ParseInt(sinceSeconds, 10, 64); err == nil {
+			logReq.SinceSeconds = &seconds
+		}
+	}
+
+	if sinceTime := params["sinceTime"]; sinceTime != "" {
+		logReq.SinceTime = sinceTime
+	}
+
+	if timestamps := params["timestamps"]; strings.EqualFold(timestamps, "true") {
+		logReq.Timestamps = true
+	}
+
+	if previous := params["previous"]; strings.EqualFold(previous, "true") {
+		logReq.Previous = true
+	}
+
+	// Parse additional K8s logs API parameters
+	if insecureSkipTLS := params["insecureSkipTLSVerifyBackend"]; strings.EqualFold(insecureSkipTLS, "true") {
+		logReq.InsecureSkipTLSVerifyBackend = true
+	}
+
+	if limitBytes := params["limitBytes"]; limitBytes != "" {
+		if bytes, err := strconv.ParseInt(limitBytes, 10, 64); err == nil {
+			logReq.LimitBytes = &bytes
+		}
+	}
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(method) // HTTP method
+	cev.SetDataSchema(TargetContainerLog.String())
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetExtension(eventID, reqUUID)
+	err := cev.SetData(cloudevents.ApplicationJSON, logReq)
+	return &cev, err
+}
+
+// ContainerLogRequest extracts ContainerLogRequest data from event
+func (ev *Event) ContainerLogRequest() (*ContainerLogRequest, error) {
+	logReq := &ContainerLogRequest{}
+	err := ev.event.DataAs(logReq)
+	return logReq, err
 }

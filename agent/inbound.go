@@ -74,6 +74,8 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 				log().WithError(err).Errorf("Unable to process incoming redis event")
 			}
 		}()
+	case event.TargetContainerLog:
+		err = a.processIncomingContainerLogRequest(ev)
 	default:
 		err = fmt.Errorf("unknown event target - processIncomingEvent: %s", ev.Target())
 	}
