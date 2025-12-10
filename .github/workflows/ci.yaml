@@ -153,6 +153,12 @@ jobs:
       - name: Install required packages
         run: |
           sudo apt-get install libpwquality-tools
+      - name: Free up some disk space
+        run: |
+          df -h
+          sudo apt clean
+          sudo docker system prune -a -f
+          df -h
       - name: Checkout code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       - name: Setup Golang
