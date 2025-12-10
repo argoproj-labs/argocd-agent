@@ -395,7 +395,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		"Port the health check server will listen on")
 
 	command.Flags().StringVar(&otlpAddress, "otlp-address",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_OTLP_ADDRESS", nil, "localhost:4317"),
+		env.StringWithDefault("ARGOCD_PRINCIPAL_OTLP_ADDRESS", nil, ""),
 		"OpenTelemetry collector address for sending traces (e.g., localhost:4317)")
 	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_OTLP_INSECURE", false),
