@@ -74,10 +74,21 @@ Open Jaeger UI at http://localhost:16686 and select:
 
 ## Configuration Options
 
+The same configuration flags apply to both the **principal** and **agent** components, using their respective environment variable prefixes.
+
+### Principal Configuration
+
 | Flag | Environment Variable | Default | Description |
 |------|---------------------|---------|-------------|
 | `--otlp-address` | `ARGOCD_PRINCIPAL_OTLP_ADDRESS` | `localhost:4317` | OTLP collector endpoint address |
 | `--otlp-insecure` | `ARGOCD_PRINCIPAL_OTLP_INSECURE` | `false` | Use insecure connection to OTLP endpoint |
+
+### Agent Configuration
+
+| Flag | Environment Variable | Default | Description |
+|------|---------------------|---------|-------------|
+| `--otlp-address` | `ARGOCD_AGENT_OTLP_ADDRESS` | `localhost:4317` | OTLP collector endpoint address |
+| `--otlp-insecure` | `ARGOCD_AGENT_OTLP_INSECURE` | `false` | Use insecure connection to OTLP endpoint |
 
 ## Trace Attributes
 
@@ -102,7 +113,7 @@ The following custom attributes are added to spans to provide context:
 - `argocd.event.id`: Unique event identifier
 - `argocd.operation.type`: Operation type (create, update, delete, get, list, etc.)
 
-### Debugging with Traces
+## Debugging with Traces
 
 **Example 1: Why is my resource not syncing?**
 
@@ -118,7 +129,7 @@ Sort traces by duration to find slow operations:
 - Slow Kubernetes operations might indicate API server load
 - Large span duration in event processing might indicate resource processing issues
 
-### Security Considerations
+## Security Considerations
 
 - Use `--otlp-insecure=false` in production and configure proper TLS certificates
 - Ensure your OTLP endpoint is properly secured and not exposed publicly

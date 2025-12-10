@@ -291,7 +291,7 @@ func NewAgentRunCommand() *cobra.Command {
 		"Interval to refresh cluster cache info in principal")
 
 	command.Flags().StringVar(&otlpAddress, "otlp-address",
-		env.StringWithDefault("ARGOCD_AGENT_OTLP_ADDRESS", nil, "localhost:4317"),
+		env.StringWithDefault("ARGOCD_AGENT_OTLP_ADDRESS", nil, ""),
 		"OpenTelemetry collector address for sending traces (e.g., localhost:4317)")
 	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
 		env.BoolWithDefault("ARGOCD_AGENT_OTLP_INSECURE", false),
