@@ -156,25 +156,25 @@ certificates on demand.
 
 Create private key with openssl
 
-```
+```bash
 openssl genrsa -out ca.key 4096
 ```
 
 Create root certificate using the generated key:
 
-```
+```bash
 openssl req -new -x509 -sha256 -days 3650 -key ca.key -out ca.crt
 ```
 
 Create a CA secret in Kubernetes:
 
-```
+```bash
 kubectl create secret tls argocd-agent-ca --cert=ca.crt --key=ca.key -n argocd
 ```
 
 Create cert-manager issuer for the CA we generated previously:
 
-```
+```yaml
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
@@ -190,7 +190,7 @@ spec:
 Generate the server certificate for the principal's gRPC service, `argocd-agent-principal-tls`, using cert-manager Certificate.
 Make sure you update the `organizationalUnits` and `dnsNames` to reflect the values for your installation:
 
-```
+```yaml
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -215,7 +215,7 @@ Next generate the certificate for the resource proxy, note the `dnsNames` may no
 need to be changed here since it is an internal service unless you are using a different
 namespace then `argocd`. However update your `organizationalUnits` as desired:
 
-```
+```yaml
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -239,7 +239,7 @@ spec:
 Confirm that the certificates have been deployed and are ready, `READY` should be `True` for both certs as
 per this example:
 
-```
+```bash
 $ kubectl get certificate -n argocd
 NAME                              READY   SECRET                            AGE
 argocd-agent-principal-tls        True    argocd-agent-principal-tls        4m8s
