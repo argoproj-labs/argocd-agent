@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -278,6 +279,8 @@ func (c *ArgoRestClient) GetApplicationLogs(app *v1alpha1.Application, namespace
 	if tailLines > 0 {
 		q.Set("tailLines", fmt.Sprint(tailLines))
 	}
+	// Set sinceSeconds to avoid time parsing errors - fetch logs from last 5 minutes
+	q.Set("sinceSeconds", "300")
 	u.RawQuery = q.Encode()
 	u.Path = fmt.Sprintf("/api/v1/applications/%s/logs", app.Name)
 
@@ -382,19 +385,22 @@ func GetInitialAdminSecret(k8sClient KubeClient) (string, error) {
 }
 
 func GetArgoCDServerEndpoint(k8sClient KubeClient) (string, error) {
+	// Check environment variable first (avoids unnecessary K8s API call)
+	if envAddr := os.Getenv("ARGOCD_SERVER_ADDRESS"); envAddr != "" {
+		return envAddr, nil
+	}
 
-	// Get the Argo server endpoint to use
+	// Fall back to querying K8s service
 	srvService := &corev1.Service{}
 	err := k8sClient.Get(context.Background(),
 		types.NamespacedName{Namespace: "argocd", Name: "argocd-server"}, srvService, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
-	argoEndpoint := srvService.Spec.LoadBalancerIP
 
+	argoEndpoint := srvService.Spec.LoadBalancerIP
 	if len(srvService.Status.LoadBalancer.Ingress) > 0 {
-		hostname := srvService.Status.LoadBalancer.Ingress[0].Hostname
-		if hostname != "" {
+		if hostname := srvService.Status.LoadBalancer.Ingress[0].Hostname; hostname != "" {
 			argoEndpoint = hostname
 		}
 	}

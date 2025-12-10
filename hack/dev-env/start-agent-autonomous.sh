@@ -46,23 +46,39 @@ else
 fi
 
 # Set Redis address for local development
-# When running locally, we need to use localhost via port-forward
-# since we can't access in-cluster DNS
+# Agents connect to their vcluster Redis via localhost port-forward
+# (in-cluster DNS is not accessible from host machine)
 if [ -z "${ARGOCD_AGENT_REDIS_ADDRESS}" ]; then
     # Default to localhost:6382 for local E2E testing (requires port-forward)
-    # This allows TLS certificate validation to work (localhost is in cert SANs)
+    # Port-forward allows TLS validation (localhost is in certificate SANs)
     ARGOCD_AGENT_REDIS_ADDRESS="localhost:6382"
     echo "Using default Redis address for local development: ${ARGOCD_AGENT_REDIS_ADDRESS}"
-    echo "NOTE: Requires port-forward to Redis (automatic when using 'make start-e2e', otherwise run manually):"
+    echo "NOTE: Port-forward to Redis required (automatic with 'make start-e2e', manual otherwise):"
     echo "  kubectl port-forward svc/argocd-redis -n argocd 6382:6379 --context vcluster-agent-autonomous"
 else
     echo "Using Redis address: ${ARGOCD_AGENT_REDIS_ADDRESS}"
 fi
 REDIS_ADDRESS_ARG="--redis-addr=${ARGOCD_AGENT_REDIS_ADDRESS}"
 
+# Extract mTLS client certificates and CA from Kubernetes secret for agent authentication
+echo "Extracting mTLS client certificates and CA from Kubernetes..."
+TLS_CERT_PATH="/tmp/agent-autonomous-tls.crt"
+TLS_KEY_PATH="/tmp/agent-autonomous-tls.key"
+ROOT_CA_PATH="/tmp/agent-autonomous-ca.crt"
+kubectl --context vcluster-agent-autonomous -n argocd get secret argocd-agent-client-tls \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > "${TLS_CERT_PATH}" || { echo "ERROR: Failed to extract TLS cert from argocd-agent-client-tls secret"; exit 1; }
+kubectl --context vcluster-agent-autonomous -n argocd get secret argocd-agent-client-tls \
+  -o jsonpath='{.data.tls\.key}' | base64 -d > "${TLS_KEY_PATH}" || { echo "ERROR: Failed to extract TLS key from argocd-agent-client-tls secret"; exit 1; }
+kubectl --context vcluster-agent-autonomous -n argocd get secret argocd-agent-ca \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d > "${ROOT_CA_PATH}" || { echo "ERROR: Failed to extract CA cert from argocd-agent-ca secret"; exit 1; }
+echo " mTLS client certificates and CA extracted"
+
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode autonomous \
     --creds mtls:any \
+    --tls-client-cert="${TLS_CERT_PATH}" \
+    --tls-client-key="${TLS_KEY_PATH}" \
+    --root-ca-path="${ROOT_CA_PATH}" \
     $REDIS_TLS_ARGS \
     $REDIS_ADDRESS_ARG \
     --server-address 127.0.0.1 \

@@ -14,21 +14,21 @@ echo "Generating Redis TLS certificates in ${CREDS_DIR}..."
 # Generate CA private key and certificate
 if [[ ! -f "${CREDS_DIR}/ca.key" ]]; then
     echo "Generating CA key and certificate..."
-    openssl genrsa -out "${CREDS_DIR}/ca.key" 4096 2>/dev/null
+    openssl genrsa -out "${CREDS_DIR}/ca.key" 4096
     openssl req -new -x509 -days 3650 -key "${CREDS_DIR}/ca.key" \
         -out "${CREDS_DIR}/ca.crt" \
-        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=Redis CA" 2>/dev/null
+        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=Redis CA"
 elif [[ ! -f "${CREDS_DIR}/ca.crt" ]]; then
     echo "Generating CA certificate..."
     openssl req -new -x509 -days 3650 -key "${CREDS_DIR}/ca.key" \
         -out "${CREDS_DIR}/ca.crt" \
-        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=Redis CA" 2>/dev/null
+        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=Redis CA"
 fi
 
 # Generate Redis server certificate for control-plane
 if [[ ! -f "${CREDS_DIR}/redis-control-plane.key" ]]; then
     echo "Generating redis-control-plane certificate..."
-    openssl genrsa -out "${CREDS_DIR}/redis-control-plane.key" 4096 2>/dev/null
+    openssl genrsa -out "${CREDS_DIR}/redis-control-plane.key" 4096
 fi
 
 if [[ ! -f "${CREDS_DIR}/redis-control-plane.crt" ]]; then
@@ -46,7 +46,7 @@ EOF
 
     openssl req -new -key "${CREDS_DIR}/redis-control-plane.key" \
         -out "${CREDS_DIR}/redis-control-plane.csr" \
-        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis" 2>/dev/null
+        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis"
 
     openssl x509 -req -in "${CREDS_DIR}/redis-control-plane.csr" \
         -CA "${CREDS_DIR}/ca.crt" \
@@ -54,16 +54,23 @@ EOF
         -CAcreateserial \
         -out "${CREDS_DIR}/redis-control-plane.crt" \
         -days 365 \
-        -extfile "${CREDS_DIR}/redis-control-plane.ext" 2>/dev/null
+        -extfile "${CREDS_DIR}/redis-control-plane.ext"
 fi
 
 # Generate Redis proxy certificate (for principal's Redis proxy)
 if [[ ! -f "${CREDS_DIR}/redis-proxy.key" ]]; then
     echo "Generating redis-proxy certificate..."
-    openssl genrsa -out "${CREDS_DIR}/redis-proxy.key" 4096 2>/dev/null
+    openssl genrsa -out "${CREDS_DIR}/redis-proxy.key" 4096
 fi
 
 if [[ ! -f "${CREDS_DIR}/redis-proxy.crt" ]]; then
+    # Get local machine IP for certificate SANs
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || echo "")
+    else
+        LOCAL_IP=$(ip r show default 2>/dev/null | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,' | head -n 1 || echo "")
+    fi
+    
     cat > "${CREDS_DIR}/redis-proxy.ext" <<EOF
 subjectAltName = @alt_names
 [alt_names]
@@ -72,13 +79,19 @@ DNS.2 = argocd-redis-proxy.argocd
 DNS.3 = argocd-redis-proxy.argocd.svc
 DNS.4 = argocd-redis-proxy.argocd.svc.cluster.local
 DNS.5 = localhost
+DNS.6 = rathole-container-internal
 IP.1 = 127.0.0.1
 IP.2 = 127.0.0.2
 EOF
 
+    # Only add local IP if detected
+    if [ -n "${LOCAL_IP}" ]; then
+        echo "IP.3 = ${LOCAL_IP}" >> "${CREDS_DIR}/redis-proxy.ext"
+    fi
+
     openssl req -new -key "${CREDS_DIR}/redis-proxy.key" \
         -out "${CREDS_DIR}/redis-proxy.csr" \
-        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis-proxy" 2>/dev/null
+        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis-proxy"
 
     openssl x509 -req -in "${CREDS_DIR}/redis-proxy.csr" \
         -CA "${CREDS_DIR}/ca.crt" \
@@ -86,14 +99,14 @@ EOF
         -CAcreateserial \
         -out "${CREDS_DIR}/redis-proxy.crt" \
         -days 365 \
-        -extfile "${CREDS_DIR}/redis-proxy.ext" 2>/dev/null
+        -extfile "${CREDS_DIR}/redis-proxy.ext"
 fi
 
 # Generate Redis certificates for agent vclusters
 for agent in autonomous managed; do
     if [[ ! -f "${CREDS_DIR}/redis-${agent}.key" ]]; then
         echo "Generating redis-${agent} certificate..."
-        openssl genrsa -out "${CREDS_DIR}/redis-${agent}.key" 4096 2>/dev/null
+        openssl genrsa -out "${CREDS_DIR}/redis-${agent}.key" 4096
     fi
 
     if [[ ! -f "${CREDS_DIR}/redis-${agent}.crt" ]]; then
@@ -110,7 +123,7 @@ EOF
 
         openssl req -new -key "${CREDS_DIR}/redis-${agent}.key" \
             -out "${CREDS_DIR}/redis-${agent}.csr" \
-            -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis-${agent}" 2>/dev/null
+            -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis-${agent}"
 
         openssl x509 -req -in "${CREDS_DIR}/redis-${agent}.csr" \
             -CA "${CREDS_DIR}/ca.crt" \
@@ -118,7 +131,7 @@ EOF
             -CAcreateserial \
             -out "${CREDS_DIR}/redis-${agent}.crt" \
             -days 365 \
-            -extfile "${CREDS_DIR}/redis-${agent}.ext" 2>/dev/null
+            -extfile "${CREDS_DIR}/redis-${agent}.ext"
     fi
 done
 

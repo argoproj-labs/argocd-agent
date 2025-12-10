@@ -140,20 +140,9 @@ func (rp *RedisProxy) createServerTLSConfig() (*tls.Config, error) {
 		}
 	} else if rp.tlsServerCert != nil && rp.tlsServerKey != nil {
 		// Convert cert and key to tls.Certificate
-		certDER := rp.tlsServerCert.Raw
-		// For private key, we need to marshal it
-		keyDER, err := x509.MarshalPKCS8PrivateKey(rp.tlsServerKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal private key: %w", err)
-		}
-		cert.Certificate = [][]byte{certDER}
+		cert.Certificate = [][]byte{rp.tlsServerCert.Raw}
 		cert.PrivateKey = rp.tlsServerKey
 		cert.Leaf = rp.tlsServerCert
-
-		// Try to parse the key
-		if _, err := x509.ParsePKCS8PrivateKey(keyDER); err != nil {
-			return nil, fmt.Errorf("failed to parse private key: %w", err)
-		}
 	} else {
 		return nil, fmt.Errorf("no TLS certificate configured")
 	}
@@ -853,15 +842,28 @@ func (rp *RedisProxy) establishConnectionToPrincipalRedis(logCtx *logrus.Entry) 
 		return nil, fmt.Errorf("unable to resolve address: %w", err)
 	}
 
-	// Dial the resolved address
-	conn, err := net.DialTCP("tcp", nil, addr)
+	// Dial the resolved address with timeout to prevent indefinite hangs
+	dialer := &net.Dialer{
+		Timeout: 30 * time.Second,
+	}
+	conn, err := dialer.Dial("tcp", addr.String())
 	if err != nil {
 		logCtx.WithError(err).WithField("redisAddress", rp.principalRedisAddress).Error("Connection error")
 		return nil, fmt.Errorf("unable to connect to redis '%s': %w", rp.principalRedisAddress, err)
 	}
 
-	// If TLS is enabled for upstream, wrap the connection with TLS
-	if rp.tlsEnabled && (rp.upstreamTLSCA != nil || rp.upstreamTLSCAPath != "" || rp.upstreamTLSInsecure) {
+	// Check if upstream TLS configuration is provided
+	hasUpstreamTLSConfig := rp.upstreamTLSCA != nil || rp.upstreamTLSCAPath != "" || rp.upstreamTLSInsecure
+
+	// Warn if server TLS is enabled but upstream TLS is not configured
+	// This creates a security gap: agent→proxy is encrypted, but proxy→redis is not
+	if rp.tlsEnabled && !hasUpstreamTLSConfig {
+		logCtx.Warn("SECURITY WARNING: Redis proxy server has TLS enabled, but no upstream TLS configuration provided. Connection to principal Redis will be UNENCRYPTED. This exposes data in transit within the cluster.")
+	}
+
+	// If upstream TLS is configured, wrap the connection with TLS
+	// This is independent of server TLS configuration
+	if hasUpstreamTLSConfig {
 		tlsConfig := &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		}
@@ -869,6 +871,10 @@ func (rp *RedisProxy) establishConnectionToPrincipalRedis(logCtx *logrus.Entry) 
 		if rp.upstreamTLSInsecure {
 			logCtx.Warn("INSECURE: Not verifying upstream Redis TLS certificate")
 			tlsConfig.InsecureSkipVerify = true
+			// Warn if CA configuration is provided but will be ignored
+			if rp.upstreamTLSCA != nil || rp.upstreamTLSCAPath != "" {
+				logCtx.Warn("CA configuration provided but ignored due to InsecureSkipVerify=true")
+			}
 		} else if rp.upstreamTLSCA != nil {
 			tlsConfig.RootCAs = rp.upstreamTLSCA
 			logCtx.Trace("Using provided CA certificate pool for upstream Redis TLS")
@@ -894,10 +900,22 @@ func (rp *RedisProxy) establishConnectionToPrincipalRedis(logCtx *logrus.Entry) 
 		}
 		tlsConfig.ServerName = hostname
 
+		// Set deadline for handshake to prevent indefinite hangs
+		if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("failed to set handshake deadline: %w", err)
+		}
+
 		tlsConn := tls.Client(conn, tlsConfig)
 		if err := tlsConn.Handshake(); err != nil {
 			conn.Close()
 			return nil, fmt.Errorf("TLS handshake failed: %w", err)
+		}
+
+		// Clear deadline after successful handshake so future I/O operations aren't affected
+		if err := tlsConn.SetDeadline(time.Time{}); err != nil {
+			tlsConn.Close()
+			return nil, fmt.Errorf("failed to clear handshake deadline: %w", err)
 		}
 
 		logCtx.Trace("Established TLS connection to upstream Redis")

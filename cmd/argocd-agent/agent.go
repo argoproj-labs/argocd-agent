@@ -240,8 +240,8 @@ func NewAgentRunCommand() *cobra.Command {
 
 	// Redis TLS flags
 	command.Flags().BoolVar(&redisTLSEnabled, "redis-tls-enabled",
-		env.BoolWithDefault("ARGOCD_AGENT_REDIS_TLS_ENABLED", false),
-		"Enable TLS for Redis connections")
+		env.BoolWithDefault("ARGOCD_AGENT_REDIS_TLS_ENABLED", true),
+		"Enable TLS for Redis connections (enabled by default for security)")
 	command.Flags().StringVar(&redisTLSCAPath, "redis-tls-ca-path",
 		env.StringWithDefault("ARGOCD_AGENT_REDIS_TLS_CA_PATH", nil, ""),
 		"Path to CA certificate for Redis TLS")

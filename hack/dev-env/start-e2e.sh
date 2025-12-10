@@ -50,12 +50,12 @@ getExternalLoadBalancerIP() {
 # Set Redis addresses to use localhost (for TLS certificate validation)
 # Port-forwards are managed by goreman (see Procfile.e2e)
 export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="localhost:6380"
-export ARGOCD_AGENT_REDIS_ADDRESS="localhost:6381"  # For managed agent
+export ARGOCD_AGENT_REDIS_ADDRESS="localhost:6381"
 export MANAGED_AGENT_REDIS_ADDR="localhost:6381"
 export AUTONOMOUS_AGENT_REDIS_ADDR="localhost:6382"
+export ARGOCD_SERVER_ADDRESS="localhost:8444"
 
-
-export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed -n argocd -o jsonpath='{.data.auth}' | base64 --decode)
+REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed -n argocd -o jsonpath='{.data.auth}' | base64 --decode)
+export REDIS_PASSWORD
 
 goreman -exit-on-stop=false -f hack/dev-env/Procfile.e2e start
-

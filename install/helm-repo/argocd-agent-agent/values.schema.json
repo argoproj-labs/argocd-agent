@@ -305,9 +305,11 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
-          "type": "string",
-          "enum": ["true", "false"],
-          "description": "Enable TLS for Redis connections"
+          "anyOf": [
+            { "type": "string", "enum": ["true", "false"] },
+            { "type": "boolean" }
+          ],
+          "description": "Enable TLS for Redis connections (can be boolean or string)"
         },
         "caPath": {
           "type": "string",
@@ -318,9 +320,11 @@
           "description": "Name of the Kubernetes Secret containing the Redis TLS CA certificate"
         },
         "insecure": {
-          "type": "string",
-          "enum": ["true", "false"],
-          "description": "Skip verification of Redis TLS certificate (INSECURE - for development only)"
+          "anyOf": [
+            { "type": "string", "enum": ["true", "false"] },
+            { "type": "boolean" }
+          ],
+          "description": "Skip verification of Redis TLS certificate (INSECURE - for development only, can be boolean or string)"
         }
       }
     },

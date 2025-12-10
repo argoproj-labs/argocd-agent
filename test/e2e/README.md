@@ -18,7 +18,9 @@ Both the vcluster and Argo CD installations require that LoadBalancer functional
 
 ## Running the tests
 
-To setup the test environment on the cluster, execute the following command from the repository root:
+### Step 1: Setup the test environment
+
+From the repository root:
 
 ```shell
 make setup-e2e
@@ -26,17 +28,57 @@ make setup-e2e
 
 **Note:** Redis TLS is **required** and configured automatically. See the [Redis TLS](#redis-tls) section below for details.
 
-To run the principal and agents, execute the following command from the repository root:
+### Step 1b: Reverse Tunnel Setup (Remote Clusters Only)
+
+**Only required if your vclusters are on a remote cluster (e.g., AWS, GCP) that cannot directly reach your local machine.**
+
+If you're using a local cluster (kind, minikube, Docker Desktop), **skip this step**.
+
+For remote clusters, set up the reverse tunnel to allow Argo CD (running remotely) to connect to your local principal:
+
+In **Terminal 1**:
+
+```shell
+./hack/dev-env/reverse-tunnel/setup.sh
+```
+
+This will:
+- Deploy a rathole proxy in your remote vcluster
+- Configure Argo CD to route traffic through the tunnel
+- Start a local rathole client (leave it running)
+- Wait for "Control channel established" message
+
+**Keep Terminal 1 running with the rathole tunnel.**
+
+See [hack/dev-env/reverse-tunnel/README.md](../../hack/dev-env/reverse-tunnel/README.md) for more details.
+
+### Step 2: Start the principal and agents
+
+In **Terminal 2** (or Terminal 1 if not using reverse tunnel), start the E2E environment (principal, agents, and port-forwards):
 
 ```shell
 make start-e2e
 ```
 
-To run the tests, execute the following command from the repository root in a separate terminal instance:
+**Important:** Keep this terminal running! The tests require:
+- Port-forwards to Redis (localhost:6380, 6381, 6382) - for test code to access Redis
+- Principal and agent processes
+
+These are managed by `goreman` and must remain running for tests to work.
+
+**Note:** If using the reverse tunnel (remote clusters), Argo CD connects to the principal via the tunnel, not port-forwards.
+
+### Step 3: Run the tests
+
+In **Terminal 3** (or Terminal 2 if not using reverse tunnel), run the E2E tests:
 
 ```shell
 make test-e2e
 ```
+
+The tests will automatically detect if they're running locally or in CI, and use appropriate connection methods:
+- **Local (macOS)**: Connects via port-forwards to `localhost`
+- **CI (Linux with MetalLB)**: Connects directly to LoadBalancer IPs
 
 ### Redis TLS
 
@@ -61,8 +103,6 @@ If you need to manually reconfigure Redis TLS (e.g., after certificate expiratio
 ./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-managed
 ./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-autonomous
 ```
-
-**Note:** The principal and agents use `InsecureSkipVerify: true` in E2E tests for simplicity, as they connect to Redis via LoadBalancer addresses that aren't in the certificate SANs. TLS encryption is still enabled.
 
 # Writing new end-to-end tests
 

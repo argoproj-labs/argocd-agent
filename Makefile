@@ -59,14 +59,23 @@ endif
 	@echo ""
 	@echo "Configuring Redis TLS (required for E2E)..."
 	./hack/dev-env/gen-redis-tls-certs.sh
-	@echo "Step 1: Enabling TLS on Redis servers (creates secrets)..."
+	@echo ""
+	@echo "Configuring each cluster for Redis TLS (Redis + ArgoCD components together)"
+	@echo "Note: Redis and ArgoCD components are configured together per-cluster to avoid"
+	@echo "      connection errors during the transition period."
+	@echo ""
+	@echo "=== Control Plane ==="
 	./hack/dev-env/configure-redis-tls.sh vcluster-control-plane
-	./hack/dev-env/configure-redis-tls.sh vcluster-agent-managed
-	./hack/dev-env/configure-redis-tls.sh vcluster-agent-autonomous
-	@echo "Step 2: Configuring Argo CD components for Redis TLS..."
 	./hack/dev-env/configure-argocd-redis-tls.sh vcluster-control-plane
+	@echo ""
+	@echo "=== Agent Managed ==="
+	./hack/dev-env/configure-redis-tls.sh vcluster-agent-managed
 	./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-managed
+	@echo ""
+	@echo "=== Agent Autonomous ==="
+	./hack/dev-env/configure-redis-tls.sh vcluster-agent-autonomous
 	./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-autonomous
+	@echo ""
 	@echo " E2E environment ready with Redis TLS enabled (required)"
 
 .PHONY: teardown-e2e
