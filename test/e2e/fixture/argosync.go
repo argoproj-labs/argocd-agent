@@ -16,8 +16,12 @@ package fixture
 
 import (
 	"context"
+	"testing"
+	"time"
 
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/gitops-engine/pkg/health"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -51,4 +55,31 @@ func SyncApplicationWithOperation(ctx context.Context, appKey types.NamespacedNa
 	return EnsureUpdate(ctx, kclient, &app, func(_ KubeObject) {
 		app.Operation = &operation
 	})
+}
+
+// WaitForAppSyncedAndHealthy waits for an application to be synced and healthy.
+// It will trigger a re-sync every 5 retries if argoClient is provided.
+func WaitForAppSyncedAndHealthy(t *testing.T, ctx context.Context, kclient KubeClient,
+	argoClient *ArgoRestClient, app *argoapp.Application) {
+
+	appKey := types.NamespacedName{Namespace: app.Namespace, Name: app.Name}
+	retries := 0
+	require.Eventually(t, func() bool {
+		tempApp := &argoapp.Application{}
+		if err := kclient.Get(ctx, appKey, tempApp, metav1.GetOptions{}); err != nil {
+			t.Logf("Failed to get application %s: %v", appKey, err)
+			return false
+		}
+		if tempApp.Status.Sync.Status == argoapp.SyncStatusCodeSynced &&
+			tempApp.Status.Health.Status == health.HealthStatusHealthy {
+			return true
+		}
+		if retries > 0 && retries%5 == 0 && argoClient != nil {
+			if err := argoClient.Sync(tempApp); err != nil {
+				t.Logf("Failed to sync application %s: %v", appKey, err)
+			}
+		}
+		retries++
+		return false
+	}, 60*time.Second, 1*time.Second)
 }

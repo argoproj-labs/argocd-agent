@@ -845,3 +845,165 @@ func TestResourceRequest_IsValid(t *testing.T) {
 		})
 	}
 }
+
+func TestNewTerminalRequestEvent(t *testing.T) {
+	es := NewEventSource("test-source")
+
+	t.Run("creates valid terminal request event", func(t *testing.T) {
+		terminalReq := &ContainerTerminalRequest{
+			UUID:          "test-uuid-123",
+			Namespace:     "test-namespace",
+			PodName:       "test-pod",
+			ContainerName: "test-container",
+			Command:       []string{"/bin/sh", "-c", "ls"},
+			TTY:           true,
+			Stdin:         true,
+			Stdout:        true,
+			Stderr:        true,
+		}
+
+		ev, err := es.NewTerminalRequestEvent(terminalReq)
+		require.NoError(t, err)
+		require.NotNil(t, ev)
+
+		// Verify event type and schema
+		require.Equal(t, TerminalRequest.String(), ev.Type())
+		require.Equal(t, TargetTerminal.String(), ev.DataSchema())
+
+		// Verify extensions
+		resID, err := ev.Context.GetExtension(resourceID)
+		require.NoError(t, err)
+		require.Equal(t, "test-uuid-123", resID)
+
+		evtID, err := ev.Context.GetExtension(eventID)
+		require.NoError(t, err)
+		require.Equal(t, "test-uuid-123", evtID)
+
+		// Verify source
+		require.Equal(t, "test-source", ev.Source())
+	})
+
+	t.Run("creates terminal request event with minimal fields", func(t *testing.T) {
+		terminalReq := &ContainerTerminalRequest{
+			UUID:      "minimal-uuid",
+			Namespace: "ns",
+			PodName:   "pod",
+		}
+
+		ev, err := es.NewTerminalRequestEvent(terminalReq)
+		require.NoError(t, err)
+		require.NotNil(t, ev)
+
+		require.Equal(t, TerminalRequest.String(), ev.Type())
+	})
+}
+
+func TestTerminalRequestFromEvent(t *testing.T) {
+	es := NewEventSource("test-source")
+
+	t.Run("extracts terminal request from event", func(t *testing.T) {
+		originalReq := &ContainerTerminalRequest{
+			UUID:          "extract-test-uuid",
+			Namespace:     "extract-namespace",
+			PodName:       "extract-pod",
+			ContainerName: "extract-container",
+			Command:       []string{"/bin/bash"},
+			TTY:           true,
+			Stdin:         true,
+			Stdout:        true,
+			Stderr:        false,
+		}
+
+		cloudEvent, err := es.NewTerminalRequestEvent(originalReq)
+		require.NoError(t, err)
+
+		// Wrap in Event type
+		ev := New(cloudEvent, TargetTerminal)
+
+		// Extract terminal request
+		extractedReq, err := ev.TerminalRequest()
+		require.NoError(t, err)
+		require.NotNil(t, extractedReq)
+
+		// Verify all fields match
+		require.Equal(t, originalReq.UUID, extractedReq.UUID)
+		require.Equal(t, originalReq.Namespace, extractedReq.Namespace)
+		require.Equal(t, originalReq.PodName, extractedReq.PodName)
+		require.Equal(t, originalReq.ContainerName, extractedReq.ContainerName)
+		require.Equal(t, originalReq.Command, extractedReq.Command)
+		require.Equal(t, originalReq.TTY, extractedReq.TTY)
+		require.Equal(t, originalReq.Stdin, extractedReq.Stdin)
+		require.Equal(t, originalReq.Stdout, extractedReq.Stdout)
+		require.Equal(t, originalReq.Stderr, extractedReq.Stderr)
+	})
+
+	t.Run("handles empty command slice", func(t *testing.T) {
+		originalReq := &ContainerTerminalRequest{
+			UUID:      "empty-cmd-uuid",
+			Namespace: "ns",
+			PodName:   "pod",
+			Command:   []string{},
+		}
+
+		cloudEvent, err := es.NewTerminalRequestEvent(originalReq)
+		require.NoError(t, err)
+
+		ev := New(cloudEvent, TargetTerminal)
+		extractedReq, err := ev.TerminalRequest()
+		require.NoError(t, err)
+		require.Empty(t, extractedReq.Command)
+	})
+}
+
+func TestTargetTerminal(t *testing.T) {
+	es := NewEventSource("test-source")
+
+	t.Run("Target returns TargetTerminal for terminal request event", func(t *testing.T) {
+		terminalReq := &ContainerTerminalRequest{
+			UUID:      "target-test-uuid",
+			Namespace: "ns",
+			PodName:   "pod",
+		}
+
+		ev, err := es.NewTerminalRequestEvent(terminalReq)
+		require.NoError(t, err)
+
+		target := Target(ev)
+		require.Equal(t, TargetTerminal, target)
+	})
+
+	t.Run("TargetTerminal string representation", func(t *testing.T) {
+		require.Equal(t, "terminal", TargetTerminal.String())
+	})
+
+	t.Run("TerminalRequest event type string representation", func(t *testing.T) {
+		require.Equal(t, "io.argoproj.argocd-agent.event.terminal-request", TerminalRequest.String())
+	})
+}
+
+func TestContainerTerminalRequestFields(t *testing.T) {
+	t.Run("all fields are serializable", func(t *testing.T) {
+		req := ContainerTerminalRequest{
+			UUID:          "full-test-uuid",
+			Namespace:     "full-namespace",
+			PodName:       "full-pod",
+			ContainerName: "full-container",
+			Command:       []string{"/bin/sh", "-c", "echo hello"},
+			TTY:           true,
+			Stdin:         true,
+			Stdout:        true,
+			Stderr:        true,
+		}
+
+		// Verify the struct can be used
+		require.Equal(t, "full-test-uuid", req.UUID)
+		require.Equal(t, "full-namespace", req.Namespace)
+		require.Equal(t, "full-pod", req.PodName)
+		require.Equal(t, "full-container", req.ContainerName)
+		require.Len(t, req.Command, 3)
+		require.True(t, req.TTY)
+		require.True(t, req.Stdin)
+		require.True(t, req.Stdout)
+		require.True(t, req.Stderr)
+	})
+}
