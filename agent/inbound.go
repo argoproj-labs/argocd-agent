@@ -87,9 +87,14 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	case event.TargetRedis:
 		go func() {
 			// Process request in a separate go routine, to avoid blocking the event thread on redis I/O
+			_, redisSpan := tracing.Tracer().Start(ctx, "redis.async_processing")
+			defer redisSpan.End()
 			err := a.processIncomingRedisRequest(ev)
 			if err != nil {
+				tracing.RecordError(redisSpan, err)
 				log().WithError(err).Errorf("Unable to process incoming redis event")
+			} else {
+				tracing.SetSpanOK(redisSpan)
 			}
 		}()
 	case event.TargetContainerLog:

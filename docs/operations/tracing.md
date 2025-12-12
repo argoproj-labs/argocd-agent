@@ -68,7 +68,7 @@ argocd-agent agent # ... other flags
 
 ### 4. View Traces
 
-Open Jaeger UI at http://localhost:16686 and select:
+Open Jaeger UI at [http://localhost:16686](http://localhost:16686) and select:
 - Service: `principal` or `agent`
 - Click "Find Traces" to see the traces
 
@@ -142,7 +142,7 @@ Sort traces by duration to find slow operations:
 1. Verify tracing is enabled: `--otlp-address`
 2. Check the OTLP endpoint is correct and reachable
 3. Check application logs for tracing initialization messages:
-   ```
+   ```text
    OpenTelemetry tracing initialized (address=localhost:4317)
    ```
 4. Verify your tracing backend is running and accepting OTLP data on the correct port
