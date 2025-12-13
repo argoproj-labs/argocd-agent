@@ -80,7 +80,7 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Description**: Skip verification of remote TLS certificate (INSECURE)
 - **Type**: Boolean
 - **Default**: `false`
-- **Security Warning**: Only use for development purposes
+**Security Warning**: Only use for development purposes
 - **Example**: `"false"`
 
 #### Root CA Secret Name

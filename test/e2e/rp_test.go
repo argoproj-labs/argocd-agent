@@ -292,27 +292,16 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	}()
 
 	// Get the Argo server endpoint to use
-	srvService := &corev1.Service{}
-	err := suite.PrincipalClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-server"}, srvService, v1.GetOptions{})
+	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
 	requires.NoError(err)
-	argoEndpoint := srvService.Spec.LoadBalancerIP
 
-	if len(srvService.Status.LoadBalancer.Ingress) > 0 {
-		hostname := srvService.Status.LoadBalancer.Ingress[0].Hostname
-		if hostname != "" {
-			argoEndpoint = hostname
-		}
-	}
 	appName := "guestbook-ui"
 
 	// Read admin secret from principal's cluster
-	pwdSecret := &corev1.Secret{}
-	err = suite.PrincipalClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-initial-admin-secret"}, pwdSecret, v1.GetOptions{})
+	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
 	requires.NoError(err)
 
-	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", string(pwdSecret.Data["password"]))
+	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
 	err = argoClient.Login()
 	requires.NoError(err)
 
@@ -517,7 +506,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	// We'll test with a pod eviction endpoint - it should fail with 404 since the pod doesn't exist,
 	// but this proves the subresource routing works
 	postData := []byte(`{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"test-pod","namespace":"argocd"}}`)
-	req, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:9090/api/v1/namespaces/argocd/pods/test-pod/eviction", 
+	req, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:9090/api/v1/namespaces/argocd/pods/test-pod/eviction",
 		io.NopCloser(strings.NewReader(string(postData))))
 	requires.NoError(err)
 	req.Header.Set("Content-Type", "application/json")

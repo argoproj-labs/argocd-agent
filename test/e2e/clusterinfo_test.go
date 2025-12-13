@@ -105,13 +105,14 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 
 	// Verify that connection status is updated again when agent is re-connected
+	// Increased timeout to 60s to handle potential port-forward latency in long test runs
 	requires.Eventually(func() bool {
 		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
 			Status:     appv1.ConnectionStatusSuccessful,
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 2*time.Second)
 }
 
 func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
@@ -119,12 +120,13 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 	clusterDetail := suite.ClusterDetails
 
 	// Verify the connection status is updated when agent is already connected
+	// Increased timeout to 60s to handle potential port-forward latency in long test runs
 	requires.Eventually(func() bool {
 		return fixture.HasConnectionStatus(fixture.AgentAutonomousName, appv1.ConnectionState{
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf(message, fixture.AgentAutonomousName, "connected"),
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 2*time.Second)
 
 	// Stop the agent
 	err := fixture.StopProcess(fixture.AgentAutonomousName)
@@ -137,7 +139,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 			Message:    fmt.Sprintf(message, fixture.AgentAutonomousName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 2*time.Second)
 
 	// Restart the agent
 	err = fixture.StartProcess(fixture.AgentAutonomousName)

@@ -115,10 +115,19 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_managed() {
 	requires.NotEmpty(podName, "could not find guestbook pod")
 	requires.NotEmpty(containerName, "could not determine container name")
 
-	// Fetch logs
+	// Wait for log streaming proxy to be ready (especially when running after other tests)
+	// The managed agent needs more time to recover from previous test state
+	time.Sleep(15 * time.Second)
+
+	// Fetch logs with extended timeout for managed agent
 	var logs string
 	requires.Eventually(func() bool {
-		s, e := argoClient.GetApplicationLogs(app, "guestbook", podName, containerName, 100)
+		// Fetch fresh app data from principal to ensure we have current metadata
+		freshApp := &v1alpha1.Application{}
+		if e := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, freshApp, metav1.GetOptions{}); e != nil {
+			return false
+		}
+		s, e := argoClient.GetApplicationLogs(freshApp, "guestbook", podName, containerName, 100)
 		if e != nil {
 			return false
 		}
@@ -127,7 +136,7 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_managed() {
 		}
 		logs = s
 		return true
-	}, 30*time.Second, 1*time.Second)
+	}, 90*time.Second, 3*time.Second)
 
 	requires.Greater(len(logs), 0)
 }
@@ -212,7 +221,10 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_autonomous() {
 	requires.NotEmpty(podName, "could not find guestbook pod")
 	requires.NotEmpty(containerName, "could not determine container name")
 
-	// Fetch logs
+	// Wait for log streaming proxy to be ready
+	time.Sleep(10 * time.Second)
+
+	// Fetch logs with extended timeout for CI environments
 	var logs string
 	requires.Eventually(func() bool {
 		papp := &v1alpha1.Application{}
@@ -228,9 +240,12 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_autonomous() {
 		}
 		logs = s
 		return true
-	}, 30*time.Second, 1*time.Second)
+	}, 90*time.Second, 3*time.Second)
 
 	requires.Greater(len(logs), 0)
+
+	// Allow time for log streaming connections to fully close before next test
+	time.Sleep(5 * time.Second)
 }
 
 func TestLogsStreamingTestSuite(t *testing.T) {

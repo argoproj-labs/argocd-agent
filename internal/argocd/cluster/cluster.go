@@ -15,6 +15,7 @@
 package cluster
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"time"
@@ -131,6 +132,13 @@ func (m *Manager) SetClusterCacheStats(clusterInfo *event.ClusterCacheInfo, agen
 		if existingClusterInfo.CacheInfo.LastCacheSyncTime != nil {
 			newClusterInfo.CacheInfo.LastCacheSyncTime = existingClusterInfo.CacheInfo.LastCacheSyncTime
 		}
+	} else {
+		// Initialize ConnectionState if it doesn't exist yet (agent just connected)
+		newClusterInfo.ConnectionState = appv1.ConnectionState{
+			Status:     appv1.ConnectionStatusSuccessful,
+			Message:    fmt.Sprintf("Agent: '%s' is connected with principal", agentName),
+			ModifiedAt: &metav1.Time{Time: time.Now()},
+		}
 	}
 
 	// Set the info in mapped cluster at principal.
@@ -165,7 +173,7 @@ func (m *Manager) setClusterInfo(clusterServer, agentName, clusterName string, c
 }
 
 // NewClusterCacheInstance creates a new cache instance with Redis connection
-func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType) (*appstatecache.Cache, error) {
+func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType, tlsConfig *tls.Config) (*appstatecache.Cache, error) {
 
 	redisOptions := &redis.Options{
 		Addr:     redisAddress,
@@ -173,6 +181,7 @@ func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressio
 		MaintNotificationsConfig: &maintnotifications.Config{
 			Mode: maintnotifications.ModeDisabled,
 		},
+		TLSConfig: tlsConfig,
 	}
 	redisClient := redis.NewClient(redisOptions)
 
