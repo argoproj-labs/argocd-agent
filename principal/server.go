@@ -49,6 +49,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	logstream "github.com/argoproj-labs/argocd-agent/principal/apis/logstreamapi"
@@ -59,6 +60,7 @@ import (
 	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -627,6 +629,13 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 		"mode":  agent.Mode(),
 	})
 
+	ctx, span := tracing.Tracer().Start(s.ctx, "handleResyncOnConnect", trace.WithAttributes(
+		tracing.AttrAgentName.String(agent.Name()),
+		tracing.AttrAgentMode.String(agent.Mode()),
+		tracing.AttrComponentType.String("principal"),
+	))
+	defer span.End()
+
 	if s.resyncStatus.isResynced(agent.Name()) {
 		if agent.Mode() == types.AgentModeManaged.String() {
 			// When the agent is down, the informer could've dropped events since it doesn't know anything about the agent.
@@ -667,6 +676,8 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 			return fmt.Errorf("failed to create SyncedResourceList event: %v", err)
 		}
 
+		span.SetAttributes(tracing.AttrEventType.String(event.SyncedResourceList.String()))
+		tracing.InjectTraceContext(ctx, ev)
 		sendQ.Add(ev)
 		logCtx.Trace("Sent a request for SyncedResourceList")
 	} else {
@@ -684,6 +695,8 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 			return fmt.Errorf("failed to create ResourceResync event: %v", err)
 		}
 
+		span.SetAttributes(tracing.AttrEventType.String(event.EventRequestResourceResync.String()))
+		tracing.InjectTraceContext(ctx, ev)
 		sendQ.Add(ev)
 		logCtx.Trace("Sent a request for ResourceResync")
 	}
@@ -693,6 +706,13 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 }
 
 func (s *Server) sendCurrentStateToAgent(agent string) error {
+	ctx, span := tracing.Tracer().Start(s.ctx, "sendCurrentStateToAgent", trace.WithAttributes(
+		tracing.AttrAgentName.String(agent),
+		tracing.AttrComponentType.String("principal"),
+		tracing.AttrEventType.String(event.SpecUpdate.String()),
+	))
+	defer span.End()
+
 	sendQ := s.queues.SendQ(agent)
 	// Send all the AppProjects to the agent
 	appProjects, err := s.projectManager.List(s.ctx, backend.AppProjectSelector{Namespace: s.namespace})
@@ -713,7 +733,10 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 		}
 
 		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent)
-		sendQ.Add(s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject))
+		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
+		tracing.PopulateSpanFromObject(span, &appProject)
+		tracing.InjectTraceContext(ctx, ev)
+		sendQ.Add(ev)
 
 		projectMap[string(appProject.Name)] = appProject
 	}
@@ -748,7 +771,10 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 		s.projectToRepos.Add(projectName, repository.Name)
 		s.repoToAgents.Add(repository.Name, agent)
 
-		sendQ.Add(s.events.RepositoryEvent(event.SpecUpdate, &repository))
+		ev := s.events.RepositoryEvent(event.SpecUpdate, &repository)
+		tracing.PopulateSpanFromObject(span, &repository)
+		tracing.InjectTraceContext(ctx, ev)
+		sendQ.Add(ev)
 	}
 
 	return nil
