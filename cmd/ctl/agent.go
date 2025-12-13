@@ -98,10 +98,79 @@ func generateAgentClientCert(agentName string, clt *kube.KubernetesClient) (clie
 	return
 }
 
+// parseSecretRef parses a secret reference in the format "namespace/name" or "name".
+// If no namespace is specified, the default namespace is used.
+func parseSecretRef(secretRef, defaultNamespace string) (namespace, name string) {
+	parts := strings.SplitN(secretRef, "/", 2)
+	if len(parts) == 2 {
+		if parts[0] == "" {
+			return defaultNamespace, parts[1]
+		}
+		return parts[0], parts[1]
+	}
+	return defaultNamespace, secretRef
+}
+
+// readTLSFromExistingSecrets reads TLS certificate, key and CA data from existing secrets.
+// The TLS secret should contain keys tls.crt and tls.key.
+// The CA secret should contain the key ca.crt.
+// Secret references can be in the format "namespace/name" or just "name" (uses principal namespace).
+func readTLSFromExistingSecrets(ctx context.Context, clt *kube.KubernetesClient, tlsSecretRef, caSecretRef string) (clientCert string, clientKey string, caData string, err error) {
+	// Parse secret references to extract namespace and name
+	tlsNamespace, tlsSecretName := parseSecretRef(tlsSecretRef, globalOpts.principalNamespace)
+	caNamespace, caSecretName := parseSecretRef(caSecretRef, globalOpts.principalNamespace)
+
+	// Read TLS certificate and key from the TLS secret
+	tlsSecret, err := clt.Clientset.CoreV1().Secrets(tlsNamespace).Get(ctx, tlsSecretName, metav1.GetOptions{})
+	if err != nil {
+		err = fmt.Errorf("could not read TLS secret %s/%s: %w", tlsNamespace, tlsSecretName, err)
+		return
+	}
+
+	certData, ok := tlsSecret.Data["tls.crt"]
+	if !ok {
+		err = fmt.Errorf("TLS secret %s/%s does not contain key 'tls.crt'", tlsNamespace, tlsSecretName)
+		return
+	}
+	keyData, ok := tlsSecret.Data["tls.key"]
+	if !ok {
+		err = fmt.Errorf("TLS secret %s/%s does not contain key 'tls.key'", tlsNamespace, tlsSecretName)
+		return
+	}
+
+	// Validate that the certificate and key form a valid pair
+	_, err = tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		err = fmt.Errorf("invalid TLS certificate/key pair in secret %s/%s: %w", tlsNamespace, tlsSecretName, err)
+		return
+	}
+
+	// Read CA certificate from the CA secret
+	caSecret, err := clt.Clientset.CoreV1().Secrets(caNamespace).Get(ctx, caSecretName, metav1.GetOptions{})
+	if err != nil {
+		err = fmt.Errorf("could not read CA secret %s/%s: %w", caNamespace, caSecretName, err)
+		return
+	}
+
+	caCertData, ok := caSecret.Data["ca.crt"]
+	if !ok {
+		err = fmt.Errorf("CA secret %s/%s does not contain key 'ca.crt'", caNamespace, caSecretName)
+		return
+	}
+
+	clientCert = string(certData)
+	clientKey = string(keyData)
+	caData = string(caCertData)
+
+	return
+}
+
 func NewAgentCreateCommand() *cobra.Command {
 	var (
-		rpServer  string
-		addLabels []string
+		rpServer      string
+		addLabels     []string
+		tlsFromSecret string
+		caFromSecret  string
 	)
 	command := &cobra.Command{
 		Short: "Create a new agent configuration",
@@ -113,6 +182,11 @@ func NewAgentCreateCommand() *cobra.Command {
 			}
 			agentName := args[0]
 			ctx := context.TODO()
+
+			// Validate that both --tls-from-secret and --ca-from-secret are provided together
+			if (tlsFromSecret != "" && caFromSecret == "") || (tlsFromSecret == "" && caFromSecret != "") {
+				cmdutil.Fatal("Both --tls-from-secret and --ca-from-secret must be provided together")
+			}
 
 			// A set of labels for the cluster secret
 			labels := make(map[string]string)
@@ -145,9 +219,20 @@ func NewAgentCreateCommand() *cobra.Command {
 				cmdutil.Fatal("Agent %s exists.", agentName)
 			}
 
-			clientCert, clientKey, caData, err := generateAgentClientCert(agentName, clt)
-			if err != nil {
-				cmdutil.Fatal("%v", err)
+			var clientCert, clientKey, caData string
+
+			if tlsFromSecret != "" && caFromSecret != "" {
+				// Read TLS credentials from existing secrets
+				clientCert, clientKey, caData, err = readTLSFromExistingSecrets(ctx, clt, tlsFromSecret, caFromSecret)
+				if err != nil {
+					cmdutil.Fatal("%v", err)
+				}
+			} else {
+				// Generate certificates from the PKI
+				clientCert, clientKey, caData, err = generateAgentClientCert(agentName, clt)
+				if err != nil {
+					cmdutil.Fatal("%v", err)
+				}
 			}
 
 			// Construct Argo CD cluster configuration
@@ -184,6 +269,8 @@ func NewAgentCreateCommand() *cobra.Command {
 	}
 	command.Flags().StringVar(&rpServer, "resource-proxy-server", "argocd-agent-resource-proxy:9090", "Address of principal's resource-proxy")
 	command.Flags().StringSliceVarP(&addLabels, "label", "l", []string{}, "Additional labels for the agent")
+	command.Flags().StringVar(&tlsFromSecret, "tls-from-secret", "", "Name of an existing secret containing TLS certificate and key (keys: tls.crt, tls.key). Format: [namespace/]name")
+	command.Flags().StringVar(&caFromSecret, "ca-from-secret", "", "Name of an existing secret containing CA certificate (key: ca.crt). Format: [namespace/]name")
 	return command
 }
 
