@@ -31,7 +31,13 @@ if [[ ! -f "${CREDS_DIR}/redis-control-plane.key" ]]; then
     openssl genrsa -out "${CREDS_DIR}/redis-control-plane.key" 4096
 fi
 
-if [[ ! -f "${CREDS_DIR}/redis-control-plane.crt" ]]; then
+# Always regenerate certificate to include LoadBalancer IPs if available
+echo "Generating redis-control-plane certificate with LoadBalancer SANs..."
+
+# Try to get LoadBalancer IP/hostname if vcluster exists
+LB_IP=$(kubectl get svc argocd-redis --context="vcluster-control-plane" -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+LB_HOSTNAME=$(kubectl get svc argocd-redis --context="vcluster-control-plane" -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+
     # Create extension file for SAN
     cat > "${CREDS_DIR}/redis-control-plane.ext" <<EOF
 subjectAltName = @alt_names
@@ -44,6 +50,17 @@ DNS.5 = localhost
 IP.1 = 127.0.0.1
 EOF
 
+# Add LoadBalancer address if available
+if [ -n "${LB_IP}" ]; then
+    echo "  Adding LoadBalancer IP to redis-control-plane certificate: ${LB_IP}"
+    echo "IP.2 = ${LB_IP}" >> "${CREDS_DIR}/redis-control-plane.ext"
+elif [ -n "${LB_HOSTNAME}" ]; then
+    echo "  Adding LoadBalancer hostname to redis-control-plane certificate: ${LB_HOSTNAME}"
+    echo "DNS.6 = ${LB_HOSTNAME}" >> "${CREDS_DIR}/redis-control-plane.ext"
+else
+    echo "  No LoadBalancer address found for redis-control-plane (OK if vclusters not created yet)"
+fi
+
     openssl req -new -key "${CREDS_DIR}/redis-control-plane.key" \
         -out "${CREDS_DIR}/redis-control-plane.csr" \
         -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis"
@@ -55,7 +72,6 @@ EOF
         -out "${CREDS_DIR}/redis-control-plane.crt" \
         -days 365 \
         -extfile "${CREDS_DIR}/redis-control-plane.ext"
-fi
 
 # Generate Redis proxy certificate (for principal's Redis proxy)
 if [[ ! -f "${CREDS_DIR}/redis-proxy.key" ]]; then
@@ -109,7 +125,14 @@ for agent in autonomous managed; do
         openssl genrsa -out "${CREDS_DIR}/redis-${agent}.key" 4096
     fi
 
-    if [[ ! -f "${CREDS_DIR}/redis-${agent}.crt" ]]; then
+    # Always regenerate certificate to include LoadBalancer IPs if available
+    echo "Generating redis-${agent} certificate with LoadBalancer SANs..."
+    
+    # Try to get LoadBalancer IP/hostname if vcluster exists
+    CONTEXT="vcluster-agent-${agent}"
+    LB_IP=$(kubectl get svc argocd-redis --context="${CONTEXT}" -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+    LB_HOSTNAME=$(kubectl get svc argocd-redis --context="${CONTEXT}" -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    
         cat > "${CREDS_DIR}/redis-${agent}.ext" <<EOF
 subjectAltName = @alt_names
 [alt_names]
@@ -120,6 +143,17 @@ DNS.4 = argocd-redis.argocd.svc.cluster.local
 DNS.5 = localhost
 IP.1 = 127.0.0.1
 EOF
+
+    # Add LoadBalancer address if available
+    if [ -n "${LB_IP}" ]; then
+        echo "  Adding LoadBalancer IP to redis-${agent} certificate: ${LB_IP}"
+        echo "IP.2 = ${LB_IP}" >> "${CREDS_DIR}/redis-${agent}.ext"
+    elif [ -n "${LB_HOSTNAME}" ]; then
+        echo "  Adding LoadBalancer hostname to redis-${agent} certificate: ${LB_HOSTNAME}"
+        echo "DNS.6 = ${LB_HOSTNAME}" >> "${CREDS_DIR}/redis-${agent}.ext"
+    else
+        echo "  No LoadBalancer address found for redis-${agent} (OK if vclusters not created yet)"
+    fi
 
         openssl req -new -key "${CREDS_DIR}/redis-${agent}.key" \
             -out "${CREDS_DIR}/redis-${agent}.csr" \
@@ -132,7 +166,6 @@ EOF
             -out "${CREDS_DIR}/redis-${agent}.crt" \
             -days 365 \
             -extfile "${CREDS_DIR}/redis-${agent}.ext"
-    fi
 done
 
 echo ""

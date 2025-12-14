@@ -1,7 +1,5 @@
-pf-control-plane: kubectl port-forward svc/argocd-redis -n argocd 6380:6379 --context vcluster-control-plane
-pf-managed: kubectl port-forward svc/argocd-redis -n argocd 6381:6379 --context vcluster-agent-managed
-pf-autonomous: kubectl port-forward svc/argocd-redis -n argocd 6382:6379 --context vcluster-agent-autonomous
-pf-argocd-server: kubectl port-forward svc/argocd-server -n argocd 8444:443 --context vcluster-control-plane
-principal: sleep 3s && hack/dev-env/start-principal.sh
+# Default Procfile - for Linux/CI (without port-forwards)
+# For local macOS development, use Procfile.e2e.local
+principal: hack/dev-env/start-principal.sh
 agent-managed: sleep 5s && ARGOCD_AGENT_REDIS_ADDRESS=$MANAGED_AGENT_REDIS_ADDR hack/dev-env/start-agent-managed.sh
 agent-autonomous: sleep 5s && ARGOCD_AGENT_REDIS_ADDRESS=$AUTONOMOUS_AGENT_REDIS_ADDR hack/dev-env/start-agent-autonomous.sh

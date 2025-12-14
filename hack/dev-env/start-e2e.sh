@@ -47,15 +47,75 @@ getExternalLoadBalancerIP() {
 
 }
 
-# Set Redis addresses to use localhost (for TLS certificate validation)
-# Port-forwards are managed by goreman (see Procfile.e2e)
-export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="localhost:6380"
-export ARGOCD_AGENT_REDIS_ADDRESS="localhost:6381"
-export MANAGED_AGENT_REDIS_ADDR="localhost:6381"
-export AUTONOMOUS_AGENT_REDIS_ADDR="localhost:6382"
-export ARGOCD_SERVER_ADDRESS="localhost:8444"
+# Dual-mode setup: Port-forwards (local) vs LoadBalancer IPs
+# Can be overridden with E2E_USE_PORT_FORWARD=true/false
+if [[ "${E2E_USE_PORT_FORWARD:-auto}" == "auto" ]]; then
+  # Auto-detect based on OS
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    E2E_USE_PORT_FORWARD=true
+  else
+    E2E_USE_PORT_FORWARD=false
+  fi
+fi
 
-REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed -n argocd -o jsonpath='{.data.auth}' | base64 --decode)
-export REDIS_PASSWORD
+if [[ "$E2E_USE_PORT_FORWARD" == "true" ]]; then
+  echo "=========================================="
+  echo "Mode: LOCAL (Port-Forwards)"
+  echo "=========================================="
+  echo "Using localhost addresses via kubectl port-forward"
+  echo ""
+  export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="localhost:6380"
+  export MANAGED_AGENT_REDIS_ADDR="localhost:6381"
+  export AUTONOMOUS_AGENT_REDIS_ADDR="localhost:6382"
+  export ARGOCD_SERVER_ADDRESS="localhost:8444"
+else
+  echo "=========================================="
+  echo "Mode: Linux/CI (Direct LoadBalancer IPs)"
+  echo "=========================================="
+  echo "Using LoadBalancer IPs directly (requires MetalLB or cloud LB)"
+  echo ""
+  
+  # Get hostname of control-plane redis
+  K8S_CONTEXT="--context=vcluster-control-plane"
+  K8S_NAMESPACE="-n argocd"
+  getExternalLoadBalancerIP "argocd-redis"
+  export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="$EXTERNAL_IP:6379"
 
-goreman -exit-on-stop=false -f hack/dev-env/Procfile.e2e start
+  # Get hostname of agent-managed redis
+  K8S_CONTEXT="--context=vcluster-agent-managed"
+  K8S_NAMESPACE="-n argocd"
+  getExternalLoadBalancerIP "argocd-redis"
+  export MANAGED_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
+
+  # Get hostname of agent-autonomous redis
+  K8S_CONTEXT="--context=vcluster-agent-autonomous"
+  K8S_NAMESPACE="-n argocd"
+  getExternalLoadBalancerIP "argocd-redis"
+  export AUTONOMOUS_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
+fi
+
+K8S_NAMESPACE="-n argocd"
+export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed $K8S_NAMESPACE -o jsonpath='{.data.auth}' | base64 --decode)
+
+echo "Addresses:"
+echo "  Principal Redis: $ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS"
+echo "  Managed Redis:   $MANAGED_AGENT_REDIS_ADDR"
+echo "  Autonomous Redis: $AUTONOMOUS_AGENT_REDIS_ADDR"
+if [[ -n "$ARGOCD_SERVER_ADDRESS" ]]; then
+  echo "  ArgoCD Server:   $ARGOCD_SERVER_ADDRESS"
+fi
+echo ""
+
+# Use the appropriate Procfile based on mode
+if [[ "$E2E_USE_PORT_FORWARD" == "true" ]]; then
+  PROCFILE="hack/dev-env/Procfile.e2e.local"
+  echo "Starting with port-forwards..."
+  echo "Procfile: $PROCFILE"
+else
+  PROCFILE="hack/dev-env/Procfile.e2e"
+  echo "Starting without port-forwards..."
+  echo "Procfile: $PROCFILE"
+fi
+echo ""
+
+goreman -exit-on-stop=false -f $PROCFILE start

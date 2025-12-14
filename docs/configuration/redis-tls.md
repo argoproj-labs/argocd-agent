@@ -12,6 +12,7 @@ This guide explains how to configure TLS encryption for Redis connections in arg
 - [Certificate Management](#certificate-management)
 - [Configuration](#configuration)
 - [Kubernetes Installation](#kubernetes-installation)
+- [Testing Guide](#testing-guide)
 - [Troubleshooting](#troubleshooting)
 - [Security Best Practices](#security-best-practices)
 
@@ -76,16 +77,23 @@ Tests will fail if Redis TLS is not properly configured. The `make setup-e2e` co
 ```bash
 make setup-e2e    # Automatically includes Redis TLS setup
 make start-e2e    # Start principal and agents
-make test-e2e     # Run tests (ONLY with Redis TLS enabled)
+make test-e2e     # Run tests
 ```
 
-**E2E Test Environment Variables:**
+**For CI:**
 ```bash
-# Automatically set by hack/dev-env/start-e2e:
-export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="localhost:6380"
-export MANAGED_AGENT_REDIS_ADDR="localhost:6381"
-export AUTONOMOUS_AGENT_REDIS_ADDR="localhost:6382"
+make setup-e2e
+make start-e2e &
+sleep 10
+make test-e2e
 ```
+
+> **Note:** No manual environment variables needed! The scripts automatically detect your environment (macOS vs Linux) and configure appropriately.
+
+**What Happens Automatically:**
+- **Local macOS**: Port-forwards to `localhost:6380/6381/6382` are used
+- **CI/Linux**: Direct LoadBalancer IPs are detected and used
+- **With reverse tunnel**: Traffic routes through the tunnel to your local principal
 
 #### What `make setup-e2e` Does
 
@@ -94,18 +102,20 @@ The `make setup-e2e` command performs a comprehensive setup, including all Redis
 1. **Creates vclusters** (control-plane, agent-managed, agent-autonomous)
 2. **Generates mTLS certificates** for agent authentication
 3. **Creates agent configuration** (cluster secrets, RBAC)
-4. **Generates Redis TLS certificates** (calls `gen-redis-tls-certs.sh`)
+4. **Waits for LoadBalancer IPs** - Ensures Redis services have external IPs assigned (critical for CI)
+5. **Generates Redis TLS certificates** (calls `gen-redis-tls-certs.sh`)
    - ✅ Includes your local IP in SANs
+   - ✅ Includes LoadBalancer IPs/hostnames in SANs (fixes TLS handshake failures in CI)
    - ✅ Includes `rathole-container-internal` for reverse tunnel
-5. **Configures Redis for TLS** (calls `configure-redis-tls.sh` for each vcluster)
+6. **Configures Redis for TLS** (calls `configure-redis-tls.sh` for each vcluster)
    - Creates `argocd-redis-tls` secrets
    - Patches Redis Deployments for TLS
-6. **Configures Argo CD components** (calls `configure-argocd-redis-tls.sh` for each vcluster)
+7. **Configures Argo CD components** (calls `configure-argocd-redis-tls.sh` for each vcluster)
    - Sets `redis.server` to DNS names (not ClusterIPs)
    - Adds TLS configuration to server, repo-server, application-controller
    - Restarts all components
 
-After `make setup-e2e` completes, your environment is **fully configured** for Redis TLS and ready to run tests.
+After `make setup-e2e` completes, your environment is **fully configured** for Redis TLS and ready to run tests. **All E2E tests pass successfully** ✅
 
 ### Local Development Environments
 
@@ -115,7 +125,7 @@ Your local development setup determines whether additional configuration is need
 - **Description:** vclusters run on local microk8s/k3d/kind on your workstation
 - **Connectivity:** Direct via LoadBalancer or port-forwards
 - **Requirements:** 
-  - ✅ Port-forwards (`localhost:6380/6381/6382`)
+  - ✅ Port-forwards (`localhost:6380/6381/6382`) on macOS
   - ❌ No reverse tunnel needed
 - **Example:** CI environment, local k3d setup
 
@@ -160,95 +170,7 @@ Your local development setup determines whether additional configuration is need
 
 - **See also:** `hack/dev-env/reverse-tunnel/README.md` for detailed configuration
 
-**Manual Testing:**
-
-#### Step 1: Generate Certificates
-
-```bash
-./hack/dev-env/gen-redis-tls-certs.sh
-```
-
-This script generates:
-- **CA certificate** (`ca.crt`, `ca.key`) - Used to sign all Redis certificates
-- **Redis server certificates** for each vcluster:
-  - `redis-control-plane.{crt,key}` - For principal's Redis
-  - `redis-managed.{crt,key}` - For managed agent's Redis
-  - `redis-autonomous.{crt,key}` - For autonomous agent's Redis
-- **Redis proxy certificate** (`redis-proxy.{crt,key}`) - For principal's Redis proxy
-  - **Automatically includes** your Mac's local IP in SANs (detected via `ipconfig` or `ip`)
-  - **Already includes** `rathole-container-internal` in SANs for reverse tunnel support
-
-**Certificate SANs include:**
-- `argocd-redis`, `argocd-redis.argocd.svc.cluster.local` (Kubernetes DNS)
-- `localhost`, `127.0.0.1` (port-forward support)
-- Your Mac's IP address (direct access)
-- `rathole-container-internal` (reverse tunnel support)
-
-#### Step 2: Configure Redis for TLS
-
-```bash
-./hack/dev-env/configure-redis-tls.sh vcluster-control-plane
-./hack/dev-env/configure-redis-tls.sh vcluster-agent-managed
-./hack/dev-env/configure-redis-tls.sh vcluster-agent-autonomous
-```
-
-This script **for each cluster**:
-1. Creates `argocd-redis-tls` secret with TLS certificate, key, and CA
-2. Patches `argocd-redis` Deployment:
-   - Adds `redis-tls` volume (from secret)
-   - Adds volume mount to `/app/tls`
-   - Updates Redis arguments:
-     - `--tls-port 6379` (enable TLS on port 6379)
-     - `--port 0` (disable plain TCP)
-     - `--tls-cert-file`, `--tls-key-file`, `--tls-ca-cert-file` (certificate paths)
-     - `--tls-auth-clients no` (client certs not required)
-3. Waits for deployment rollout to complete
-
-#### Step 3: Configure Argo CD Components for Redis TLS
-
-```bash
-./hack/dev-env/configure-argocd-redis-tls.sh vcluster-control-plane
-./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-managed
-./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-autonomous
-```
-
-This script **for each cluster**:
-1. **For agent clusters only:** Updates `argocd-cmd-params-cm` ConfigMap:
-   - Sets `redis.server: argocd-redis:6379` (uses DNS name, not ClusterIP!)
-2. Patches Argo CD components (`argocd-server`, `argocd-repo-server`, `argocd-application-controller`):
-   - Adds `redis-tls-ca` volume (CA certificate from `argocd-redis-tls` secret)
-   - Adds volume mount to `/app/config/redis/tls`
-   - Adds args: `--redis-use-tls`, `--redis-ca-certificate=/app/config/redis/tls/ca.crt`
-3. Restarts all Argo CD components to apply changes
-
-#### Step 4: Start Principal with TLS
-
-```bash
-./hack/dev-env/start-principal.sh
-```
-
-The script automatically:
-- Detects Redis TLS certificates in `hack/dev-env/creds/redis-tls/`
-- Enables Redis TLS with `--redis-tls-enabled=true`
-- Configures Redis proxy server TLS (for incoming connections from Argo CD)
-- Configures upstream Redis TLS (for connections to principal's Redis)
-
-#### Step 5: Start Agents with TLS
-
-```bash
-# In separate terminals
-./hack/dev-env/start-agent-managed.sh
-./hack/dev-env/start-agent-autonomous.sh
-```
-
-The scripts automatically:
-- Detect Redis TLS certificates
-- Enable Redis TLS with `--redis-tls-enabled=true`
-- Configure Redis CA certificate for TLS validation
-
-### For Production (Kubernetes)
-
-See the [Kubernetes Installation](#kubernetes-installation) section below.
+> **For detailed manual testing steps**, see the comprehensive [Testing Guide](#testing-guide) section below.
 
 ## Certificate Management
 
@@ -464,6 +386,470 @@ data:
 ```
 
 **Deployments already have volume mounts configured** - no manual changes needed.
+
+## Testing Guide
+
+This guide walks through testing Redis TLS in a local development environment using the E2E setup scripts.
+
+### Prerequisites
+
+- ✅ Run `make setup-e2e` first (sets up vclusters with Argo CD and LoadBalancer IPs)
+- ✅ Code changes compiled
+- ✅ Three terminal windows available
+
+### Terminal Layout
+
+| Terminal | Purpose |
+|----------|---------|
+| Terminal 1 | Principal process (auto-starts control plane Redis port-forward on 6380) |
+| Terminal 2 | Agent process (requires port-forward on 6381 for agent Redis) |
+| Terminal 3 | Port-forwards (agent Redis 6381, UI 8080) & test commands |
+
+---
+
+### Step 1: Generate Certificates
+
+```bash
+cd hack/dev-env
+./gen-redis-tls-certs.sh
+```
+
+**Expected:** Certificate files created in `creds/redis-tls/`:
+- `ca.crt`, `ca.key` (CA certificate authority)
+- `redis-control-plane.{crt,key}` (for control plane Redis)
+- `redis-proxy.{crt,key}` (for principal's Redis proxy)
+- `redis-managed.{crt,key}` (for managed agent Redis)
+- `redis-autonomous.{crt,key}` (for autonomous agent Redis)
+
+---
+
+### Step 2: Configure Argo CD Components for Redis TLS
+
+**Important:** Configure Argo CD components BEFORE enabling Redis TLS to prevent connection errors.
+
+```bash
+# Control plane
+./configure-argocd-redis-tls.sh vcluster-control-plane
+
+# Managed agent
+./configure-argocd-redis-tls.sh vcluster-agent-managed
+
+# Autonomous agent (optional, if testing autonomous mode)
+./configure-argocd-redis-tls.sh vcluster-agent-autonomous
+```
+
+**What this does:**
+- ✅ Creates `argocd-redis-tls` Kubernetes secret with certificates
+- ✅ Mounts CA certificate to Argo CD components
+- ✅ Configures `--redis-use-tls` with `--redis-ca-certificate` flag
+- ✅ Waits for pods to restart with new configuration
+- ✅ **Enables proper certificate validation** (no insecure skip!)
+
+**Expected output:**
+```
+✅ Argo CD Redis TLS Configuration Complete!
+Argo CD components will now connect to Redis using TLS with proper certificate validation.
+```
+
+---
+
+### Step 3: Enable Redis TLS
+
+Now that Argo CD components are ready, enable TLS on Redis:
+
+```bash
+# Control plane
+./configure-redis-tls.sh vcluster-control-plane
+
+# Managed agent
+./configure-redis-tls.sh vcluster-agent-managed
+
+# Autonomous agent (optional)
+./configure-redis-tls.sh vcluster-agent-autonomous
+```
+
+**What this does:**
+- ✅ Uses existing `argocd-redis-tls` secret (created in Step 2)
+- ✅ Patches Redis deployment for TLS-only mode
+- ✅ Waits for rollout to complete
+
+**Expected output:**
+```
+✅ Redis TLS Configuration Complete!
+Redis is now running in TLS-only mode.
+```
+
+---
+
+### Step 4: Verify No Errors
+
+Wait 30 seconds for everything to stabilize, then check for errors:
+
+```bash
+sleep 30
+
+# Control plane - should be EMPTY (no errors)
+kubectl logs -n argocd -l app.kubernetes.io/name=argocd-redis --context vcluster-control-plane --since=1m | grep -i "error\|wrong version\|bad certificate"
+
+# Managed agent - should be EMPTY (no errors)
+kubectl logs -n argocd -l app.kubernetes.io/name=argocd-redis --context vcluster-agent-managed --since=1m | grep -i "error\|wrong version\|bad certificate"
+```
+
+**Expected:** No output (indicates no TLS errors)
+
+---
+
+### Step 5: Test Redis TLS Connections
+
+Test direct Redis connections to verify TLS is working:
+
+**Control Plane:**
+```bash
+REDIS_PASSWORD=$(kubectl get secret argocd-redis -n argocd --context vcluster-control-plane -o jsonpath='{.data.auth}' | base64 -d)
+kubectl exec -n argocd --context vcluster-control-plane -it deployment/argocd-redis -- redis-cli -h localhost -p 6379 --tls --insecure -a "$REDIS_PASSWORD" PING
+```
+
+**Expected:** `PONG`
+
+**Managed Agent:**
+```bash
+REDIS_PASSWORD=$(kubectl get secret argocd-redis -n argocd --context vcluster-agent-managed -o jsonpath='{.data.auth}' | base64 -d)
+kubectl exec -n argocd --context vcluster-agent-managed -it deployment/argocd-redis -- redis-cli -h localhost -p 6379 --tls --insecure -a "$REDIS_PASSWORD" PING
+```
+
+**Expected:** `PONG`
+
+---
+
+### Step 6: Start Port-Forward for Agent Redis (Terminal 3)
+
+The agent needs local access to its Redis. Start the port-forward:
+
+```bash
+kubectl port-forward svc/argocd-redis -n argocd 6381:6379 --context vcluster-agent-managed
+```
+
+**Keep this running!**
+
+**Note:** The control plane Redis port-forward (6380) is automatically started by `start-principal.sh` in Step 7.
+
+**Test the port-forward (in another terminal):**
+```bash
+REDIS_PASSWORD=$(kubectl get secret argocd-redis -n argocd --context vcluster-agent-managed -o jsonpath='{.data.auth}' | base64 -d)
+redis-cli -h localhost -p 6381 --tls --insecure -a "$REDIS_PASSWORD" PING
+```
+
+**Expected:** `PONG` ✅
+
+---
+
+### Step 7: Start Principal (Terminal 1)
+
+```bash
+cd hack/dev-env
+./start-principal.sh
+```
+
+**The script automatically:**
+1. Sets up port-forward to control plane Redis on `localhost:6380`
+2. Loads Redis TLS certificates
+3. Connects with **proper TLS certificate validation** using the CA certificate
+4. Starts Redis proxy with TLS enabled on port 6379
+
+**Wait for these success messages:**
+```
+✅ Starting port-forward to Redis on localhost:6380...
+✅ Connected to Redis via port-forward at localhost:6380
+✅ Redis TLS certificates found, enabling TLS for Redis connections
+✅ Loading Redis upstream CA certificate from file
+✅ level=info msg="Starting argocd-agent (server) v99.9.9-unreleased"
+✅ level=info msg="Now listening on [::]:8443"
+✅ level=info msg="Redis proxy started on 0.0.0.0:6379 with TLS"
+✅ level=info msg="Application informer synced and ready"
+```
+
+**✅ Full TLS with Certificate Validation:** The port-forward allows connection via `localhost`, which is in the certificate's SANs, enabling proper hostname verification!
+
+**Keep this terminal running!**
+
+---
+
+### Step 8: Start Agent (Terminal 2)
+
+```bash
+cd hack/dev-env
+./start-agent-managed.sh
+```
+
+**The script automatically:**
+1. Uses `localhost:6381` for Redis (requires the port-forward from Step 6)
+2. Loads Redis TLS certificates
+3. Enables TLS with **proper certificate validation** using the CA certificate
+4. Connects to the principal with mTLS authentication
+
+**Wait for these success messages:**
+```
+✅ Using default Redis address for local development: localhost:6381
+✅ Redis TLS certificates found, enabling TLS for Redis connections
+✅ level=info msg="Loading Redis CA certificate from file"
+✅ level=debug msg="Using CA certificate for Redis TLS"
+✅ level=info msg="Starting argocd-agent (agent)"
+✅ level=info msg="Authentication successful"
+✅ level=info msg="Connected to argocd-agent"
+```
+
+**✅ Full TLS with Certificate Validation:** The agent validates certificates properly via `localhost` (in cert SANs)!
+
+**Keep this terminal running!**
+
+---
+
+### Step 9: Create Test Application
+
+Get the cluster server URL:
+
+```bash
+kubectl get secret cluster-agent-managed -n argocd --context vcluster-control-plane -o jsonpath='{.data.server}' | base64 -d && echo
+```
+
+**Example output:** `https://192.168.1.2:9090?agentName=agent-managed`
+
+Create an application (replace the server URL with yours):
+
+```bash
+cat <<EOF | kubectl apply --context vcluster-control-plane -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook
+  namespace: agent-managed
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    server: https://192.168.1.2:9090?agentName=agent-managed
+    namespace: default
+EOF
+```
+
+**Note:** Applications are created in the `agent-managed` namespace on the control plane.
+
+---
+
+### Step 10: Verify Application Sync
+
+**Watch the application on control plane:**
+
+```bash
+kubectl get application guestbook -n agent-managed --context vcluster-control-plane
+```
+
+**Expected:** Progresses to `Synced` + `Healthy` (1-2 minutes)
+
+**Check the application on managed agent:**
+
+```bash
+sleep 15
+kubectl get application guestbook -n argocd --context vcluster-agent-managed
+```
+
+**Expected:** Shows `Synced` + `Healthy`
+
+**Verify pods are running:**
+
+```bash
+kubectl get pods -n default --context vcluster-agent-managed
+```
+
+**Expected:** `guestbook-ui-*` pod in `Running` state
+
+---
+
+### Step 11: Access Argo CD UI
+
+Get the admin password:
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret --context vcluster-control-plane -o jsonpath="{.data.password}" | base64 -d && echo
+```
+
+Start port-forward to the UI (in Terminal 3, after stopping agent Redis port-forward with Ctrl+C):
+
+```bash
+kubectl port-forward svc/argocd-server -n argocd 8080:443 --context vcluster-control-plane
+```
+
+Open browser: **http://localhost:8080**
+
+- Username: `admin`
+- Password: (from command above)
+
+**Verify:** Application shows `Synced` + `Healthy` in the UI
+
+---
+
+### Step 12: Final Verification
+
+Check for any Redis TLS errors during the entire test:
+
+```bash
+# Control plane (should return 0)
+kubectl logs -n argocd -l app.kubernetes.io/name=argocd-redis --context vcluster-control-plane --since=10m | grep -i "error\|wrong version\|bad certificate" | wc -l
+
+# Managed agent (should return 0)
+kubectl logs -n argocd -l app.kubernetes.io/name=argocd-redis --context vcluster-agent-managed --since=10m | grep -i "error\|wrong version\|bad certificate" | wc -l
+```
+
+**Expected:** Both commands return `0` (no errors)
+
+---
+
+### ✅ Success Criteria
+
+All must be true:
+
+1. ✅ No Redis TLS errors in logs
+2. ✅ Principal started with "Loading Redis upstream CA certificate from file"
+3. ✅ Agent connected successfully with "Authentication successful"
+4. ✅ Application synced to managed cluster
+5. ✅ Pods deployed and running
+6. ✅ Application visible in UI as Synced/Healthy
+
+---
+
+### Common Issues and Solutions
+
+#### ❌ Error: "secret 'argocd-redis-tls' not found"
+
+**When:** Running `configure-argocd-redis-tls.sh`
+
+**Cause:** Redis TLS secret doesn't exist yet
+
+**Fix:** This shouldn't happen if you followed the steps in order. The secret is created by `configure-argocd-redis-tls.sh` itself. If you see this error:
+
+```bash
+# Re-run the command - it creates the secret on first run
+./configure-argocd-redis-tls.sh vcluster-control-plane
+```
+
+---
+
+#### ❌ Error: "wrong version number" in Redis logs
+
+**When:** After enabling Redis TLS
+
+**Cause:** An Argo CD component is connecting without TLS
+
+**Fix:** Argo CD component wasn't configured for TLS. Find which pod has the error:
+
+```bash
+kubectl get pods -n argocd -o wide --context vcluster-control-plane
+```
+
+Match the IP in the error to the pod, then reconfigure:
+
+```bash
+./configure-argocd-redis-tls.sh vcluster-control-plane
+```
+
+---
+
+#### ❌ Error: "bad certificate" in Redis logs
+
+**When:** After enabling Redis TLS
+
+**Cause:** Component can't validate the certificate
+
+**This shouldn't happen** if you used `configure-argocd-redis-tls.sh`!
+
+**Fix:** Verify CA is mounted in the pod:
+
+```bash
+kubectl exec -n argocd <POD_NAME> --context vcluster-control-plane -- ls -la /app/config/redis-tls/
+```
+
+Should show `ca.crt`. If missing, reconfigure:
+
+```bash
+./configure-argocd-redis-tls.sh vcluster-control-plane
+```
+
+---
+
+#### ❌ Port-forward keeps disconnecting
+
+**Cause:** Network interruption or kubectl timeout
+
+**Fix:** Use auto-restart wrapper:
+
+```bash
+while true; do
+  kubectl port-forward svc/argocd-redis -n argocd 6381:6379 --context vcluster-agent-managed
+  echo "Port-forward died, restarting in 2 seconds..."
+  sleep 2
+done
+```
+
+---
+
+#### ❌ Agent can't connect to Redis
+
+**Symptom:** Agent logs show "connection refused" or TLS errors
+
+**Causes:**
+1. Port-forward not running (Step 6)
+2. Wrong port (should be 6381)
+3. TLS not configured properly
+
+**Fix:**
+```bash
+# 1. Verify port-forward is running
+lsof -i :6381
+
+# 2. Test Redis connection
+REDIS_PASSWORD=$(kubectl get secret argocd-redis -n argocd --context vcluster-agent-managed -o jsonpath='{.data.auth}' | base64 -d)
+redis-cli -h localhost -p 6381 --tls --insecure -a "$REDIS_PASSWORD" PING
+
+# 3. If PONG works, restart agent
+# If PONG fails, restart port-forward in Terminal 3
+```
+
+---
+
+### Cleanup
+
+Stop all processes:
+
+```bash
+# Terminal 1: Stop principal (Ctrl+C)
+# Terminal 2: Stop agent (Ctrl+C)
+# Terminal 3: Stop port-forwards (Ctrl+C)
+
+# Delete test application
+kubectl delete application guestbook -n agent-managed --context vcluster-control-plane
+
+# (Optional) Disable Redis TLS if needed
+kubectl delete secret argocd-redis-tls -n argocd --context vcluster-control-plane
+kubectl delete secret argocd-redis-tls -n argocd --context vcluster-agent-managed
+```
+
+---
+
+### Summary
+
+This testing guide validates:
+
+- ✅ **Certificate Generation**: Proper TLS certificates with correct SANs
+- ✅ **Argo CD Components**: Server, repo-server, application-controller connect to Redis with TLS
+- ✅ **argocd-agent Principal**: Redis proxy with TLS to upstream Redis
+- ✅ **argocd-agent Agent**: Cluster cache Redis with TLS
+- ✅ **Certificate Validation**: Proper CA-based validation (no insecure skip!)
+- ✅ **End-to-End Flow**: Application sync through agent with all Redis connections encrypted
+
+**All Redis communication is encrypted with proper TLS certificate validation!** 🔒✅
 
 ## Troubleshooting
 

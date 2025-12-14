@@ -66,6 +66,10 @@ make start-e2e
 
 These are managed by `goreman` and must remain running for tests to work.
 
+**Automatic Dual-Mode Setup:**
+- **macOS (Local)**: Automatically uses port-forwards to `localhost`
+- **Linux/CI**: Automatically uses direct LoadBalancer IPs (requires MetalLB/cloud LB)
+
 **Note:** If using the reverse tunnel (remote clusters), Argo CD connects to the principal via the tunnel, not port-forwards.
 
 ### Step 3: Run the tests
