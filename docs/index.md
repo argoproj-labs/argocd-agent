@@ -30,7 +30,8 @@ See our [Features Overview](./features/index.md) for detailed capabilities and c
 
 ## Project Status
 
-argocd-agent is a **young project in active development**. While not yet production-ready, it already demonstrates the viability of distributed GitOps at scale. The core architecture is stable, and essential features like application synchronization, live resource access, and dual operational modes are working.
+argocd-agent is in active development. It already demonstrates the viability of distributed GitOps at scale. The core architecture is stable, and essential features like application synchronization, live and desired resource access, and dual operational modes are working. We are not yet feature complete, but we encourage anyone to try and integrate argocd-agent for their use cases.
+
 
 **We Need Your Help**
 

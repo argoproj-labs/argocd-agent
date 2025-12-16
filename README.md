@@ -31,19 +31,7 @@ Imagine managing GitOps deployments across edge locations, multiple cloud provid
 
 ## ⚡ Quick Start
 
-Get up and running in minutes! Check out our [**Getting Started Guide**](https://argocd-agent.readthedocs.io/latest/getting-started/kubernetes/) for step-by-step instructions.
-
-```bash
-# 1. Set up the control plane (where your Argo CD UI lives)
-kubectl apply -k https://github.com/argoproj-labs/argocd-agent/install/kubernetes/principal
-
-# 2. Deploy agents to your workload clusters
-kubectl apply -k https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent
-
-# 3. Watch the magic happen ✨
-```
-
-Want to try it out? Our [**getting started guide**](https://argocd-agent.readthedocs.io/latest/getting-started/) gets you running with a local environment in under 10 minutes.
+Get up and running in minutes! Check out our [**Getting Started Guide**](https://argocd-agent.readthedocs.io/latest/getting-started/) for step-by-step instructions.
 
 ## 🏗️ How It Works
 
@@ -81,7 +69,7 @@ Think of argocd-agent as a **hub-and-spoke architecture** where agents reach bac
 - Control plane provides observability and monitoring
 - Perfect for air-gapped or highly autonomous environments
 
-Mix and match modes across your fleet—some clusters managed, others autonomous, all visible from one dashboard.
+Mix and match modes across your fleet - some clusters managed, others autonomous, all visible from one dashboard.
 
 ## 🌟 Key Features
 
@@ -107,26 +95,7 @@ Mix and match modes across your fleet—some clusters managed, others autonomous
 
 ## 🚧 Current Status
 
-> **🚀 Approaching GA**: argocd-agent has matured significantly and is on a solid path toward general availability. While not yet feature-complete, the project has seen serious development efforts and no breaking changes are expected before GA. We encourage users to install and run argocd-agent in their environments.
->
-> **🤝 Community Driven**: We depend on feedback and bug reports from the community to become better. Your real-world usage, issue reports, and feature requests are essential for making argocd-agent production-ready for everyone.
-
-**What works today:**
-- ✅ Basic hub-and-spoke architecture  
-- ✅ Application deployment and status sync
-- ✅ Multi-cluster observability  
-- ✅ Both managed and autonomous modes
-- ✅ Live resource viewing and manipulation
-- ✅ Custom resource actions
-- ✅ Resource proxy for transparent cluster access
-
-**Coming soon:**
-- 🚧 Pod logs streaming
-- 🚧 Advanced RBAC and multi-tenancy
-- 🚧 Enhanced UI integrations
-- 🚧 Production hardening
-
-Track our progress in the [**roadmap**](ROADMAP.md) and [**milestones**](https://github.com/argoproj-labs/argocd-agent/milestones).
+Track our progress and vision in the [**milestones**](https://github.com/argoproj-labs/argocd-agent/milestones) on GitHub.
 
 ## 🤝 Join the Community
 
