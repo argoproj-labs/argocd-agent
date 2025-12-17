@@ -52,7 +52,7 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 
 	// Create trace span for incoming event processing, continuing the trace from principal
 	spanName := fmt.Sprintf("%s.%s", ev.Target().String(), ev.Type().String())
-	_, span := tracing.Tracer().Start(ctx, spanName,
+	ctx, span := tracing.Tracer().Start(ctx, spanName,
 		trace.WithAttributes(
 			tracing.AttrEventType.String(string(ev.Type())),
 			tracing.AttrEventTarget.String(ev.Target().String()),
