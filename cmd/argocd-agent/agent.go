@@ -292,10 +292,10 @@ func NewAgentRunCommand() *cobra.Command {
 
 	command.Flags().StringVar(&otlpAddress, "otlp-address",
 		env.StringWithDefault("ARGOCD_AGENT_OTLP_ADDRESS", nil, ""),
-		"OpenTelemetry collector address for sending traces (e.g., localhost:4317)")
+		"Experimental: OpenTelemetry collector address for sending traces (e.g., localhost:4317)")
 	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
 		env.BoolWithDefault("ARGOCD_AGENT_OTLP_INSECURE", false),
-		"Use insecure connection to OpenTelemetry collector endpoint")
+		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
