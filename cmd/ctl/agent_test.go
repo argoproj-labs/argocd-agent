@@ -15,10 +15,16 @@
 package main
 
 import (
+	"context"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 )
 
 func Test_serverURL(t *testing.T) {
@@ -240,4 +246,310 @@ func Test_serverURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_parseSecretRef(t *testing.T) {
+	testCases := []struct {
+		name              string
+		secretRef         string
+		defaultNamespace  string
+		expectedNamespace string
+		expectedName      string
+	}{
+		{
+			name:              "simple name without namespace",
+			secretRef:         "my-secret",
+			defaultNamespace:  "default-ns",
+			expectedNamespace: "default-ns",
+			expectedName:      "my-secret",
+		},
+		{
+			name:              "name with namespace",
+			secretRef:         "custom-ns/my-secret",
+			defaultNamespace:  "default-ns",
+			expectedNamespace: "custom-ns",
+			expectedName:      "my-secret",
+		},
+		{
+			name:              "name with namespace containing slashes in name",
+			secretRef:         "ns/secret/with/slashes",
+			defaultNamespace:  "default-ns",
+			expectedNamespace: "ns",
+			expectedName:      "secret/with/slashes",
+		},
+		{
+			name:              "empty namespace prefix",
+			secretRef:         "/my-secret",
+			defaultNamespace:  "default-ns",
+			expectedNamespace: "default-ns",
+			expectedName:      "my-secret",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			namespace, name := parseSecretRef(tc.secretRef, tc.defaultNamespace)
+			assert.Equal(t, tc.expectedNamespace, namespace)
+			assert.Equal(t, tc.expectedName, name)
+		})
+	}
+}
+
+func Test_readTLSFromExistingSecrets(t *testing.T) {
+	// Load test certificate data
+	certPem := testutil.MustReadFile("testdata/001_test_cert.pem")
+	keyPem := testutil.MustReadFile("testdata/001_test_key.pem")
+
+	// Save original globalOpts and restore after test
+	originalNamespace := globalOpts.principalNamespace
+	defer func() {
+		globalOpts.principalNamespace = originalNamespace
+	}()
+	globalOpts.principalNamespace = "argocd"
+
+	t.Run("Valid TLS and CA secrets in default namespace", func(t *testing.T) {
+		tlsSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-tls-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"tls.crt": certPem,
+				"tls.key": keyPem,
+			},
+		}
+		caSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-ca-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"ca.crt": certPem, // Use cert as CA for testing
+			},
+		}
+
+		clientset := kubefake.NewSimpleClientset(tlsSecret, caSecret)
+		clt := &kube.KubernetesClient{Clientset: clientset}
+
+		clientCert, clientKey, caData, err := readTLSFromExistingSecrets(context.TODO(), clt, "my-tls-secret", "my-ca-secret")
+		require.NoError(t, err)
+		assert.Equal(t, string(certPem), clientCert)
+		assert.Equal(t, string(keyPem), clientKey)
+		assert.Equal(t, string(certPem), caData)
+	})
+
+	t.Run("Valid TLS and CA secrets with explicit namespace", func(t *testing.T) {
+		tlsSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-tls-secret",
+				Namespace: "custom-ns",
+			},
+			Data: map[string][]byte{
+				"tls.crt": certPem,
+				"tls.key": keyPem,
+			},
+		}
+		caSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-ca-secret",
+				Namespace: "other-ns",
+			},
+			Data: map[string][]byte{
+				"ca.crt": certPem,
+			},
+		}
+
+		clientset := kubefake.NewSimpleClientset(tlsSecret, caSecret)
+		clt := &kube.KubernetesClient{Clientset: clientset}
+
+		clientCert, clientKey, caData, err := readTLSFromExistingSecrets(context.TODO(), clt, "custom-ns/my-tls-secret", "other-ns/my-ca-secret")
+		require.NoError(t, err)
+		assert.Equal(t, string(certPem), clientCert)
+		assert.Equal(t, string(keyPem), clientKey)
+		assert.Equal(t, string(certPem), caData)
+	})
+
+	t.Run("TLS secret not found", func(t *testing.T) {
+		caSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-ca-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"ca.crt": certPem,
+			},
+		}
+
+		clientset := kubefake.NewSimpleClientset(caSecret)
+		clt := &kube.KubernetesClient{Clientset: clientset}
+
+		_, _, _, err := readTLSFromExistingSecrets(context.TODO(), clt, "my-tls-secret", "my-ca-secret")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "could not read TLS secret argocd/my-tls-secret")
+	})
+
+	t.Run("CA secret not found", func(t *testing.T) {
+		tlsSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-tls-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"tls.crt": certPem,
+				"tls.key": keyPem,
+			},
+		}
+
+		clientset := kubefake.NewSimpleClientset(tlsSecret)
+		clt := &kube.KubernetesClient{Clientset: clientset}
+
+		_, _, _, err := readTLSFromExistingSecrets(context.TODO(), clt, "my-tls-secret", "my-ca-secret")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "could not read CA secret argocd/my-ca-secret")
+	})
+
+	t.Run("TLS secret missing tls.crt key", func(t *testing.T) {
+		tlsSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-tls-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"tls.key": keyPem,
+			},
+		}
+		caSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-ca-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"ca.crt": certPem,
+			},
+		}
+
+		clientset := kubefake.NewSimpleClientset(tlsSecret, caSecret)
+		clt := &kube.KubernetesClient{Clientset: clientset}
+
+		_, _, _, err := readTLSFromExistingSecrets(context.TODO(), clt, "my-tls-secret", "my-ca-secret")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not contain key 'tls.crt'")
+	})
+
+	t.Run("TLS secret missing tls.key key", func(t *testing.T) {
+		tlsSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-tls-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"tls.crt": certPem,
+			},
+		}
+		caSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-ca-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"ca.crt": certPem,
+			},
+		}
+
+		clientset := kubefake.NewSimpleClientset(tlsSecret, caSecret)
+		clt := &kube.KubernetesClient{Clientset: clientset}
+
+		_, _, _, err := readTLSFromExistingSecrets(context.TODO(), clt, "my-tls-secret", "my-ca-secret")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not contain key 'tls.key'")
+	})
+
+	t.Run("CA secret missing ca.crt key", func(t *testing.T) {
+		tlsSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-tls-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"tls.crt": certPem,
+				"tls.key": keyPem,
+			},
+		}
+		caSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-ca-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"other-key": certPem,
+			},
+		}
+
+		clientset := kubefake.NewSimpleClientset(tlsSecret, caSecret)
+		clt := &kube.KubernetesClient{Clientset: clientset}
+
+		_, _, _, err := readTLSFromExistingSecrets(context.TODO(), clt, "my-tls-secret", "my-ca-secret")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not contain key 'ca.crt'")
+	})
+
+	t.Run("Invalid TLS certificate/key pair", func(t *testing.T) {
+		tlsSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-tls-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("invalid cert"),
+				"tls.key": []byte("invalid key"),
+			},
+		}
+		caSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-ca-secret",
+				Namespace: "argocd",
+			},
+			Data: map[string][]byte{
+				"ca.crt": certPem,
+			},
+		}
+
+		clientset := kubefake.NewSimpleClientset(tlsSecret, caSecret)
+		clt := &kube.KubernetesClient{Clientset: clientset}
+
+		_, _, _, err := readTLSFromExistingSecrets(context.TODO(), clt, "my-tls-secret", "my-ca-secret")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid TLS certificate/key pair")
+	})
+
+	t.Run("Secrets in different namespaces", func(t *testing.T) {
+		tlsSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "tls-secret",
+				Namespace: "tls-namespace",
+			},
+			Data: map[string][]byte{
+				"tls.crt": certPem,
+				"tls.key": keyPem,
+			},
+		}
+		caSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ca-secret",
+				Namespace: "ca-namespace",
+			},
+			Data: map[string][]byte{
+				"ca.crt": certPem,
+			},
+		}
+
+		clientset := kubefake.NewSimpleClientset(tlsSecret, caSecret)
+		clt := &kube.KubernetesClient{Clientset: clientset}
+
+		clientCert, clientKey, caData, err := readTLSFromExistingSecrets(context.TODO(), clt, "tls-namespace/tls-secret", "ca-namespace/ca-secret")
+		require.NoError(t, err)
+		assert.Equal(t, string(certPem), clientCert)
+		assert.Equal(t, string(keyPem), clientKey)
+		assert.Equal(t, string(certPem), caData)
+	})
 }
