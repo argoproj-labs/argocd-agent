@@ -1,5 +1,8 @@
 # OpenTelemetry Tracing
 
+!!! warning "Experimental Feature"
+    OpenTelemetry tracing support is currently **experimental**. The configuration options, span attributes, and instrumentation details may change in the future releases. We encourage you to try it out and provide feedback, but be aware that breaking changes may occur as we refine the implementation.
+
 The argocd-agent supports distributed tracing using OpenTelemetry to help you understand the flow of resources from the principal to agents and identify performance bottlenecks. The tracing integration uses OpenTelemetry with the OTLP (OpenTelemetry Protocol) exporter, which can send traces to any OTLP-compatible backend such as Jaeger, Grafana Tempo, Datadog, New Relic, etc.
 
 ## Overview
