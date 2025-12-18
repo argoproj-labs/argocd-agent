@@ -1,0 +1,61 @@
+// Copyright 2025 The argocd-agent Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+option go_package = "github.com/argoproj-labs/argocd-agent/pkg/api/grpc/terminalstreamapi";
+
+package terminalstreamapi;
+
+import "google/api/annotations.proto";
+
+// TerminalStreamData represents a chunk of data in a terminal stream session.
+// It supports bidirectional streaming for stdin, stdout, stderr, and terminal resize events.
+message TerminalStreamData {
+    // request_uuid uniquely identifies the terminal session
+    string request_uuid = 1;
+    
+    // data contains the actual terminal input/output bytes
+    bytes data = 2;
+    
+    // stream_type indicates which stream this data belongs to ("stdin", "stdout", "stderr")
+    string stream_type = 3;
+    
+    // resize indicates this is a terminal resize event (not data)
+    bool resize = 4;
+    
+    // rows is the terminal height in character rows (used with resize=true)
+    uint32 rows = 5;
+    
+    // cols is the terminal width in character columns (used with resize=true)
+    uint32 cols = 6;
+    
+    // eof indicates the stream has ended normally
+    bool eof = 7;
+    
+    // error contains an error message if the stream failed
+    string error = 8;
+}
+
+// TerminalStreamService provides bidirectional streaming for web terminal sessions.
+// The principal opens this service, and agents connect to stream terminal I/O.
+service TerminalStreamService {
+    // StreamTerminal establishes a bidirectional stream for a web terminal session.
+    // The client (agent) sends stdin data and receives stdout/stderr data.
+    // The server (principal) receives stdin from the browser and sends stdout/stderr back.
+    rpc StreamTerminal(stream TerminalStreamData) returns (stream TerminalStreamData) {
+        option (google.api.http).get = "/api/v1/terminal/stream";
+    }
+}
+

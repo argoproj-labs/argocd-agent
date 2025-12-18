@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+data:
+  # Policy to allow admin role to exec into pods (web terminal)
+  policy.csv: |
+    p, role:admin, exec, create, */*, allow
+  policy.default: role:admin
+

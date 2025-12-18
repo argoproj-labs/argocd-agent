@@ -1,0 +1,34 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: argocd-server-exec
+    app.kubernetes.io/part-of: argocd
+    app.kubernetes.io/component: server
+  name: argocd-server-exec
+rules:
+# Permission for web terminal support
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: argocd-server-exec
+    app.kubernetes.io/part-of: argocd
+    app.kubernetes.io/component: server
+  name: argocd-server-exec
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argocd-server-exec
+subjects:
+- kind: ServiceAccount
+  name: argocd-server
+  namespace: argocd
+
