@@ -16,8 +16,11 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -160,6 +163,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 
 	if a.remote == nil {
 		return nil, fmt.Errorf("remote not defined")
+	}
+
+	if a.cacheRefreshInterval == 0 {
+		return nil, fmt.Errorf("cache refresh interval not set")
 	}
 
 	a.kubeClient = client
@@ -321,7 +328,31 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		connMap: map[string]connectionEntry{},
 	}
 
-	clusterCache, err := cluster.NewClusterCacheInstance(a.redisProxyMsgHandler.redisAddress, a.redisProxyMsgHandler.redisPassword, cacheutil.RedisCompressionGZip)
+	// Create TLS config for cluster cache Redis client (same as for Redis proxy)
+	var clusterCacheTLSConfig *tls.Config = nil
+	if a.redisProxyMsgHandler.redisTLSEnabled {
+		clusterCacheTLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+		if a.redisProxyMsgHandler.redisTLSInsecure {
+			log().Warn("INSECURE: Not verifying Redis TLS certificate for cluster cache")
+			clusterCacheTLSConfig.InsecureSkipVerify = true
+		} else if a.redisProxyMsgHandler.redisTLSCAPath != "" {
+			caCertPEM, err := os.ReadFile(a.redisProxyMsgHandler.redisTLSCAPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CA certificate for cluster cache: %w", err)
+			}
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caCertPEM) {
+				return nil, fmt.Errorf("failed to parse CA certificate for cluster cache from %s", a.redisProxyMsgHandler.redisTLSCAPath)
+			}
+			clusterCacheTLSConfig.RootCAs = certPool
+		} else {
+			return nil, fmt.Errorf("redis TLS enabled but no CA certificate configured for cluster cache: use --redis-tls-ca-path or --redis-tls-insecure")
+		}
+	}
+
+	clusterCache, err := cluster.NewClusterCacheInstance(a.redisProxyMsgHandler.redisAddress, a.redisProxyMsgHandler.redisPassword, cacheutil.RedisCompressionGZip, clusterCacheTLSConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
 	}
@@ -421,20 +452,22 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	// Start the background process of periodic sync of cluster cache info.
 	// This will send periodic updates of Application, Resource and API counts to principal.
-	if a.mode == types.AgentModeManaged {
-		go func() {
-			ticker := time.NewTicker(a.cacheRefreshInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					a.addClusterCacheInfoUpdateToQueue()
-				case <-a.context.Done():
-					return
-				}
+	// Both managed and autonomous agents need to send cluster cache info updates
+	go func() {
+		// Send initial update immediately on startup (don't wait for first ticker)
+		a.addClusterCacheInfoUpdateToQueue()
+
+		ticker := time.NewTicker(a.cacheRefreshInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				a.addClusterCacheInfoUpdateToQueue()
+			case <-a.context.Done():
+				return
 			}
-		}()
-	}
+		}
+	}()
 
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)

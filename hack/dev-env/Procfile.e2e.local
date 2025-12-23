@@ -1,0 +1,9 @@
+# Procfile for local macOS development (with port-forwards)
+pf-control-plane: kubectl port-forward --context=vcluster-control-plane -n argocd svc/argocd-redis 6380:6379
+pf-managed: kubectl port-forward --context=vcluster-agent-managed -n argocd svc/argocd-redis 6381:6379
+pf-autonomous: kubectl port-forward --context=vcluster-agent-autonomous -n argocd svc/argocd-redis 6382:6379
+pf-argocd-server: kubectl port-forward --context=vcluster-control-plane -n argocd svc/argocd-server 8444:443
+principal: sleep 3s && hack/dev-env/start-principal.sh
+agent-managed: sleep 5s && ARGOCD_AGENT_REDIS_ADDRESS=$MANAGED_AGENT_REDIS_ADDR hack/dev-env/start-agent-managed.sh
+agent-autonomous: sleep 5s && ARGOCD_AGENT_REDIS_ADDRESS=$AUTONOMOUS_AGENT_REDIS_ADDR hack/dev-env/start-agent-autonomous.sh
+

@@ -16,12 +16,17 @@ package fixture
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9/maintnotifications"
 	corev1 "k8s.io/api/core/v1"
@@ -38,12 +43,16 @@ const (
 
 type ClusterDetails struct {
 	// Managed agent Redis configuration
-	ManagedAgentRedisAddr     string
-	ManagedAgentRedisPassword string
+	ManagedAgentRedisAddr       string
+	ManagedAgentRedisPassword   string
+	ManagedAgentRedisTLSEnabled bool
+	ManagedAgentRedisTLSCAPath  string
 
 	// Principal Redis configuration
-	PrincipalRedisAddr     string
-	PrincipalRedisPassword string
+	PrincipalRedisAddr       string
+	PrincipalRedisPassword   string
+	PrincipalRedisTLSEnabled bool
+	PrincipalRedisTLSCAPath  string
 
 	// Cluster server addresses
 	ManagedClusterAddr    string
@@ -146,12 +155,17 @@ func GetPrincipalClusterInfo(agentName string, clusterDetails *ClusterDetails) (
 		return appv1.ClusterInfo{}, fmt.Errorf("invalid agent name: %s", agentName)
 	}
 
+	fmt.Printf("GetPrincipalClusterInfo: Looking up cluster info for agent=%s, server=%s, redis=%s\n",
+		agentName, server, clusterDetails.PrincipalRedisAddr)
+
 	err := getCacheInstance(PrincipalName, clusterDetails).GetClusterInfo(server, &clusterInfo)
 	if err != nil {
 		// Treat missing cache key error (means no apps exist yet) as zero-value info
 		if err == cacheutil.ErrCacheMiss {
+			fmt.Printf("GetPrincipalClusterInfo: Cache miss for server=%s\n", server)
 			return appv1.ClusterInfo{}, nil
 		}
+		fmt.Printf("GetPrincipalClusterInfo: Error getting cluster info: %v\n", err)
 		return clusterInfo, err
 	}
 	return clusterInfo, err
@@ -160,6 +174,7 @@ func GetPrincipalClusterInfo(agentName string, clusterDetails *ClusterDetails) (
 // getCacheInstance creates a new cache instance for the given source
 func getCacheInstance(source string, clusterDetails *ClusterDetails) *appstatecache.Cache {
 	redisOptions := &redis.Options{}
+	var tlsCAPath string
 	switch source {
 	case PrincipalName:
 		redisOptions.Addr = clusterDetails.PrincipalRedisAddr
@@ -167,15 +182,103 @@ func getCacheInstance(source string, clusterDetails *ClusterDetails) *appstateca
 		redisOptions.MaintNotificationsConfig = &maintnotifications.Config{
 			Mode: maintnotifications.ModeDisabled,
 		}
+
+		// Enable TLS if configured
+		if clusterDetails.PrincipalRedisTLSEnabled {
+			tlsCAPath = clusterDetails.PrincipalRedisTLSCAPath
+			tlsConfig := &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
+
+			// CA certificate MUST be present for E2E tests with TLS
+			if tlsCAPath == "" {
+				panic(fmt.Sprintf("Principal Redis TLS is enabled but no CA certificate path specified. " +
+					"Ensure REDIS_TLS_CA_PATH is set or run 'make setup-e2e' to generate certificates."))
+			}
+
+			// Try to make path absolute if it's relative
+			if !filepath.IsAbs(tlsCAPath) {
+				if absPath, err := filepath.Abs(tlsCAPath); err == nil {
+					tlsCAPath = absPath
+				}
+			}
+
+			if _, err := os.Stat(tlsCAPath); err != nil {
+				panic(fmt.Sprintf("Principal Redis CA certificate not found at %s: %v. "+
+					"Run 'make setup-e2e' to generate certificates.", tlsCAPath, err))
+			}
+
+			caCertPEM, err := os.ReadFile(tlsCAPath)
+			if err != nil {
+				panic(fmt.Sprintf("Failed to read principal Redis CA certificate from %s: %v", tlsCAPath, err))
+			}
+
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caCertPEM) {
+				panic(fmt.Sprintf("Failed to parse principal Redis CA certificate from %s. "+
+					"Run 'make setup-e2e' to regenerate certificates.", tlsCAPath))
+			}
+
+			tlsConfig.RootCAs = certPool
+			redisOptions.TLSConfig = tlsConfig
+		}
 	case AgentManagedName:
 		redisOptions.Addr = clusterDetails.ManagedAgentRedisAddr
 		redisOptions.Password = clusterDetails.ManagedAgentRedisPassword
 		redisOptions.MaintNotificationsConfig = &maintnotifications.Config{
 			Mode: maintnotifications.ModeDisabled,
 		}
+
+		// Enable TLS if configured
+		if clusterDetails.ManagedAgentRedisTLSEnabled {
+			tlsCAPath = clusterDetails.ManagedAgentRedisTLSCAPath
+			tlsConfig := &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
+
+			// CA certificate MUST be present for E2E tests with TLS
+			if tlsCAPath == "" {
+				panic(fmt.Sprintf("Managed agent Redis TLS is enabled but no CA certificate path specified. " +
+					"Ensure REDIS_TLS_CA_PATH is set or run 'make setup-e2e' to generate certificates."))
+			}
+
+			// Try to make path absolute if it's relative
+			if !filepath.IsAbs(tlsCAPath) {
+				if absPath, err := filepath.Abs(tlsCAPath); err == nil {
+					tlsCAPath = absPath
+				}
+			}
+
+			if _, err := os.Stat(tlsCAPath); err != nil {
+				panic(fmt.Sprintf("Managed agent Redis CA certificate not found at %s: %v. "+
+					"Run 'make setup-e2e' to generate certificates.", tlsCAPath, err))
+			}
+
+			caCertPEM, err := os.ReadFile(tlsCAPath)
+			if err != nil {
+				panic(fmt.Sprintf("Failed to read managed agent Redis CA certificate from %s: %v", tlsCAPath, err))
+			}
+
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caCertPEM) {
+				panic(fmt.Sprintf("Failed to parse managed agent Redis CA certificate from %s. "+
+					"Run 'make setup-e2e' to regenerate certificates.", tlsCAPath))
+			}
+
+			tlsConfig.RootCAs = certPool
+			redisOptions.TLSConfig = tlsConfig
+		}
 	default:
-		panic(fmt.Sprintf("invalid source: %s", source))
+		ginkgo.Fail(fmt.Sprintf("invalid source: %s", source))
 	}
+
+	// Set generous timeouts for E2E tests to handle port-forward latency
+	redisOptions.DialTimeout = 10 * time.Second
+	redisOptions.ReadTimeout = 30 * time.Second // Increased for slow port-forward operations
+	redisOptions.WriteTimeout = 10 * time.Second
+	redisOptions.MinRetryBackoff = 100 * time.Millisecond
+	redisOptions.MaxRetryBackoff = 1 * time.Second
+	redisOptions.ConnMaxIdleTime = 5 * time.Minute // Faster connection cleanup in test environments
 
 	redisClient := redis.NewClient(redisOptions)
 	cache := appstatecache.NewCache(cacheutil.NewCache(
@@ -213,7 +316,7 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 		return fmt.Errorf("failed to get Redis service: %w", err)
 	}
 
-	// Get Redis address from LoadBalancer ingress
+	// Get Redis address from LoadBalancer ingress or spec
 	var redisAddr string
 	if len(service.Status.LoadBalancer.Ingress) > 0 {
 		ingress := service.Status.LoadBalancer.Ingress[0]
@@ -223,9 +326,35 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 			redisAddr = fmt.Sprintf("%s:6379", ingress.Hostname)
 		}
 	}
-	if redisAddr == "" {
-		return fmt.Errorf("could not get Redis server address from LoadBalancer ingress")
+	// Fall back to spec.loadBalancerIP for local development (vcluster)
+	if redisAddr == "" && service.Spec.LoadBalancerIP != "" {
+		redisAddr = fmt.Sprintf("%s:6379", service.Spec.LoadBalancerIP)
 	}
+	// Fall back to ClusterIP as last resort
+	if redisAddr == "" && service.Spec.ClusterIP != "" {
+		redisAddr = fmt.Sprintf("%s:6379", service.Spec.ClusterIP)
+	}
+
+	// Allow override via environment variable for local development with port-forward
+	if envAddr := os.Getenv("MANAGED_AGENT_REDIS_ADDR"); envAddr != "" {
+		redisAddr = envAddr
+	}
+
+	if redisAddr == "" {
+		return fmt.Errorf("could not get Redis server address from LoadBalancer ingress, spec, or ClusterIP")
+	}
+
+	// Redis TLS is always enabled for E2E tests
+	clusterDetails.ManagedAgentRedisTLSEnabled = true
+
+	// Set CA certificate path (same as used by agents)
+	// Allow override via environment variable
+	caPath := os.Getenv("REDIS_TLS_CA_PATH")
+	if caPath == "" {
+		caPath = "hack/dev-env/creds/redis-tls/ca.crt" // default for local dev
+	}
+	clusterDetails.ManagedAgentRedisTLSCAPath = caPath
+
 	clusterDetails.ManagedAgentRedisAddr = redisAddr
 
 	// Fetch Redis secret to get the password
@@ -257,7 +386,7 @@ func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, cl
 		return fmt.Errorf("failed to get Principal Redis service: %w", err)
 	}
 
-	// Get Redis address from LoadBalancer ingress
+	// Get Redis address from LoadBalancer ingress or spec
 	var redisAddr string
 	if len(service.Status.LoadBalancer.Ingress) > 0 {
 		ingress := service.Status.LoadBalancer.Ingress[0]
@@ -267,9 +396,34 @@ func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, cl
 			redisAddr = fmt.Sprintf("%s:6379", ingress.Hostname)
 		}
 	}
-	if redisAddr == "" {
-		return fmt.Errorf("could not get Principal Redis server address from LoadBalancer ingress")
+	// Fall back to spec.loadBalancerIP for local development (vcluster)
+	if redisAddr == "" && service.Spec.LoadBalancerIP != "" {
+		redisAddr = fmt.Sprintf("%s:6379", service.Spec.LoadBalancerIP)
 	}
+	// Fall back to ClusterIP as last resort
+	if redisAddr == "" && service.Spec.ClusterIP != "" {
+		redisAddr = fmt.Sprintf("%s:6379", service.Spec.ClusterIP)
+	}
+
+	// Allow override via environment variable for local development with port-forward
+	if envAddr := os.Getenv("ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS"); envAddr != "" {
+		redisAddr = envAddr
+	}
+
+	if redisAddr == "" {
+		return fmt.Errorf("could not get Principal Redis server address from LoadBalancer ingress, spec, or ClusterIP")
+	}
+
+	clusterDetails.PrincipalRedisTLSEnabled = true
+
+	// Set CA certificate path (same as used by principal)
+	// Allow override via environment variable
+	principalCAPath := os.Getenv("REDIS_TLS_CA_PATH")
+	if principalCAPath == "" {
+		principalCAPath = "hack/dev-env/creds/redis-tls/ca.crt" // default for local dev
+	}
+	clusterDetails.PrincipalRedisTLSCAPath = principalCAPath
+
 	clusterDetails.PrincipalRedisAddr = redisAddr
 
 	// Fetch Redis secret to get the password

@@ -140,3 +140,27 @@ data:
   # principal.redis.server.address: The address of the Redis server.
   # Default: "argocd-redis:6379"
   principal.redis.server.address: "argocd-redis:6379"
+  # principal.redis.tls.enabled: Whether to enable TLS for Redis connections.
+  # Default: true
+  principal.redis.tls.enabled: "true"
+  # principal.redis.proxy.server.tls.cert-path: Path to TLS certificate for Redis proxy server.
+  # This should match the mount path in the Deployment for proxy server certificate.
+  # Default: "/app/config/redis-proxy-server-tls/tls.crt"
+  principal.redis.proxy.server.tls.cert-path: "/app/config/redis-proxy-server-tls/tls.crt"
+  # principal.redis.proxy.server.tls.key-path: Path to TLS private key for Redis proxy server.
+  # This should match the mount path in the Deployment for proxy server key.
+  # Default: "/app/config/redis-proxy-server-tls/tls.key"
+  principal.redis.proxy.server.tls.key-path: "/app/config/redis-proxy-server-tls/tls.key"
+  # principal.redis.proxy.server.tls.secret-name: Secret name containing TLS certificate and key for Redis proxy server.
+  # Default: "argocd-redis-tls"
+  principal.redis.proxy.server.tls.secret-name: "argocd-redis-tls"
+  # principal.redis.ca-path: Path to CA certificate for verifying Redis TLS certificate.
+  # This should match the mount path in the Deployment for Redis CA.
+  # Default: "/app/config/redis-tls/ca.crt"
+  principal.redis.ca-path: "/app/config/redis-tls/ca.crt"
+  # principal.redis.ca-secret-name: Secret name containing CA certificate for verifying Redis TLS certificate.
+  # Default: "argocd-redis-tls"
+  principal.redis.ca-secret-name: "argocd-redis-tls"
+  # principal.redis.tls.insecure: INSECURE: Do not verify Redis TLS certificate.
+  # Default: false
+  principal.redis.tls.insecure: "false"

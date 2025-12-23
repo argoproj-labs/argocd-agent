@@ -116,6 +116,10 @@ func CheckReadiness(t require.TestingT, compName string) {
 		healthzAddr = "http://localhost:8003/healthz"
 	}
 
+	// Use a longer timeout to allow components (especially principal) to wait for informers to sync
+	// The principal's informer sync timeout is 120s in E2E tests, so we wait 180s to be safe
+	timeout := 180 * time.Second
+
 	require.Eventually(t, func() bool {
 		resp, err := http.Get(healthzAddr)
 		if err != nil {
@@ -123,7 +127,7 @@ func CheckReadiness(t require.TestingT, compName string) {
 		}
 		defer resp.Body.Close()
 		return resp.StatusCode == http.StatusOK
-	}, 120*time.Second, 2*time.Second)
+	}, timeout, 2*time.Second)
 }
 
 func IsNotReady(t require.TestingT, compName string) {

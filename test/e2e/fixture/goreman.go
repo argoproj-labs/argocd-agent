@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"os/exec"
+
+	"github.com/onsi/ginkgo/v2"
 )
 
 // StopProcess stops the named process managed by goreman
@@ -26,13 +28,13 @@ func IsProcessRunning(processName string) bool {
 	cmd.Stdout = out
 	err := cmd.Run()
 	if err != nil {
-		panic(err)
+		ginkgo.Fail(err.Error())
 	}
 	sc := bufio.NewScanner(out)
 	for sc.Scan() {
 		l := sc.Text()
 		if len(l) < 2 {
-			panic("unknown output")
+			ginkgo.Fail("unknown output")
 		}
 		switch l[0] {
 		case '*':
@@ -46,7 +48,7 @@ func IsProcessRunning(processName string) bool {
 				return false
 			}
 		default:
-			panic("unknown output")
+			ginkgo.Fail("unknown output")
 		}
 	}
 	// process not found

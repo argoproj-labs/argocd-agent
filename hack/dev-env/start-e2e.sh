@@ -41,33 +41,94 @@ getExternalLoadBalancerIP() {
   done
 
   if [ $i -gt $MAX_ATTEMPTS ]; then
-    echo "Failed to obtain external IP after $MAX_ATTEMPTS attempts."
+    echo "ERROR: Failed to obtain external IP after $MAX_ATTEMPTS attempts."
+    echo ""
+    echo "This usually means:"
+    echo "  1. MetalLB is not installed or not configured on your cluster"
+    echo "  2. Your cluster doesn't support LoadBalancer services"
+    echo ""
+    echo "Alternative: Use port-forward mode instead (works on any OS):"
+    echo "  E2E_USE_PORT_FORWARD=true ./hack/dev-env/start-e2e.sh"
+    echo ""
+    echo "Note: You'll need to run port-forwards in a separate terminal:"
+    echo "  goreman -f hack/dev-env/Procfile.e2e.local start"
+    echo ""
     exit 1
   fi
 
 }
 
-# Get hostname of control-plane redis
-K8S_CONTEXT="--context=vcluster-control-plane"
+# Dual-mode setup: Port-forwards (local) vs LoadBalancer IPs
+# 
+# E2E_USE_PORT_FORWARD is a user-provided environment variable (not auto-detected):
+# - E2E_USE_PORT_FORWARD=true: Use localhost with port-forwards (local dev on any OS)
+# - Not set or false (default): Use LoadBalancer IPs (CI/Linux with MetalLB)
+#
+# Examples:
+#   E2E_USE_PORT_FORWARD=true ./hack/dev-env/start-e2e.sh  # Port-forward mode
+#   ./hack/dev-env/start-e2e.sh                           # LoadBalancer mode (default)
+#
+if [[ "${E2E_USE_PORT_FORWARD}" == "true" ]]; then
+  echo "=========================================="
+  echo "Mode: LOCAL (Port-Forwards)"
+  echo "=========================================="
+  echo "Using localhost addresses via kubectl port-forward"
+  echo ""
+  echo "Note: Make sure port-forwards are running in a separate terminal:"
+  echo "  goreman -f hack/dev-env/Procfile.e2e.local start"
+  echo ""
+export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="localhost:6380"
+export MANAGED_AGENT_REDIS_ADDR="localhost:6381"
+export AUTONOMOUS_AGENT_REDIS_ADDR="localhost:6382"
+export ARGOCD_SERVER_ADDRESS="localhost:8444"
+else
+  echo "=========================================="
+  echo "Mode: Linux/CI (Direct LoadBalancer IPs)"
+  echo "=========================================="
+  echo "Using LoadBalancer IPs directly (requires MetalLB or cloud LB)"
+  echo ""
+  
+  # Get hostname of control-plane redis
+  K8S_CONTEXT="--context=vcluster-control-plane"
+  K8S_NAMESPACE="-n argocd"
+  getExternalLoadBalancerIP "argocd-redis"
+  export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="$EXTERNAL_IP:6379"
+
+  # Get hostname of agent-managed redis
+  K8S_CONTEXT="--context=vcluster-agent-managed"
+  K8S_NAMESPACE="-n argocd"
+  getExternalLoadBalancerIP "argocd-redis"
+  export MANAGED_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
+
+  # Get hostname of agent-autonomous redis
+  K8S_CONTEXT="--context=vcluster-agent-autonomous"
+  K8S_NAMESPACE="-n argocd"
+  getExternalLoadBalancerIP "argocd-redis"
+  export AUTONOMOUS_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
+fi
+
 K8S_NAMESPACE="-n argocd"
-getExternalLoadBalancerIP "argocd-redis"
-export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="$EXTERNAL_IP:6379"
-
-
-# Get hostname of agent-managed redis
-K8S_CONTEXT="--context=vcluster-agent-managed"
-K8S_NAMESPACE="-n argocd"
-getExternalLoadBalancerIP "argocd-redis"
-export MANAGED_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
-
-# Get hostname of agent-autonomous redis
-K8S_CONTEXT="--context=vcluster-agent-autonomous"
-K8S_NAMESPACE="-n argocd"
-getExternalLoadBalancerIP "argocd-redis"
-export AUTONOMOUS_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
-
-
 export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed $K8S_NAMESPACE -o jsonpath='{.data.auth}' | base64 --decode)
 
-goreman -exit-on-stop=false -f hack/dev-env/Procfile.e2e start
+echo "Addresses:"
+echo "  Principal Redis: $ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS"
+echo "  Managed Redis:   $MANAGED_AGENT_REDIS_ADDR"
+echo "  Autonomous Redis: $AUTONOMOUS_AGENT_REDIS_ADDR"
+if [[ -n "$ARGOCD_SERVER_ADDRESS" ]]; then
+  echo "  ArgoCD Server:   $ARGOCD_SERVER_ADDRESS"
+fi
+echo ""
 
+# Use the appropriate Procfile based on mode
+if [[ "$E2E_USE_PORT_FORWARD" == "true" ]]; then
+  PROCFILE="hack/dev-env/Procfile.e2e.local"
+  echo "Starting with port-forwards..."
+  echo "Procfile: $PROCFILE"
+else
+  PROCFILE="hack/dev-env/Procfile.e2e"
+  echo "Starting without port-forwards..."
+  echo "Procfile: $PROCFILE"
+fi
+echo ""
+
+goreman -exit-on-stop=false -f $PROCFILE start

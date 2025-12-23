@@ -34,9 +34,40 @@ if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
 fi
 
+# Check if Redis TLS certificates exist
+# Note: Redis TLS uses the same agent CA (ca.crt is a copy from creds/ca.crt)
+REDIS_TLS_ARGS=""
+if [ -f "${SCRIPTPATH}/creds/redis-tls/ca.crt" ]; then
+    echo "Redis TLS certificates found (using agent CA), enabling TLS for Redis connections"
+    REDIS_TLS_ARGS="--redis-tls-enabled=true \
+        --redis-tls-ca-path=${SCRIPTPATH}/creds/redis-tls/ca.crt"
+else
+    echo "Redis TLS certificates not found, running without TLS"
+    echo "Run './hack/dev-env/gen-redis-tls-certs.sh' to generate certificates"
+fi
+
+# Set Redis address for local development
+if [ -z "${ARGOCD_AGENT_REDIS_ADDRESS}" ]; then
+    # Fallback for manual runs (when ARGOCD_AGENT_REDIS_ADDRESS is not set)
+    # Normally, start-e2e.sh sets this env var based on E2E_USE_PORT_FORWARD:
+    # - E2E_USE_PORT_FORWARD=true: localhost:6382 (local development with port-forward)
+    # - E2E_USE_PORT_FORWARD not set: <LoadBalancer-IP>:6379 (CI/Linux - direct LoadBalancer)
+    # This fallback defaults to localhost for convenience in manual testing.
+    # Note: Agents running on host (via 'go run') cannot access in-cluster DNS.
+    ARGOCD_AGENT_REDIS_ADDRESS="localhost:6382"
+    echo "ARGOCD_AGENT_REDIS_ADDRESS not set; defaulting to localhost:6382"
+    echo "Ensure port-forward is running:"
+    echo "  kubectl port-forward svc/argocd-redis -n argocd 6382:6379 --context vcluster-agent-autonomous"
+else
+    echo "Using Redis address: ${ARGOCD_AGENT_REDIS_ADDRESS}"
+fi
+REDIS_ADDRESS_ARG="--redis-addr=${ARGOCD_AGENT_REDIS_ADDRESS}"
+
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode autonomous \
     --creds mtls:any \
+    $REDIS_TLS_ARGS \
+    $REDIS_ADDRESS_ARG \
     --server-address 127.0.0.1 \
     --kubecontext vcluster-agent-autonomous \
     --namespace argocd \

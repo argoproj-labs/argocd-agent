@@ -86,6 +86,16 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisPassword        string
 		redisCompressionType string
 		healthzPort          int
+
+		// Redis TLS configuration
+		redisTLSEnabled               bool
+		redisProxyServerTLSCertPath   string
+		redisProxyServerTLSKeyPath    string
+		redisProxyServerTLSSecretName string
+		redisTLSCAPath                string
+		redisTLSCASecretName          string
+		redisTLSInsecure              bool
+		informerSyncTimeout           time.Duration
 	)
 	var command = &cobra.Command{
 		Use:   "principal",
@@ -246,6 +256,53 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithRedis(redisAddress, redisPassword, redisCompressionType))
 			opts = append(opts, principal.WithHealthzPort(healthzPort))
 
+			if informerSyncTimeout > 0 {
+				opts = append(opts, principal.WithInformerSyncTimeout(informerSyncTimeout))
+			}
+
+			// Configure Redis TLS
+			opts = append(opts, principal.WithRedisTLSEnabled(redisTLSEnabled))
+			if redisTLSEnabled {
+				// Redis proxy server TLS (for incoming connections from Argo CD)
+				if redisProxyServerTLSCertPath != "" && redisProxyServerTLSKeyPath != "" {
+					logrus.Infof("Loading Redis proxy server TLS configuration from files cert=%s and key=%s", redisProxyServerTLSCertPath, redisProxyServerTLSKeyPath)
+					opts = append(opts, principal.WithRedisProxyServerTLSFromPath(redisProxyServerTLSCertPath, redisProxyServerTLSKeyPath))
+				} else if (redisProxyServerTLSCertPath != "" && redisProxyServerTLSKeyPath == "") || (redisProxyServerTLSCertPath == "" && redisProxyServerTLSKeyPath != "") {
+					cmdutil.Fatal("Both --redis-proxy-server-tls-cert and --redis-proxy-server-tls-key have to be given")
+				} else {
+					logrus.Infof("Loading Redis proxy server TLS certificate from secret %s/%s", namespace, redisProxyServerTLSSecretName)
+					opts = append(opts, principal.WithRedisProxyServerTLSFromSecret(kubeConfig.Clientset, namespace, redisProxyServerTLSSecretName))
+				}
+
+				// Validate Redis TLS configuration - only one mode can be specified
+				modesSet := 0
+				if redisTLSInsecure {
+					modesSet++
+				}
+				if redisTLSCAPath != "" {
+					modesSet++
+				}
+				// Only count non-default secret name to allow default value
+				if redisTLSCASecretName != "" && redisTLSCASecretName != "argocd-redis-tls" {
+					modesSet++
+				}
+				if modesSet > 1 {
+					cmdutil.Fatal("Only one Redis TLS mode can be specified: --redis-tls-insecure, --redis-ca-path, or --redis-ca-secret-name")
+				}
+
+				// Redis TLS (for connections to principal's argocd-redis)
+				if redisTLSInsecure {
+					logrus.Warn("INSECURE: Not verifying Redis TLS certificate")
+					opts = append(opts, principal.WithRedisTLSInsecure(true))
+				} else if redisTLSCAPath != "" {
+					logrus.Infof("Loading Redis CA certificate from file %s", redisTLSCAPath)
+					opts = append(opts, principal.WithRedisTLSCAFromFile(redisTLSCAPath))
+				} else {
+					logrus.Infof("Loading Redis CA certificate from secret %s/%s", namespace, redisTLSCASecretName)
+					opts = append(opts, principal.WithRedisTLSCAFromSecret(kubeConfig.Clientset, namespace, redisTLSCASecretName, "tls.crt"))
+				}
+			}
+
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
 				cmdutil.Fatal("Could not create new server instance: %v", err)
@@ -374,6 +431,32 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().IntVar(&healthzPort, "healthz-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT", cmdutil.ValidPort, 8003),
 		"Port the health check server will listen on")
+	command.Flags().DurationVar(&informerSyncTimeout, "informer-sync-timeout",
+		env.DurationWithDefault("ARGOCD_PRINCIPAL_INFORMER_SYNC_TIMEOUT", nil, 0),
+		"Timeout for waiting for Kubernetes informers to sync during startup. Set to 0 to use the internal default of 60s. Increase this value (e.g., 120s or 180s) for slow cluster environments or large numbers of resources.")
+
+	// Redis TLS flags
+	command.Flags().BoolVar(&redisTLSEnabled, "redis-tls-enabled",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_REDIS_TLS_ENABLED", true),
+		"Enable TLS for Redis connections (enabled by default for security)")
+	command.Flags().StringVar(&redisProxyServerTLSCertPath, "redis-proxy-server-tls-cert",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_CERT_PATH", nil, ""),
+		"Path to TLS certificate for Redis proxy server")
+	command.Flags().StringVar(&redisProxyServerTLSKeyPath, "redis-proxy-server-tls-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_KEY_PATH", nil, ""),
+		"Path to TLS private key for Redis proxy server")
+	command.Flags().StringVar(&redisProxyServerTLSSecretName, "redis-proxy-server-tls-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_SECRET_NAME", nil, "argocd-redis-tls"),
+		"Secret name containing TLS certificate and key for Redis proxy server")
+	command.Flags().StringVar(&redisTLSCAPath, "redis-ca-path",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_CA_PATH", nil, ""),
+		"Path to CA certificate for verifying Redis TLS certificate")
+	command.Flags().StringVar(&redisTLSCASecretName, "redis-ca-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_CA_SECRET_NAME", nil, "argocd-redis-tls"),
+		"Secret name containing CA certificate for verifying Redis TLS certificate")
+	command.Flags().BoolVar(&redisTLSInsecure, "redis-tls-insecure",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_REDIS_TLS_INSECURE", false),
+		"INSECURE: Do not verify Redis TLS certificate")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
@@ -404,7 +487,7 @@ func observer(interval time.Duration) {
 // The secret names where the certificates are stored in are hard-coded at the
 // moment.
 func getResourceProxyTLSConfigFromKube(kubeClient *kube.KubernetesClient, namespace, certName, caName string) (*tls.Config, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	proxyCert, err := tlsutil.TLSCertFromSecret(ctx, kubeClient.Clientset, namespace, certName)
 	if err != nil {
