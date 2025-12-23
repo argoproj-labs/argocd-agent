@@ -143,24 +143,24 @@ data:
   # principal.redis.tls.enabled: Whether to enable TLS for Redis connections.
   # Default: true
   principal.redis.tls.enabled: "true"
-  # principal.redis.server.tls.cert-path: Path to TLS certificate for Redis proxy server.
-  # This should match the mount path in the Deployment for server certificate.
-  # Default: "/app/config/redis-server-tls/tls.crt"
-  principal.redis.server.tls.cert-path: "/app/config/redis-server-tls/tls.crt"
-  # principal.redis.server.tls.key-path: Path to TLS private key for Redis proxy server.
-  # This should match the mount path in the Deployment for server key.
-  # Default: "/app/config/redis-server-tls/tls.key"
-  principal.redis.server.tls.key-path: "/app/config/redis-server-tls/tls.key"
-  # principal.redis.server.tls.secret-name: Secret name containing TLS certificate and key for Redis proxy server.
+  # principal.redis.proxy.server.tls.cert-path: Path to TLS certificate for Redis proxy server.
+  # This should match the mount path in the Deployment for proxy server certificate.
+  # Default: "/app/config/redis-proxy-server-tls/tls.crt"
+  principal.redis.proxy.server.tls.cert-path: "/app/config/redis-proxy-server-tls/tls.crt"
+  # principal.redis.proxy.server.tls.key-path: Path to TLS private key for Redis proxy server.
+  # This should match the mount path in the Deployment for proxy server key.
+  # Default: "/app/config/redis-proxy-server-tls/tls.key"
+  principal.redis.proxy.server.tls.key-path: "/app/config/redis-proxy-server-tls/tls.key"
+  # principal.redis.proxy.server.tls.secret-name: Secret name containing TLS certificate and key for Redis proxy server.
   # Default: "argocd-redis-tls"
-  principal.redis.server.tls.secret-name: "argocd-redis-tls"
-  # principal.redis.upstream.ca-path: Path to CA certificate for verifying upstream Redis TLS certificate.
-  # This should match the mount path in the Deployment for upstream CA.
-  # Default: "/app/config/redis-upstream-tls/ca.crt"
-  principal.redis.upstream.ca-path: "/app/config/redis-upstream-tls/ca.crt"
-  # principal.redis.upstream.ca-secret-name: Secret name containing CA certificate for verifying upstream Redis TLS certificate.
+  principal.redis.proxy.server.tls.secret-name: "argocd-redis-tls"
+  # principal.redis.ca-path: Path to CA certificate for verifying Redis TLS certificate.
+  # This should match the mount path in the Deployment for Redis CA.
+  # Default: "/app/config/redis-tls/ca.crt"
+  principal.redis.ca-path: "/app/config/redis-tls/ca.crt"
+  # principal.redis.ca-secret-name: Secret name containing CA certificate for verifying Redis TLS certificate.
   # Default: "argocd-redis-tls"
-  principal.redis.upstream.ca-secret-name: "argocd-redis-tls"
-  # principal.redis.upstream.tls.insecure: INSECURE: Do not verify upstream Redis TLS certificate.
+  principal.redis.ca-secret-name: "argocd-redis-tls"
+  # principal.redis.tls.insecure: INSECURE: Do not verify Redis TLS certificate.
   # Default: false
-  principal.redis.upstream.tls.insecure: "false"
+  principal.redis.tls.insecure: "false"

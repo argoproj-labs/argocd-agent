@@ -35,9 +35,10 @@ if [ -f "$E2E_ENV_FILE" ]; then
 fi
 
 # Check if Redis TLS certificates exist
+# Note: Redis TLS uses the same agent CA (ca.crt is a copy from creds/ca.crt)
 REDIS_TLS_ARGS=""
 if [ -f "${SCRIPTPATH}/creds/redis-tls/ca.crt" ]; then
-    echo "Redis TLS certificates found, enabling TLS for Redis connections"
+    echo "Redis TLS certificates found (using agent CA), enabling TLS for Redis connections"
     REDIS_TLS_ARGS="--redis-tls-enabled=true \
         --redis-tls-ca-path=${SCRIPTPATH}/creds/redis-tls/ca.crt"
 else
@@ -46,39 +47,25 @@ else
 fi
 
 # Set Redis address for local development
-# Agents connect to their vcluster Redis via localhost port-forward
-# (in-cluster DNS is not accessible from host machine)
 if [ -z "${ARGOCD_AGENT_REDIS_ADDRESS}" ]; then
-    # Default to localhost:6381 for local E2E testing (requires port-forward)
-    # Port-forward allows TLS validation (localhost is in certificate SANs)
+    # Fallback for manual runs (when ARGOCD_AGENT_REDIS_ADDRESS is not set)
+    # Normally, start-e2e.sh sets this env var based on E2E_USE_PORT_FORWARD:
+    # - E2E_USE_PORT_FORWARD=true: localhost:6381 (local development with port-forward)
+    # - E2E_USE_PORT_FORWARD not set: <LoadBalancer-IP>:6379 (CI/Linux - direct LoadBalancer)
+    # This fallback defaults to localhost for convenience in manual testing.
+    # Note: Agents running on host (via 'go run') cannot access in-cluster DNS.
     ARGOCD_AGENT_REDIS_ADDRESS="localhost:6381"
-    echo "Using default Redis address for local development: ${ARGOCD_AGENT_REDIS_ADDRESS}"
-    echo "NOTE: Port-forward to Redis required (automatic with 'make start-e2e', manual otherwise):"
+    echo "ARGOCD_AGENT_REDIS_ADDRESS not set; defaulting to localhost:6381"
+    echo "Ensure port-forward is running:"
     echo "  kubectl port-forward svc/argocd-redis -n argocd 6381:6379 --context vcluster-agent-managed"
 else
     echo "Using Redis address: ${ARGOCD_AGENT_REDIS_ADDRESS}"
 fi
 REDIS_ADDRESS_ARG="--redis-addr=${ARGOCD_AGENT_REDIS_ADDRESS}"
 
-# Extract mTLS client certificates and CA from Kubernetes secret for agent authentication
-echo "Extracting mTLS client certificates and CA from Kubernetes..."
-TLS_CERT_PATH="/tmp/agent-managed-tls.crt"
-TLS_KEY_PATH="/tmp/agent-managed-tls.key"
-ROOT_CA_PATH="/tmp/agent-managed-ca.crt"
-kubectl --context vcluster-agent-managed -n argocd get secret argocd-agent-client-tls \
-  -o jsonpath='{.data.tls\.crt}' | base64 -d > "${TLS_CERT_PATH}" || { echo "ERROR: Failed to extract TLS cert from argocd-agent-client-tls secret"; exit 1; }
-kubectl --context vcluster-agent-managed -n argocd get secret argocd-agent-client-tls \
-  -o jsonpath='{.data.tls\.key}' | base64 -d > "${TLS_KEY_PATH}" || { echo "ERROR: Failed to extract TLS key from argocd-agent-client-tls secret"; exit 1; }
-kubectl --context vcluster-agent-managed -n argocd get secret argocd-agent-ca \
-  -o jsonpath='{.data.ca\.crt}' | base64 -d > "${ROOT_CA_PATH}" || { echo "ERROR: Failed to extract CA cert from argocd-agent-ca secret"; exit 1; }
-echo " mTLS client certificates and CA extracted"
-
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode managed \
     --creds "mtls:any" \
-    --tls-client-cert="${TLS_CERT_PATH}" \
-    --tls-client-key="${TLS_KEY_PATH}" \
-    --root-ca-path="${ROOT_CA_PATH}" \
     $REDIS_TLS_ARGS \
     $REDIS_ADDRESS_ARG \
     --server-address 127.0.0.1 \

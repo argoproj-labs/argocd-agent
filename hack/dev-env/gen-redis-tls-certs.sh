@@ -1,45 +1,72 @@
 #!/bin/bash
 # Generate Redis TLS certificates for development and testing
+# Uses the existing agent CA (from hack/dev-env/creds/ca.{crt,key})
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CREDS_DIR="${SCRIPT_DIR}/creds/redis-tls"
+AGENT_CA_DIR="${SCRIPT_DIR}/creds"
+REDIS_CREDS_DIR="${SCRIPT_DIR}/creds/redis-tls"
 
 # Create directory for Redis TLS credentials
-mkdir -p "${CREDS_DIR}"
+mkdir -p "${REDIS_CREDS_DIR}"
 
-echo "Generating Redis TLS certificates in ${CREDS_DIR}..."
+echo "Generating Redis TLS certificates using agent CA..."
+echo ""
 
-# Generate CA private key and certificate
-if [[ ! -f "${CREDS_DIR}/ca.key" ]]; then
-    echo "Generating CA key and certificate..."
-    openssl genrsa -out "${CREDS_DIR}/ca.key" 4096
-    openssl req -new -x509 -days 3650 -key "${CREDS_DIR}/ca.key" \
-        -out "${CREDS_DIR}/ca.crt" \
-        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=Redis CA"
-elif [[ ! -f "${CREDS_DIR}/ca.crt" ]]; then
-    echo "Generating CA certificate..."
-    openssl req -new -x509 -days 3650 -key "${CREDS_DIR}/ca.key" \
-        -out "${CREDS_DIR}/ca.crt" \
-        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=Redis CA"
+# Check if agent CA files exist on disk
+if [[ ! -f "${AGENT_CA_DIR}/ca.key" ]] || [[ ! -f "${AGENT_CA_DIR}/ca.crt" ]]; then
+    echo "⚠ Agent CA files not found on disk, extracting from Kubernetes secret..."
+    
+    # Try to extract from Kubernetes secret
+    if ! kubectl get secret argocd-agent-ca -n argocd --context vcluster-control-plane >/dev/null 2>&1; then
+        echo ""
+        echo "ERROR: Agent CA not found!"
+        echo "Expected:"
+        echo "  - Files: ${AGENT_CA_DIR}/ca.{crt,key}"
+        echo "  - OR Kubernetes secret: argocd-agent-ca (in vcluster-control-plane/argocd)"
+        echo ""
+        echo "Please run 'make setup-e2e' to initialize the PKI infrastructure first."
+        exit 1
+    fi
+    
+    # Extract CA from secret
+    echo "  Extracting ca.crt from argocd-agent-ca secret..."
+    kubectl get secret argocd-agent-ca -n argocd --context vcluster-control-plane \
+        -o jsonpath='{.data.tls\.crt}' | base64 -d > "${AGENT_CA_DIR}/ca.crt"
+    
+    echo "  Extracting ca.key from argocd-agent-ca secret..."
+    kubectl get secret argocd-agent-ca -n argocd --context vcluster-control-plane \
+        -o jsonpath='{.data.tls\.key}' | base64 -d > "${AGENT_CA_DIR}/ca.key"
+    
+    chmod 600 "${AGENT_CA_DIR}/ca.key"
+    echo " Extracted agent CA from Kubernetes secret"
+else
+    echo " Using existing agent CA from ${AGENT_CA_DIR}"
 fi
 
+echo ""
+
+# Copy CA certificate to redis-tls directory for convenience
+cp "${AGENT_CA_DIR}/ca.crt" "${REDIS_CREDS_DIR}/ca.crt"
+echo "✓ Copied agent CA certificate to ${REDIS_CREDS_DIR}/ca.crt"
+echo ""
+
 # Generate Redis server certificate for control-plane
-if [[ ! -f "${CREDS_DIR}/redis-control-plane.key" ]]; then
-    echo "Generating redis-control-plane certificate..."
-    openssl genrsa -out "${CREDS_DIR}/redis-control-plane.key" 4096
+if [[ ! -f "${REDIS_CREDS_DIR}/redis-control-plane.key" ]]; then
+    echo "Generating redis-control-plane private key..."
+    openssl genrsa -out "${REDIS_CREDS_DIR}/redis-control-plane.key" 4096
 fi
 
 # Always regenerate certificate to include LoadBalancer IPs if available
-echo "Generating redis-control-plane certificate with LoadBalancer SANs..."
+echo "Generating redis-control-plane certificate (signed by agent CA)..."
 
 # Try to get LoadBalancer IP/hostname if vcluster exists
 LB_IP=$(kubectl get svc argocd-redis --context="vcluster-control-plane" -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
 LB_HOSTNAME=$(kubectl get svc argocd-redis --context="vcluster-control-plane" -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
 
     # Create extension file for SAN
-    cat > "${CREDS_DIR}/redis-control-plane.ext" <<EOF
+    cat > "${REDIS_CREDS_DIR}/redis-control-plane.ext" <<EOF
 subjectAltName = @alt_names
 [alt_names]
 DNS.1 = argocd-redis
@@ -52,42 +79,46 @@ EOF
 
 # Add LoadBalancer address if available
 if [ -n "${LB_IP}" ]; then
-    echo "  Adding LoadBalancer IP to redis-control-plane certificate: ${LB_IP}"
-    echo "IP.2 = ${LB_IP}" >> "${CREDS_DIR}/redis-control-plane.ext"
+    echo "  Adding LoadBalancer IP: ${LB_IP}"
+    echo "IP.2 = ${LB_IP}" >> "${REDIS_CREDS_DIR}/redis-control-plane.ext"
 elif [ -n "${LB_HOSTNAME}" ]; then
-    echo "  Adding LoadBalancer hostname to redis-control-plane certificate: ${LB_HOSTNAME}"
-    echo "DNS.6 = ${LB_HOSTNAME}" >> "${CREDS_DIR}/redis-control-plane.ext"
+    echo "  Adding LoadBalancer hostname: ${LB_HOSTNAME}"
+    echo "DNS.6 = ${LB_HOSTNAME}" >> "${REDIS_CREDS_DIR}/redis-control-plane.ext"
 else
-    echo "  No LoadBalancer address found for redis-control-plane (OK if vclusters not created yet)"
+    echo "  No LoadBalancer address found (OK if vclusters not created yet)"
 fi
 
-    openssl req -new -key "${CREDS_DIR}/redis-control-plane.key" \
-        -out "${CREDS_DIR}/redis-control-plane.csr" \
+    openssl req -new -key "${REDIS_CREDS_DIR}/redis-control-plane.key" \
+        -out "${REDIS_CREDS_DIR}/redis-control-plane.csr" \
         -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis"
 
-    openssl x509 -req -in "${CREDS_DIR}/redis-control-plane.csr" \
-        -CA "${CREDS_DIR}/ca.crt" \
-        -CAkey "${CREDS_DIR}/ca.key" \
+    openssl x509 -req -in "${REDIS_CREDS_DIR}/redis-control-plane.csr" \
+        -CA "${AGENT_CA_DIR}/ca.crt" \
+        -CAkey "${AGENT_CA_DIR}/ca.key" \
         -CAcreateserial \
-        -out "${CREDS_DIR}/redis-control-plane.crt" \
+        -out "${REDIS_CREDS_DIR}/redis-control-plane.crt" \
         -days 365 \
-        -extfile "${CREDS_DIR}/redis-control-plane.ext"
+        -extfile "${REDIS_CREDS_DIR}/redis-control-plane.ext"
+
+echo " Generated redis-control-plane certificate"
+echo ""
 
 # Generate Redis proxy certificate (for principal's Redis proxy)
-if [[ ! -f "${CREDS_DIR}/redis-proxy.key" ]]; then
-    echo "Generating redis-proxy certificate..."
-    openssl genrsa -out "${CREDS_DIR}/redis-proxy.key" 4096
+if [[ ! -f "${REDIS_CREDS_DIR}/redis-proxy.key" ]]; then
+    echo "Generating redis-proxy private key..."
+    openssl genrsa -out "${REDIS_CREDS_DIR}/redis-proxy.key" 4096
 fi
 
-if [[ ! -f "${CREDS_DIR}/redis-proxy.crt" ]]; then
-    # Get local machine IP for certificate SANs
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || echo "")
-    else
-        LOCAL_IP=$(ip r show default 2>/dev/null | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,' | head -n 1 || echo "")
-    fi
-    
-    cat > "${CREDS_DIR}/redis-proxy.ext" <<EOF
+echo "Generating redis-proxy certificate (signed by agent CA)..."
+
+# Get local machine IP for certificate SANs
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || echo "")
+else
+    LOCAL_IP=$(ip r show default 2>/dev/null | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,' | head -n 1 || echo "")
+fi
+
+cat > "${REDIS_CREDS_DIR}/redis-proxy.ext" <<EOF
 subjectAltName = @alt_names
 [alt_names]
 DNS.1 = argocd-redis-proxy
@@ -100,40 +131,43 @@ IP.1 = 127.0.0.1
 IP.2 = 127.0.0.2
 EOF
 
-    # Only add local IP if detected
-    if [ -n "${LOCAL_IP}" ]; then
-        echo "IP.3 = ${LOCAL_IP}" >> "${CREDS_DIR}/redis-proxy.ext"
-    fi
-
-    openssl req -new -key "${CREDS_DIR}/redis-proxy.key" \
-        -out "${CREDS_DIR}/redis-proxy.csr" \
-        -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis-proxy"
-
-    openssl x509 -req -in "${CREDS_DIR}/redis-proxy.csr" \
-        -CA "${CREDS_DIR}/ca.crt" \
-        -CAkey "${CREDS_DIR}/ca.key" \
-        -CAcreateserial \
-        -out "${CREDS_DIR}/redis-proxy.crt" \
-        -days 365 \
-        -extfile "${CREDS_DIR}/redis-proxy.ext"
+# Only add local IP if detected
+if [ -n "${LOCAL_IP}" ]; then
+    echo "  Adding local IP: ${LOCAL_IP}"
+    echo "IP.3 = ${LOCAL_IP}" >> "${REDIS_CREDS_DIR}/redis-proxy.ext"
 fi
+
+openssl req -new -key "${REDIS_CREDS_DIR}/redis-proxy.key" \
+    -out "${REDIS_CREDS_DIR}/redis-proxy.csr" \
+    -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis-proxy"
+
+openssl x509 -req -in "${REDIS_CREDS_DIR}/redis-proxy.csr" \
+    -CA "${AGENT_CA_DIR}/ca.crt" \
+    -CAkey "${AGENT_CA_DIR}/ca.key" \
+    -CAcreateserial \
+    -out "${REDIS_CREDS_DIR}/redis-proxy.crt" \
+    -days 365 \
+    -extfile "${REDIS_CREDS_DIR}/redis-proxy.ext"
+
+echo " Generated redis-proxy certificate"
+echo ""
 
 # Generate Redis certificates for agent vclusters
 for agent in autonomous managed; do
-    if [[ ! -f "${CREDS_DIR}/redis-${agent}.key" ]]; then
-        echo "Generating redis-${agent} certificate..."
-        openssl genrsa -out "${CREDS_DIR}/redis-${agent}.key" 4096
+    if [[ ! -f "${REDIS_CREDS_DIR}/redis-${agent}.key" ]]; then
+        echo "Generating redis-${agent} private key..."
+        openssl genrsa -out "${REDIS_CREDS_DIR}/redis-${agent}.key" 4096
     fi
 
     # Always regenerate certificate to include LoadBalancer IPs if available
-    echo "Generating redis-${agent} certificate with LoadBalancer SANs..."
+    echo "Generating redis-${agent} certificate (signed by agent CA)..."
     
     # Try to get LoadBalancer IP/hostname if vcluster exists
     CONTEXT="vcluster-agent-${agent}"
     LB_IP=$(kubectl get svc argocd-redis --context="${CONTEXT}" -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
     LB_HOSTNAME=$(kubectl get svc argocd-redis --context="${CONTEXT}" -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
     
-        cat > "${CREDS_DIR}/redis-${agent}.ext" <<EOF
+        cat > "${REDIS_CREDS_DIR}/redis-${agent}.ext" <<EOF
 subjectAltName = @alt_names
 [alt_names]
 DNS.1 = argocd-redis
@@ -146,38 +180,45 @@ EOF
 
     # Add LoadBalancer address if available
     if [ -n "${LB_IP}" ]; then
-        echo "  Adding LoadBalancer IP to redis-${agent} certificate: ${LB_IP}"
-        echo "IP.2 = ${LB_IP}" >> "${CREDS_DIR}/redis-${agent}.ext"
+        echo "  Adding LoadBalancer IP: ${LB_IP}"
+        echo "IP.2 = ${LB_IP}" >> "${REDIS_CREDS_DIR}/redis-${agent}.ext"
     elif [ -n "${LB_HOSTNAME}" ]; then
-        echo "  Adding LoadBalancer hostname to redis-${agent} certificate: ${LB_HOSTNAME}"
-        echo "DNS.6 = ${LB_HOSTNAME}" >> "${CREDS_DIR}/redis-${agent}.ext"
+        echo "  Adding LoadBalancer hostname: ${LB_HOSTNAME}"
+        echo "DNS.6 = ${LB_HOSTNAME}" >> "${REDIS_CREDS_DIR}/redis-${agent}.ext"
     else
-        echo "  No LoadBalancer address found for redis-${agent} (OK if vclusters not created yet)"
+        echo "  No LoadBalancer address found (OK if vclusters not created yet)"
     fi
 
-        openssl req -new -key "${CREDS_DIR}/redis-${agent}.key" \
-            -out "${CREDS_DIR}/redis-${agent}.csr" \
+        openssl req -new -key "${REDIS_CREDS_DIR}/redis-${agent}.key" \
+            -out "${REDIS_CREDS_DIR}/redis-${agent}.csr" \
             -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=argocd-redis-${agent}"
 
-        openssl x509 -req -in "${CREDS_DIR}/redis-${agent}.csr" \
-            -CA "${CREDS_DIR}/ca.crt" \
-            -CAkey "${CREDS_DIR}/ca.key" \
+        openssl x509 -req -in "${REDIS_CREDS_DIR}/redis-${agent}.csr" \
+            -CA "${AGENT_CA_DIR}/ca.crt" \
+            -CAkey "${AGENT_CA_DIR}/ca.key" \
             -CAcreateserial \
-            -out "${CREDS_DIR}/redis-${agent}.crt" \
+            -out "${REDIS_CREDS_DIR}/redis-${agent}.crt" \
             -days 365 \
-            -extfile "${CREDS_DIR}/redis-${agent}.ext"
+            -extfile "${REDIS_CREDS_DIR}/redis-${agent}.ext"
+    
+    echo " Generated redis-${agent} certificate"
+    echo ""
 done
 
-echo ""
 echo "Cleaning up temporary files..."
-rm -f "${CREDS_DIR}"/*.csr "${CREDS_DIR}"/*.ext "${CREDS_DIR}"/*.srl
+rm -f "${REDIS_CREDS_DIR}"/*.csr "${REDIS_CREDS_DIR}"/*.ext
 
 echo ""
-echo "Redis TLS certificates generated successfully!"
+echo "═══════════════════════════════════════════════════════════"
+echo " Redis TLS certificates generated successfully!"
+echo "═══════════════════════════════════════════════════════════"
 echo ""
-echo "Generated files in ${CREDS_DIR}:"
-echo "  - ca.crt, ca.key (CA)"
+echo "All certificates signed by agent CA: ${AGENT_CA_DIR}/ca.{crt,key}"
+echo ""
+echo "Generated files in ${REDIS_CREDS_DIR}:"
+echo "  - ca.crt"
 echo "  - redis-control-plane.{crt,key}"
 echo "  - redis-proxy.{crt,key}"
 echo "  - redis-autonomous.{crt,key}"
 echo "  - redis-managed.{crt,key}"
+echo ""

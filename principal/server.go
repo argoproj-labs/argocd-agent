@@ -355,20 +355,20 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		if s.options.redisTLSEnabled {
 			s.redisProxy.SetTLSEnabled(true)
 
-			// Server TLS (for incoming connections from Argo CD)
-			if s.options.redisServerTLSCertPath != "" && s.options.redisServerTLSKeyPath != "" {
-				s.redisProxy.SetServerTLSFromPath(s.options.redisServerTLSCertPath, s.options.redisServerTLSKeyPath)
-			} else if s.options.redisServerTLSCert != nil && s.options.redisServerTLSKey != nil {
-				s.redisProxy.SetServerTLS(s.options.redisServerTLSCert, s.options.redisServerTLSKey)
+			// Proxy server TLS (for incoming connections from Argo CD)
+			if s.options.redisProxyServerTLSCertPath != "" && s.options.redisProxyServerTLSKeyPath != "" {
+				s.redisProxy.SetServerTLSFromPath(s.options.redisProxyServerTLSCertPath, s.options.redisProxyServerTLSKeyPath)
+			} else if s.options.redisProxyServerTLSCert != nil && s.options.redisProxyServerTLSKey != nil {
+				s.redisProxy.SetServerTLS(s.options.redisProxyServerTLSCert, s.options.redisProxyServerTLSKey)
 			}
 
-			// Upstream TLS (for connections to principal's argocd-redis)
-			if s.options.redisUpstreamTLSInsecure {
+			// Redis TLS (for connections to principal's argocd-redis)
+			if s.options.redisTLSInsecure {
 				s.redisProxy.SetUpstreamTLSInsecure(true)
-			} else if s.options.redisUpstreamTLSCAPath != "" {
-				s.redisProxy.SetUpstreamTLSCAPath(s.options.redisUpstreamTLSCAPath)
-			} else if s.options.redisUpstreamTLSCA != nil {
-				s.redisProxy.SetUpstreamTLSCA(s.options.redisUpstreamTLSCA)
+			} else if s.options.redisTLSCAPath != "" {
+				s.redisProxy.SetUpstreamTLSCAPath(s.options.redisTLSCAPath)
+			} else if s.options.redisTLSCA != nil {
+				s.redisProxy.SetUpstreamTLSCA(s.options.redisTLSCA)
 			}
 		}
 	}
@@ -405,24 +405,24 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		clusterMgrRedisTLSConfig = &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		}
-		if s.options.redisUpstreamTLSInsecure {
+		if s.options.redisTLSInsecure {
 			clusterMgrRedisTLSConfig.InsecureSkipVerify = true
-			log().Warn("INSECURE: Cluster manager not verifying upstream Redis TLS certificate")
-		} else if s.options.redisUpstreamTLSCA != nil {
-			clusterMgrRedisTLSConfig.RootCAs = s.options.redisUpstreamTLSCA
+			log().Warn("INSECURE: Cluster manager not verifying Redis TLS certificate")
+		} else if s.options.redisTLSCA != nil {
+			clusterMgrRedisTLSConfig.RootCAs = s.options.redisTLSCA
 			log().Debug("Using provided CA certificate pool for cluster manager Redis TLS")
-		} else if s.options.redisUpstreamTLSCAPath != "" {
+		} else if s.options.redisTLSCAPath != "" {
 			// Load CA certificate from file
-			caCert, err := os.ReadFile(s.options.redisUpstreamTLSCAPath)
+			caCert, err := os.ReadFile(s.options.redisTLSCAPath)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read Redis CA certificate from %s: %w", s.options.redisUpstreamTLSCAPath, err)
+				return nil, fmt.Errorf("failed to read Redis CA certificate from %s: %w", s.options.redisTLSCAPath, err)
 			}
 			caCertPool := x509.NewCertPool()
 			if !caCertPool.AppendCertsFromPEM(caCert) {
-				return nil, fmt.Errorf("failed to parse Redis CA certificate from %s", s.options.redisUpstreamTLSCAPath)
+				return nil, fmt.Errorf("failed to parse Redis CA certificate from %s", s.options.redisTLSCAPath)
 			}
 			clusterMgrRedisTLSConfig.RootCAs = caCertPool
-			log().WithField("caPath", s.options.redisUpstreamTLSCAPath).Info("Loaded Redis CA certificate for cluster manager")
+			log().WithField("caPath", s.options.redisTLSCAPath).Info("Loaded Redis CA certificate for cluster manager")
 		}
 	}
 

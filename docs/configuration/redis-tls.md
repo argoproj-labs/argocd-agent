@@ -54,12 +54,12 @@ Agent Component
 1. **Redis Proxy Server TLS** (Principal only)
    - Secures incoming connections from Argo CD to the principal's Redis proxy
    - Requires: TLS certificate and private key
-   - Configured via: `--redis-server-tls-cert`, `--redis-server-tls-key` or `--redis-server-tls-secret-name`
+   - Configured via: `--redis-proxy-server-tls-cert`, `--redis-proxy-server-tls-key` or `--redis-proxy-server-tls-secret-name`
 
 2. **Upstream Redis TLS** (Principal only)
    - Secures connections from the principal's Redis proxy to its local argocd-redis
    - Requires: CA certificate to validate the Redis server's certificate
-   - Configured via: `--redis-upstream-ca-path` or `--redis-upstream-ca-secret-name`
+   - Configured via: `--redis-ca-path` or `--redis-ca-secret-name`
 
 3. **Agent Redis TLS** (Agent only)
    - Secures connections from agents to their local argocd-redis
@@ -110,7 +110,7 @@ The `make setup-e2e` command performs a comprehensive setup, including all Redis
 6. **Configures Redis for TLS** (calls `configure-redis-tls.sh` for each vcluster)
    - Creates `argocd-redis-tls` secrets
    - Patches Redis Deployments for TLS
-7. **Configures Argo CD components** (calls `configure-argocd-redis-tls.sh` for each vcluster)
+7. **Configures Argo CD components** (calls `configure-argocd-redis-for-tls.sh` for each vcluster)
    - Sets `redis.server` to DNS names (not ClusterIPs)
    - Adds TLS configuration to server, repo-server, application-controller
    - Restarts all components
@@ -179,32 +179,39 @@ Your local development setup determines whether additional configuration is need
 For production deployments, you'll need:
 
 1. **CA Certificate** (`ca.crt`, `ca.key`)
-   - Used to sign Redis server certificates
-   - Distributed to principal and agents for certificate validation
+   - **Redis TLS uses the same agent CA** used for agent/principal mTLS authentication
+   - This simplifies certificate management by consolidating to a single CA
+   - The CA signs both agent client certificates and Redis server certificates
 
 2. **Redis Server Certificate** (`tls.crt`, `tls.key`)
    - For the argocd-redis Deployment in each cluster
+   - Signed by the agent CA
    - Must include Subject Alternative Names (SANs) for all connection methods:
      - `argocd-redis`, `argocd-redis.argocd.svc.cluster.local` (Kubernetes DNS)
      - `localhost`, `127.0.0.1` (for port-forward connections)
 
-**Note:** The same certificate is used for both the Redis server and the principal's Redis proxy for simplicity
+**Note:** 
+- The same certificate is used for both the Redis server and the principal's Redis proxy for simplicity
+- For dev/E2E environments, `gen-redis-tls-certs.sh` automatically uses the existing agent CA
 
 ### Generating Certificates
 
 #### Using OpenSSL (Manual)
 
-> **Note:** For E2E tests and local development, use `./hack/dev-env/gen-redis-tls-certs.sh` instead, which automates all of this and includes appropriate SANs automatically.
+> **Note:** For E2E tests and local development, use `./hack/dev-env/gen-redis-tls-certs.sh` instead, which automatically uses the existing agent CA and includes appropriate SANs.
 
-For production or custom setups, you can generate certificates manually:
+For production or custom setups, you can generate certificates manually.
+
+**Important:** Redis TLS uses the same CA as agent/principal mTLS. Use your existing agent CA instead of generating a new one:
 
 ```bash
-# Generate CA
-openssl genrsa -out ca.key 4096
-openssl req -new -x509 -days 3650 -key ca.key -out ca.crt \
-    -subj "/CN=Redis CA"
+# Use your existing agent CA (e.g., from argocd-agent-ca secret)
+# If you don't have one yet, generate it:
+# openssl genrsa -out ca.key 4096
+# openssl req -new -x509 -days 3650 -key ca.key -out ca.crt \
+#     -subj "/CN=Agent CA"
 
-# Generate Redis server certificate
+# Generate Redis server certificate (signed by agent CA)
 openssl genrsa -out redis.key 4096
 openssl req -new -key redis.key -out redis.csr \
     -subj "/CN=argocd-redis"
@@ -233,9 +240,9 @@ openssl x509 -req -in redis.csr -CA ca.crt -CAkey ca.key \
 ```bash
 argocd-agent principal \
   --redis-tls-enabled=true \
-  --redis-server-tls-cert=/app/config/redis-server-tls/tls.crt \
-  --redis-server-tls-key=/app/config/redis-server-tls/tls.key \
-  --redis-upstream-ca-path=/app/config/redis-upstream-tls/ca.crt
+  --redis-proxy-server-tls-cert=/app/config/redis-proxy-server-tls/tls.crt \
+  --redis-proxy-server-tls-key=/app/config/redis-proxy-server-tls/tls.key \
+  --redis-ca-path=/app/config/redis-tls/ca.crt
 ```
 
 #### Environment Variables
@@ -243,9 +250,9 @@ argocd-agent principal \
 ```bash
 export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS=localhost:6380  # Redis address (with port-forward)
 export ARGOCD_PRINCIPAL_REDIS_TLS_ENABLED=true
-export ARGOCD_PRINCIPAL_REDIS_SERVER_TLS_CERT_PATH=/app/config/redis-server-tls/tls.crt
-export ARGOCD_PRINCIPAL_REDIS_SERVER_TLS_KEY_PATH=/app/config/redis-server-tls/tls.key
-export ARGOCD_PRINCIPAL_REDIS_UPSTREAM_CA_PATH=/app/config/redis-upstream-tls/ca.crt
+export ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_CERT_PATH=/app/config/redis-proxy-server-tls/tls.crt
+export ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_KEY_PATH=/app/config/redis-proxy-server-tls/tls.key
+export ARGOCD_PRINCIPAL_REDIS_CA_PATH=/app/config/redis-tls/ca.crt
 ```
 
 #### All Principal Redis TLS Options
@@ -254,12 +261,12 @@ export ARGOCD_PRINCIPAL_REDIS_UPSTREAM_CA_PATH=/app/config/redis-upstream-tls/ca
 |------|---------|-------------|---------|
 | `--redis-server-address` | `ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS` | Redis server address (host:port) | `argocd-redis:6379` |
 | `--redis-tls-enabled` | `ARGOCD_PRINCIPAL_REDIS_TLS_ENABLED` | Enable TLS for Redis connections | `true` |
-| `--redis-server-tls-cert` | `ARGOCD_PRINCIPAL_REDIS_SERVER_TLS_CERT_PATH` | Path to Redis proxy server TLS certificate | `""` |
-| `--redis-server-tls-key` | `ARGOCD_PRINCIPAL_REDIS_SERVER_TLS_KEY_PATH` | Path to Redis proxy server TLS private key | `""` |
-| `--redis-server-tls-secret-name` | `ARGOCD_PRINCIPAL_REDIS_SERVER_TLS_SECRET_NAME` | Kubernetes secret containing Redis proxy TLS cert/key | `argocd-redis-tls` |
-| `--redis-upstream-ca-path` | `ARGOCD_PRINCIPAL_REDIS_UPSTREAM_CA_PATH` | Path to CA certificate for upstream Redis TLS | `""` |
-| `--redis-upstream-ca-secret-name` | `ARGOCD_PRINCIPAL_REDIS_UPSTREAM_CA_SECRET_NAME` | Kubernetes secret containing CA certificate | `argocd-redis-tls` |
-| `--redis-upstream-tls-insecure` | `ARGOCD_PRINCIPAL_REDIS_UPSTREAM_TLS_INSECURE` | INSECURE: Skip upstream Redis TLS verification | `false` |
+| `--redis-proxy-server-tls-cert` | `ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_CERT_PATH` | Path to Redis proxy server TLS certificate | `""` |
+| `--redis-proxy-server-tls-key` | `ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_KEY_PATH` | Path to Redis proxy server TLS private key | `""` |
+| `--redis-proxy-server-tls-secret-name` | `ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_SECRET_NAME` | Kubernetes secret containing Redis proxy TLS cert/key | `argocd-redis-tls` |
+| `--redis-ca-path` | `ARGOCD_PRINCIPAL_REDIS_CA_PATH` | Path to CA certificate for upstream Redis TLS | `""` |
+| `--redis-ca-secret-name` | `ARGOCD_PRINCIPAL_REDIS_CA_SECRET_NAME` | Kubernetes secret containing CA certificate | `argocd-redis-tls` |
+| `--redis-tls-insecure` | `ARGOCD_PRINCIPAL_REDIS_TLS_INSECURE` | INSECURE: Skip upstream Redis TLS verification | `false` |
 
 ### Agent Configuration
 
@@ -371,11 +378,11 @@ The default Kubernetes installation already has Redis TLS **fully configured**:
 ```yaml
 data:
   principal.redis.tls.enabled: "true"
-  principal.redis.server.tls.cert-path: "/app/config/redis-server-tls/tls.crt"
-  principal.redis.server.tls.key-path: "/app/config/redis-server-tls/tls.key"
-  principal.redis.server.tls.secret-name: "argocd-redis-tls"
-  principal.redis.upstream.ca-path: "/app/config/redis-upstream-tls/ca.crt"
-  principal.redis.upstream.ca-secret-name: "argocd-redis-tls"
+  principal.redis.proxy.server.tls.cert-path: "/app/config/redis-proxy-server-tls/tls.crt"
+  principal.redis.proxy.server.tls.key-path: "/app/config/redis-proxy-server-tls/tls.key"
+  principal.redis.proxy.server.tls.secret-name: "argocd-redis-tls"
+  principal.redis.ca-path: "/app/config/redis-tls/ca.crt"
+  principal.redis.ca-secret-name: "argocd-redis-tls"
 ```
 
 **Agent ConfigMap** (`install/kubernetes/agent/agent-params-cm.yaml`):
@@ -429,13 +436,13 @@ cd hack/dev-env
 
 ```bash
 # Control plane
-./configure-argocd-redis-tls.sh vcluster-control-plane
+./configure-argocd-redis-for-tls.sh vcluster-control-plane
 
 # Managed agent
-./configure-argocd-redis-tls.sh vcluster-agent-managed
+./configure-argocd-redis-for-tls.sh vcluster-agent-managed
 
 # Autonomous agent (optional, if testing autonomous mode)
-./configure-argocd-redis-tls.sh vcluster-agent-autonomous
+./configure-argocd-redis-for-tls.sh vcluster-agent-autonomous
 ```
 
 **What this does:**
@@ -724,15 +731,15 @@ All must be true:
 
 #### ❌ Error: "secret 'argocd-redis-tls' not found"
 
-**When:** Running `configure-argocd-redis-tls.sh`
+**When:** Running `configure-argocd-redis-for-tls.sh`
 
 **Cause:** Redis TLS secret doesn't exist yet
 
-**Fix:** This shouldn't happen if you followed the steps in order. The secret is created by `configure-argocd-redis-tls.sh` itself. If you see this error:
+**Fix:** This shouldn't happen if you followed the steps in order. The secret is created by `configure-argocd-redis-for-tls.sh` itself. If you see this error:
 
 ```bash
 # Re-run the command - it creates the secret on first run
-./configure-argocd-redis-tls.sh vcluster-control-plane
+./configure-argocd-redis-for-tls.sh vcluster-control-plane
 ```
 
 ---
@@ -752,7 +759,7 @@ kubectl get pods -n argocd -o wide --context vcluster-control-plane
 Match the IP in the error to the pod, then reconfigure:
 
 ```bash
-./configure-argocd-redis-tls.sh vcluster-control-plane
+./configure-argocd-redis-for-tls.sh vcluster-control-plane
 ```
 
 ---
@@ -763,7 +770,7 @@ Match the IP in the error to the pod, then reconfigure:
 
 **Cause:** Component can't validate the certificate
 
-**This shouldn't happen** if you used `configure-argocd-redis-tls.sh`!
+**This shouldn't happen** if you used `configure-argocd-redis-for-tls.sh`!
 
 **Fix:** Verify CA is mounted in the pod:
 
@@ -774,7 +781,7 @@ kubectl exec -n argocd <POD_NAME> --context vcluster-control-plane -- ls -la /ap
 Should show `ca.crt`. If missing, reconfigure:
 
 ```bash
-./configure-argocd-redis-tls.sh vcluster-control-plane
+./configure-argocd-redis-for-tls.sh vcluster-control-plane
 ```
 
 ---
@@ -886,7 +893,7 @@ deployment "argocd-redis" successfully rolled out
 ✅ Redis pod argocd-redis-xxx is running with TLS
 ```
 
-**configure-argocd-redis-tls.sh:**
+**configure-argocd-redis-for-tls.sh:**
 ```
 ╔══════════════════════════════════════════════════════════╗
 ║  Configure Argo CD Components for Redis TLS             ║
@@ -967,7 +974,7 @@ Configuring argocd-application-controller for Redis TLS...
    ./hack/dev-env/configure-redis-tls.sh vcluster-control-plane
    
    # Re-run Argo CD component configuration
-   ./hack/dev-env/configure-argocd-redis-tls.sh vcluster-control-plane
+   ./hack/dev-env/configure-argocd-redis-for-tls.sh vcluster-control-plane
    ```
 
 2. **Force regenerate certificates:**
@@ -981,7 +988,7 @@ Configuring argocd-application-controller for Redis TLS...
    # Reconfigure all clusters
    for ctx in vcluster-control-plane vcluster-agent-managed vcluster-agent-autonomous; do
      ./hack/dev-env/configure-redis-tls.sh $ctx
-     ./hack/dev-env/configure-argocd-redis-tls.sh $ctx
+     ./hack/dev-env/configure-argocd-redis-for-tls.sh $ctx
    done
    ```
 
@@ -1020,7 +1027,7 @@ Configuring argocd-application-controller for Redis TLS...
 **Problem:** Principal logs show "unable to connect to principal redis"
 
 **Solution:**
-- Verify `--redis-upstream-ca-path` points to the correct CA certificate
+- Verify `--redis-ca-path` points to the correct CA certificate
 - Check Redis server certificate was signed by the same CA
 - Ensure Redis Deployment has TLS properly configured
 
@@ -1078,8 +1085,8 @@ kubectl exec -it $REDIS_POD -n argocd -- sh -c \
    - Test rotation procedures in non-production environments
 
 4. **Disable Insecure Options**
-   - Never use `--redis-upstream-tls-insecure` or `--redis-tls-insecure` in production
-   - These options disable certificate verification and are insecure
+   - Never use `--redis-tls-insecure` (used by both agent and principal) in production
+   - This option disables certificate verification and is insecure
 
 ## Additional Resources
 

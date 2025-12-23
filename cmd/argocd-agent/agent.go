@@ -195,6 +195,8 @@ func NewAgentRunCommand() *cobra.Command {
 				} else if redisTLSCAPath != "" {
 					logrus.Infof("Loading Redis CA certificate from file %s", redisTLSCAPath)
 					agentOpts = append(agentOpts, agent.WithRedisTLSCAPath(redisTLSCAPath))
+				} else {
+					cmdutil.Fatal("Redis TLS enabled but no CA certificate configured: use --redis-tls-ca-path or --redis-tls-insecure")
 				}
 			}
 

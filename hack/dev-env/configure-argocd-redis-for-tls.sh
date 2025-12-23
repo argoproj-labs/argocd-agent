@@ -168,21 +168,48 @@ if kubectl get deployment argocd-repo-server -n ${NAMESPACE} &>/dev/null; then
     # Check if volume already exists
     if ! kubectl get deployment argocd-repo-server -n ${NAMESPACE} -o jsonpath='{.spec.template.spec.volumes[?(@.name=="redis-tls-ca")]}' | grep -q "redis-tls-ca"; then
         echo "  Adding redis-tls-ca volume..."
-        if ! kubectl -n ${NAMESPACE} patch deployment argocd-repo-server --type=json -p '[
-          {
-            "op": "add",
-            "path": "/spec/template/spec/volumes/-",
-            "value": {
-              "name": "redis-tls-ca",
-              "secret": {
-                "secretName": "argocd-redis-tls",
-                "items": [{"key": "ca.crt", "path": "ca.crt"}]
+        
+        # Check if volumes array exists
+        VOLUMES_EXIST=$(kubectl get deployment argocd-repo-server -n ${NAMESPACE} -o jsonpath='{.spec.template.spec.volumes}' 2>/dev/null || echo "")
+        
+        if [ -z "$VOLUMES_EXIST" ] || [ "$VOLUMES_EXIST" = "null" ]; then
+            # Create volumes array with first element
+            if ! kubectl -n ${NAMESPACE} patch deployment argocd-repo-server --type=json -p '[
+              {
+                "op": "add",
+                "path": "/spec/template/spec/volumes",
+                "value": [{
+                  "name": "redis-tls-ca",
+                  "secret": {
+                    "secretName": "argocd-redis-tls",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}]
+                  }
+                }]
               }
-            }
-          }
-        ]'; then
-            echo "  ERROR: Failed to add redis-tls-ca volume to argocd-repo-server"
-            exit 1
+            ]'; then
+                echo "  ERROR: Failed to create volumes array and add redis-tls-ca volume to argocd-repo-server"
+                echo "  This is required for Redis TLS."
+                exit 1
+            fi
+        else
+            # Append to existing volumes array
+            if ! kubectl -n ${NAMESPACE} patch deployment argocd-repo-server --type=json -p '[
+              {
+                "op": "add",
+                "path": "/spec/template/spec/volumes/-",
+                "value": {
+                  "name": "redis-tls-ca",
+                  "secret": {
+                    "secretName": "argocd-redis-tls",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}]
+                  }
+                }
+              }
+            ]'; then
+                echo "  ERROR: Failed to add redis-tls-ca volume to argocd-repo-server"
+                echo "  This is required for Redis TLS. Please check deployment structure."
+                exit 1
+            fi
         fi
     else
         echo "  redis-tls-ca volume already exists"
@@ -357,44 +384,24 @@ echo ""
 echo "Scaling up Argo CD components with Redis TLS configuration..."
 echo ""
 
-# Read replica counts from ConfigMap (created by configure-redis-tls.sh)
-# If ConfigMap doesn't exist, use default values
-REPO_SERVER_REPLICAS=$(kubectl get configmap argocd-redis-tls-replicas -n ${NAMESPACE} -o jsonpath='{.data.repo-server}' 2>/dev/null || echo "1")
-CONTROLLER_REPLICAS=$(kubectl get configmap argocd-redis-tls-replicas -n ${NAMESPACE} -o jsonpath='{.data.application-controller}' 2>/dev/null || echo "1")
-SERVER_REPLICAS=$(kubectl get configmap argocd-redis-tls-replicas -n ${NAMESPACE} -o jsonpath='{.data.server}' 2>/dev/null || echo "1")
-
-# Ensure we have at least 1 replica
-if [ -z "$REPO_SERVER_REPLICAS" ] || [ "$REPO_SERVER_REPLICAS" = "0" ]; then
-    REPO_SERVER_REPLICAS="1"
-fi
-if [ -z "$CONTROLLER_REPLICAS" ] || [ "$CONTROLLER_REPLICAS" = "0" ]; then
-    CONTROLLER_REPLICAS="1"
-fi
-if [ -z "$SERVER_REPLICAS" ] || [ "$SERVER_REPLICAS" = "0" ]; then
-    SERVER_REPLICAS="1"
-fi
-
-# Scale up components (they will start with the new TLS configuration)
+# Scale up components to 1 replica (dev/E2E always uses 1)
 if kubectl get deployment argocd-server -n ${NAMESPACE} &>/dev/null; then
-    echo "Scaling up argocd-server to ${SERVER_REPLICAS} replicas..."
-    kubectl scale deployment argocd-server -n ${NAMESPACE} --replicas=${SERVER_REPLICAS}
+    echo "Scaling up argocd-server to 1 replica..."
+    kubectl scale deployment argocd-server -n ${NAMESPACE} --replicas=1
     kubectl rollout status deployment argocd-server -n ${NAMESPACE} --timeout=120s
 fi
 
 if kubectl get deployment argocd-repo-server -n ${NAMESPACE} &>/dev/null; then
-    echo "Scaling up argocd-repo-server to ${REPO_SERVER_REPLICAS} replicas..."
-    kubectl scale deployment argocd-repo-server -n ${NAMESPACE} --replicas=${REPO_SERVER_REPLICAS}
+    echo "Scaling up argocd-repo-server to 1 replica..."
+    kubectl scale deployment argocd-repo-server -n ${NAMESPACE} --replicas=1
     kubectl rollout status deployment argocd-repo-server -n ${NAMESPACE} --timeout=120s
 fi
 
 if kubectl get statefulset argocd-application-controller -n ${NAMESPACE} &>/dev/null; then
-    echo "Scaling up argocd-application-controller to ${CONTROLLER_REPLICAS} replicas..."
-    kubectl scale statefulset argocd-application-controller -n ${NAMESPACE} --replicas=${CONTROLLER_REPLICAS}
+    echo "Scaling up argocd-application-controller to 1 replica..."
+    kubectl scale statefulset argocd-application-controller -n ${NAMESPACE} --replicas=1
     kubectl rollout status statefulset argocd-application-controller -n ${NAMESPACE} --timeout=120s
 fi
-
-# Clean up the temporary ConfigMap
-kubectl delete configmap argocd-redis-tls-replicas -n ${NAMESPACE} 2>/dev/null || true
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"

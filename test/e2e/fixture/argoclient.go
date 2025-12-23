@@ -27,6 +27,7 @@ import (
 	"os"
 
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/onsi/ginkgo/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -279,8 +280,7 @@ func (c *ArgoRestClient) GetApplicationLogs(app *v1alpha1.Application, namespace
 	if tailLines > 0 {
 		q.Set("tailLines", fmt.Sprint(tailLines))
 	}
-	// Set sinceSeconds to avoid time parsing errors - fetch logs from last 5 minutes
-	q.Set("sinceSeconds", "300")
+
 	u.RawQuery = q.Encode()
 	u.Path = fmt.Sprintf("/api/v1/applications/%s/logs", app.Name)
 
@@ -354,7 +354,7 @@ func (c *ArgoRestClient) url(params ...string) *url.URL {
 		}
 		u.RawQuery = q.Encode()
 	} else if len(params) != 0 {
-		panic("params must be given in pairs")
+		ginkgo.Fail("params must be given in pairs")
 	}
 	return u
 }

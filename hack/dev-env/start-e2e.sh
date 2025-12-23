@@ -41,33 +41,46 @@ getExternalLoadBalancerIP() {
   done
 
   if [ $i -gt $MAX_ATTEMPTS ]; then
-    echo "Failed to obtain external IP after $MAX_ATTEMPTS attempts."
+    echo "ERROR: Failed to obtain external IP after $MAX_ATTEMPTS attempts."
+    echo ""
+    echo "This usually means:"
+    echo "  1. MetalLB is not installed or not configured on your cluster"
+    echo "  2. Your cluster doesn't support LoadBalancer services"
+    echo ""
+    echo "Alternative: Use port-forward mode instead (works on any OS):"
+    echo "  E2E_USE_PORT_FORWARD=true ./hack/dev-env/start-e2e.sh"
+    echo ""
+    echo "Note: You'll need to run port-forwards in a separate terminal:"
+    echo "  goreman -f hack/dev-env/Procfile.e2e.local start"
+    echo ""
     exit 1
   fi
 
 }
 
 # Dual-mode setup: Port-forwards (local) vs LoadBalancer IPs
-# Can be overridden with E2E_USE_PORT_FORWARD=true/false
-if [[ "${E2E_USE_PORT_FORWARD:-auto}" == "auto" ]]; then
-  # Auto-detect based on OS
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    E2E_USE_PORT_FORWARD=true
-  else
-    E2E_USE_PORT_FORWARD=false
-  fi
-fi
-
-if [[ "$E2E_USE_PORT_FORWARD" == "true" ]]; then
+# 
+# E2E_USE_PORT_FORWARD is a user-provided environment variable (not auto-detected):
+# - E2E_USE_PORT_FORWARD=true: Use localhost with port-forwards (local dev on any OS)
+# - Not set or false (default): Use LoadBalancer IPs (CI/Linux with MetalLB)
+#
+# Examples:
+#   E2E_USE_PORT_FORWARD=true ./hack/dev-env/start-e2e.sh  # Port-forward mode
+#   ./hack/dev-env/start-e2e.sh                           # LoadBalancer mode (default)
+#
+if [[ "${E2E_USE_PORT_FORWARD}" == "true" ]]; then
   echo "=========================================="
   echo "Mode: LOCAL (Port-Forwards)"
   echo "=========================================="
   echo "Using localhost addresses via kubectl port-forward"
   echo ""
-  export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="localhost:6380"
-  export MANAGED_AGENT_REDIS_ADDR="localhost:6381"
-  export AUTONOMOUS_AGENT_REDIS_ADDR="localhost:6382"
-  export ARGOCD_SERVER_ADDRESS="localhost:8444"
+  echo "Note: Make sure port-forwards are running in a separate terminal:"
+  echo "  goreman -f hack/dev-env/Procfile.e2e.local start"
+  echo ""
+export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="localhost:6380"
+export MANAGED_AGENT_REDIS_ADDR="localhost:6381"
+export AUTONOMOUS_AGENT_REDIS_ADDR="localhost:6382"
+export ARGOCD_SERVER_ADDRESS="localhost:8444"
 else
   echo "=========================================="
   echo "Mode: Linux/CI (Direct LoadBalancer IPs)"

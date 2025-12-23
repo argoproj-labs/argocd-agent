@@ -78,14 +78,14 @@ type ServerOptions struct {
 	redisProxyDisabled     bool
 	informerSyncTimeout    time.Duration
 	// Redis TLS configuration
-	redisTLSEnabled          bool
-	redisServerTLSCert       *x509.Certificate
-	redisServerTLSKey        crypto.PrivateKey
-	redisServerTLSCertPath   string
-	redisServerTLSKeyPath    string
-	redisUpstreamTLSCA       *x509.CertPool
-	redisUpstreamTLSCAPath   string
-	redisUpstreamTLSInsecure bool
+	redisTLSEnabled             bool
+	redisProxyServerTLSCert     *x509.Certificate
+	redisProxyServerTLSKey      crypto.PrivateKey
+	redisProxyServerTLSCertPath string
+	redisProxyServerTLSKeyPath  string
+	redisTLSCA                  *x509.CertPool
+	redisTLSCAPath              string
+	redisTLSInsecure            bool
 }
 
 type ServerOption func(o *Server) error
@@ -497,52 +497,52 @@ func WithRedisTLSEnabled(enabled bool) ServerOption {
 	}
 }
 
-// WithRedisServerTLSFromPath configures the TLS certificate and private key for the Redis proxy server
-func WithRedisServerTLSFromPath(certPath, keyPath string) ServerOption {
+// WithRedisProxyServerTLSFromPath configures the TLS certificate and private key for the Redis proxy server
+func WithRedisProxyServerTLSFromPath(certPath, keyPath string) ServerOption {
 	return func(o *Server) error {
-		o.options.redisServerTLSCertPath = certPath
-		o.options.redisServerTLSKeyPath = keyPath
+		o.options.redisProxyServerTLSCertPath = certPath
+		o.options.redisProxyServerTLSKeyPath = keyPath
 		return nil
 	}
 }
 
-// WithRedisServerTLSFromSecret configures the TLS certificate and private key for the Redis proxy server from a Kubernetes secret
-func WithRedisServerTLSFromSecret(kube kubernetes.Interface, namespace, name string) ServerOption {
+// WithRedisProxyServerTLSFromSecret configures the TLS certificate and private key for the Redis proxy server from a Kubernetes secret
+func WithRedisProxyServerTLSFromSecret(kube kubernetes.Interface, namespace, name string) ServerOption {
 	return func(o *Server) error {
 		c, err := tlsutil.TLSCertFromSecret(context.Background(), kube, namespace, name)
 		if err != nil {
 			return err
 		}
-		o.options.redisServerTLSCert = c.Leaf
-		o.options.redisServerTLSKey = c.PrivateKey
+		o.options.redisProxyServerTLSCert = c.Leaf
+		o.options.redisProxyServerTLSKey = c.PrivateKey
 		return nil
 	}
 }
 
-// WithRedisUpstreamTLSCAFromFile loads the CA certificate to validate the upstream Redis TLS certificate
-func WithRedisUpstreamTLSCAFromFile(caPath string) ServerOption {
+// WithRedisTLSCAFromFile loads the CA certificate to validate the Redis TLS certificate
+func WithRedisTLSCAFromFile(caPath string) ServerOption {
 	return func(o *Server) error {
-		o.options.redisUpstreamTLSCAPath = caPath
+		o.options.redisTLSCAPath = caPath
 		return nil
 	}
 }
 
-// WithRedisUpstreamTLSCAFromSecret loads the CA certificate from a Kubernetes secret to validate the upstream Redis TLS certificate
-func WithRedisUpstreamTLSCAFromSecret(kube kubernetes.Interface, namespace, name, field string) ServerOption {
+// WithRedisTLSCAFromSecret loads the CA certificate from a Kubernetes secret to validate the Redis TLS certificate
+func WithRedisTLSCAFromSecret(kube kubernetes.Interface, namespace, name, field string) ServerOption {
 	return func(o *Server) error {
 		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, field)
 		if err != nil {
 			return err
 		}
-		o.options.redisUpstreamTLSCA = pool
+		o.options.redisTLSCA = pool
 		return nil
 	}
 }
 
-// WithRedisUpstreamTLSInsecure allows insecure TLS connections to upstream Redis (for testing only)
-func WithRedisUpstreamTLSInsecure(insecure bool) ServerOption {
+// WithRedisTLSInsecure allows insecure TLS connections to Redis (for testing only)
+func WithRedisTLSInsecure(insecure bool) ServerOption {
 	return func(o *Server) error {
-		o.options.redisUpstreamTLSInsecure = insecure
+		o.options.redisTLSInsecure = insecure
 		return nil
 	}
 }

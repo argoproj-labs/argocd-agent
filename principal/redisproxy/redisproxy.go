@@ -69,10 +69,10 @@ type RedisProxy struct {
 	tlsServerCertPath string
 	tlsServerKeyPath  string
 
-	// TLS configuration for upstream Redis (connections to principal's argocd-redis)
-	upstreamTLSCA       *x509.CertPool
-	upstreamTLSCAPath   string
-	upstreamTLSInsecure bool
+	// TLS configuration for Redis (connections to principal's argocd-redis)
+	redisTLSCA       *x509.CertPool
+	redisTLSCAPath   string
+	redisTLSInsecure bool
 }
 
 const (
@@ -114,17 +114,17 @@ func (rp *RedisProxy) SetServerTLSFromPath(certPath, keyPath string) {
 
 // SetUpstreamTLSCA sets the CA certificate pool for verifying upstream Redis TLS
 func (rp *RedisProxy) SetUpstreamTLSCA(ca *x509.CertPool) {
-	rp.upstreamTLSCA = ca
+	rp.redisTLSCA = ca
 }
 
 // SetUpstreamTLSCAPath sets the CA certificate path for verifying upstream Redis TLS
 func (rp *RedisProxy) SetUpstreamTLSCAPath(caPath string) {
-	rp.upstreamTLSCAPath = caPath
+	rp.redisTLSCAPath = caPath
 }
 
 // SetUpstreamTLSInsecure enables insecure upstream TLS (for testing only)
 func (rp *RedisProxy) SetUpstreamTLSInsecure(insecure bool) {
-	rp.upstreamTLSInsecure = insecure
+	rp.redisTLSInsecure = insecure
 }
 
 // createServerTLSConfig creates a TLS configuration for the Redis proxy server
@@ -853,12 +853,14 @@ func (rp *RedisProxy) establishConnectionToPrincipalRedis(logCtx *logrus.Entry) 
 	}
 
 	// Check if upstream TLS configuration is provided
-	hasUpstreamTLSConfig := rp.upstreamTLSCA != nil || rp.upstreamTLSCAPath != "" || rp.upstreamTLSInsecure
+	hasUpstreamTLSConfig := rp.redisTLSCA != nil || rp.redisTLSCAPath != "" || rp.redisTLSInsecure
 
-	// Warn if server TLS is enabled but upstream TLS is not configured
-	// This creates a security gap: agent→proxy is encrypted, but proxy→redis is not
+	// Fail if server TLS is enabled but upstream TLS is not configured
+	// This prevents a security gap: agent→proxy is encrypted, but proxy→redis is not
 	if rp.tlsEnabled && !hasUpstreamTLSConfig {
-		logCtx.Warn("SECURITY WARNING: Redis proxy server has TLS enabled, but no upstream TLS configuration provided. Connection to principal Redis will be UNENCRYPTED. This exposes data in transit within the cluster.")
+		return nil, fmt.Errorf("SECURITY ERROR: Redis proxy server has TLS enabled, but no upstream TLS configuration provided. " +
+			"This would create an unencrypted connection to principal Redis. " +
+			"Configure upstream TLS using --redis-ca-path, --redis-ca-secret-name, or --redis-tls-insecure")
 	}
 
 	// If upstream TLS is configured, wrap the connection with TLS
@@ -868,18 +870,18 @@ func (rp *RedisProxy) establishConnectionToPrincipalRedis(logCtx *logrus.Entry) 
 			MinVersion: tls.VersionTLS12,
 		}
 
-		if rp.upstreamTLSInsecure {
+		if rp.redisTLSInsecure {
 			logCtx.Warn("INSECURE: Not verifying upstream Redis TLS certificate")
 			tlsConfig.InsecureSkipVerify = true
 			// Warn if CA configuration is provided but will be ignored
-			if rp.upstreamTLSCA != nil || rp.upstreamTLSCAPath != "" {
+			if rp.redisTLSCA != nil || rp.redisTLSCAPath != "" {
 				logCtx.Warn("CA configuration provided but ignored due to InsecureSkipVerify=true")
 			}
-		} else if rp.upstreamTLSCA != nil {
-			tlsConfig.RootCAs = rp.upstreamTLSCA
+		} else if rp.redisTLSCA != nil {
+			tlsConfig.RootCAs = rp.redisTLSCA
 			logCtx.Trace("Using provided CA certificate pool for upstream Redis TLS")
-		} else if rp.upstreamTLSCAPath != "" {
-			caCert, err := os.ReadFile(rp.upstreamTLSCAPath)
+		} else if rp.redisTLSCAPath != "" {
+			caCert, err := os.ReadFile(rp.redisTLSCAPath)
 			if err != nil {
 				conn.Close()
 				return nil, fmt.Errorf("failed to read CA certificate: %w", err)
@@ -890,7 +892,7 @@ func (rp *RedisProxy) establishConnectionToPrincipalRedis(logCtx *logrus.Entry) 
 				return nil, fmt.Errorf("failed to append CA certificate")
 			}
 			tlsConfig.RootCAs = caCertPool
-			logCtx.Debugf("Using CA certificate from %s for upstream Redis TLS", rp.upstreamTLSCAPath)
+			logCtx.Debugf("Using CA certificate from %s for upstream Redis TLS", rp.redisTLSCAPath)
 		}
 
 		// Extract hostname from address for SNI

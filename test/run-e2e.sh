@@ -30,9 +30,9 @@ echo "Checking Redis TLS Configuration (REQUIRED)"
 echo "=========================================="
 
 # Check if all required Redis TLS certificates exist
+# Note: ca.key is not included - it stays in creds/ca.key for security
 REQUIRED_CERTS=(
   "ca.crt"
-  "ca.key"
   "redis-control-plane.crt"
   "redis-control-plane.key"
   "redis-proxy.crt"
@@ -106,16 +106,21 @@ echo ""
 echo "Running E2E tests with Redis TLS enabled..."
 echo ""
 
-# Dual-mode test setup: Port-forwards (local) vs LoadBalancer IPs (CI)
-# Auto-detect or use E2E_USE_PORT_FORWARD env var
-if [[ "${E2E_USE_PORT_FORWARD:-auto}" == "auto" ]]; then
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        E2E_USE_PORT_FORWARD=true
-    else
-        E2E_USE_PORT_FORWARD=false
-    fi
+# Set Redis TLS CA path if not already set (absolute path from repo root)
+if [[ -z "${REDIS_TLS_CA_PATH}" ]]; then
+    export REDIS_TLS_CA_PATH="${SCRIPT_DIR}/../hack/dev-env/creds/redis-tls/ca.crt"
 fi
 
+# Dual-mode test setup: Port-forwards (local) vs LoadBalancer IPs (CI)
+#
+# E2E_USE_PORT_FORWARD is a user-provided environment variable (not auto-detected):
+# - E2E_USE_PORT_FORWARD=true: Use localhost with port-forwards (local dev on any OS)
+# - Not set or false (default): Use LoadBalancer IPs (CI/Linux with MetalLB)
+#
+# Examples:
+#   E2E_USE_PORT_FORWARD=true ./test/run-e2e.sh  # Port-forward mode
+#   ./test/run-e2e.sh                           # LoadBalancer mode (default)
+#
 if [[ "$E2E_USE_PORT_FORWARD" == "true" ]]; then
     echo "=========================================="
     echo "Test Mode: LOCAL (Port-Forwards)"
@@ -153,14 +158,14 @@ if [[ "$E2E_USE_PORT_FORWARD" == "true" ]]; then
         echo ""
         echo " WARNING: Port-forwards not detected!"
         echo ""
-        echo "For local macOS development, you must have 'make start-e2e' running"
-        echo "in another terminal before running tests."
+        echo "For local development with E2E_USE_PORT_FORWARD=true, you must have"
+        echo "port-forwards running in another terminal before running tests."
         echo ""
         echo "In Terminal 1:"
-        echo "  make start-e2e"
+        echo "  E2E_USE_PORT_FORWARD=true make start-e2e"
         echo ""
         echo "In Terminal 2:"
-        echo "  make test-e2e"
+        echo "  E2E_USE_PORT_FORWARD=true make test-e2e"
         echo ""
         echo "Continuing anyway (tests may fail if port-forwards aren't running)..."
         echo ""

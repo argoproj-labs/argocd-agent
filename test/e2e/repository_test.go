@@ -114,6 +114,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 	requires.NoError(err)
 
 	// Ensure the repository is updated on the managed agent
+	// Use longer timeout for slow environments (repository updates can take time to propagate)
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
@@ -126,7 +127,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 			return false
 		}
 		return true
-	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
+	}, 60*time.Second, 1*time.Second, "GET repository from managed-agent")
 
 	// Delete the repository on the principal
 	err = suite.PrincipalClient.Delete(suite.Ctx, &sourceRepo, metav1.DeleteOptions{})

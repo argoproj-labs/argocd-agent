@@ -254,23 +254,23 @@ spec:
                 name: argocd-agent-params
                 key: principal.redis.server.tls.secret-name
                 optional: true
-          - name: ARGOCD_PRINCIPAL_REDIS_UPSTREAM_CA_PATH
+          - name: ARGOCD_PRINCIPAL_REDIS_CA_PATH
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: principal.redis.upstream.ca-path
+                key: principal.redis.ca-path
                 optional: true
-          - name: ARGOCD_PRINCIPAL_REDIS_UPSTREAM_CA_SECRET_NAME
+          - name: ARGOCD_PRINCIPAL_REDIS_CA_SECRET_NAME
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: principal.redis.upstream.ca-secret-name
+                key: principal.redis.ca-secret-name
                 optional: true
-          - name: ARGOCD_PRINCIPAL_REDIS_UPSTREAM_TLS_INSECURE
+          - name: ARGOCD_PRINCIPAL_REDIS_TLS_INSECURE
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
-                key: principal.redis.upstream.tls.insecure
+                key: principal.redis.tls.insecure
                 optional: true
 
           image: argocd-agent
@@ -299,11 +299,11 @@ spec:
               mountPath: /app/config/jwt
             - name: userpass-passwd
               mountPath: /app/config/userpass
-            - name: redis-server-tls
-              mountPath: /app/config/redis-server-tls
+            - name: redis-proxy-server-tls
+              mountPath: /app/config/redis-proxy-server-tls
               readOnly: true
-            - name: redis-upstream-tls-ca
-              mountPath: /app/config/redis-upstream-tls
+            - name: redis-tls-ca
+              mountPath: /app/config/redis-tls
               readOnly: true
       serviceAccountName: argocd-agent-principal
       volumes:
@@ -321,7 +321,7 @@ spec:
           - key: jwt.key
             path: jwt.key
           optional: true
-      - name: redis-server-tls
+      - name: redis-proxy-server-tls
         secret:
           secretName: argocd-redis-tls
           items:
@@ -330,7 +330,7 @@ spec:
           - key: tls.key
             path: tls.key
           optional: true
-      - name: redis-upstream-tls-ca
+      - name: redis-tls-ca
         secret:
           secretName: argocd-redis-tls
           items:

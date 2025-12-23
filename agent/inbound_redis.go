@@ -366,8 +366,8 @@ func (a *Agent) getRedisClientAndCache() (*redis.Client, *rediscache.Cache, erro
 			tlsConfig.RootCAs = certPool
 			log().Debugf("Using CA certificate from %s for Redis TLS", a.redisProxyMsgHandler.redisTLSCAPath)
 		} else {
-			// No CA specified, will use system CAs
-			log().Warn("Redis TLS enabled but no CA certificate specified, using system CAs. This may fail with self-signed certificates.")
+			// No CA specified - require explicit configuration
+			return nil, nil, fmt.Errorf("redis TLS enabled but no CA certificate configured: use --redis-tls-ca-path or --redis-tls-insecure")
 		}
 	}
 

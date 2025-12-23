@@ -42,12 +42,6 @@ Kubernetes: `>=1.24.0-0`
 | logLevel | string | `"info"` | Log level for the agent. |
 | metricsPort | string | `"8181"` | Metrics server port exposed by the agent. |
 | namespaceOverride | string | `""` | Override namespace to deploy the agent into. Leave empty to use the release namespace. |
-| networkPolicy.enabled | bool | `true` |  |
-| networkPolicy.redis.agentSelector."app.kubernetes.io/name" | string | `"argocd-agent-agent"` |  |
-| networkPolicy.redis.enabled | bool | `true` |  |
-| networkPolicy.redis.name | string | `"allow-agent-to-redis"` |  |
-| networkPolicy.redis.namespace | string | `""` |  |
-| networkPolicy.redis.redisSelector."app.kubernetes.io/name" | string | `"argocd-redis"` |  |
 | nodeSelector | object | `{}` | Node selector for scheduling the agent Pod. |
 | podAnnotations | object | `{}` | Additional annotations to add to the agent Pod. |
 | podLabels | object | `{}` | Additional labels to add to the agent Pod. |

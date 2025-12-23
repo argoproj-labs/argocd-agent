@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2024 The argocd-agent Authors
+# Copyright 2025 The argocd-agent Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -83,23 +83,10 @@ echo "Found Redis Deployment"
 echo ""
 
 # Scale down ArgoCD components that connect to Redis BEFORE enabling TLS
-# This prevents SSL errors during the transition (old pods trying to connect without TLS)
-echo "Scaling down ArgoCD components to prevent SSL errors during transition..."
+# This prevents TLS errors during the transition (old pods trying to connect without TLS)
+echo "Scaling down ArgoCD components to prevent TLS errors during transition..."
 
-# Save current replica counts for restoration by configure-argocd-redis-tls.sh
-REPO_SERVER_REPLICAS=$(kubectl get deployment argocd-repo-server -n ${NAMESPACE} -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
-CONTROLLER_REPLICAS=$(kubectl get statefulset argocd-application-controller -n ${NAMESPACE} -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
-SERVER_REPLICAS=$(kubectl get deployment argocd-server -n ${NAMESPACE} -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
-
-# Store replica counts in a ConfigMap for the argocd-redis-tls script to use
-kubectl create configmap argocd-redis-tls-replicas \
-  --from-literal=repo-server=${REPO_SERVER_REPLICAS} \
-  --from-literal=application-controller=${CONTROLLER_REPLICAS} \
-  --from-literal=server=${SERVER_REPLICAS} \
-  -n ${NAMESPACE} \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# Scale down components
+# Scale down components (will be scaled back to 1 by configure-argocd-redis-for-tls.sh)
 if kubectl get deployment argocd-repo-server -n ${NAMESPACE} &>/dev/null; then
     kubectl scale deployment argocd-repo-server -n ${NAMESPACE} --replicas=0
     echo "  Scaled down argocd-repo-server"
@@ -125,7 +112,9 @@ echo "ArgoCD components scaled down"
 echo ""
 
 # Create secret
-echo "Creating TLS secret..."
+# Note: ca.crt is the agent CA (copied by gen-redis-tls-certs.sh)
+# Redis certificates are signed by the same CA used for agent/principal mTLS
+echo "Creating TLS secret (using agent CA)..."
 kubectl create secret generic argocd-redis-tls \
   --from-file=tls.crt=creds/redis-tls/${REDIS_CERT_PREFIX}.crt \
   --from-file=tls.key=creds/redis-tls/${REDIS_CERT_PREFIX}.key \
@@ -133,7 +122,7 @@ kubectl create secret generic argocd-redis-tls \
   -n ${NAMESPACE} \
   --dry-run=client -o yaml | kubectl apply -f -
 
-echo "Secret created"
+echo "Secret created (argocd-redis-tls)"
 echo ""
 
 # Patch deployment for TLS

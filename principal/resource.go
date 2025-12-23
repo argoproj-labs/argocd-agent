@@ -39,7 +39,7 @@ const resourceRequestRegexp = `^/(?:api|apis|(?:api|apis/(?P<group>[^\/]+))/(?P<
 // resource.
 //
 // TODO(jannfis): Make the timeout configurable
-const requestTimeout = 30 * time.Second
+const requestTimeout = 10 * time.Second
 
 // processResourceRequest is being executed by the resource proxy once it
 // received a request for a specific resource. It will encapsulate this request

@@ -119,6 +119,8 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 
 	// Wait for SSE stream to fully establish and Redis SUBSCRIBE to propagate
 	// This prevents a race condition where the pod is deleted before the subscription is active
+	// Note: We use sleep here because polling would consume messages from the channel that the
+	// test logic below needs to process (e.g., looking for specific pod names in the stream)
 	t.Log("Waiting for SSE stream to fully establish...")
 	time.Sleep(5 * time.Second)
 
@@ -185,31 +187,25 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 
 	// Verify the name of the new pod exists in what has been sent from the channel (this will only be true if redis proxy subscription is working)
 	requires.Eventually(func() bool {
-		// Drain available messages in the channel (bounded to prevent hanging on noisy streams)
-		const maxMessagesPerIteration = 200 // Limit processing to prevent infinite loop on continuous SSE streams
+		// Drain all currently available messages from the channel before returning.
+		// We process messages in a batch to handle SSE streams that send bursts of updates.
 		messagesProcessed := 0
-
-		for messagesProcessed < maxMessagesPerIteration {
+		for {
 			select {
 			case msg := <-msgChan:
 				messagesProcessed++
-				t.Logf("Processing SSE message %d (looking for pod %s)", messagesProcessed, newPod.Name)
 				if strings.Contains(msg, newPod.Name) {
-					t.Logf("Found new pod name in SSE stream: %s", newPod.Name)
+					t.Logf("Found new pod name in SSE stream after processing %d messages: %s", messagesProcessed, newPod.Name)
 					return true
 				}
 			default:
-				// Channel is empty (for now)
+				// Channel is empty - no more messages available right now
 				if messagesProcessed > 0 {
-					t.Logf("Drained %d messages, pod not found yet, will retry...", messagesProcessed)
+					t.Logf("Processed %d SSE messages, pod %s not found yet, will retry", messagesProcessed, newPod.Name)
 				}
 				return false
 			}
 		}
-
-		// Hit the message limit - return false to retry after interval
-		t.Logf("Processed %d messages without finding pod, will retry...", messagesProcessed)
-		return false
 	}, time.Second*120, time.Second*5)
 
 	// Ensure that the pod appears in the new resource tree value returned by Argo CD server
@@ -330,6 +326,8 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 
 	// Wait for SSE stream to fully establish and Redis SUBSCRIBE to propagate
 	// This prevents a race condition where the pod is deleted before the subscription is active
+	// Note: We use sleep here because polling would consume messages from the channel that the
+	// test logic below needs to process (e.g., looking for specific pod names in the stream)
 	t.Log("Waiting for SSE stream to fully establish...")
 	time.Sleep(5 * time.Second)
 
@@ -409,31 +407,25 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	// Verify the name of the new pod exists in what has been sent on the subscribe channel
 
 	requires.Eventually(func() bool {
-		// Drain available messages in the channel (bounded to prevent hanging on noisy streams)
-		const maxMessagesPerIteration = 200 // Limit processing to prevent infinite loop on continuous SSE streams
+		// Drain all currently available messages from the channel before returning.
+		// We process messages in a batch to handle SSE streams that send bursts of updates.
 		messagesProcessed := 0
-
-		for messagesProcessed < maxMessagesPerIteration {
+		for {
 			select {
 			case msg := <-msgChan:
 				messagesProcessed++
-				t.Logf("Processing SSE message %d (looking for pod %s)", messagesProcessed, newPod.Name)
 				if strings.Contains(msg, newPod.Name) {
-					t.Logf("Found new pod name in SSE stream: %s", newPod.Name)
+					t.Logf("Found new pod name in SSE stream after processing %d messages: %s", messagesProcessed, newPod.Name)
 					return true
 				}
 			default:
-				// Channel is empty (for now)
+				// Channel is empty - no more messages available right now
 				if messagesProcessed > 0 {
-					t.Logf("Drained %d messages, pod not found yet, will retry...", messagesProcessed)
+					t.Logf("Processed %d SSE messages, pod %s not found yet, will retry...", messagesProcessed, newPod.Name)
 				}
 				return false
 			}
 		}
-
-		// Hit the message limit - return false to retry after interval
-		t.Logf("Processed %d messages without finding pod, will retry...", messagesProcessed)
-		return false
 	}, time.Second*120, time.Second*5)
 
 	// Ensure that the pod appears in the new resource tree value returned by Argo CD server
@@ -595,7 +587,7 @@ func createArgoCDAPIClient(ctx context.Context, argoServerEndpoint string, passw
 // - resource tree events (changes in Application resources) are an example of one type of data that can be received via this API
 func streamFromEventSourceNew(ctx context.Context, eventSourceAPIURL string, sessionToken string, t *testing.T) (chan string, error) {
 
-	msgChan := make(chan string, 100) // Buffered channel to prevent message loss
+	msgChan := make(chan string)
 
 	go func() {
 

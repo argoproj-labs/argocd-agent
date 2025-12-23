@@ -18,6 +18,33 @@ Both the vcluster and Argo CD installations require that LoadBalancer functional
 
 ## Running the tests
 
+### Connection Modes
+
+E2E tests support two connection modes for Redis access:
+
+1. **LoadBalancer Mode (Default - for CI/Linux with MetalLB):**
+   - Uses LoadBalancer IPs directly
+   - No port-forwards needed
+   - Default when `E2E_USE_PORT_FORWARD` is not set
+   ```bash
+   make start-e2e
+   make test-e2e
+   ```
+
+2. **Port-Forward Mode (for local development on any OS):**
+   - Uses `localhost` addresses via `kubectl port-forward`
+   - Works on macOS, Linux, Windows
+   - Enable by setting `E2E_USE_PORT_FORWARD=true`
+   ```bash
+   E2E_USE_PORT_FORWARD=true make start-e2e
+   E2E_USE_PORT_FORWARD=true make test-e2e
+   ```
+
+**When to use each mode:**
+- **CI/GitHub Actions**: Use default LoadBalancer mode
+- **Local development without MetalLB**: Use port-forward mode
+- **Local development with MetalLB**: Either mode works
+
 ### Step 1: Setup the test environment
 
 From the repository root:
@@ -61,14 +88,32 @@ make start-e2e
 ```
 
 **Important:** Keep this terminal running! The tests require:
-- Port-forwards to Redis (localhost:6380, 6381, 6382) - for test code to access Redis
 - Principal and agent processes
+- Redis connections (via port-forward OR LoadBalancer, depending on mode)
 
 These are managed by `goreman` and must remain running for tests to work.
 
-**Automatic Dual-Mode Setup:**
-- **macOS (Local)**: Automatically uses port-forwards to `localhost`
-- **Linux/CI**: Automatically uses direct LoadBalancer IPs (requires MetalLB/cloud LB)
+**Dual-Mode Setup:**
+
+By default, the scripts use **LoadBalancer mode** (direct LoadBalancer IPs, for CI/Linux with MetalLB). To use **port-forward mode** instead (local development on any OS), set `E2E_USE_PORT_FORWARD=true`:
+
+```shell
+# Port-forward mode (local development, any OS)
+E2E_USE_PORT_FORWARD=true make start-e2e
+
+# LoadBalancer mode (default - CI/Linux with MetalLB)
+make start-e2e
+```
+
+**Port-forward mode:**
+- Uses `localhost:6380`, `6381`, `6382` for Redis
+- Requires port-forwards (started automatically via `Procfile.e2e.local`)
+- Works on any OS (macOS, Linux, Windows)
+
+**LoadBalancer mode (default):**
+- Uses LoadBalancer IPs directly for Redis
+- Requires MetalLB or cloud LoadBalancer support
+- No port-forwards needed (uses `Procfile.e2e`)
 
 **Note:** If using the reverse tunnel (remote clusters), Argo CD connects to the principal via the tunnel, not port-forwards.
 
@@ -77,12 +122,18 @@ These are managed by `goreman` and must remain running for tests to work.
 In **Terminal 3** (or Terminal 2 if not using reverse tunnel), run the E2E tests:
 
 ```shell
+# Port-forward mode (if you started with E2E_USE_PORT_FORWARD=true)
+E2E_USE_PORT_FORWARD=true make test-e2e
+
+# LoadBalancer mode (default - if you started without E2E_USE_PORT_FORWARD)
 make test-e2e
 ```
 
-The tests will automatically detect if they're running locally or in CI, and use appropriate connection methods:
-- **Local (macOS)**: Connects via port-forwards to `localhost`
-- **CI (Linux with MetalLB)**: Connects directly to LoadBalancer IPs
+**Important:** Use the same `E2E_USE_PORT_FORWARD` setting for both `start-e2e` and `test-e2e`.
+
+The tests will use the appropriate connection method based on the `E2E_USE_PORT_FORWARD` setting:
+- **Port-forward mode** (`E2E_USE_PORT_FORWARD=true`): Connects via port-forwards to `localhost`
+- **LoadBalancer mode** (default): Connects directly to LoadBalancer IPs
 
 ### Redis TLS
 
@@ -103,9 +154,9 @@ If you need to manually reconfigure Redis TLS (e.g., after certificate expiratio
 ./hack/dev-env/configure-redis-tls.sh vcluster-agent-autonomous
 
 # Reconfigure Argo CD components for each vcluster
-./hack/dev-env/configure-argocd-redis-tls.sh vcluster-control-plane
-./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-managed
-./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-autonomous
+./hack/dev-env/configure-argocd-redis-for-tls.sh vcluster-control-plane
+./hack/dev-env/configure-argocd-redis-for-tls.sh vcluster-agent-managed
+./hack/dev-env/configure-argocd-redis-for-tls.sh vcluster-agent-autonomous
 ```
 
 # Writing new end-to-end tests

@@ -56,59 +56,7 @@ endif
 ifneq (${ARGOCD_AGENT_IN_CLUSTER},)
 	./hack/dev-env/restart-all.sh
 endif
-	@echo ""
-	@echo "Waiting for LoadBalancer IPs to be assigned..."
-	@for context in vcluster-control-plane vcluster-agent-managed vcluster-agent-autonomous; do \
-		echo "  Checking LoadBalancer in $$context..."; \
-		FOUND=""; \
-		for i in 1 2 3 4 5 6 7 8 9 10; do \
-			LB_IP=$$(kubectl get svc argocd-redis --context=$$context -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo ""); \
-			LB_HOST=$$(kubectl get svc argocd-redis --context=$$context -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo ""); \
-			if [ -n "$$LB_IP" ] || [ -n "$$LB_HOST" ]; then \
-				FOUND="yes"; \
-				if [ -n "$$LB_IP" ]; then \
-					echo "    ✓ LoadBalancer IP assigned: $$LB_IP"; \
-				else \
-					echo "    ✓ LoadBalancer hostname assigned: $$LB_HOST"; \
-				fi; \
-				break; \
-			fi; \
-			echo "    Waiting for LoadBalancer... (attempt $$i/10)"; \
-			sleep 5; \
-		done; \
-		if [ -z "$$FOUND" ]; then \
-			echo "    ✗ ERROR: LoadBalancer not assigned for $$context after 10 attempts (50 seconds)"; \
-			echo ""; \
-			echo "This usually means:"; \
-			echo "  1. MetalLB is not installed or not configured on your cluster"; \
-			echo "  2. Your cluster doesn't support LoadBalancer services"; \
-			echo "  3. The cluster is slow to assign LoadBalancer IPs"; \
-			echo ""; \
-			echo "For local development, see: hack/dev-env/README.md"; \
-			exit 1; \
-		fi; \
-	done
-	@echo ""
-	@echo "Configuring Redis TLS (required for E2E)..."
-	./hack/dev-env/gen-redis-tls-certs.sh
-	@echo ""
-	@echo "Configuring each cluster for Redis TLS (Redis + ArgoCD components together)"
-	@echo "Note: Redis and ArgoCD components are configured together per-cluster to avoid"
-	@echo "      connection errors during the transition period."
-	@echo ""
-	@echo "=== Control Plane ==="
-	./hack/dev-env/configure-redis-tls.sh vcluster-control-plane
-	./hack/dev-env/configure-argocd-redis-tls.sh vcluster-control-plane
-	@echo ""
-	@echo "=== Agent Managed ==="
-	./hack/dev-env/configure-redis-tls.sh vcluster-agent-managed
-	./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-managed
-	@echo ""
-	@echo "=== Agent Autonomous ==="
-	./hack/dev-env/configure-redis-tls.sh vcluster-agent-autonomous
-	./hack/dev-env/configure-argocd-redis-tls.sh vcluster-agent-autonomous
-	@echo ""
-	@echo " E2E environment ready with Redis TLS enabled (required)"
+	./hack/dev-env/setup-e2e-enable-redis-tls.sh
 
 .PHONY: teardown-e2e
 teardown-e2e:

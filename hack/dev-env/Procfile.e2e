@@ -1,5 +1,5 @@
 # Default Procfile - for Linux/CI (without port-forwards)
-# For local macOS development, use Procfile.e2e.local
+# For local development with port-forwards, use Procfile.e2e.local
 principal: hack/dev-env/start-principal.sh
 agent-managed: sleep 5s && ARGOCD_AGENT_REDIS_ADDRESS=$MANAGED_AGENT_REDIS_ADDR hack/dev-env/start-agent-managed.sh
 agent-autonomous: sleep 5s && ARGOCD_AGENT_REDIS_ADDRESS=$AUTONOMOUS_AGENT_REDIS_ADDR hack/dev-env/start-agent-autonomous.sh

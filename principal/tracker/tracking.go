@@ -72,10 +72,7 @@ func (p *Tracker) Track(eventID string, agentName string) (<-chan *cloudevents.E
 	if ok {
 		return nil, fmt.Errorf("resource with ID %s already tracked", eventID)
 	}
-	// Use a buffered channel to prevent blocking sends.
-	// The sender (processRedisEventResponse) and receiver (sendSynchronousRedisMessageToAgent)
-	// both run in goroutines, and an unbuffered channel can deadlock if timing is off.
-	ch := make(chan *cloudevents.Event, 1)
+	ch := make(chan *cloudevents.Event)
 	p.statemap.requests[eventID] = &requestWrapper{agentName: agentName, evCh: ch}
 	return ch, nil
 }

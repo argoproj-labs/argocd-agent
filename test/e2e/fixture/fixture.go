@@ -229,7 +229,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 		err = EnsureDeletion(ctx, autonomousAgentClient, &app)
 		if err != nil {
-			fmt.Printf("Warning: Failed to delete Application %s from autonomous agent: %v\n", app.Name, err)
+			return err
 		}
 
 		// Wait for the app to be deleted from the control plane
@@ -237,7 +237,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		principalApp.SetNamespace("agent-autonomous")
 		err = WaitForDeletion(ctx, principalClient, principalApp)
 		if err != nil {
-			fmt.Printf("Warning: Failed to wait for Application %s deletion from principal: %v\n", principalApp.Name, err)
+			return err
 		}
 	}
 
@@ -254,7 +254,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 		err = EnsureDeletion(ctx, principalClient, &app)
 		if err != nil {
-			fmt.Printf("Warning: Failed to delete Application %s from principal: %v\n", app.Name, err)
+			return err
 		}
 
 		// Wait for the app to be deleted from the managed cluster
@@ -262,7 +262,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		managedApp.SetNamespace("argocd")
 		err = WaitForDeletion(ctx, managedAgentClient, managedApp)
 		if err != nil {
-			fmt.Printf("Warning: Failed to wait for Application %s deletion from managed agent: %v\n", managedApp.Name, err)
+			return err
 		}
 	}
 
@@ -275,7 +275,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 	for _, app := range list.Items {
 		err = EnsureDeletion(ctx, managedAgentClient, &app)
 		if err != nil {
-			fmt.Printf("Warning: Failed to delete remaining Application %s from managed agent: %v\n", app.Name, err)
+			return err
 		}
 	}
 
@@ -288,7 +288,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 	for _, app := range list.Items {
 		err = EnsureDeletion(ctx, principalClient, &app)
 		if err != nil {
-			fmt.Printf("Warning: Failed to delete remaining Application %s from principal: %v\n", app.Name, err)
+			return err
 		}
 	}
 
@@ -309,8 +309,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 		err = EnsureDeletion(ctx, autonomousAgentClient, &appProject)
 		if err != nil {
-			// Log the error but continue cleanup - don't fail the entire test
-			fmt.Printf("Warning: Failed to delete AppProject %s from autonomous agent: %v\n", appProject.Name, err)
+			return err
 		}
 
 		// Wait for the appProject to be deleted from the control plane
@@ -342,8 +341,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 		err = EnsureDeletion(ctx, principalClient, &appProject)
 		if err != nil {
-			// Log the error but continue cleanup - don't fail the entire test
-			fmt.Printf("Warning: Failed to delete AppProject %s from principal: %v\n", appProject.Name, err)
+			return err
 		}
 
 		// Wait for the appProject to be deleted from the managed cluster
@@ -352,8 +350,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		managedAppProject.SetNamespace("argocd")
 		err = WaitForDeletion(ctx, managedAgentClient, managedAppProject)
 		if err != nil {
-			// Log the error but continue cleanup - don't fail the entire test
-			fmt.Printf("Warning: Failed to wait for AppProject %s deletion from managed agent: %v\n", managedAppProject.Name, err)
+			return err
 		}
 	}
 
@@ -369,8 +366,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		}
 		err = EnsureDeletion(ctx, managedAgentClient, &appProject)
 		if err != nil {
-			// Log the error but continue cleanup - don't fail the entire test
-			fmt.Printf("Warning: Failed to delete AppProject %s from managed agent: %v\n", appProject.Name, err)
+			return err
 		}
 	}
 
@@ -494,7 +490,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 // resetManagedAgentClusterInfo resets the cluster info in the redis cache for the managed agent
 func resetManagedAgentClusterInfo(clusterDetails *ClusterDetails) error {
 	// Reset cluster info in redis cache
-	if err := getCachedCacheInstance(AgentManagedName, clusterDetails).SetClusterInfo(AgentClusterServerURL, &argoapp.ClusterInfo{}); err != nil {
+	if err := getCacheInstance(AgentManagedName, clusterDetails).SetClusterInfo(AgentClusterServerURL, &argoapp.ClusterInfo{}); err != nil {
 		return fmt.Errorf("resetManagedAgentClusterInfo: %w", err)
 	}
 	return nil

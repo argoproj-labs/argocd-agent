@@ -161,14 +161,19 @@ argocd-agentctl jwt create-key \
 !!! warning "Redis TLS is Required"
     Redis TLS is **enabled by default** in argocd-agent. All Redis connections must use TLS.
 
+!!! info "Reuse Agent CA"
+    Redis TLS uses the same agent CA created in step 2.1. This simplifies certificate management by using a single CA for all argocd-agent TLS certificates.
+
 #### Generate Certificates and Create Secret
 
 ```bash
-# Generate CA certificate
-openssl genrsa -out redis-ca.key 4096
-openssl req -new -x509 -days 3650 -key redis-ca.key -out redis-ca.crt -subj "/CN=Redis CA"
+# Extract agent CA from argocd-agent-ca secret (created in step 2.1)
+kubectl get secret argocd-agent-ca -n argocd --context <control-plane-context> \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > agent-ca.crt
+kubectl get secret argocd-agent-ca -n argocd --context <control-plane-context> \
+  -o jsonpath='{.data.tls\.key}' | base64 -d > agent-ca.key
 
-# Generate Redis server certificate
+# Generate Redis server certificate (signed by agent CA)
 openssl genrsa -out redis-server.key 4096
 openssl req -new -key redis-server.key -out redis-server.csr -subj "/CN=argocd-redis"
 
@@ -181,14 +186,14 @@ DNS.3 = localhost
 IP.1 = 127.0.0.1
 EOF
 
-openssl x509 -req -in redis-server.csr -CA redis-ca.crt -CAkey redis-ca.key \
+openssl x509 -req -in redis-server.csr -CA agent-ca.crt -CAkey agent-ca.key \
   -CAcreateserial -out redis-server.crt -days 365 -extfile redis-server.ext
 
 # Create secret
 kubectl create secret generic argocd-redis-tls \
   --from-file=tls.crt=redis-server.crt \
   --from-file=tls.key=redis-server.key \
-  --from-file=ca.crt=redis-ca.crt \
+  --from-file=ca.crt=agent-ca.crt \
   -n argocd --context <control-plane-context>
 ```
 

@@ -132,13 +132,6 @@ func (m *Manager) SetClusterCacheStats(clusterInfo *event.ClusterCacheInfo, agen
 		if existingClusterInfo.CacheInfo.LastCacheSyncTime != nil {
 			newClusterInfo.CacheInfo.LastCacheSyncTime = existingClusterInfo.CacheInfo.LastCacheSyncTime
 		}
-	} else {
-		// Initialize ConnectionState if it doesn't exist yet (agent just connected)
-		newClusterInfo.ConnectionState = appv1.ConnectionState{
-			Status:     appv1.ConnectionStatusSuccessful,
-			Message:    fmt.Sprintf("Agent: '%s' is connected with principal", agentName),
-			ModifiedAt: &metav1.Time{Time: time.Now()},
-		}
 	}
 
 	// Set the info in mapped cluster at principal.

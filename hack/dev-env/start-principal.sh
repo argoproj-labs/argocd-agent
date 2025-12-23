@@ -21,11 +21,15 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
 fi
 
 if test "${ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS}" = ""; then
-       # For TLS to work with proper certificate validation in dev/E2E, we expect
-       # a port-forward on localhost:6380 (set up by Procfile.e2e or manually).
+       # Fallback for manual runs (when ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS is not set)
+       # Normally, start-e2e.sh sets this env var based on E2E_USE_PORT_FORWARD:
+       # - E2E_USE_PORT_FORWARD=true: localhost:6380 (local development with port-forward)
+       # - E2E_USE_PORT_FORWARD not set: <LoadBalancer-IP>:6379 (CI/Linux - direct LoadBalancer)
+       # This fallback defaults to localhost for convenience in manual testing.
        ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="localhost:6380"
        export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS
-       echo "Using Redis via localhost:6380; ensure a port-forward is running (e.g. pf-control-plane in Procfile.e2e or a manual kubectl port-forward)."
+       echo "ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS not set; defaulting to localhost:6380"
+       echo "Ensure a port-forward is running: kubectl port-forward --context=vcluster-control-plane -n argocd svc/argocd-redis 6380:6379"
 fi
 
 if test "${REDIS_PASSWORD}" = ""; then
@@ -45,20 +49,21 @@ export ARGOCD_PRINCIPAL_INFORMER_SYNC_TIMEOUT=${ARGOCD_PRINCIPAL_INFORMER_SYNC_T
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 # Check if Redis TLS certificates exist
+# Note: Redis TLS uses the same agent CA (ca.crt is a copy from creds/ca.crt)
 REDIS_TLS_ARGS=""
 if [ -f "${SCRIPTPATH}/creds/redis-tls/redis-proxy.crt" ] && \
    [ -f "${SCRIPTPATH}/creds/redis-tls/redis-proxy.key" ] && \
    [ -f "${SCRIPTPATH}/creds/redis-tls/ca.crt" ]; then
-    echo "Redis TLS certificates found, enabling TLS for Redis connections"
+    echo "Redis TLS certificates found (using agent CA), enabling TLS for Redis connections"
     # Certificate includes SANs for:
     # - localhost (for port-forward connections)
     # - rathole-container-internal (for reverse tunnel from remote Argo CD)
     # - local IP (for direct connections when on same network)
     REDIS_TLS_ARGS="--redis-tls-enabled=true \
-        --redis-server-tls-cert=${SCRIPTPATH}/creds/redis-tls/redis-proxy.crt \
-        --redis-server-tls-key=${SCRIPTPATH}/creds/redis-tls/redis-proxy.key \
-        --redis-upstream-ca-path=${SCRIPTPATH}/creds/redis-tls/ca.crt"
-    echo "Redis TLS enabled with proper certificate validation"
+        --redis-proxy-server-tls-cert=${SCRIPTPATH}/creds/redis-tls/redis-proxy.crt \
+        --redis-proxy-server-tls-key=${SCRIPTPATH}/creds/redis-tls/redis-proxy.key \
+        --redis-ca-path=${SCRIPTPATH}/creds/redis-tls/ca.crt"
+    echo "✓ Redis TLS enabled (certificates signed by agent CA)"
 else
     echo "Redis TLS certificates not found, running without TLS"
     echo "Run './hack/dev-env/gen-redis-tls-certs.sh' to generate certificates"
