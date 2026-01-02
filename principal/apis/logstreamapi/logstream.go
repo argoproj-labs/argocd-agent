@@ -109,6 +109,13 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 		}
 		s.sessions[requestUUID] = sess
 	} else {
+		// Close old doneCh to stop the previous watchdog goroutine before starting a new one.
+		// This prevents multiple watchdog goroutines from running for the same session.
+		if sess.doneCh != nil {
+			close(sess.doneCh)
+		}
+		sess.doneCh = make(chan struct{})
+
 		sess.hw = &httpWriter{w: w, flusher: flusher}
 	}
 
