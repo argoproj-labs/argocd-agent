@@ -112,8 +112,9 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 		sess.hw = &httpWriter{w: w, flusher: flusher}
 	}
 
-	// watchdog for client disconnection. When client disconnects, immediately cancel the stream
-	go func(reqID string, done <-chan struct{}, sess *session) {
+	// watchdog for client disconnection. When client disconnects, immediately cancel the stream.
+	// doneCh is passed as a parameter to avoid a data race with closeChannels setting it to nil.
+	go func(reqID string, done <-chan struct{}, doneCh <-chan struct{}) {
 		// Wait for either client disconnection or session finalization
 		select {
 		case <-done:
@@ -121,18 +122,20 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 				"request_id": reqID,
 				"reason":     "client_disconnected",
 			}).Debug("HTTP client disconnected; canceling stream")
-		case <-sess.doneCh:
+		case <-doneCh:
 			// Session was finalized, watchdog is no longer needed
 			return
 		}
 		s.mu.Lock()
-		sess.hw = nil
-		if sess.cancelFn != nil {
-			// Tag stream as canceled due to client detach.
-			sess.cancelFn()
+		if sess, ok := s.sessions[reqID]; ok {
+			sess.hw = nil
+			if sess.cancelFn != nil {
+				// Tag stream as canceled due to client detach.
+				sess.cancelFn()
+			}
 		}
 		s.mu.Unlock()
-	}(requestUUID, r.Context().Done(), sess)
+	}(requestUUID, r.Context().Done(), sess.doneCh)
 
 	return nil
 }
