@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -278,6 +279,7 @@ func (c *ArgoRestClient) GetApplicationLogs(app *v1alpha1.Application, namespace
 	if tailLines > 0 {
 		q.Set("tailLines", fmt.Sprint(tailLines))
 	}
+
 	u.RawQuery = q.Encode()
 	u.Path = fmt.Sprintf("/api/v1/applications/%s/logs", app.Name)
 
@@ -294,7 +296,67 @@ func (c *ArgoRestClient) GetApplicationLogs(app *v1alpha1.Application, namespace
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("expected HTTP 200, got %d: %s", resp.StatusCode, string(body))
 	}
-	return string(body), nil
+
+	type logResult struct {
+		Content      string      `json:"content"`
+		TimeStamp    interface{} `json:"timeStamp"`
+		Last         bool        `json:"last"`
+		TimeStampStr string      `json:"timeStampStr"`
+		PodName      string      `json:"podName"`
+	}
+	type logError struct {
+		GRPCCode   int    `json:"grpc_code"`
+		HTTPCode   int    `json:"http_code"`
+		Message    string `json:"message"`
+		HTTPStatus string `json:"http_status"`
+	}
+	type logChunk struct {
+		Result *logResult `json:"result"`
+		Error  *logError  `json:"error"`
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(body))
+	var out strings.Builder
+	var sawNonEmpty bool
+	for {
+		var chunk logChunk
+		if err := dec.Decode(&chunk); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", fmt.Errorf("failed to decode argo logs payload: %w: %s", err, string(body))
+		}
+		if chunk.Error != nil {
+			return "", fmt.Errorf("argo logs error (grpc_code=%d http_code=%d): %s", chunk.Error.GRPCCode, chunk.Error.HTTPCode, chunk.Error.Message)
+		}
+		if chunk.Result == nil {
+			continue
+		}
+		// Ignore empty chunks (Argo often emits a final last=true frame with empty content).
+		if chunk.Result.Content == "" {
+			continue
+		}
+		// Detect embedded upstream errors which Argo CD sometimes places into content.
+		if strings.HasPrefix(chunk.Result.Content, "Get \"https://") {
+			return "", fmt.Errorf("log fetch failed: %s", chunk.Result.Content)
+		}
+		// The principal can be forced to write a timeout line into the log stream
+		// (e.g., "Timeout fetching logs from agent"). This is not valid container
+		// log output for our e2e purposes; treat it as a failure so tests don't
+		// pass on timeouts.
+		if strings.Contains(chunk.Result.Content, "Timeout fetching logs from agent") {
+			return "", fmt.Errorf("argo logs timed out via principal: %s", strings.TrimSpace(chunk.Result.Content))
+		}
+		sawNonEmpty = true
+		out.WriteString(chunk.Result.Content)
+		if !strings.HasSuffix(chunk.Result.Content, "\n") {
+			out.WriteString("\n")
+		}
+	}
+	if !sawNonEmpty {
+		return "", fmt.Errorf("argo logs returned no content (pod=%s container=%s)", podName, container)
+	}
+	return out.String(), nil
 }
 
 // ListResourceActions lists available actions for the given resource and returns their names.

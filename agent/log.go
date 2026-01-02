@@ -220,11 +220,28 @@ func (a *Agent) streamLogsToCompletion(
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				_ = stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Eof: true})
+				logCtx.Info("Static log stream reached EOF")
+				// IMPORTANT: don't ignore EOF send errors. If this fails, the principal will
+				// not signal completion (it only completes on receiving Eof=true) and the
+				// HTTP handler may hit "Static logs timeout" even though we read all logs.
+				if sendErr := stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Eof: true}); sendErr != nil {
+					logCtx.WithError(sendErr).Warn("Failed to send EOF frame")
+					if _, closedErr := stream.CloseAndRecv(); closedErr != nil {
+						return closedErr
+					}
+					return sendErr
+				}
+				// IMPORTANT: Must call CloseAndRecv to properly close the client-streaming RPC.
+				// This ensures all messages are flushed and the server receives the final response.
+				if _, closeErr := stream.CloseAndRecv(); closeErr != nil {
+					logCtx.WithError(closeErr).Warn("Failed to close stream after EOF")
+					return closeErr
+				}
 				return nil
 			}
 			logCtx.WithError(err).Error("Error reading log stream")
 			_ = stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Error: "log stream read failed"})
+			_, _ = stream.CloseAndRecv()
 			return err
 		}
 	}
@@ -381,9 +398,11 @@ func (a *Agent) streamLogs(ctx context.Context, stream logstreamapi.LogStreamSer
 			if errors.Is(err, io.EOF) {
 				logCtx.WithError(err).Info("Log stream ended")
 				_ = stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Eof: true})
+				_, _ = stream.CloseAndRecv()
 				return lastTimestamp, nil
 			}
 			_ = stream.Send(&logstreamapi.LogStreamData{RequestUuid: logReq.UUID, Error: err.Error()})
+			_, _ = stream.CloseAndRecv()
 			return lastTimestamp, err
 		}
 	}

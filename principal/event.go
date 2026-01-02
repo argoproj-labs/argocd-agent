@@ -473,13 +473,10 @@ func (s *Server) processRedisEventResponse(ctx context.Context, logCtx *logrus.E
 
 		logCtx.Tracef("handling PushFromSubscribe, sending message to tracked channel")
 
-		// Forward the event back to the appropriate receiver via connection-specific channel
-		select {
-		case evChan <- ev:
-			err = nil
-		case <-ctx.Done():
-			err = fmt.Errorf("error waiting for response to be read: %w", ctx.Err())
-		}
+		// Forward the event back to the appropriate receiver via connection-specific channel.
+		// NOTE: the receiver can StopTracking() and close this channel while a late agent
+		// response is in-flight. Never panic the principal on "send on closed channel".
+		err = safeSendCloudEvent(ctx, evChan, ev)
 
 		if err == nil {
 			logCtx.Tracef("handling PushFromSubscribe, sent message to tracked channel")
@@ -508,13 +505,10 @@ func (s *Server) processRedisEventResponse(ctx context.Context, logCtx *logrus.E
 
 	logCtx.Trace("sending message to eventIDTracker channel")
 
-	// Forward the message back to the appropriate reciver via event-specific channel
-	select {
-	case evChan <- ev:
-		err = nil
-	case <-ctx.Done():
-		err = fmt.Errorf("error waiting for response to be read: %w", ctx.Err())
-	}
+	// Forward the message back to the appropriate receiver via event-specific channel.
+	// NOTE: the receiver can StopTracking() and close this channel while a late agent
+	// response is in-flight. Never panic the principal on "send on closed channel".
+	err = safeSendCloudEvent(ctx, evChan, ev)
 
 	logCtx.Trace("sent message to eventIDTracker channel")
 
@@ -545,14 +539,30 @@ func (s *Server) processResourceEventResponse(ctx context.Context, agentName str
 	// There should be someone at the receiving end of the channel to read and
 	// process the event. Typically, this will be the resource proxy. However,
 	// we will not wait forever for the response to be read.
-	select {
-	case evChan <- ev:
-		err = nil
-	case <-ctx.Done():
-		err = fmt.Errorf("error waiting for response to be read: %w", ctx.Err())
-	}
+	// NOTE: the receiver can StopTracking() and close this channel while a late agent
+	// response is in-flight. Never panic the principal on "send on closed channel".
+	err = safeSendCloudEvent(ctx, evChan, ev)
 
 	return err
+}
+
+// safeSendCloudEvent attempts to send a CloudEvent on a channel.
+// If the channel is closed concurrently, it converts the resulting panic into
+// a benign outcome (nil error), because the response is no longer needed.
+func safeSendCloudEvent(ctx context.Context, ch chan *cloudevents.Event, ev *cloudevents.Event) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Channel was closed by StopTracking() while the response was in-flight.
+			// Dropping the response is fine; crashing the principal is not.
+			err = nil
+		}
+	}()
+	select {
+	case ch <- ev:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("error waiting for response to be read: %w", ctx.Err())
+	}
 }
 
 // processIncomingResourceResyncEvent will handle the incoming resync events from the agent
