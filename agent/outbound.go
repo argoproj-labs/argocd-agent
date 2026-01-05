@@ -15,16 +15,20 @@
 package agent
 
 import (
+	"context"
 	"errors"
+	"fmt"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -34,6 +38,9 @@ import (
 func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 	logCtx := log().WithField(logfields.Event, "NewApp").WithField(logfields.Application, app.QualifiedName())
 	logCtx.Debugf("New app event")
+
+	ctx, span := a.startSpan("create", "Application", app)
+	defer span.End()
 
 	a.resources.Add(resources.NewResourceKeyFromApp(app))
 
@@ -60,7 +67,9 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 		return
 	}
 
-	q.Add(a.emitter.ApplicationEvent(event.Create, app))
+	ev := a.emitter.ApplicationEvent(event.Create, app)
+	tracing.InjectTraceContext(ctx, ev)
+	q.Add(ev)
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).WithField(logfields.SendQueueName, defaultQueueName).Debugf("Added app create event to send queue")
 }
 
@@ -70,6 +79,10 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	logCtx := log().WithField(logfields.Event, "UpdateApp").WithField(logfields.Application, old.QualifiedName())
 	a.watchLock.Lock()
 	defer a.watchLock.Unlock()
+
+	ctx, span := a.startSpan("update", "Application", new)
+	defer span.End()
+
 	if a.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
 		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
 		return
@@ -104,8 +117,9 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 		eventType = event.StatusUpdate
 	}
 
-	q.Add(a.emitter.ApplicationEvent(eventType, new))
-	// q.Add(ev)
+	ev := a.emitter.ApplicationEvent(eventType, new)
+	tracing.InjectTraceContext(ctx, ev)
+	q.Add(ev)
 	logCtx.
 		WithField(logfields.SendQueueLen, q.Len()).
 		WithField(logfields.SendQueueName, defaultQueueName).
@@ -117,6 +131,9 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	logCtx := log().WithField(logfields.Event, "DeleteApp").WithField(logfields.Application, app.QualifiedName())
 	logCtx.Debugf("Delete app event")
+
+	ctx, span := a.startSpan("delete", "Application", app)
+	defer span.End()
 
 	if isResourceFromPrincipal(app) {
 		reverted, err := manager.RevertUserInitiatedDeletion(a.context, app, a.deletions, a.appManager, logCtx)
@@ -145,7 +162,9 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 		return
 	}
 
-	q.Add(a.emitter.ApplicationEvent(event.Delete, app))
+	ev := a.emitter.ApplicationEvent(event.Delete, app)
+	tracing.InjectTraceContext(ctx, ev)
+	q.Add(ev)
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added app delete event to send queue")
 }
 
@@ -177,6 +196,9 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 
 	logCtx.Debugf("New appProject event")
 
+	ctx, span := a.startSpan("create", "AppProject", appProject)
+	defer span.End()
+
 	a.resources.Add(resources.NewResourceKeyFromAppProject(appProject))
 
 	// Update events trigger a new event sometimes, too. If we've already seen
@@ -202,7 +224,9 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 		return
 	}
 
-	q.Add(a.emitter.AppProjectEvent(event.Create, appProject))
+	ev := a.emitter.AppProjectEvent(event.Create, appProject)
+	tracing.InjectTraceContext(ctx, ev)
+	q.Add(ev)
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject create event to send queue")
 }
 
@@ -217,6 +241,9 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 
 	a.watchLock.Lock()
 	defer a.watchLock.Unlock()
+
+	ctx, span := a.startSpan("update", "AppProject", new)
+	defer span.End()
 
 	if a.projectManager.IsChangeIgnored(new.Name, new.ResourceVersion) {
 		logCtx.Debugf("Ignoring this change for resource version %s", new.ResourceVersion)
@@ -254,7 +281,9 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 		return
 	}
 
-	q.Add(a.emitter.AppProjectEvent(event.SpecUpdate, new))
+	ev := a.emitter.AppProjectEvent(event.SpecUpdate, new)
+	tracing.InjectTraceContext(ctx, ev)
+	q.Add(ev)
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject spec update event to send queue")
 }
 
@@ -268,6 +297,9 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 	})
 
 	logCtx.Debugf("Delete appProject event")
+
+	ctx, span := a.startSpan("delete", "AppProject", appProject)
+	defer span.End()
 
 	if isResourceFromPrincipal(appProject) {
 		reverted, err := manager.RevertUserInitiatedDeletion(a.context, appProject, a.deletions, a.projectManager, logCtx)
@@ -301,7 +333,9 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 		return
 	}
 
-	q.Add(a.emitter.AppProjectEvent(event.Delete, appProject))
+	ev := a.emitter.AppProjectEvent(event.Delete, appProject)
+	tracing.InjectTraceContext(ctx, ev)
+	q.Add(ev)
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject delete event to send queue")
 }
 
@@ -448,4 +482,30 @@ func isResourceFromPrincipal(resource metav1.Object) bool {
 	}
 	_, ok := annotations[manager.SourceUIDAnnotation]
 	return ok
+}
+
+// startSpan creates a trace span for agent callbacks with common attributes.
+// Returns the context with the span and the span itself for defer cleanup.
+func (a *Agent) startSpan(operation, resourceKind string, obj metav1.Object) (context.Context, trace.Span) {
+	if !tracing.IsEnabled() {
+		return a.context, trace.SpanFromContext(a.context)
+	}
+
+	agentMode := types.AgentModeAutonomous
+	if isResourceFromPrincipal(obj) {
+		agentMode = types.AgentModeManaged
+	}
+
+	spanName := fmt.Sprintf("%s.%s", resourceKind, operation)
+	return tracing.Tracer().Start(a.context, spanName,
+		trace.WithAttributes(
+			tracing.AttrComponentType.String("agent"),
+			tracing.AttrOperationType.String(operation),
+			tracing.AttrAgentName.String(a.namespace),
+			tracing.AttrResourceName.String(obj.GetName()),
+			tracing.AttrResourceKind.String(resourceKind),
+			tracing.AttrAgentMode.String(agentMode.String()),
+			tracing.AttrResourceUID.String(string(obj.GetUID())),
+		),
+	)
 }
