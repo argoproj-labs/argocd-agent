@@ -491,11 +491,6 @@ func (a *Agent) startSpan(operation, resourceKind string, obj metav1.Object) (co
 		return a.context, trace.SpanFromContext(a.context)
 	}
 
-	agentMode := types.AgentModeAutonomous
-	if isResourceFromPrincipal(obj) {
-		agentMode = types.AgentModeManaged
-	}
-
 	spanName := fmt.Sprintf("%s.%s", resourceKind, operation)
 	return tracing.Tracer().Start(a.context, spanName,
 		trace.WithAttributes(
@@ -504,7 +499,7 @@ func (a *Agent) startSpan(operation, resourceKind string, obj metav1.Object) (co
 			tracing.AttrAgentName.String(a.namespace),
 			tracing.AttrResourceName.String(obj.GetName()),
 			tracing.AttrResourceKind.String(resourceKind),
-			tracing.AttrAgentMode.String(agentMode.String()),
+			tracing.AttrAgentMode.String(a.mode.String()),
 			tracing.AttrResourceUID.String(string(obj.GetUID())),
 		),
 	)
