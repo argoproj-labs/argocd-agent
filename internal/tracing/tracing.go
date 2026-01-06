@@ -17,6 +17,7 @@ package tracing
 import (
 	"context"
 	"fmt"
+	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"go.opentelemetry.io/otel"
@@ -71,7 +72,12 @@ func InitTracer(ctx context.Context, serviceName, otlpAddress string, otlpInsecu
 		opts = append(opts, otlptracegrpc.WithInsecure())
 	}
 
-	exporter, err = otlptracegrpc.New(ctx, opts...)
+	// Use timeout context for exporter creation to prevent startup hang
+	// if OTLP collector is unreachable
+	exporterCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	exporter, err = otlptracegrpc.New(exporterCtx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}
