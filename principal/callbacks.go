@@ -15,24 +15,39 @@
 package principal
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	// Informer operation types
+	operationcreate = "create"
+	operationupdate = "update"
+	operationdelete = "delete"
 )
 
 // newAppCallback is executed when a new application event was emitted from
 // the informer and needs to be sent out to an agent. If the receiving agent
 // is in autonomous mode, this event will be discarded.
 func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
+	ctx, span := s.startSpan(operationcreate, "Application", outbound)
+	defer span.End()
+
 	logCtx := log().WithFields(logrus.Fields{
 		"component":        "EventCallback",
 		"queue":            outbound.Namespace,
@@ -55,6 +70,8 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		return
 	}
 	ev := s.events.ApplicationEvent(event.Create, outbound)
+	// Inject trace context into the event for propagation to agent
+	tracing.InjectTraceContext(ctx, ev)
 	q.Add(ev)
 	logCtx.Tracef("Added app %s to send queue, total length now %d", outbound.QualifiedName(), q.Len())
 
@@ -66,6 +83,10 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Application) {
 	s.watchLock.Lock()
 	defer s.watchLock.Unlock()
+
+	ctx, span := s.startSpan(operationupdate, "Application", old)
+	defer span.End()
+
 	logCtx := log().WithFields(logrus.Fields{
 		"component":        "EventCallback",
 		"queue":            old.Namespace,
@@ -129,6 +150,8 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		ev = s.events.ApplicationEvent(event.SpecUpdate, out)
 	}
 
+	// Inject trace context into the event for propagation to agent
+	tracing.InjectTraceContext(ctx, ev)
 	q.Add(ev)
 	logCtx.WithField("event_type", ev.Type()).Tracef("Added app to send queue, total length now %d", q.Len())
 
@@ -138,6 +161,9 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 }
 
 func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
+	ctx, span := s.startSpan(operationdelete, "Application", outbound)
+	defer span.End()
+
 	logCtx := log().WithFields(logrus.Fields{
 		"component":        "EventCallback",
 		"queue":            outbound.Namespace,
@@ -173,6 +199,8 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 		return
 	}
 	ev := s.events.ApplicationEvent(event.Delete, outbound)
+	// Inject trace context into the event for propagation to agent
+	tracing.InjectTraceContext(ctx, ev)
 	logCtx.WithField("event", "DeleteApp").WithField("sendq_len", q.Len()+1).Tracef("Added event to send queue")
 	q.Add(ev)
 
@@ -185,6 +213,9 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 // the informer and needs to be sent out to an agent. If the receiving agent
 // is in autonomous mode, this event will be discarded.
 func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
+	ctx, span := s.startSpan(operationcreate, "AppProject", outbound)
+	defer span.End()
+
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "EventCallback",
 		"queue":           outbound.Namespace,
@@ -229,17 +260,23 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent)
 		ev := s.events.AppProjectEvent(event.Create, &agentAppProject)
+		// Inject trace context into the event for propagation to agent
+		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s to send queue, total length now %d", outbound.Name, q.Len())
 	}
 
 	// Reconcile repositories that reference this project.
-	s.syncRepositoriesForProject(outbound.Name, outbound.Namespace, logCtx)
+	s.syncRepositoriesForProject(ctx, outbound.Name, outbound.Namespace, logCtx)
 }
 
 func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha1.AppProject) {
 	s.watchLock.Lock()
 	defer s.watchLock.Unlock()
+
+	ctx, span := s.startSpan(operationupdate, "AppProject", old)
+	defer span.End()
+
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "EventCallback",
 		"queue":           old.Namespace,
@@ -283,10 +320,10 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		logCtx.Trace("Created a new queue pair for the existing agent namespace")
 	}
 
-	s.syncAppProjectUpdatesToAgents(old, new, logCtx)
+	s.syncAppProjectUpdatesToAgents(ctx, old, new, logCtx)
 
 	// The project rules could have been updated. Reconcile repositories that reference this project.
-	s.syncRepositoriesForProject(new.Name, new.Namespace, logCtx)
+	s.syncRepositoriesForProject(ctx, new.Name, new.Namespace, logCtx)
 
 	if s.metrics != nil {
 		s.metrics.AppProjectUpdated.Inc()
@@ -294,6 +331,9 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 }
 
 func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
+	ctx, span := s.startSpan(operationdelete, "AppProject", outbound)
+	defer span.End()
+
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "EventCallback",
 		"queue":           outbound.Namespace,
@@ -348,6 +388,8 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
+		// Inject trace context into the event for propagation to agent
+		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
 		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added appProject delete event to send queue")
 	}
@@ -358,6 +400,9 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 }
 
 func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
+	ctx, span := s.startSpan(operationcreate, "Repository", outbound)
+	defer span.End()
+
 	logCtx := log().WithFields(logrus.Fields{
 		"component": "EventCallback",
 		"event":     "repository_create",
@@ -395,6 +440,8 @@ func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
 		s.resources.Add(agent, resources.NewResourceKeyFromRepository(outbound))
 
 		ev := s.events.RepositoryEvent(event.Create, outbound)
+		// Inject trace context into the event for propagation to agent
+		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
 
 		s.repoToAgents.Add(outbound.Name, agent)
@@ -407,6 +454,9 @@ func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
 }
 
 func (s *Server) updateRepositoryCallback(old, new *corev1.Secret) {
+	ctx, span := s.startSpan(operationupdate, "Repository", old)
+	defer span.End()
+
 	logCtx := log().WithFields(logrus.Fields{
 		"component": "EventCallback",
 		"event":     "repository_update",
@@ -415,7 +465,7 @@ func (s *Server) updateRepositoryCallback(old, new *corev1.Secret) {
 
 	logCtx.Info("Update repository event")
 
-	s.syncRepositoryUpdatesToAgents(old, new, logCtx)
+	s.syncRepositoryUpdatesToAgents(ctx, old, new, logCtx)
 
 	if s.metrics != nil {
 		s.metrics.RepositoryUpdated.Inc()
@@ -423,6 +473,9 @@ func (s *Server) updateRepositoryCallback(old, new *corev1.Secret) {
 }
 
 func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
+	ctx, span := s.startSpan(operationdelete, "Repository", outbound)
+	defer span.End()
+
 	logCtx := log().WithFields(logrus.Fields{
 		"component": "EventCallback",
 		"event":     "repository_delete",
@@ -470,6 +523,8 @@ func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
 		s.resources.Remove(agent, resources.NewResourceKeyFromRepository(outbound))
 
 		ev := s.events.RepositoryEvent(event.Delete, outbound)
+		// Inject trace context into the event for propagation to agent
+		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
 
 		s.repoToAgents.Delete(outbound.Name, agent)
@@ -529,7 +584,7 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 
 // syncAppProjectUpdatesToAgents sends the AppProject update events to the relevant clusters.
 // It sends delete events to the clusters that no longer match the given AppProject.
-func (s *Server) syncAppProjectUpdatesToAgents(old, new *v1alpha1.AppProject, logCtx *logrus.Entry) {
+func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1alpha1.AppProject, logCtx *logrus.Entry) {
 	oldAgents := s.mapAppProjectToAgents(*old)
 	newAgents := s.mapAppProjectToAgents(*new)
 
@@ -549,6 +604,8 @@ func (s *Server) syncAppProjectUpdatesToAgents(old, new *v1alpha1.AppProject, lo
 
 		agentAppProject := appproject.AgentSpecificAppProject(*new, agent)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
+		// Inject trace context into the event for propagation to agent
+		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
 		logCtx.Tracef("Sent a delete event for an AppProject for a removed cluster")
 		deletedAgents[agent] = true
@@ -568,6 +625,8 @@ func (s *Server) syncAppProjectUpdatesToAgents(old, new *v1alpha1.AppProject, lo
 
 		agentAppProject := appproject.AgentSpecificAppProject(*new, agent)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
+		// Inject trace context into the event for propagation to agent
+		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s update event to send queue", new.Name)
 	}
@@ -575,7 +634,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(old, new *v1alpha1.AppProject, lo
 
 // syncRepositoryUpdatesToAgents sends the repository update events to the relevant agents.
 // It sends delete events to the agents that no longer match the given project.
-func (s *Server) syncRepositoryUpdatesToAgents(old, new *corev1.Secret, logCtx *logrus.Entry) {
+func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *corev1.Secret, logCtx *logrus.Entry) {
 	oldAgents := map[string]bool{}
 	newAgents := map[string]bool{}
 
@@ -633,6 +692,8 @@ func (s *Server) syncRepositoryUpdatesToAgents(old, new *corev1.Secret, logCtx *
 		}
 
 		ev := s.events.RepositoryEvent(event.Delete, new)
+		// Inject trace context into the event for propagation to agent
+		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
 
 		s.repoToAgents.Delete(new.Name, agent)
@@ -650,6 +711,8 @@ func (s *Server) syncRepositoryUpdatesToAgents(old, new *corev1.Secret, logCtx *
 		}
 
 		ev := s.events.RepositoryEvent(event.SpecUpdate, new)
+		// Inject trace context into the event for propagation to agent
+		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
 
 		s.repoToAgents.Add(new.Name, agent)
@@ -658,7 +721,7 @@ func (s *Server) syncRepositoryUpdatesToAgents(old, new *corev1.Secret, logCtx *
 	}
 }
 
-func (s *Server) syncRepositoriesForProject(projectName, ns string, logCtx *logrus.Entry) {
+func (s *Server) syncRepositoriesForProject(ctx context.Context, projectName, ns string, logCtx *logrus.Entry) {
 	repositories := s.projectToRepos.Get(projectName)
 	for repoName := range repositories {
 		logCtx.Tracef("Syncing repository %s for project %s", repoName, projectName)
@@ -669,7 +732,7 @@ func (s *Server) syncRepositoriesForProject(projectName, ns string, logCtx *logr
 			continue
 		}
 
-		s.syncRepositoryUpdatesToAgents(repo, repo, logCtx)
+		s.syncRepositoryUpdatesToAgents(ctx, repo, repo, logCtx)
 	}
 }
 
@@ -689,4 +752,30 @@ func isTerminateOperation(old, new *v1alpha1.Application) bool {
 		old.Status.OperationState.Phase != synccommon.OperationTerminating &&
 		new.Status.OperationState != nil &&
 		new.Status.OperationState.Phase == synccommon.OperationTerminating
+}
+
+// startSpan creates a trace span for a principal callback with common attributes.
+// Returns the context with the span and the span itself for defer cleanup.
+func (s *Server) startSpan(operation, resourceKind string, obj metav1.Object) (context.Context, trace.Span) {
+	if !tracing.IsEnabled() {
+		return s.ctx, trace.SpanFromContext(s.ctx)
+	}
+
+	agentMode := types.AgentModeManaged
+	if isResourceFromAutonomousAgent(obj) {
+		agentMode = types.AgentModeAutonomous
+	}
+
+	spanName := fmt.Sprintf("%s.%s", resourceKind, operation)
+	return tracing.Tracer().Start(s.ctx, spanName,
+		trace.WithAttributes(
+			tracing.AttrComponentType.String("principal"),
+			tracing.AttrOperationType.String(operation),
+			tracing.AttrAgentName.String(obj.GetNamespace()),
+			tracing.AttrResourceName.String(obj.GetName()),
+			tracing.AttrResourceKind.String(resourceKind),
+			tracing.AttrAgentMode.String(agentMode.String()),
+			tracing.AttrResourceUID.String(string(obj.GetUID())),
+		),
+	)
 }

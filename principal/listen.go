@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
@@ -143,6 +144,8 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 	}
 
 	grpcOpts := []grpc.ServerOption{
+		// Global stats handler for tracing
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		// Global interceptors for gRPC streams
 		grpc.ChainStreamInterceptor(
 			streamRequestLogger(),   // logging
