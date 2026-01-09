@@ -195,7 +195,7 @@ func (a *Agent) handleStreamEvents() error {
 				if grpcutil.NeedReconnectOnError(err) {
 					a.SetConnected(false)
 				} else {
-					logCtx.Errorf("Error while sending to stream: %v", err)
+					logCtx.Errorf("Error while receiving from stream: %v", err)
 				}
 			}
 
