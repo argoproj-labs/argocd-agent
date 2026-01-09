@@ -115,6 +115,8 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 	case event.TargetClusterCacheInfoUpdate:
 		err = s.processClusterCacheInfoUpdateEvent(agentName, ev)
+	case event.TargetHeartbeat:
+		err = s.processHeartbeatEvent(agentName, ev)
 	default:
 		err = fmt.Errorf("unknown target: '%s'", target)
 	}
@@ -459,6 +461,34 @@ func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloude
 	}).Infof("Processing clusterCacheInfoUpdate event")
 
 	return s.clusterMgr.SetClusterCacheStats(clusterInfo, agentName)
+}
+
+// processHeartbeatEvent processes heartbeat (ping/pong) events.
+// When a ping is received, respond with a pong to keep the connection alive.
+func (s *Server) processHeartbeatEvent(agentName string, ev *cloudevents.Event) error {
+	logCtx := log().WithFields(logrus.Fields{
+		"module":      "QueueProcessor",
+		"client":      agentName,
+		"event":       ev.Type(),
+		"resource_id": event.ResourceID(ev),
+		"event_id":    event.EventID(ev),
+	})
+	logCtx.Trace("Processing heartbeat event")
+
+	// If this is a ping, respond with a pong
+	if ev.Type() == event.Ping.String() {
+		pongEvent := s.events.HeartbeatEvent(event.Pong)
+		sendQ := s.queues.SendQ(agentName)
+		if sendQ != nil {
+			sendQ.Add(pongEvent)
+			logCtx.Trace("Responded to ping with pong")
+		} else {
+			return fmt.Errorf("no send queue found for agent %s", agentName)
+		}
+	}
+	// If this is a pong, just log it (agent doesn't need to respond to pongs)
+
+	return nil
 }
 
 // processRedisEventResponse proceses (redis) messages received from agents:

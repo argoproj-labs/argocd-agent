@@ -84,6 +84,7 @@ const (
 	TargetClusterCacheInfoUpdate EventTarget = "clusterCacheInfoUpdate"
 	TargetRepository             EventTarget = "repository"
 	TargetContainerLog           EventTarget = "containerlog"
+	TargetHeartbeat              EventTarget = "heartbeat"
 )
 
 const (
@@ -213,6 +214,22 @@ func (evs EventSource) RepositoryEvent(evType EventType, repository *corev1.Secr
 	cev.SetDataSchema(TargetRepository.String())
 
 	_ = cev.SetData(cloudevents.ApplicationJSON, repository)
+	return &cev
+}
+
+// HeartbeatEvent creates a ping or pong event for keepalive purposes.
+// These events keep the gRPC Subscribe stream active and help prevent
+// Istio/service mesh idle timeouts.
+func (evs EventSource) HeartbeatEvent(evType EventType) *cloudevents.Event {
+	reqUUID := uuid.NewString()
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(evType.String())
+	cev.SetExtension(eventID, reqUUID)
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetDataSchema(TargetHeartbeat.String())
+	// No data payload needed for heartbeat
 	return &cev
 }
 

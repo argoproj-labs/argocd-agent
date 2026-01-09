@@ -197,11 +197,24 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Command Line Flag**: `--keep-alive-ping-interval`
 - **Environment Variable**: `ARGOCD_AGENT_KEEP_ALIVE_PING_INTERVAL`
 - **ConfigMap Entry**: *(Not available in ConfigMap)*
-- **Description**: Ping interval to keep connection alive with Principal
+- **Description**: HTTP/2 PING frame interval to detect dead connections (transport-level keepalive)
 - **Type**: Duration
 - **Default**: `0` (disabled)
 - **Format**: Duration string (e.g., "30s", "5m", "1h")
 - **Example**: `"30s"`
+- **Note**: This uses HTTP/2 PING frames which do NOT count as requests for service mesh idle timeouts. For service mesh deployments (like Istio), use `--heartbeat-interval` instead.
+
+#### Heartbeat Interval
+- **Command Line Flag**: `--heartbeat-interval`
+- **Environment Variable**: `ARGOCD_AGENT_HEARTBEAT_INTERVAL`
+- **ConfigMap Entry**: *(Not available in ConfigMap)*
+- **Description**: Interval for application-level heartbeat messages over the Subscribe stream. Sends ping events that count as requests to prevent service mesh idle timeouts (e.g., Istio's `idleTimeout`). Set to a value less than your service mesh's idle timeout.
+- **Type**: Duration
+- **Default**: `0` (disabled)
+- **Format**: Duration string (e.g., "30s", "5m", "1h")
+- **Example**: `"30s"`
+- **Recommended for**: Deployments behind service meshes like Istio, Linkerd, or other proxies with idle connection timeouts
+- **Best Practice**: Set to 50-75% of your service mesh's `idleTimeout` (e.g., if Istio `idleTimeout` is 60s, use 30-45s)
 
 #### Enable Compression
 - **Command Line Flag**: `--enable-compression`
@@ -323,6 +336,65 @@ data:
 ```
 
 The ConfigMap should be mounted to the agent container and the parameters will be automatically read by the agent on startup.
+
+## Service Mesh Considerations
+
+When running argocd-agent behind a service mesh like Istio, Linkerd, or other proxies, you may encounter connection timeout issues. Service meshes typically have idle connection timeouts that close connections without recent HTTP activity.
+
+### Understanding Keepalive Options
+
+argocd-agent provides two keepalive mechanisms:
+
+| Option | Type | Counts as Request | Use Case |
+|--------|------|-------------------|----------|
+| `--keep-alive-ping-interval` | HTTP/2 PING frames | No | Detecting dead TCP connections |
+| `--heartbeat-interval` | Application events | Yes | Preventing service mesh idle timeouts |
+
+### Istio Configuration Example
+
+Istio's `DestinationRule` allows configuring `idleTimeout` for HTTP connections. Per [Istio documentation](https://istio.io/latest/docs/reference/config/networking/destination-rule/#ConnectionPoolSettings-HTTPSettings), HTTP/2 PINGs do not keep connections alive for request-based timeouts.
+
+**Recommended agent configuration for Istio:**
+```bash
+argocd-agent agent \
+  --heartbeat-interval=30s \
+  --keep-alive-ping-interval=30s
+```
+
+Or via environment variables:
+```yaml
+env:
+  - name: ARGOCD_AGENT_HEARTBEAT_INTERVAL
+    value: "30s"
+  - name: ARGOCD_AGENT_KEEP_ALIVE_PING_INTERVAL
+    value: "30s"
+```
+
+**Istio DestinationRule (optional, to increase timeout):**
+```yaml
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: argocd-agent-principal
+spec:
+  host: argocd-agent-principal.argocd.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      http:
+        idleTimeout: 300s  # 5 minutes
+```
+
+### Troubleshooting Connection Issues
+
+If you see errors like:
+- `stream terminated by RST_STREAM with error code: NO_ERROR`
+- `context canceled` on the principal side
+- Frequent reconnections in agent logs
+
+These often indicate idle timeout issues. Enable heartbeats with:
+```bash
+--heartbeat-interval=30s
+```
 
 ## Security Considerations
 
