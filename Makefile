@@ -3,7 +3,7 @@ DOCKER_BIN?=docker
 # Image names
 IMAGE_REPOSITORY?=ghcr.io/argoproj-labs/argocd-agent
 IMAGE_NAME=argocd-agent
-IMAGE_PLATFORMS?=linux/amd64
+IMAGE_PLATFORMS?=linux/amd64,linux/arm64
 IMAGE_TAG?=latest
 
 # mkdocs related configuration
