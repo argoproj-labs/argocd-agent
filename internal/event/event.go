@@ -619,6 +619,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetClusterCacheInfoUpdate
 	case TargetContainerLog.String():
 		return TargetContainerLog
+	case TargetHeartbeat.String():
+		return TargetHeartbeat
 	}
 	return ""
 }
@@ -1056,16 +1058,18 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	}
 
 	// Move to sentEvents BEFORE unlocking to prevent ACK race
-	isACK := Target(eventMsg.event) == TargetEventAck
-	if !isACK {
+	// Fire-and-forget events (ACKs and heartbeats) don't need retry tracking
+	target := Target(eventMsg.event)
+	isFireAndForget := target == TargetEventAck || target == TargetHeartbeat
+	if !isFireAndForget {
 		ew.sentEvents[resID] = eventMsg
 	}
 	ew.mu.Unlock()
 
-	// Schedule retry at the end for non-ACK events
+	// Schedule retry at the end for events that need reliability guarantees
 	// On success: retry happens if ACK never arrives
 	// On failure: retry happens after backoff
-	if !isACK {
+	if !isFireAndForget {
 		defer ew.scheduleRetry(eventMsg)
 	}
 
@@ -1093,8 +1097,8 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 
 	logCtx.Trace("event sent to target")
 
-	if isACK {
-		logCtx.Trace("ACK is removed from the event writer")
+	if isFireAndForget {
+		logCtx.Trace("Fire-and-forget event (ACK or heartbeat) removed from event writer")
 	}
 }
 

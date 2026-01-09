@@ -233,8 +233,8 @@ func (a *Agent) handleStreamEvents() error {
 
 	// Send heartbeat (ping) events at regular intervals to keep the stream alive.
 	// This is necessary for service meshes like Istio that timeout idle connections.
-	// Heartbeats are sent directly on the stream (bypassing EventWriter) because they
-	// are fire-and-forget and don't need ACK tracking or retry logic.
+	// Heartbeats are routed through EventWriter to ensure thread-safe stream access.
+	// EventWriter treats them as fire-and-forget events (no ACK tracking or retries).
 	if a.options.heartbeatInterval > 0 {
 		go func() {
 			logCtx := logCtx.WithFields(logrus.Fields{
@@ -250,19 +250,11 @@ func (a *Agent) handleStreamEvents() error {
 					logCtx.Debug("Heartbeat sender stopped due to context cancellation")
 					return
 				case <-ticker.C:
-					// Create and send ping event directly on stream (bypass EventWriter, fire & forget)
+					// Add heartbeat to EventWriter for thread-safe sending
+					// EventWriter will send it without ACK tracking (fire-and-forget)
 					pingEvent := a.emitter.HeartbeatEvent(event.Ping)
-					pev, err := format.ToProto(pingEvent)
-					if err != nil {
-						logCtx.Errorf("Failed to encode heartbeat: %v", err)
-						continue
-					}
-					if err := stream.Send(&eventstreamapi.Event{Event: pev}); err != nil {
-						logCtx.Warnf("Failed to send heartbeat: %v", err)
-						// Don't return on error - connection state handled by other goroutines
-					} else {
-						logCtx.Trace("Sent heartbeat ping")
-					}
+					a.eventWriter.Add(pingEvent)
+					logCtx.Trace("Queued heartbeat ping")
 				}
 			}
 			logCtx.Debug("Heartbeat sender stopped")
