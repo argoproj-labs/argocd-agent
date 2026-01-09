@@ -123,6 +123,16 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Security Warning**: Only use for development purposes
 - **Example**: `"false"`
 
+#### Insecure Plaintext Mode
+- **Command Line Flag**: `--insecure-plaintext`
+- **Environment Variable**: `ARGOCD_PRINCIPAL_INSECURE_PLAINTEXT`
+- **ConfigMap Entry**: `principal.tls.insecure-plaintext`
+- **Description**: Run gRPC server without TLS (use with service mesh like Istio)
+- **Type**: Boolean
+- **Default**: `false`
+- **Security Warning**: Only use when running behind a service mesh that handles mTLS termination at the sidecar level. Required when using `header` authentication method.
+- **Example**: `"true"`
+
 #### TLS CA Secret Name
 - **Command Line Flag**: `--tls-ca-secret-name`
 - **Environment Variable**: `ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_SECRET_NAME`
@@ -266,6 +276,31 @@ The recommended approach for production deployments is to use ConfigMap entries 
   - Istio with SPIFFE URIs: `"header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)"`
   - Custom identity header: `"header:x-client-id:^(.+)$"`
   - Traditional mTLS: `"mtls:CN=([^,]+)"`
+
+#### Insecure Plaintext Mode (Service Mesh Authentication)
+- **Command Line Flag**: `--insecure-plaintext`
+- **Environment Variable**: `ARGOCD_PRINCIPAL_INSECURE_PLAINTEXT`
+- **ConfigMap Entry**: `principal.tls.insecure-plaintext`
+- **Description**: Disables TLS termination on the gRPC server, allowing the principal to run in plaintext mode. This flag is **required** when using `header:<header-name>:<extraction-regex>` authentication behind a service mesh.
+- **Type**: Boolean
+- **Default**: `false`
+- **Valid Values**: `true` or `false`
+- **When to Use**:
+  - **REQUIRED** when using header-based authentication (`header:...`)
+  - When running behind a service mesh (Istio, Linkerd, etc.) that terminates mTLS at the sidecar level
+  - The service mesh must provide transport security and inject identity headers (e.g., `x-forwarded-client-cert`)
+- **Security Implications**:
+  - **CRITICAL**: Never enable this flag without a service mesh providing mTLS
+  - When enabled, the principal accepts unencrypted gRPC connections
+  - All transport security must be provided by the service mesh sidecar
+  - Identity verification depends entirely on headers injected by the mesh
+  - Exposing the plaintext port outside the service mesh creates a severe security vulnerability
+- **Authentication Pairing**:
+  - `--insecure-plaintext=true` + `--auth=header:...` → **Correct** (service mesh handles mTLS)
+  - `--insecure-plaintext=false` + `--auth=mtls:...` → **Correct** (direct TLS to principal)
+  - `--insecure-plaintext=true` + `--auth=mtls:...` → **Invalid** (no client certs in plaintext mode)
+  - `--insecure-plaintext=false` + `--auth=header:...` → **Invalid** (headers not injected without mesh)
+- **Example**: `"true"` (when using Istio with header authentication)
 
 ### Logging and Debugging
 
@@ -436,11 +471,40 @@ data:
 
 The ConfigMap should be mounted to the principal container and the parameters will be automatically read by the principal on startup.
 
+### Istio Service Mesh with Header Authentication
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-agent-params
+data:
+  principal.listen.host: "0.0.0.0"
+  principal.listen.port: "8443"
+  principal.log.level: "info"
+  principal.namespace: "argocd"
+  principal.metrics.port: "8000"
+  principal.healthz.port: "8003"
+  # Disable TLS - Istio sidecar handles mTLS
+  principal.tls.insecure-plaintext: "true"
+  # Extract agent ID from SPIFFE URI in x-forwarded-client-cert header
+  # Format: spiffe://cluster.local/ns/<namespace>/sa/<service-account>
+  # This extracts the service account name as the agent ID
+  principal.auth: "header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)"
+  principal.jwt.secret-name: "argocd-agent-jwt"
+  principal.resource-proxy.secret-name: "argocd-agent-resource-proxy-tls"
+  principal.resource-proxy.ca.secret-name: "argocd-agent-ca"
+  principal.namespace-create.enable: "false"
+```
+
 ## Security Considerations
 
 - Always use proper TLS certificates in production (avoid `insecure-*-generate` options)
 - Store sensitive configuration like JWT keys and TLS certificates in Kubernetes Secrets, not ConfigMaps
-- Use mutual TLS authentication (`mtls`) when possible for enhanced security
+- **Authentication Security**:
+  - Use mutual TLS authentication (`mtls`) when agents connect directly to the principal
+  - Use header-based authentication (`header`) when running behind a service mesh (Istio, Linkerd, etc.) that terminates mTLS
+  - **Never** use `--insecure-plaintext` without a service mesh providing transport security
+  - Ensure header extraction regex patterns properly validate agent identity
 - Regularly rotate TLS certificates, JWT signing keys, and authentication credentials
 - Restrict network access to the principal's metrics and health endpoints
 - Carefully configure namespace creation permissions to prevent unauthorized access

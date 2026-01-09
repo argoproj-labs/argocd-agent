@@ -81,7 +81,7 @@ func (h *HeaderAuthentication) Authenticate(ctx context.Context, creds auth.Cred
 	}
 
 	headerValue := headerValues[0]
-	log.Debugf("Received header '%s': %s", h.HeaderName, headerValue)
+	log.Debugf("Received header '%s' (value redacted)", h.HeaderName)
 
 	// Extract agent ID from header value using regex
 	agentID, err := h.extractAgentID(headerValue)
@@ -118,15 +118,15 @@ func (h *HeaderAuthentication) extractAgentID(headerValue string) (string, error
 
 	matches := h.ExtractionRegex.FindStringSubmatch(headerValue)
 	if len(matches) < 2 {
-		log.Debugf("Header value '%s' does not match regex pattern '%s'", headerValue, h.ExtractionRegex.String())
+		log.Debugf("Header value does not match regex pattern '%s'", h.ExtractionRegex.String())
 		return "", fmt.Errorf("header value does not match the extraction regex pattern")
 	}
 
-	log.Debugf("Regex matched with %d capture groups: %v", len(matches), matches)
+	log.Debugf("Regex matched with %d capture groups", len(matches))
 
 	agentID := matches[1]
 	if agentID == "" {
-		log.Debugf("Extracted agent ID is empty from header value '%s'", headerValue)
+		log.Debug("Extracted agent ID is empty from header value")
 		return "", fmt.Errorf("extracted agent ID is empty from header value")
 	}
 

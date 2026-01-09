@@ -228,6 +228,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not parse auth: %v", err)
 			}
+
+			// Validate authentication method and TLS mode pairing
+			if err := validateAuthTLSPairing(authMethod, insecurePlaintext); err != nil {
+				cmdutil.Fatal("%v", err)
+			}
+
 			switch authMethod {
 			case "mtls":
 				var regex *regexp.Regexp
@@ -550,4 +556,31 @@ func parseHeaderAuth(config string) (string, *regexp.Regexp, error) {
 	}
 
 	return headerName, extractionRegex, nil
+}
+
+// validateAuthTLSPairing validates that the authentication method is compatible
+// with the TLS configuration. Certain combinations are invalid:
+//   - header auth requires insecure-plaintext mode (service mesh handles mTLS)
+//   - mtls auth requires TLS mode (needs client certificates)
+func validateAuthTLSPairing(authMethod string, insecurePlaintext bool) error {
+	switch authMethod {
+	case "header":
+		if !insecurePlaintext {
+			return fmt.Errorf("invalid configuration: header-based authentication requires --insecure-plaintext=true\n" +
+				"  Header authentication is designed for service mesh environments (e.g., Istio) where\n" +
+				"  the sidecar terminates mTLS and injects identity headers.\n" +
+				"  Either:\n" +
+				"  - Add --insecure-plaintext flag when using header auth behind a service mesh\n" +
+				"  - Use --auth=mtls:<regex> for direct TLS connections without a service mesh")
+		}
+	case "mtls":
+		if insecurePlaintext {
+			return fmt.Errorf("invalid configuration: mtls authentication cannot be used with --insecure-plaintext\n" +
+				"  mTLS authentication requires TLS to be enabled to receive client certificates.\n" +
+				"  Either:\n" +
+				"  - Remove --insecure-plaintext flag to enable TLS for mTLS authentication\n" +
+				"  - Use --auth=header:<header>:<regex> for service mesh environments with plaintext mode")
+		}
+	}
+	return nil
 }
