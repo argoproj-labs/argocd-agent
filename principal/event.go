@@ -463,31 +463,15 @@ func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloude
 	return s.clusterMgr.SetClusterCacheStats(clusterInfo, agentName)
 }
 
-// processHeartbeatEvent processes heartbeat (ping/pong) events.
-// When a ping is received, respond with a pong to keep the connection alive.
+// processHeartbeatEvent processes heartbeat ping events from agents.
+// The ping keeps the gRPC stream active and prevents service mesh idle timeouts.
+// No response is needed - ping itself should reset the service mesh idle timer.
 func (s *Server) processHeartbeatEvent(agentName string, ev *cloudevents.Event) error {
-	logCtx := log().WithFields(logrus.Fields{
-		"module":      "QueueProcessor",
-		"client":      agentName,
-		"event":       ev.Type(),
-		"resource_id": event.ResourceID(ev),
-		"event_id":    event.EventID(ev),
-	})
-	logCtx.Trace("Processing heartbeat event")
-
-	// If this is a ping, respond with a pong
-	if ev.Type() == event.Ping.String() {
-		pongEvent := s.events.HeartbeatEvent(event.Pong)
-		sendQ := s.queues.SendQ(agentName)
-		if sendQ != nil {
-			sendQ.Add(pongEvent)
-			logCtx.Trace("Responded to ping with pong")
-		} else {
-			return fmt.Errorf("no send queue found for agent %s", agentName)
-		}
-	}
-	// If this is a pong, just log it (agent doesn't need to respond to pongs)
-
+	log().WithFields(logrus.Fields{
+		"module": "QueueProcessor",
+		"client": agentName,
+		"event":  ev.Type(),
+	}).Trace("Received heartbeat")
 	return nil
 }
 
