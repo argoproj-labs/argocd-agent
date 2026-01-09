@@ -257,8 +257,15 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Format**: `<method>:<configuration>`
 - **Valid Methods**:
   - `userpass:/path/to/creds/file` - Username/password authentication **[DEPRECATED - not suited for use outside development environments]**
-  - `mtls:regex_pattern` - Mutual TLS authentication with agent ID extraction **(Recommended)**
-- **Example**: `"mtls:CN=([^,]+)"`
+  - `mtls:regex_pattern` - Mutual TLS authentication with agent ID extraction
+  - `header:<header-name>:<extraction-regex>` - Generic header-based authentication **(Recommended for Istio)**
+    - Extracts agent ID from any HTTP header using a regex pattern
+    - First capture group becomes the agent ID
+    - Must be used with `--insecure-plaintext` (service mesh handles mTLS)
+- **Examples**:
+  - Istio with SPIFFE URIs: `"header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)"`
+  - Custom identity header: `"header:x-client-id:^(.+)$"`
+  - Traditional mTLS: `"mtls:CN=([^,]+)"`
 
 ### Logging and Debugging
 

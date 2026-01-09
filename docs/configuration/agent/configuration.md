@@ -68,8 +68,9 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Format**: `<method>:<configuration>`
 - **Valid Methods**:
   - `userpass:/path/to/creds/file` - Username/password authentication **[DEPRECATED - not suited for use outside development environments]**
-  - `mtls:regex_pattern` - Mutual TLS authentication with agent ID extraction **(Recommended)**
-- **Example**: `"mtls:^CN=(.+)$"`
+  - `mtls:` - Mutual TLS authentication with agent ID extraction
+  - `header:` - Header-based authentication for service mesh environments **(Recommended for Istio)**
+- **Example**: `"header:"` (for Istio/service mesh), `"mtls:"` (for direct mTLS)
 
 ### TLS Configuration
 

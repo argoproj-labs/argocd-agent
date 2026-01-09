@@ -77,6 +77,9 @@ type ServerOptions struct {
 	healthzPort            int
 	redisProxyDisabled     bool
 	informerSyncTimeout    time.Duration
+	// insecurePlaintext disables TLS on the gRPC server. Use when Istio sidecar
+	// handles mTLS termination.
+	insecurePlaintext bool
 }
 
 type ServerOption func(o *Server) error
@@ -477,5 +480,18 @@ func WithHealthzPort(port int) ServerOption {
 		} else {
 			return fmt.Errorf("invalid port: %d", port)
 		}
+	}
+}
+
+// WithInsecurePlaintext disables TLS on the gRPC server. This should only be
+// used when running behind a service mesh (e.g., Istio) that handles mTLS
+// termination at the sidecar level.
+//
+// INSECURE: Do not use this without a service mesh providing transport security.
+func WithInsecurePlaintext() ServerOption {
+	return func(o *Server) error {
+		log().Warn("INSECURE: gRPC server will run in plaintext mode - ensure Istio or similar service mesh provides mTLS")
+		o.options.insecurePlaintext = true
+		return nil
 	}
 }
