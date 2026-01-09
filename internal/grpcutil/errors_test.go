@@ -41,4 +41,13 @@ func Test_NeedReconnectOnError(t *testing.T) {
 		err := status.Error(codes.Internal, "")
 		assert.False(t, NeedReconnectOnError(err))
 	})
+	t.Run("Need reconnect on stream termination (RST_STREAM)", func(t *testing.T) {
+		// This matches the exact error message seen when HTTP/2 RST_STREAM is received
+		err := status.Error(codes.Internal, "stream terminated by RST_STREAM with error code: NO_ERROR")
+		assert.True(t, NeedReconnectOnError(err))
+	})
+	t.Run("No reconnect on other Internal errors", func(t *testing.T) {
+		err := status.Error(codes.Internal, "some other internal error")
+		assert.False(t, NeedReconnectOnError(err))
+	})
 }
