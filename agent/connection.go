@@ -254,7 +254,7 @@ func (a *Agent) handleStreamEvents() error {
 					// EventWriter will send it without ACK tracking (fire-and-forget)
 					pingEvent := a.emitter.HeartbeatEvent(event.Ping)
 					a.eventWriter.Add(pingEvent)
-					logCtx.Trace("Queued heartbeat ping")
+					logCtx.Debug("Queued heartbeat ping")
 				}
 			}
 			logCtx.Debug("Heartbeat sender stopped")

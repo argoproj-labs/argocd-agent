@@ -471,7 +471,7 @@ func (s *Server) processHeartbeatEvent(agentName string, ev *cloudevents.Event) 
 		"module": "QueueProcessor",
 		"client": agentName,
 		"event":  ev.Type(),
-	}).Trace("Received heartbeat")
+	}).Debug("Received heartbeat")
 	return nil
 }
 
