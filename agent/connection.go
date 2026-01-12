@@ -231,6 +231,36 @@ func (a *Agent) handleStreamEvents() error {
 		}
 	}()
 
+	// Send heartbeat (ping) events at regular intervals to keep the stream alive.
+	// This is necessary for service meshes like Istio that timeout idle connections.
+	// Heartbeats are routed through EventWriter to ensure thread-safe stream access.
+	// EventWriter treats them as fire-and-forget events (no ACK tracking or retries).
+	if a.options.heartbeatInterval > 0 {
+		go func() {
+			logCtx := logCtx.WithFields(logrus.Fields{
+				"direction": "heartbeat",
+			})
+			logCtx.Infof("Starting heartbeat sender with interval %v", a.options.heartbeatInterval)
+			ticker := time.NewTicker(a.options.heartbeatInterval)
+			defer ticker.Stop()
+
+			for a.IsConnected() {
+				select {
+				case <-a.context.Done():
+					logCtx.Debug("Heartbeat sender stopped due to context cancellation")
+					return
+				case <-ticker.C:
+					// Add heartbeat to EventWriter for thread-safe sending
+					// EventWriter will send it without ACK tracking (fire-and-forget)
+					pingEvent := a.emitter.HeartbeatEvent(event.Ping)
+					a.eventWriter.Add(pingEvent)
+					logCtx.Debug("Queued heartbeat ping")
+				}
+			}
+			logCtx.Debug("Heartbeat sender stopped")
+		}()
+	}
+
 	for a.IsConnected() {
 		select {
 		case <-a.context.Done():

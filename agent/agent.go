@@ -129,6 +129,12 @@ type AgentOptions struct {
 	metricsPort int
 
 	healthzPort int
+
+	// heartbeatInterval is the interval at which the agent sends heartbeat (ping)
+	// events to the principal over the Subscribe stream. This is used to keep
+	// the connection alive through service meshes like Istio that have idle timeouts.
+	// A value of 0 disables heartbeats.
+	heartbeatInterval time.Duration
 }
 
 // AgentOption is a functional option type used to configure an Agent instance during initialization.

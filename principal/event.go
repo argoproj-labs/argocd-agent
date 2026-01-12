@@ -115,6 +115,8 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 	case event.TargetClusterCacheInfoUpdate:
 		err = s.processClusterCacheInfoUpdateEvent(agentName, ev)
+	case event.TargetHeartbeat:
+		err = s.processHeartbeatEvent(agentName, ev)
 	default:
 		err = fmt.Errorf("unknown target: '%s'", target)
 	}
@@ -459,6 +461,18 @@ func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloude
 	}).Infof("Processing clusterCacheInfoUpdate event")
 
 	return s.clusterMgr.SetClusterCacheStats(clusterInfo, agentName)
+}
+
+// processHeartbeatEvent processes heartbeat ping events from agents.
+// The ping keeps the gRPC stream active and prevents service mesh idle timeouts.
+// No response is needed - ping itself should reset the service mesh idle timer.
+func (s *Server) processHeartbeatEvent(agentName string, ev *cloudevents.Event) error {
+	log().WithFields(logrus.Fields{
+		"module": "QueueProcessor",
+		"client": agentName,
+		"event":  ev.Type(),
+	}).Debug("Received heartbeat")
+	return nil
 }
 
 // processRedisEventResponse proceses (redis) messages received from agents:
