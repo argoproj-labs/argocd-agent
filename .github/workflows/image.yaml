@@ -51,9 +51,20 @@ jobs:
     steps:
     - name: Checkout source code
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+    - name: Set up Docker
+      uses: docker/setup-docker-action@v4
+      with:
+        daemon-config: |
+          {
+            "features": {
+              "containerd-snapshotter": true
+            }
+          }
+    - name: Setup QEMU
+      uses: docker/setup-qemu-action@v3
     - name: Build argocd-agent container image
       run: |
-          make image
+          make image-multiarch
     - name: Tag latest
       if: env.IMAGE_LATEST == 'yes'
       run: |
