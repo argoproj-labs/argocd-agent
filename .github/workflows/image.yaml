@@ -64,7 +64,11 @@ jobs:
       uses: docker/setup-qemu-action@v3
     - name: Build argocd-agent container image
       run: |
-          make image-multiarch
+          if [[ "$GITHUB_REPOSITORY" == "argoproj-labs/argocd-agent" ]] && ( [[ "$GITHUB_EVENT_NAME" == "push" ]] || jq -e '.pull_request.labels[].name == "ok-to-push"' "$GITHUB_EVENT_PATH" > /dev/null ); then
+            make image-multiarch
+          else
+            make image
+          fi
     - name: Tag latest
       if: env.IMAGE_LATEST == 'yes'
       run: |
