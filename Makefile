@@ -6,7 +6,7 @@ IMAGE_NAME=argocd-agent
 IMAGE_PLATFORM?=linux/amd64
 IMAGE_MULTIARCH_PLATFORMS?=linux/amd64,linux/arm64
 IMAGE_TAG?=latest
-BUILDX_FLAGS?=--load
+BUILDX_FLAGS?=
 
 # mkdocs related configuration
 MKDOCS_DOCKER_IMAGE?=squidfunk/mkdocs-material:9

@@ -48,6 +48,7 @@ jobs:
       IMAGE_LATEST: ${{ needs.set-vars.outputs.latest }}
       IMAGE_REPOSITORY: ghcr.io/argoproj-labs/argocd-agent
       IMAGE_NAME: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
+      BUILDX_FLAGS: --load
     steps:
     - name: Checkout source code
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
