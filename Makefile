@@ -8,6 +8,17 @@ IMAGE_MULTIARCH_PLATFORMS?=linux/amd64,linux/arm64
 IMAGE_TAG?=latest
 BUILDX_FLAGS?=
 
+ifeq ($(DOCKER_BIN),docker)
+	MULTIARCH_BUILD_CMDS?= \
+		$(DOCKER_BIN) buildx create --use --name argocd-agent-builder && \
+		$(DOCKER_BIN) buildx build $(BUILDX_FLAGS) --platform $(IMAGE_MULTIARCH_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG) . && \
+		$(DOCKER_BIN) buildx rm argocd-agent-builder
+else
+	MULTIARCH_BUILD_CMDS?= \
+		$(DOCKER_BIN) manifest create $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG) && \
+		$(DOCKER_BIN) build -f Dockerfile --platform $(IMAGE_MULTIARCH_PLATFORMS) --manifest $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG)
+endif
+
 # mkdocs related configuration
 MKDOCS_DOCKER_IMAGE?=squidfunk/mkdocs-material:9
 MKDOCS_RUN_ARGS?=
@@ -178,9 +189,7 @@ image:
 
 .PHONY: image-multiarch
 image-multiarch:
-	$(DOCKER_BIN) buildx create --use --name argocd-agent-builder
-	$(DOCKER_BIN) buildx build $(BUILDX_FLAGS) --platform $(IMAGE_MULTIARCH_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG) .
-	$(DOCKER_BIN) buildx rm argocd-agent-builder
+	$(MULTIARCH_BUILD_CMDS)
 
 .PHONY: push-image
 push-image:
