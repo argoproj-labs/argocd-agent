@@ -334,6 +334,41 @@ func TestEventWriter(t *testing.T) {
 		require.Len(t, fs.events[resID], 1)
 	})
 
+	t.Run("should not send heartbeat events to sentEvents (fire-and-forget)", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		// Create a heartbeat event using EventSource helper
+		heartbeatEv := es.HeartbeatEvent(Ping)
+		resID := ResourceID(heartbeatEv)
+
+		evSender.Add(heartbeatEv)
+
+		// Send the heartbeat event
+		evSender.sendEvent(resID)
+
+		// Heartbeat should not be in sentEvents (fire-and-forget, no ACK tracking)
+		require.NotContains(t, evSender.sentEvents, resID)
+		// But it should have been sent to the stream
+		require.Len(t, fs.events[resID], 1)
+	})
+
+	t.Run("heartbeat events should not accumulate in sentEvents over time", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		// Simulate multiple heartbeats being sent (like a real heartbeat interval)
+		for i := 0; i < 10; i++ {
+			heartbeatEv := es.HeartbeatEvent(Ping)
+			resID := ResourceID(heartbeatEv)
+			evSender.Add(heartbeatEv)
+			evSender.sendEvent(resID)
+		}
+
+		// sentEvents should be empty - no heartbeats should accumulate
+		require.Empty(t, evSender.sentEvents, "Heartbeat events should not accumulate in sentEvents")
+	})
+
 	t.Run("should handle empty resource ID gracefully", func(t *testing.T) {
 		fs := &fakeStream{}
 		evSender := NewEventWriter(fs)

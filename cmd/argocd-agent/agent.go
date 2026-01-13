@@ -30,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
+	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -70,6 +71,14 @@ func NewAgentRunCommand() *cobra.Command {
 
 		// Time interval for agent to refresh cluster cache info in principal
 		cacheRefreshInterval time.Duration
+
+		// Time interval for application-level heartbeats over the Subscribe stream.
+		// This is used to keep the connection alive through service meshes like Istio.
+		heartbeatInterval time.Duration
+
+		// OpenTelemetry configuration
+		otlpAddress  string
+		otlpInsecure bool
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -77,6 +86,20 @@ func NewAgentRunCommand() *cobra.Command {
 		Run: func(c *cobra.Command, args []string) {
 			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
+
+			// Initialize OpenTelemetry tracing if enabled
+			if otlpAddress != "" {
+				shutdownTracer, err := tracing.InitTracer(ctx, "agent-"+agentMode, otlpAddress, otlpInsecure)
+				if err != nil {
+					cmdutil.Fatal("Failed to initialize OpenTelemetry tracing: %v", err)
+				}
+				defer func() {
+					if err := shutdownTracer(ctx); err != nil {
+						logrus.Errorf("Error shutting down tracer: %v", err)
+					}
+				}()
+				logrus.Infof("OpenTelemetry tracing initialized (address=%s)", otlpAddress)
+			}
 
 			if pprofPort > 0 {
 				logrus.Infof("Starting pprof server on 127.0.0.1:%d", pprofPort)
@@ -178,6 +201,7 @@ func NewAgentRunCommand() *cobra.Command {
 
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
+			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
@@ -270,6 +294,17 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&cacheRefreshInterval, "cache-refresh-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_CACHE_REFRESH_INTERVAL", nil, 10*time.Second),
 		"Interval to refresh cluster cache info in principal")
+	command.Flags().DurationVar(&heartbeatInterval, "heartbeat-interval",
+		env.DurationWithDefault("ARGOCD_AGENT_HEARTBEAT_INTERVAL", nil, 0),
+		"Interval for application-level heartbeats over the Subscribe stream (e.g., 30s). "+
+			"Set to 0 to disable. Useful to keep connections alive through service meshes like Istio.")
+
+	command.Flags().StringVar(&otlpAddress, "otlp-address",
+		env.StringWithDefault("ARGOCD_AGENT_OTLP_ADDRESS", nil, ""),
+		"Experimental: OpenTelemetry collector address for sending traces (e.g., localhost:4317)")
+	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
+		env.BoolWithDefault("ARGOCD_AGENT_OTLP_INSECURE", false),
+		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

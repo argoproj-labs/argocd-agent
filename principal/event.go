@@ -27,10 +27,12 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
+	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/semaphore"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -54,6 +56,22 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		"event_type":   ev.Type(),
 		"agent_name":   agentName,
 	})
+
+	// Extract trace context from the incoming event
+	ctx = tracing.ExtractTraceContext(ctx, ev)
+
+	// Create trace span for incoming event processing, continuing the trace from agent
+	spanName := fmt.Sprintf("%s.%s", event.Target(ev), ev.Type())
+	ctx, span := tracing.Tracer().Start(ctx, spanName,
+		trace.WithAttributes(
+			tracing.AttrEventType.String(string(ev.Type())),
+			tracing.AttrEventTarget.String(string(event.Target(ev))),
+			tracing.AttrEventID.String(event.EventID(ev)),
+			tracing.AttrResourceUID.String(event.ResourceID(ev)),
+			tracing.AttrComponentType.String("principal"),
+		),
+	)
+	defer span.End()
 
 	// Start measuring time for event processing
 	cp := checkpoint.NewCheckpoint("process_recv_queue")
@@ -82,9 +100,14 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 
 		// Process redis responses on their own thread, as they may block
 		go func() {
+			_, redisSpan := tracing.Tracer().Start(ctx, "processRedisEventResponse")
+			defer redisSpan.End()
 			err = s.processRedisEventResponse(ctx, logCtx, agentName, ev)
 			if err != nil {
+				tracing.RecordError(redisSpan, err)
 				logCtx.WithError(err).Error("unable to process redis event response")
+			} else {
+				tracing.SetSpanOK(redisSpan)
 			}
 		}()
 
@@ -92,6 +115,8 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 	case event.TargetClusterCacheInfoUpdate:
 		err = s.processClusterCacheInfoUpdateEvent(agentName, ev)
+	case event.TargetHeartbeat:
+		err = s.processHeartbeatEvent(agentName, ev)
 	default:
 		err = fmt.Errorf("unknown target: '%s'", target)
 	}
@@ -116,6 +141,12 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 
 		// store time taken by principal to process event in metrics
 		s.metrics.EventProcessingTime.WithLabelValues(string(status), agentName, target.String()).Observe(cp.Duration().Seconds())
+	}
+
+	if err != nil {
+		tracing.RecordError(span, err)
+	} else {
+		tracing.SetSpanOK(span)
 	}
 
 	return ev, err
@@ -430,6 +461,18 @@ func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloude
 	}).Infof("Processing clusterCacheInfoUpdate event")
 
 	return s.clusterMgr.SetClusterCacheStats(clusterInfo, agentName)
+}
+
+// processHeartbeatEvent processes heartbeat ping events from agents.
+// The ping keeps the gRPC stream active and prevents service mesh idle timeouts.
+// No response is needed - ping itself should reset the service mesh idle timer.
+func (s *Server) processHeartbeatEvent(agentName string, ev *cloudevents.Event) error {
+	log().WithFields(logrus.Fields{
+		"module": "QueueProcessor",
+		"client": agentName,
+		"event":  ev.Type(),
+	}).Debug("Received heartbeat")
+	return nil
 }
 
 // processRedisEventResponse proceses (redis) messages received from agents:

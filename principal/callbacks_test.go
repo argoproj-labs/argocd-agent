@@ -322,7 +322,7 @@ func TestSyncAppProjectUpdatesToAgents(t *testing.T) {
 			logCtx := logrus.WithField("test", "syncAppProjectUpdatesToAgents")
 
 			// Execute the function under test
-			s.syncAppProjectUpdatesToAgents(&tt.oldAppProject, &tt.newAppProject, logCtx)
+			s.syncAppProjectUpdatesToAgents(context.Background(), &tt.oldAppProject, &tt.newAppProject, logCtx)
 
 			// Collect events from all queues
 			var deleteEventCount, updateEventCount int
@@ -677,7 +677,7 @@ func TestServer_syncRepositoryUpdatesToAgents(t *testing.T) {
 
 		// Execute function
 		logCtx := logrus.WithField("test", "syncRepositoryUpdatesToAgents")
-		s.syncRepositoryUpdatesToAgents(oldSecret, newSecret, logCtx)
+		s.syncRepositoryUpdatesToAgents(context.Background(), oldSecret, newSecret, logCtx)
 
 		// Collect events
 		for _, agent := range []string{"agent1", "agent2"} {
@@ -787,7 +787,7 @@ func TestServer_syncRepositoryUpdatesToAgents(t *testing.T) {
 		newSecret := createSecret("new-project")
 		logCtx := logrus.WithField("test", "missing-project")
 
-		s.syncRepositoryUpdatesToAgents(oldSecret, newSecret, logCtx)
+		s.syncRepositoryUpdatesToAgents(context.Background(), oldSecret, newSecret, logCtx)
 
 		// No events should be sent
 		q := s.queues.SendQ("agent1")
@@ -817,7 +817,7 @@ func TestServer_syncRepositoryUpdatesToAgents(t *testing.T) {
 		}
 		logCtx := logrus.WithField("test", "missing-project")
 
-		s.syncRepositoryUpdatesToAgents(oldSecret, newSecret, logCtx)
+		s.syncRepositoryUpdatesToAgents(context.Background(), oldSecret, newSecret, logCtx)
 
 		// No events should be sent
 		q := s.queues.SendQ("agent1")

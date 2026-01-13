@@ -17,6 +17,7 @@ package grpcutil
 import (
 	"errors"
 	"io"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -32,12 +33,16 @@ func NeedReconnectOnError(err error) bool {
 	if errors.Is(err, io.EOF) {
 		return true
 	}
-	status, ok := status.FromError(err)
+	st, ok := status.FromError(err)
 	if !ok {
 		return false
 	}
-	v, ok := reconnectableErrors[status.Code()]
-	if ok && v {
+	if v, ok := reconnectableErrors[st.Code()]; ok && v {
+		return true
+	}
+	// Handle stream termination errors (e.g., RST_STREAM) which come as codes.Internal
+	// but indicate the transport layer closed the stream and reconnection is needed
+	if st.Code() == codes.Internal && strings.Contains(st.Message(), "stream terminated") {
 		return true
 	}
 	return false

@@ -34,6 +34,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/principal"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 
@@ -86,6 +87,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisPassword        string
 		redisCompressionType string
 		healthzPort          int
+
+		// OpenTelemetry configuration
+		otlpAddress  string
+		otlpInsecure bool
 	)
 	var command = &cobra.Command{
 		Use:   "principal",
@@ -93,6 +98,20 @@ func NewPrincipalRunCommand() *cobra.Command {
 		Run: func(c *cobra.Command, args []string) {
 			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
+
+			// Initialize OpenTelemetry tracing if enabled
+			if otlpAddress != "" {
+				shutdownTracer, err := tracing.InitTracer(ctx, "principal", otlpAddress, otlpInsecure)
+				if err != nil {
+					cmdutil.Fatal("Failed to initialize OpenTelemetry tracing: %v", err)
+				}
+				defer func() {
+					if err := shutdownTracer(ctx); err != nil {
+						logrus.Errorf("Error shutting down tracer: %v", err)
+					}
+				}()
+				logrus.Infof("OpenTelemetry tracing initialized (address=%s)", otlpAddress)
+			}
 
 			if pprofPort > 0 {
 				logrus.Infof("Starting pprof server on 127.0.0.1:%d", pprofPort)
@@ -374,6 +393,13 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().IntVar(&healthzPort, "healthz-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT", cmdutil.ValidPort, 8003),
 		"Port the health check server will listen on")
+
+	command.Flags().StringVar(&otlpAddress, "otlp-address",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_OTLP_ADDRESS", nil, ""),
+		"Experimental: OpenTelemetry collector address for sending traces (e.g., localhost:4317)")
+	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_OTLP_INSECURE", false),
+		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

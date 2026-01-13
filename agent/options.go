@@ -107,3 +107,10 @@ func WithCacheRefreshInterval(interval time.Duration) AgentOption {
 		return nil
 	}
 }
+
+func WithHeartbeatInterval(interval time.Duration) AgentOption {
+	return func(o *Agent) error {
+		o.options.heartbeatInterval = interval
+		return nil
+	}
+}

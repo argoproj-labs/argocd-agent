@@ -84,6 +84,7 @@ const (
 	TargetClusterCacheInfoUpdate EventTarget = "clusterCacheInfoUpdate"
 	TargetRepository             EventTarget = "repository"
 	TargetContainerLog           EventTarget = "containerlog"
+	TargetHeartbeat              EventTarget = "heartbeat"
 )
 
 const (
@@ -213,6 +214,22 @@ func (evs EventSource) RepositoryEvent(evType EventType, repository *corev1.Secr
 	cev.SetDataSchema(TargetRepository.String())
 
 	_ = cev.SetData(cloudevents.ApplicationJSON, repository)
+	return &cev
+}
+
+// HeartbeatEvent creates a ping or pong event for keepalive purposes.
+// These events keep the gRPC Subscribe stream active and help prevent
+// Istio/service mesh idle timeouts.
+func (evs EventSource) HeartbeatEvent(evType EventType) *cloudevents.Event {
+	reqUUID := uuid.NewString()
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(evType.String())
+	cev.SetExtension(eventID, reqUUID)
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetDataSchema(TargetHeartbeat.String())
+	// No data payload needed for heartbeat
 	return &cev
 }
 
@@ -602,6 +619,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetClusterCacheInfoUpdate
 	case TargetContainerLog.String():
 		return TargetContainerLog
+	case TargetHeartbeat.String():
+		return TargetHeartbeat
 	}
 	return ""
 }
@@ -612,6 +631,10 @@ func (ev Event) Target() EventTarget {
 
 func (ev Event) Type() EventType {
 	return EventType(ev.event.Type())
+}
+
+func (ev Event) CloudEvent() *cloudevents.Event {
+	return ev.event
 }
 
 func (ev Event) Application() (*v1alpha1.Application, error) {
@@ -1034,13 +1057,15 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		return
 	}
 
-	// Move to sentEvents BEFORE unlocking to prevent ACK race
-	isACK := Target(eventMsg.event) == TargetEventAck
-	if !isACK {
+	target := Target(eventMsg.event)
+	isFireAndForget := target == TargetEventAck || target == TargetHeartbeat
+	if !isFireAndForget {
 		// IMPORTANT: Set retryAfter *before* publishing into sentEvents.
 		// We can have concurrent SendWaitingEvents loops (e.g. brief overlap during reconnect),
 		// and without this, another goroutine can observe retryAfter==nil and immediately retry,
 		// causing duplicate sends within the same second.
+		// On success: retry happens if ACK never arrives
+		// On failure: retry happens after backoff
 		ew.scheduleRetry(eventMsg)
 		ew.sentEvents[resID] = eventMsg
 	}
@@ -1070,8 +1095,8 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 
 	logCtx.Trace("event sent to target")
 
-	if isACK {
-		logCtx.Trace("ACK is removed from the event writer")
+	if isFireAndForget {
+		logCtx.Trace("Fire-and-forget event (ACK or heartbeat) removed from event writer")
 	}
 }
 
