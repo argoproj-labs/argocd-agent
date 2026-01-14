@@ -71,6 +71,7 @@ const (
 	EventRequestUpdate         EventType = TypePrefix + ".request-update"
 	EventRequestResourceResync EventType = TypePrefix + ".request-resource-resync"
 	ClusterCacheInfoUpdate     EventType = TypePrefix + ".cluster-cache-info-update"
+	TerminalRequest            EventType = TypePrefix + ".terminal-request"
 )
 
 const (
@@ -85,6 +86,7 @@ const (
 	TargetRepository             EventTarget = "repository"
 	TargetContainerLog           EventTarget = "containerlog"
 	TargetHeartbeat              EventTarget = "heartbeat"
+	TargetTerminal               EventTarget = "terminal"
 )
 
 const (
@@ -621,6 +623,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetContainerLog
 	case TargetHeartbeat.String():
 		return TargetHeartbeat
+	case TargetTerminal.String():
+		return TargetTerminal
 	}
 	return ""
 }
@@ -1295,4 +1299,36 @@ func (ev *Event) ContainerLogRequest() (*ContainerLogRequest, error) {
 	logReq := &ContainerLogRequest{}
 	err := ev.event.DataAs(logReq)
 	return logReq, err
+}
+
+type ContainerTerminalRequest struct {
+	UUID          string   `json:"uuid"`
+	Namespace     string   `json:"namespace"`
+	PodName       string   `json:"podName"`
+	ContainerName string   `json:"containerName"`
+	Command       []string `json:"command,omitempty"`
+	TTY           bool     `json:"tty"`
+	Stdin         bool     `json:"stdin"`
+	Stdout        bool     `json:"stdout"`
+	Stderr        bool     `json:"stderr"`
+}
+
+// NewTerminalRequestEvent creates a cloud event for requesting a web terminal session from an agent.
+func (evs EventSource) NewTerminalRequestEvent(terminalReq *ContainerTerminalRequest) (*cloudevents.Event, error) {
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(TerminalRequest.String())
+	cev.SetDataSchema(TargetTerminal.String())
+	cev.SetExtension(resourceID, terminalReq.UUID)
+	cev.SetExtension(eventID, terminalReq.UUID)
+	err := cev.SetData(cloudevents.ApplicationJSON, terminalReq)
+	return &cev, err
+}
+
+// TerminalRequest gets the terminal request payload from an event.
+func (ev Event) TerminalRequest() (*ContainerTerminalRequest, error) {
+	req := &ContainerTerminalRequest{}
+	err := ev.event.DataAs(req)
+	return req, err
 }

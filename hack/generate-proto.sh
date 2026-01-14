@@ -24,6 +24,7 @@ GENERATE_PATHS="
 	${PROJECT_ROOT}/principal/apis/eventstream;eventstreamapi
 	${PROJECT_ROOT}/principal/apis/version;versionapi
 	${PROJECT_ROOT}/principal/apis/logstreamapi;logstreamapi
+	${PROJECT_ROOT}/principal/apis/terminalstream;terminalstreamapi
 "
 
 for p in ${GENERATE_PATHS}; do
