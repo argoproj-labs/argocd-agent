@@ -97,6 +97,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		// OpenTelemetry configuration
 		otlpAddress  string
 		otlpInsecure bool
+
+		destinationBasedMapping bool
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -323,6 +325,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithKeepAliveMinimumInterval(keepAliveMinimumInterval))
 			opts = append(opts, principal.WithRedis(redisAddress, redisPassword, redisCompressionType))
 			opts = append(opts, principal.WithHealthzPort(healthzPort))
+			opts = append(opts, principal.WithDestinationBasedMapping(destinationBasedMapping))
 
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
@@ -472,6 +475,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_OTLP_INSECURE", false),
 		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
+
+	command.Flags().BoolVar(&destinationBasedMapping, "destination-based-mapping",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING", false),
+		"Map applications to agents based on spec.destination.name instead of namespace")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

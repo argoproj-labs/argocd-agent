@@ -167,6 +167,14 @@ type Server struct {
 
 	// terminalStreamServer handles bidirectional streaming for web terminal sessions
 	terminalStreamServer *terminalstream.Server
+	// appToAgent maps application qualified names (namespace/name) to agent names.
+	// This is used for destination-based mapping to determine which agent
+	// handles a specific application, particularly for redis proxy routing.
+	appToAgent *MapToSet
+
+	// destinationBasedMapping indicates whether applications should be mapped to agents
+	// based on spec.destination.name instead of namespace
+	destinationBasedMapping bool
 }
 
 type handlersOnConnect func(agent types.Agent) error
@@ -202,6 +210,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		projectToRepos:  NewMapToSet(),
 		sourceCache:     cache.NewSourceCache(),
 		deletions:       manager.NewDeletionTracker(),
+		appToAgent:      NewMapToSet(),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
@@ -233,6 +242,8 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	s.handlersOnConnect = []handlersOnConnect{
 		s.handleResyncOnConnect,
 	}
+
+	s.destinationBasedMapping = s.options.destinationBasedMapping
 
 	if s.authMethods == nil {
 		s.authMethods = auth.NewMethods()
@@ -371,6 +382,8 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	if !s.options.redisProxyDisabled {
 		s.redisProxy = redisproxy.New(defaultRedisProxyListenerAddr, s.options.redisAddress, s.sendSynchronousRedisMessageToAgent, s.options.redisProxyLogger)
+		// Set the agent lookup function for destination-based mapping support
+		s.redisProxy.SetAgentLookupFunc(s.GetAgentForApp)
 	}
 
 	// Instantiate our ResourceProxy to intercept Kubernetes requests from Argo
@@ -688,7 +701,8 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 			return err
 		}
 
-		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx, manager.ManagerRolePrincipal, s.namespace)
+		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx, manager.ManagerRolePrincipal, s.namespace).
+			WithDestinationBasedMapping(s.destinationBasedMapping)
 		go resyncHandler.SendRequestUpdates(s.ctx)
 
 		// Principal should request SyncedResourceList to revert any deletions on the Principal side.

@@ -124,6 +124,17 @@ type Agent struct {
 	resourceProxyLogger *logging.CentralizedLogger
 	redisProxyLogger    *logging.CentralizedLogger
 	grpcEventLogger     *logging.CentralizedLogger
+
+	// destinationBasedMapping when true, the agent operates in destination-based
+	// mapping mode where:
+	// - Applications are synced to their original namespace from the principal
+	// - The agent watches for applications in all namespaces
+	destinationBasedMapping bool
+
+	// createNamespaceIfNotExist when true, the agent will create namespaces that
+	// don't exist before creating applications. This is used in combination with
+	// destination-based mapping.
+	createNamespaceIfNotExist bool
 }
 
 const defaultQueueName = "default"
@@ -212,12 +223,19 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
+	// Determine the namespace(s) to watch for applications
+	appNamespace := a.namespace
+	if a.destinationBasedMapping {
+		// Watch all namespaces when destination-based mapping is enabled
+		appNamespace = ""
+	}
+
 	// appListFunc and watchFunc are anonymous functions for the informer
 	appListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(a.namespace).List(ctx, config.DefaultLabelSelector())
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).List(ctx, config.DefaultLabelSelector())
 	}
 	appWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(a.namespace).Watch(ctx, config.DefaultLabelSelector())
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).Watch(ctx, config.DefaultLabelSelector())
 	}
 
 	appInformerOptions := []informer.InformerOption[*v1alpha1.Application]{
@@ -227,8 +245,12 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		informer.WithUpdateHandler[*v1alpha1.Application](a.addAppUpdateToQueue),
 		informer.WithDeleteHandler[*v1alpha1.Application](a.addAppDeletionToQueue),
 		informer.WithFilters[*v1alpha1.Application](a.DefaultAppFilterChain()),
-		informer.WithNamespaceScope[*v1alpha1.Application](a.namespace),
 		informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
+	}
+
+	// Only add namespace scope if not using destination-based mapping
+	if !a.destinationBasedMapping {
+		appInformerOptions = append(appInformerOptions, informer.WithNamespaceScope[*v1alpha1.Application](a.namespace))
 	}
 
 	appProjectManagerOption := []appproject.AppProjectManagerOption{

@@ -633,7 +633,8 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 		return fmt.Errorf("queue not found for agent: %s", agentName)
 	}
 
-	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx, manager.ManagerRolePrincipal, s.namespace)
+	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx, manager.ManagerRolePrincipal, s.namespace).
+		WithDestinationBasedMapping(s.destinationBasedMapping)
 
 	switch ev.Type() {
 	case event.SyncedResourceList.String():
