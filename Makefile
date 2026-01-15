@@ -15,6 +15,9 @@ ifeq ($(DOCKER_BIN),docker)
 		$(DOCKER_BIN) buildx rm argocd-agent-builder
 else
 	MULTIARCH_BUILD_CMDS?= \
+		if $(DOCKER_BIN) manifest exists $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG); then \
+			$(DOCKER_BIN) manifest rm $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG); \
+		fi && \
 		$(DOCKER_BIN) manifest create $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG) && \
 		$(DOCKER_BIN) build -f Dockerfile --platform $(IMAGE_MULTIARCH_PLATFORMS) --manifest $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG)
 endif
