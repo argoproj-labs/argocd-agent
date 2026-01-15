@@ -55,6 +55,11 @@ type RequestHandler struct {
 	role manager.ManagerRole
 
 	namespace string
+
+	// destinationBasedMapping indicates that applications should be looked up
+	// by their actual namespace instead of assuming the agent name is the namespace.
+	// This is used when destination-based mapping is enabled on the principal.
+	destinationBasedMapping bool
 }
 
 func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLimitingInterface[*cloudevent.Event], events *event.EventSource, resources *resources.Resources, log *logrus.Entry, role manager.ManagerRole, namespace string) *RequestHandler {
@@ -67,6 +72,14 @@ func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLim
 		role:      role,
 		namespace: namespace,
 	}
+}
+
+// WithDestinationBasedMapping sets whether destination-based mapping is enabled.
+// When enabled, the handler will use the namespace from requests instead of
+// assuming the agent name equals the namespace for Applications.
+func (r *RequestHandler) WithDestinationBasedMapping(enabled bool) *RequestHandler {
+	r.destinationBasedMapping = enabled
+	return r
 }
 
 func (r *RequestHandler) ProcessSyncedResourceListRequest(agentName string, req *event.RequestSyncedResourceList) error {
@@ -222,8 +235,14 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 		namespace = r.namespace
 	case "Application":
 		if r.role == manager.ManagerRolePrincipal {
-			// Applications on the principal are in the agent's namespace (e.g., agent-managed, agent-autonomous)
-			namespace = agentName
+			if r.destinationBasedMapping {
+				// With destination-based mapping, applications can be in any namespace on the principal.
+				// Use the namespace from the request, which reflects where the app actually lives.
+				namespace = reqUpdate.Namespace
+			} else {
+				// With namespace-based mapping, applications on the principal are in the agent's namespace
+				namespace = agentName
+			}
 		} else {
 			// Applications on autonomous agents live in the agent's Argo CD namespace
 			namespace = r.namespace

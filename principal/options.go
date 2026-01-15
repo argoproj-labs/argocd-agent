@@ -72,6 +72,9 @@ type ServerOptions struct {
 	// insecurePlaintext disables TLS on the gRPC server. Use when Istio sidecar
 	// handles mTLS termination.
 	insecurePlaintext bool
+	// destinationBasedMapping enables mapping applications to agents based on
+	// spec.destination.name instead of the application's namespace
+	destinationBasedMapping bool
 }
 
 type ServerOption func(o *Server) error
@@ -496,6 +499,17 @@ func WithInsecurePlaintext() ServerOption {
 	return func(o *Server) error {
 		log().Warn("INSECURE: gRPC server will run in plaintext mode - ensure Istio or similar service mesh provides mTLS")
 		o.options.insecurePlaintext = true
+		return nil
+	}
+}
+
+// WithDestinationBasedMapping enables destination-based mapping for applications.
+// When enabled, applications are mapped to agents based on spec.destination.name
+// instead of the application's namespace. This allows applications to exist in
+// any namespace on the principal while still being routed to the correct agent.
+func WithDestinationBasedMapping(enabled bool) ServerOption {
+	return func(o *Server) error {
+		o.options.destinationBasedMapping = enabled
 		return nil
 	}
 }
