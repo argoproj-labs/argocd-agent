@@ -30,6 +30,11 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 )
 
+// CentralizedLogger encapsulates a logrus logger and provides defaults to create logs with
+type CentralizedLogger struct {
+	logger *logrus.Logger
+}
+
 // LogLevel represents the different log levels
 type LogLevel string
 
@@ -51,31 +56,39 @@ const (
 	LogFormatJSON LogFormat = "json"
 )
 
-// defaultLogger is the global logger instance
-var defaultLogger *logrus.Logger
+// defaultLogger is a CentralizedLogger for the global logger instance
+var defaultLogger *CentralizedLogger
 
 func init() {
 	// Use the process-wide standard logger so that CLI flags and InitLogging() apply here too
-	defaultLogger = logrus.StandardLogger()
+	defaultLogger = &CentralizedLogger{
+		logger: logrus.StandardLogger(),
+	}
+}
+
+func New() *CentralizedLogger {
+	return &CentralizedLogger{
+		logger: logrus.New(),
+	}
 }
 
 // SetupLogging configures the global logger with the provided options
-func SetupLogging(level LogLevel, format LogFormat, output io.Writer) error {
+func (l *CentralizedLogger) SetupLogging(level LogLevel, format LogFormat, output io.Writer) error {
 	// Set log level
 	logrusLevel, err := parseLogLevel(level)
 	if err != nil {
 		return fmt.Errorf("invalid log level %q: %w", level, err)
 	}
-	defaultLogger.SetLevel(logrusLevel)
+	l.logger.SetLevel(logrusLevel)
 
 	// Set log format
 	switch format {
 	case LogFormatJSON:
-		defaultLogger.SetFormatter(&logrus.JSONFormatter{
+		l.logger.SetFormatter(&logrus.JSONFormatter{
 			TimestampFormat: "2006-01-02T15:04:05.000Z07:00",
 		})
 	case LogFormatText:
-		defaultLogger.SetFormatter(&logrus.TextFormatter{
+		l.logger.SetFormatter(&logrus.TextFormatter{
 			FullTimestamp:   true,
 			TimestampFormat: "2006-01-02T15:04:05.000Z07:00",
 		})
@@ -85,7 +98,7 @@ func SetupLogging(level LogLevel, format LogFormat, output io.Writer) error {
 
 	// Set output
 	if output != nil {
-		defaultLogger.SetOutput(output)
+		l.logger.SetOutput(output)
 	}
 
 	return nil
@@ -114,36 +127,36 @@ func parseLogLevel(level LogLevel) (logrus.Level, error) {
 }
 
 // GetDefaultLogger returns the global logger instance
-func GetDefaultLogger() *logrus.Logger {
+func GetDefaultLogger() *CentralizedLogger {
 	return defaultLogger
 }
 
 // ComponentLogger creates a logger for a specific component with the component field pre-set
-func ComponentLogger(component string) *logrus.Entry {
-	return defaultLogger.WithField(logfields.Component, component)
+func (l *CentralizedLogger) ComponentLogger(component string) *logrus.Entry {
+	return l.logger.WithField(logfields.Component, component)
 }
 
 // ModuleLogger creates a logger for a specific module with the module field pre-set
-func ModuleLogger(module string) *logrus.Entry {
-	return defaultLogger.WithField(logfields.Module, module)
+func (l *CentralizedLogger) ModuleLogger(module string) *logrus.Entry {
+	return l.logger.WithField(logfields.Module, module)
 }
 
 // SubsystemLogger creates a logger for a specific subsystem with the subsystem field pre-set
-func SubsystemLogger(subsystem string) *logrus.Entry {
-	return defaultLogger.WithField(logfields.Subsystem, subsystem)
+func (l *CentralizedLogger) SubsystemLogger(subsystem string) *logrus.Entry {
+	return l.logger.WithField(logfields.Subsystem, subsystem)
 }
 
 // MethodLogger creates a logger with method context
-func MethodLogger(module, method string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) MethodLogger(module, method string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module: module,
 		logfields.Method: method,
 	})
 }
 
 // RequestLogger creates a logger with request context
-func RequestLogger(module, method, requestID string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) RequestLogger(module, method, requestID string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:    module,
 		logfields.Method:    method,
 		logfields.RequestID: requestID,
@@ -151,8 +164,8 @@ func RequestLogger(module, method, requestID string) *logrus.Entry {
 }
 
 // ConnectionLogger creates a logger with connection context
-func ConnectionLogger(module, connectionUUID, clientAddr string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) ConnectionLogger(module, connectionUUID, clientAddr string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:         module,
 		logfields.ConnectionUUID: connectionUUID,
 		logfields.ClientAddr:     clientAddr,
@@ -160,8 +173,8 @@ func ConnectionLogger(module, connectionUUID, clientAddr string) *logrus.Entry {
 }
 
 // EventLogger creates a logger with event context
-func EventLogger(module, event, eventID string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) EventLogger(module, event, eventID string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:  module,
 		logfields.Event:   event,
 		logfields.EventID: eventID,
@@ -169,8 +182,8 @@ func EventLogger(module, event, eventID string) *logrus.Entry {
 }
 
 // KubernetesResourceLogger creates a logger with Kubernetes resource context
-func KubernetesResourceLogger(module, kind, namespace, name string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) KubernetesResourceLogger(module, kind, namespace, name string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:    module,
 		logfields.Kind:      kind,
 		logfields.Namespace: namespace,
@@ -179,16 +192,16 @@ func KubernetesResourceLogger(module, kind, namespace, name string) *logrus.Entr
 }
 
 // ApplicationLogger creates a logger with ArgoCD application context
-func ApplicationLogger(module, application string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) ApplicationLogger(module, application string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:      module,
 		logfields.Application: application,
 	})
 }
 
 // RedisLogger creates a logger with Redis operation context
-func RedisLogger(module, command, key string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) RedisLogger(module, command, key string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:       module,
 		logfields.RedisCommand: command,
 		logfields.RedisKey:     key,
@@ -196,16 +209,16 @@ func RedisLogger(module, command, key string) *logrus.Entry {
 }
 
 // GRPCLogger creates a logger with gRPC context
-func GRPCLogger(module, method string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) GRPCLogger(module, method string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:     module,
 		logfields.GRPCMethod: method,
 	})
 }
 
 // HTTPLogger creates a logger with HTTP context
-func HTTPLogger(module, method, path string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) HTTPLogger(module, method, path string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:     module,
 		logfields.HTTPMethod: method,
 		logfields.HTTPPath:   path,
@@ -213,8 +226,8 @@ func HTTPLogger(module, method, path string) *logrus.Entry {
 }
 
 // ErrorLogger creates a logger with error context
-func ErrorLogger(module, errorType string, err error) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) ErrorLogger(module, errorType string, err error) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:    module,
 		logfields.ErrorType: errorType,
 		logfields.Error:     err.Error(),
@@ -222,8 +235,8 @@ func ErrorLogger(module, errorType string, err error) *logrus.Entry {
 }
 
 // PerformanceLogger creates a logger with performance metrics context
-func PerformanceLogger(module string, duration int64, requestCount int) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) PerformanceLogger(module string, duration int64, requestCount int) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:       module,
 		logfields.Duration:     duration,
 		logfields.RequestCount: requestCount,
@@ -231,8 +244,8 @@ func PerformanceLogger(module string, duration int64, requestCount int) *logrus.
 }
 
 // QueueLogger creates a logger with queue context
-func QueueLogger(module, queueName string, queueSize int) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) QueueLogger(module, queueName string, queueSize int) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:        module,
 		logfields.SendQueueName: queueName,
 		logfields.SendQueueLen:  queueSize,
@@ -240,8 +253,8 @@ func QueueLogger(module, queueName string, queueSize int) *logrus.Entry {
 }
 
 // ClusterLogger creates a logger with cluster context
-func ClusterLogger(module, clusterName, clusterServer string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) ClusterLogger(module, clusterName, clusterServer string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:        module,
 		logfields.ClusterName:   clusterName,
 		logfields.ClusterServer: clusterServer,
@@ -249,8 +262,8 @@ func ClusterLogger(module, clusterName, clusterServer string) *logrus.Entry {
 }
 
 // AuthLogger creates a logger with authentication context
-func AuthLogger(module, username, authMethod string) *logrus.Entry {
-	return defaultLogger.WithFields(logrus.Fields{
+func (l *CentralizedLogger) AuthLogger(module, username, authMethod string) *logrus.Entry {
+	return l.logger.WithFields(logrus.Fields{
 		logfields.Module:     module,
 		logfields.Username:   username,
 		logfields.AuthMethod: authMethod,
@@ -258,60 +271,60 @@ func AuthLogger(module, username, authMethod string) *logrus.Entry {
 }
 
 // SetLogLevel dynamically changes the log level
-func SetLogLevel(level LogLevel) error {
+func (l *CentralizedLogger) SetLogLevel(level LogLevel) error {
 	logrusLevel, err := parseLogLevel(level)
 	if err != nil {
 		return err
 	}
-	defaultLogger.SetLevel(logrusLevel)
+	l.logger.SetLevel(logrusLevel)
 	return nil
 }
 
 // GetLogLevel returns the current log level
-func GetLogLevel() logrus.Level {
-	return defaultLogger.GetLevel()
+func (l *CentralizedLogger) GetLogLevel() logrus.Level {
+	return l.logger.GetLevel()
 }
 
 // WithContext creates a logger entry with common context fields
-func WithContext(module string, fields map[string]interface{}) *logrus.Entry {
+func (l *CentralizedLogger) WithContext(module string, fields map[string]interface{}) *logrus.Entry {
 	logFields := logrus.Fields{logfields.Module: module}
 	for k, v := range fields {
 		logFields[k] = v
 	}
-	return defaultLogger.WithFields(logFields)
+	return l.logger.WithFields(logFields)
 }
 
 // Trace logs a message at trace level with module context
-func Trace(module, message string) {
-	ModuleLogger(module).Trace(message)
+func (l *CentralizedLogger) Trace(module, message string) {
+	l.ModuleLogger(module).Trace(message)
 }
 
 // Debug logs a message at debug level with module context
-func Debug(module, message string) {
-	ModuleLogger(module).Debug(message)
+func (l *CentralizedLogger) Debug(module, message string) {
+	l.ModuleLogger(module).Debug(message)
 }
 
 // Info logs a message at info level with module context
-func Info(module, message string) {
-	ModuleLogger(module).Info(message)
+func (l *CentralizedLogger) Info(module, message string) {
+	l.ModuleLogger(module).Info(message)
 }
 
 // Warn logs a message at warn level with module context
-func Warn(module, message string) {
-	ModuleLogger(module).Warn(message)
+func (l *CentralizedLogger) Warn(module, message string) {
+	l.ModuleLogger(module).Warn(message)
 }
 
 // Error logs a message at error level with module context
-func Error(module, message string) {
-	ModuleLogger(module).Error(message)
+func (l *CentralizedLogger) Error(module, message string) {
+	l.ModuleLogger(module).Error(message)
 }
 
 // Fatal logs a message at fatal level with module context and exits
-func Fatal(module, message string) {
-	ModuleLogger(module).Fatal(message)
+func (l *CentralizedLogger) Fatal(module, message string) {
+	l.ModuleLogger(module).Fatal(message)
 }
 
 // Panic logs a message at panic level with module context and panics
-func Panic(module, message string) {
-	ModuleLogger(module).Panic(message)
+func (l *CentralizedLogger) Panic(module, message string) {
+	l.ModuleLogger(module).Panic(message)
 }
