@@ -83,6 +83,10 @@ func NewAgentRunCommand() *cobra.Command {
 		// OpenTelemetry configuration
 		otlpAddress  string
 		otlpInsecure bool
+
+		// Destination-based mapping options
+		createNamespaceIfNotExist bool
+		destinationBasedMapping   bool
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -232,6 +236,8 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
+			agentOpts = append(agentOpts, agent.WithCreateNamespaceIfNotExist(createNamespaceIfNotExist))
+			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
@@ -349,6 +355,13 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
 		env.BoolWithDefault("ARGOCD_AGENT_OTLP_INSECURE", false),
 		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
+
+	command.Flags().BoolVar(&destinationBasedMapping, "destination-based-mapping",
+		env.BoolWithDefault("ARGOCD_AGENT_DESTINATION_BASED_MAPPING", false),
+		"Enable destination-based mapping. When enabled, applications are synced to their original namespace and the agent watches all namespaces")
+	command.Flags().BoolVar(&createNamespaceIfNotExist, "create-namespace-if-not-exist",
+		env.BoolWithDefault("ARGOCD_AGENT_CREATE_NAMESPACE_IF_NOT_EXIST", false),
+		"Create target namespace if it doesn't exist when syncing applications (used with destination-based-mapping)")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

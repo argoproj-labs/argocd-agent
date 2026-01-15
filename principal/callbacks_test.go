@@ -1155,6 +1155,128 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 	}
 }
 
+func TestServer_newAppCallback(t *testing.T) {
+	t.Run("sends create event to queue using namespace-based mapping", func(t *testing.T) {
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: NewMapToSet(),
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "managed-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		s.newAppCallback(app)
+
+		// Verify event was added to queue
+		sendQ := s.queues.SendQ("managed-agent")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+
+		ev, shutdown := sendQ.Get()
+		require.False(t, shutdown)
+		assert.Equal(t, event.Create.String(), ev.Type())
+
+		// Verify event contains the app
+		receivedApp := &v1alpha1.Application{}
+		err := json.Unmarshal(ev.Data(), receivedApp)
+		require.NoError(t, err)
+		assert.Equal(t, app.Name, receivedApp.Name)
+		assert.Equal(t, app.Namespace, receivedApp.Namespace)
+		sendQ.Done(ev)
+
+		// Verify resource tracking
+		agentResources := s.resources.GetAllResources("managed-agent")
+		assert.Len(t, agentResources, 1)
+		assert.Equal(t, app.Name, agentResources[0].Name)
+
+		assert.Empty(t, s.appToAgent.Get("managed-agent/test-app"))
+	})
+
+	t.Run("sends create event using destination-based mapping", func(t *testing.T) {
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			resources:               resources.NewAgentResources(),
+			appToAgent:              NewMapToSet(),
+			destinationBasedMapping: true,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "argocd", // Different from agent name
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "target-cluster", // This should be used as agent name
+				},
+			},
+		}
+
+		s.newAppCallback(app)
+
+		// Verify event was added to the correct queue (target-cluster, not argocd)
+		sendQ := s.queues.SendQ("target-cluster")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+
+		ev, shutdown := sendQ.Get()
+		require.False(t, shutdown)
+		assert.Equal(t, event.Create.String(), ev.Type())
+		sendQ.Done(ev)
+
+		// Verify app-to-agent mapping was tracked
+		agents := s.appToAgent.Get("argocd/test-app")
+		assert.True(t, agents["target-cluster"])
+
+		// Verify resource tracking uses destination name
+		agentResources := s.resources.GetAllResources("target-cluster")
+		assert.Len(t, agentResources, 1)
+		assert.Equal(t, app.Name, agentResources[0].Name)
+	})
+
+	t.Run("destination.name is empty, should not process the app", func(t *testing.T) {
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			resources:               resources.NewAgentResources(),
+			appToAgent:              NewMapToSet(),
+			destinationBasedMapping: true,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "fallback-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "", // Empty - should fall back to namespace
+				},
+			},
+		}
+
+		s.newAppCallback(app)
+
+		// Should not process the app
+		assert.Zero(t, s.queues.Len())
+	})
+}
+
 func TestServer_updateAppCallback(t *testing.T) {
 	t.Run("managed agent update sends event to queue", func(t *testing.T) {
 		mockBackend := &mocks.Application{}

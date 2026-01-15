@@ -84,7 +84,8 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 
 	for _, testEntry := range testEntries {
 		t.Run(testEntry.name, func(t *testing.T) {
-			res, err := extractAgentNameFromRedisCommandKey(testEntry.key, logEntry)
+			rp := &RedisProxy{}
+			res, err := rp.extractAgentNameFromRedisCommandKey(testEntry.key, logEntry)
 
 			require.Equal(t, testEntry.value, res)
 			require.Equal(t, testEntry.errorExpected, err != nil, "err: %v", err)
