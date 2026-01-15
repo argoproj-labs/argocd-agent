@@ -32,7 +32,7 @@ internal/logging/
 import "github.com/argoproj-labs/argocd-agent/internal/logging"
 
 // Configure logging at application startup
-err := logging.SetupLogging(
+err := logging.GetDefaultLogger().SetupLogging(
     logging.LogLevelInfo,
     logging.LogFormatJSON,
     nil, // Use default output (stdout)
@@ -56,7 +56,7 @@ func log() *logrus.Entry {
 import "github.com/argoproj-labs/argocd-agent/internal/logging"
 
 func log() *logrus.Entry {
-    return logging.ModuleLogger("Agent")
+    return logging.GetDefaultLogger().ModuleLogger("Agent")
 }
 ```
 
@@ -90,31 +90,31 @@ The package provides specialized logger functions for common scenarios:
 
 #### Request Logging
 ```go
-logger := logging.RequestLogger("ModuleName", "MethodName", "request-id")
+logger := logging.GetDefaultLogger().RequestLogger("ModuleName", "MethodName", "request-id")
 logger.Info("Processing request")
 ```
 
 #### Kubernetes Resource Logging
 ```go
-logger := logging.KubernetesResourceLogger("ModuleName", "Pod", "default", "my-pod")
+logger := logging.GetDefaultLogger().KubernetesResourceLogger("ModuleName", "Pod", "default", "my-pod")
 logger.Info("Processing Kubernetes resource")
 ```
 
 #### Redis Operations
 ```go
-logger := logging.RedisLogger("ModuleName", "GET", "cache-key")
+logger := logging.GetDefaultLogger().RedisLogger("ModuleName", "GET", "cache-key")
 logger.Debug("Redis operation completed")
 ```
 
 #### gRPC Operations
 ```go
-logger := logging.GRPCLogger("ModuleName", "/service.Method")
+logger := logging.GetDefaultLogger().GRPCLogger("ModuleName", "/service.Method")
 logger.Info("gRPC call started")
 ```
 
 #### HTTP Operations
 ```go
-logger := logging.HTTPLogger("ModuleName", "POST", "/api/v1/endpoint")
+logger := logging.GetDefaultLogger().HTTPLogger("ModuleName", "POST", "/api/v1/endpoint")
 logger.Info("HTTP request received")
 ```
 
@@ -127,9 +127,22 @@ logger.Error("Error occurred")
 
 #### Authentication
 ```go
-logger := logging.AuthLogger("ModuleName", "username", "auth-method")
+logger := logging.GetDefaultLogger().AuthLogger("ModuleName", "username", "auth-method")
 logger.Info("User authenticated")
 ```
+
+## Initializing A Different Logger
+
+If you want a part of the codebase to use different logging parameters for example: log level. 
+You can initialize a new logger to use for that.
+
+```go
+logger := logging.New()
+logger.SetupLogging(logging.LogLevelDebug, logging.LogFormatJSON, nil)
+logger.KubernetesResourceLogger("ModuleName", "Pod", "default", "my-pod")
+```
+
+You can further use this by replacing the package's log function to use this logger.
 
 ## Available Field Constants
 
