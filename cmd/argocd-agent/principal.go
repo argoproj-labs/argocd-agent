@@ -201,7 +201,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				cmdutil.PrintAvailableCipherSuites()
 				return
 			}
-			if len(tlsCipherSuites) > 0 && !(len(tlsCipherSuites) == 1 && tlsCipherSuites[0] == "") {
+			if len(tlsCipherSuites) > 0 && (len(tlsCipherSuites) != 1 || tlsCipherSuites[0] != "") {
 				opts = append(opts, principal.WithTLSCipherSuites(tlsCipherSuites))
 			}
 

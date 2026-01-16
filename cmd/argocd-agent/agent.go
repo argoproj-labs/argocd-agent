@@ -189,7 +189,7 @@ func NewAgentRunCommand() *cobra.Command {
 				cmdutil.PrintAvailableCipherSuites()
 				return
 			}
-			if len(tlsCipherSuites) > 0 && !(len(tlsCipherSuites) == 1 && tlsCipherSuites[0] == "") {
+			if len(tlsCipherSuites) > 0 && (len(tlsCipherSuites) != 1 || tlsCipherSuites[0] != "") {
 				remoteOpts = append(remoteOpts, client.WithTLSCipherSuites(tlsCipherSuites))
 			}
 
