@@ -120,6 +120,7 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_managed() {
 	requires.Eventually(func() bool {
 		s, e := argoClient.GetApplicationLogs(app, "guestbook", podName, containerName, 100)
 		if e != nil {
+			suite.T().Logf("Error getting logs: %v", e)
 			return false
 		}
 		if len(s) == 0 {
@@ -127,7 +128,7 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_managed() {
 		}
 		logs = s
 		return true
-	}, 30*time.Second, 1*time.Second)
+	}, 90*time.Second, 1*time.Second)
 
 	requires.Greater(len(logs), 0)
 }
@@ -221,6 +222,7 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_autonomous() {
 		}
 		s, e := argoClient.GetApplicationLogs(papp, "guestbook", podName, containerName, 100)
 		if e != nil {
+			suite.T().Logf("Error getting logs: %v", e)
 			return false
 		}
 		if len(s) == 0 {
@@ -228,7 +230,7 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_autonomous() {
 		}
 		logs = s
 		return true
-	}, 30*time.Second, 1*time.Second)
+	}, 90*time.Second, 1*time.Second)
 
 	requires.Greater(len(logs), 0)
 }

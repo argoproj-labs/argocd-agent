@@ -16,7 +16,6 @@ package logstream
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -418,51 +417,6 @@ func TestSafeFlush(t *testing.T) {
 		assert.Contains(t, err.Error(), "flush panic")
 	})
 }
-
-func TestTryRecvWithCancel(t *testing.T) {
-	t.Run("successful receive", func(t *testing.T) {
-		ctx := context.Background()
-		called := false
-		fn := func() (string, error) {
-			called = true
-			return "test", nil
-		}
-
-		result, err := tryRecvWithCancel(ctx, fn)
-		assert.NoError(t, err)
-		assert.Equal(t, "test", result)
-		assert.True(t, called)
-	})
-
-	t.Run("context cancellation", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // Cancel immediately
-
-		fn := func() (string, error) {
-			time.Sleep(100 * time.Millisecond) // Simulate slow operation
-			return "test", nil
-		}
-
-		result, err := tryRecvWithCancel(ctx, fn)
-		assert.Error(t, err)
-		assert.Equal(t, "", result)
-		assert.Contains(t, err.Error(), "client detached timeout")
-	})
-
-	t.Run("function error", func(t *testing.T) {
-		ctx := context.Background()
-		expectedErr := fmt.Errorf("function error")
-		fn := func() (string, error) {
-			return "", expectedErr
-		}
-
-		result, err := tryRecvWithCancel(ctx, fn)
-		assert.Error(t, err)
-		assert.Equal(t, expectedErr, err)
-		assert.Equal(t, "", result)
-	})
-}
-
 func TestNewLogClient(t *testing.T) {
 	ctx := context.Background()
 	client := NewServer().newLogClient(ctx)

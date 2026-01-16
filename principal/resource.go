@@ -180,6 +180,9 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
+		// Ensure session is cleaned up when handler exits (covers timeout/disconnect cases
+		// where StreamLogs never ran or didn't finalize the session)
+		defer s.logStream.RemoveSession(sentUUID)
 
 		// Submit the event to the queue
 		logCtx.Tracef("Submitting event: %v", sentEv)
@@ -196,12 +199,18 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 		} else {
 			// Static logs: wait for completion signal from logStream
 			logCtx.WithField("uuid", string(sentUUID)).Info("Static logs: waiting for completion")
-			if ok := s.logStream.WaitForCompletion(sentUUID, requestTimeout); !ok {
+			// for logs, we use a longer timeout
+			if ok := s.logStream.WaitForCompletion(sentUUID, requestTimeout*6); !ok {
 				logCtx.WithField("uuid", string(sentUUID)).Warn("Static logs timeout")
-				// Best-effort: the writer may have already sent partial data.
-				// Return 504 only if nothing has been sent yet. If RegisterHTTP
-				// streams early chunks, this will be ignored by client.
-				http.Error(w, "Timeout fetching logs from agent", http.StatusGatewayTimeout)
+				// Best-effort: RegisterHTTP has already written HTTP 200 headers for streaming.
+				// If the client requested timestamps, make sure our timeout message is
+				// timestamp-prefixed, otherwise Argo CD's PodLogs parser can choke when it
+				// tries to parse "Timeout" as a timestamp.
+				if strings.EqualFold(reqParams["timestamps"], "true") {
+					_, _ = w.Write([]byte(time.Now().UTC().Format(time.RFC3339Nano) + " Timeout fetching logs from agent\n"))
+				} else {
+					_, _ = w.Write([]byte("Timeout fetching logs from agent\n"))
+				}
 			}
 		}
 		// IMPORTANT: do not enter the standard eventCh loop for log requests.
