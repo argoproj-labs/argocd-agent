@@ -16,6 +16,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"math/big"
 	"path"
@@ -95,4 +96,138 @@ func Test_Connect(t *testing.T) {
 		assert.Nil(t, r.conn)
 	})
 
+}
+
+func Test_WithMinimumTLSVersion(t *testing.T) {
+	t.Run("All valid minimum TLS versions", func(t *testing.T) {
+		versions := map[string]uint16{
+			"tls1.1": tls.VersionTLS11,
+			"tls1.2": tls.VersionTLS12,
+			"tls1.3": tls.VersionTLS13,
+		}
+		for k, v := range versions {
+			r, err := NewRemote("localhost", 443, WithMinimumTLSVersion(k))
+			assert.NoError(t, err)
+			assert.Equal(t, v, r.tlsConfig.MinVersion)
+		}
+	})
+
+	t.Run("Invalid minimum TLS versions", func(t *testing.T) {
+		for _, v := range []string{"tls1.0", "ssl3.0", "invalid", "tls"} {
+			r, err := NewRemote("localhost", 443, WithMinimumTLSVersion(v))
+			assert.Error(t, err)
+			assert.Nil(t, r)
+		}
+	})
+}
+
+func Test_WithMaximumTLSVersion(t *testing.T) {
+	t.Run("All valid maximum TLS versions", func(t *testing.T) {
+		versions := map[string]uint16{
+			"tls1.1": tls.VersionTLS11,
+			"tls1.2": tls.VersionTLS12,
+			"tls1.3": tls.VersionTLS13,
+		}
+		for k, v := range versions {
+			r, err := NewRemote("localhost", 443, WithMaximumTLSVersion(k))
+			assert.NoError(t, err)
+			assert.Equal(t, v, r.tlsConfig.MaxVersion)
+		}
+	})
+
+	t.Run("Invalid maximum TLS versions", func(t *testing.T) {
+		for _, v := range []string{"tls1.0", "ssl3.0", "invalid", "tls"} {
+			r, err := NewRemote("localhost", 443, WithMaximumTLSVersion(v))
+			assert.Error(t, err)
+			assert.Nil(t, r)
+		}
+	})
+}
+
+func Test_WithTLSCipherSuites(t *testing.T) {
+	t.Run("Single valid cipher suite", func(t *testing.T) {
+		cs := tls.CipherSuites()[0]
+		r, err := NewRemote("localhost", 443, WithTLSCipherSuites([]string{cs.Name}))
+		assert.NoError(t, err)
+		assert.Equal(t, []uint16{cs.ID}, r.tlsConfig.CipherSuites)
+	})
+
+	t.Run("Multiple valid cipher suites", func(t *testing.T) {
+		ciphers := tls.CipherSuites()
+		if len(ciphers) >= 2 {
+			r, err := NewRemote("localhost", 443, WithTLSCipherSuites([]string{ciphers[0].Name, ciphers[1].Name}))
+			assert.NoError(t, err)
+			assert.Equal(t, []uint16{ciphers[0].ID, ciphers[1].ID}, r.tlsConfig.CipherSuites)
+		}
+	})
+
+	t.Run("Empty cipher suites", func(t *testing.T) {
+		r, err := NewRemote("localhost", 443, WithTLSCipherSuites([]string{}))
+		assert.NoError(t, err)
+		assert.Nil(t, r.tlsConfig.CipherSuites)
+	})
+
+	t.Run("Invalid cipher suite", func(t *testing.T) {
+		r, err := NewRemote("localhost", 443, WithTLSCipherSuites([]string{"cowabunga"}))
+		assert.Error(t, err)
+		assert.Nil(t, r)
+	})
+}
+
+func Test_validateTLSConfig(t *testing.T) {
+	t.Run("Valid configuration with min < max", func(t *testing.T) {
+		r, err := NewRemote("localhost", 443,
+			WithMinimumTLSVersion("tls1.2"),
+			WithMaximumTLSVersion("tls1.3"),
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, r)
+	})
+
+	t.Run("Valid configuration with min == max", func(t *testing.T) {
+		r, err := NewRemote("localhost", 443,
+			WithMinimumTLSVersion("tls1.2"),
+			WithMaximumTLSVersion("tls1.2"),
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, r)
+	})
+
+	t.Run("Invalid configuration with min > max", func(t *testing.T) {
+		r, err := NewRemote("localhost", 443,
+			WithMinimumTLSVersion("tls1.3"),
+			WithMaximumTLSVersion("tls1.2"),
+		)
+		assert.Error(t, err)
+		assert.Nil(t, r)
+		assert.Contains(t, err.Error(), "minimum TLS version")
+		assert.Contains(t, err.Error(), "cannot be higher than maximum TLS version")
+	})
+
+	t.Run("Incompatible cipher suite for TLS 1.3", func(t *testing.T) {
+		// Find a cipher that does NOT support TLS 1.3 (TLS 1.2 only ciphers)
+		var tls12OnlyCipher *tls.CipherSuite
+		for _, cs := range tls.CipherSuites() {
+			supportsTLS13 := false
+			for _, v := range cs.SupportedVersions {
+				if v == tls.VersionTLS13 {
+					supportsTLS13 = true
+					break
+				}
+			}
+			if !supportsTLS13 {
+				tls12OnlyCipher = cs
+				break
+			}
+		}
+		if tls12OnlyCipher != nil {
+			r, err := NewRemote("localhost", 443,
+				WithMinimumTLSVersion("tls1.3"),
+				WithTLSCipherSuites([]string{tls12OnlyCipher.Name}),
+			)
+			assert.Error(t, err)
+			assert.Nil(t, r)
+			assert.Contains(t, err.Error(), "is not supported by minimum TLS version")
+		}
+	})
 }

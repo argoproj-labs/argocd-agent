@@ -78,6 +78,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 		resourceProxyCaSecretName string
 		resourceProxyCAPath       string
 
+		tlsMinVersion   string
+		tlsMaxVersion   string
+		tlsCipherSuites []string
+
 		// Minimum time duration for agent to wait before sending next keepalive ping to principal
 		// if agent sends ping more often than specified interval then connection will be dropped
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
@@ -186,6 +190,21 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
 			opts = append(opts, principal.WithClientCertSubjectMatch(clientCertSubjectMatch))
+
+			if tlsMinVersion != "" {
+				opts = append(opts, principal.WithMinimumTLSVersion(tlsMinVersion))
+			}
+			if tlsMaxVersion != "" {
+				opts = append(opts, principal.WithMaximumTLSVersion(tlsMaxVersion))
+			}
+			if len(tlsCipherSuites) == 1 && tlsCipherSuites[0] == "list" {
+				cmdutil.PrintAvailableCipherSuites()
+				return
+			}
+			if len(tlsCipherSuites) > 0 && !(len(tlsCipherSuites) == 1 && tlsCipherSuites[0] == "") {
+				opts = append(opts, principal.WithTLSCipherSuites(tlsCipherSuites))
+			}
+
 			opts = append(opts, principal.WithResourceProxyEnabled(enableResourceProxy))
 
 			if enableResourceProxy {
@@ -335,6 +354,16 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&clientCertSubjectMatch, "client-cert-subject-match",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_TLS_CLIENT_CERT_MATCH_SUBJECT", false),
 		"Whether a client cert's subject must match the agent name")
+
+	command.Flags().StringVar(&tlsMinVersion, "tls-min-version",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_MIN_VERSION", nil, "tls1.3"),
+		"Minimum TLS version to accept (tls1.1, tls1.2, tls1.3). Default: tls1.3")
+	command.Flags().StringVar(&tlsMaxVersion, "tls-max-version",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_MAX_VERSION", nil, ""),
+		"Maximum TLS version to accept (tls1.1, tls1.2, tls1.3)")
+	command.Flags().StringSliceVar(&tlsCipherSuites, "tls-ciphersuites",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_TLS_CIPHERSUITES", nil, []string{}),
+		"Comma-separated list of TLS cipher suites to use. Use 'list' to show available cipher suites and exit")
 
 	command.Flags().StringVar(&resourceProxySecretName, "resource-proxy-secret-name",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_SECRET_NAME", nil, config.SecretNameProxyTLS),
