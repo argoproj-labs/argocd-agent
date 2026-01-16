@@ -159,6 +159,36 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Default**: `false`
 - **Example**: `"true"`
 
+#### TLS Minimum Version
+- **Command Line Flag**: `--tls-min-version`
+- **Environment Variable**: `ARGOCD_PRINCIPAL_TLS_MIN_VERSION`
+- **ConfigMap Entry**: `principal.tls.min-version`
+- **Description**: Minimum TLS version to accept from connecting agents
+- **Type**: String
+- **Default**: `"tls1.3"`
+- **Valid Values**: `"tls1.1"`, `"tls1.2"`, `"tls1.3"`
+- **Example**: `"tls1.2"`
+
+#### TLS Maximum Version
+- **Command Line Flag**: `--tls-max-version`
+- **Environment Variable**: `ARGOCD_PRINCIPAL_TLS_MAX_VERSION`
+- **ConfigMap Entry**: `principal.tls.max-version`
+- **Description**: Maximum TLS version to accept from connecting agents
+- **Type**: String
+- **Default**: `""` (uses highest available)
+- **Valid Values**: `"tls1.1"`, `"tls1.2"`, `"tls1.3"`
+- **Example**: `"tls1.3"`
+
+#### TLS Cipher Suites
+- **Command Line Flag**: `--tls-ciphersuites`
+- **Environment Variable**: `ARGOCD_PRINCIPAL_TLS_CIPHERSUITES`
+- **ConfigMap Entry**: `principal.tls.ciphersuites`
+- **Description**: Comma-separated list of TLS cipher suites to use
+- **Type**: String (comma-separated list)
+- **Default**: `""` (uses Go defaults)
+- **Note**: Use `--tls-ciphersuites=list` to display all available cipher suites and their supported TLS versions
+- **Example**: `"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"`
+
 ### Resource Proxy Configuration
 
 #### Enable Resource Proxy
@@ -420,6 +450,9 @@ data:
   principal.tls.server.root-ca-secret-name: "argocd-agent-ca"
   principal.tls.client-cert.require: "true"
   principal.tls.client-cert.match-subject: "true"
+  principal.tls.min-version: "tls1.3"
+  principal.tls.max-version: ""
+  principal.tls.ciphersuites: ""
   principal.jwt.secret-name: "argocd-agent-jwt"
   principal.auth: "mtls:CN=([^,]+)"
   principal.resource-proxy.secret-name: "argocd-agent-resource-proxy-tls"
@@ -438,6 +471,8 @@ The ConfigMap should be mounted to the principal container and the parameters wi
 - Restrict network access to the principal's metrics and health endpoints
 - Carefully configure namespace creation permissions to prevent unauthorized access
 - Use strong regex patterns for client certificate subject matching when enabled
+- Configure appropriate TLS minimum version (`tls.min-version`) based on your security requirements
+- Use `--tls-ciphersuites=list` to view available cipher suites before configuring custom cipher suites
 
 ## Performance Tuning
 

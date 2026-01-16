@@ -128,3 +128,96 @@ func KeyDataToPEM(k crypto.PrivateKey) (string, error) {
 	return keyPem.String(), err
 
 }
+
+// supportedTLSVersions maps TLS version names to their constants.
+var supportedTLSVersions = map[string]uint16{
+	"tls1.1": tls.VersionTLS11,
+	"tls1.2": tls.VersionTLS12,
+	"tls1.3": tls.VersionTLS13,
+}
+
+// TLSVersionName returns the human-readable name for a TLS version constant.
+// Returns a hex representation if the version is unknown.
+func TLSVersionName(version uint16) string {
+	for name, v := range supportedTLSVersions {
+		if v == version {
+			return name
+		}
+	}
+	return fmt.Sprintf("unknown (0x%04x)", version)
+}
+
+// TLSVersionFromName parses a TLS version string (e.g., "tls1.2") and returns
+// the corresponding TLS version constant. Returns an error if the version
+// string is not recognized.
+func TLSVersionFromName(name string) (uint16, error) {
+	v, ok := supportedTLSVersions[name]
+	if !ok {
+		return 0, fmt.Errorf("TLS version %s is not supported", name)
+	}
+	return v, nil
+}
+
+// ParseCipherSuites converts a list of cipher suite names to their corresponding
+// uint16 IDs. Returns an error if any cipher suite name is not recognized.
+func ParseCipherSuites(names []string) ([]uint16, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	availableCiphers := tls.CipherSuites()
+	cipherIDs := make([]uint16, 0, len(names))
+	for _, name := range names {
+		found := false
+		for _, cs := range availableCiphers {
+			if cs.Name == name {
+				cipherIDs = append(cipherIDs, cs.ID)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("no such cipher suite: %s", name)
+		}
+	}
+	return cipherIDs, nil
+}
+
+// ValidateTLSConfig validates the TLS configuration parameters.
+// It checks that:
+// - The minimum TLS version is not greater than the maximum TLS version
+// - All configured cipher suites are compatible with the minimum TLS version
+func ValidateTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16) error {
+	// Check that min version <= max version (if both are set)
+	if minVersion != 0 && maxVersion != 0 {
+		if minVersion > maxVersion {
+			return fmt.Errorf("minimum TLS version (%s) cannot be higher than maximum TLS version (%s)",
+				TLSVersionName(minVersion), TLSVersionName(maxVersion))
+		}
+	}
+
+	// Check that all cipher suites are compatible with the minimum TLS version
+	if len(cipherSuites) > 0 && minVersion != 0 {
+		availableCiphers := tls.CipherSuites()
+		for _, cipherID := range cipherSuites {
+			for _, cs := range availableCiphers {
+				if cs.ID == cipherID {
+					// Check if this cipher supports the minimum TLS version
+					supported := false
+					for _, v := range cs.SupportedVersions {
+						if v == minVersion {
+							supported = true
+							break
+						}
+					}
+					if !supported {
+						return fmt.Errorf("cipher suite %s is not supported by minimum TLS version %s",
+							cs.Name, TLSVersionName(minVersion))
+					}
+					break
+				}
+			}
+		}
+	}
+
+	return nil
+}

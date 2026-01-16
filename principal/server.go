@@ -213,6 +213,11 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		}
 	}
 
+	// Validate TLS options after all options have been applied
+	if err := tlsutil.ValidateTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers); err != nil {
+		return nil, err
+	}
+
 	s.handlersOnConnect = []handlersOnConnect{
 		s.handleResyncOnConnect,
 	}
@@ -849,6 +854,9 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
+		MinVersion:   s.options.tlsMinVersion,
+		MaxVersion:   s.options.tlsMaxVersion,
+		CipherSuites: s.options.tlsCiphers,
 	}
 
 	// If the server is configured to require client certificates, set up the

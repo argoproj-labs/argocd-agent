@@ -134,6 +134,12 @@ tlsClientKeyPath: ""
 tlsClientCertPath: ""
 # -- Path to the TLS root CA certificate.
 tlsRootCAPath: ""
+# -- Minimum TLS version to use (tls1.1, tls1.2, tls1.3). Empty uses Go default.
+tlsMinVersion: ""
+# -- Maximum TLS version to use (tls1.1, tls1.2, tls1.3). Empty uses highest available.
+tlsMaxVersion: ""
+# -- Comma-separated list of TLS cipher suites. Empty uses Go defaults.
+tlsCipherSuites: ""
 
 ## @section Services
 # -- Service configuration for metrics and healthz endpoints.

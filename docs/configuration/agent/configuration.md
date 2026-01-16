@@ -128,6 +128,36 @@ The recommended approach for production deployments is to use ConfigMap entries 
 - **Default**: `""` (empty)
 - **Example**: `"/app/certs/client.key"`
 
+#### TLS Minimum Version
+- **Command Line Flag**: `--tls-min-version`
+- **Environment Variable**: `ARGOCD_AGENT_TLS_MIN_VERSION`
+- **ConfigMap Entry**: `agent.tls.min-version`
+- **Description**: Minimum TLS version to use when connecting to the principal
+- **Type**: String
+- **Default**: `""` (uses Go default)
+- **Valid Values**: `"tls1.1"`, `"tls1.2"`, `"tls1.3"`
+- **Example**: `"tls1.2"`
+
+#### TLS Maximum Version
+- **Command Line Flag**: `--tls-max-version`
+- **Environment Variable**: `ARGOCD_AGENT_TLS_MAX_VERSION`
+- **ConfigMap Entry**: `agent.tls.max-version`
+- **Description**: Maximum TLS version to use when connecting to the principal
+- **Type**: String
+- **Default**: `""` (uses highest available)
+- **Valid Values**: `"tls1.1"`, `"tls1.2"`, `"tls1.3"`
+- **Example**: `"tls1.3"`
+
+#### TLS Cipher Suites
+- **Command Line Flag**: `--tls-ciphersuites`
+- **Environment Variable**: `ARGOCD_AGENT_TLS_CIPHERSUITES`
+- **ConfigMap Entry**: `agent.tls.ciphersuites`
+- **Description**: Comma-separated list of TLS cipher suites to use
+- **Type**: String (comma-separated list)
+- **Default**: `""` (uses Go defaults)
+- **Note**: Use `--tls-ciphersuites=list` to display all available cipher suites and their supported TLS versions
+- **Example**: `"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"`
+
 ### Logging and Debugging
 
 #### Log Level
@@ -331,6 +361,9 @@ data:
   agent.tls.client.insecure: "false"
   agent.tls.root-ca-secret-name: "argocd-agent-ca"
   agent.tls.secret-name: "argocd-agent-client-tls"
+  agent.tls.min-version: ""
+  agent.tls.max-version: ""
+  agent.tls.ciphersuites: ""
   agent.metrics.port: "8181"
   agent.healthz.port: "8001"
 ```
@@ -404,6 +437,8 @@ These often indicate idle timeout issues. Enable heartbeats with:
 - Regularly rotate TLS certificates and authentication credentials
 - Restrict network access to the agent's metrics and health endpoints
 - Consider disabling resource proxy (`--enable-resource-proxy=false`) if live resource access is not required for enhanced security isolation
+- Configure appropriate TLS minimum version (`tls.min-version`) based on your security requirements
+- Use `--tls-ciphersuites=list` to view available cipher suites before configuring custom cipher suites
 
 ## Resource Proxy Considerations
 
