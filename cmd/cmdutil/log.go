@@ -86,3 +86,45 @@ func LogFormatter(format string) (logrus.Formatter, error) {
 		return nil, fmt.Errorf("invalid format '%s', must be one of text, json", format)
 	}
 }
+
+// CreateLogger creates a new logrus instance with the log level specified
+// validation is done on the log level to ensure it is valid, log formatter
+// is also set
+func CreateLogger(logLevel string, logFormat string) *logrus.Logger {
+	logger := logrus.New()
+	if logLevel == "" {
+		logLevel = "info"
+	}
+	if logLevel != "" {
+		lvl, err := StringToLoglevel(logLevel)
+		if err != nil {
+			Fatal("invalid resource proxy log level: %s. Available levels are %s", logLevel, AvailableLogLevels())
+		}
+		logger.SetLevel(lvl)
+	}
+	if formatter, err := LogFormatter(logFormat); err != nil {
+		Fatal("%s", err.Error())
+	} else {
+		logger.SetFormatter(formatter)
+	}
+
+	logger.AddHook(&writer.Hook{
+		Writer: os.Stderr,
+		LogLevels: []logrus.Level{
+			logrus.PanicLevel,
+			logrus.FatalLevel,
+			logrus.ErrorLevel,
+			logrus.WarnLevel,
+		},
+	})
+	logger.AddHook(&writer.Hook{
+		Writer: os.Stdout,
+		LogLevels: []logrus.Level{
+			logrus.InfoLevel,
+			logrus.DebugLevel,
+			logrus.TraceLevel,
+		},
+	})
+
+	return logger
+}

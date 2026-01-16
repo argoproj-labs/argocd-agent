@@ -70,12 +70,11 @@ const (
 
 // processIncomingRedisRequest handles incoming redis-specific events from principal, including get/subscribe (from argo cd) and ping (internal).
 func (a *Agent) processIncomingRedisRequest(ev *event.Event) error {
-
 	rreq, err := ev.RedisRequest()
 	if err != nil {
 		return err
 	}
-	logCtx := log().WithFields(logrus.Fields{
+	logCtx := a.redisProxyLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
 		"method":         "processIncomingRedisRequest",
 		"uuid":           rreq.UUID,
 		"connectionUUID": rreq.ConnectionUUID,
@@ -174,7 +173,6 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 	}()
 
 	return res, nil
-
 }
 
 // forwardRedisSubscribeNotificationsToPrincipal reads subscription events from agent Argo CD redis, then sends them to principal.
@@ -185,7 +183,7 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 
 	ch := pubsub.Channel()
 
-	logCtx = logCtx.WithField(logfields.ChannelName, channelName)
+	logCtx = a.redisProxyLogger.ModuleLogger("Agent").WithField(logfields.ChannelName, channelName)
 	for {
 		select {
 
@@ -240,7 +238,6 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 			logCtx.Tracef("Emitted Subscribe push event")
 		}
 	}
-
 }
 
 func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisRequest) (*event.RedisResponseBody, error) {
@@ -289,7 +286,6 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 // needs to be converted to, e.g.
 // "app|resources-tree|my-app|1.8.3.gz
 func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error) {
-
 	var matchedPrefix string
 	expectedPrefixes := []string{
 		"app|resources-tree|",
@@ -329,7 +325,6 @@ func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error
 	key = strings.Join(components, "|")
 
 	return key, nil
-
 }
 
 func (a *Agent) getRedisClientAndCache() (*redis.Client, *rediscache.Cache, error) {
@@ -351,5 +346,4 @@ func (a *Agent) getRedisClientAndCache() (*redis.Client, *rediscache.Cache, erro
 	cache := rediscache.New(&rediscache.Options{Redis: client})
 
 	return client, cache, nil
-
 }

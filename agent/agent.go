@@ -119,6 +119,11 @@ type Agent struct {
 
 	// trackingReader reads and caches the Argo CD resource tracking configuration
 	trackingReader *ResourceTrackingReader
+
+	// below are loggers to contorl log levels of different subsystems
+	resourceProxyLogger *logging.CentralizedLogger
+	redisProxyLogger    *logging.CentralizedLogger
+	grpcEventLogger     *logging.CentralizedLogger
 }
 
 const defaultQueueName = "default"
@@ -495,7 +500,7 @@ func (a *Agent) SetConnected(connected bool) {
 }
 
 func log() *logrus.Entry {
-	return logging.ModuleLogger("Agent")
+	return logging.GetDefaultLogger().ModuleLogger("Agent")
 }
 
 func (a *Agent) healthzHandler(w http.ResponseWriter, r *http.Request) {

@@ -83,6 +83,11 @@ func NewAgentRunCommand() *cobra.Command {
 		// OpenTelemetry configuration
 		otlpAddress  string
 		otlpInsecure bool
+
+		// Log levels for subsystems
+		logLevelRedisProxy    string
+		logLevelResourceProxy string
+		logLevelGrpcEvent     string
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -134,6 +139,11 @@ func NewAgentRunCommand() *cobra.Command {
 			} else {
 				logrus.SetFormatter(formatter)
 			}
+
+			resorceProxyLogger := cmdutil.CreateLogger(logLevelResourceProxy, logFormat)
+			redisProxyLogger := cmdutil.CreateLogger(logLevelRedisProxy, logFormat)
+			grpcEventLogger := cmdutil.CreateLogger(logLevelGrpcEvent, logFormat)
+
 			if namespace == "" {
 				cmdutil.Fatal("namespace value is empty and must be specified")
 			}
@@ -227,6 +237,8 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
+
+			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(resorceProxyLogger, redisProxyLogger, grpcEventLogger))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
@@ -344,6 +356,18 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
 		env.BoolWithDefault("ARGOCD_AGENT_OTLP_INSECURE", false),
 		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
+
+	command.Flags().StringVar(&logLevelResourceProxy, "--resource-proxy-log-level",
+		env.StringWithDefault("ARGOCD_AGENT_RESOURCE_PROXY_LOG_LEVEL", nil, "info"),
+		"The log level of the resource proxy")
+
+	command.Flags().StringVar(&logLevelRedisProxy, "--redis-proxy-log-level",
+		env.StringWithDefault("ARGOCD_AGENT_REDIS_PROXY_LOG_LEVEL", nil, "info"),
+		"The log level of the redis proxy")
+
+	command.Flags().StringVar(&logLevelGrpcEvent, "--grpc-event-log-level",
+		env.StringWithDefault("ARGOCD_AGENT_GRPC_LOG_LEVEL", nil, "info"),
+		"The log level for grpc events")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
