@@ -478,7 +478,7 @@ kind: ConfigMap
 metadata:
   name: argocd-agent-params
 data:
-  principal.listen.host: "0.0.0.0"
+  principal.listen.host: "127.0.0.1"
   principal.listen.port: "8443"
   principal.log.level: "info"
   principal.namespace: "argocd"
