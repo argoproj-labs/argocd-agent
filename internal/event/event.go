@@ -1064,6 +1064,8 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		// We can have concurrent SendWaitingEvents loops (e.g. brief overlap during reconnect),
 		// and without this, another goroutine can observe retryAfter==nil and immediately retry,
 		// causing duplicate sends within the same second.
+		//
+		// Retry behavior:
 		// On success: retry happens if ACK never arrives
 		// On failure: retry happens after backoff
 		ew.scheduleRetry(eventMsg)
