@@ -144,6 +144,8 @@ func NewAgentRunCommand() *cobra.Command {
 			redisProxyLogger := cmdutil.CreateLogger(logLevelRedisProxy, logFormat)
 			grpcEventLogger := cmdutil.CreateLogger(logLevelGrpcEvent, logFormat)
 
+			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(resorceProxyLogger, redisProxyLogger, grpcEventLogger))
+
 			if namespace == "" {
 				cmdutil.Fatal("namespace value is empty and must be specified")
 			}
@@ -237,8 +239,6 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
-
-			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(resorceProxyLogger, redisProxyLogger, grpcEventLogger))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))

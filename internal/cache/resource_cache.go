@@ -51,7 +51,7 @@ func newResourceCache[T any](name string) *ResourceCache[T] {
 	return &ResourceCache[T]{
 		items: make(map[types.UID]T),
 		name:  name,
-		log:   logging.ModuleLogger("SourceCache").WithField("key", name),
+		log:   logging.GetDefaultLogger().ModuleLogger("SourceCache").WithField("key", name),
 	}
 }
 
