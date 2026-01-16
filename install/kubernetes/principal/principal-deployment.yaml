@@ -129,6 +129,24 @@ spec:
                 name: argocd-agent-params
                 key: principal.tls.client-cert.match-subject
                 optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_MIN_VERSION
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.tls.min-version
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_MAX_VERSION
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.tls.max-version
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_CIPHERSUITES
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.tls.ciphersuites
+                optional: true
           - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_SECRET_NAME
             valueFrom:
               configMapKeyRef:

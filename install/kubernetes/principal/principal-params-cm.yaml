@@ -74,6 +74,18 @@ data:
   # in a client certificate presented by an agent to the agent's name.
   # Default: false
   principal.tls.client-cert.match-subject: "false"
+  # principal.tls.min-version: Minimum TLS version to accept from agents.
+  # Valid values: tls1.1, tls1.2, tls1.3
+  # Default: "tls1.3"
+  principal.tls.min-version: "tls1.3"
+  # principal.tls.max-version: Maximum TLS version to accept from agents.
+  # Valid values: tls1.1, tls1.2, tls1.3
+  # Default: "" (use highest available)
+  principal.tls.max-version: ""
+  # principal.tls.ciphersuites: Comma-separated list of TLS cipher suites.
+  # Run 'argocd-agent principal --tls-ciphersuites=list' to see available suites.
+  # Default: "" (use Go defaults)
+  principal.tls.ciphersuites: ""
   # principal.resource-proxy.secret-name: The name of the secret containing
   # the TLS certificate and key for the resource proxy.
   # Default: "argocd-agent-resource-proxy-tls"
