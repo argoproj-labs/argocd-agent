@@ -503,7 +503,7 @@ data:
 - **Authentication Security**:
   - Use mutual TLS authentication (`mtls`) when agents connect directly to the principal
   - Use header-based authentication (`header`) when running behind a service mesh (Istio, Linkerd, etc.) that terminates mTLS
-  - **Never** use `--insecure-plaintext` without a service mesh providing transport security
+  - **Never** use `--insecure-plaintext` without a service mesh providing transport security and restricting network access to the principal's service (e.g. by setting `--listen-host` to `127.0.0.1` and using network policies).'
   - Ensure header extraction regex patterns properly validate agent identity
 - Regularly rotate TLS certificates, JWT signing keys, and authentication credentials
 - Restrict network access to the principal's metrics and health endpoints
