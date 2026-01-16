@@ -99,6 +99,13 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 		}()
 	case event.TargetContainerLog:
 		err = a.processIncomingContainerLogRequest(ev)
+	case event.TargetTerminal:
+		// Process terminal request in a separate goroutine to avoid blocking the event thread
+		go func() {
+			if termErr := a.processIncomingTerminalRequest(ev); termErr != nil && !isShellNotFoundError(termErr) {
+				log().WithError(termErr).Errorf("Unable to process incoming terminal event")
+			}
+		}()
 	default:
 		err = fmt.Errorf("unknown event target - processIncomingEvent: %s", ev.Target())
 	}

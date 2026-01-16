@@ -108,6 +108,8 @@ type Agent struct {
 	inflightMu sync.Mutex
 	// inflightLogs blocks starting a duplicate stream for the same request UUID (esp. follow=true).
 	inflightLogs map[string]struct{}
+	// inflightTerminal blocks starting a duplicate web terminal session for the same request UUID.
+	inflightTerminal map[string]struct{}
 	// sourceCache is a cache of resources from the source. We use it to revert any changes made to the local resources.
 	sourceCache *cache.SourceCache
 
@@ -129,6 +131,12 @@ type AgentOptions struct {
 	metricsPort int
 
 	healthzPort int
+
+	// heartbeatInterval is the interval at which the agent sends heartbeat (ping)
+	// events to the principal over the Subscribe stream. This is used to keep
+	// the connection alive through service meshes like Istio that have idle timeouts.
+	// A value of 0 disables heartbeats.
+	heartbeatInterval time.Duration
 }
 
 // AgentOption is a functional option type used to configure an Agent instance during initialization.
@@ -139,10 +147,11 @@ type AgentOption func(*Agent) error
 // options.
 func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace string, opts ...AgentOption) (*Agent, error) {
 	a := &Agent{
-		version:      version.New("argocd-agent"),
-		deletions:    manager.NewDeletionTracker(),
-		sourceCache:  cache.NewSourceCache(),
-		inflightLogs: make(map[string]struct{}),
+		version:          version.New("argocd-agent"),
+		deletions:        manager.NewDeletionTracker(),
+		sourceCache:      cache.NewSourceCache(),
+		inflightLogs:     make(map[string]struct{}),
+		inflightTerminal: make(map[string]struct{}),
 	}
 	a.infStopCh = make(chan struct{})
 	a.namespace = namespace

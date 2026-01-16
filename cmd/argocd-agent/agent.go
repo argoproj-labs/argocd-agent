@@ -72,6 +72,10 @@ func NewAgentRunCommand() *cobra.Command {
 		// Time interval for agent to refresh cluster cache info in principal
 		cacheRefreshInterval time.Duration
 
+		// Time interval for application-level heartbeats over the Subscribe stream.
+		// This is used to keep the connection alive through service meshes like Istio.
+		heartbeatInterval time.Duration
+
 		// OpenTelemetry configuration
 		otlpAddress  string
 		otlpInsecure bool
@@ -197,6 +201,7 @@ func NewAgentRunCommand() *cobra.Command {
 
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
+			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
@@ -289,6 +294,10 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&cacheRefreshInterval, "cache-refresh-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_CACHE_REFRESH_INTERVAL", nil, 10*time.Second),
 		"Interval to refresh cluster cache info in principal")
+	command.Flags().DurationVar(&heartbeatInterval, "heartbeat-interval",
+		env.DurationWithDefault("ARGOCD_AGENT_HEARTBEAT_INTERVAL", nil, 0),
+		"Interval for application-level heartbeats over the Subscribe stream (e.g., 30s). "+
+			"Set to 0 to disable. Useful to keep connections alive through service meshes like Istio.")
 
 	command.Flags().StringVar(&otlpAddress, "otlp-address",
 		env.StringWithDefault("ARGOCD_AGENT_OTLP_ADDRESS", nil, ""),

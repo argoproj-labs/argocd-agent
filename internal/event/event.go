@@ -71,6 +71,7 @@ const (
 	EventRequestUpdate         EventType = TypePrefix + ".request-update"
 	EventRequestResourceResync EventType = TypePrefix + ".request-resource-resync"
 	ClusterCacheInfoUpdate     EventType = TypePrefix + ".cluster-cache-info-update"
+	TerminalRequest            EventType = TypePrefix + ".terminal-request"
 )
 
 const (
@@ -84,6 +85,8 @@ const (
 	TargetClusterCacheInfoUpdate EventTarget = "clusterCacheInfoUpdate"
 	TargetRepository             EventTarget = "repository"
 	TargetContainerLog           EventTarget = "containerlog"
+	TargetHeartbeat              EventTarget = "heartbeat"
+	TargetTerminal               EventTarget = "terminal"
 )
 
 const (
@@ -213,6 +216,22 @@ func (evs EventSource) RepositoryEvent(evType EventType, repository *corev1.Secr
 	cev.SetDataSchema(TargetRepository.String())
 
 	_ = cev.SetData(cloudevents.ApplicationJSON, repository)
+	return &cev
+}
+
+// HeartbeatEvent creates a ping or pong event for keepalive purposes.
+// These events keep the gRPC Subscribe stream active and help prevent
+// Istio/service mesh idle timeouts.
+func (evs EventSource) HeartbeatEvent(evType EventType) *cloudevents.Event {
+	reqUUID := uuid.NewString()
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(evType.String())
+	cev.SetExtension(eventID, reqUUID)
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetDataSchema(TargetHeartbeat.String())
+	// No data payload needed for heartbeat
 	return &cev
 }
 
@@ -602,6 +621,10 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetClusterCacheInfoUpdate
 	case TargetContainerLog.String():
 		return TargetContainerLog
+	case TargetHeartbeat.String():
+		return TargetHeartbeat
+	case TargetTerminal.String():
+		return TargetTerminal
 	}
 	return ""
 }
@@ -1039,16 +1062,18 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	}
 
 	// Move to sentEvents BEFORE unlocking to prevent ACK race
-	isACK := Target(eventMsg.event) == TargetEventAck
-	if !isACK {
+	// Fire-and-forget events (ACKs and heartbeats) don't need retry tracking
+	target := Target(eventMsg.event)
+	isFireAndForget := target == TargetEventAck || target == TargetHeartbeat
+	if !isFireAndForget {
 		ew.sentEvents[resID] = eventMsg
 	}
 	ew.mu.Unlock()
 
-	// Schedule retry at the end for non-ACK events
+	// Schedule retry at the end for events that need reliability guarantees
 	// On success: retry happens if ACK never arrives
 	// On failure: retry happens after backoff
-	if !isACK {
+	if !isFireAndForget {
 		defer ew.scheduleRetry(eventMsg)
 	}
 
@@ -1076,8 +1101,8 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 
 	logCtx.Trace("event sent to target")
 
-	if isACK {
-		logCtx.Trace("ACK is removed from the event writer")
+	if isFireAndForget {
+		logCtx.Trace("Fire-and-forget event (ACK or heartbeat) removed from event writer")
 	}
 }
 
@@ -1274,4 +1299,36 @@ func (ev *Event) ContainerLogRequest() (*ContainerLogRequest, error) {
 	logReq := &ContainerLogRequest{}
 	err := ev.event.DataAs(logReq)
 	return logReq, err
+}
+
+type ContainerTerminalRequest struct {
+	UUID          string   `json:"uuid"`
+	Namespace     string   `json:"namespace"`
+	PodName       string   `json:"podName"`
+	ContainerName string   `json:"containerName"`
+	Command       []string `json:"command,omitempty"`
+	TTY           bool     `json:"tty"`
+	Stdin         bool     `json:"stdin"`
+	Stdout        bool     `json:"stdout"`
+	Stderr        bool     `json:"stderr"`
+}
+
+// NewTerminalRequestEvent creates a cloud event for requesting a web terminal session from an agent.
+func (evs EventSource) NewTerminalRequestEvent(terminalReq *ContainerTerminalRequest) (*cloudevents.Event, error) {
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(TerminalRequest.String())
+	cev.SetDataSchema(TargetTerminal.String())
+	cev.SetExtension(resourceID, terminalReq.UUID)
+	cev.SetExtension(eventID, terminalReq.UUID)
+	err := cev.SetData(cloudevents.ApplicationJSON, terminalReq)
+	return &cev, err
+}
+
+// TerminalRequest gets the terminal request payload from an event.
+func (ev Event) TerminalRequest() (*ContainerTerminalRequest, error) {
+	req := &ContainerTerminalRequest{}
+	err := ev.event.DataAs(req)
+	return req, err
 }

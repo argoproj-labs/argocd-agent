@@ -74,6 +74,14 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 
 	logCtx = logCtx.WithField("agent", cert.Subject.CommonName)
 
+	// Handle exec subresource separately.
+	// because it requires WebSocket for bidirectional streaming
+	subresource := params.Get("subresource")
+	if subresource == "exec" {
+		s.processTerminalRequest(w, r, params, agentName)
+		return
+	}
+
 	// If the agent is not connected, return early
 	if !s.queues.HasQueuePair(agentName) {
 		logCtx.Debugf("Agent is not connected, stop proxying")
