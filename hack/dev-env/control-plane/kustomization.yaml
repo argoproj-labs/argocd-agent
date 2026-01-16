@@ -8,13 +8,16 @@ resources:
 - ../argo-cd/manifests/cluster-rbac/server
 - ../argo-cd/examples/k8s-rbac/argocd-server-applications
 - ../common
+- argocd-server-exec-clusterrole.yaml
 
 images:
 - name: quay.io/argoproj/argocd
   newTag: LatestReleaseTag
 
 patches:
+- path: argocd-cm.yaml
 - path: argocd-cmd-params-cm.yaml
+- path: argocd-rbac-cm.yaml
 - path: argocd-secret.yaml
 - path: server-service.yaml
 - path: repo-server-service.yaml

@@ -25,8 +25,11 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -455,9 +458,12 @@ func GetArgoCDServerEndpoint(k8sClient KubeClient) (string, error) {
 	argoEndpoint := srvService.Spec.LoadBalancerIP
 
 	if len(srvService.Status.LoadBalancer.Ingress) > 0 {
-		hostname := srvService.Status.LoadBalancer.Ingress[0].Hostname
-		if hostname != "" {
-			argoEndpoint = hostname
+		ingress := srvService.Status.LoadBalancer.Ingress[0]
+		// Prefer hostname if available, otherwise use IP
+		if ingress.Hostname != "" {
+			argoEndpoint = ingress.Hostname
+		} else if ingress.IP != "" {
+			argoEndpoint = ingress.IP
 		}
 	}
 
@@ -611,4 +617,187 @@ func (c *ArgoRestClient) TerminateOperation(name, namespace string) error {
 	}
 
 	return nil
+}
+
+// TerminalClient represents a test client for terminal WebSocket connections.
+type TerminalClient struct {
+	wsConn   *websocket.Conn
+	mu       sync.Mutex
+	closed   bool
+	output   strings.Builder
+	outputMu sync.Mutex
+}
+
+// ExecTerminal opens a terminal session to a pod via WebSocket.
+// This replicates the behavior of the ArgoCD UI when a user opens a terminal session to an application.
+// ArgoCD decides which shell to use based on the configured allowed shells.
+func (c *ArgoRestClient) ExecTerminal(app *v1alpha1.Application, namespace, podName, container string) (*TerminalClient, error) {
+	if err := c.ensureToken(); err != nil {
+		return nil, err
+	}
+
+	// Build the exec URL
+	u := &url.URL{
+		Scheme: "wss",
+		Host:   c.endpoint,
+		Path:   "/terminal",
+	}
+
+	q := u.Query()
+	q.Set("pod", podName)
+	q.Set("container", container)
+	q.Set("appName", app.Name)
+	q.Set("appNamespace", app.Namespace)
+	q.Set("projectName", app.Spec.Project)
+	q.Set("namespace", namespace)
+	u.RawQuery = q.Encode()
+
+	// Create WebSocket dialer with TLS config
+	dialer := websocket.Dialer{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	// Set token as cookie - ArgoCD expects auth token in argocd.token cookie
+	headers := http.Header{}
+	headers.Set("Cookie", fmt.Sprintf("argocd.token=%s", c.token))
+
+	// Connect to WebSocket
+	wsConn, resp, err := dialer.Dial(u.String(), headers)
+	if err != nil {
+		if resp != nil {
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("failed to connect to terminal WebSocket: %w (status: %d, body: %s)", err, resp.StatusCode, string(body))
+		}
+		return nil, fmt.Errorf("failed to connect to terminal WebSocket: %w", err)
+	}
+
+	session := &TerminalClient{
+		wsConn: wsConn,
+	}
+
+	// Start reading output in background
+	go session.readOutput()
+
+	return session, nil
+}
+
+// ensureToken makes sure we have a valid authentication token
+func (c *ArgoRestClient) ensureToken() error {
+	if c.token == "" {
+		return c.Login()
+	}
+	return nil
+}
+
+// terminalMessage is the JSON message format used by ArgoCD terminal WebSocket
+type terminalMessage struct {
+	Operation string `json:"operation"`
+	Data      string `json:"data"`
+	Rows      uint16 `json:"rows"`
+	Cols      uint16 `json:"cols"`
+}
+
+// readOutput continuously reads output from the WebSocket connection
+func (s *TerminalClient) readOutput() {
+	for {
+		_, message, err := s.wsConn.ReadMessage()
+		if err != nil {
+			// Connection closed or error
+			return
+		}
+
+		if len(message) < 1 {
+			continue
+		}
+
+		// Parse JSON message
+		var msg terminalMessage
+		if err := json.Unmarshal(message, &msg); err != nil {
+			continue
+		}
+
+		switch msg.Operation {
+		case "stdout":
+			s.outputMu.Lock()
+			s.output.WriteString(msg.Data)
+			s.outputMu.Unlock()
+		}
+	}
+}
+
+// SendInput sends input to the terminal session
+func (s *TerminalClient) SendInput(input string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return errors.New("session is closed")
+	}
+
+	// ArgoCD terminal uses JSON messages (includes rows/cols like the UI)
+	msg, err := json.Marshal(terminalMessage{
+		Operation: "stdin",
+		Data:      input,
+		Rows:      24,
+		Cols:      80,
+	})
+	if err != nil {
+		return err
+	}
+	return s.wsConn.WriteMessage(websocket.TextMessage, msg)
+}
+
+// SendResize sends a terminal resize message
+func (s *TerminalClient) SendResize(cols, rows uint16) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return errors.New("session is closed")
+	}
+
+	// ArgoCD terminal uses JSON messages
+	msg, err := json.Marshal(terminalMessage{
+		Operation: "resize",
+		Cols:      cols,
+		Rows:      rows,
+	})
+	if err != nil {
+		return err
+	}
+	return s.wsConn.WriteMessage(websocket.TextMessage, msg)
+}
+
+// GetOutput returns all captured output so far
+func (s *TerminalClient) GetOutput() string {
+	s.outputMu.Lock()
+	defer s.outputMu.Unlock()
+	return s.output.String()
+}
+
+// WaitForOutput waits until the output contains the expected string or timeout
+func (s *TerminalClient) WaitForOutput(expected string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Contains(s.GetOutput(), expected) {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
+}
+
+// Close closes the terminal session
+func (s *TerminalClient) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	return s.wsConn.Close()
 }

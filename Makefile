@@ -1,10 +1,26 @@
 DOCKER_BIN?=docker
 
-# Image names
+# Image name and options
 IMAGE_REPOSITORY?=ghcr.io/argoproj-labs/argocd-agent
 IMAGE_NAME=argocd-agent
-IMAGE_PLATFORMS?=linux/amd64
+IMAGE_PLATFORM?=linux/amd64
+IMAGE_MULTIARCH_PLATFORMS?=linux/amd64,linux/arm64
 IMAGE_TAG?=latest
+BUILDX_FLAGS?=
+
+ifeq ($(DOCKER_BIN),docker)
+	MULTIARCH_BUILD_CMDS?= \
+		$(DOCKER_BIN) buildx create --use --name argocd-agent-builder && \
+		$(DOCKER_BIN) buildx build $(BUILDX_FLAGS) --platform $(IMAGE_MULTIARCH_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG) . && \
+		$(DOCKER_BIN) buildx rm argocd-agent-builder
+else
+	MULTIARCH_BUILD_CMDS?= \
+		if $(DOCKER_BIN) manifest exists $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG); then \
+			$(DOCKER_BIN) manifest rm $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG); \
+		fi && \
+		$(DOCKER_BIN) manifest create $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG) && \
+		$(DOCKER_BIN) build -f Dockerfile --platform $(IMAGE_MULTIARCH_PLATFORMS) --manifest $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG)
+endif
 
 # mkdocs related configuration
 MKDOCS_DOCKER_IMAGE?=squidfunk/mkdocs-material:9
@@ -172,7 +188,11 @@ cli:
 
 .PHONY: image
 image:
-	$(DOCKER_BIN) build -f Dockerfile --platform $(IMAGE_PLATFORMS) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG) .
+	$(DOCKER_BIN) build -f Dockerfile --platform $(IMAGE_PLATFORM) -t $(IMAGE_REPOSITORY)/$(IMAGE_NAME):$(IMAGE_TAG) .
+
+.PHONY: image-multiarch
+image-multiarch:
+	$(MULTIARCH_BUILD_CMDS)
 
 .PHONY: push-image
 push-image:
