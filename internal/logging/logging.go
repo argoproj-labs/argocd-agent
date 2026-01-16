@@ -66,9 +66,13 @@ func init() {
 	}
 }
 
-func New() *CentralizedLogger {
+func New(logger *logrus.Logger) *CentralizedLogger {
+	if logger == nil {
+		logger = logrus.New()
+	}
+
 	return &CentralizedLogger{
-		logger: logrus.New(),
+		logger: logger,
 	}
 }
 

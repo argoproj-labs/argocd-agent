@@ -394,7 +394,7 @@ func TestDefaultLoggerNotAltered(t *testing.T) {
 
 	defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &defaultBuf)
 
-	newLogger := New()
+	newLogger := New(nil)
 	newLogger.SetupLogging(LogLevelDebug, LogFormatJSON, &newBuf)
 
 	defaultLogger.Info("TestModule", "default info message")
@@ -417,11 +417,11 @@ func TestSeperateLoggerLevels(t *testing.T) {
 	var debugBuf bytes.Buffer
 	var warnBuf bytes.Buffer
 
-	debugLogger := New()
+	debugLogger := New(nil)
 	err := debugLogger.SetupLogging(LogLevelDebug, LogFormatJSON, &debugBuf)
 	require.NoError(t, err)
 
-	warnLogger := New()
+	warnLogger := New(nil)
 	err = warnLogger.SetupLogging(LogLevelWarn, LogFormatJSON, &warnBuf)
 	require.NoError(t, err)
 
