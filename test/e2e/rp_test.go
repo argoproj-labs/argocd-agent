@@ -92,7 +92,11 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	requires.NoError(err)
 	requires.Equal("argocd", depl.Namespace)
 	requires.Equal("argocd-repo-server", depl.Name)
-	depl.Labels["app.kubernetes.io/instance"] = "argocd-repo-server"
+	// Add Argo CD tracking annotation to make it a managed resource
+	if depl.Annotations == nil {
+		depl.Annotations = make(map[string]string)
+	}
+	depl.Annotations["argocd.argoproj.io/tracking-id"] = "argocd-repo-server:apps/Deployment:argocd/argocd-repo-server"
 	err = suite.ManagedAgentClient.Update(context.TODO(), depl, v1.UpdateOptions{})
 	requires.NoError(err)
 
@@ -465,7 +469,11 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	requires.NoError(err)
 	requires.Equal("argocd", depl.Namespace)
 	requires.Equal("argocd-repo-server", depl.Name)
-	depl.Labels["app.kubernetes.io/instance"] = "argocd-repo-server"
+	// Add Argo CD tracking annotation to make it a managed resource
+	if depl.Annotations == nil {
+		depl.Annotations = make(map[string]string)
+	}
+	depl.Annotations["argocd.argoproj.io/tracking-id"] = "argocd-repo-server:apps/Deployment:argocd/argocd-repo-server"
 	err = suite.ManagedAgentClient.Update(context.TODO(), depl, v1.UpdateOptions{})
 	requires.NoError(err)
 
