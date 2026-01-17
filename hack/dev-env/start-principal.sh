@@ -19,6 +19,7 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
     echo "kube context vcluster-control-plane is not configured; missing setup?" >&2
     exit 1
 fi
+SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 if test "${ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS}" = ""; then
        ipaddr=$(kubectl --context vcluster-control-plane -n argocd get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
@@ -46,7 +47,18 @@ if [ -f "$E2E_ENV_FILE" ]; then
     export ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=${ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET:-false}
 fi
 
-SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+# Verify Redis TLS is configured (required for E2E tests)
+if ! kubectl --context=vcluster-control-plane -n argocd get secret argocd-redis-tls >/dev/null 2>&1; then
+    echo "ERROR: Redis TLS not configured (secret argocd-redis-tls not found)" >&2
+    echo "Redis TLS is REQUIRED for E2E tests." >&2
+    echo "" >&2
+    echo "Please run:" >&2
+    echo " make setup-e2e" >&2
+    echo "" >&2
+    exit 1
+fi
+echo "Redis TLS enabled"
+
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent principal \
 	--allowed-namespaces '*' \
 	--kubecontext vcluster-control-plane \
