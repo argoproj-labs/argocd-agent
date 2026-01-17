@@ -517,7 +517,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	// We'll test with a pod eviction endpoint - it should fail with 404 since the pod doesn't exist,
 	// but this proves the subresource routing works
 	postData := []byte(`{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"test-pod","namespace":"argocd"}}`)
-	req, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:9090/api/v1/namespaces/argocd/pods/test-pod/eviction", 
+	req, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:9090/api/v1/namespaces/argocd/pods/test-pod/eviction",
 		io.NopCloser(strings.NewReader(string(postData))))
 	requires.NoError(err)
 	req.Header.Set("Content-Type", "application/json")

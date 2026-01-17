@@ -8,6 +8,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -53,7 +54,7 @@ func Test_StartStop(t *testing.T) {
 		},
 	}
 	clt := kube.NewFakeClientsetWithResources(redisSecret)
-	m, err := NewManager(context.TODO(), "argocd", "", "", "", clt)
+	m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, clt, nil)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	err = m.Start()
@@ -74,7 +75,7 @@ func Test_onClusterAdd(t *testing.T) {
 		},
 	}
 	clt := kube.NewFakeClientsetWithResources(redisSecret)
-	m, err := NewManager(context.TODO(), "argocd", "", "", "", clt)
+	m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, clt, nil)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	err = m.Start()
