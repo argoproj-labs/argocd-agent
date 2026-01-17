@@ -27,6 +27,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/auth/header"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/mtls"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
@@ -61,6 +62,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		jwtKey                    string
 		allowTLSGenerate          bool
 		allowJwtGenerate          bool
+		insecurePlaintext         bool
 		authMethod                string
 		rootCaSecretName          string
 		rootCaPath                string
@@ -163,7 +165,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			opts = append(opts, principal.WithNamespaces(allowedNamespaces...))
 
-			if allowTLSGenerate {
+			// Configure TLS or plaintext mode
+			if insecurePlaintext {
+				logrus.Warn("INSECURE: Running in plaintext mode - ensure Istio or similar service mesh provides mTLS")
+				opts = append(opts, principal.WithInsecurePlaintext())
+			} else if allowTLSGenerate {
 				logrus.Info("Using one-time generated TLS certificate for gRPC")
 				opts = append(opts, principal.WithGeneratedTLS("argocd-agent-principal--generated"))
 			} else if tlsCert != "" && tlsKey != "" {
@@ -176,12 +182,15 @@ func NewPrincipalRunCommand() *cobra.Command {
 				opts = append(opts, principal.WithTLSKeyPairFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
 			}
 
-			if rootCaPath != "" {
-				logrus.Infof("Loading root CA certificate from file %s", rootCaPath)
-				opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
-			} else {
-				logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCaSecretName)
-				opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, namespace, rootCaSecretName, "tls.crt"))
+			// Only load root CA if not in plaintext mode
+			if !insecurePlaintext {
+				if rootCaPath != "" {
+					logrus.Infof("Loading root CA certificate from file %s", rootCaPath)
+					opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
+				} else {
+					logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCaSecretName)
+					opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, namespace, rootCaSecretName, "tls.crt"))
+				}
 			}
 
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
@@ -219,6 +228,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not parse auth: %v", err)
 			}
+
+			// Validate authentication method and TLS mode pairing
+			if err := validateAuthTLSPairing(authMethod, insecurePlaintext); err != nil {
+				cmdutil.Fatal("%v", err)
+			}
+
 			switch authMethod {
 			case "mtls":
 				var regex *regexp.Regexp
@@ -248,6 +263,22 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if err != nil {
 					cmdutil.Fatal("Could not register userpass auth method: %v", err)
 				}
+			case "header":
+				// Generic header-based authentication extracts agent ID from any HTTP header
+				// Format: header:<header-name>:<extraction-regex>
+				headerName, extractionRegex, err := parseHeaderAuth(authConfig)
+				if err != nil {
+					cmdutil.Fatal("Error parsing header auth config: %v", err)
+				}
+				headerAuth := header.NewHeaderAuthentication(headerName, extractionRegex)
+				if err := headerAuth.Init(); err != nil {
+					cmdutil.Fatal("Error initializing header auth: %v", err)
+				}
+				err = authMethods.RegisterMethod("header", headerAuth)
+				if err != nil {
+					cmdutil.Fatal("Could not register header auth method: %v", err)
+				}
+				logrus.Infof("Using header-based authentication (header: %s, pattern: %s)", headerName, extractionRegex.String())
 			default:
 				cmdutil.Fatal("Unknown auth method: %s", authMethod)
 			}
@@ -323,6 +354,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&allowTLSGenerate, "insecure-tls-generate",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ALLOW_GENERATE", false),
 		"INSECURE: Generate and use temporary TLS cert and key")
+	command.Flags().BoolVar(&insecurePlaintext, "insecure-plaintext",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_INSECURE_PLAINTEXT", false),
+		"INSECURE: Run gRPC server without TLS (use with Istio or similar service mesh)")
 	command.Flags().StringVar(&rootCaSecretName, "tls-ca-secret-name",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_SECRET_NAME", nil, config.SecretNamePrincipalCA),
 		"Secret name of TLS CA certificate")
@@ -489,7 +523,64 @@ func parseAuth(authStr string) (string, string, error) {
 		return "userpass", p[1], nil
 	case "mtls":
 		return "mtls", p[1], nil
+	case "header":
+		return "header", p[1], nil
 	default:
 		return "", "", fmt.Errorf("unknown auth method: %s", p[0])
 	}
+}
+
+// parseHeaderAuth parses header authentication config in the format:
+// <header-name>:<extraction-regex>
+//
+// Example: "x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)"
+func parseHeaderAuth(config string) (string, *regexp.Regexp, error) {
+	parts := strings.SplitN(config, ":", 2)
+	if len(parts) != 2 {
+		return "", nil, fmt.Errorf("header auth config must be in format <header-name>:<extraction-regex>, got: %s", config)
+	}
+
+	headerName := strings.TrimSpace(parts[0])
+	if headerName == "" {
+		return "", nil, fmt.Errorf("header name cannot be empty")
+	}
+
+	regexPattern := strings.TrimSpace(parts[1])
+	if regexPattern == "" {
+		return "", nil, fmt.Errorf("extraction regex cannot be empty")
+	}
+
+	extractionRegex, err := regexp.Compile(regexPattern)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid extraction regex: %w", err)
+	}
+
+	return headerName, extractionRegex, nil
+}
+
+// validateAuthTLSPairing validates that the authentication method is compatible
+// with the TLS configuration. Certain combinations are invalid:
+//   - header auth requires insecure-plaintext mode (service mesh handles mTLS)
+//   - mtls auth requires TLS mode (needs client certificates)
+func validateAuthTLSPairing(authMethod string, insecurePlaintext bool) error {
+	switch authMethod {
+	case "header":
+		if !insecurePlaintext {
+			return fmt.Errorf("invalid configuration: header-based authentication requires --insecure-plaintext=true\n" +
+				"  Header authentication is designed for service mesh environments (e.g., Istio) where\n" +
+				"  the sidecar terminates mTLS and injects identity headers.\n" +
+				"  Either:\n" +
+				"  - Add --insecure-plaintext flag when using header auth behind a service mesh\n" +
+				"  - Use --auth=mtls:<regex> for direct TLS connections without a service mesh")
+		}
+	case "mtls":
+		if insecurePlaintext {
+			return fmt.Errorf("invalid configuration: mtls authentication cannot be used with --insecure-plaintext\n" +
+				"  mTLS authentication requires TLS to be enabled to receive client certificates.\n" +
+				"  Either:\n" +
+				"  - Remove --insecure-plaintext flag to enable TLS for mTLS authentication\n" +
+				"  - Use --auth=header:<header>:<regex> for service mesh environments with plaintext mode")
+		}
+	}
+	return nil
 }
