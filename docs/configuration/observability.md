@@ -33,7 +33,6 @@ Via environment variable:
 
 ```bash
 export ARGOCD_PRINCIPAL_LOG_LEVEL=info
-export ARGOCD_PRINCIPAL_LOG_FORMAT=text
 ```
 
 ### Agent Logging Configuration

@@ -164,7 +164,7 @@ argocd-agent agent --creds="header:"
 
 !!! warning "Critical Security Requirements"
     When using header-based authentication with `--insecure-plaintext`:
-    
+     
     1. **Never expose the principal's plaintext port outside the service mesh**
     2. **Always bind to localhost** (`--listen-host=127.0.0.1`)
     3. **Use network policies** to restrict access to the principal pod

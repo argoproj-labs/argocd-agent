@@ -219,7 +219,7 @@ The log level for the agent.
 | | |
 |---|---|
 | **CLI Flag** | `--log-format` |
-| **Environment Variable** | `ARGOCD_PRINCIPAL_LOG_FORMAT` |
+| **Environment Variable** | `ARGOCD_AGENT_LOG_FORMAT` |
 | **ConfigMap Entry** | N/A |
 | **Type** | String |
 | **Default** | `text` |

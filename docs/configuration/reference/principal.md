@@ -386,6 +386,10 @@ Authentication method and corresponding configuration.
 - Istio: `header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)`
 - Custom header: `header:x-client-id:^(.+)$`
 
+!!! warning "Header Authentication Security"
+
+    Header-based authentication must only be used with a service mesh (Istio, Linkerd) that handles mTLS at the sidecar level. Without proper network isolation, attackers could inject arbitrary identity headers and impersonate any agent. See [Networking: Service Mesh Security](../networking.md#service-mesh-security-considerations) for required security measures.
+
 ## Logging and Debugging
 
 ### Log Level
