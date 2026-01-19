@@ -39,6 +39,11 @@ func (s *Server) clientCertificateMatches(ctx context.Context, match string) err
 		logCtx.Debug("No client cert subject matching requested")
 		return nil
 	}
+	// Skip TLS checks in plaintext mode (e.g., when running behind Istio)
+	if s.options.insecurePlaintext {
+		logCtx.Debug("Skipping client cert matching in plaintext mode")
+		return nil
+	}
 	c, ok := peer.FromContext(ctx)
 	if !ok {
 		return fmt.Errorf("could not get peer from context")

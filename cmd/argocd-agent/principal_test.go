@@ -1,0 +1,85 @@
+// Copyright 2025 The argocd-agent Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestValidateAuthTLSPairing(t *testing.T) {
+	tests := []struct {
+		name              string
+		authMethod        string
+		insecurePlaintext bool
+		expectError       bool
+		errorContains     string
+	}{
+		{
+			name:              "valid: header auth with plaintext mode",
+			authMethod:        "header",
+			insecurePlaintext: true,
+			expectError:       false,
+		},
+		{
+			name:              "valid: mtls auth with TLS mode",
+			authMethod:        "mtls",
+			insecurePlaintext: false,
+			expectError:       false,
+		},
+		{
+			name:              "valid: userpass auth with TLS mode",
+			authMethod:        "userpass",
+			insecurePlaintext: false,
+			expectError:       false,
+		},
+		{
+			name:              "valid: userpass auth with plaintext mode",
+			authMethod:        "userpass",
+			insecurePlaintext: true,
+			expectError:       false,
+		},
+		{
+			name:              "invalid: header auth without plaintext mode",
+			authMethod:        "header",
+			insecurePlaintext: false,
+			expectError:       true,
+			errorContains:     "header-based authentication requires --insecure-plaintext=true",
+		},
+		{
+			name:              "invalid: mtls auth with plaintext mode",
+			authMethod:        "mtls",
+			insecurePlaintext: true,
+			expectError:       true,
+			errorContains:     "mtls authentication cannot be used with --insecure-plaintext",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAuthTLSPairing(tt.authMethod, tt.insecurePlaintext)
+
+			if tt.expectError {
+				require.Error(t, err)
+				if tt.errorContains != "" {
+					require.Contains(t, err.Error(), tt.errorContains)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}

@@ -59,6 +59,11 @@ data:
   # configured. This is insecure. Do only use for development.
   # Default: false
   principal.tls.server.allow-generate: "false"
+  # principal.tls.insecure-plaintext: Run gRPC server without TLS. Only use
+  # when running behind a service mesh (e.g., Istio) that handles mTLS at
+  # the sidecar level. Required when using header-based authentication.
+  # Default: false
+  principal.tls.insecure-plaintext: "false"
   # principal.tls.client-cert.require: Whether to require client certs from
   # agents upon connection.
   # Default: false
@@ -110,10 +115,15 @@ data:
   # format <method>:<configuration>. Valid values are:
   # - "userpass:_path_to_encrypted_creds_" where _path_to_encrypted_creds_ is
   #   the path to the file containing encrypted credentials for authenticating
-  #   agent connections.
+  #   agent connections. [DEPRECATED - not suited for use outside development]
   # - "mtls:_agent_id_regex_" where _agent_id_regex_ is the regex pattern for
   #   extracting the agent ID from client cert subject.
-  # Default: userpass:_path_to_encrypted_creds_
+  # - "header:_header_name_:_extraction_regex_" for service mesh environments
+  #   (e.g., Istio). Extracts agent ID from any HTTP header using regex.
+  #   First capture group becomes the agent ID. Requires insecure-plaintext mode.
+  #   Example for Istio SPIFFE URIs:
+  #   "header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)"
+  # Default: "mtls:CN=([^,]+)"
   principal.auth: "mtls:CN=([^,]+)"
   # principal.log.format: The log format principal should use. Valid values are
   # "json" or "text".
