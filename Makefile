@@ -121,6 +121,9 @@ clean-all: clean
 ./build/bin/mockery: ./build/bin
 	GOBIN=$(current_dir)/build/bin go install github.com/vektra/mockery/v2@$(MOCKERY_V2_VERSION)
 
+./build/bin/helm-docs: ./build/bin
+	./hack/install/install-helm-docs.sh
+
 $(GO_BIN_DIR)/goreman:
 	go install github.com/mattn/goreman@latest
 
@@ -210,9 +213,13 @@ build-docs:
 validate-values-schema:
 	@$(current_dir)/hack/validate-values-schema.sh
 
+.PHONY: install-helm-docs
+install-helm-docs: ./build/bin/helm-docs
+	@echo "helm-docs installed."
+
 .PHONY: generate-helm-docs
-generate-helm-docs:
-	helm-docs
+generate-helm-docs: install-helm-docs
+	$(BIN_DIR)/helm-docs
 
 .PHONY: help
 help:
