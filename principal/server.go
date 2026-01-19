@@ -167,10 +167,13 @@ type Server struct {
 
 	// terminalStreamServer handles bidirectional streaming for web terminal sessions
 	terminalStreamServer *terminalstream.Server
+
 	// appToAgent maps application qualified names (namespace/name) to agent names.
 	// This is used for destination-based mapping to determine which agent
 	// handles a specific application, particularly for redis proxy routing.
-	appToAgent *MapToSet
+	// key: app qualified name (namespace/name)
+	// value: agent name
+	appToAgent *concurrentMap[string, string]
 
 	// destinationBasedMapping indicates whether applications should be mapped to agents
 	// based on spec.destination.name instead of namespace
@@ -210,7 +213,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		projectToRepos:  NewMapToSet(),
 		sourceCache:     cache.NewSourceCache(),
 		deletions:       manager.NewDeletionTracker(),
-		appToAgent:      NewMapToSet(),
+		appToAgent:      newConcurrentStringMap(),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)

@@ -17,6 +17,7 @@ package principal
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -794,18 +795,14 @@ func (s *Server) getAgentNameForApp(app *v1alpha1.Application) string {
 // destination-based mapping is enabled.
 func (s *Server) trackAppToAgent(app *v1alpha1.Application, agentName string) {
 	if s.destinationBasedMapping && s.appToAgent != nil {
-		s.appToAgent.Add(app.QualifiedName(), agentName)
+		s.appToAgent.Set(app.QualifiedName(), agentName)
 	}
 }
 
 // untrackAppToAgent removes the mapping from application qualified name to agent name.
 func (s *Server) untrackAppToAgent(app *v1alpha1.Application) {
 	if s.destinationBasedMapping && s.appToAgent != nil {
-		// Get all agents for this app and remove them all
-		agents := s.appToAgent.Get(app.QualifiedName())
-		for agent := range agents {
-			s.appToAgent.Delete(app.QualifiedName(), agent)
-		}
+		s.appToAgent.Delete(app.QualifiedName())
 	}
 }
 
@@ -822,12 +819,7 @@ func (s *Server) GetAgentForApp(namespace, name string) string {
 		return namespace
 	}
 	qualifiedName := fmt.Sprintf("%s/%s", namespace, name)
-	agents := s.appToAgent.Get(qualifiedName)
-	// Return the first (and should be only) agent
-	for agent := range agents {
-		return agent
-	}
-	return ""
+	return s.appToAgent.Get(qualifiedName)
 }
 
 // handleAppAgentChange handles the case when an application's destination.name changes,
@@ -892,4 +884,31 @@ func (s *Server) startSpan(operation, resourceKind string, obj metav1.Object) (c
 			tracing.AttrResourceUID.String(string(obj.GetUID())),
 		),
 	)
+}
+
+type concurrentMap[K comparable, V any] struct {
+	mu sync.RWMutex
+	m  map[K]V
+}
+
+func newConcurrentStringMap() *concurrentMap[string, string] {
+	return &concurrentMap[string, string]{m: make(map[string]string)}
+}
+
+func (c *concurrentMap[K, V]) Get(key K) V {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.m[key]
+}
+
+func (c *concurrentMap[K, V]) Set(key K, value V) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m[key] = value
+}
+
+func (c *concurrentMap[K, V]) Delete(key K) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, key)
 }
