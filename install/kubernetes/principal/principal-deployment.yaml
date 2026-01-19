@@ -39,6 +39,24 @@ spec:
                 name: argocd-agent-params
                 key: principal.log.level
                 optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_LOG_LEVEL
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.log.resource-proxy-level
+                optional: true
+          - name: ARGOCD_PRINCIPAL_LOG_REDIS_PROXY_LEVEL
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.log.redis-proxy-level
+                optional: true
+          - name: ARGOCD_PRINCIPAL_LOG_GRPC_LOG_LEVEL
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.log.grpc-level
+                optional: true
           - name: ARGOCD_PRINCIPAL_METRICS_PORT
             valueFrom:
               configMapKeyRef:

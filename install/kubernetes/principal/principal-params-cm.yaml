@@ -7,13 +7,24 @@ data:
   # for all interfaces.
   # Default: ""
   principal.listen.host: ""
-  # principal.listen.port: The port the gRPC server should listen on.
-  # Default: 8443
+  # principal.listen.port: The port the gRPC server should listenprincipal  # Default: 8443
   principal.listen.port: "8443"
   # principal.log.level: The logging level to use. One of trace, debug, info,
   # warn or error.
   # Default: info
   principal.log.level: info
+  # principal.log.resource-proxy-level: The log level the agent should use for the resource proxy.
+  # Valid values are trace, debug, info, warn and error.
+  # Default: "info"
+  principal.log.resource-proxy-level: "info"
+  # principal.log.redis-proxy-level: The log level the agent should use for the redis proxy.
+  # Valid values are trace, debug, info, warn and error.
+  # Default: "info"
+  principal.log.redis-proxy-level: "info"
+  # principal.log.grpc-level: The log level the agent should use for grpc events.
+  # Valid values are trace, debug, info, warn and error.
+  # Default: "info"
+  principal.log.grpc-level: "info"
   # principal.metrics.port: The port the metrics server should listen on.
   # Default: 8000
   principal.metrics.port: "8000"

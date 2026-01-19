@@ -475,16 +475,16 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_OTLP_INSECURE", false),
 		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
 
-	command.Flags().StringVar(&logLevelResourceProxy, "--resource-proxy-log-level",
-		env.StringWithDefault("ARGOCD_AGENT_RESOURCE_PROXY_LOG_LEVEL", nil, "info"),
+	command.Flags().StringVar(&logLevelResourceProxy, "resource-proxy-log-level",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_LOG_LEVEL", nil, "info"),
 		"The log level of the resource proxy")
 
-	command.Flags().StringVar(&logLevelRedisProxy, "--redis-proxy-log-level",
-		env.StringWithDefault("ARGOCD_AGENT_REDIS_PROXY_LOG_LEVEL", nil, "info"),
+	command.Flags().StringVar(&logLevelRedisProxy, "redis-proxy-log-level",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_LOG_LEVEL", nil, "info"),
 		"The log level of the redis proxy")
 
-	command.Flags().StringVar(&logLevelGrpcEvent, "--grpc-event-log-level",
-		env.StringWithDefault("ARGOCD_AGENT_GRPC_LOG_LEVEL", nil, "info"),
+	command.Flags().StringVar(&logLevelGrpcEvent, "grpc-event-log-level",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_GRPC_LOG_LEVEL", nil, "info"),
 		"The log level for grpc events")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")

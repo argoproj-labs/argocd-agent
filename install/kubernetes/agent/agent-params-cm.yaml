@@ -56,6 +56,18 @@ data:
   # trace, debug, info, warn and error.
   # Default: "info"
   agent.log.level: "info"
+  # agent.log.resource-proxy-level: The log level the agent should use for the resource proxy.
+  # Valid values are trace, debug, info, warn and error.
+  # Default: "info"
+  agent.log.resource-proxy-level: "info"
+  # agent.log.redis-proxy-level: The log level the agent should use for the redis proxy.
+  # Valid values are trace, debug, info, warn and error.
+  # Default: "info"
+  agent.log.redis-proxy-level: "info"
+  # agent.log.grpc-level: The log level the agent should use for grpc events.
+  # Valid values are trace, debug, info, warn and error.
+  # Default: "info"
+  agent.log.grpc-level: "info"
   # agent.namespace: The namespace the agent should operate and manage the
   # Argo CD resources in.
   # Default: "argocd"

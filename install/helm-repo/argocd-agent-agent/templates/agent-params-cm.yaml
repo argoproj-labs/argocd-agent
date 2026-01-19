@@ -6,7 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/name: argocd-agent-agent
     app.kubernetes.io/part-of: argocd-agent
-    app.kubernetes.io/component: agent 
+    app.kubernetes.io/component: agent
 data:
   # agent.mode: The mode this agent should operate in. Valid values are
   # "autonomous" or "managed".
@@ -31,7 +31,7 @@ data:
   # Default: false
   agent.tls.client.insecure: {{ .Values.tlsClientInSecure  | quote }}
   # agent.tls.root-ca-path: The path to a file containing the certificates for
-  # the TLS root certificate authority used to validate the remote principal. 
+  # the TLS root certificate authority used to validate the remote principal.
   # Default: ""
   agent.tls.root-ca-path: {{ .Values.tlsRootCAPath }}
   # agent.tls.client.cert-path: Path to a file containing the agent's TLS client
@@ -58,14 +58,26 @@ data:
   # trace, debug, info, warn and error.
   # Default: "info"
   agent.log.level: {{ .Values.logLevel }}
+  # agent.log.resource-proxy-level: The log level the agent should use for the resource proxy.
+  # Valid values are trace, debug, info, warn and error.
+  # Default: "info"
+  agent.log.resource-proxy-level: {{ .Values.resourceProxyLogLevel }}
+  # agent.log.redis-proxy-level: The log level the agent should use for the redis proxy.
+  # Valid values are trace, debug, info, warn and error.
+  # Default: "info"
+  agent.log.redis-proxy-level: {{ .Values.redisProxyLogLevel }}
+  # agent.log.grpc-level: The log level the agent should use for grpc events.
+  # Valid values are trace, debug, info, warn and error.
+  # Default: "info"
+  agent.log.grpc-level: {{ .Values.grpcEventLogLevel }}
   # agent.namespace: The namespace the agent should operate and manage the
   # Argo CD resources in.
   # Default: "argocd"
-  agent.namespace: {{ include  "argocd-agent-agent.namespace" . }} 
+  agent.namespace: {{ include  "argocd-agent-agent.namespace" . }}
   # agent.principal.address: The remote address of the principal to connect
   # to. Can be a DNS name, an IPv4 address or an IPv6 address.
   # Default: ""
-  agent.server.address: {{ .Values.server}}
+  agent.server.address: {{ .Values.server }}
   # agent.server.port: The remote port of the principal to connect to.
   # Default: "443"
   agent.server.port: {{ .Values.serverPort | quote }}

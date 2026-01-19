@@ -75,6 +75,33 @@ spec:
           exit 1
         fi
         
+        # Test agent.log.level
+        if [ -f /etc/config/agent.log.resource-proxy-level ]; then
+          echo "✓ agent.log.resource-proxy-level exists"
+          cat /etc/config/agent.log.resource-proxy-levellevel
+        else
+          echo "✗ agent.log.resrouce-proxy-levellevel missing"
+          exit 1
+        fi
+        
+        # Test agent.log.level
+        if [ -f /etc/config/agent.log.redis-proxy-level ]; then
+          echo "✓ agent.log.redis-proxy-level exists"
+          cat /etc/config/agent.log.redis-proxy-level
+        else
+          echo "✗ agent.log.redis-proxy-level missing"
+          exit 1
+        fi
+        
+        # Test agent.log.level
+        if [ -f /etc/config/agent.log.grpc-level ]; then
+          echo "✓ agent.log.grpc-level exists"
+          cat /etc/config/agent.log.grpc-level
+        else
+          echo "✗ agent.log.grpc-level missing"
+          exit 1
+        fi
+        
         # Test agent.namespace
         if [ -f /etc/config/agent.namespace ]; then
           echo "✓ agent.namespace exists"

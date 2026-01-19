@@ -11,7 +11,7 @@ image:
   # -- Container image repository for the agent.
   repository: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
   # -- Container image tag for the agent.
-  tag: latest 
+  tag: latest
   # -- Image pull policy for the agent container.
   pullPolicy: "Always"
 
@@ -96,6 +96,12 @@ agentMode: "autonomous"
 auth: "mtls:any"
 # -- Log level for the agent.
 logLevel: "info"
+# -- Log level for the resource proxy
+resourceProxyLogLevel: "info"
+# -- Log level for the redis proxy
+redisProxyLogLevel: "info"
+# -- Log level for grpc events
+grpcEventLogLevel: "info"
 # -- Log format for the agent (text or json).
 logFormat: "text"
 # -- Principal server address (hostname or host:port).

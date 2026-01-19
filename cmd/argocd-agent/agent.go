@@ -357,15 +357,15 @@ func NewAgentRunCommand() *cobra.Command {
 		env.BoolWithDefault("ARGOCD_AGENT_OTLP_INSECURE", false),
 		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
 
-	command.Flags().StringVar(&logLevelResourceProxy, "--resource-proxy-log-level",
+	command.Flags().StringVar(&logLevelResourceProxy, "resource-proxy-log-level",
 		env.StringWithDefault("ARGOCD_AGENT_RESOURCE_PROXY_LOG_LEVEL", nil, "info"),
 		"The log level of the resource proxy")
 
-	command.Flags().StringVar(&logLevelRedisProxy, "--redis-proxy-log-level",
+	command.Flags().StringVar(&logLevelRedisProxy, "redis-proxy-log-level",
 		env.StringWithDefault("ARGOCD_AGENT_REDIS_PROXY_LOG_LEVEL", nil, "info"),
 		"The log level of the redis proxy")
 
-	command.Flags().StringVar(&logLevelGrpcEvent, "--grpc-event-log-level",
+	command.Flags().StringVar(&logLevelGrpcEvent, "grpc-event-log-level",
 		env.StringWithDefault("ARGOCD_AGENT_GRPC_LOG_LEVEL", nil, "info"),
 		"The log level for grpc events")
 
