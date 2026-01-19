@@ -543,7 +543,7 @@ kubectl get appprojects -A --context <new-control-plane-context>
 
 **Cluster Onboarding:** Follow the [Adding Agents](./adding-agents.md) guide for future cluster additions.
 
-**Certificate Management:** Plan for regular certificate rotation and renewal. See PKI management documentation for both [agent](../configuration/agent/pki-certificates.md) and [principal](../configuration/principal/pki-certificates.md) for details.
+**Certificate Management:** Plan for regular certificate rotation and renewal. See the [TLS & Certificates](../configuration/tls-certificates.md) documentation for details.
 
 **Monitoring and Alerting:** Update monitoring systems to track agent connectivity and sync status.
 

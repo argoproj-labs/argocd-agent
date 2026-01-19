@@ -266,7 +266,7 @@ If the principal cluster is lost, autonomous agents continue working normally. F
 
 For more information about Argo CD Agent configuration and other features, see:
 
-- [Agent Configuration](../configuration/agent/configuration.md)
-- [Principal Configurations](../configuration/principal/configuration.md)
+- [Agent Configuration Reference](../configuration/reference/agent.md)
+- [Principal Configuration Reference](../configuration/reference/principal.md)
 - [Application Management](applications.md)
 - [AppProject Synchronization](appprojects.md)
