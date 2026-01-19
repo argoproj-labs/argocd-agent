@@ -245,12 +245,8 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		informer.WithUpdateHandler[*v1alpha1.Application](a.addAppUpdateToQueue),
 		informer.WithDeleteHandler[*v1alpha1.Application](a.addAppDeletionToQueue),
 		informer.WithFilters[*v1alpha1.Application](a.DefaultAppFilterChain()),
+		informer.WithNamespaceScope[*v1alpha1.Application](appNamespace),
 		informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
-	}
-
-	// Only add namespace scope if not using destination-based mapping
-	if !a.destinationBasedMapping {
-		appInformerOptions = append(appInformerOptions, informer.WithNamespaceScope[*v1alpha1.Application](a.namespace))
 	}
 
 	appProjectManagerOption := []appproject.AppProjectManagerOption{
