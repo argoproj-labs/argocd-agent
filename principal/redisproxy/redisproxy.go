@@ -36,7 +36,6 @@ import (
 
 // RedisProxy proxies traffic from principal Argo CD, to either, a) agent Argo CD redis or b) principal Argo CD redis, depending on the type and content of message.
 type RedisProxy struct {
-
 	// EventIDTracker maintains a channel that can be used to send/receive synchronous events; that is, cases where we are sending a specific sync message and expecting a specific sync response. The request/response both share a single event id.
 	EventIDTracker *tracker.Tracker
 
@@ -57,6 +56,9 @@ type RedisProxy struct {
 
 	// listener is the listener for the redis proxy
 	listener net.Listener
+
+	// logger is a sepearte logger from the default one to allow control to the log level of this subsystem
+	logger *logging.CentralizedLogger
 }
 
 const (
@@ -66,7 +68,10 @@ const (
 // sendSynchronousMessageToAgentFuncType is the function signature used to send a message (and wait for a response) to remote agent via principal's machinery
 type sendSynchronousMessageToAgentFuncType func(agentName string, connectionUUID string, body event.RedisCommandBody) *event.RedisResponseBody
 
-func New(listenAddress string, principalRedisAddress string, sendSyncMessageToAgentFuncParam sendSynchronousMessageToAgentFuncType) *RedisProxy {
+func New(listenAddress string, principalRedisAddress string, sendSyncMessageToAgentFuncParam sendSynchronousMessageToAgentFuncType, logger *logging.CentralizedLogger) *RedisProxy {
+	if logger == nil {
+		logger = logging.GetDefaultLogger()
+	}
 
 	res := &RedisProxy{
 		sendSynchronousMessageToAgentFn: sendSyncMessageToAgentFuncParam,
@@ -74,6 +79,7 @@ func New(listenAddress string, principalRedisAddress string, sendSyncMessageToAg
 		ConnectionIDTracker:             tracker.New(),
 		principalRedisAddress:           principalRedisAddress,
 		listenAddress:                   listenAddress,
+		logger:                          logger,
 	}
 
 	return res
@@ -81,7 +87,6 @@ func New(listenAddress string, principalRedisAddress string, sendSyncMessageToAg
 
 // Start listening on redis proxy port, and handling connections
 func (rp *RedisProxy) Start() error {
-
 	l, err := net.Listen("tcp", rp.listenAddress)
 	if err != nil {
 		log().WithError(err).Error("error occurred on listening to addr: " + rp.listenAddress)
@@ -117,12 +122,11 @@ func (rp *RedisProxy) Stop() error {
 // handleConnection is passed a TCP-IP socket connection from a redis client (e.g. Argo CD server). handleConnection initializes the connection and passes it to the message loop function.
 // - This functions runs for the lifecycle of the connection.
 func (rp *RedisProxy) handleConnection(fromArgoCDConn net.Conn) {
-
 	defer fromArgoCDConn.Close()
 
 	connUUID := uuid.New().String()
 
-	logCtx := log().WithField("function", "redisFxn")
+	logCtx := rp.logger.ModuleLogger("redisProxy").WithField("function", "redisFxn")
 	logCtx = logCtx.WithField("connUUID", connUUID)
 
 	redisConn, err := establishConnectionToPrincipalRedis(rp.principalRedisAddress, logCtx)
@@ -175,12 +179,10 @@ func (rp *RedisProxy) handleConnection(fromArgoCDConn net.Conn) {
 	}
 
 	rp.handleConnectionMessageLoop(connState, endpointMessageChannel, argocdWriter, redisWriter, logCtx)
-
 }
 
 // connectionState is the state we track for a specific TCP-IP socket connection from Argo CD. The lifecycle of this struct (and related goroutines/functions) is equivalent to the lifecycle of that TCP-IP socket.
 type connectionState struct {
-
 	// connectionCtx should be cancelled in order to cause all connection-related go-routines to complete
 	connectionCtx context.Context
 
@@ -202,7 +204,6 @@ type connectionState struct {
 // handleConnectionMessageLoop is passed an initialized connection from handleConenction
 // - This functions runs for the lifecycle of the connection.
 func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, endpointMessageChannel chan parsedRedisCommand, argocdWriter argoCDRedisWriter, redisWriter *bufio.Writer, logCtx *logrus.Entry) {
-
 	defer logCtx.Debug("handleConnectionMessageLoop has exited")
 
 	for {
@@ -232,7 +233,6 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 		logCtx.Tracef("processing redis command: %s", parsedRedisCommandVal.generateParsedCommandDebugString())
 
 		if len(parsedRedisCommandVal.internalMsg) == 2 {
-
 			// Handle subscription notify (push)
 			if err := handleInternalNotify(parsedRedisCommandVal.internalMsg, argocdWriter, logCtx); err != nil {
 				logCtx.WithError(err).Error("exit due to unable to handle subscription notify command")
@@ -242,7 +242,7 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 
 		parsedReceived := parsedRedisCommandVal.parsedReceived
 
-		forwardRawCommandToPrincipalRedis := true // whether to send the command to principal redis: false if the command has already been processed, true otherwise.
+		forwardRawCommandToPrincipalRedis := true // whether to send the command to principal redis: falsGetDefaultLogger().e if the command has already been processed, true otherwise.
 
 		// If we received a 'subscribe' message from argo cd, in the exact expected format
 		if len(parsedReceived) == 2 && parsedReceived[0] == "subscribe" {
@@ -318,7 +318,6 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 
 // handleInternalNotify	handle subscription notify (push) from agent
 func handleInternalNotify(vals []string, argocdWriter argoCDRedisWriter, logCtx *logrus.Entry) error {
-
 	if len(vals) != 2 {
 		return fmt.Errorf("unexpected internal message command format: %v", vals)
 	}
@@ -363,7 +362,6 @@ func handleInternalNotify(vals []string, argocdWriter argoCDRedisWriter, logCtx 
 
 // handleAgentGet processes a redis get message that is destinated for a specific agent
 func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, argocdWriter argoCDRedisWriter, agentName string, logCtx *logrus.Entry) error {
-
 	rp.beginPingGoRoutineIfNeeded(connState, agentName, logCtx)
 
 	// Example of a redis get command request/response:
@@ -436,12 +434,10 @@ func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, arg
 
 		return nil
 	}
-
 }
 
 // handleAgentSubscribe handles a subscription request from Argo CD to be forwarded to agent redis
 func (rp *RedisProxy) handleAgentSubscribe(connState *connectionState, channelName string, agentName string, argoCDWrite argoCDRedisWriter, logCtx *logrus.Entry) error {
-
 	rp.beginPingGoRoutineIfNeeded(connState, agentName, logCtx)
 
 	// Create the channel and start the goroutine for the channel that is responsible for reading asynchronous redis subscription responses from agents
@@ -474,7 +470,6 @@ func (rp *RedisProxy) handleAgentSubscribe(connState *connectionState, channelNa
 					connState.connectionUUIDEventsChannel <- event
 				}
 			}
-
 		}()
 	}
 
@@ -515,7 +510,6 @@ func (rp *RedisProxy) handleAgentSubscribe(connState *connectionState, channelNa
 // - Only 1 ping go routine is started per agent (name)
 // - This ensures that if principal or agent are restarted, that all redis connections on the other side are closed.
 func (rp *RedisProxy) beginPingGoRoutineIfNeeded(connState *connectionState, agentName string, logCtx *logrus.Entry) {
-
 	_, exists := connState.pingRoutineStarted[agentName]
 	if exists {
 		// Already started, so no-op
@@ -526,7 +520,6 @@ func (rp *RedisProxy) beginPingGoRoutineIfNeeded(connState *connectionState, age
 
 	// Send 'ping' to the agent for as long as the redis connection is active.
 	go func() {
-
 		logCtx = logCtx.WithField("agent-name", agentName)
 
 		logCtx.Debug("Beginning ping thread")
@@ -553,14 +546,11 @@ func (rp *RedisProxy) beginPingGoRoutineIfNeeded(connState *connectionState, age
 				return
 			}
 		}
-
 	}()
-
 }
 
 // readNextMessageFromArgoCDOrInternal reads the next message from either the argo cd TCP-IP socket or the internal channel (used for subscription notify)
 func readNextMessageFromArgoCDOrInternal(connState *connectionState, receiverChan chan parsedRedisCommand, logCtx *logrus.Entry) parsedRedisCommand {
-
 	select {
 
 	case <-connState.connectionCtx.Done(): // Stop reading if the connection context is cancelled
@@ -595,7 +585,6 @@ func readNextMessageFromArgoCDOrInternal(connState *connectionState, receiverCha
 
 // generateParsedCommandDebugString is debug utility function
 func (prc *parsedRedisCommand) generateParsedCommandDebugString() string {
-
 	if prc.err != nil {
 		return fmt.Sprintf("error occurred: %v", prc.err)
 	}
@@ -610,7 +599,6 @@ func (prc *parsedRedisCommand) generateParsedCommandDebugString() string {
 	}
 
 	return res
-
 }
 
 // sanitizeStringIfNonASCII: if the string is non-ascii (likely because it includes binary data), then only return the number of bytes of the string rather than the string itself
@@ -627,7 +615,6 @@ func sanitizeStringIfNonASCII(str string) string {
 	}
 
 	return res
-
 }
 
 // parsedRedisCommand is parsed commands (messages) from redis socket
@@ -654,7 +641,6 @@ type parsedRedisCommand struct {
 // forwardTrafficSimple reads from 'r' and writes to 'argocdWriter'. Traffic is MITMed so that it can be output via debug.
 // - 'simple' in the sense that we read/write with any modification to that data.
 func forwardTrafficSimple(debugStr string, r *bufio.Reader, argocdWriter *argoCDRedisWriterInternal, logCtx *logrus.Entry) error {
-
 	// Maintains a record of bytes forwarded, so we can output via debug log
 	debugBuf := bytes.NewBuffer(make([]byte, 0))
 	debugWrite := bufio.NewWriter(debugBuf)
@@ -713,7 +699,6 @@ type argoCDRedisWriter interface {
 
 // argoCDRedisWriterInternal is a simple wrapper around argo cd redis socket, which ensures that lock is owned while writing to argo cd server.
 type argoCDRedisWriterInternal struct {
-
 	// Use 'writeToArgoCDRedisSocket' function: these internal fields should not be called directly.
 
 	fromArgoCDWrite *bufio.Writer
@@ -722,7 +707,6 @@ type argoCDRedisWriterInternal struct {
 
 // writeToArgoCDRedisSocket writes data back to Argo CD while owning mutex
 func (are *argoCDRedisWriterInternal) writeToArgoCDRedisSocket(logCtx *logrus.Entry, bytes []byte) error {
-
 	are.argoCDWriteLock.Lock()
 	defer are.argoCDWriteLock.Unlock()
 
@@ -742,7 +726,6 @@ func (are *argoCDRedisWriterInternal) writeToArgoCDRedisSocket(logCtx *logrus.En
 
 // establishConnectionToPrincipalRedis establishes a simple TCP-IP socket connection to principal's redis. (That is, we don't use go-redis client)
 func establishConnectionToPrincipalRedis(principalRedisAddress string, logCtx *logrus.Entry) (*net.TCPConn, error) {
-
 	var redisConn *net.TCPConn
 
 	addr, err := net.ResolveTCPAddr("tcp", principalRedisAddress)
@@ -770,7 +753,6 @@ func establishConnectionToPrincipalRedis(principalRedisAddress string, logCtx *l
 // - The extracted agent name will be 'agent-managed'
 //   - This value comes from the third field, before the '_' character
 func extractAgentNameFromRedisCommandKey(redisKey string, logCtx *logrus.Entry) (string, error) {
-
 	// We only recognize agent names from these keys
 	if !strings.HasPrefix(redisKey, "app|managed-resources") && !strings.HasPrefix(redisKey, "app|resources-tree") {
 
@@ -824,9 +806,8 @@ func extractAgentNameFromRedisCommandKey(redisKey string, logCtx *logrus.Entry) 
 	res := namespaceAndName[0:strings.Index(namespaceAndName, "_")]
 
 	return res, nil
-
 }
 
 func log() *logrus.Entry {
-	return logging.ModuleLogger("redisProxy")
+	return logging.GetDefaultLogger().ModuleLogger("redisProxy")
 }

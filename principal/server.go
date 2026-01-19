@@ -358,7 +358,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	if !s.options.redisProxyDisabled {
-		s.redisProxy = redisproxy.New(defaultRedisProxyListenerAddr, s.options.redisAddress, s.sendSynchronousRedisMessageToAgent)
+		s.redisProxy = redisproxy.New(defaultRedisProxyListenerAddr, s.options.redisAddress, s.sendSynchronousRedisMessageToAgent, s.options.redisProxyLogger)
 	}
 
 	// Instantiate our ResourceProxy to intercept Kubernetes requests from Argo
@@ -400,7 +400,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 }
 
 func (s *Server) proxyVersion(w http.ResponseWriter, r *http.Request, params resourceproxy.Params) {
-	var kubeVersion = struct {
+	kubeVersion := struct {
 		Major        string
 		Minor        string
 		GitVersion   string
@@ -440,7 +440,6 @@ func (s *Server) proxyVersion(w http.ResponseWriter, r *http.Request, params res
 // error during startup, before the go routines are running, will be returned
 // immediately. Errors during the runtime will be propagated via errch.
 func (s *Server) Start(ctx context.Context, errch chan error) error {
-
 	if s.namespace != "" {
 		log().Infof("Starting %s (server) v%s (ns=%s, allowed_namespaces=%v)", s.version.Name(), s.version.Version(), s.namespace, s.options.namespaces)
 	} else {
@@ -907,7 +906,7 @@ func (s *Server) TokenIssuerForE2EOnly() issuer.Issuer {
 }
 
 func log() *logrus.Entry {
-	return logging.ModuleLogger("server")
+	return logging.GetDefaultLogger().ModuleLogger("server")
 }
 
 func (s *Server) AuthMethodsForE2EOnly() *auth.Methods {

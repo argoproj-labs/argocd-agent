@@ -215,7 +215,7 @@ func (ts *TerminalSession) Close() {
 }
 
 func log() *logrus.Entry {
-	return logging.ModuleLogger("terminalstream")
+	return logging.GetDefaultLogger().ModuleLogger("terminalstream")
 }
 
 // tryRecvWithCancel is a helper function to receive data from a stream with cancellation support.

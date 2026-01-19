@@ -62,6 +62,8 @@ type Server struct {
 type ServerOptions struct {
 	MaxStreamDuration time.Duration
 	notifyOnConnect   chan types.Agent
+
+	logger *logging.CentralizedLogger
 }
 
 type ServerOption func(o *ServerOptions)
@@ -87,6 +89,12 @@ func WithMaxStreamDuration(d time.Duration) ServerOption {
 func WithNotifyOnConnect(notify chan types.Agent) ServerOption {
 	return func(o *ServerOptions) {
 		o.notifyOnConnect = notify
+	}
+}
+
+func WithLogger(logger *logging.CentralizedLogger) ServerOption {
+	return func(o *ServerOptions) {
+		o.logger = logger
 	}
 }
 
@@ -414,7 +422,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 // Application resources.
 // Push is called by GRPC machinery.
 func (s *Server) Push(pushs eventstreamapi.EventStream_PushServer) error {
-	logCtx := log().WithField("method", "Push")
+	logCtx := s.options.logger.ModuleLogger("grpc.AppStream").WithField("method", "Push")
 
 	var ctx context.Context
 	var cancel context.CancelFunc
@@ -486,5 +494,5 @@ recvloop:
 }
 
 func log() *logrus.Entry {
-	return logging.ModuleLogger("grpc.AppStream")
+	return logging.GetDefaultLogger().ModuleLogger("grpc.AppStream")
 }

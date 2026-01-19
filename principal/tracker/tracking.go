@@ -28,7 +28,6 @@ type Tracker struct {
 }
 
 func New() *Tracker {
-
 	var res Tracker
 	res.statemap.requests = make(map[string]*requestWrapper)
 
@@ -99,5 +98,5 @@ func (p *Tracker) StopTracking(eventID string) error {
 }
 
 func log() *logrus.Entry {
-	return logging.ModuleLogger("tracker")
+	return logging.GetDefaultLogger().ModuleLogger("tracker")
 }

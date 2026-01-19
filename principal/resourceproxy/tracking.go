@@ -54,7 +54,7 @@ func (rp *ResourceProxy) Tracked(eventID string) (string, chan *cloudevents.Even
 func (rp *ResourceProxy) Track(eventID string, agentName string) (<-chan *cloudevents.Event, error) {
 	rp.statemap.mutex.Lock()
 	defer rp.statemap.mutex.Unlock()
-	log().WithFields(logrus.Fields{"event_id": eventID, "agent": agentName}).Trace("Tracking new request")
+	rp.logger.ModuleLogger("proxy").WithFields(logrus.Fields{"event_id": eventID, "agent": agentName}).Trace("Tracking new request")
 	_, ok := rp.statemap.requests[eventID]
 	if ok {
 		return nil, fmt.Errorf("resource with ID %s already tracked", eventID)
@@ -72,7 +72,7 @@ func (rp *ResourceProxy) StopTracking(eventID string) error {
 	r, ok := rp.statemap.requests[eventID]
 	if ok {
 		close(r.evCh)
-		logCtx := log().WithFields(logrus.Fields{
+		logCtx := rp.logger.ModuleLogger("proxy").WithFields(logrus.Fields{
 			"event_id": eventID,
 			"agent":    r.agentName,
 		})
@@ -80,7 +80,7 @@ func (rp *ResourceProxy) StopTracking(eventID string) error {
 		delete(rp.statemap.requests, eventID)
 		return nil
 	} else {
-		log().WithField("event_id", eventID).Warn("Resource not tracked -- is this a bug?")
+		rp.logger.ModuleLogger("proxy").WithField("event_id", eventID).Warn("Resource not tracked -- is this a bug?")
 		return fmt.Errorf("resource request %s not tracked", eventID)
 	}
 }

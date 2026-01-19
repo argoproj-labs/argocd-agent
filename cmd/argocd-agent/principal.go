@@ -97,8 +97,13 @@ func NewPrincipalRunCommand() *cobra.Command {
 		// OpenTelemetry configuration
 		otlpAddress  string
 		otlpInsecure bool
+
+		// Log levels for subsystems
+		logLevelRedisProxy    string
+		logLevelResourceProxy string
+		logLevelGrpcEvent     string
 	)
-	var command = &cobra.Command{
+	command := &cobra.Command{
 		Use:   "principal",
 		Short: "Run the argocd-agent principal component",
 		Run: func(c *cobra.Command, args []string) {
@@ -149,6 +154,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not load Kubernetes config: %v", err)
 			}
+
+			redisProxyLogger := cmdutil.CreateLogger(logLevelRedisProxy, logFormat)
+			resourceProxyLogger := cmdutil.CreateLogger(logLevelResourceProxy, logFormat)
+			grpcEventLogger := cmdutil.CreateLogger(logLevelGrpcEvent, logFormat)
+
+			opts = append(opts, principal.WithSubsystemLoggers(redisProxyLogger, resourceProxyLogger, grpcEventLogger))
 
 			opts = append(opts, principal.WithListenerAddress(listenHost))
 			opts = append(opts, principal.WithListenerPort(listenPort))
@@ -464,11 +475,22 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_OTLP_INSECURE", false),
 		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
 
+	command.Flags().StringVar(&logLevelResourceProxy, "--resource-proxy-log-level",
+		env.StringWithDefault("ARGOCD_AGENT_RESOURCE_PROXY_LOG_LEVEL", nil, "info"),
+		"The log level of the resource proxy")
+
+	command.Flags().StringVar(&logLevelRedisProxy, "--redis-proxy-log-level",
+		env.StringWithDefault("ARGOCD_AGENT_REDIS_PROXY_LOG_LEVEL", nil, "info"),
+		"The log level of the redis proxy")
+
+	command.Flags().StringVar(&logLevelGrpcEvent, "--grpc-event-log-level",
+		env.StringWithDefault("ARGOCD_AGENT_GRPC_LOG_LEVEL", nil, "info"),
+		"The log level for grpc events")
+
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
 
 	return command
-
 }
 
 // observer puts some valuable debug information in the logs every interval.
