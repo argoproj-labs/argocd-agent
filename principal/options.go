@@ -525,7 +525,7 @@ func WithSubsystemLoggers(redisProxy, resourceProxy, grpcEvent *logrus.Logger) S
 		if grpcEvent != nil {
 			o.options.grpcEventLogger = logging.New(grpcEvent)
 		} else {
-			o.options.resourceProxyLogger = logging.GetDefaultLogger()
+			o.options.grpcEventLogger = logging.GetDefaultLogger()
 		}
 		return nil
 	}

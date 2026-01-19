@@ -183,7 +183,7 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 
 	ch := pubsub.Channel()
 
-	logCtx = a.redisProxyLogger.ModuleLogger("Agent").WithField(logfields.ChannelName, channelName)
+	logCtx = logCtx.WithField(logfields.ChannelName, channelName)
 	for {
 		select {
 

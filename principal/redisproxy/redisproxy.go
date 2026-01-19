@@ -57,7 +57,7 @@ type RedisProxy struct {
 	// listener is the listener for the redis proxy
 	listener net.Listener
 
-	// logger is a sepearte logger from the default one to allow control to the log level of this subsystem
+	// logger is a separate logger from the default one to allow control to the log level of this subsystem
 	logger *logging.CentralizedLogger
 }
 

@@ -493,6 +493,7 @@ recvloop:
 	return nil
 }
 
-func log() *logrus.Entry {
-	return logging.GetDefaultLogger().ModuleLogger("grpc.AppStream")
-}
+// Not sure what to do with below!
+// func log() *logrus.Entry {
+// 	return logging.GetDefaultLogger().ModuleLogger("grpc.AppStream")
+// }

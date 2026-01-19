@@ -213,6 +213,18 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		}
 	}
 
+	if s.options.resourceProxyLogger == nil {
+		s.options.resourceProxyLogger = logging.GetDefaultLogger()
+	}
+
+	if s.options.redisProxyLogger == nil {
+		s.options.redisProxyLogger = logging.GetDefaultLogger()
+	}
+
+	if s.options.grpcEventLogger == nil {
+		s.options.grpcEventLogger = logging.GetDefaultLogger()
+	}
+
 	// Validate TLS options after all options have been applied
 	if err := tlsutil.ValidateTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers); err != nil {
 		return nil, err
