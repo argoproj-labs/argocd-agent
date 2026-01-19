@@ -104,6 +104,11 @@ func NewServer(queues queue.QueuePair, eventWriters *event.EventWritersMap, metr
 	for _, o := range opts {
 		o(options)
 	}
+
+	if options.logger == nil {
+		options.logger = logging.GetDefaultLogger()
+	}
+
 	return &Server{
 		queues:       queues,
 		options:      options,
@@ -493,7 +498,6 @@ recvloop:
 	return nil
 }
 
-// Not sure what to do with below!
-// func log() *logrus.Entry {
-// 	return logging.GetDefaultLogger().ModuleLogger("grpc.AppStream")
-// }
+func log() *logrus.Entry {
+	return logging.GetDefaultLogger().ModuleLogger("grpc.AppStream")
+}

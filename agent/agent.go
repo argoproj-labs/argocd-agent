@@ -120,7 +120,7 @@ type Agent struct {
 	// trackingReader reads and caches the Argo CD resource tracking configuration
 	trackingReader *ResourceTrackingReader
 
-	// below are loggers to contorl log levels of different subsystems
+	// below are loggers to control log levels of different subsystems
 	resourceProxyLogger *logging.CentralizedLogger
 	redisProxyLogger    *logging.CentralizedLogger
 	grpcEventLogger     *logging.CentralizedLogger

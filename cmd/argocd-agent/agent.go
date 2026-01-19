@@ -140,11 +140,11 @@ func NewAgentRunCommand() *cobra.Command {
 				logrus.SetFormatter(formatter)
 			}
 
-			resorceProxyLogger := cmdutil.CreateLogger(logLevelResourceProxy, logFormat)
+			resourceProxyLogger := cmdutil.CreateLogger(logLevelResourceProxy, logFormat)
 			redisProxyLogger := cmdutil.CreateLogger(logLevelRedisProxy, logFormat)
 			grpcEventLogger := cmdutil.CreateLogger(logLevelGrpcEvent, logFormat)
 
-			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(resorceProxyLogger, redisProxyLogger, grpcEventLogger))
+			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(resourceProxyLogger, redisProxyLogger, grpcEventLogger))
 
 			if namespace == "" {
 				cmdutil.Fatal("namespace value is empty and must be specified")

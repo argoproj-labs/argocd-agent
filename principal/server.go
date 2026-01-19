@@ -390,6 +390,9 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 				[]string{"get"},
 				s.proxyVersion,
 			),
+
+			resourceproxy.WithLogger(s.options.resourceProxyLogger),
+
 			resourceproxy.WithTLSConfig(s.resourceProxyTLSConfig),
 		)
 		if err != nil {

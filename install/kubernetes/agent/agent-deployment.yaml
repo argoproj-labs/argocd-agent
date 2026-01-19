@@ -45,13 +45,13 @@ spec:
                 name: argocd-agent-params
                 key: agent.log.resource-proxy-level
                 optional: true
-          - name: ARGOCD_AGENT_LOG_REDIS_PROXY_LEVEL
+          - name: ARGOCD_AGENT_REDIS_PROXY_LEVEL
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
                 key: agent.log.redis-proxy-level
                 optional: true
-          - name: ARGOCD_AGENT_LOG_GRPC_LOG_LEVEL
+          - name: ARGOCD_AGENT_GRPC_LOG_LEVEL
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
