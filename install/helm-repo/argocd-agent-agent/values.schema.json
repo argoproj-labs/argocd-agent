@@ -206,6 +206,20 @@
     "tlsClientKeyPath": { "type": "string", "description": "Path to client key inside container" },
     "tlsClientCertPath": { "type": "string", "description": "Path to client cert inside container" },
     "tlsRootCAPath": { "type": "string", "description": "Path to Root CA inside container" },
+    "tlsMinVersion": {
+      "type": "string",
+      "enum": ["", "tls1.1", "tls1.2", "tls1.3"],
+      "description": "Minimum TLS version to use (empty uses Go default)"
+    },
+    "tlsMaxVersion": {
+      "type": "string",
+      "enum": ["", "tls1.1", "tls1.2", "tls1.3"],
+      "description": "Maximum TLS version to use (empty uses highest available)"
+    },
+    "tlsCipherSuites": {
+      "type": "string",
+      "description": "Comma-separated list of TLS cipher suites (empty uses Go defaults)"
+    },
 
     "service": {
       "type": "object",

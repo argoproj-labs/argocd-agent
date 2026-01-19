@@ -279,6 +279,43 @@ func WithCompression(flag bool) RemoteOption {
 	}
 }
 
+// WithMinimumTLSVersion configures the minimum TLS version the client will accept.
+func WithMinimumTLSVersion(version string) RemoteOption {
+	return func(r *Remote) error {
+		v, err := tlsutil.TLSVersionFromName(version)
+		if err != nil {
+			return err
+		}
+		r.tlsConfig.MinVersion = v
+		return nil
+	}
+}
+
+// WithMaximumTLSVersion configures the maximum TLS version the client will use.
+func WithMaximumTLSVersion(version string) RemoteOption {
+	return func(r *Remote) error {
+		v, err := tlsutil.TLSVersionFromName(version)
+		if err != nil {
+			return err
+		}
+		r.tlsConfig.MaxVersion = v
+		return nil
+	}
+}
+
+// WithTLSCipherSuites configures the TLS cipher suites the client will use.
+// If an unknown cipher suite is specified, an error is returned.
+func WithTLSCipherSuites(cipherSuites []string) RemoteOption {
+	return func(r *Remote) error {
+		cipherIDs, err := tlsutil.ParseCipherSuites(cipherSuites)
+		if err != nil {
+			return err
+		}
+		r.tlsConfig.CipherSuites = cipherIDs
+		return nil
+	}
+}
+
 func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error) {
 	r := &Remote{
 		hostname: hostname,
@@ -298,6 +335,12 @@ func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error)
 			return nil, err
 		}
 	}
+
+	// Validate TLS configuration after all options have been applied
+	if err := tlsutil.ValidateTLSConfig(r.tlsConfig.MinVersion, r.tlsConfig.MaxVersion, r.tlsConfig.CipherSuites); err != nil {
+		return nil, err
+	}
+
 	return r, nil
 }
 

@@ -56,6 +56,9 @@ func NewAgentRunCommand() *cobra.Command {
 		tlsSecretName       string
 		tlsClientCrt        string
 		tlsClientKey        string
+		tlsMinVersion       string
+		tlsMaxVersion       string
+		tlsCipherSuites     []string
 		enableWebSocket     bool
 		metricsPort         int
 		healthzPort         int
@@ -184,6 +187,20 @@ func NewAgentRunCommand() *cobra.Command {
 				}
 			}
 
+			if tlsMinVersion != "" {
+				remoteOpts = append(remoteOpts, client.WithMinimumTLSVersion(tlsMinVersion))
+			}
+			if tlsMaxVersion != "" {
+				remoteOpts = append(remoteOpts, client.WithMaximumTLSVersion(tlsMaxVersion))
+			}
+			if len(tlsCipherSuites) == 1 && tlsCipherSuites[0] == "list" {
+				cmdutil.PrintAvailableCipherSuites()
+				return
+			}
+			if len(tlsCipherSuites) > 0 && (len(tlsCipherSuites) != 1 || tlsCipherSuites[0] != "") {
+				remoteOpts = append(remoteOpts, client.WithTLSCipherSuites(tlsCipherSuites))
+			}
+
 			remoteOpts = append(remoteOpts, client.WithWebSocket(enableWebSocket))
 			remoteOpts = append(remoteOpts, client.WithClientMode(types.AgentModeFromString(agentMode)))
 			remoteOpts = append(remoteOpts, client.WithKeepAlivePingInterval(keepAlivePingInterval))
@@ -281,6 +298,17 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&tlsClientKey, "tls-client-key",
 		env.StringWithDefault("ARGOCD_AGENT_TLS_CLIENT_KEY_PATH", nil, ""),
 		"Path to TLS client key")
+
+	command.Flags().StringVar(&tlsMinVersion, "tls-min-version",
+		env.StringWithDefault("ARGOCD_AGENT_TLS_MIN_VERSION", nil, ""),
+		"Minimum TLS version to use (tls1.1, tls1.2, tls1.3)")
+	command.Flags().StringVar(&tlsMaxVersion, "tls-max-version",
+		env.StringWithDefault("ARGOCD_AGENT_TLS_MAX_VERSION", nil, ""),
+		"Maximum TLS version to use (tls1.1, tls1.2, tls1.3)")
+	command.Flags().StringSliceVar(&tlsCipherSuites, "tls-ciphersuites",
+		env.StringSliceWithDefault("ARGOCD_AGENT_TLS_CIPHERSUITES", nil, []string{}),
+		"Comma-separated list of TLS cipher suites to use. Use 'list' to show available cipher suites and exit")
+
 	command.Flags().BoolVar(&enableWebSocket, "enable-websocket",
 		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_WEBSOCKET", false),
 		"Agent will rely on gRPC over WebSocket to stream events to the Principal")
