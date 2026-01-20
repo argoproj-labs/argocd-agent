@@ -130,18 +130,6 @@
       "type": "string",
       "description": "Log level (debug, info, warn, error)"
     },
-    "resourceProxyLogLevel": {
-      "type": "string",
-      "description": "Log level (debug, info, warn, error)"
-    },
-    "redisProxyLogLevel": {
-      "type": "string",
-      "description": "Log level (debug, info, warn, error)"
-    },
-    "grpcEventLogLevel": {
-      "type": "string",
-      "description": "Log level (debug, info, warn, error)"
-    },
     "logFormat": {
       "type": "string",
       "enum": ["text", "json"],

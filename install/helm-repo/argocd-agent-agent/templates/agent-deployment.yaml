@@ -43,24 +43,6 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.log.level
                 optional: true
-          - name: ARGOCD_AGENT_RESOURCE_PROXY_LOG_LEVEL
-            valueFrom:
-              configMapKeyRef:
-                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
-                key: agent.log.resource-proxy-level
-                optional: true
-          - name: ARGOCD_AGENT_REDIS_PROXY_LEVEL
-            valueFrom:
-              configMapKeyRef:
-                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
-                key: agent.log.redis-proxy-level
-                optional: true
-          - name: ARGOCD_AGENT_GRPC_LOG_LEVEL
-            valueFrom:
-              configMapKeyRef:
-                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
-                key: agent.log.grpc-level
-                optional: true
           - name: ARGOCD_AGENT_NAMESPACE
             valueFrom:
               configMapKeyRef:

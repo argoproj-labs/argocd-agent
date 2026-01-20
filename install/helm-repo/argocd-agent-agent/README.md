@@ -33,7 +33,6 @@ Kubernetes: `>=1.24.0-0`
 | enableCompression | bool | `false` | Whether to enable gRPC compression. |
 | enableResourceProxy | bool | `true` | Whether to enable resource proxy. |
 | enableWebSocket | bool | `false` | Whether to enable WebSocket connections. |
-| grpcEventLogLevel | string | `"info"` | Log level for grpc events |
 | healthzPort | string | `"8002"` | Healthz server port exposed by the agent. |
 | image.pullPolicy | string | `"Always"` | Image pull policy for the agent container. |
 | image.repository | string | `"ghcr.io/argoproj-labs/argocd-agent/argocd-agent"` | Container image repository for the agent. |
@@ -60,10 +59,8 @@ Kubernetes: `>=1.24.0-0`
 | probes.readiness.periodSeconds | int | `10` | Frequency of readiness probes. |
 | probes.readiness.timeoutSeconds | int | `2` | Timeout for readiness probe. |
 | redisAddress | string | `"argocd-redis:6379"` | Redis address used by the agent. |
-| redisProxyLogLevel | string | `"info"` | Log level for the redis proxy |
 | redisUsername | string | `""` | Redis username for authentication. |
 | replicaCount | int | `1` | Number of replicas for the agent Deployment. |
-| resourceProxyLogLevel | string | `"info"` | Log level for the resource proxy |
 | resources | object | `{"limits":{"cpu":"500m","memory":"512Mi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Resource requests and limits for the agent Pod. |
 | server | string | `"principal.server.address.com"` | Principal server address (hostname or host:port). |
 | serverPort | string | `"443"` | Principal server port. |
