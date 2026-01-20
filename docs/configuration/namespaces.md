@@ -11,7 +11,7 @@ argocd-agent uses a "namespace per agent" model on the control plane cluster. Ea
 - **Principal's namespace** (`--namespace`): The namespace where the principal runs and reads its configuration (typically `argocd`)
 - **Agent namespaces** (`--allowed-namespaces`): The namespaces where the principal creates and manages Applications for each agent
 
-For example, if an agent named `production-cluster` connects:
+For example, if an agent named `agent-prod` connects:
 
 - Applications targeting that agent are stored in namespace `production-cluster` on the control plane
 - The agent syncs these Applications to its local cluster
