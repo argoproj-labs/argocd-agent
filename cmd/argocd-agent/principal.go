@@ -48,7 +48,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 	var (
 		listenHost                string
 		listenPort                int
-		logLevel                  string
+		logLevels                 []string
 		logFormat                 string
 		metricsPort               int
 		namespace                 string
@@ -97,11 +97,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 		// OpenTelemetry configuration
 		otlpAddress  string
 		otlpInsecure bool
-
-		// Log levels for subsystems
-		logLevelRedisProxy    string
-		logLevelResourceProxy string
-		logLevelGrpcEvent     string
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -136,30 +131,31 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			opts := []principal.ServerOption{}
-			if logLevel != "" {
-				lvl, err := cmdutil.StringToLoglevel(logLevel)
-				if err != nil {
-					cmdutil.Fatal("invalid log level: %s. Available levels are: %s", logLevel, cmdutil.AvailableLogLevels())
-				}
-				logrus.Printf("Setting loglevel to %s", logLevel)
-				logrus.SetLevel(lvl)
-			}
 			if formatter, err := cmdutil.LogFormatter(logFormat); err != nil {
 				cmdutil.Fatal("%s", err.Error())
 			} else {
 				logrus.SetFormatter(formatter)
 			}
 
+			subLoggers := cmdutil.SubSystemLoggers{
+				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
+				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
+				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
+			}
+
+			if len(logLevels) == 0 {
+				logLevels = append(logLevels, "info")
+			}
+			if len(logLevels) > 0 {
+				cmdutil.ParseLogLevels(logLevels, &subLoggers)
+			}
+
+			opts = append(opts, principal.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
+
 			kubeConfig, err := cmdutil.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
 			if err != nil {
 				cmdutil.Fatal("Could not load Kubernetes config: %v", err)
 			}
-
-			redisProxyLogger := cmdutil.CreateLogger(logLevelRedisProxy, logFormat)
-			resourceProxyLogger := cmdutil.CreateLogger(logLevelResourceProxy, logFormat)
-			grpcEventLogger := cmdutil.CreateLogger(logLevelGrpcEvent, logFormat)
-
-			opts = append(opts, principal.WithSubsystemLoggers(redisProxyLogger, resourceProxyLogger, grpcEventLogger))
 
 			opts = append(opts, principal.WithListenerAddress(listenHost))
 			opts = append(opts, principal.WithListenerPort(listenPort))
@@ -345,8 +341,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.NumWithDefault("ARGOCD_PRINCIPAL_LISTEN_PORT", cmdutil.ValidPort, 8443),
 		"Port the gRPC server will listen on")
 
-	command.Flags().StringVar(&logLevel, "log-level",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_LEVEL", nil, logrus.InfoLevel.String()),
+	command.Flags().StringSliceVar(&logLevels, "log-level",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_LOG_LEVEL", nil, []string{"info"}),
 		"The log level to use")
 	command.Flags().StringVar(&logFormat, "log-format",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),
@@ -474,18 +470,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_OTLP_INSECURE", false),
 		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
-
-	command.Flags().StringVar(&logLevelResourceProxy, "resource-proxy-log-level",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_LOG_LEVEL", nil, "info"),
-		"The log level of the resource proxy")
-
-	command.Flags().StringVar(&logLevelRedisProxy, "redis-proxy-log-level",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_LOG_LEVEL", nil, "info"),
-		"The log level of the redis proxy")
-
-	command.Flags().StringVar(&logLevelGrpcEvent, "grpc-event-log-level",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_GRPC_LOG_LEVEL", nil, "info"),
-		"The log level for grpc events")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

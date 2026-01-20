@@ -508,7 +508,7 @@ func WithInsecurePlaintext() ServerOption {
 	}
 }
 
-func WithSubsystemLoggers(redisProxy, resourceProxy, grpcEvent *logrus.Logger) ServerOption {
+func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) ServerOption {
 	return func(o *Server) error {
 		if redisProxy != nil {
 			o.options.redisProxyLogger = logging.New(redisProxy)

@@ -175,6 +175,18 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		}
 	}
 
+	if a.resourceProxyLogger == nil {
+		a.resourceProxyLogger = logging.GetDefaultLogger()
+	}
+
+	if a.redisProxyLogger == nil {
+		a.redisProxyLogger = logging.GetDefaultLogger()
+	}
+
+	if a.grpcEventLogger == nil {
+		a.grpcEventLogger = logging.GetDefaultLogger()
+	}
+
 	if a.remote == nil {
 		return nil, fmt.Errorf("remote not defined")
 	}
