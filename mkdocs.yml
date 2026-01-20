@@ -50,6 +50,7 @@ nav:
     - Overview: configuration/index.md
     - Authentication: configuration/authentication.md
     - TLS & Certificates: configuration/tls-certificates.md
+    - Namespaces: configuration/namespaces.md
     - Networking: configuration/networking.md
     - Observability: configuration/observability.md
     - Reference:
