@@ -40,6 +40,18 @@ data:
   # private key.
   # Default: ""
   agent.tls.client.key-path: ""
+  # agent.tls.min-version: Minimum TLS version to use when connecting to the principal.
+  # Valid values: tls1.1, tls1.2, tls1.3
+  # Default: "" (use Go default)
+  agent.tls.min-version: ""
+  # agent.tls.max-version: Maximum TLS version to use when connecting to the principal.
+  # Valid values: tls1.1, tls1.2, tls1.3
+  # Default: "" (use highest available)
+  agent.tls.max-version: ""
+  # agent.tls.ciphersuites: Comma-separated list of TLS cipher suites.
+  # Run 'argocd-agent agent --tls-ciphersuites=list' to see available suites.
+  # Default: "" (use Go defaults)
+  agent.tls.ciphersuites: ""
   # agent.log.level: The log level the agent should use. Valid values are
   # trace, debug, info, warn and error.
   # Default: "info"

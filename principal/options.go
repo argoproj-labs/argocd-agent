@@ -37,25 +37,17 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// supportedTLSVersion is a list of TLS versions we support
-var supportedTLSVersion map[string]int = map[string]int{
-	"tls1.1": tls.VersionTLS11,
-	"tls1.2": tls.VersionTLS12,
-	"tls1.3": tls.VersionTLS13,
-}
-
 type ServerOptions struct {
-	serverName  string
-	port        int
-	address     string
-	tlsCertPath string
-	tlsKeyPath  string
-	tlsCert     *x509.Certificate
-	tlsKey      crypto.PrivateKey
-	// tlsCiphers is not currently read
-	tlsCiphers *tls.CipherSuite
-	// tlsMinVersion is not currently read
-	tlsMinVersion int
+	serverName    string
+	port          int
+	address       string
+	tlsCertPath   string
+	tlsKeyPath    string
+	tlsCert       *x509.Certificate
+	tlsKey        crypto.PrivateKey
+	tlsCiphers    []uint16
+	tlsMinVersion uint16
+	tlsMaxVersion uint16
 	gracePeriod   time.Duration
 	namespaces    []string
 	signingKey    crypto.PrivateKey
@@ -314,17 +306,16 @@ func WithGeneratedTLS(serverName string) ServerOption {
 	}
 }
 
-// WithTLSCipherSuite configures the TLS cipher suite to be used by the server.
+// WithTLSCipherSuites configures the TLS cipher suites to be used by the server.
 // If an unknown cipher suite is specified, an error is returned.
-func WithTLSCipherSuite(cipherSuite string) ServerOption {
+func WithTLSCipherSuites(cipherSuites []string) ServerOption {
 	return func(o *Server) error {
-		for _, cs := range tls.CipherSuites() {
-			if cs.Name == cipherSuite {
-				o.options.tlsCiphers = cs
-				return nil
-			}
+		cipherIDs, err := tlsutil.ParseCipherSuites(cipherSuites)
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("no such cipher suite: %s", cipherSuite)
+		o.options.tlsCiphers = cipherIDs
+		return nil
 	}
 }
 
@@ -332,11 +323,24 @@ func WithTLSCipherSuite(cipherSuite string) ServerOption {
 // the server.
 func WithMinimumTLSVersion(version string) ServerOption {
 	return func(o *Server) error {
-		v, ok := supportedTLSVersion[version]
-		if !ok {
-			return fmt.Errorf("TLS version %s is not supported", version)
+		v, err := tlsutil.TLSVersionFromName(version)
+		if err != nil {
+			return err
 		}
 		o.options.tlsMinVersion = v
+		return nil
+	}
+}
+
+// WithMaximumTLSVersion configures the maximum TLS version to be accepted by
+// the server.
+func WithMaximumTLSVersion(version string) ServerOption {
+	return func(o *Server) error {
+		v, err := tlsutil.TLSVersionFromName(version)
+		if err != nil {
+			return err
+		}
+		o.options.tlsMaxVersion = v
 		return nil
 	}
 }

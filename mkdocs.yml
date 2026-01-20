@@ -47,12 +47,15 @@ nav:
     - Accessing live resources on workload clusters: user-guide/live-resources.md
     - Migration from classical multi-cluster Argo CD: user-guide/migration.md
   - Configuration:
-    - Principal: 
-        - Configuration parameters: configuration/principal/configuration.md
-        - PKI: configuration/principal/pki-certificates.md
-    - Agent:
-        - Configuration parameters: configuration/agent/configuration.md
-        - PKI: configuration/agent/pki-certificates.md
+    - Overview: configuration/index.md
+    - Authentication: configuration/authentication.md
+    - TLS & Certificates: configuration/tls-certificates.md
+    - Networking: configuration/networking.md
+    - Observability: configuration/observability.md
+    - Reference:
+        - Overview: configuration/reference/index.md
+        - Principal: configuration/reference/principal.md
+        - Agent: configuration/reference/agent.md
   - Operations:
     - Metrics: operations/metrics.md
     - Profiling: operations/profiling.md

@@ -81,6 +81,24 @@ spec:
                 name: argocd-agent-params
                 key: agent.tls.root-ca-path
                 optional: true
+          - name: ARGOCD_AGENT_TLS_MIN_VERSION
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.tls.min-version
+                optional: true
+          - name: ARGOCD_AGENT_TLS_MAX_VERSION
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.tls.max-version
+                optional: true
+          - name: ARGOCD_AGENT_TLS_CIPHERSUITES
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.tls.ciphersuites
+                optional: true
           - name: ARGOCD_AGENT_MODE
             valueFrom:
               configMapKeyRef:
