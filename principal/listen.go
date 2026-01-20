@@ -157,8 +157,13 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 			unaryRequestLogger(),   // logging
 			s.unaryAuthInterceptor, // auth
 		),
-		// TLS credentials
-		grpc.Creds(credentials.NewTLS(s.tlsConfig)),
+	}
+
+	// Add TLS credentials unless running in plaintext mode (e.g., behind Istio)
+	if s.tlsConfig != nil {
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(s.tlsConfig)))
+	} else {
+		log().Warn("gRPC server running without TLS - ensure service mesh provides transport security")
 	}
 
 	if s.keepAliveMinimumInterval != 0 {
@@ -186,7 +191,12 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 		}
 
 		go func() {
-			err = downgradingServer.ServeTLS(s.listener.l, s.options.tlsCertPath, s.options.tlsKeyPath)
+			// Use plaintext HTTP if TLS is disabled (e.g., behind Istio)
+			if s.tlsConfig != nil {
+				err = downgradingServer.ServeTLS(s.listener.l, s.options.tlsCertPath, s.options.tlsKeyPath)
+			} else {
+				err = downgradingServer.Serve(s.listener.l)
+			}
 			errch <- err
 		}()
 	} else {

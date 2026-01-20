@@ -213,6 +213,11 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		}
 	}
 
+	// Validate TLS options after all options have been applied
+	if err := tlsutil.ValidateTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers); err != nil {
+		return nil, err
+	}
+
 	s.handlersOnConnect = []handlersOnConnect{
 		s.handleResyncOnConnect,
 	}
@@ -833,8 +838,15 @@ func (s *Server) Shutdown() error {
 
 // loadTLSConfig will configure and return a tls.Config object that can be
 // used by the server's listener. It will use options set in the server for
-// configuring the returned object.
+// configuring the returned object. Returns nil if insecurePlaintext mode is
+// enabled (e.g., when running behind Istio).
 func (s *Server) loadTLSConfig() (*tls.Config, error) {
+	// Skip TLS configuration when running in plaintext mode (e.g., behind Istio)
+	if s.options.insecurePlaintext {
+		log().Warn("TLS disabled - running in plaintext mode for service mesh integration")
+		return nil, nil
+	}
+
 	var cert tls.Certificate
 	var err error
 
@@ -849,6 +861,9 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
+		MinVersion:   s.options.tlsMinVersion,
+		MaxVersion:   s.options.tlsMaxVersion,
+		CipherSuites: s.options.tlsCiphers,
 	}
 
 	// If the server is configured to require client certificates, set up the

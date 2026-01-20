@@ -45,6 +45,7 @@ func NewAgentRunCommand() *cobra.Command {
 		logLevel            string
 		logFormat           string
 		insecure            bool
+		insecurePlaintext   bool
 		rootCASecretName    string
 		rootCAPath          string
 		kubeConfig          string
@@ -55,6 +56,9 @@ func NewAgentRunCommand() *cobra.Command {
 		tlsSecretName       string
 		tlsClientCrt        string
 		tlsClientKey        string
+		tlsMinVersion       string
+		tlsMaxVersion       string
+		tlsCipherSuites     []string
 		enableWebSocket     bool
 		metricsPort         int
 		healthzPort         int
@@ -147,33 +151,54 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 			var remote *client.Remote
 
-			// The certificate pool for verifying TLS certificates can be
-			// loaded from a file if requested on the command line.
-			// Otherwise the pool will be loaded from a secret, unless the
-			// insecure option was given - in which case, certificates will
-			// not be verified.
-			if insecure {
-				logrus.Warn("INSECURE: Not verifying remote TLS certificate")
-				remoteOpts = append(remoteOpts, client.WithInsecureSkipTLSVerify())
-			} else if rootCAPath != "" {
-				logrus.Infof("Loading root CA certificate from file %s", rootCAPath)
-				remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromFile(rootCAPath))
+			// Configure TLS or plaintext mode
+			if insecurePlaintext {
+				// Plaintext mode - skip all TLS configuration (e.g., when behind Istio)
+				logrus.Warn("INSECURE: Connecting without TLS - ensure Istio or similar service mesh provides mTLS")
+				remoteOpts = append(remoteOpts, client.WithInsecurePlaintext())
 			} else {
-				logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCASecretName)
-				remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, namespace, rootCASecretName, ""))
+				// The certificate pool for verifying TLS certificates can be
+				// loaded from a file if requested on the command line.
+				// Otherwise the pool will be loaded from a secret, unless the
+				// insecure option was given - in which case, certificates will
+				// not be verified.
+				if insecure {
+					logrus.Warn("INSECURE: Not verifying remote TLS certificate")
+					remoteOpts = append(remoteOpts, client.WithInsecureSkipTLSVerify())
+				} else if rootCAPath != "" {
+					logrus.Infof("Loading root CA certificate from file %s", rootCAPath)
+					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromFile(rootCAPath))
+				} else {
+					logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCASecretName)
+					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, namespace, rootCASecretName, ""))
+				}
+
+				// If both a certificate and a key are specified on the command
+				// line, the agent will load the client cert from these files.
+				// Otherwise, it will try and load the TLS keypair from a secret.
+				if tlsClientCrt != "" && tlsClientKey != "" {
+					logrus.Infof("Loading client TLS configuration from files cert=%s and key=%s", tlsClientCrt, tlsClientKey)
+					remoteOpts = append(remoteOpts, client.WithTLSClientCertFromFile(tlsClientCrt, tlsClientKey))
+				} else if (tlsClientCrt != "" && tlsClientKey == "") || (tlsClientCrt == "" && tlsClientKey != "") {
+					cmdutil.Fatal("Both --tls-client-cert and --tls-client-key have to be given")
+				} else {
+					logrus.Infof("Loading client TLS certificate from secret %s/%s", namespace, tlsSecretName)
+					remoteOpts = append(remoteOpts, client.WithTLSClientCertFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
+				}
 			}
 
-			// If both a certificate and a key are specified on the command
-			// line, the agent will load the client cert from these files.
-			// Otherwise, it will try and load the TLS keypair from a secret.
-			if tlsClientCrt != "" && tlsClientKey != "" {
-				logrus.Infof("Loading client TLS configuration from files cert=%s and key=%s", tlsClientCrt, tlsClientKey)
-				remoteOpts = append(remoteOpts, client.WithTLSClientCertFromFile(tlsClientCrt, tlsClientKey))
-			} else if (tlsClientCrt != "" && tlsClientKey == "") || (tlsClientCrt == "" && tlsClientKey != "") {
-				cmdutil.Fatal("Both --tls-client-cert and --tls-client-key have to be given")
-			} else {
-				logrus.Infof("Loading client TLS certificate from secret %s/%s", namespace, tlsSecretName)
-				remoteOpts = append(remoteOpts, client.WithTLSClientCertFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
+			if tlsMinVersion != "" {
+				remoteOpts = append(remoteOpts, client.WithMinimumTLSVersion(tlsMinVersion))
+			}
+			if tlsMaxVersion != "" {
+				remoteOpts = append(remoteOpts, client.WithMaximumTLSVersion(tlsMaxVersion))
+			}
+			if len(tlsCipherSuites) == 1 && tlsCipherSuites[0] == "list" {
+				cmdutil.PrintAvailableCipherSuites()
+				return
+			}
+			if len(tlsCipherSuites) > 0 && (len(tlsCipherSuites) != 1 || tlsCipherSuites[0] != "") {
+				remoteOpts = append(remoteOpts, client.WithTLSCipherSuites(tlsCipherSuites))
 			}
 
 			remoteOpts = append(remoteOpts, client.WithWebSocket(enableWebSocket))
@@ -246,6 +271,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&insecure, "insecure-tls",
 		env.BoolWithDefault("ARGOCD_AGENT_TLS_INSECURE", false),
 		"INSECURE: Do not verify remote TLS certificate")
+	command.Flags().BoolVar(&insecurePlaintext, "insecure-plaintext",
+		env.BoolWithDefault("ARGOCD_AGENT_INSECURE_PLAINTEXT", false),
+		"INSECURE: Connect without TLS (use with Istio or similar service mesh)")
 	command.Flags().StringVarP(&namespace, "namespace", "n",
 		env.StringWithDefault("ARGOCD_AGENT_NAMESPACE", nil, "argocd"),
 		"Namespace to manage applications in")
@@ -270,6 +298,17 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&tlsClientKey, "tls-client-key",
 		env.StringWithDefault("ARGOCD_AGENT_TLS_CLIENT_KEY_PATH", nil, ""),
 		"Path to TLS client key")
+
+	command.Flags().StringVar(&tlsMinVersion, "tls-min-version",
+		env.StringWithDefault("ARGOCD_AGENT_TLS_MIN_VERSION", nil, ""),
+		"Minimum TLS version to use (tls1.1, tls1.2, tls1.3)")
+	command.Flags().StringVar(&tlsMaxVersion, "tls-max-version",
+		env.StringWithDefault("ARGOCD_AGENT_TLS_MAX_VERSION", nil, ""),
+		"Maximum TLS version to use (tls1.1, tls1.2, tls1.3)")
+	command.Flags().StringSliceVar(&tlsCipherSuites, "tls-ciphersuites",
+		env.StringSliceWithDefault("ARGOCD_AGENT_TLS_CIPHERSUITES", nil, []string{}),
+		"Comma-separated list of TLS cipher suites to use. Use 'list' to show available cipher suites and exit")
+
 	command.Flags().BoolVar(&enableWebSocket, "enable-websocket",
 		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_WEBSOCKET", false),
 		"Agent will rely on gRPC over WebSocket to stream events to the Principal")
@@ -327,6 +366,9 @@ func parseCreds(credStr string) (string, auth.Credentials, error) {
 		return "userpass", creds, nil
 	case "mtls":
 		return "mtls", auth.Credentials{}, nil
+	case "header":
+		// Header-based auth doesn't require credentials - the sidecar/proxy injects the header
+		return "header", auth.Credentials{}, nil
 	default:
 		return "", nil, fmt.Errorf("unknown auth method: %s", p[0])
 	}

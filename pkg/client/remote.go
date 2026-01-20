@@ -37,6 +37,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
@@ -84,6 +85,9 @@ type Remote struct {
 	timeouts          timeouts
 	enableWebSocket   bool
 	enableCompression bool
+	// insecurePlaintext disables TLS for the connection. Use when Istio sidecar
+	// handles mTLS termination.
+	insecurePlaintext bool
 
 	// Time interval for agent to principal ping
 	keepAlivePingInterval time.Duration
@@ -224,6 +228,19 @@ func WithInsecureSkipTLSVerify() RemoteOption {
 	}
 }
 
+// WithInsecurePlaintext disables TLS for the connection. This should only be
+// used when running behind a service mesh (e.g., Istio) that handles mTLS
+// termination at the sidecar level.
+//
+// INSECURE: Do not use this without a service mesh providing transport security.
+func WithInsecurePlaintext() RemoteOption {
+	return func(r *Remote) error {
+		log().Warn("INSECURE: Agent will connect without TLS - ensure Istio or similar service mesh provides mTLS")
+		r.insecurePlaintext = true
+		return nil
+	}
+}
+
 // The agent will rely on gRPC over WebSocket for bi-directional streaming. This option could be enabled
 // when there is an intermediate component that is HTTP/2 incompatible and downgrades the incoming request to HTTP/1.1
 func WithWebSocket(enableWebSocket bool) RemoteOption {
@@ -262,6 +279,43 @@ func WithCompression(flag bool) RemoteOption {
 	}
 }
 
+// WithMinimumTLSVersion configures the minimum TLS version the client will accept.
+func WithMinimumTLSVersion(version string) RemoteOption {
+	return func(r *Remote) error {
+		v, err := tlsutil.TLSVersionFromName(version)
+		if err != nil {
+			return err
+		}
+		r.tlsConfig.MinVersion = v
+		return nil
+	}
+}
+
+// WithMaximumTLSVersion configures the maximum TLS version the client will use.
+func WithMaximumTLSVersion(version string) RemoteOption {
+	return func(r *Remote) error {
+		v, err := tlsutil.TLSVersionFromName(version)
+		if err != nil {
+			return err
+		}
+		r.tlsConfig.MaxVersion = v
+		return nil
+	}
+}
+
+// WithTLSCipherSuites configures the TLS cipher suites the client will use.
+// If an unknown cipher suite is specified, an error is returned.
+func WithTLSCipherSuites(cipherSuites []string) RemoteOption {
+	return func(r *Remote) error {
+		cipherIDs, err := tlsutil.ParseCipherSuites(cipherSuites)
+		if err != nil {
+			return err
+		}
+		r.tlsConfig.CipherSuites = cipherIDs
+		return nil
+	}
+}
+
 func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error) {
 	r := &Remote{
 		hostname: hostname,
@@ -281,6 +335,12 @@ func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error)
 			return nil, err
 		}
 	}
+
+	// Validate TLS configuration after all options have been applied
+	if err := tlsutil.ValidateTLSConfig(r.tlsConfig.MinVersion, r.tlsConfig.MaxVersion, r.tlsConfig.CipherSuites); err != nil {
+		return nil, err
+	}
+
 	return r, nil
 }
 
@@ -347,7 +407,6 @@ func connectBackoff() wait.Backoff {
 // When Connect returns nil, the connection was successfully established and an
 // authentication token has been received.
 func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
-	creds := credentials.NewTLS(r.tlsConfig)
 	cparams := grpc.ConnectParams{
 		MinConnectTimeout: 365 * 24 * time.Hour,
 	}
@@ -376,12 +435,22 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			grpchttp1client.DialOpts(opts...),
 		}
 
-		conn, err = grpchttp1client.ConnectViaProxy(ctx, r.Addr(), r.tlsConfig, grpcHTTP1Opts...)
+		// Use nil TLS config for plaintext mode (WebSocket over HTTP)
+		var tlsCfg *tls.Config
+		if !r.insecurePlaintext {
+			tlsCfg = r.tlsConfig
+		}
+		conn, err = grpchttp1client.ConnectViaProxy(ctx, r.Addr(), tlsCfg, grpcHTTP1Opts...)
 		if err != nil {
 			return err
 		}
 	} else {
-		opts = append(opts, grpc.WithTransportCredentials(creds))
+		// Use insecure credentials for plaintext mode (e.g., behind Istio)
+		if r.insecurePlaintext {
+			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		} else {
+			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(r.tlsConfig)))
+		}
 
 		if r.keepAlivePingInterval != 0 {
 			log().Debugf("Agent ping to principal is enabled, agent will send a ping event after every %s.", r.keepAlivePingInterval)
