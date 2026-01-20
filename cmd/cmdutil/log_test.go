@@ -2,6 +2,7 @@ package cmdutil
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -112,6 +113,10 @@ func Test_parseLogLevels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Reset logrus state for subsequent tests
+			logrus.SetLevel(logrus.InfoLevel)
+			logrus.SetOutput(os.Stdout)
+
 			ss := SubSystemLoggers{
 				ResourceProxyLogger: logrus.New(),
 				RedisProxyLogger:    logrus.New(),
