@@ -138,9 +138,9 @@ func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) A
 // namespaces if they don't exist when syncing applications. This is used in
 // combination with destination-based mapping to ensure that target namespaces
 // exist before creating applications.
-func WithCreateNamespaceIfNotExist(enabled bool) AgentOption {
+func WithCreateNamespace(enabled bool) AgentOption {
 	return func(o *Agent) error {
-		o.createNamespaceIfNotExist = enabled
+		o.createNamespace = enabled
 		return nil
 	}
 }
