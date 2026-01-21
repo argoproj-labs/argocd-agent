@@ -74,16 +74,22 @@ func (suite *DeleteTestSuite) Test_CascadeDeleteOnManagedAgent() {
 	}, 60*time.Second, 1*time.Second)
 
 	t.Log("Add a finalizer to the Deployment to keep it from being deleted")
-	depl.Finalizers = append(depl.Finalizers, "test-e2e/my-test-finalizer")
-	err = suite.ManagedAgentClient.Update(suite.Ctx, depl, metav1.UpdateOptions{})
+
+	err = suite.ManagedAgentClient.EnsureDeploymentUpdate(suite.Ctx, fixture.ToNamespacedName(depl), func(d *appsv1.Deployment) error {
+		d.Finalizers = append(d.Finalizers, "test-e2e/my-test-finalizer")
+		return nil
+	}, metav1.UpdateOptions{})
 	requires.NoError(err)
 
 	// Ensure that finalizer is removed from Deployment if the test ends prematurely
 	defer func() {
 		err = suite.ManagedAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(depl), depl, metav1.GetOptions{})
 		if err == nil { // If the Deployment still exists
-			depl.Finalizers = nil // Remove the finalizer
-			err = suite.ManagedAgentClient.Update(suite.Ctx, depl, metav1.UpdateOptions{})
+
+			err = suite.ManagedAgentClient.EnsureDeploymentUpdate(suite.Ctx, fixture.ToNamespacedName(depl), func(d *appsv1.Deployment) error {
+				d.Finalizers = nil // Remove the finalizer
+				return nil
+			}, metav1.UpdateOptions{})
 			requires.NoError(err)
 		}
 	}()
@@ -114,8 +120,10 @@ func (suite *DeleteTestSuite) Test_CascadeDeleteOnManagedAgent() {
 	err = suite.ManagedAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(depl), depl, metav1.GetOptions{})
 	requires.NoError(err)
 
-	depl.Finalizers = nil
-	err = suite.ManagedAgentClient.Update(suite.Ctx, depl, metav1.UpdateOptions{})
+	err = suite.ManagedAgentClient.EnsureDeploymentUpdate(suite.Ctx, fixture.ToNamespacedName(depl), func(d *appsv1.Deployment) error {
+		d.Finalizers = nil // Remove the finalizer
+		return nil
+	}, metav1.UpdateOptions{})
 	requires.NoError(err)
 
 	t.Log("Verify managed agent application is eventually deleted")

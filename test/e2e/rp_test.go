@@ -92,8 +92,11 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	requires.NoError(err)
 	requires.Equal("argocd", depl.Namespace)
 	requires.Equal("argocd-repo-server", depl.Name)
-	depl.Labels["app.kubernetes.io/instance"] = "argocd-repo-server"
-	err = suite.ManagedAgentClient.Update(context.TODO(), depl, v1.UpdateOptions{})
+
+	err = suite.ManagedAgentClient.EnsureDeploymentUpdate(context.TODO(), fixture.ToNamespacedName(depl), func(d *appsv1.Deployment) error {
+		d.Labels["app.kubernetes.io/instance"] = "argocd-repo-server"
+		return nil
+	}, v1.UpdateOptions{})
 	requires.NoError(err)
 
 	// Managed agents should respond swiftly
@@ -465,8 +468,11 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	requires.NoError(err)
 	requires.Equal("argocd", depl.Namespace)
 	requires.Equal("argocd-repo-server", depl.Name)
-	depl.Labels["app.kubernetes.io/instance"] = "argocd-repo-server"
-	err = suite.ManagedAgentClient.Update(context.TODO(), depl, v1.UpdateOptions{})
+
+	err = suite.ManagedAgentClient.EnsureDeploymentUpdate(context.TODO(), fixture.ToNamespacedName(depl), func(d *appsv1.Deployment) error {
+		d.Labels["app.kubernetes.io/instance"] = "argocd-repo-server"
+		return nil
+	}, v1.UpdateOptions{})
 	requires.NoError(err)
 
 	// Test GET request for status subresource

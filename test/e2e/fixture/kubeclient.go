@@ -370,3 +370,26 @@ func (c KubeClient) EnsureRepositoryUpdate(ctx context.Context, key types.Namesp
 		}
 	}
 }
+
+// EnsureDeploymentUpdate ensures the kubernetes deployment with the given key is
+// updated by retrying if there is a conflicting change.
+func (c KubeClient) EnsureDeploymentUpdate(ctx context.Context, key types.NamespacedName, modify func(*apps.Deployment) error, options metav1.UpdateOptions) error {
+	var err error
+	for {
+		var deployment apps.Deployment
+		err = c.Get(ctx, key, &deployment, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		err = modify(&deployment)
+		if err != nil {
+			return err
+		}
+
+		err = c.Update(ctx, &deployment, options)
+		if !errors.IsConflict(err) {
+			return err
+		}
+	}
+}
