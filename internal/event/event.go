@@ -757,6 +757,8 @@ type EventWriter struct {
 }
 
 type eventMessage struct {
+	// when this lock is owned, never attempt to THEN acquire `eventWriter.mu`, as this will lead to a deadlock.
+	// If you require `eventWriter.mu`, you must acquire that lock FIRST, before attempting to acquiring `mu` (to avoid deadlock)
 	mu sync.RWMutex
 
 	// latest event for a resource

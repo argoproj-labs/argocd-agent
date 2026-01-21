@@ -597,6 +597,10 @@ func safeSendCloudEvent(ctx context.Context, ch chan *cloudevents.Event, ev *clo
 		if r := recover(); r != nil {
 			// Channel was closed by StopTracking() while the response was in-flight.
 			// Dropping the response is fine; crashing the principal is not.
+			log().WithFields(logrus.Fields{
+				"event_id": event.EventID(ev),
+				"panic":    r,
+			}).Warn("recovered from panic while sending cloud event, likely due to channel being closed")
 			err = nil
 		}
 	}()

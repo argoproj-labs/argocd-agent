@@ -61,11 +61,20 @@ type httpWriter struct {
 }
 
 type logClient struct {
+	mu           sync.Mutex
 	ctx          context.Context
 	cancelFn     context.CancelFunc
 	logCtx       *logrus.Entry
 	requestID    string
 	terminateErr error // returned as stream status when set
+}
+
+func (c *logClient) setTerminateErr(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.terminateErr == nil {
+		c.terminateErr = err
+	}
 }
 
 func (s *Server) newLogClient(ctx context.Context) *logClient {
@@ -147,7 +156,7 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 	return nil
 }
 
-// StreamLogs receives log data from agent and forwards to HTTP writer
+// StreamLogs receives log data from agent
 func (s *Server) StreamLogs(stream logstreamapi.LogStreamService_StreamLogsServer) error {
 	c := s.newLogClient(stream.Context())
 	// One background pump goroutine per stream.
@@ -175,33 +184,52 @@ func (s *Server) StreamLogs(stream logstreamapi.LogStreamService_StreamLogsServe
 		}
 	}()
 
+	s.processLogStreamLoop(c, dataCh, errCh)
+
+	// Cleanup session
+	if c.requestID != "" {
+		s.finalizeSession(c.requestID)
+	}
+	c.mu.Lock()
+	terr := c.terminateErr
+	c.mu.Unlock()
+	if terr != nil {
+		return terr
+	}
+	resp := &logstreamapi.LogStreamResponse{RequestUuid: c.requestID, Status: http.StatusOK}
+	return stream.SendAndClose(resp)
+}
+
+// processLogStreamLoop processes log data from agent and forwards to HTTP writer
+// It also handles client detachment and timeout.
+func (s *Server) processLogStreamLoop(c *logClient, dataCh <-chan *logstreamapi.LogStreamData, errCh <-chan error) {
+	// Always unblock the recv pump on any return path.
+	defer c.cancelFn()
 	for {
 		select {
 		case <-c.ctx.Done():
 			// Ensure we terminate promptly when HTTP client detaches.
-			if c.terminateErr == nil {
-				c.terminateErr = status.Error(codes.Canceled, "client detached timeout")
-			}
-			goto done
+			c.setTerminateErr(status.Error(codes.Canceled, "client detached timeout"))
+			return
 		case err := <-errCh:
 			// io.EOF means the client finished sending (normal close on the agent side).
 			if err != nil && err != io.EOF {
 				// Prefer a consistent reason for the agent on cancellations.
-				if status.Code(err) == codes.Canceled && c.terminateErr == nil {
-					c.terminateErr = status.Error(codes.Canceled, "client detached timeout")
-				} else if c.terminateErr == nil {
-					c.terminateErr = err
+				if status.Code(err) == codes.Canceled {
+					c.setTerminateErr(status.Error(codes.Canceled, "client detached timeout"))
+				} else {
+					c.setTerminateErr(err)
 				}
 			}
-			goto done
+			return
 		case msg, ok := <-dataCh:
 			if !ok {
 				// Pump exited without delivering an error (likely due to ctx cancellation).
-				goto done
+				return
 			}
 			if msg == nil {
-				c.terminateErr = status.Error(codes.InvalidArgument, "invalid log message")
-				goto done
+				c.setTerminateErr(status.Error(codes.InvalidArgument, "invalid log message"))
+				return
 			}
 
 			// First message, capture request UUID and expose cancelFn for detach handler
@@ -214,7 +242,7 @@ func (s *Server) StreamLogs(stream logstreamapi.LogStreamService_StreamLogsServe
 				if sess, ok := s.sessions[c.requestID]; ok {
 					sess.cancelFn = func() {
 						// tag this stream as terminated due to client detach
-						c.terminateErr = status.Error(codes.Canceled, "client detached timeout")
+						c.setTerminateErr(status.Error(codes.Canceled, "client detached timeout"))
 						c.cancelFn()
 					}
 				}
@@ -224,24 +252,13 @@ func (s *Server) StreamLogs(stream logstreamapi.LogStreamService_StreamLogsServe
 			if err := s.processLogMessage(c, msg); err != nil {
 				// processLogMessage can return io.EOF or a terminal status
 				if err == io.EOF {
-					goto done
+					return
 				}
-				c.terminateErr = err
-				goto done
+				c.setTerminateErr(err)
+				return
 			}
 		}
 	}
-done:
-	// Cleanup session
-	if c.requestID != "" {
-		s.finalizeSession(c.requestID)
-	}
-
-	if c.terminateErr != nil {
-		return c.terminateErr
-	}
-	resp := &logstreamapi.LogStreamResponse{RequestUuid: c.requestID, Status: http.StatusOK}
-	return stream.SendAndClose(resp)
 }
 
 // safeFlush prevents process crash if ResponseWriter is gone.
