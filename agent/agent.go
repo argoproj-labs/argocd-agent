@@ -198,6 +198,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		a.grpcEventLogger = logging.GetDefaultLogger()
 	}
 
+	if a.createNamespaceIfNotExist && !a.destinationBasedMapping {
+		return nil, fmt.Errorf("cannot create namespaces if destination based mapping is disabled")
+	}
+
 	if a.remote == nil {
 		return nil, fmt.Errorf("remote not defined")
 	}
