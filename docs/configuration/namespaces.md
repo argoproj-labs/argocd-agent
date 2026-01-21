@@ -95,7 +95,7 @@ data:
 ```
 
 ```bash
-# Principal
+# Running the principal from the command line in a development setup
 argocd-agent principal --allowed-namespaces='*'
 ```
 
