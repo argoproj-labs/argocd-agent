@@ -1898,6 +1898,233 @@ func TestServer_updateAppCallback(t *testing.T) {
 	})
 }
 
+func TestServer_handleAppAgentChange(t *testing.T) {
+	tests := []struct {
+		name                    string
+		destinationBasedMapping bool
+		oldApp                  *v1alpha1.Application
+		newApp                  *v1alpha1.Application
+		expectedDeleteAgent     string
+		expectedDeleteEvent     bool
+		expectedAddAgent        string
+		shouldTrackApp          bool
+	}{
+		{
+			name:                    "destination changed - moves app from old to new agent",
+			destinationBasedMapping: true,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "new-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "old-agent",
+			expectedDeleteEvent: true,
+			expectedAddAgent:    "new-agent",
+			shouldTrackApp:      true,
+		},
+		{
+			name:                    "destination unchanged - no action taken",
+			destinationBasedMapping: true,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "same-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "same-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "",
+			expectedDeleteEvent: false,
+			expectedAddAgent:    "",
+			shouldTrackApp:      false,
+		},
+		{
+			name:                    "destination-based mapping disabled - no action taken",
+			destinationBasedMapping: false,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "new-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "",
+			expectedDeleteEvent: false,
+			expectedAddAgent:    "",
+			shouldTrackApp:      false,
+		},
+		{
+			name:                    "old agent empty - only adds to new agent",
+			destinationBasedMapping: true,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "new-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "",
+			expectedDeleteEvent: false,
+			expectedAddAgent:    "new-agent",
+			shouldTrackApp:      true,
+		},
+		{
+			name:                    "new agent empty - only removes from old agent",
+			destinationBasedMapping: true,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "",
+					},
+				},
+			},
+			expectedDeleteAgent: "old-agent",
+			expectedDeleteEvent: true,
+			expectedAddAgent:    "",
+			shouldTrackApp:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				ctx:                     context.Background(),
+				queues:                  queue.NewSendRecvQueues(),
+				events:                  event.NewEventSource("test"),
+				resources:               resources.NewAgentResources(),
+				appToAgent:              newConcurrentStringMap(),
+				destinationBasedMapping: tt.destinationBasedMapping,
+			}
+
+			// Create queues for agents involved
+			if tt.expectedDeleteAgent != "" {
+				s.queues.Create(tt.expectedDeleteAgent)
+			}
+			if tt.expectedAddAgent != "" {
+				s.queues.Create(tt.expectedAddAgent)
+			}
+
+			logCtx := logrus.WithField("test", "handleAppAgentChange")
+
+			// Execute the function under test
+			s.handleAppAgentChange(context.Background(), tt.oldApp, tt.newApp, logCtx)
+
+			// Verify delete event sent if expected
+			if tt.expectedDeleteEvent && tt.expectedDeleteAgent != "" {
+				q := s.queues.SendQ(tt.expectedDeleteAgent)
+				require.NotNil(t, q)
+				assert.Greater(t, q.Len(), 0, "Expected delete event in queue")
+
+				if q.Len() > 0 {
+					ev, shutdown := q.Get()
+					require.False(t, shutdown)
+					assert.Equal(t, event.Delete.String(), ev.Type())
+					q.Done(ev)
+				}
+			}
+
+			// Verify app tracking if expected
+			if tt.shouldTrackApp && tt.expectedAddAgent != "" {
+				trackedAgent := s.appToAgent.Get(tt.newApp.QualifiedName())
+				assert.Equal(t, tt.expectedAddAgent, trackedAgent, "App should be tracked to new agent")
+			}
+
+			// Verify app not tracked if not expected
+			if !tt.shouldTrackApp {
+				trackedAgent := s.appToAgent.Get(tt.newApp.QualifiedName())
+				assert.Empty(t, trackedAgent, "App should not be tracked")
+			}
+
+			// Verify resources added/removed
+			if tt.expectedDeleteAgent != "" {
+				resourceKey := resources.NewResourceKeyFromApp(tt.oldApp)
+				assert.NotContainsf(t, s.resources.Get(tt.expectedDeleteAgent).GetAll(), resourceKey, "Resource should be added to new agent")
+			}
+
+			if tt.expectedAddAgent != "" {
+				resourceKey := resources.NewResourceKeyFromApp(tt.newApp)
+				assert.Containsf(t, s.resources.Get(tt.expectedAddAgent).GetAll(), resourceKey, "Resource should be added to new agent")
+			}
+		})
+	}
+}
+
 func drainQueue(t *testing.T, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) {
 	for q.Len() > 0 {
 		ev, shutdown := q.Get()
