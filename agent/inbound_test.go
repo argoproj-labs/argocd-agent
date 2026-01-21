@@ -90,11 +90,11 @@ func Test_CreateApplication(t *testing.T) {
 	t.Run("Create application with destination based mapping", func(t *testing.T) {
 		defer func() {
 			a.destinationBasedMapping = false
-			a.createNamespaceIfNotExist = false
+			a.createNamespace = false
 		}()
 
 		a.destinationBasedMapping = true
-		a.createNamespaceIfNotExist = true
+		a.createNamespace = true
 
 		defer a.appManager.Unmanage(app.QualifiedName())
 		a.mode = types.AgentModeManaged

@@ -131,10 +131,10 @@ type Agent struct {
 	// - The agent watches for applications in all namespaces
 	destinationBasedMapping bool
 
-	// createNamespaceIfNotExist when true, the agent will create namespaces that
+	// createNamespace when true, the agent will create namespaces that
 	// don't exist before creating applications. This is used in combination with
 	// destination-based mapping.
-	createNamespaceIfNotExist bool
+	createNamespace bool
 }
 
 const defaultQueueName = "default"
@@ -198,7 +198,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		a.grpcEventLogger = logging.GetDefaultLogger()
 	}
 
-	if a.createNamespaceIfNotExist && !a.destinationBasedMapping {
+	if a.createNamespace && !a.destinationBasedMapping {
 		return nil, fmt.Errorf("cannot create namespaces if destination based mapping is disabled")
 	}
 
