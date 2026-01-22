@@ -61,6 +61,10 @@ type ApplicationManager struct {
 	manager.ObservedResources
 	// deletions tracks valid deletions from the source.
 	deletions *manager.DeletionTracker
+
+	// destinationBasedMapping enables destination-based mapping mode where
+	// applications are stored in their original namespace rather than the agent's namespace.
+	destinationBasedMapping bool
 }
 
 // ApplicationManagerOption is a callback function to set an option to the Application
@@ -92,6 +96,12 @@ func WithMode(mode manager.ManagerMode) ApplicationManagerOption {
 func WithDeletionTracker(d *manager.DeletionTracker) ApplicationManagerOption {
 	return func(m *ApplicationManager) {
 		m.deletions = d
+	}
+}
+
+func WithDestinationBasedMapping(enabled bool) ApplicationManagerOption {
+	return func(m *ApplicationManager) {
+		m.destinationBasedMapping = enabled
 	}
 }
 
@@ -186,7 +196,9 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	var updated *v1alpha1.Application
 	var err error
 
-	incoming.SetNamespace(m.namespace)
+	if !m.destinationBasedMapping {
+		incoming.SetNamespace(m.namespace)
+	}
 
 	if m.role != manager.ManagerRoleAgent || m.mode != manager.ManagerModeManaged {
 		return nil, fmt.Errorf("updatedManagedApp should be called on a managed agent, only")
@@ -284,7 +296,11 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 
 // CompareSourceUID checks for an existing app with the same name/namespace and compare its source UID with the incoming app.
 func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1alpha1.Application) (bool, bool, error) {
-	incoming.SetNamespace(m.namespace)
+	if !m.destinationBasedMapping {
+		incoming.SetNamespace(m.namespace)
+	}
+
+	fmt.Println("Hell Yeah", incoming.Namespace, m.namespace)
 
 	existing, err := m.applicationBackend.Get(ctx, incoming.Name, incoming.Namespace)
 	if err != nil {
@@ -318,7 +334,9 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 
 	var updated *v1alpha1.Application
 	var err error
-	incoming.SetNamespace(namespace)
+	if !m.destinationBasedMapping {
+		incoming.SetNamespace(namespace)
+	}
 	if m.role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
 	} else {
@@ -409,7 +427,9 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 
 	var updated *v1alpha1.Application
 	var err error
-	incoming.SetNamespace(namespace)
+	if !m.destinationBasedMapping {
+		incoming.SetNamespace(namespace)
+	}
 	if m.role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
 	} else {
@@ -540,7 +560,9 @@ func operationToUse(existing, incoming *v1alpha1.Application) *v1alpha1.Operatio
 
 // TerminateOperation aborts a running sync operation by setting .status.operationState.phase to Terminating.
 func (m *ApplicationManager) TerminateOperation(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
-	incoming.SetNamespace(m.namespace)
+	if !m.destinationBasedMapping {
+		incoming.SetNamespace(m.namespace)
+	}
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "TerminateOperation",
 		"application":     incoming.QualifiedName(),
@@ -596,7 +618,9 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 	})
 	if m.role.IsPrincipal() {
 		removeFinalizer = true
-		incoming.SetNamespace(namespace)
+		if !m.destinationBasedMapping {
+			incoming.SetNamespace(namespace)
+		}
 	}
 	var err error
 	var updated *v1alpha1.Application
