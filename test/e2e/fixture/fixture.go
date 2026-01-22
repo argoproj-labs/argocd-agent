@@ -85,8 +85,11 @@ func (suite *BaseSuite) SetupTest() {
 	err = suite.AutonomousAgentClient.Get(suite.Ctx, key, project, metav1.GetOptions{})
 	suite.Require().Nil(err)
 	now := time.Now().Format(time.RFC3339)
-	project.Annotations = map[string]string{"created": now}
-	err = suite.AutonomousAgentClient.Update(suite.Ctx, project, metav1.UpdateOptions{})
+
+	err = suite.AutonomousAgentClient.EnsureAppProjectUpdate(suite.Ctx, ToNamespacedName(project), func(ap *argoapp.AppProject) error {
+		ap.Annotations = map[string]string{"created": now}
+		return nil
+	}, metav1.UpdateOptions{})
 	suite.Require().Nil(err)
 
 	suite.Require().Eventually(func() bool {
@@ -426,8 +429,10 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 	}
 	for _, deployment := range deploymentList.Items {
 		if len(deployment.Finalizers) > 0 {
-			deployment.Finalizers = nil
-			if err := managedAgentClient.Update(ctx, &deployment, metav1.UpdateOptions{}); err != nil {
+			err := EnsureUpdate(ctx, managedAgentClient, &deployment, func(obj KubeObject) {
+				obj.SetFinalizers(nil)
+			})
+			if err != nil {
 				return err
 			}
 		}

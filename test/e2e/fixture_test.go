@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/restmapper"
+	"k8s.io/client-go/util/retry"
 )
 
 // FixtureTestSuit is code used to experiment with and test the e2e fixture code
@@ -406,10 +407,15 @@ func (suite *FixtureTestSuite) Test_Update_Application() {
 	requires.Equal("HEAD", app.Spec.Source.TargetRevision)
 	requires.NotEmpty(app.UID)
 
-	app.Spec.Source.TargetRevision = "TAIL"
-	err = kclient.Update(ctx, &app, metav1.UpdateOptions{})
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		err := kclient.Get(ctx, types.NamespacedName{Namespace: "test-argocd-agent", Name: "foo"}, &app, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		app.Spec.Source.TargetRevision = "TAIL"
+		return kclient.Update(ctx, &app, metav1.UpdateOptions{})
+	})
 	requires.NoError(err)
-	requires.Equal("TAIL", app.Spec.Source.TargetRevision)
 
 	app = argoapp.Application{}
 	err = kclient.Get(ctx, types.NamespacedName{Namespace: "test-argocd-agent", Name: "foo"}, &app, metav1.GetOptions{})
