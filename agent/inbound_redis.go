@@ -74,7 +74,7 @@ func (a *Agent) processIncomingRedisRequest(ev *event.Event) error {
 	if err != nil {
 		return err
 	}
-	logCtx := a.redisProxyLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logRedisProxy().WithFields(logrus.Fields{
 		"method":         "processIncomingRedisRequest",
 		"uuid":           rreq.UUID,
 		"connectionUUID": rreq.ConnectionUUID,

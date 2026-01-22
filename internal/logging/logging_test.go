@@ -413,7 +413,7 @@ func TestDefaultLoggerNotAltered(t *testing.T) {
 	assert.Contains(t, newOutput, "new debug message")
 }
 
-func TestSeperateLoggerLevels(t *testing.T) {
+func TestSeparateLoggerLevels(t *testing.T) {
 	var debugBuf bytes.Buffer
 	var warnBuf bytes.Buffer
 

@@ -49,7 +49,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	status := metrics.EventProcessingSuccess
 	ev, _ := q.Get()
 
-	logCtx := s.options.grpcEventLogger.ModuleLogger("grpc").WithFields(logrus.Fields{
+	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
 		"module":       "QueueProcessor",
 		"client":       agentName,
 		"event_target": ev.DataSchema(),
@@ -162,7 +162,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	}
 	agentMode := s.agentMode(agentName)
 
-	logCtx := s.options.grpcEventLogger.ModuleLogger("grpc").WithFields(logrus.Fields{
+	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
 		"module":      "QueueProcessor",
 		"client":      agentName,
 		"mode":        agentMode.String(),
@@ -348,7 +348,7 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 	}
 	agentMode := s.agentMode(agentName)
 
-	logCtx := s.options.grpcEventLogger.ModuleLogger("grpc").WithFields(logrus.Fields{
+	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
 		"module":      "QueueProcessor",
 		"client":      agentName,
 		"mode":        agentMode.String(),
@@ -451,7 +451,7 @@ func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloude
 	}
 
 	agentMode := s.agentMode(agentName)
-	s.options.grpcEventLogger.ModuleLogger("grpc").WithFields(logrus.Fields{
+	s.logGrpcEvent().WithFields(logrus.Fields{
 		"module":      "QueueProcessor",
 		"client":      agentName,
 		"mode":        agentMode.String(),
@@ -467,7 +467,7 @@ func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloude
 // The ping keeps the gRPC stream active and prevents service mesh idle timeouts.
 // No response is needed - ping itself should reset the service mesh idle timer.
 func (s *Server) processHeartbeatEvent(agentName string, ev *cloudevents.Event) error {
-	s.options.grpcEventLogger.ModuleLogger("grpc").WithFields(logrus.Fields{
+	s.logGrpcEvent().WithFields(logrus.Fields{
 		"module": "QueueProcessor",
 		"client": agentName,
 		"event":  ev.Type(),
@@ -614,7 +614,7 @@ func safeSendCloudEvent(ctx context.Context, ch chan *cloudevents.Event, ev *clo
 // processIncomingResourceResyncEvent will handle the incoming resync events from the agent
 func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
 	agentMode := s.agentMode(agentName)
-	logCtx := s.options.grpcEventLogger.ModuleLogger("grpc").WithFields(logrus.Fields{
+	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
 		"module":      "QueueProcessor",
 		"client":      agentName,
 		"mode":        agentMode.String(),
@@ -707,7 +707,7 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 func (s *Server) eventProcessor(ctx context.Context) error {
 	sem := semaphore.NewWeighted(s.options.eventProcessors)
 	queueLock := namedlock.NewNamedLock()
-	logCtx := s.options.grpcEventLogger.ModuleLogger("grpc").WithField("module", "EventProcessor")
+	logCtx := s.logGrpcEvent().WithField("module", "EventProcessor")
 	for {
 		queuesProcessed := 0
 		for _, queueName := range s.queues.Names() {

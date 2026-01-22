@@ -332,3 +332,12 @@ func (l *CentralizedLogger) Fatal(module, message string) {
 func (l *CentralizedLogger) Panic(module, message string) {
 	l.ModuleLogger(module).Panic(message)
 }
+
+// SelectLogger checks to see if a centralized logger is nil and if it is
+// returns the default logger
+func SelectLogger(l *CentralizedLogger) *CentralizedLogger {
+	if l == nil {
+		return GetDefaultLogger()
+	}
+	return l
+}

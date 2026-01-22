@@ -92,7 +92,7 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 			err := a.processIncomingRedisRequest(ev)
 			if err != nil {
 				tracing.RecordError(redisSpan, err)
-				a.grpcEventLogger.ModuleLogger("Agent").WithError(err).Errorf("Unable to process incoming redis event")
+				a.logGrpcEvent().WithError(err).Errorf("Unable to process incoming redis event")
 			} else {
 				tracing.SetSpanOK(redisSpan)
 			}
@@ -103,7 +103,7 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 		// Process terminal request in a separate goroutine to avoid blocking the event thread
 		go func() {
 			if termErr := a.processIncomingTerminalRequest(ev); termErr != nil && !isShellNotFoundError(termErr) {
-				a.grpcEventLogger.ModuleLogger("Agent").WithError(termErr).Errorf("Unable to process incoming terminal event")
+				a.logGrpcEvent().WithError(termErr).Errorf("Unable to process incoming terminal event")
 			}
 		}()
 	default:
@@ -137,7 +137,7 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 }
 
 func (a *Agent) processIncomingApplication(ev *event.Event) error {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method": "processIncomingEvents",
 	})
 	incomingApp, err := ev.Application()
@@ -238,7 +238,7 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 }
 
 func (a *Agent) processIncomingAppProject(ev *event.Event) error {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method": "processIncomingEvents",
 	})
 	incomingAppProject, err := ev.AppProject()
@@ -321,7 +321,7 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 }
 
 func (a *Agent) processIncomingRepository(ev *event.Event) error {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method": "processIncomingEvents",
 	})
 
@@ -408,7 +408,7 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 // processIncomingResourceResyncEvent handles all the resync events that are
 // exchanged with the agent/principal restarts
 func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method":      "processIncomingEvents",
 		"agent":       a.remote.ClientID(),
 		"mode":        a.mode,
@@ -496,7 +496,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	// Applications must exist in the same namespace as the agent
 	incoming.SetNamespace(a.namespace)
 
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method": "CreateApplication",
 		"app":    incoming.QualifiedName(),
 	})
@@ -548,7 +548,7 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	// Applications must exist in the same namespace as the agent
 	incoming.SetNamespace(a.namespace)
 
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method":          "UpdateApplication",
 		"app":             incoming.QualifiedName(),
 		"resourceVersion": incoming.ResourceVersion,
@@ -591,7 +591,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	// Applications must exist in the same namespace as the agent
 	app.SetNamespace(a.namespace)
 
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method": "DeleteApplication",
 		"app":    app.QualifiedName(),
 	})
@@ -634,7 +634,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 
 	err = a.appManager.Unmanage(app.QualifiedName())
 	if err != nil {
-		a.grpcEventLogger.ModuleLogger("Agent").Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
+		a.logGrpcEvent().Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
 	}
 	return nil
 }
@@ -645,7 +645,7 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	// AppProjects must exist in the same namespace as the agent
 	incoming.SetNamespace(a.namespace)
 
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method":     "CreateAppProject",
 		"appProject": incoming.Name,
 	})
@@ -685,7 +685,7 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	// AppProjects must exist in the same namespace as the agent
 	incoming.SetNamespace(a.namespace)
 
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method":          "UpdateAppProject",
 		"appProject":      incoming.Name,
 		"resourceVersion": incoming.ResourceVersion,
@@ -715,7 +715,7 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 	// AppProjects must exist in the same namespace as the agent
 	project.SetNamespace(a.namespace)
 
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method":     "DeleteAppProject",
 		"appProject": project.Name,
 	})
@@ -754,7 +754,7 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 
 	err = a.projectManager.Unmanage(project.Name)
 	if err != nil {
-		a.grpcEventLogger.ModuleLogger("Agent").Warnf("Could not unmanage appProject %s: %v", project.Name, err)
+		a.logGrpcEvent().Warnf("Could not unmanage appProject %s: %v", project.Name, err)
 	}
 	return nil
 }
@@ -764,7 +764,7 @@ func (a *Agent) createRepository(incoming *corev1.Secret) (*corev1.Secret, error
 	// Repository secrets must exist in the same namespace as the agent
 	incoming.SetNamespace(a.namespace)
 
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method": "CreateRepository",
 		"repo":   incoming.Name,
 	})
@@ -807,7 +807,7 @@ func (a *Agent) updateRepository(incoming *corev1.Secret) (*corev1.Secret, error
 	// Repository secrets must exist in the same namespace as the agent
 	incoming.SetNamespace(a.namespace)
 
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method":          "UpdateRepository",
 		"repo":            incoming.Name,
 		"resourceVersion": incoming.ResourceVersion,
@@ -836,7 +836,7 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 	// Repository secrets must exist in the same namespace as the agent
 	repo.SetNamespace(a.namespace)
 
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method": "DeleteRepository",
 		"repo":   repo.Name,
 	})
@@ -871,7 +871,7 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 
 	err = a.repoManager.Unmanage(repo.Name)
 	if err != nil {
-		a.grpcEventLogger.ModuleLogger("Agent").Warnf("Could not unmanage repository %s: %v", repo.Name, err)
+		a.logGrpcEvent().Warnf("Could not unmanage repository %s: %v", repo.Name, err)
 	}
 
 	return nil

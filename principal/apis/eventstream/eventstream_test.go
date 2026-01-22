@@ -46,12 +46,14 @@ func Test_Subscribe(t *testing.T) {
 			AgentName: "default",
 			AgentMode: string(types.AgentModeManaged),
 		}
+
+		logCtx := s.log()
 		st.AddRecvHook(func(s *mock.MockEventServer) error {
-			log().WithField("component", "RecvHook").Tracef("Entry")
+			logCtx.WithField("component", "RecvHook").Tracef("Entry")
 			ticker := time.NewTicker(500 * time.Millisecond)
 			<-ticker.C
 			ticker.Stop()
-			log().WithField("component", "RecvHook").Tracef("Exit")
+			logCtx.WithField("component", "RecvHook").Tracef("Exit")
 			return io.EOF
 		})
 		emitter := event.NewEventSource("test")
@@ -127,12 +129,14 @@ func Test_Subscribe(t *testing.T) {
 			AgentName: "default",
 			AgentMode: string(types.AgentModeAutonomous),
 		}
+
+		logCtx := s.log()
 		st.AddRecvHook(func(s *mock.MockEventServer) error {
-			log().WithField("component", "RecvHook").Tracef("Entry")
+			logCtx.WithField("component", "RecvHook").Tracef("Entry")
 			ticker := time.NewTicker(500 * time.Millisecond)
 			<-ticker.C
 			ticker.Stop()
-			log().WithField("component", "RecvHook").Tracef("Exit")
+			logCtx.WithField("component", "RecvHook").Tracef("Exit")
 			return io.EOF
 		})
 		emitter := event.NewEventSource("test")
@@ -153,7 +157,6 @@ func Test_Subscribe(t *testing.T) {
 		assert.Equal(t, 0, int(st.NumRecv.Load()))
 		assert.Equal(t, 1, int(st.NumSent.Load()))
 	})
-
 }
 
 func init() {

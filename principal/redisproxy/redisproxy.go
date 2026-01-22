@@ -89,7 +89,7 @@ func New(listenAddress string, principalRedisAddress string, sendSyncMessageToAg
 func (rp *RedisProxy) Start() error {
 	l, err := net.Listen("tcp", rp.listenAddress)
 	if err != nil {
-		log().WithError(err).Error("error occurred on listening to addr: " + rp.listenAddress)
+		rp.log().WithError(err).Error("error occurred on listening to addr: " + rp.listenAddress)
 		return err
 	}
 	rp.listener = l
@@ -99,14 +99,14 @@ func (rp *RedisProxy) Start() error {
 		for {
 			conn, err := l.Accept()
 			if err != nil {
-				log().WithError(err).Error("error occurred on accepting connection")
+				rp.log().WithError(err).Error("error occurred on accepting connection")
 				return
 			}
 			go rp.handleConnection(conn)
 		}
 	}()
 
-	log().Infof("Redis proxy started on %s", rp.listenAddress)
+	rp.log().Infof("Redis proxy started on %s", rp.listenAddress)
 
 	return nil
 }
@@ -126,7 +126,7 @@ func (rp *RedisProxy) handleConnection(fromArgoCDConn net.Conn) {
 
 	connUUID := uuid.New().String()
 
-	logCtx := rp.logger.ModuleLogger("redisProxy").WithField("function", "redisFxn")
+	logCtx := rp.log().WithField("function", "redisFxn")
 	logCtx = logCtx.WithField("connUUID", connUUID)
 
 	redisConn, err := establishConnectionToPrincipalRedis(rp.principalRedisAddress, logCtx)
@@ -712,7 +712,7 @@ func (are *argoCDRedisWriterInternal) writeToArgoCDRedisSocket(logCtx *logrus.En
 
 	_, err := are.fromArgoCDWrite.Write(bytes)
 	if err != nil {
-		log().WithError(err).Error("unable to write to Argo CD Redis socket")
+		logCtx.WithError(err).Error("unable to write to Argo CD Redis socket")
 		return err
 	}
 
@@ -808,6 +808,6 @@ func extractAgentNameFromRedisCommandKey(redisKey string, logCtx *logrus.Entry) 
 	return res, nil
 }
 
-func log() *logrus.Entry {
-	return logging.GetDefaultLogger().ModuleLogger("redisProxy")
+func (rp *RedisProxy) log() *logrus.Entry {
+	return logging.SelectLogger(rp.logger).ModuleLogger("redisProxy")
 }

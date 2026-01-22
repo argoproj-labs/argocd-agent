@@ -118,7 +118,7 @@ func New(addr string, options ...ResourceProxyOption) (*ResourceProxy, error) {
 	// proxyHandler is the main HTTP handler, used to process every request
 	p.mux.HandleFunc("/", p.proxyHandler)
 
-	httpLogger := log().WriterLevel(logrus.ErrorLevel)
+	httpLogger := p.log().WriterLevel(logrus.ErrorLevel)
 
 	// Configure the HTTP server
 	p.server = &http.Server{
@@ -138,7 +138,7 @@ func New(addr string, options ...ResourceProxyOption) (*ResourceProxy, error) {
 // may read an error from the returned channel. The channel will only be
 // written to in case of a start-up error, or when the proxy has shut down.
 func (rp *ResourceProxy) Start(ctx context.Context) (<-chan error, error) {
-	rp.logger.ModuleLogger("proxy").Infof("Starting ResourceProxy on %s", rp.addr)
+	rp.log().Infof("Starting ResourceProxy on %s", rp.addr)
 	errCh := make(chan error)
 	var l net.Listener
 	var err error
@@ -163,7 +163,7 @@ func (rp *ResourceProxy) Start(ctx context.Context) (<-chan error, error) {
 	if rp.tlsConfig != nil {
 		l, err = tls.Listen(network, rp.addr, rp.tlsConfig)
 	} else {
-		rp.logger.ModuleLogger("proxy").Warn("INSECURE: kube-proxy is listening in non-TLS mode")
+		rp.log().Warn("INSECURE: kube-proxy is listening in non-TLS mode")
 		l, err = net.Listen(network, rp.addr)
 	}
 	if err != nil {
@@ -186,7 +186,7 @@ func (rp *ResourceProxy) Stop(ctx context.Context) error {
 // proxyHandler is a HTTP request handler that inspects incoming requests. By
 // default, every request will be passed down to the reverse proxy.
 func (rp *ResourceProxy) proxyHandler(w http.ResponseWriter, r *http.Request) {
-	rp.logger.ModuleLogger("proxy").Debugf("Processing URI %s %s (goroutines:%d)", r.Method, r.RequestURI, runtime.NumGoroutine())
+	rp.log().Debugf("Processing URI %s %s (goroutines:%d)", r.Method, r.RequestURI, runtime.NumGoroutine())
 
 	// Loop through all registered matchers and match them against the request
 	// URI's path. First match wins. This is obviously not the most efficient
@@ -195,7 +195,7 @@ func (rp *ResourceProxy) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	for _, m := range rp.interceptors {
 		matches := m.matcher.FindStringSubmatch(r.URL.Path)
 		if matches == nil {
-			rp.logger.ModuleLogger("proxy").Debugf("Request did not match %s %s", r.Method, r.RequestURI)
+			rp.log().Debugf("Request did not match %s %s", r.Method, r.RequestURI)
 			continue
 		} else {
 			validMethod := false
@@ -207,7 +207,7 @@ func (rp *ResourceProxy) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			// We must have a callback function defined. Also, method must be
 			// allowed.
 			if !validMethod || m.fn == nil {
-				rp.logger.ModuleLogger("proxy").Debugf("Method %s not allowed for URI %s", r.Method, r.RequestURI)
+				rp.log().Debugf("Method %s not allowed for URI %s", r.Method, r.RequestURI)
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}
@@ -222,17 +222,17 @@ func (rp *ResourceProxy) proxyHandler(w http.ResponseWriter, r *http.Request) {
 
 			// Call the handler with our params. The connection will stay open
 			// until the handler returns.
-			rp.logger.ModuleLogger("proxy").Tracef("Executing callback for %v", uriParams)
+			rp.log().Tracef("Executing callback for %v", uriParams)
 			m.fn(w, r, uriParams)
 			return
 		}
 	}
 
 	// Finally, if we had no handler match, we don't handle it
-	rp.logger.ModuleLogger("proxy").Debugf("No interceptor matched %s %s", r.Method, r.RequestURI)
+	rp.log().Debugf("No interceptor matched %s %s", r.Method, r.RequestURI)
 	w.WriteHeader(http.StatusBadRequest)
 }
 
-func log() *logrus.Entry {
-	return logging.GetDefaultLogger().ModuleLogger("proxy")
+func (rp *ResourceProxy) log() *logrus.Entry {
+	return logging.SelectLogger(rp.logger).ModuleLogger("proxy")
 }

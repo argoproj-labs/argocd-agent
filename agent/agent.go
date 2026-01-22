@@ -515,6 +515,18 @@ func log() *logrus.Entry {
 	return logging.GetDefaultLogger().ModuleLogger("Agent")
 }
 
+func (a *Agent) logResourceProxy() *logrus.Entry {
+	return logging.SelectLogger(a.resourceProxyLogger).ModuleLogger("ResourceProxy")
+}
+
+func (a *Agent) logRedisProxy() *logrus.Entry {
+	return logging.SelectLogger(a.redisProxyLogger).ModuleLogger("RedisProxy")
+}
+
+func (a *Agent) logGrpcEvent() *logrus.Entry {
+	return logging.SelectLogger(a.grpcEventLogger).ModuleLogger("GrpcEvent")
+}
+
 func (a *Agent) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	if a.IsConnected() {

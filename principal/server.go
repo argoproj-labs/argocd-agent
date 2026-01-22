@@ -924,6 +924,10 @@ func log() *logrus.Entry {
 	return logging.GetDefaultLogger().ModuleLogger("server")
 }
 
+func (s *Server) logGrpcEvent() *logrus.Entry {
+	return logging.SelectLogger(s.options.grpcEventLogger).ModuleLogger("GrpcEvent")
+}
+
 func (s *Server) AuthMethodsForE2EOnly() *auth.Methods {
 	return s.authMethods
 }

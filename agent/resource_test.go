@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
-	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -459,8 +458,6 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
-		agent.resourceProxyLogger = logging.GetDefaultLogger()
-
 		// Create resource request event
 		reqUUID := "test-uuid"
 		resourceReq := &event.ResourceRequest{
@@ -527,8 +524,6 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
-		agent.resourceProxyLogger = logging.GetDefaultLogger()
-
 		// Create resource request event
 		reqUUID := "test-uuid"
 		resourceReq := &event.ResourceRequest{
@@ -579,8 +574,6 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
-		agent.resourceProxyLogger = logging.GetDefaultLogger()
-
 		// Create resource request event
 		reqUUID := "test-uuid"
 		resourceReq := &event.ResourceRequest{
@@ -629,8 +622,6 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 			trackingReader:      newTestTrackingReader(""),
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
-
-		agent.resourceProxyLogger = logging.GetDefaultLogger()
 
 		// Create invalid event (missing required data)
 		ev := cloudevents.NewEvent()

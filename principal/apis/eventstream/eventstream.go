@@ -427,7 +427,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 // Application resources.
 // Push is called by GRPC machinery.
 func (s *Server) Push(pushs eventstreamapi.EventStream_PushServer) error {
-	logCtx := s.options.logger.ModuleLogger("grpc.AppStream").WithField("method", "Push")
+	logCtx := s.log().WithField("method", "Push")
 
 	var ctx context.Context
 	var cancel context.CancelFunc
@@ -498,6 +498,6 @@ recvloop:
 	return nil
 }
 
-func log() *logrus.Entry {
-	return logging.GetDefaultLogger().ModuleLogger("grpc.AppStream")
+func (s *Server) log() *logrus.Entry {
+	return logging.SelectLogger(s.options.logger).ModuleLogger("grpc.AppStream")
 }

@@ -36,7 +36,7 @@ import (
 // addAppCreationToQueue processes a new application event originating from the
 // AppInformer and puts it in the send queue.
 func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithField(logfields.Event, "NewApp").WithField(logfields.Application, app.QualifiedName())
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "NewApp").WithField(logfields.Application, app.QualifiedName())
 	logCtx.Debugf("New app event")
 
 	ctx, span := a.startSpan("create", "Application", app)
@@ -76,7 +76,7 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 // addAppUpdateToQueue processes an application update event originating from
 // the AppInformer and puts it in the agent's send queue.
 func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.Application) {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithField(logfields.Event, "UpdateApp").WithField(logfields.Application, old.QualifiedName())
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "UpdateApp").WithField(logfields.Application, old.QualifiedName())
 	a.watchLock.Lock()
 	defer a.watchLock.Unlock()
 
@@ -129,7 +129,7 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 // addAppDeletionToQueue processes an application delete event originating from
 // the AppInformer and puts it in the send queue.
 func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithField(logfields.Event, "DeleteApp").WithField(logfields.Application, app.QualifiedName())
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "DeleteApp").WithField(logfields.Application, app.QualifiedName())
 	logCtx.Debugf("Delete app event")
 
 	ctx, span := a.startSpan("delete", "Application", app)
@@ -171,7 +171,7 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 // deleteNamespaceCallback is called when the user deletes the agent namespace.
 // Since there is no namespace we can remove the queue associated with this agent.
 func (a *Agent) deleteNamespaceCallback(outbound *corev1.Namespace) {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithField(logfields.Event, "DeleteNamespace").WithField(logfields.Agent, outbound.Name)
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "DeleteNamespace").WithField(logfields.Agent, outbound.Name)
 
 	if !a.queues.HasQueuePair(outbound.Name) {
 		return
@@ -188,7 +188,7 @@ func (a *Agent) deleteNamespaceCallback(outbound *corev1.Namespace) {
 // addAppProjectCreationToQueue processes a new appProject event originating from the
 // AppProject Informer and puts it in the send queue.
 func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"event":      "NewAppProject",
 		"appProject": appProject.Name,
 		"sendq_name": defaultQueueName,
@@ -233,7 +233,7 @@ func (a *Agent) addAppProjectCreationToQueue(appProject *v1alpha1.AppProject) {
 // addAppProjectUpdateToQueue processes an appProject update event originating from the
 // AppProject Informer and puts it in the send queue.
 func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alpha1.AppProject) {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"event":      "UpdateAppProject",
 		"appProject": new.Name,
 		"sendq_name": defaultQueueName,
@@ -290,7 +290,7 @@ func (a *Agent) addAppProjectUpdateToQueue(old *v1alpha1.AppProject, new *v1alph
 // addAppProjectDeletionToQueue processes an appProject delete event originating from the
 // AppProject Informer and puts it in the send queue.
 func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"event":      "DeleteAppProject",
 		"appProject": appProject.Name,
 		"sendq_name": defaultQueueName,
@@ -342,7 +342,7 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 // addClusterCacheInfoUpdateToQueue processes a cluster cache info update event
 // and puts it in the send queue.
 func (a *Agent) addClusterCacheInfoUpdateToQueue() {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"event": "addClusterCacheInfoUpdateToQueue",
 	})
 
@@ -380,7 +380,7 @@ func (a *Agent) addClusterCacheInfoUpdateToQueue() {
 }
 
 func (a *Agent) handleRepositoryCreation(repo *corev1.Secret) {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"event":      "NewRepository",
 		"repository": repo.Name,
 	})
@@ -406,7 +406,7 @@ func (a *Agent) handleRepositoryCreation(repo *corev1.Secret) {
 }
 
 func (a *Agent) handleRepositoryUpdate(old, new *corev1.Secret) {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"event":      "UpdateRepository",
 		"repository": new.Name,
 	})
@@ -436,7 +436,7 @@ func (a *Agent) handleRepositoryUpdate(old, new *corev1.Secret) {
 }
 
 func (a *Agent) handleRepositoryDeletion(repo *corev1.Secret) {
-	logCtx := a.grpcEventLogger.ModuleLogger("Agent").WithFields(logrus.Fields{
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"event":      "DeleteRepository",
 		"repository": repo.Name,
 	})
