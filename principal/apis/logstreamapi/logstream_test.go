@@ -16,7 +16,6 @@ package logstream
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -29,6 +28,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestNewServer(t *testing.T) {
@@ -326,6 +327,94 @@ func TestProcessLogMessage(t *testing.T) {
 	})
 }
 
+func TestProcessLogStreamLoop(t *testing.T) {
+	server := NewServer()
+	requestUUID := "test-request-123"
+
+	t.Run("successful log streaming", func(t *testing.T) {
+		// Register HTTP session first
+		w := mock.NewMockHTTPResponseWriter()
+		r := httptest.NewRequest("GET", "/logs", nil)
+		err := server.RegisterHTTP(requestUUID, w, r)
+		require.NoError(t, err)
+
+		// Create log client
+		ctx := context.Background()
+		client := server.newLogClient(ctx)
+
+		// Buffered to avoid blocking if the loop exits early.
+		dataCh := make(chan *logstreamapi.LogStreamData, 2)
+		errCh := make(chan error, 1)
+
+		dataCh <- &logstreamapi.LogStreamData{
+			RequestUuid: requestUUID,
+			Data:        []byte("test log line\n"),
+		}
+		dataCh <- &logstreamapi.LogStreamData{
+			RequestUuid: requestUUID,
+			Eof:         true,
+		}
+		close(dataCh)
+
+		// Run processLogStreamLoop
+		server.processLogStreamLoop(client, dataCh, errCh)
+
+		server.mu.RLock()
+		session := server.sessions[requestUUID]
+		server.mu.RUnlock()
+		require.NotNil(t, session)
+		assert.NotNil(t, session.completeCh)
+		// doneCh is closed + nulled on EOF completion.
+		assert.Nil(t, session.doneCh)
+		assert.NotNil(t, session.hw)
+		assert.NotNil(t, session.cancelFn)
+
+		assert.Equal(t, requestUUID, client.requestID)
+		client.mu.Lock()
+		assert.Nil(t, client.terminateErr)
+		client.mu.Unlock()
+	})
+
+	t.Run("stream with error from agent", func(t *testing.T) {
+		// Create log client
+		ctx := context.Background()
+		client := server.newLogClient(ctx)
+
+		// Buffered to avoid blocking if the loop exits early.
+		dataCh := make(chan *logstreamapi.LogStreamData, 2)
+		errCh := make(chan error, 1)
+
+		errCh <- status.Error(codes.Internal, "agent error")
+		close(errCh)
+
+		server.processLogStreamLoop(client, dataCh, errCh)
+
+		client.mu.Lock()
+		assert.Error(t, client.terminateErr)
+		assert.Contains(t, client.terminateErr.Error(), "agent error")
+		client.mu.Unlock()
+	})
+
+	t.Run("stream with context cancellation", func(t *testing.T) {
+		// Create log client
+		ctx, cancel := context.WithCancel(context.Background())
+		client := server.newLogClient(ctx)
+
+		// Buffered to avoid blocking if the loop exits early.
+		dataCh := make(chan *logstreamapi.LogStreamData, 2)
+		errCh := make(chan error, 1)
+
+		cancel() // Cancel immediately
+
+		// Run StreamLogs
+		server.processLogStreamLoop(client, dataCh, errCh)
+		client.mu.Lock()
+		assert.Error(t, client.terminateErr)
+		assert.Contains(t, client.terminateErr.Error(), "client detached timeout")
+		client.mu.Unlock()
+	})
+}
+
 func TestWaitForCompletion(t *testing.T) {
 	server := NewServer()
 	requestUUID := "test-request-123"
@@ -418,51 +507,6 @@ func TestSafeFlush(t *testing.T) {
 		assert.Contains(t, err.Error(), "flush panic")
 	})
 }
-
-func TestTryRecvWithCancel(t *testing.T) {
-	t.Run("successful receive", func(t *testing.T) {
-		ctx := context.Background()
-		called := false
-		fn := func() (string, error) {
-			called = true
-			return "test", nil
-		}
-
-		result, err := tryRecvWithCancel(ctx, fn)
-		assert.NoError(t, err)
-		assert.Equal(t, "test", result)
-		assert.True(t, called)
-	})
-
-	t.Run("context cancellation", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // Cancel immediately
-
-		fn := func() (string, error) {
-			time.Sleep(100 * time.Millisecond) // Simulate slow operation
-			return "test", nil
-		}
-
-		result, err := tryRecvWithCancel(ctx, fn)
-		assert.Error(t, err)
-		assert.Equal(t, "", result)
-		assert.Contains(t, err.Error(), "client detached timeout")
-	})
-
-	t.Run("function error", func(t *testing.T) {
-		ctx := context.Background()
-		expectedErr := fmt.Errorf("function error")
-		fn := func() (string, error) {
-			return "", expectedErr
-		}
-
-		result, err := tryRecvWithCancel(ctx, fn)
-		assert.Error(t, err)
-		assert.Equal(t, expectedErr, err)
-		assert.Equal(t, "", result)
-	})
-}
-
 func TestNewLogClient(t *testing.T) {
 	ctx := context.Background()
 	client := NewServer().newLogClient(ctx)

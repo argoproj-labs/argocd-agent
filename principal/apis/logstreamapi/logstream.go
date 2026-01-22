@@ -42,17 +42,39 @@ type session struct {
 	doneCh     chan struct{} // closed on finalization to stop watchdog goroutine
 }
 
+// closeChannels safely closes doneCh and completeCh if open.
+// Caller must hold the server mutex.
+func (sess *session) closeChannels() {
+	if sess.doneCh != nil {
+		close(sess.doneCh)
+		sess.doneCh = nil
+	}
+	if sess.completeCh != nil {
+		close(sess.completeCh)
+		sess.completeCh = nil
+	}
+}
+
 type httpWriter struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
 }
 
 type logClient struct {
+	mu           sync.Mutex
 	ctx          context.Context
 	cancelFn     context.CancelFunc
 	logCtx       *logrus.Entry
 	requestID    string
 	terminateErr error // returned as stream status when set
+}
+
+func (c *logClient) setTerminateErr(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.terminateErr == nil {
+		c.terminateErr = err
+	}
 }
 
 func (s *Server) newLogClient(ctx context.Context) *logClient {
@@ -96,26 +118,32 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 		}
 		s.sessions[requestUUID] = sess
 	} else {
+		// Close old doneCh to stop the previous watchdog goroutine before starting a new one.
+		// This prevents multiple watchdog goroutines from running for the same session.
+		if sess.doneCh != nil {
+			close(sess.doneCh)
+		}
+		sess.doneCh = make(chan struct{})
+
 		sess.hw = &httpWriter{w: w, flusher: flusher}
 	}
 
-	//watchdog for client disconnection. When client disconnects, immediately cancel the stream
-	go func(reqID, ua, ra string, done <-chan struct{}) {
+	// watchdog for client disconnection. When client disconnects, immediately cancel the stream.
+	// doneCh is passed as a parameter to avoid a data race with closeChannels setting it to nil.
+	go func(reqID string, done <-chan struct{}, doneCh <-chan struct{}) {
 		// Wait for either client disconnection or session finalization
 		select {
 		case <-done:
 			logrus.WithFields(logrus.Fields{
 				"request_id": reqID,
 				"reason":     "client_disconnected",
-			}).Info("Stream terminated due to client disconnection")
-		case <-sess.doneCh:
+			}).Debug("HTTP client disconnected; canceling stream")
+		case <-doneCh:
 			// Session was finalized, watchdog is no longer needed
 			return
 		}
-
 		s.mu.Lock()
-		sess := s.sessions[reqID]
-		if sess != nil {
+		if sess, ok := s.sessions[reqID]; ok {
 			sess.hw = nil
 			if sess.cancelFn != nil {
 				// Tag stream as canceled due to client detach.
@@ -123,87 +151,114 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 			}
 		}
 		s.mu.Unlock()
-	}(requestUUID, r.Header.Get("User-Agent"), r.RemoteAddr, r.Context().Done())
+	}(requestUUID, r.Context().Done(), sess.doneCh)
 
 	return nil
 }
 
-// tryRecvWithCancel wraps stream.Recv() so we can abort via c.ctx.Done().
-func tryRecvWithCancel[T any](ctx context.Context, fn func() (T, error)) (T, error) {
-	type res struct {
-		m   T
-		err error
-	}
-	ch := make(chan res, 1)
-	go func() {
-		m, err := fn()
-		select {
-		case ch <- res{m, err}: // send result if someone is still listening
-		case <-ctx.Done(): // otherwise just exit quietly
-		}
-	}()
-	select {
-	case <-ctx.Done():
-		var zero T
-		return zero, status.Error(codes.Canceled, "client detached timeout")
-	case r := <-ch:
-		return r.m, r.err
-	}
-}
-
-// StreamLogs receives log data from agent and forwards to HTTP writer
+// StreamLogs receives log data from agent
 func (s *Server) StreamLogs(stream logstreamapi.LogStreamService_StreamLogsServer) error {
 	c := s.newLogClient(stream.Context())
-	for {
-		msg, err := tryRecvWithCancel(c.ctx, stream.Recv) // ← cancelable
-		if err != nil {
-			// prefer a consistent reason for the agent
-			if status.Code(err) == codes.Canceled && c.terminateErr == nil {
-				c.terminateErr = status.Error(codes.Canceled, "client detached timeout")
-			}
-			break
-		}
-		if msg == nil {
-			c.terminateErr = status.Error(codes.InvalidArgument, "invalid log message")
-			break
-		}
-
-		// First message, capture request UUID and expose cancelFn for detach handler
-		if c.requestID == "" {
-			c.requestID = msg.GetRequestUuid()
-			c.logCtx = c.logCtx.WithField("request_id", c.requestID)
-			c.logCtx.Info("LogStream started")
-
-			s.mu.Lock()
-			if sess, ok := s.sessions[c.requestID]; ok {
-				sess.cancelFn = func() {
-					// tag this stream as terminated due to client detach TTL
-					c.terminateErr = status.Error(codes.Canceled, "client detached timeout")
-					c.cancelFn()
+	// One background pump goroutine per stream.
+	dataCh := make(chan *logstreamapi.LogStreamData)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(dataCh)
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				// Best-effort: don't block shutdown if receiver already exited.
+				select {
+				case errCh <- err:
+				default:
 				}
+				return
 			}
-			s.mu.Unlock()
+			select {
+			case dataCh <- msg:
+			case <-c.ctx.Done():
+				return
+			case <-stream.Context().Done():
+				return
+			}
 		}
+	}()
 
-		if err := s.processLogMessage(c, msg); err != nil {
-			// processLogMessage can return io.EOF or a terminal status
-			if err == io.EOF {
-				break
-			}
-			c.terminateErr = err
-			break
-		}
-	}
+	s.processLogStreamLoop(c, dataCh, errCh)
+
 	// Cleanup session
 	if c.requestID != "" {
 		s.finalizeSession(c.requestID)
 	}
-
-	if c.terminateErr != nil {
-		return c.terminateErr
+	c.mu.Lock()
+	terr := c.terminateErr
+	c.mu.Unlock()
+	if terr != nil {
+		return terr
 	}
-	resp := &logstreamapi.LogStreamResponse{RequestUuid: c.requestID, Status: 200}
+	resp := &logstreamapi.LogStreamResponse{RequestUuid: c.requestID, Status: http.StatusOK}
 	return stream.SendAndClose(resp)
+}
+
+// processLogStreamLoop processes log data from agent and forwards to HTTP writer
+// It also handles client detachment and timeout.
+func (s *Server) processLogStreamLoop(c *logClient, dataCh <-chan *logstreamapi.LogStreamData, errCh <-chan error) {
+	// Always unblock the recv pump on any return path.
+	defer c.cancelFn()
+	for {
+		select {
+		case <-c.ctx.Done():
+			// Ensure we terminate promptly when HTTP client detaches.
+			c.setTerminateErr(status.Error(codes.Canceled, "client detached timeout"))
+			return
+		case err := <-errCh:
+			// io.EOF means the client finished sending (normal close on the agent side).
+			if err != nil && err != io.EOF {
+				// Prefer a consistent reason for the agent on cancellations.
+				if status.Code(err) == codes.Canceled {
+					c.setTerminateErr(status.Error(codes.Canceled, "client detached timeout"))
+				} else {
+					c.setTerminateErr(err)
+				}
+			}
+			return
+		case msg, ok := <-dataCh:
+			if !ok {
+				// Pump exited without delivering an error (likely due to ctx cancellation).
+				return
+			}
+			if msg == nil {
+				c.setTerminateErr(status.Error(codes.InvalidArgument, "invalid log message"))
+				return
+			}
+
+			// First message, capture request UUID and expose cancelFn for detach handler
+			if c.requestID == "" {
+				c.requestID = msg.GetRequestUuid()
+				c.logCtx = c.logCtx.WithField("request_id", c.requestID)
+				c.logCtx.Info("LogStream started")
+
+				s.mu.Lock()
+				if sess, ok := s.sessions[c.requestID]; ok {
+					sess.cancelFn = func() {
+						// tag this stream as terminated due to client detach
+						c.setTerminateErr(status.Error(codes.Canceled, "client detached timeout"))
+						c.cancelFn()
+					}
+				}
+				s.mu.Unlock()
+			}
+
+			if err := s.processLogMessage(c, msg); err != nil {
+				// processLogMessage can return io.EOF or a terminal status
+				if err == io.EOF {
+					return
+				}
+				c.setTerminateErr(err)
+				return
+			}
+		}
+	}
 }
 
 // safeFlush prevents process crash if ResponseWriter is gone.
@@ -215,6 +270,22 @@ func safeFlush(f http.Flusher) (err error) {
 	}()
 	f.Flush()
 	return nil
+}
+
+// clearWriterAndCancel clears the HTTP writer and invokes the cancel function.
+// Used when write/flush fails or client disconnects.
+func (s *Server) clearWriterAndCancel(reqID string) {
+	s.mu.Lock()
+	sess := s.sessions[reqID]
+	var cancel context.CancelFunc
+	if sess != nil {
+		sess.hw = nil
+		cancel = sess.cancelFn
+	}
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (s *Server) processLogMessage(c *logClient, msg *logstreamapi.LogStreamData) error {
@@ -239,10 +310,18 @@ func (s *Server) processLogMessage(c *logClient, msg *logstreamapi.LogStreamData
 	if msg.GetEof() {
 		logCtx.Info("LogStream EOF")
 		s.mu.Lock()
-		if sess, ok := s.sessions[reqID]; ok && sess.completeCh != nil {
+		if sess, ok := s.sessions[reqID]; ok {
+			// Close doneCh FIRST to stop watchdog before HTTP handler returns.
+			// This prevents a race where the watchdog cancels the stream after
+			// WaitForCompletion returns but before finalizeSession is called.
+			if sess.doneCh != nil {
+				close(sess.doneCh)
+				sess.doneCh = nil
+			}
+			// Signal completion so WaitForCompletion can return (non-blocking).
 			select {
 			case sess.completeCh <- true:
-			default: // don't block if already signaled
+			default:
 			}
 		}
 		s.mu.Unlock()
@@ -250,7 +329,7 @@ func (s *Server) processLogMessage(c *logClient, msg *logstreamapi.LogStreamData
 	}
 
 	data := msg.GetData()
-	// Agent sends empty frame as prob, no flush needed
+	// Agent sends empty frame as probe, no flush needed
 	if len(data) == 0 {
 		return nil
 	}
@@ -259,7 +338,6 @@ func (s *Server) processLogMessage(c *logClient, msg *logstreamapi.LogStreamData
 	// Get current writer
 	s.mu.RLock()
 	hw := sess.hw
-	cancel := sess.cancelFn
 	s.mu.RUnlock()
 
 	// If writer is gone, end the stream (vanilla semantics: new request will be created)
@@ -268,35 +346,18 @@ func (s *Server) processLogMessage(c *logClient, msg *logstreamapi.LogStreamData
 		return status.Error(codes.Canceled, "client disconnected")
 	}
 
-	// write + flush; on failure, null writer and cancel
+	// Write data and flush; on failure, clear writer and cancel stream
 	if _, err := hw.w.Write(data); err != nil {
 		logCtx.WithError(err).Warn("HTTP write failed; canceling stream")
-		s.mu.Lock()
-		if sess := s.sessions[reqID]; sess != nil {
-			sess.hw = nil
-		}
-		s.mu.Unlock()
-		if cancel != nil {
-			cancel()
-		}
+		s.clearWriterAndCancel(reqID)
 		return status.Error(codes.Canceled, "HTTP write failed")
 	}
 	if err := safeFlush(hw.flusher); err != nil {
 		logCtx.WithError(err).Warn("HTTP flush failed; canceling stream")
-		s.mu.Lock()
-		if sess := s.sessions[reqID]; sess != nil {
-			sess.hw = nil
-		}
-		s.mu.Unlock()
-		if cancel != nil {
-			cancel()
-		}
+		s.clearWriterAndCancel(reqID)
 		return status.Error(codes.Canceled, "HTTP flush failed")
 	}
-	logCtx.WithFields(logrus.Fields{
-		"data_length": len(data),
-		"request_id":  reqID,
-	}).Info("HTTP write and flush successful")
+	logCtx.WithField("data_length", len(data)).Trace("HTTP write and flush successful")
 	return nil
 }
 
@@ -317,13 +378,18 @@ func (s *Server) WaitForCompletion(requestUUID string, timeout time.Duration) bo
 	}
 }
 
+// RemoveSession removes a session if it exists.
+func (s *Server) RemoveSession(requestUUID string) {
+	s.finalizeSession(requestUUID)
+}
+
 func (s *Server) finalizeSession(requestUUID string) {
 	s.mu.Lock()
-	sess := s.sessions[requestUUID]
-	if sess != nil && sess.doneCh != nil {
-		// Close doneCh to signal watchdog goroutine to exit
-		close(sess.doneCh)
+	defer s.mu.Unlock()
+	if sess := s.sessions[requestUUID]; sess != nil {
+		// closeChannels unblocks WaitForCompletion and stops watchdog.
+		// Channels may already be closed from EOF handling.
+		sess.closeChannels()
 	}
 	delete(s.sessions, requestUUID)
-	s.mu.Unlock()
 }

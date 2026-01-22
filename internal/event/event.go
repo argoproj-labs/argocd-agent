@@ -757,6 +757,8 @@ type EventWriter struct {
 }
 
 type eventMessage struct {
+	// when this lock is owned, never attempt to THEN acquire `eventWriter.mu`, as this will lead to a deadlock.
+	// If you require `eventWriter.mu`, you must acquire that lock FIRST, before attempting to acquiring `mu` (to avoid deadlock)
 	mu sync.RWMutex
 
 	// latest event for a resource
@@ -1061,21 +1063,21 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		return
 	}
 
-	// Move to sentEvents BEFORE unlocking to prevent ACK race
-	// Fire-and-forget events (ACKs and heartbeats) don't need retry tracking
 	target := Target(eventMsg.event)
 	isFireAndForget := target == TargetEventAck || target == TargetHeartbeat
 	if !isFireAndForget {
+		// IMPORTANT: Set retryAfter *before* publishing into sentEvents.
+		// We can have concurrent SendWaitingEvents loops (e.g. brief overlap during reconnect),
+		// and without this, another goroutine can observe retryAfter==nil and immediately retry,
+		// causing duplicate sends within the same second.
+		//
+		// Retry behavior:
+		// On success: retry happens if ACK never arrives
+		// On failure: retry happens after backoff
+		ew.scheduleRetry(eventMsg)
 		ew.sentEvents[resID] = eventMsg
 	}
 	ew.mu.Unlock()
-
-	// Schedule retry at the end for events that need reliability guarantees
-	// On success: retry happens if ACK never arrives
-	// On failure: retry happens after backoff
-	if !isFireAndForget {
-		defer ew.scheduleRetry(eventMsg)
-	}
 
 	// Send the event
 	eventMsg.mu.Lock()
