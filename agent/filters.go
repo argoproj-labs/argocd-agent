@@ -29,7 +29,11 @@ func (a *Agent) DefaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 
 	// Admit based on namespace of the application
 	fc.AppendAdmitFilter(func(app *v1alpha1.Application) bool {
-		if !glob.MatchStringInList(append([]string{a.namespace}, a.allowedNamespaces...), app.Namespace, glob.REGEXP) {
+		nsList := append([]string{a.namespace}, a.allowedNamespaces...)
+		if a.destinationBasedMapping {
+			nsList = append(nsList, app.Namespace)
+		}
+		if !glob.MatchStringInList(nsList, app.Namespace, glob.REGEXP) {
 			log().Warnf("namespace not allowed: %s", app.QualifiedName())
 			return false
 		}

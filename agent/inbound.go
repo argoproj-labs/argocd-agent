@@ -428,7 +428,8 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 		return fmt.Errorf("send queue not found for the default queue pair")
 	}
 
-	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent, a.namespace)
+	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent, a.namespace).
+		WithDestinationBasedMapping(a.destinationBasedMapping)
 	subject := &auth.AuthSubject{}
 	err = json.Unmarshal([]byte(a.remote.ClientID()), subject)
 	if err != nil {
