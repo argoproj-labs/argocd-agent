@@ -27,11 +27,25 @@ MKDOCS_DOCKER_IMAGE?=squidfunk/mkdocs-material:9
 MKDOCS_RUN_ARGS?=
 
 # Binary names
-BIN_NAME_ARGOCD_AGENT=argocd-agent
+BIN_NAME_AGENT?=
 BIN_NAME_CLI?=argocd-agentctl
 BIN_ARCH?=$(shell go env GOARCH)
 BIN_OS?=$(shell go env GOOS)
+CGO_ENABLED?=0
+GOEXPERIMENT?=
+GO_TAGS?=
+GO_MOD?=
 LDFLAGS?=
+
+GO_TAGS_FLAG :=
+ifneq ($(strip $(GO_TAGS)),)
+GO_TAGS_FLAG = -tags '$(GO_TAGS)'
+endif
+
+GO_MOD_FLAG :=
+ifneq ($(strip $(GO_MOD)),)
+GO_MOD_FLAG = -mod=$(GO_MOD)
+endif
 
 current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BIN_DIR := $(current_dir)/build/bin
@@ -172,7 +186,7 @@ lint: install-lint-toolchain
 
 .PHONY: argocd-agent
 argocd-agent:
-	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_AGENT) -ldflags '$(LDFLAGS)' ./cmd/argocd-agent
+	CGO_ENABLED=$(CGO_ENABLED) GOEXPERIMENT=$(GOEXPERIMENT) GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v $(GO_TAGS_FLAG) $(GO_MOD_FLAG) -o dist/$(BIN_NAME_AGENT) -ldflags '$(LDFLAGS)' ./cmd/argocd-agent
 
 .PHONY: cli-all
 cli-all:
@@ -184,7 +198,7 @@ cli-all:
 
 .PHONY: cli
 cli:
-	CGO_ENABLED=0 GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v -o dist/$(BIN_NAME_CLI) -ldflags '$(LDFLAGS)' ./cmd/ctl
+	CGO_ENABLED=$(CGO_ENABLED) GOEXPERIMENT=$(GOEXPERIMENT) GOARCH=$(BIN_ARCH) GOOS=$(BIN_OS) go build -v $(GO_TAGS_FLAG) $(GO_MOD_FLAG) -o dist/$(BIN_NAME_CLI) -ldflags '$(LDFLAGS)' ./cmd/ctl
 
 .PHONY: image
 image:
