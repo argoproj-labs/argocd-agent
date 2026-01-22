@@ -263,6 +263,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		application.WithRole(manager.ManagerRoleAgent),
 		application.WithMode(managerMode),
 		application.WithDeletionTracker(a.deletions),
+		application.WithDestinationBasedMapping(a.destinationBasedMapping),
 	}
 
 	if a.options.metricsPort > 0 {
@@ -560,7 +561,13 @@ func (a *Agent) healthzHandler(w http.ResponseWriter, r *http.Request) {
 
 func (a *Agent) populateSourceCache(ctx context.Context) error {
 	log().Infof("Recreating application spec cache from existing resources on cluster")
-	appList, err := a.appManager.List(ctx, backend.ApplicationSelector{Namespaces: []string{a.namespace}})
+	// When destination-based mapping is enabled, apps can be in any namespace,
+	// so we need to list from all namespaces
+	var namespaces []string
+	if !a.destinationBasedMapping {
+		namespaces = []string{a.namespace}
+	}
+	appList, err := a.appManager.List(ctx, backend.ApplicationSelector{Namespaces: namespaces})
 	if err != nil {
 		return err
 	}

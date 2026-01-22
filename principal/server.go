@@ -282,6 +282,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	appManagerOpts := []application.ApplicationManagerOption{
 		application.WithAllowUpsert(true),
 		application.WithRole(manager.ManagerRolePrincipal),
+		application.WithDestinationBasedMapping(s.destinationBasedMapping),
 	}
 
 	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
