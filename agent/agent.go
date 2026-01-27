@@ -116,6 +116,9 @@ type Agent struct {
 	// deletions tracks valid deletions from the source.
 	// This is used to differentiate between valid and invalid deletions
 	deletions *manager.DeletionTracker
+
+	// trackingReader reads and caches the Argo CD resource tracking configuration
+	trackingReader *ResourceTrackingReader
 }
 
 const defaultQueueName = "default"
@@ -318,6 +321,9 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.resources = resources.NewResources()
 
 	a.syncCh = make(chan bool, 1)
+
+	// Initialize the resource tracking reader
+	a.trackingReader = NewResourceTrackingReader(ctx, client, a.namespace)
 
 	argoClient, argoCache, err := a.getRedisClientAndCache()
 	if err != nil {
