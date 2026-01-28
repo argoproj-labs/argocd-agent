@@ -141,6 +141,11 @@ func ParseLogLevels(input []string, ss *SubSystemLoggers) {
 			continue
 		}
 
+		split[0] = strings.TrimSpace(split[0])
+		if len(split) > 1 {
+			split[1] = strings.TrimSpace(split[1])
+		}
+
 		if len(split) == 1 {
 			if split[0] == "" {
 				split[0] = "info"

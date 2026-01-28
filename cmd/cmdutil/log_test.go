@@ -20,6 +20,15 @@ func Test_parseLogLevels(t *testing.T) {
 		expectedMessage       string
 	}{
 		{
+			name:                  "set everything to warning",
+			logLevels:             []string{"warning"},
+			resourceProxyExpected: logrus.WarnLevel,
+			redisProxyExpected:    logrus.WarnLevel,
+			grpcEventExpected:     logrus.WarnLevel,
+			defaultExpected:       logrus.WarnLevel,
+			expectedMessage:       "",
+		},
+		{
 			name:                  "just resource-proxy ",
 			logLevels:             []string{"resource-proxy=warning"},
 			resourceProxyExpected: logrus.WarnLevel,

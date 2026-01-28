@@ -119,9 +119,17 @@ func WithHeartbeatInterval(interval time.Duration) AgentOption {
 
 func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) AgentOption {
 	return func(o *Agent) error {
-		o.resourceProxyLogger = logging.New(resourceProxy)
-		o.redisProxyLogger = logging.New(redisProxy)
-		o.grpcEventLogger = logging.New(grpcEvent)
+		if resourceProxy != nil {
+			o.resourceProxyLogger = logging.New(resourceProxy)
+		}
+
+		if redisProxy != nil {
+			o.redisProxyLogger = logging.New(redisProxy)
+		}
+
+		if grpcEvent != nil {
+			o.grpcEventLogger = logging.New(grpcEvent)
+		}
 		return nil
 	}
 }
