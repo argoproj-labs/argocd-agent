@@ -376,14 +376,24 @@ Authentication method and corresponding configuration.
 
 | Method | Format | Description |
 |--------|--------|-------------|
-| `mtls` | `mtls:<regex>` | Mutual TLS authentication. Regex extracts agent ID from certificate subject. |
+| `mtls` | `mtls:[source:]<regex>` | Mutual TLS authentication. Regex extracts agent ID from certificate. |
 | `header` | `header:<header-name>:<regex>` | Header-based authentication. First capture group becomes agent ID. |
 | `userpass` | `userpass:<path>` | **[DEPRECATED]** Username/password authentication. |
 
+**mTLS Identity Sources:**
+
+| Format | Source | Use Case |
+|--------|--------|----------|
+| `mtls:<regex>` | Subject DN | Default, backwards compatible |
+| `mtls:subject:<regex>` | Subject DN | Explicit subject extraction |
+| `mtls:uri:<regex>` | URI SANs | SPIFFE URIs when CN is constrained |
+
 **Examples:**
 
-- mTLS: `mtls:CN=([^,]+)`
-- Istio: `header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)`
+- mTLS (subject): `mtls:CN=([^,]+)`
+- mTLS (subject explicit): `mtls:subject:CN=([^,]+)`
+- mTLS (SPIFFE URI): `mtls:uri:spiffe://[^/]+/ns/[^/]+/sa/(.+)`
+- Istio header: `header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)`
 - Custom header: `header:x-client-id:^(.+)$`
 
 !!! warning "Header Authentication Security"
