@@ -227,6 +227,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
+	if a.destinationBasedMapping && a.mode == types.AgentModeAutonomous {
+		return nil, fmt.Errorf("destination-based mapping is not supported for autonomous agents")
+	}
+
 	// Determine the namespace(s) to watch for applications
 	appNamespace := a.namespace
 	if a.destinationBasedMapping {
