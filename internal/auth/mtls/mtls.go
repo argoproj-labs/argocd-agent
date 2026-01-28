@@ -25,16 +25,31 @@ import (
 	"k8s.io/apimachinery/pkg/api/validation"
 )
 
+// IdentitySource specifies where to extract the agent identity from
+type IdentitySource string
+
+const (
+	// IdentitySourceSubject extracts identity from cert.Subject (DN)
+	IdentitySourceSubject IdentitySource = "subject"
+	// IdentitySourceURI extracts identity from cert.URIs (e.g., SPIFFE)
+	IdentitySourceURI IdentitySource = "uri"
+)
+
 // MTLSAuthentication implements a mTLS authentication method
 //
-// It extracts the agent ID from the TLS certificate subject.
+// It extracts the agent ID from the TLS certificate subject or URI SANs.
 type MTLSAuthentication struct {
-	AgentIDRegex *regexp.Regexp
+	AgentIDRegex   *regexp.Regexp
+	IdentitySource IdentitySource
 }
 
-func NewMTLSAuthentication(regex *regexp.Regexp) *MTLSAuthentication {
+func NewMTLSAuthentication(regex *regexp.Regexp, source IdentitySource) *MTLSAuthentication {
+	if source == "" {
+		source = IdentitySourceSubject
+	}
 	return &MTLSAuthentication{
-		AgentIDRegex: regex,
+		AgentIDRegex:   regex,
+		IdentitySource: source,
 	}
 }
 
@@ -52,12 +67,23 @@ func (m *MTLSAuthentication) Authenticate(ctx context.Context, creds auth.Creden
 		return "", fmt.Errorf("no verified certificates found in TLS cred")
 	}
 	cert := tlsInfo.State.VerifiedChains[0][0]
-	subject := cert.Subject.String()
+
+	var identityString string
+	switch m.IdentitySource {
+	case IdentitySourceURI:
+		if len(cert.URIs) == 0 {
+			return "", fmt.Errorf("no URI SANs found in client certificate")
+		}
+		identityString = cert.URIs[0].String()
+	default:
+		identityString = cert.Subject.String()
+	}
+
 	var agentID string
 	if m.AgentIDRegex != nil {
-		matches := m.AgentIDRegex.FindStringSubmatch(subject)
+		matches := m.AgentIDRegex.FindStringSubmatch(identityString)
 		if len(matches) < 2 {
-			return "", fmt.Errorf("the TLS subject '%s' does not match the agent ID regex pattern", subject)
+			return "", fmt.Errorf("certificate %s '%s' does not match the agent ID regex pattern", m.IdentitySource, identityString)
 		}
 		agentID = matches[1]
 	}

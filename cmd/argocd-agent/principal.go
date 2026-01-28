@@ -262,14 +262,16 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			switch authMethod {
 			case "mtls":
+				source, regexStr := parseMTLSConfig(authConfig)
 				var regex *regexp.Regexp
-				if authConfig != "" {
-					regex, err = regexp.Compile(authConfig)
+				if regexStr != "" {
+					regex, err = regexp.Compile(regexStr)
 					if err != nil {
 						cmdutil.Fatal("Error compiling mtls agent id regex: %v", err)
 					}
 				}
-				mtlsauth := mtls.NewMTLSAuthentication(regex)
+				mtlsauth := mtls.NewMTLSAuthentication(regex, source)
+				logrus.Infof("Using mTLS authentication (source: %s, pattern: %s)", source, regexStr)
 				err := authMethods.RegisterMethod("mtls", mtlsauth)
 				if err != nil {
 					cmdutil.Fatal("Could not register mtls auth method: %v", err)
@@ -591,6 +593,23 @@ func parseHeaderAuth(config string) (string, *regexp.Regexp, error) {
 	}
 
 	return headerName, extractionRegex, nil
+}
+
+// parseMTLSConfig parses mTLS configuration in the format:
+//
+//	<regex>              -> source=subject (backwards compat)
+//	subject:<regex>      -> source=subject
+//	uri:<regex>          -> source=uri (for SPIFFE URIs)
+//
+// Example: "uri:spiffe://ea1t\\.us\\.a/ns/argocd-agent/sa/(.+)"
+func parseMTLSConfig(config string) (mtls.IdentitySource, string) {
+	if strings.HasPrefix(config, "subject:") {
+		return mtls.IdentitySourceSubject, strings.TrimPrefix(config, "subject:")
+	}
+	if strings.HasPrefix(config, "uri:") {
+		return mtls.IdentitySourceURI, strings.TrimPrefix(config, "uri:")
+	}
+	return mtls.IdentitySourceSubject, config
 }
 
 // validateAuthTLSPairing validates that the authentication method is compatible
