@@ -103,7 +103,7 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 	err = wait.ExponentialBackoff(backoff, func() (done bool, err error) {
 		var lerr error
 		if try == 1 {
-			log().Debugf("Starting TCP listener on %s", bind)
+			s.logGrpcEvent().Debugf("Starting TCP listener on %s", bind)
 		}
 		// Even though we load TLS configuration here, we will not yet create
 		// a TLS listener. TLS will be setup using the appropriate grpc-go API
@@ -115,7 +115,7 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 		// Start the TCP listener and bail out on errors.
 		c, lerr = net.Listen("tcp", bind)
 		if lerr != nil {
-			log().WithError(err).Debugf("Retrying to start TCP listener on %s (retry %d/%d)", bind, try, listenerRetries)
+			s.logGrpcEvent().WithError(lerr).Debugf("Retrying to start TCP listener on %s (retry %d/%d)", bind, try, listenerRetries)
 			try += 1
 			return false, lerr
 		}
@@ -126,7 +126,7 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 		return err
 	}
 
-	log().Infof("Now listening on %s", c.Addr().String())
+	s.logGrpcEvent().Infof("Now listening on %s", c.Addr().String())
 	s.listener, err = addrToListener(c)
 	if err == nil {
 		if ctx == nil {
@@ -149,12 +149,12 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		// Global interceptors for gRPC streams
 		grpc.ChainStreamInterceptor(
-			streamRequestLogger(),   // logging
+			s.streamRequestLogger(), // logging
 			s.streamAuthInterceptor, // auth
 		),
 		// Global interceptors for gRPC unary calls
 		grpc.ChainUnaryInterceptor(
-			unaryRequestLogger(),   // logging
+			s.unaryRequestLogger(), // logging
 			s.unaryAuthInterceptor, // auth
 		),
 	}
@@ -167,7 +167,7 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 	}
 
 	if s.keepAliveMinimumInterval != 0 {
-		log().Debugf("Agent ping to principal is enabled, agent should wait at least %s before sending next ping event to principal", s.keepAliveMinimumInterval)
+		s.logGrpcEvent().Debugf("Agent ping to principal is enabled, agent should wait at least %s before sending next ping event to principal", s.keepAliveMinimumInterval)
 		grpcOpts = append(grpcOpts, grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: s.keepAliveMinimumInterval}))
 	}
 
@@ -232,7 +232,12 @@ func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
 	}
 	authapi.RegisterAuthenticationServer(s.grpcServer, authSrv)
 	versionapi.RegisterVersionServer(s.grpcServer, version.NewServer(s.authenticate))
-	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues, s.eventWriters, metrics, s.clusterMgr, eventstream.WithNotifyOnConnect(s.notifyOnConnect)))
+
+	opts := []eventstream.ServerOption{}
+	opts = append(opts, eventstream.WithNotifyOnConnect(s.notifyOnConnect))
+	opts = append(opts, eventstream.WithLogger(s.options.grpcEventLogger))
+
+	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues, s.eventWriters, metrics, s.clusterMgr, opts...))
 	// Proposal: register LogStream gRPC service for data-plane (use singleton instance)
 	logstreamapi.RegisterLogStreamServiceServer(s.grpcServer, s.logStream)
 	// Register TerminalStream gRPC service for web terminal sessions

@@ -78,7 +78,6 @@ func (be *KubernetesBackend) Get(ctx context.Context, name string, namespace str
 }
 
 func (be *KubernetesBackend) Delete(ctx context.Context, name string, namespace string, deletionPropagation *backend.DeletionPropagation) error {
-
 	// If nil, default to foreground
 	k8sPropagationPolicy := v1.DeletePropagationForeground
 
@@ -174,5 +173,5 @@ func isValidRepositorySecret(res *corev1.Secret, namespace string) bool {
 }
 
 func log() *logrus.Entry {
-	return logging.ComponentLogger("RepositoryBackend")
+	return logging.GetDefaultLogger().ComponentLogger("RepositoryBackend")
 }

@@ -181,5 +181,5 @@ func (a *UserPassAuthentication) Init() error {
 }
 
 func log() *logrus.Entry {
-	return logging.ComponentLogger("AuthUserPass")
+	return logging.GetDefaultLogger().ComponentLogger("AuthUserPass")
 }

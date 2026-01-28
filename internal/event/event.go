@@ -35,8 +35,10 @@ import (
 
 const cloudEventSpecVersion = "1.0"
 
-type EventType string
-type EventTarget string
+type (
+	EventType   string
+	EventTarget string
+)
 
 const TypePrefix = "io.argoproj.argocd-agent.event"
 
@@ -246,8 +248,7 @@ type RedisCommandBodySubscribe struct {
 	ChannelName string `json:"channel"`
 }
 
-type RedisCommandBodyPing struct {
-}
+type RedisCommandBodyPing struct{}
 
 type RedisResponse struct {
 	UUID           string            `json:"uuid"`
@@ -276,8 +277,7 @@ type RedisResponseBodyPushFromSubscribe struct {
 	ChannelName string `json:"channelName"`
 }
 
-type RedisResponseBodyPong struct {
-}
+type RedisResponseBodyPong struct{}
 
 // ResourceRequest is an event that holds a request for a resource. It is
 // usually emitted from the resource proxy, and is sent from the principal
@@ -556,8 +556,7 @@ func (evs EventSource) RequestUpdateEvent(reqUpdate *RequestUpdate) (*cloudevent
 
 // RequestResourceResync is sent by the source to a peer when the source process restarts.
 // It informs the peer that the source process restarted and it might be out of sync with the source.
-type RequestResourceResync struct {
-}
+type RequestResourceResync struct{}
 
 func (evs EventSource) RequestResourceResyncEvent() (*cloudevents.Event, error) {
 	reqUUID := uuid.NewString()

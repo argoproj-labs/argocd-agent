@@ -552,5 +552,5 @@ func (r *Remote) SetClientID(id string) {
 }
 
 func log() *logrus.Entry {
-	return logging.ModuleLogger("Connector")
+	return logging.GetDefaultLogger().ModuleLogger("Connector")
 }

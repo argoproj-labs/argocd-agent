@@ -42,7 +42,7 @@ func NewAgentRunCommand() *cobra.Command {
 	var (
 		serverAddress       string
 		serverPort          int
-		logLevel            string
+		logLevels           []string
 		logFormat           string
 		insecure            bool
 		insecurePlaintext   bool
@@ -119,21 +119,26 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts := []agent.AgentOption{}
 			remoteOpts := []client.RemoteOption{}
 
-			if logLevel == "" {
-				logLevel = "info"
-			}
-			if logLevel != "" {
-				lvl, err := cmdutil.StringToLoglevel(logLevel)
-				if err != nil {
-					cmdutil.Fatal("invalid log level: %s. Available levels are: %s", logLevel, cmdutil.AvailableLogLevels())
-				}
-				logrus.SetLevel(lvl)
-			}
 			if formatter, err := cmdutil.LogFormatter(logFormat); err != nil {
 				cmdutil.Fatal("%s", err.Error())
 			} else {
 				logrus.SetFormatter(formatter)
 			}
+
+			subLoggers := cmdutil.SubSystemLoggers{
+				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
+				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
+				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
+			}
+
+			if len(logLevels) == 0 {
+				logLevels = append(logLevels, "info")
+			}
+			if len(logLevels) > 0 {
+				cmdutil.ParseLogLevels(logLevels, &subLoggers)
+			}
+
+			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
 			if namespace == "" {
 				cmdutil.Fatal("namespace value is empty and must be specified")
 			}
@@ -249,9 +254,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().IntVar(&serverPort, "server-port",
 		env.NumWithDefault("ARGOCD_AGENT_REMOTE_PORT", nil, 443),
 		"Port on the server to connect to")
-	command.Flags().StringVar(&logLevel, "log-level",
-		env.StringWithDefault("ARGOCD_AGENT_LOG_LEVEL", nil, "info"),
-		"The log level for the agent")
+	command.Flags().StringSliceVar(&logLevels, "log-level",
+		env.StringSliceWithDefault("ARGOCD_AGENT_LOG_LEVEL", nil, []string{"info"}),
+		"The log level to use. Comma-separated list of components in the format [<component>=]level")
 
 	command.Flags().StringVar(&redisAddr, "redis-addr",
 		env.StringWithDefault("REDIS_ADDR", nil, "argocd-redis:6379"),

@@ -65,7 +65,7 @@ func NewEventWriter(target streamWriter) *EventWriter {
 		unsentEvents: map[string]*eventQueue{},
 		sentEvents:   map[string]*eventMessage{},
 		target:       target,
-		log:          logging.ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())),
+		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())),
 	}
 }
 
@@ -198,7 +198,6 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 // Note: This function will never return unless the context is done, and therefore
 // should be started in a separate goroutine.
 func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
-
 	logCtx := ew.log
 
 	logCtx.Info("Starting event writer")
@@ -273,7 +272,8 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 		"event_id":     EventID(sentMsg.event),
 		"event_target": sentMsg.event.DataSchema(),
 		"event_type":   sentMsg.event.Type(),
-		"retry_count":  sentMsg.retryCount})
+		"retry_count":  sentMsg.retryCount,
+	})
 
 	// Check if we've exhausted retries
 	maxRetries := sentMsg.backoff.Steps
@@ -369,7 +369,8 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	logCtx = logCtx.WithFields(logrus.Fields{
 		"event_id":     EventID(eventMsg.event),
 		"event_target": eventMsg.event.DataSchema(),
-		"event_type":   eventMsg.event.Type()})
+		"event_type":   eventMsg.event.Type(),
+	})
 
 	pev, err := format.ToProto(eventMsg.event)
 	eventMsg.mu.Unlock()

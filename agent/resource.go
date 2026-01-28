@@ -44,7 +44,7 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	if err != nil {
 		return err
 	}
-	logCtx := log().WithFields(logrus.Fields{
+	logCtx := a.logResourceProxy().WithFields(logrus.Fields{
 		"method":      "processIncomingResourceRequest",
 		"uuid":        rreq.UUID,
 		"http_method": rreq.Method,

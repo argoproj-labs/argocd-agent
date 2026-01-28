@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,7 +44,7 @@ func Test_proxyHandler(t *testing.T) {
 		p, err := New("127.0.0.1:8080",
 			WithRequestMatcher("^/test/foo$", []string{"get"}, func(w http.ResponseWriter, r *http.Request, params Params) {
 				intercepted = true
-				log().Tracef("Writing OK")
+				logging.GetDefaultLogger().ModuleLogger("RedisProxy").Tracef("Writing OK")
 				w.WriteHeader(http.StatusOK)
 			}),
 		)
@@ -64,7 +65,6 @@ func Test_proxyHandler(t *testing.T) {
 		r = httptest.NewRequest(http.MethodGet, "/test/foo/bar", nil)
 		p.proxyHandler(rec, r)
 		assert.Equal(t, http.StatusBadRequest, rec.Result().StatusCode)
-
 	})
 }
 

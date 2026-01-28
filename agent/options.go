@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/sirupsen/logrus"
 )
 
 func WithAllowedNamespaces(namespaces ...string) AgentOption {
@@ -111,6 +113,23 @@ func WithCacheRefreshInterval(interval time.Duration) AgentOption {
 func WithHeartbeatInterval(interval time.Duration) AgentOption {
 	return func(o *Agent) error {
 		o.options.heartbeatInterval = interval
+		return nil
+	}
+}
+
+func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) AgentOption {
+	return func(o *Agent) error {
+		if resourceProxy != nil {
+			o.resourceProxyLogger = logging.New(resourceProxy)
+		}
+
+		if redisProxy != nil {
+			o.redisProxyLogger = logging.New(redisProxy)
+		}
+
+		if grpcEvent != nil {
+			o.grpcEventLogger = logging.New(grpcEvent)
+		}
 		return nil
 	}
 }

@@ -162,5 +162,5 @@ func (m *Manager) Stop() error {
 }
 
 func log() *logrus.Entry {
-	return logging.ComponentLogger("ClusterManager")
+	return logging.GetDefaultLogger().ComponentLogger("ClusterManager")
 }

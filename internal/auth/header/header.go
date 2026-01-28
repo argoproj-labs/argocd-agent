@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/validation"
 )
 
-var log = logging.ComponentLogger("header-auth")
+var log = logging.GetDefaultLogger().ComponentLogger("header-auth")
 
 // HeaderAuthentication implements authentication using identity extracted from
 // HTTP headers injected by a sidecar proxy or service mesh.

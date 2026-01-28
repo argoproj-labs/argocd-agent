@@ -48,7 +48,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 	var (
 		listenHost                string
 		listenPort                int
-		logLevel                  string
+		logLevels                 []string
 		logFormat                 string
 		metricsPort               int
 		namespace                 string
@@ -98,7 +98,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		otlpAddress  string
 		otlpInsecure bool
 	)
-	var command = &cobra.Command{
+	command := &cobra.Command{
 		Use:   "principal",
 		Short: "Run the argocd-agent principal component",
 		Run: func(c *cobra.Command, args []string) {
@@ -131,19 +131,26 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			opts := []principal.ServerOption{}
-			if logLevel != "" {
-				lvl, err := cmdutil.StringToLoglevel(logLevel)
-				if err != nil {
-					cmdutil.Fatal("invalid log level: %s. Available levels are: %s", logLevel, cmdutil.AvailableLogLevels())
-				}
-				logrus.Printf("Setting loglevel to %s", logLevel)
-				logrus.SetLevel(lvl)
-			}
 			if formatter, err := cmdutil.LogFormatter(logFormat); err != nil {
 				cmdutil.Fatal("%s", err.Error())
 			} else {
 				logrus.SetFormatter(formatter)
 			}
+
+			subLoggers := cmdutil.SubSystemLoggers{
+				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
+				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
+				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
+			}
+
+			if len(logLevels) == 0 {
+				logLevels = append(logLevels, "info")
+			}
+			if len(logLevels) > 0 {
+				cmdutil.ParseLogLevels(logLevels, &subLoggers)
+			}
+
+			opts = append(opts, principal.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
 
 			kubeConfig, err := cmdutil.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
 			if err != nil {
@@ -334,9 +341,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.NumWithDefault("ARGOCD_PRINCIPAL_LISTEN_PORT", cmdutil.ValidPort, 8443),
 		"Port the gRPC server will listen on")
 
-	command.Flags().StringVar(&logLevel, "log-level",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_LEVEL", nil, logrus.InfoLevel.String()),
-		"The log level to use")
+	command.Flags().StringSliceVar(&logLevels, "log-level",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_LOG_LEVEL", nil, []string{"info"}),
+		"The log level to use. Comma-separated list of components in the format [<component>=]level")
 	command.Flags().StringVar(&logFormat, "log-format",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),
 		"The log format to use (one of: text, json)")
@@ -468,7 +475,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
 
 	return command
-
 }
 
 // observer puts some valuable debug information in the logs every interval.

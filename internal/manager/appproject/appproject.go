@@ -37,8 +37,10 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-type updateTransformer func(existing, incoming *v1alpha1.AppProject)
-type patchTransformer func(existing, incoming *v1alpha1.AppProject) (jsondiff.Patch, error)
+type (
+	updateTransformer func(existing, incoming *v1alpha1.AppProject)
+	patchTransformer  func(existing, incoming *v1alpha1.AppProject) (jsondiff.Patch, error)
+)
 
 const (
 	// LastUpdatedAnnotation is a label put on AppProject which contains the time
@@ -125,7 +127,6 @@ func (m *AppProjectManager) StartBackend(ctx context.Context) error {
 
 // Create creates the AppProject using the Manager's AppProject backend.
 func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
-
 	// A new AppProject must neither specify ResourceVersion nor Generation
 	project.ResourceVersion = ""
 	project.Generation = 0
@@ -493,5 +494,5 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alp
 }
 
 func log() *logrus.Entry {
-	return logging.ComponentLogger("AppProjectManager")
+	return logging.GetDefaultLogger().ComponentLogger("AppProjectManager")
 }

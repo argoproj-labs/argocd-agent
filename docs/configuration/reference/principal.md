@@ -399,11 +399,13 @@ Authentication method and corresponding configuration.
 | **CLI Flag** | `--log-level` |
 | **Environment Variable** | `ARGOCD_PRINCIPAL_LOG_LEVEL` |
 | **ConfigMap Entry** | `principal.log.level` |
-| **Type** | String |
+| **Type** | String (comma-separated list) |
 | **Default** | `info` |
-| **Valid Values** | `trace`, `debug`, `info`, `warn`, `error` |
+| **Format** | `[<component>=]<level>` |
+| **Valid Values (component)** | `resource-proxy`, `redis-proxy`, `grpc-event` |
+| **Valid Values (level)** | `trace`, `debug`, `info`, `warning`, `error` |
 
-The log level to use.
+The log level for the general logger and subsystem loggers for the principal.
 
 ### Log Format
 
