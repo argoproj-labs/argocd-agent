@@ -515,9 +515,11 @@ func TestAgentSpecificAppProject(t *testing.T) {
 		appProject v1alpha1.AppProject
 		agent      string
 		want       v1alpha1.AppProject
+		dstMapping bool
 	}{
 		{
-			name: "filters destinations for matching agent",
+			name:       "filters destinations for matching agent",
+			dstMapping: false,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-project",
@@ -567,7 +569,8 @@ func TestAgentSpecificAppProject(t *testing.T) {
 			},
 		},
 		{
-			name: "matches multiple destinations with glob pattern",
+			name:       "matches multiple destinations with glob pattern",
+			dstMapping: false,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "multi-dest-project",
@@ -623,7 +626,8 @@ func TestAgentSpecificAppProject(t *testing.T) {
 			},
 		},
 		{
-			name: "no matching destinations",
+			name:       "no matching destinations",
+			dstMapping: false,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "no-match-project",
@@ -667,7 +671,8 @@ func TestAgentSpecificAppProject(t *testing.T) {
 			},
 		},
 		{
-			name: "empty destinations and roles",
+			name:       "empty destinations and roles",
+			dstMapping: false,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "empty-project",
@@ -693,7 +698,8 @@ func TestAgentSpecificAppProject(t *testing.T) {
 			},
 		},
 		{
-			name: "agent name matches wildcard destination",
+			name:       "agent name matches wildcard destination",
+			dstMapping: false,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "wildcard-project",
@@ -729,11 +735,49 @@ func TestAgentSpecificAppProject(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:       "preserves source namespaces for destination-based mapping",
+			dstMapping: true,
+			appProject: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "wildcard-project",
+					Namespace: "argocd",
+				},
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{
+							Name:      "*",
+							Namespace: "default",
+						},
+					},
+					SourceNamespaces: []string{"agent-name,app-ns"},
+					Roles:            []v1alpha1.ProjectRole{},
+				},
+			},
+			agent: "test-agent",
+			want: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "wildcard-project",
+					Namespace: "argocd",
+				},
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{
+							Name:      "in-cluster",
+							Server:    "https://kubernetes.default.svc",
+							Namespace: "default",
+						},
+					},
+					SourceNamespaces: []string{"agent-name,app-ns"},
+					Roles:            []v1alpha1.ProjectRole{},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := AgentSpecificAppProject(tt.appProject, tt.agent)
+			got := AgentSpecificAppProject(tt.appProject, tt.agent, tt.dstMapping)
 			assert.Equal(t, tt.want, got)
 		})
 	}
