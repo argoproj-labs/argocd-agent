@@ -1,6 +1,6 @@
 ## ArgoCD Agent HA Failover Design
 
-_ai disclosure: diagrams and tables were formatted/generatd with ai_
+_ai disclosure: diagrams and tables were formatted/generated with ai_
 
 ## Overview
 
@@ -12,7 +12,9 @@ This document outlines the High Availability (HA) failover strategy for the argo
 |----------|--------|-----------|
 | **Recovery Target** | 1-5 minutes | Acceptable for DR scenario, enables simpler DNS-based failover |
 | **State Replication** | Principal-to-Principal streaming | Uses existing event streaming mechanisms, Replica stays in sync |
-| **Agent Connectivity** | Single GSLB endpoint | Transparent to agents, no agent code changes |
+| **Agent Connectivity** | Single GSLB endpoint | Transparent to agents, minimal agent code changes |
+| **Split-Brain Prevention** | Self-fencing on lost peer ACK | Primary must prove replica is listening; no external quorum needed |
+| **Consistency vs Availability** | Safety over availability | Accept brief outage during some partitions to prevent split-brain |
 
 ## Architecture
 
@@ -36,6 +38,7 @@ This document outlines the High Availability (HA) failover strategy for the argo
     │  │  - Health :8080/healthz   │      │   │  │  - gRPC :8403             │  │
     │  │  - In-memory state        │──────┼───┼─►│  - Mirrors all state      │  │
     │  │  - Replication Server     │      │   │  │  - Health :8080/healthz   │  │
+    │  │  - Term: N                │◄─ACK─┼───┼──│  - Term: N                │  │
     │  └─────────────┬─────────────┘      │   │  └─────────────┬─────────────┘  │
     │                │                    │   │                │                │
     │  ┌─────────────▼─────────────┐      │   │  ┌─────────────▼─────────────┐  │
@@ -48,12 +51,9 @@ This document outlines the High Availability (HA) failover strategy for the argo
                       ▲                               ▲
                       │                               │
                       │    Replication Stream:        │
-                      │    All events forwarded       │
-                      │    Primary → Replica          │
-                      │                               │
-                      │    On failover:               │
-                      │    Agents reconnect to        │
-                      │    Replica (via GSLB)         │
+                      │    - Events + Heartbeats      │
+                      │    - Bidirectional ACKs       │
+                      │    - Term synchronization     │
                       │                               │
               ┌───────┴───────────────────────────────┴───────┐
               │                                               │
@@ -68,11 +68,83 @@ This document outlines the High Availability (HA) failover strategy for the argo
 
 ---
 
+## Split-Brain Prevention
+
+### The Problem
+
+With only two principals and no external witness, network partitions can cause both principals to believe they should be active (split-brain). DNS/GSLB alone cannot prevent this—it routes traffic but cannot fence an already-active principal.
+
+### Solution: Self-Fencing on Lost Peer ACK
+
+**Core rule:** The primary must continuously prove the replica is listening. If the primary stops receiving ACKs, it must fence itself.
+
+```
+PR1 (primary):
+  - Sends heartbeats every 5s on replication stream
+  - Expects ACKs from PR2
+  - No ACK for ackTimeout (15s) → check peer health
+  - If peer unreachable → peer likely dead, stay ACTIVE
+  - If peer reachable but not ACKing → partition, fence self
+
+PR2 (replica):
+  - No heartbeat/events for failoverTimeout (30s) → promote to STANDBY
+  - Trusts that PR1 will self-fence if partitioned
+```
+
+This guarantees that in asymmetric partition scenarios:
+- PR2 may promote
+- PR1 will fence itself
+- Only one principal can serve at any time
+
+**Trade-off:** In some partitions the system may become temporarily unavailable, but it remains correct.
+
+### Term/Epoch for Stale Rejection
+
+To prevent stale leaders from corrupting state, we use a monotonically increasing term:
+
+- Each ACTIVE promotion increments the term
+- Agent connections and inbound events carry the term
+- A principal only accepts inbound updates for its current term
+
+```go
+type HAState struct {
+    Role        Role   // ACTIVE, STANDBY, FENCED, etc.
+    Term        uint64 // Incremented on each promotion
+    LastPeerAck time.Time
+}
+
+func (s *HAState) Promote() {
+    s.Term++
+    s.Role = RoleActive
+}
+
+func (s *HAState) ValidateInbound(term uint64) error {
+    if term != s.Term {
+        return status.Error(codes.FailedPrecondition, "stale term")
+    }
+    return nil
+}
+```
+
+### Role of DNS/GSLB
+
+DNS failover (Route53, etc.) is **necessary for traffic steering** but **not sufficient for split-brain prevention**:
+
+| What DNS Does | What DNS Doesn't Do |
+|---------------|---------------------|
+| Health check principals | Fence active principals |
+| Route new connections | Terminate existing connections |
+| Failover traffic | Prevent dual-active |
+
+In this design:
+- **Self-fencing = correctness** (prevents split-brain)
+- **DNS/GSLB = traffic steering** (routes agents to healthy principal)
+
+---
+
 ## Principal-to-Principal Replication
 
 Minimizing data loss during failover is achieved by leveraging **continuous state replication** from Primary to Replica using the existing event streaming mechanisms.
-
-We could also consider enabling linearizable writes / ensuring a write is propagated to the replica before streaming to agents.
 
 ### Replication Model
 
@@ -97,7 +169,7 @@ The Replica principal runs a **Replication Client** that connects to the Primary
 │                                 │                                       │
 └─────────────────────────────────┼───────────────────────────────────────┘
                                   │
-                                  │ EventStream (all events, tagged with agent)
+                                  │ EventStream (events + heartbeats)
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -105,7 +177,8 @@ The Replica principal runs a **Replication Client** that connects to the Primary
 │                                                                         │
 │                    ┌──────────────────────────┐                         │
 │                    │   Replication Client     │                         │
-│                    │   (Receives all events)  │                         │
+│                    │   (Receives all events,  │                         │
+│                    │    sends ACKs)           │                         │
 │                    └────────────┬─────────────┘                         │
 │                                 │                                       │
 │           ┌─────────────────────┼─────────────────────┐                 │
@@ -132,6 +205,7 @@ The Replica principal runs a **Replication Client** that connects to the Primary
 | **Agent Connections** | Principal connection state | Metadata in replication stream |
 | **Resource Checksums** | `resources.AgentResources` | Periodic snapshot or event-driven |
 | **Queue State** | `queue.SendRecvQueues` | Events replicated as they're queued |
+| **Term** | HA Controller | Included in heartbeats |
 
 ### Event Types Replicated
 
@@ -160,22 +234,13 @@ Events flow in **both directions** between Primary and agents. The replica needs
 Extend existing CloudEvents with replication metadata:
 
 ```go
-// Replication wrapper for events
 type ReplicatedEvent struct {
-    // Original event
-    Event *cloudevents.Event `json:"event"`
-
-    // Agent this event is associated with
-    AgentName string `json:"agentName"`
-
-    // Direction: "inbound" (agent→principal) or "outbound" (principal→agent)
-    Direction string `json:"direction"`
-
-    // Sequence number for ordering
-    SequenceNum uint64 `json:"sequenceNum"`
-
-    // Timestamp when event was processed by primary
-    ProcessedAt time.Time `json:"processedAt"`
+    Event       *cloudevents.Event `json:"event"`
+    AgentName   string             `json:"agentName"`
+    Direction   string             `json:"direction"` // "inbound" or "outbound"
+    SequenceNum uint64             `json:"sequenceNum"`
+    ProcessedAt time.Time          `json:"processedAt"`
+    Term        uint64             `json:"term"`
 }
 ```
 
@@ -183,7 +248,7 @@ type ReplicatedEvent struct {
 
 ## Implementation Components
 
-### 1. Replication Service (New Proto Definition)
+### 1. Replication Service (Proto Definition)
 
 **File**: `principal/apis/replication/replication.proto`
 
@@ -203,12 +268,27 @@ message ReplicatedEvent {
     string direction = 3;  // "inbound" or "outbound"
     uint64 sequence_num = 4;
     int64 processed_at_unix = 5;
+    uint64 term = 6;
+}
+
+// Heartbeat sent by primary to replica
+message ReplicationHeartbeat {
+    uint64 sequence_num = 1;
+    int64 timestamp_unix = 2;
+    uint64 term = 3;
+}
+
+// ACK from replica to primary (critical for split-brain prevention)
+message ReplicationAck {
+    uint64 acked_sequence_num = 1;
+    uint64 term = 2;
 }
 
 // ReplicationSnapshot for initial sync
 message ReplicationSnapshot {
     repeated AgentState agents = 1;
     uint64 last_sequence_num = 2;
+    uint64 term = 3;
 }
 
 message AgentState {
@@ -226,21 +306,27 @@ message Resource {
     bytes spec_checksum = 5;
 }
 
-// ACK from replica
-message ReplicationAck {
-    uint64 acked_sequence_num = 1;
-}
-
 // Health/status
 message ReplicationStatus {
     uint64 current_sequence_num = 1;
     int32 pending_events = 2;
     int64 last_event_unix = 3;
+    uint64 term = 4;
+    string state = 5;  // HA state: ACTIVE, REPLICATING, FENCED, etc.
+}
+
+// Stream message can be either event or heartbeat
+message ReplicationStreamMessage {
+    oneof payload {
+        ReplicatedEvent event = 1;
+        ReplicationHeartbeat heartbeat = 2;
+    }
 }
 
 service Replication {
     // Subscribe to replication stream (replica calls this on primary)
-    rpc Subscribe(stream ReplicationAck) returns (stream ReplicatedEvent);
+    // Bidirectional: primary sends events/heartbeats, replica sends ACKs
+    rpc Subscribe(stream ReplicationAck) returns (stream ReplicationStreamMessage);
 
     // Get initial snapshot (replica calls on connect)
     rpc GetSnapshot(SnapshotRequest) returns (ReplicationSnapshot);
@@ -250,11 +336,46 @@ service Replication {
 }
 
 message SnapshotRequest {
-    // If set, only get events after this sequence number
     uint64 since_sequence_num = 1;
 }
 
 message StatusRequest {}
+```
+
+### 2. HA Controller
+
+```go
+type HAController struct {
+    mu sync.RWMutex
+
+    state           HAState
+    term            uint64
+    lastPeerAck     time.Time
+    peerAddress     string
+    preferredRole   string
+    gslbHostname    string
+
+    // Timeouts
+    ackTimeout       time.Duration // Time without ACKs before considering fence (15s)
+    heartbeatInterval time.Duration // Heartbeat frequency (5s)
+    failoverTimeout  time.Duration // Time before replica promotes (30s)
+    recoveryTimeout  time.Duration // Time before unfencing after peer confirmed dead (60s)
+
+    // Optional external witness
+    trafficAuthority TrafficAuthority
+}
+
+type HAState string
+
+const (
+    StateRecovering  HAState = "RECOVERING"   // Just started, determining role
+    StateActive      HAState = "ACTIVE"       // Serving agents, sending replication
+    StateReplicating HAState = "REPLICATING"  // Receiving replication, not serving
+    StateDisconnected HAState = "DISCONNECTED" // Lost replication, waiting
+    StateStandby     HAState = "STANDBY"      // Ready to serve, waiting for agents
+    StateSyncing     HAState = "SYNCING"      // Catching up to current primary
+    StateFenced      HAState = "FENCED"       // Self-fenced, not serving
+)
 ```
 
 ---
@@ -266,74 +387,327 @@ Each principal runs an **HA Controller** that manages state transitions.
 ### States
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              STATE MACHINE                                  │
-│                                                                             │
-│   ┌──────────────┐      replication         ┌──────────────┐               │
-│   │              │      stream breaks       │              │               │
-│   │  REPLICATING ├─────────────────────────►│ DISCONNECTED │               │
-│   │              │                          │              │               │
-│   └──────┬───────┘                          └──────┬───────┘               │
-│          │                                         │                        │
-│          │ replication                             │ failover timeout       │
-│          │ stream                                  │ (30s) + peer           │
-│          │ reconnects                              │ unreachable            │
-│          │                                         ▼                        │
-│          │                                  ┌──────────────┐               │
-│          │                                  │              │               │
-│          └──────────────────────────────────┤   STANDBY    │               │
-│                                             │              │               │
-│                                             └──────┬───────┘               │
-│                                                    │                        │
-│                                                    │ first agent connects   │
-│                                                    │ (GSLB routed here)     │
-│                                                    ▼                        │
-│                                             ┌──────────────┐               │
-│                                             │              │               │
-│                                             │    ACTIVE    │               │
-│                                             │              │               │
-│                                             └──────────────┘               │
-│                                                                             │
-│  Additional states for recovery:                                            │
-│                                                                             │
-│   ┌──────────────┐      peer is active      ┌──────────────┐               │
-│   │              │      (I was down)        │              │               │
-│   │  RECOVERING  ├─────────────────────────►│   SYNCING    │               │
-│   │  (startup)   │                          │              │               │
-│   └──────────────┘                          └──────┬───────┘               │
-│                                                    │                        │
-│                                                    │ caught up              │
-│                                                    ▼                        │
-│                                             ┌──────────────┐               │
-│                                             │   STANDBY    │               │
-│                                             │ (awaiting    │               │
-│                                             │  failback)   │               │
-│                                             └──────────────┘               │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                              STATE MACHINE                                        │
+│                                                                                   │
+│  ┌──────────────┐                                                                 │
+│  │  RECOVERING  │ (startup)                                                       │
+│  └──────┬───────┘                                                                 │
+│         │                                                                         │
+│         ├─── peer ACTIVE ──────────────────────► SYNCING ───► STANDBY            │
+│         │                                                                         │
+│         └─── peer unreachable/down ────────────► ACTIVE (if preferred-primary)   │
+│                                                  STANDBY (if preferred-replica)  │
+│                                                                                   │
+│                                                                                   │
+│  PRIMARY PATH:                                                                    │
+│  ─────────────                                                                    │
+│  ┌──────────────┐     no ACKs for        ┌──────────────┐                        │
+│  │              │     ackTimeout         │              │                        │
+│  │    ACTIVE    ├───────────────────────►│    FENCED    │                        │
+│  │              │     + peer reachable   │              │                        │
+│  └──────────────┘                        └──────┬───────┘                        │
+│         ▲                                       │                                 │
+│         │                                       │ peer reconnects                 │
+│         │ unfence (peer confirmed dead         │ as new primary                  │
+│         │ + GSLB routes to me)                 ▼                                 │
+│         │                                ┌──────────────┐                        │
+│         └────────────────────────────────┤   SYNCING    │                        │
+│                                          └──────────────┘                        │
+│                                                                                   │
+│                                                                                   │
+│  REPLICA PATH:                                                                    │
+│  ────────────                                                                     │
+│  ┌──────────────┐    replication         ┌──────────────┐                        │
+│  │              │    stream breaks       │              │                        │
+│  │  REPLICATING ├───────────────────────►│ DISCONNECTED │                        │
+│  │              │                        │              │                        │
+│  └──────┬───────┘                        └──────┬───────┘                        │
+│         │                                       │                                 │
+│         │ replication                           │ failoverTimeout                 │
+│         │ reconnects                            │ + peer unreachable              │
+│         │                                       ▼                                 │
+│         │                                ┌──────────────┐                        │
+│         │                                │              │                        │
+│         └────────────────────────────────┤   STANDBY    │                        │
+│                                          │              │                        │
+│                                          └──────┬───────┘                        │
+│                                                 │                                 │
+│                                                 │ first agent connects            │
+│                                                 │ (term++)                        │
+│                                                 ▼                                 │
+│                                          ┌──────────────┐                        │
+│                                          │              │                        │
+│                                          │    ACTIVE    │                        │
+│                                          │              │                        │
+│                                          └──────────────┘                        │
+│                                                                                   │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Health Check by State
 
 | State | `/healthz` | `/readyz` | Effect |
 |-------|------------|-----------|--------|
-| REPLICATING | UNHEALTHY | UNHEALTHY | GSLB won't route agents here |
-| DISCONNECTED | UNHEALTHY | UNHEALTHY | Waiting for timeout, don't accept traffic |
-| STANDBY | **HEALTHY** | **HEALTHY** | Ready! GSLB can route agents here |
-| ACTIVE | **HEALTHY** | **HEALTHY** | Serving agents |
 | RECOVERING | UNHEALTHY | UNHEALTHY | Just started, determining role |
+| ACTIVE | **HEALTHY** | **HEALTHY** | Serving agents |
+| REPLICATING | UNHEALTHY | UNHEALTHY | GSLB won't route agents here |
+| DISCONNECTED | UNHEALTHY | UNHEALTHY | Waiting for timeout |
+| STANDBY | **HEALTHY** | **HEALTHY** | Ready! GSLB can route agents here |
 | SYNCING | UNHEALTHY | UNHEALTHY | Catching up to current primary |
+| FENCED | UNHEALTHY | UNHEALTHY | Self-fenced, rejecting all traffic |
 
 ### Agent Connection Handling by State
 
 | State | Agent Connects | Behavior |
 |-------|----------------|----------|
-| REPLICATING | Reject | Return gRPC error: `UNAVAILABLE: not primary` |
-| DISCONNECTED | Reject | Return gRPC error: `UNAVAILABLE: not primary` |
-| STANDBY | Accept | Transition to ACTIVE, serve agent |
-| ACTIVE | Accept | Normal operation |
-| RECOVERING | Reject | Return gRPC error: `UNAVAILABLE: recovering` |
-| SYNCING | Reject | Return gRPC error: `UNAVAILABLE: syncing` |
+| RECOVERING | Reject | `UNAVAILABLE: recovering` |
+| ACTIVE | Accept | Normal operation, validate term |
+| REPLICATING | Reject | `UNAVAILABLE: not primary` |
+| DISCONNECTED | Reject | `UNAVAILABLE: not primary` |
+| STANDBY | Accept | Transition to ACTIVE (term++), serve agent |
+| SYNCING | Reject | `UNAVAILABLE: syncing` |
+| FENCED | Reject | `UNAVAILABLE: fenced` + terminate existing |
+
+---
+
+## Self-Fencing Logic
+
+### Primary Fencing Decision
+
+```go
+func (c *HAController) checkFencing() {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+
+    if c.state != StateActive {
+        return
+    }
+
+    if time.Since(c.lastPeerAck) <= c.ackTimeout {
+        return // ACKs are fresh, all good
+    }
+
+    // No ACKs for ackTimeout - determine cause
+    peerHealth := c.probePeerHealth()
+
+    if peerHealth == PeerUnreachable {
+        // Peer is likely dead, not partitioned - stay active
+        log.Warn("peer unreachable but no ACKs, assuming peer dead")
+        return
+    }
+
+    // Peer is reachable but not ACKing - this is a partition
+    // We must fence to prevent split-brain
+    log.Warn("peer reachable but not ACKing, self-fencing")
+    c.transitionTo(StateFenced)
+    c.terminateAllAgentSessions()
+}
+```
+
+### Fenced Recovery
+
+```go
+func (c *HAController) attemptRecovery() {
+    // Called periodically while in FENCED state
+
+    c.mu.Lock()
+    defer c.mu.Unlock()
+
+    if c.state != StateFenced {
+        return
+    }
+
+    // Check if peer is still unreachable
+    peerHealth := c.probePeerHealth()
+
+    if peerHealth == PeerActive {
+        // Peer took over, become replica
+        c.transitionTo(StateSyncing)
+        return
+    }
+
+    if peerHealth == PeerUnreachable {
+        // Peer still gone - check if we should unfence
+        if c.shouldUnfence() {
+            log.Info("peer confirmed dead, unfencing")
+            c.transitionTo(StateActive)
+        }
+    }
+}
+
+func (c *HAController) shouldUnfence() bool {
+    // Conditions to unfence:
+    // 1. Peer still unreachable after recoveryTimeout
+    // 2. GSLB has no healthy target OR points to us
+
+    if time.Since(c.fencedAt) < c.recoveryTimeout {
+        return false
+    }
+
+    // Check GSLB - are we the only option?
+    return c.gslbResolvesToMe() || c.gslbHasNoHealthyTarget()
+}
+
+func (c *HAController) gslbResolvesToMe() bool {
+    ips, err := net.LookupIP(c.gslbHostname)
+    if err != nil {
+        return false
+    }
+    for _, ip := range ips {
+        if ip.Equal(c.myIP) {
+            return true
+        }
+    }
+    return false
+}
+```
+
+---
+
+## Failure Scenarios
+
+### Scenario 1: Replica Crashes (Clean Failure)
+
+```
+Time    PR1 (primary)              PR2 (replica)         GSLB
+─────────────────────────────────────────────────────────────────
+T+0     Serving agents             💀 Dies               PR1 HEALTHY
+T+5s    Heartbeat, no ACK          -                     PR1 HEALTHY
+T+15s   No ACKs for ackTimeout     -
+        Probes peer: unreachable
+        → Stays ACTIVE             -                     PR1 HEALTHY
+        (peer dead, not partition)
+
+Result: PR1 continues serving. No outage.
+```
+
+### Scenario 2: Primary Crashes (Clean Failure)
+
+```
+Time    PR1 (primary)              PR2 (replica)         GSLB
+─────────────────────────────────────────────────────────────────
+T+0     💀 Dies                    Replication breaks    PR1 was HEALTHY
+                                   → DISCONNECTED        PR2 UNHEALTHY
+T+30s   -                          failoverTimeout
+                                   Probes PR1: unreachable
+                                   → STANDBY             PR2 HEALTHY
+T+45s   -                          GSLB routes here
+                                   Agent connects
+                                   → ACTIVE (term++)     PR2 HEALTHY
+
+Result: ~45s RTO. Clean failover.
+```
+
+### Scenario 3: Asymmetric Partition (PR1 → PR2 Broken)
+
+```
+Time    PR1 (primary)              PR2 (replica)         GSLB
+─────────────────────────────────────────────────────────────────
+T+0     Can't reach PR2            Replication breaks    PR1 HEALTHY
+        Heartbeats fail            → DISCONNECTED        PR2 UNHEALTHY
+T+15s   No ACKs for ackTimeout
+        Probes PR2: unreachable
+        (same network path)
+        → Stays ACTIVE                                   PR1 HEALTHY
+T+30s   -                          failoverTimeout
+                                   Probes PR1: ???
+
+        If PR2 CAN reach PR1:
+          PR2 sees PR1 is ACTIVE
+          → Stay DISCONNECTED, retry replication
+          No split-brain ✓
+
+        If PR2 CANNOT reach PR1:
+          → STANDBY                                      PR2 HEALTHY
+          Both healthy! GSLB decides.
+          Route53 PRIMARY/SECONDARY → PR1 wins
+```
+
+### Scenario 4: Full Partition (Neither Can Reach Other)
+
+```
+Time    PR1 (primary)              PR2 (replica)         GSLB
+─────────────────────────────────────────────────────────────────
+T+0     Can't reach PR2            Can't reach PR1       PR1 HEALTHY
+T+15s   No ACKs, probes fail
+        → Stays ACTIVE             -                     PR1 HEALTHY
+        (thinks PR2 dead)
+T+30s   -                          failoverTimeout
+                                   Probes PR1: fail
+                                   → STANDBY             PR2 HEALTHY
+
+        Both HEALTHY! GSLB arbitrates.
+
+        Route53 PRIMARY/SECONDARY:
+        → Always returns PR1 (PRIMARY wins)
+        → Agents go to PR1
+        → PR2 sits idle in STANDBY
+
+        When partition heals:
+        → PR2 sees PR1 is ACTIVE
+        → PR2 reconnects as replica
+```
+
+### Scenario 5: Network Blip (Transient)
+
+```
+Time    PR1 (primary)              PR2 (replica)
+─────────────────────────────────────────────────────────────────
+T+0     Network hiccup             Replication pauses
+T+5s    Still no ACKs              Waiting...
+T+10s   Network recovers
+        Receives ACK               Receives heartbeat
+        Stays ACTIVE               Stays REPLICATING
+
+Result: No state change. ackTimeout (15s) > typical blip.
+```
+
+---
+
+## Agent Behavior
+
+### Changes Required
+
+| Change | Required? | Description |
+|--------|-----------|-------------|
+| Handle disconnection | Already exists | Agents already reconnect on disconnect |
+| Term in handshake | **New** | Send/receive term on connect |
+| Handle stale term | **New** | On `FailedPrecondition` → reconnect |
+
+### Agent Handshake Flow
+
+```
+Agent                          Principal
+─────────────────────────────────────────────
+1. Connect to GSLB endpoint
+   (DNS resolves to healthy principal)
+
+2. gRPC handshake
+   AgentHello{term: <last known or 0>}
+                               ──► If term matches: OK
+                               ──► If term stale: FailedPrecondition
+
+3. On FailedPrecondition:
+   - Clear cached term
+   - Reconnect (get new term from principal)
+
+4. On disconnect (principal fenced/failed):
+   - Backoff + retry
+   - DNS may resolve to different principal
+   - New handshake gets new term
+```
+
+### Agent Configuration (Minimal Changes)
+
+```yaml
+# agent-config.yaml
+agent:
+  remote:
+    address: principal.argocd.example.com:8403  # GSLB endpoint (unchanged)
+  ha:
+    termCachePath: /var/lib/argocd-agent/term   # Optional: persist last known term
+```
 
 ---
 
@@ -353,7 +727,7 @@ T+10s   (still down)                State: DISCONNECTED          A: UNHEALTHY
                                     Timer: 20s remaining          B: UNHEALTHY
 
 T+30s   (still down)                Timer expires                 A: UNHEALTHY
-                                    Checks peer: unreachable      B: UNHEALTHY
+                                    Probes peer: unreachable      B: UNHEALTHY
                                     State → STANDBY
                                     Health → HEALTHY              B: HEALTHY ✓
 
@@ -362,11 +736,11 @@ T+45s   (still down)                State: STANDBY               Routes to B!
 
 T+60s   (still down)                DNS TTL expires              DNS → Region B
                                     First agent connects
+                                    Term++ (now term=2)
                                     State → ACTIVE
 
 T+90s                               Serving all agents           Stable
-                                    Accepting replication
-                                    (if old primary recovers)
+                                    Term: 2
 ```
 
 ### What Happens on Agent Reconnection
@@ -374,9 +748,10 @@ T+90s                               Serving all agents           Stable
 Because the Replica has been receiving replicated events:
 
 1. **Agent authenticates** - Same credentials work (shared CA)
-2. **Replica checks state** - Already knows this agent's resources from replication
-3. **Quick checksum verification** - Confirm replica's view matches agent's
-4. **Minimal delta sync** - Only sync events that were in-flight during failover
+2. **Term exchange** - Agent sends last known term, principal sends current term
+3. **Replica checks state** - Already knows this agent's resources from replication
+4. **Quick checksum verification** - Confirm replica's view matches agent's
+5. **Minimal delta sync** - Only sync events that were in-flight during failover
 
 **Key benefit**: No full resync required. RTO is primarily DNS propagation + failover timeout.
 
@@ -391,15 +766,16 @@ When Region A recovers, it must sync from Region B before becoming primary again
 ```
 Time    Region A (Old Primary)      Region B (Current Primary)   Operator
 ────────────────────────────────────────────────────────────────────────────
-T+0     Comes back online           State: ACTIVE                Monitoring
+T+0     Comes back online           State: ACTIVE, term=2        Monitoring
         State: RECOVERING           Serving all agents
-        Checks peer status...
+        Probes peer...
         Peer is ACTIVE!
         State → SYNCING
         Connects to B as replica
 
 T+30s   Receiving replication       Forwarding events to A       Gets alert:
-        State: SYNCING              Continues serving agents     "Region A online"
+        State: SYNCING              Continues serving            "Region A online"
+        Learning term=2
 
 T+2m    Caught up!                  (still serving)              Sees A synced
         State: STANDBY
@@ -410,17 +786,16 @@ T+5m    (waiting)                   (still serving)              Decides to
                                                                  failback
 
 T+5m    Receives: "become primary"  Receives: "become replica"   Runs:
-+1s     State → ACTIVE              State → REPLICATING          $ argocd-agent
-        Health → HEALTHY            Health → UNHEALTHY             ha failback
-        Starts replication server   Connects to A as replica
++1s     Term++ (now term=3)         State → REPLICATING          $ argocd-agent
+        State → ACTIVE              Health → UNHEALTHY             ha failback
+        Health → HEALTHY            Connects to A as replica
 
 T+6m    GSLB routes to A            Agents reconnect to A        Done ✓
         Serving all agents          Receiving replication
+        Term: 3
 ```
 
 ### Failback Command
-
-Failback could be assisted by argocd-agent cli
 
 ```bash
 # Check current HA status
@@ -428,12 +803,14 @@ $ argocd-agent ha status
 Region A (principal.region-a.internal):
   State: STANDBY
   Role: preferred-primary
+  Term: 2
   Replication: synced (lag: 0s)
   Last event: 2024-01-15T10:30:00Z
 
 Region B (principal.region-b.internal):
   State: ACTIVE
   Role: preferred-replica
+  Term: 2
   Connected agents: 47
   Uptime: 2h 15m
 
@@ -441,7 +818,7 @@ Region B (principal.region-b.internal):
 $ argocd-agent ha failback --to region-a
 
 WARNING: This will:
-  1. Promote Region A to primary
+  1. Promote Region A to primary (term → 3)
   2. Demote Region B to replica
   3. Cause all 47 agents to reconnect
 
@@ -450,76 +827,36 @@ Region A replication status: SYNCED (lag: 0s)
 Proceed? [y/N]: y
 
 [1/3] Signaling Region B to become replica... done
-[2/3] Signaling Region A to become primary... done
+[2/3] Signaling Region A to become primary (term=3)... done
 [3/3] Waiting for agents to reconnect... 47/47 connected
 
-Failback complete. Region A is now primary.
-
-NOTE: Update GSLB health check priorities if using manual DNS failover.
+Failback complete. Region A is now primary (term=3).
 ```
 
----
-
-## HA Controller Implementation
-
-### Configuration
-
-```yaml
-# Region A - Preferred Primary
-principal:
-  ha:
-    enabled: true
-    preferredRole: primary
-    peerAddress: principal.region-b.internal:8404
-    failoverTimeout: 30s      # Time to wait before promoting
-
-# Region B - Preferred Replica
-principal:
-  ha:
-    enabled: true
-    preferredRole: replica
-    peerAddress: principal.region-a.internal:8404
-    failoverTimeout: 30s
-```
 ---
 
 ## Configuration
 
 ### Principal Configuration
 
-The HA configuration is vendor-agnostic. The same principal binary can run as primary or replica based on configuration.
-
 ```yaml
 # values-region-a.yaml (Preferred Primary)
 principal:
   ha:
     enabled: true
-    preferredRole: primary              # "primary" or "replica"
-    peerAddress: principal.region-b.internal:8404  # Direct peer address (not GSLB)
-    failoverTimeout: 30s                # Time to wait before auto-promoting
+    preferredRole: primary
+    peerAddress: principal.region-b.internal:8404
+    gslbHostname: principal.argocd.example.com  # For unfence detection
 
-  replication:
-    port: 8404                          # Separate port for replication traffic
-    tls:
-      certFile: /etc/argocd-agent/replication/tls.crt
-      keyFile: /etc/argocd-agent/replication/tls.key
-      caFile: /etc/argocd-agent/replication/ca.crt
+    # Timeouts
+    heartbeatInterval: 5s    # Send heartbeat every 5s
+    ackTimeout: 15s          # Fence if no ACKs for 15s
+    failoverTimeout: 30s     # Replica promotes after 30s
+    recoveryTimeout: 60s     # Unfence after 60s if peer confirmed dead
 
-  # Health endpoint for GSLB (any vendor)
-  health:
-    port: 8080
-    livenessPath: /healthz
-    readinessPath: /readyz
-```
-
-```yaml
-# values-region-b.yaml (Preferred Replica)
-principal:
-  ha:
-    enabled: true
-    preferredRole: replica
-    peerAddress: principal.region-a.internal:8404
-    failoverTimeout: 30s
+    # Optional external witness
+    trafficAuthority:
+      type: none  # or: aws-arc, consul, k8s-lease
 
   replication:
     port: 8404
@@ -534,16 +871,34 @@ principal:
     readinessPath: /readyz
 ```
 
-### Agent Configuration (Unchanged)
-
-Agents connect to a single DNS endpoint. The GSLB/DNS layer handles routing.
-
 ```yaml
-# agent-config.yaml - NO CHANGES NEEDED
-agent:
-  remote:
-    # Single endpoint - GSLB routes to healthy principal
-    address: principal.argocd.example.com:8403
+# values-region-b.yaml (Preferred Replica)
+principal:
+  ha:
+    enabled: true
+    preferredRole: replica
+    peerAddress: principal.region-a.internal:8404
+    gslbHostname: principal.argocd.example.com
+
+    heartbeatInterval: 5s
+    ackTimeout: 15s
+    failoverTimeout: 30s
+    recoveryTimeout: 60s
+
+    trafficAuthority:
+      type: none
+
+  replication:
+    port: 8404
+    tls:
+      certFile: /etc/argocd-agent/replication/tls.crt
+      keyFile: /etc/argocd-agent/replication/tls.key
+      caFile: /etc/argocd-agent/replication/ca.crt
+
+  health:
+    port: 8080
+    livenessPath: /healthz
+    readinessPath: /readyz
 ```
 
 ---
@@ -561,11 +916,22 @@ The HA design requires a Global Server Load Balancer (GSLB) or DNS-based failove
 | DNS TTL | Configurable, recommend 60s for reasonable RTO |
 | Single endpoint | Agents connect to one DNS name |
 
+### Important: DNS Role in This Design
+
+DNS/GSLB is **necessary but not sufficient** for split-brain prevention:
+
+- ✅ Routes new connections to healthy principal
+- ✅ Provides failover when health checks fail
+- ❌ Cannot fence already-active principals
+- ❌ Cannot terminate existing gRPC connections
+- ❌ Cannot prevent dual-active during partitions
+
+**Self-fencing handles correctness; DNS handles traffic steering.**
+
 ### Example: AWS Route53 (Reference Implementation)
 
 ```yaml
 # AWS Route53 Health Checks + Failover Routing
-# This is one possible implementation - adapt for your GSLB provider
 
 HostedZone: argocd.example.com
 
@@ -575,8 +941,8 @@ HealthChecks:
     FullyQualifiedDomainName: principal.region-a.internal
     Port: 8080
     ResourcePath: /healthz
-    RequestInterval: 10        # Check every 10s
-    FailureThreshold: 3        # 3 failures = unhealthy
+    RequestInterval: 10
+    FailureThreshold: 3
 
   - Id: region-b-health
     Type: HTTPS
@@ -587,7 +953,7 @@ HealthChecks:
     FailureThreshold: 3
 
 Records:
-  # Primary record (Region A)
+  # PRIMARY wins when both healthy (prevents dual-active routing)
   - Name: principal.argocd.example.com
     Type: A
     SetIdentifier: region-a-primary
@@ -597,7 +963,6 @@ Records:
     ResourceRecords:
       - <region-a-lb-ip>
 
-  # Failover record (Region B)
   - Name: principal.argocd.example.com
     Type: A
     SetIdentifier: region-b-secondary
@@ -608,93 +973,139 @@ Records:
       - <region-b-lb-ip>
 ```
 
-### Example: Generic DNS Provider
-
-For providers without native GSLB, use external health checkers:
-
-```yaml
-# Using external-dns with health check annotations
-# Or any DNS provider with API access
-
-# Health check script (runs on monitoring system)
-healthcheck:
-  targets:
-    - name: region-a
-      endpoint: https://principal.region-a.internal:8080/healthz
-      interval: 10s
-      threshold: 3
-    - name: region-b
-      endpoint: https://principal.region-b.internal:8080/healthz
-      interval: 10s
-      threshold: 3
-
-  dns:
-    record: principal.argocd.example.com
-    ttl: 60
-    # Update DNS to point to healthy region
-    onFailure:
-      action: update-dns
-      target: healthy-region
-```
-
-### Example: Kubernetes + External DNS
-
-```yaml
-# If using Kubernetes in both regions with external-dns
-apiVersion: v1
-kind: Service
-metadata:
-  name: principal
-  annotations:
-    external-dns.alpha.kubernetes.io/hostname: principal.argocd.example.com
-    external-dns.alpha.kubernetes.io/ttl: "60"
-spec:
-  type: LoadBalancer
-  ports:
-    - port: 8403
-      name: grpc
-    - port: 8080
-      name: health
-  selector:
-    app: argocd-agent-principal
-```
-
 ---
 
-## Operational Considerations
+## Optional: External Traffic Authority
 
-### Replication Lag Monitoring
+For environments requiring stronger guarantees, an external traffic authority can act as a third-party witness.
 
-### Split-Brain Prevention
+### TrafficAuthority Interface
 
-The replication model inherently prevents split-brain:
+```go
+// Pluggable interface for external witness
+type TrafficAuthority interface {
+    // Check if this region is authorized to serve
+    GetServingState(region string) (TrafficState, error)
 
-1. **Replica knows it's a replica** - Won't accept agents while replication stream is healthy
-2. **Failover requires replication stream break** - Only then does replica become active
-3. **GSLB is authoritative** - Agents only connect to whoever GSLB points to
+    // Request to change serving state (for failback)
+    SetServingState(region string, state TrafficState) error
+}
+
+type TrafficState string
+
+const (
+    TrafficStateOn  TrafficState = "ON"
+    TrafficStateOff TrafficState = "OFF"
+)
+```
+
+### Implementations
+
+| Backend | Use Case |
+|---------|----------|
+| `NoOpAuthority` | Default - self-fencing only |
+| `AWSARCAuthority` | Route53 Application Recovery Controller |
+| `ConsulAuthority` | Consul-based distributed lock |
+| `K8sLeaseAuthority` | Kubernetes Lease object in multi-AZ control plane |
+
+### AWS Route53 ARC Integration
+
+Route53 ARC provides **routing controls**—explicit on/off switches independent of health checks.
+
+```go
+type AWSARCAuthority struct {
+    client             *route53recoverycontrolconfig.Client
+    routingControlArn  string
+    clusterArn         string
+}
+
+func (a *AWSARCAuthority) GetServingState(region string) (TrafficState, error) {
+    resp, err := a.client.GetRoutingControlState(ctx, &route53recoverycontrolconfig.GetRoutingControlStateInput{
+        RoutingControlArn: aws.String(a.routingControlArn),
+    })
+    if err != nil {
+        return TrafficStateOff, err
+    }
+    if resp.RoutingControlState == types.RoutingControlStateOn {
+        return TrafficStateOn, nil
+    }
+    return TrafficStateOff, nil
+}
+```
+
+### Using External Authority
+
+When configured, the principal checks both internal state AND external authority:
+
+```go
+func (c *HAController) canServeAgents() bool {
+    // Must be in serving state internally
+    if c.state != StateActive && c.state != StateStandby {
+        return false
+    }
+
+    // If external authority configured, must also be authorized
+    if c.trafficAuthority != nil {
+        state, err := c.trafficAuthority.GetServingState(c.region)
+        if err != nil || state != TrafficStateOn {
+            return false
+        }
+    }
+
+    return true
+}
+```
+
+### Configuration with ARC
+
+```yaml
+principal:
+  ha:
+    enabled: true
+    trafficAuthority:
+      type: aws-arc
+      aws:
+        routingControlArn: arn:aws:route53-recovery-control::123456789012:controlpanel/abc123/routingcontrol/def456
+        clusterArn: arn:aws:route53-recovery-control::123456789012:cluster/xyz789
+```
+
+### When to Use External Authority
+
+| Scenario | Self-Fencing Only | With External Authority |
+|----------|-------------------|-------------------------|
+| Typical DR | ✅ Sufficient | Overkill |
+| Regulatory/compliance | ⚠️ May not satisfy auditors | ✅ External witness documented |
+| Zero split-brain tolerance | ⚠️ Edge cases exist | ✅ Belt + suspenders |
+| Multi-cloud | ✅ Works | Need equivalent per cloud |
 
 ---
-
 
 ## Design Decisions Summary
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Replication backpressure | Metrics only, no action | Keep simple for v1; monitor and tune buffer sizes |
-| Secrets handling | Operator configures manually | Avoid replicating sensitive data; use external secret management |
+| Split-brain prevention | Self-fencing on lost peer ACK | Primary must prove replica listening; no external quorum needed |
+| Consistency vs availability | Safety over availability | Accept brief outage to prevent corruption |
+| Term/epoch | Increment on promotion | Reject stale updates even if fencing imperfect |
+| Heartbeat interval | 5 seconds | Frequent enough for fast detection |
+| ACK timeout | 15 seconds | Balance between false positives and detection speed |
+| Failover timeout | 30 seconds | Time for replica to promote after stream breaks |
+| Recovery timeout | 60 seconds | Time before unfencing after peer confirmed dead |
+| Session termination on fence | Mandatory | Long-lived gRPC survives DNS changes |
 | Failback mode | Manual only | Prevents flapping, gives operator control |
-| Split-brain prevention | Health check + state machine | Replica only healthy in STANDBY/ACTIVE; rejects agents otherwise |
-| Failover timeout | 30 seconds (configurable) | Balance between avoiding flapping and minimizing RTO |
+| External witness | Optional (pluggable) | Not required for correctness, adds defense in depth |
 
 ---
 
 ## Open Questions (Future Enhancements)
 
-1. **Multi-Replica**: Should we support multiple replicas for read scaling or additional redundancy? #186 should be the main design for horizontal scaling
+1. **Multi-Replica**: Should we support multiple replicas for read scaling or additional redundancy? See #186 for horizontal scaling design.
 
-2. **Automatic Failback**: Add option to automatically failback after N minutes if preferred primary is synced and healthy? Personally think manual failback is easiest for now
+2. **Automatic Failback**: Add option to automatically failback after N minutes if preferred primary is synced and healthy?
 
-3. **Partial Failures**: What if primary is reachable for replication but not for agents (network partition)?
+3. **Partial Failures**: What if primary is reachable for replication but not for agents (port-specific partition)?
+
+4. **Term Persistence**: Should term be persisted to disk, or is increment-on-startup sufficient?
 
 ---
 
@@ -704,5 +1115,3 @@ The replication model inherently prevents split-brain:
 - [Event System](../internal/event/event.go)
 - [Queue Implementation](../internal/queue/queue.go)
 - [Resync Protocol](../internal/resync/resync.go)
-
-
