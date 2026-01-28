@@ -167,6 +167,17 @@ type Server struct {
 
 	// terminalStreamServer handles bidirectional streaming for web terminal sessions
 	terminalStreamServer *terminalstream.Server
+
+	// appToAgent maps application qualified names (namespace/name) to agent names.
+	// This is used for destination-based mapping to determine which agent
+	// handles a specific application, particularly for redis proxy routing.
+	// key: app qualified name (namespace/name)
+	// value: agent name
+	appToAgent *concurrentMap[string, string]
+
+	// destinationBasedMapping indicates whether applications should be mapped to agents
+	// based on spec.destination.name instead of namespace
+	destinationBasedMapping bool
 }
 
 type handlersOnConnect func(agent types.Agent) error
@@ -202,6 +213,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		projectToRepos:  NewMapToSet(),
 		sourceCache:     cache.NewSourceCache(),
 		deletions:       manager.NewDeletionTracker(),
+		appToAgent:      newConcurrentStringMap(),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
@@ -221,6 +233,8 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	s.handlersOnConnect = []handlersOnConnect{
 		s.handleResyncOnConnect,
 	}
+
+	s.destinationBasedMapping = s.options.destinationBasedMapping
 
 	if s.authMethods == nil {
 		s.authMethods = auth.NewMethods()
@@ -256,6 +270,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	appManagerOpts := []application.ApplicationManagerOption{
 		application.WithAllowUpsert(true),
 		application.WithRole(manager.ManagerRolePrincipal),
+		application.WithDestinationBasedMapping(s.destinationBasedMapping),
 	}
 
 	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
@@ -359,6 +374,8 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	if !s.options.redisProxyDisabled {
 		s.redisProxy = redisproxy.New(defaultRedisProxyListenerAddr, s.options.redisAddress, s.sendSynchronousRedisMessageToAgent)
+		// Set the agent lookup function for destination-based mapping support
+		s.redisProxy.SetAgentLookupFunc(s.GetAgentForApp)
 	}
 
 	// Instantiate our ResourceProxy to intercept Kubernetes requests from Argo
@@ -674,7 +691,8 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 			return err
 		}
 
-		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx, manager.ManagerRolePrincipal, s.namespace)
+		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx, manager.ManagerRolePrincipal, s.namespace).
+			WithDestinationBasedMapping(s.destinationBasedMapping)
 		go resyncHandler.SendRequestUpdates(s.ctx)
 
 		// Principal should request SyncedResourceList to revert any deletions on the Principal side.
@@ -742,7 +760,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		tracing.PopulateSpanFromObject(span, &appProject)
 		tracing.InjectTraceContext(ctx, ev)
