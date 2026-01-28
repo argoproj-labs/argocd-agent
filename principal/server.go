@@ -774,7 +774,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		tracing.PopulateSpanFromObject(span, &appProject)
 		tracing.InjectTraceContext(ctx, ev)

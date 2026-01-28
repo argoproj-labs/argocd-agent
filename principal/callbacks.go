@@ -283,7 +283,7 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.Create, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
@@ -411,7 +411,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
@@ -627,7 +627,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*new, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
@@ -648,7 +648,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*new, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
@@ -783,6 +783,10 @@ func isTerminateOperation(old, new *v1alpha1.Application) bool {
 // If destination-based mapping is enabled, the agent name is determined from
 // spec.destination.name. Otherwise, the agent name is the application's namespace.
 func (s *Server) getAgentNameForApp(app *v1alpha1.Application) string {
+	if isResourceFromAutonomousAgent(app) {
+		return app.Namespace
+	}
+
 	if s.destinationBasedMapping {
 		// Use destination.name as the agent identifier
 		return app.Spec.Destination.Name

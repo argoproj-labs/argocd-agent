@@ -899,11 +899,13 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 }
 
 // getTargetNamespaceForApp returns the namespace where the application should
-// be created on the agent. If destinationBasedMapping is enabled, it returns
-// the original namespace from the principal. Otherwise, it returns the agent's
-// namespace.
+// be created on the agent. If destinationBasedMapping is enabled AND the agent
+// is in managed mode, it returns the original namespace from the principal.
+// For autonomous mode, apps always stay in the agent's namespace regardless of
+// destination-based mapping setting, since the agent is the source of truth.
 func (a *Agent) getTargetNamespaceForApp(app *v1alpha1.Application) string {
-	if a.destinationBasedMapping && app.Namespace != "" {
+	// Destination-based mapping only applies to managed mode.
+	if a.destinationBasedMapping && a.mode == types.AgentModeManaged {
 		return app.Namespace
 	}
 	return a.namespace

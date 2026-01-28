@@ -300,8 +300,6 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 		incoming.SetNamespace(m.namespace)
 	}
 
-	fmt.Println("Hell Yeah", incoming.Namespace, m.namespace)
-
 	existing, err := m.applicationBackend.Get(ctx, incoming.Name, incoming.Namespace)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -334,9 +332,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 
 	var updated *v1alpha1.Application
 	var err error
-	if !m.destinationBasedMapping {
-		incoming.SetNamespace(namespace)
-	}
+	incoming.SetNamespace(namespace)
 	if m.role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
 	} else {
@@ -618,9 +614,6 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 	})
 	if m.role.IsPrincipal() {
 		removeFinalizer = true
-		if !m.destinationBasedMapping {
-			incoming.SetNamespace(namespace)
-		}
 	}
 	var err error
 	var updated *v1alpha1.Application

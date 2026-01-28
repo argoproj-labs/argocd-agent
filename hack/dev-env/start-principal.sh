@@ -44,6 +44,7 @@ E2E_ENV_FILE="/tmp/argocd-agent-e2e"
 if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
     export ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=${ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET:-false}
+    export ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=${ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING:-false}
 fi
 
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"

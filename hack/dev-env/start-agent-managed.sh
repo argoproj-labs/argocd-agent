@@ -32,6 +32,8 @@ E2E_ENV_FILE="/tmp/argocd-agent-e2e"
 if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
     export ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=${ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET:-false}
+    export ARGOCD_AGENT_DESTINATION_BASED_MAPPING=${ARGOCD_AGENT_DESTINATION_BASED_MAPPING:-false}
+    export ARGOCD_AGENT_CREATE_NAMESPACE=${ARGOCD_AGENT_CREATE_NAMESPACE:-false}
 fi
 
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
