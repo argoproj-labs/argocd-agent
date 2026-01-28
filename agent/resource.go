@@ -319,7 +319,8 @@ func (a *Agent) getManagedResource(ctx context.Context, gvr schema.GroupVersionR
 	if err != nil {
 		return nil, err
 	}
-	ok, err := isResourceManaged(a.kubeClient, res, ownerLookupRecursionLimit)
+
+	ok, err := isResourceManaged(a.kubeClient, res, ownerLookupRecursionLimit, a.trackingReader)
 	if !ok {
 		if err != nil {
 			err = fmt.Errorf("%w: %w", ErrUnmanaged, err)
@@ -399,25 +400,26 @@ func (a *Agent) getAvailableAPIs(ctx context.Context, group, version string) (*u
 }
 
 // isResourceManaged checks whether a given resource is considered to be
-// managed by an Argo CD application.
-func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructured, maxRecurse int) (bool, error) {
+// managed by an Argo CD application using the provided tracking reader.
+func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructured, maxRecurse int, trackingReader *ResourceTrackingReader) (bool, error) {
 	if maxRecurse < 1 {
 		return false, fmt.Errorf("recursion limit reached")
 	}
 
-	// If the resource carries a tracking label or annotation, regardless of
-	// its value, we deem the resource to be managed by Argo CD. At this
-	// point in time, we do not care about the particular details of the
-	// managing app.
+	// If the resource carries a tracking label or annotation based on the
+	// tracking configuration, regardless of its value, we deem the resource
+	// to be managed by Argo CD. At this point in time, we do not care about
+	// the particular details of the managing app.
 	refs := res.GetOwnerReferences()
 	lbls := res.GetLabels()
 	annt := res.GetAnnotations()
 
-	// TODO: Read Argo CD configuration for the actual value of the tracking
-	// method and the label name.
-	_, lok := lbls["app.kubernetes.io/instance"]
-	_, aok := annt["argocd.argoproj.io/tracking-id"]
-	if lok || aok {
+	// Use the tracking reader to determine if the resource is managed
+	isTracked, err := trackingReader.IsResourceTracked(lbls, annt)
+	if err != nil {
+		return false, fmt.Errorf("failed to check resource tracking: %w", err)
+	}
+	if isTracked {
 		return true, nil
 	}
 
@@ -468,7 +470,7 @@ func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructur
 			}
 		}
 
-		isOwned, err := isResourceManaged(kube, owner, maxRecurse-1)
+		isOwned, err := isResourceManaged(kube, owner, maxRecurse-1, trackingReader)
 		if err != nil {
 			return false, err
 		}

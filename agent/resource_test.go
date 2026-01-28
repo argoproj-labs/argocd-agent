@@ -10,6 +10,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,8 @@ import (
 )
 
 func Test_isResourceOwnedByApp(t *testing.T) {
+	labelTrackingReader := newTestTrackingReader(v1alpha1.TrackingMethodLabel)
+
 	t.Run("Find manager by label", func(t *testing.T) {
 		pod1 := &corev1.Pod{
 			ObjectMeta: v1.ObjectMeta{
@@ -39,11 +42,12 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 
 		un := objToUnstructured(pod1)
 
-		isOwned, err := isResourceManaged(kubeclient, un, 5)
+		isOwned, err := isResourceManaged(kubeclient, un, 5, labelTrackingReader)
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 	})
 	t.Run("Find manager by annotation", func(t *testing.T) {
+		annotationTrackingReader := newTestTrackingReader(v1alpha1.TrackingMethodAnnotation)
 		pod1 := &corev1.Pod{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "pod1",
@@ -57,7 +61,7 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 
 		un := objToUnstructured(pod1)
 
-		isOwned, err := isResourceManaged(kubeclient, un, 5)
+		isOwned, err := isResourceManaged(kubeclient, un, 5, annotationTrackingReader)
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 	})
@@ -101,7 +105,7 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 
 		un := objToUnstructured(pod1)
 
-		isOwned, err := isResourceManaged(kubeclient, un, 5)
+		isOwned, err := isResourceManaged(kubeclient, un, 5, labelTrackingReader)
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 	})
@@ -145,7 +149,7 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 
 		un := objToUnstructured(pod1)
 
-		isOwned, err := isResourceManaged(kubeclient, un, 5)
+		isOwned, err := isResourceManaged(kubeclient, un, 5, labelTrackingReader)
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 	})
@@ -190,7 +194,7 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 
 		un := objToUnstructured(pod1)
 
-		isOwned, err := isResourceManaged(kubeclient, un, 5)
+		isOwned, err := isResourceManaged(kubeclient, un, 5, labelTrackingReader)
 		assert.False(t, isOwned)
 		assert.Error(t, err)
 	})
@@ -205,7 +209,7 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 
 		un := objToUnstructured(pod1)
 
-		isOwned, err := isResourceManaged(kubeclient, un, 5)
+		isOwned, err := isResourceManaged(kubeclient, un, 5, labelTrackingReader)
 		assert.False(t, isOwned)
 		assert.NoError(t, err)
 	})
@@ -227,7 +231,7 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		}
 		kubeclient := kube.NewDynamicFakeClient(pod1)
 		un := objToUnstructured(pod1)
-		isOwned, err := isResourceManaged(kubeclient, un, 5)
+		isOwned, err := isResourceManaged(kubeclient, un, 5, labelTrackingReader)
 		assert.False(t, isOwned)
 		assert.True(t, errors.IsNotFound(err))
 	})
@@ -275,13 +279,141 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 
 		un := objToUnstructured(pod1)
 
-		isOwned, err := isResourceManaged(kubeclient, un, 3)
+		isOwned, err := isResourceManaged(kubeclient, un, 3, labelTrackingReader)
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 
-		isOwned, err = isResourceManaged(kubeclient, un, 2)
+		isOwned, err = isResourceManaged(kubeclient, un, 2, labelTrackingReader)
 		assert.False(t, isOwned)
 		assert.ErrorContains(t, err, "recursion limit reached")
+	})
+
+	// Test different tracking methods
+	t.Run("Label-only tracking method", func(t *testing.T) {
+		labelOnlyReader := newTestTrackingReader(v1alpha1.TrackingMethodLabel)
+
+		// Should be tracked, has label
+		pod1 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: "default",
+				Labels: map[string]string{
+					"app.kubernetes.io/instance": "some-app",
+				},
+			},
+		}
+		kubeclient := kube.NewDynamicFakeClient(pod1)
+		un := objToUnstructured(pod1)
+		isOwned, err := isResourceManaged(kubeclient, un, 5, labelOnlyReader)
+		assert.True(t, isOwned)
+		assert.NoError(t, err)
+
+		// Should not be tracked, only has annotation
+		pod2 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod2",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"argocd.argoproj.io/tracking-id": "some-app",
+				},
+			},
+		}
+		kubeclient2 := kube.NewDynamicFakeClient(pod2)
+		un2 := objToUnstructured(pod2)
+		isOwned, err = isResourceManaged(kubeclient2, un2, 5, labelOnlyReader)
+		assert.False(t, isOwned)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Annotation-only tracking method", func(t *testing.T) {
+		annotationOnlyReader := newTestTrackingReader(v1alpha1.TrackingMethodAnnotation)
+
+		// Should be tracked, has annotation
+		pod1 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"argocd.argoproj.io/tracking-id": "some-app",
+				},
+			},
+		}
+		kubeclient := kube.NewDynamicFakeClient(pod1)
+		un := objToUnstructured(pod1)
+		isOwned, err := isResourceManaged(kubeclient, un, 5, annotationOnlyReader)
+		assert.True(t, isOwned)
+		assert.NoError(t, err)
+
+		// Should not be tracked, only has label
+		pod2 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod2",
+				Namespace: "default",
+				Labels: map[string]string{
+					"app.kubernetes.io/instance": "some-app",
+				},
+			},
+		}
+		kubeclient2 := kube.NewDynamicFakeClient(pod2)
+		un2 := objToUnstructured(pod2)
+		isOwned, err = isResourceManaged(kubeclient2, un2, 5, annotationOnlyReader)
+		assert.False(t, isOwned)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Annotation+Label tracking method", func(t *testing.T) {
+		annotationAndLabelReader := newTestTrackingReader(v1alpha1.TrackingMethodAnnotationAndLabel)
+
+		// Should be tracked, has both annotation AND label
+		pod1 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"argocd.argoproj.io/tracking-id": "some-app",
+				},
+				Labels: map[string]string{
+					"app.kubernetes.io/instance": "some-app",
+				},
+			},
+		}
+		kubeclient := kube.NewDynamicFakeClient(pod1)
+		un := objToUnstructured(pod1)
+		isOwned, err := isResourceManaged(kubeclient, un, 5, annotationAndLabelReader)
+		assert.True(t, isOwned)
+		assert.NoError(t, err)
+
+		// Should not be tracked, only has annotation
+		pod2 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod2",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"argocd.argoproj.io/tracking-id": "some-app",
+				},
+			},
+		}
+		kubeclient2 := kube.NewDynamicFakeClient(pod2)
+		un2 := objToUnstructured(pod2)
+		isOwned, err = isResourceManaged(kubeclient2, un2, 5, annotationAndLabelReader)
+		assert.False(t, isOwned)
+		assert.NoError(t, err)
+
+		// Should not be tracked, only has label
+		pod3 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod3",
+				Namespace: "default",
+				Labels: map[string]string{
+					"app.kubernetes.io/instance": "some-app",
+				},
+			},
+		}
+		kubeclient3 := kube.NewDynamicFakeClient(pod3)
+		un3 := objToUnstructured(pod3)
+		isOwned, err = isResourceManaged(kubeclient3, un3, 5, annotationAndLabelReader)
+		assert.False(t, isOwned)
+		assert.NoError(t, err)
 	})
 }
 
@@ -322,6 +454,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 			queues:              queue.NewSendRecvQueues(),
 			emitter:             event.NewEventSource("test-agent"),
 			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(v1alpha1.TrackingMethodLabel),
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
@@ -387,6 +520,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 			queues:              queue.NewSendRecvQueues(),
 			emitter:             event.NewEventSource("test-agent"),
 			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(""),
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
@@ -436,6 +570,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 			queues:              queue.NewSendRecvQueues(),
 			emitter:             event.NewEventSource("test-agent"),
 			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(""),
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
@@ -477,12 +612,14 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 	})
 
 	t.Run("Invalid request returns error", func(t *testing.T) {
+		kubeClient := kube.NewDynamicFakeClient()
 		agent := &Agent{
 			context:             context.Background(),
-			kubeClient:          kube.NewDynamicFakeClient(),
+			kubeClient:          kubeClient,
 			queues:              queue.NewSendRecvQueues(),
 			emitter:             event.NewEventSource("test-agent"),
 			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(""),
 		}
 		require.NoError(t, agent.queues.Create(defaultQueueName))
 
@@ -498,10 +635,12 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 
 func Test_getAvailableResources(t *testing.T) {
 	t.Run("Error when resource is specified", func(t *testing.T) {
+		kubeClient := kube.NewDynamicFakeClient()
 		agent := &Agent{
 			context:             context.Background(),
-			kubeClient:          kube.NewDynamicFakeClient(),
+			kubeClient:          kubeClient,
 			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(""),
 		}
 
 		gvr := schema.GroupVersionResource{
@@ -530,10 +669,12 @@ func Test_getAvailableResources(t *testing.T) {
 			},
 		}
 
+		kubeClient := kube.NewDynamicFakeClient(pod1, pod2)
 		agent := &Agent{
 			context:             context.Background(),
-			kubeClient:          kube.NewDynamicFakeClient(pod1, pod2),
+			kubeClient:          kubeClient,
 			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(""),
 		}
 
 		gvr := schema.GroupVersionResource{
@@ -560,10 +701,12 @@ func Test_getAvailableResources(t *testing.T) {
 			},
 		}
 
+		kubeClient := kube.NewDynamicFakeClient(node1, node2)
 		agent := &Agent{
 			context:             context.Background(),
-			kubeClient:          kube.NewDynamicFakeClient(node1, node2),
+			kubeClient:          kubeClient,
 			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(""),
 		}
 
 		gvr := schema.GroupVersionResource{
@@ -1019,8 +1162,9 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 			kubeClient.DynamicClient = fakeDyn
 
 			agent := &Agent{
-				context:    context.Background(),
-				kubeClient: kubeClient,
+				context:        context.Background(),
+				kubeClient:     kubeClient,
+				trackingReader: newTestTrackingReader(v1alpha1.TrackingMethodLabel),
 			}
 
 			gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
@@ -1056,7 +1200,6 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 
 func TestBuildSubresourcePath(t *testing.T) {
 	agent := &Agent{}
-	
 	testCases := []struct {
 		name        string
 		gvr         schema.GroupVersionResource
