@@ -231,11 +231,14 @@ func (l *CentralizedLogger) HTTPLogger(module, method, path string) *logrus.Entr
 
 // ErrorLogger creates a logger with error context
 func (l *CentralizedLogger) ErrorLogger(module, errorType string, err error) *logrus.Entry {
-	return l.logger.WithFields(logrus.Fields{
+	fields := logrus.Fields{
 		logfields.Module:    module,
 		logfields.ErrorType: errorType,
-		logfields.Error:     err.Error(),
-	})
+	}
+	if err != nil {
+		fields[logfields.Error] = err.Error()
+	}
+	return l.logger.WithFields(fields)
 }
 
 // PerformanceLogger creates a logger with performance metrics context

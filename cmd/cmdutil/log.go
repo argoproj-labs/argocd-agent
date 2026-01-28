@@ -101,6 +101,7 @@ func LogFormatter(format string) (logrus.Formatter, error) {
 // is also set
 func CreateLogger(logFormat string) *logrus.Logger {
 	logger := logrus.New()
+	logger.SetOutput(io.Discard)
 	if formatter, err := LogFormatter(logFormat); err != nil {
 		Fatal("%s", err.Error())
 	} else {

@@ -115,7 +115,7 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 		// Start the TCP listener and bail out on errors.
 		c, lerr = net.Listen("tcp", bind)
 		if lerr != nil {
-			s.logGrpcEvent().WithError(err).Debugf("Retrying to start TCP listener on %s (retry %d/%d)", bind, try, listenerRetries)
+			s.logGrpcEvent().WithError(lerr).Debugf("Retrying to start TCP listener on %s (retry %d/%d)", bind, try, listenerRetries)
 			try += 1
 			return false, lerr
 		}

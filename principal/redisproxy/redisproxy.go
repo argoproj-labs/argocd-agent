@@ -242,7 +242,7 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 
 		parsedReceived := parsedRedisCommandVal.parsedReceived
 
-		forwardRawCommandToPrincipalRedis := true // whether to send the command to principal redis: falsGetDefaultLogger().e if the command has already been processed, true otherwise.
+		forwardRawCommandToPrincipalRedis := true // whether to send the command to principal redis: false if the command has already been processed, true otherwise.
 
 		// If we received a 'subscribe' message from argo cd, in the exact expected format
 		if len(parsedReceived) == 2 && parsedReceived[0] == "subscribe" {

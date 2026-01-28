@@ -343,7 +343,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 	command.Flags().StringSliceVar(&logLevels, "log-level",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_LOG_LEVEL", nil, []string{"info"}),
-		"The log level to use")
+		"The log level to use. Comma-separated list of components in the format [<component>=]level")
 	command.Flags().StringVar(&logFormat, "log-format",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),
 		"The log format to use (one of: text, json)")

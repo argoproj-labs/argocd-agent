@@ -48,6 +48,9 @@ func WithRequestMatcher(pattern string, methods []string, fn HandlerFunc) Resour
 // WithLogger sets the logger for the proxy to what is passed in. If this option is not provided
 // the New function will set it to the default logger
 func WithLogger(logger *logging.CentralizedLogger) ResourceProxyOption {
+	if logger == nil {
+		logger = logging.GetDefaultLogger()
+	}
 	return func(p *ResourceProxy) error {
 		p.logger = logger
 		return nil

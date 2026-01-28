@@ -392,10 +392,10 @@ func TestDefaultLoggerNotAltered(t *testing.T) {
 	var defaultBuf bytes.Buffer
 	var newBuf bytes.Buffer
 
-	defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &defaultBuf)
+	require.NoError(t, defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &defaultBuf))
 
 	newLogger := New(nil)
-	newLogger.SetupLogging(LogLevelDebug, LogFormatJSON, &newBuf)
+	require.NoError(t, newLogger.SetupLogging(LogLevelDebug, LogFormatJSON, &newBuf))
 
 	defaultLogger.Info("TestModule", "default info message")
 	defaultLogger.Debug("TestModule", "default debug message")

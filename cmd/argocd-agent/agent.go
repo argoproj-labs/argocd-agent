@@ -256,7 +256,7 @@ func NewAgentRunCommand() *cobra.Command {
 		"Port on the server to connect to")
 	command.Flags().StringSliceVar(&logLevels, "log-level",
 		env.StringSliceWithDefault("ARGOCD_AGENT_LOG_LEVEL", nil, []string{"info"}),
-		"The log level for the agent")
+		"The log level to use. Comma-separated list of components in the format [<component>=]level")
 
 	command.Flags().StringVar(&redisAddr, "redis-addr",
 		env.StringWithDefault("REDIS_ADDR", nil, "argocd-redis:6379"),
