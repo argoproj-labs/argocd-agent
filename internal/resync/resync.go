@@ -318,7 +318,7 @@ func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *
 			return err
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName)
+		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName, r.destinationBasedMapping)
 		ev := r.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		logCtx.Trace("Sending a request to update the appProject")
 		r.sendQ.Add(ev)
