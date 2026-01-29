@@ -208,11 +208,13 @@ Comma-separated list of TLS cipher suites to use. Use `--tls-ciphersuites=list` 
 | **CLI Flag** | `--log-level` |
 | **Environment Variable** | `ARGOCD_AGENT_LOG_LEVEL` |
 | **ConfigMap Entry** | `agent.log.level` |
-| **Type** | String |
+| **Type** | String (comma-separated list) |
 | **Default** | `info` |
-| **Valid Values** | `trace`, `debug`, `info`, `warn`, `error` |
+| **Format** | `[<component>=]<level>` |
+| **Valid Values (component)** | `resource-proxy`, `redis-proxy`, `grpc-event` |
+| **Valid Values (level)** | `trace`, `debug`, `info`, `warning`, `error` |
 
-The log level for the agent.
+The log level for the general logger and subsystem loggers for the agent.
 
 ### Log Format
 

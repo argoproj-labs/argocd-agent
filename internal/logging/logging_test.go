@@ -62,7 +62,7 @@ func TestSetupLogging(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			err := SetupLogging(tt.level, tt.format, &buf)
+			err := defaultLogger.SetupLogging(tt.level, tt.format, &buf)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -105,10 +105,10 @@ func TestParseLogLevel(t *testing.T) {
 
 func TestComponentLogger(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	logger := ComponentLogger("TestComponent")
+	logger := defaultLogger.ComponentLogger("TestComponent")
 	logger.Info("test message")
 
 	var logEntry map[string]interface{}
@@ -122,10 +122,10 @@ func TestComponentLogger(t *testing.T) {
 
 func TestModuleLogger(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	logger := ModuleLogger("TestModule")
+	logger := defaultLogger.ModuleLogger("TestModule")
 	logger.Info("test message")
 
 	var logEntry map[string]interface{}
@@ -138,10 +138,10 @@ func TestModuleLogger(t *testing.T) {
 
 func TestMethodLogger(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	logger := MethodLogger("TestModule", "TestMethod")
+	logger := defaultLogger.MethodLogger("TestModule", "TestMethod")
 	logger.Info("test message")
 
 	var logEntry map[string]interface{}
@@ -154,10 +154,10 @@ func TestMethodLogger(t *testing.T) {
 
 func TestRequestLogger(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	logger := RequestLogger("TestModule", "TestMethod", "test-request-id")
+	logger := defaultLogger.RequestLogger("TestModule", "TestMethod", "test-request-id")
 	logger.Info("test message")
 
 	var logEntry map[string]interface{}
@@ -171,10 +171,10 @@ func TestRequestLogger(t *testing.T) {
 
 func TestApplicationLogger(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	logger := ApplicationLogger("TestModule", "test-app")
+	logger := defaultLogger.ApplicationLogger("TestModule", "test-app")
 	logger.Info("test message")
 
 	var logEntry map[string]interface{}
@@ -187,10 +187,10 @@ func TestApplicationLogger(t *testing.T) {
 
 func TestKubernetesResourceLogger(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	logger := KubernetesResourceLogger("TestModule", "Pod", "default", "test-pod")
+	logger := defaultLogger.KubernetesResourceLogger("TestModule", "Pod", "default", "test-pod")
 	logger.Info("test message")
 
 	var logEntry map[string]interface{}
@@ -205,10 +205,10 @@ func TestKubernetesResourceLogger(t *testing.T) {
 
 func TestRedisLogger(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	logger := RedisLogger("TestModule", "GET", "test-key")
+	logger := defaultLogger.RedisLogger("TestModule", "GET", "test-key")
 	logger.Info("test message")
 
 	var logEntry map[string]interface{}
@@ -222,10 +222,10 @@ func TestRedisLogger(t *testing.T) {
 
 func TestGRPCLogger(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	logger := GRPCLogger("TestModule", "/test.Service/Method")
+	logger := defaultLogger.GRPCLogger("TestModule", "/test.Service/Method")
 	logger.Info("test message")
 
 	var logEntry map[string]interface{}
@@ -238,10 +238,10 @@ func TestGRPCLogger(t *testing.T) {
 
 func TestHTTPLogger(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	logger := HTTPLogger("TestModule", "GET", "/api/v1/test")
+	logger := defaultLogger.HTTPLogger("TestModule", "GET", "/api/v1/test")
 	logger.Info("test message")
 
 	var logEntry map[string]interface{}
@@ -255,10 +255,10 @@ func TestHTTPLogger(t *testing.T) {
 
 func TestTextFormat(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatText, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatText, &buf)
 	require.NoError(t, err)
 
-	logger := ComponentLogger("TestComponent")
+	logger := defaultLogger.ComponentLogger("TestComponent")
 	logger.Info("test message")
 
 	logOutput := buf.String()
@@ -269,10 +269,10 @@ func TestTextFormat(t *testing.T) {
 
 func TestJSONFormat(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelDebug, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelDebug, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	logger := ComponentLogger("TestComponent")
+	logger := defaultLogger.ComponentLogger("TestComponent")
 	logger.Debug("debug message")
 
 	// Should contain the debug message since we set level to debug
@@ -289,10 +289,10 @@ func TestJSONFormat(t *testing.T) {
 
 func TestLogLevels(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelWarn, LogFormatText, &buf)
+	err := defaultLogger.SetupLogging(LogLevelWarn, LogFormatText, &buf)
 	require.NoError(t, err)
 
-	logger := ComponentLogger("TestComponent")
+	logger := defaultLogger.ComponentLogger("TestComponent")
 
 	// Debug and Info should not appear (below warn level)
 	logger.Debug("debug message")
@@ -312,43 +312,43 @@ func TestLogLevels(t *testing.T) {
 func TestGetDefaultLogger(t *testing.T) {
 	logger := GetDefaultLogger()
 	assert.NotNil(t, logger)
-	assert.IsType(t, &logrus.Logger{}, logger)
+	assert.IsType(t, &CentralizedLogger{}, logger)
 }
 
 func TestSetLogLevel(t *testing.T) {
 	// Save original level
-	originalLevel := GetLogLevel()
+	originalLevel := defaultLogger.GetLogLevel()
 	defer func() {
-		defaultLogger.SetLevel(originalLevel)
+		defaultLogger.logger.SetLevel(originalLevel)
 	}()
 
-	err := SetLogLevel(LogLevelDebug)
+	err := defaultLogger.SetLogLevel(LogLevelDebug)
 	assert.NoError(t, err)
-	assert.Equal(t, logrus.DebugLevel, GetLogLevel())
+	assert.Equal(t, logrus.DebugLevel, defaultLogger.GetLogLevel())
 
-	err = SetLogLevel(LogLevelError)
+	err = defaultLogger.SetLogLevel(LogLevelError)
 	assert.NoError(t, err)
-	assert.Equal(t, logrus.ErrorLevel, GetLogLevel())
+	assert.Equal(t, logrus.ErrorLevel, defaultLogger.GetLogLevel())
 
 	// Test invalid level
-	err = SetLogLevel(LogLevel("invalid"))
+	err = defaultLogger.SetLogLevel(LogLevel("invalid"))
 	assert.Error(t, err)
 }
 
 func TestGetLogLevel(t *testing.T) {
 	// Save original level
-	originalLevel := GetLogLevel()
+	originalLevel := defaultLogger.GetLogLevel()
 	defer func() {
-		defaultLogger.SetLevel(originalLevel)
+		defaultLogger.logger.SetLevel(originalLevel)
 	}()
 
-	defaultLogger.SetLevel(logrus.WarnLevel)
-	assert.Equal(t, logrus.WarnLevel, GetLogLevel())
+	defaultLogger.logger.SetLevel(logrus.WarnLevel)
+	assert.Equal(t, logrus.WarnLevel, defaultLogger.GetLogLevel())
 }
 
 func TestWithContext(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
 	fields := map[string]interface{}{
@@ -356,7 +356,7 @@ func TestWithContext(t *testing.T) {
 		logfields.RequestID: "req-123",
 	}
 
-	logger := WithContext("TestModule", fields)
+	logger := defaultLogger.WithContext("TestModule", fields)
 	logger.Info("test message")
 
 	var logEntry map[string]interface{}
@@ -370,15 +370,15 @@ func TestWithContext(t *testing.T) {
 
 func TestDirectLoggingFunctions(t *testing.T) {
 	var buf bytes.Buffer
-	err := SetupLogging(LogLevelTrace, LogFormatJSON, &buf)
+	err := defaultLogger.SetupLogging(LogLevelTrace, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
 	// Test different log levels
-	Trace("TestModule", "trace message")
-	Debug("TestModule", "debug message")
-	Info("TestModule", "info message")
-	Warn("TestModule", "warn message")
-	Error("TestModule", "error message")
+	defaultLogger.Trace("TestModule", "trace message")
+	defaultLogger.Debug("TestModule", "debug message")
+	defaultLogger.Info("TestModule", "info message")
+	defaultLogger.Warn("TestModule", "warn message")
+	defaultLogger.Error("TestModule", "error message")
 
 	logOutput := buf.String()
 	assert.Contains(t, logOutput, "trace message")
@@ -386,4 +386,68 @@ func TestDirectLoggingFunctions(t *testing.T) {
 	assert.Contains(t, logOutput, "info message")
 	assert.Contains(t, logOutput, "warn message")
 	assert.Contains(t, logOutput, "error message")
+}
+
+func TestDefaultLoggerNotAltered(t *testing.T) {
+	var defaultBuf bytes.Buffer
+	var newBuf bytes.Buffer
+
+	require.NoError(t, defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &defaultBuf))
+
+	newLogger := New(nil)
+	require.NoError(t, newLogger.SetupLogging(LogLevelDebug, LogFormatJSON, &newBuf))
+
+	defaultLogger.Info("TestModule", "default info message")
+	defaultLogger.Debug("TestModule", "default debug message")
+	newLogger.Debug("TestModule", "new debug message")
+
+	defaultOutput := defaultBuf.String()
+	newOutput := newBuf.String()
+
+	assert.Contains(t, defaultOutput, "default info message")
+	assert.NotContains(t, defaultOutput, "default debug message")
+	assert.NotContains(t, defaultOutput, "new debug message")
+
+	assert.NotContains(t, newOutput, "default info message")
+	assert.NotContains(t, newOutput, "default debug message")
+	assert.Contains(t, newOutput, "new debug message")
+}
+
+func TestSeparateLoggerLevels(t *testing.T) {
+	var debugBuf bytes.Buffer
+	var warnBuf bytes.Buffer
+
+	debugLogger := New(nil)
+	err := debugLogger.SetupLogging(LogLevelDebug, LogFormatJSON, &debugBuf)
+	require.NoError(t, err)
+
+	warnLogger := New(nil)
+	err = warnLogger.SetupLogging(LogLevelWarn, LogFormatJSON, &warnBuf)
+	require.NoError(t, err)
+
+	debugLogger.Trace("TestModule", "trace message")
+	debugLogger.Debug("TestModule", "debug message")
+	debugLogger.Info("TestModule", "info message")
+	debugLogger.Warn("TestModule", "warn message")
+	debugLogger.Error("TestModule", "error message")
+
+	debugOutput := debugBuf.String()
+	assert.NotContains(t, debugOutput, "trace message")
+	assert.Contains(t, debugOutput, "debug message")
+	assert.Contains(t, debugOutput, "info message")
+	assert.Contains(t, debugOutput, "warn message")
+	assert.Contains(t, debugOutput, "error message")
+
+	warnLogger.Trace("TestModule", "trace message")
+	warnLogger.Debug("TestModule", "debug message")
+	warnLogger.Info("TestModule", "info message")
+	warnLogger.Warn("TestModule", "warn message")
+	warnLogger.Error("TestModule", "error message")
+
+	warnOutput := warnBuf.String()
+	assert.NotContains(t, warnOutput, "trace message")
+	assert.NotContains(t, warnOutput, "debug message")
+	assert.NotContains(t, warnOutput, "info message")
+	assert.Contains(t, warnOutput, "warn message")
+	assert.Contains(t, warnOutput, "error message")
 }

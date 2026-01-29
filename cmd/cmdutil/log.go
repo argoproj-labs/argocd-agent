@@ -18,11 +18,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/writer"
 )
+
+const AvailableSubSystems = "resource-proxy, redis-proxy, grpc-event"
+
+type SubSystemLoggers struct {
+	ResourceProxyLogger *logrus.Logger
+	RedisProxyLogger    *logrus.Logger
+	GrpcEventLogger     *logrus.Logger
+}
 
 func StringToLoglevel(l string) (logrus.Level, error) {
 	switch strings.ToLower(l) {
@@ -84,5 +93,102 @@ func LogFormatter(format string) (logrus.Formatter, error) {
 		return &logrus.JSONFormatter{}, nil
 	default:
 		return nil, fmt.Errorf("invalid format '%s', must be one of text, json", format)
+	}
+}
+
+// CreateLogger creates a new logrus instance with the log level specified
+// validation is done on the log level to ensure it is valid, log formatter
+// is also set
+func CreateLogger(logFormat string) *logrus.Logger {
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	if formatter, err := LogFormatter(logFormat); err != nil {
+		Fatal("%s", err.Error())
+	} else {
+		logger.SetFormatter(formatter)
+	}
+
+	logger.AddHook(&writer.Hook{
+		Writer: os.Stderr,
+		LogLevels: []logrus.Level{
+			logrus.PanicLevel,
+			logrus.FatalLevel,
+			logrus.ErrorLevel,
+			logrus.WarnLevel,
+		},
+	})
+	logger.AddHook(&writer.Hook{
+		Writer: os.Stdout,
+		LogLevels: []logrus.Level{
+			logrus.InfoLevel,
+			logrus.DebugLevel,
+			logrus.TraceLevel,
+		},
+	})
+
+	return logger
+}
+
+// ParseLogLevels parses the slice produced by the log level flag and sets log levels
+// for subsystems and the default logger accordingly
+func ParseLogLevels(input []string, ss *SubSystemLoggers) {
+	seen := []string{}
+
+	for _, e := range input {
+		split := strings.Split(e, "=")
+		if len(split) > 2 || len(split) == 0 {
+			logrus.Warnf("%s is invalid please use the format subsystem=loglevel, skipping", e)
+			continue
+		}
+
+		split[0] = strings.TrimSpace(split[0])
+		if len(split) > 1 {
+			split[1] = strings.TrimSpace(split[1])
+		}
+
+		if len(split) == 1 {
+			if split[0] == "" {
+				split[0] = "info"
+			}
+
+			level, err := StringToLoglevel(split[0])
+			if err != nil {
+				Fatal("an invalid log level was entered: %s. Available levels are %s", split[0], AvailableLogLevels())
+			}
+			logrus.SetLevel(level)
+
+			if !slices.Contains(seen, "resource-proxy") {
+				ss.ResourceProxyLogger.SetLevel(level)
+			}
+			if !slices.Contains(seen, "redis-proxy") {
+				ss.RedisProxyLogger.SetLevel(level)
+			}
+			if !slices.Contains(seen, "grpc-event") {
+				ss.GrpcEventLogger.SetLevel(level)
+			}
+			continue
+		}
+
+		if split[1] == "" {
+			split[1] = "info"
+		}
+
+		level, err := StringToLoglevel(split[1])
+		if err != nil {
+			Fatal("an invalid log level was entered: %s for %s. Available levels are %s", split[1], split[0], AvailableLogLevels())
+		}
+		switch split[0] {
+		case "resource-proxy":
+			ss.ResourceProxyLogger.SetLevel(level)
+			seen = append(seen, "resource-proxy")
+		case "redis-proxy":
+			ss.RedisProxyLogger.SetLevel(level)
+			seen = append(seen, "redis-proxy")
+		case "grpc-event":
+			ss.GrpcEventLogger.SetLevel(level)
+			seen = append(seen, "grpc-event")
+		default:
+			logrus.Warnf("an invalid subsystem %s was specified. subsystems are %s, skipping", split[0], AvailableSubSystems)
+		}
 	}
 }

@@ -34,7 +34,7 @@ import (
 //
 // AFTER:
 func log() *logrus.Entry {
-	return logging.ModuleLogger("Connector")
+	return logging.GetDefaultLogger().ModuleLogger("Connector")
 }
 
 // Example 2: Replace manual field creation with constants
@@ -57,41 +57,43 @@ func ExampleStructuredLogging(uuid, connectionUUID string) *logrus.Entry {
 
 // Example 3: Using specialized logger functions
 func ExampleSpecializedLoggers() {
+	defaultLogger := logging.GetDefaultLogger()
+
 	// For request handling
-	requestLogger := logging.RequestLogger("AgentModule", "HandleRequest", "req-123")
+	requestLogger := defaultLogger.RequestLogger("AgentModule", "HandleRequest", "req-123")
 	requestLogger.Info("Processing request")
 
 	// For Kubernetes resources
-	k8sLogger := logging.KubernetesResourceLogger("AgentModule", "Pod", "default", "my-pod")
+	k8sLogger := defaultLogger.KubernetesResourceLogger("AgentModule", "Pod", "default", "my-pod")
 	k8sLogger.Info("Processing Kubernetes resource")
 
 	// For Redis operations
-	redisLogger := logging.RedisLogger("AgentModule", "GET", "app:config")
+	redisLogger := defaultLogger.RedisLogger("AgentModule", "GET", "app:config")
 	redisLogger.Debug("Redis operation completed")
 
 	// For gRPC calls
-	grpcLogger := logging.GRPCLogger("AgentModule", "/argocd.agent.v1.AgentService/Subscribe")
+	grpcLogger := defaultLogger.GRPCLogger("AgentModule", "/argocd.agent.v1.AgentService/Subscribe")
 	grpcLogger.Info("gRPC call started")
 
 	// For HTTP operations
-	httpLogger := logging.HTTPLogger("AgentModule", "POST", "/api/v1/applications")
+	httpLogger := defaultLogger.HTTPLogger("AgentModule", "POST", "/api/v1/applications")
 	httpLogger.Info("HTTP request received")
 
 	// For error handling
 	err := errors.New("connection failed")
-	errorLogger := logging.ErrorLogger("AgentModule", "ConnectionError", err)
+	errorLogger := defaultLogger.ErrorLogger("AgentModule", "ConnectionError", err)
 	errorLogger.Error("Connection error occurred")
 
 	// For authentication
-	authLogger := logging.AuthLogger("AgentModule", "admin", "bearer-token")
+	authLogger := defaultLogger.AuthLogger("AgentModule", "admin", "bearer-token")
 	authLogger.Info("User authenticated")
 
 	// For cluster operations
-	clusterLogger := logging.ClusterLogger("AgentModule", "prod-cluster", "https://k8s.example.com")
+	clusterLogger := defaultLogger.ClusterLogger("AgentModule", "prod-cluster", "https://k8s.example.com")
 	clusterLogger.Info("Cluster operation completed")
 
 	// For queue operations
-	queueLogger := logging.QueueLogger("AgentModule", "event-queue", 42)
+	queueLogger := defaultLogger.QueueLogger("AgentModule", "event-queue", 42)
 	queueLogger.Debug("Queue operation")
 }
 
@@ -104,7 +106,7 @@ func ExampleComplexLoggingScenario(appName, namespace, eventType string) {
 	//     WithField("event", eventType)
 
 	// AFTER: Using structured fields and specialized logger
-	logCtx := logging.ApplicationLogger("ApplicationManager", appName).
+	logCtx := logging.GetDefaultLogger().ApplicationLogger("ApplicationManager", appName).
 		WithFields(logrus.Fields{
 			logfields.Namespace: namespace,
 			logfields.Event:     eventType,
@@ -116,7 +118,7 @@ func ExampleComplexLoggingScenario(appName, namespace, eventType string) {
 // Example 5: Setup logging in main function
 func ExampleSetupLogging() {
 	// Configure logging at application startup
-	err := logging.SetupLogging(
+	err := logging.GetDefaultLogger().SetupLogging(
 		logging.LogLevelInfo,  // Set log level
 		logging.LogFormatJSON, // Use JSON format for production
 		nil,                   // Use default output (stdout)
@@ -127,14 +129,14 @@ func ExampleSetupLogging() {
 	}
 
 	// Get logger for the main component
-	mainLogger := logging.ComponentLogger("Main")
+	mainLogger := logging.GetDefaultLogger().ComponentLogger("Main")
 	mainLogger.Info("Application started")
 }
 
 // Example 6: Performance logging
 func ExamplePerformanceLogging() {
 	// Log performance metrics
-	performanceLogger := logging.PerformanceLogger("APIHandler", 150, 100)
+	performanceLogger := logging.GetDefaultLogger().PerformanceLogger("APIHandler", 150, 100)
 	performanceLogger.WithFields(logrus.Fields{
 		logfields.ResponseTime: "150ms",
 		logfields.Status:       "success",
@@ -143,7 +145,7 @@ func ExamplePerformanceLogging() {
 
 // Example 7: Using field constants for consistency
 func ExampleFieldConstants() {
-	logger := logging.ModuleLogger("ExampleModule")
+	logger := logging.GetDefaultLogger().ModuleLogger("ExampleModule")
 
 	// BEFORE: String literals (inconsistent, error-prone)
 	// logger.WithField("user_name", "john").Info("User action")

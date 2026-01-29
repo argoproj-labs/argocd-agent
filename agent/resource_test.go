@@ -1200,6 +1200,7 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 
 func TestBuildSubresourcePath(t *testing.T) {
 	agent := &Agent{}
+
 	testCases := []struct {
 		name        string
 		gvr         schema.GroupVersionResource

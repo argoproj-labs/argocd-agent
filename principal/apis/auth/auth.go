@@ -50,8 +50,7 @@ const (
 
 var errAuthenticationFailed = status.Error(codes.Unauthenticated, authFailedMessage)
 
-type ServerOptions struct {
-}
+type ServerOptions struct{}
 
 type ServerOption func(o *ServerOptions) error
 
@@ -183,5 +182,5 @@ func (s *Server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenReques
 }
 
 func log() *logrus.Entry {
-	return logging.ModuleLogger("grpc.AuthenticationServer")
+	return logging.GetDefaultLogger().ModuleLogger("grpc.AuthenticationServer")
 }

@@ -62,7 +62,7 @@ func log() *logrus.Entry {
 
 // ✅ REQUIRED - use centralized logging
 func log() *logrus.Entry {
-    return logging.ModuleLogger("MyModule")
+    return logging.GetDefaultLogger().ModuleLogger("MyModule")
 }
 ```
 
@@ -85,7 +85,7 @@ const (
 ### Request Processing
 ```go
 func HandleRequest(requestID, method string) {
-    logger := logging.RequestLogger("MyModule", method, requestID)
+    logger := logging.GetDefaultLogger().RequestLogger("MyModule", method, requestID)
     logger.Info("Starting request processing")
     
     // Add additional context as needed
@@ -98,7 +98,7 @@ func HandleRequest(requestID, method string) {
 ### Kubernetes Resource Management
 ```go
 func ProcessPod(namespace, name string) {
-    logger := logging.KubernetesResourceLogger("PodProcessor", "Pod", namespace, name)
+    logger := logging.GetDefaultLogger().KubernetesResourceLogger("PodProcessor", "Pod", namespace, name)
     logger.Info("Processing pod")
     
     logger.WithFields(logrus.Fields{
@@ -111,7 +111,7 @@ func ProcessPod(namespace, name string) {
 ### Error Handling
 ```go
 func HandleError(err error) {
-    logger := logging.ErrorLogger("MyModule", "ValidationError", err)
+    logger := logging.GetDefaultLogger().ErrorLogger("MyModule", "ValidationError", err)
     logger.WithFields(logrus.Fields{
         logfields.ErrorCode: "E001",
         logfields.Reason:    "invalid input",
@@ -122,7 +122,7 @@ func HandleError(err error) {
 ### gRPC Operations
 ```go
 func HandleGRPCCall(method string) {
-    logger := logging.GRPCLogger("GRPCHandler", method)
+    logger := logging.GetDefaultLogger().GRPCLogger("GRPCHandler", method)
     logger.Info("gRPC call started")
     
     logger.WithFields(logrus.Fields{
@@ -199,7 +199,7 @@ logger.Info("Processing completed")
 
 ### ✅ Correct Approach
 ```go
-logger := logging.ApplicationLogger("AppProcessor", appName)
+logger := logging.GetDefaultLogger().ApplicationLogger("AppProcessor", appName)
 logger.WithFields(logrus.Fields{
     logfields.Method:    "ProcessApp",
     logfields.Duration:  duration,
@@ -214,7 +214,7 @@ Use the logging package's test utilities:
 ```go
 func TestMyFunction(t *testing.T) {
     var buf bytes.Buffer
-    err := logging.SetupLogging(logging.LogLevelDebug, logging.LogFormatJSON, &buf)
+    err := logging.GetDefaultLogger().SetupLogging(logging.LogLevelDebug, logging.LogFormatJSON, &buf)
     require.NoError(t, err)
     
     // Call your function that logs

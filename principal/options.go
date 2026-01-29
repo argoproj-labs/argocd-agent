@@ -32,8 +32,10 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
+	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -69,9 +71,15 @@ type ServerOptions struct {
 	healthzPort            int
 	redisProxyDisabled     bool
 	informerSyncTimeout    time.Duration
+
 	// insecurePlaintext disables TLS on the gRPC server. Use when Istio sidecar
 	// handles mTLS termination.
 	insecurePlaintext bool
+
+	// redisProxyLogger, resourceProxyLogger, and grpcEventLogger are loggers for various subsystems
+	redisProxyLogger    *logging.CentralizedLogger
+	resourceProxyLogger *logging.CentralizedLogger
+	grpcEventLogger     *logging.CentralizedLogger
 }
 
 type ServerOption func(o *Server) error
@@ -496,6 +504,29 @@ func WithInsecurePlaintext() ServerOption {
 	return func(o *Server) error {
 		log().Warn("INSECURE: gRPC server will run in plaintext mode - ensure Istio or similar service mesh provides mTLS")
 		o.options.insecurePlaintext = true
+		return nil
+	}
+}
+
+func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) ServerOption {
+	return func(o *Server) error {
+		if redisProxy != nil {
+			o.options.redisProxyLogger = logging.New(redisProxy)
+		} else {
+			o.options.redisProxyLogger = logging.GetDefaultLogger()
+		}
+
+		if resourceProxy != nil {
+			o.options.resourceProxyLogger = logging.New(resourceProxy)
+		} else {
+			o.options.resourceProxyLogger = logging.GetDefaultLogger()
+		}
+
+		if grpcEvent != nil {
+			o.options.grpcEventLogger = logging.New(grpcEvent)
+		} else {
+			o.options.grpcEventLogger = logging.GetDefaultLogger()
+		}
 		return nil
 	}
 }

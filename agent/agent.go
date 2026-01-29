@@ -119,6 +119,11 @@ type Agent struct {
 
 	// trackingReader reads and caches the Argo CD resource tracking configuration
 	trackingReader *ResourceTrackingReader
+
+	// below are loggers to control log levels of different subsystems
+	resourceProxyLogger *logging.CentralizedLogger
+	redisProxyLogger    *logging.CentralizedLogger
+	grpcEventLogger     *logging.CentralizedLogger
 }
 
 const defaultQueueName = "default"
@@ -168,6 +173,18 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if a.resourceProxyLogger == nil {
+		a.resourceProxyLogger = logging.GetDefaultLogger()
+	}
+
+	if a.redisProxyLogger == nil {
+		a.redisProxyLogger = logging.GetDefaultLogger()
+	}
+
+	if a.grpcEventLogger == nil {
+		a.grpcEventLogger = logging.GetDefaultLogger()
 	}
 
 	if a.remote == nil {
@@ -495,7 +512,19 @@ func (a *Agent) SetConnected(connected bool) {
 }
 
 func log() *logrus.Entry {
-	return logging.ModuleLogger("Agent")
+	return logging.GetDefaultLogger().ModuleLogger("Agent")
+}
+
+func (a *Agent) logResourceProxy() *logrus.Entry {
+	return logging.SelectLogger(a.resourceProxyLogger).ModuleLogger("ResourceProxy")
+}
+
+func (a *Agent) logRedisProxy() *logrus.Entry {
+	return logging.SelectLogger(a.redisProxyLogger).ModuleLogger("RedisProxy")
+}
+
+func (a *Agent) logGrpcEvent() *logrus.Entry {
+	return logging.SelectLogger(a.grpcEventLogger).ModuleLogger("GrpcEvent")
 }
 
 func (a *Agent) healthzHandler(w http.ResponseWriter, r *http.Request) {

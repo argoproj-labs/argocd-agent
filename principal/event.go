@@ -49,7 +49,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	status := metrics.EventProcessingSuccess
 	ev, _ := q.Get()
 
-	logCtx := log().WithFields(logrus.Fields{
+	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
 		"module":       "QueueProcessor",
 		"client":       agentName,
 		"event_target": ev.DataSchema(),
@@ -162,7 +162,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	}
 	agentMode := s.agentMode(agentName)
 
-	logCtx := log().WithFields(logrus.Fields{
+	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
 		"module":      "QueueProcessor",
 		"client":      agentName,
 		"mode":        agentMode.String(),
@@ -348,7 +348,7 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 	}
 	agentMode := s.agentMode(agentName)
 
-	logCtx := log().WithFields(logrus.Fields{
+	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
 		"module":      "QueueProcessor",
 		"client":      agentName,
 		"mode":        agentMode.String(),
@@ -451,7 +451,7 @@ func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloude
 	}
 
 	agentMode := s.agentMode(agentName)
-	log().WithFields(logrus.Fields{
+	s.logGrpcEvent().WithFields(logrus.Fields{
 		"module":      "QueueProcessor",
 		"client":      agentName,
 		"mode":        agentMode.String(),
@@ -467,7 +467,7 @@ func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloude
 // The ping keeps the gRPC stream active and prevents service mesh idle timeouts.
 // No response is needed - ping itself should reset the service mesh idle timer.
 func (s *Server) processHeartbeatEvent(agentName string, ev *cloudevents.Event) error {
-	log().WithFields(logrus.Fields{
+	s.logGrpcEvent().WithFields(logrus.Fields{
 		"module": "QueueProcessor",
 		"client": agentName,
 		"event":  ev.Type(),
@@ -478,7 +478,6 @@ func (s *Server) processHeartbeatEvent(agentName string, ev *cloudevents.Event) 
 // processRedisEventResponse proceses (redis) messages received from agents:
 // - These messages will be Get responses, initial Subscribe response, and (async) Subscribe notifications
 func (s *Server) processRedisEventResponse(ctx context.Context, logCtx *logrus.Entry, agentName string, ev *cloudevents.Event) error {
-
 	resReq := &event.RedisResponse{}
 	err := ev.DataAs(resReq)
 	if err != nil {
@@ -615,7 +614,7 @@ func safeSendCloudEvent(ctx context.Context, ch chan *cloudevents.Event, ev *clo
 // processIncomingResourceResyncEvent will handle the incoming resync events from the agent
 func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
 	agentMode := s.agentMode(agentName)
-	logCtx := log().WithFields(logrus.Fields{
+	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
 		"module":      "QueueProcessor",
 		"client":      agentName,
 		"mode":        agentMode.String(),
@@ -708,7 +707,7 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 func (s *Server) eventProcessor(ctx context.Context) error {
 	sem := semaphore.NewWeighted(s.options.eventProcessors)
 	queueLock := namedlock.NewNamedLock()
-	logCtx := log().WithField("module", "EventProcessor")
+	logCtx := s.logGrpcEvent().WithField("module", "EventProcessor")
 	for {
 		queuesProcessed := 0
 		for _, queueName := range s.queues.Names() {
@@ -761,7 +760,6 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					defer func() {
 						sem.Release(1)
 						queueLock.Unlock(agentName)
-
 					}()
 
 					ev, err := s.processRecvQueue(ctx, agentName, q)
@@ -796,7 +794,6 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-
 }
 
 // StartEventProcessor will start the event processor, which processes items
@@ -834,7 +831,8 @@ func (s *Server) createNamespaceIfNotExist(ctx context.Context, name string) (bo
 				ObjectMeta: v1.ObjectMeta{
 					Name:   name,
 					Labels: s.autoNamespaceLabels,
-				}},
+				},
+			},
 				v1.CreateOptions{})
 			return true, err
 		}

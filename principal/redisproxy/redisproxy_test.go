@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -27,8 +28,7 @@ import (
 )
 
 func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
-
-	logEntry := log()
+	logEntry := logging.GetDefaultLogger().ModuleLogger("RedisProxy")
 
 	type testEntry struct {
 		name          string
@@ -83,15 +83,12 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 	}
 
 	for _, testEntry := range testEntries {
-
 		t.Run(testEntry.name, func(t *testing.T) {
 			res, err := extractAgentNameFromRedisCommandKey(testEntry.key, logEntry)
 
 			require.Equal(t, testEntry.value, res)
 			require.Equal(t, testEntry.errorExpected, err != nil, "err: %v", err)
-
 		})
-
 	}
 }
 
@@ -109,7 +106,7 @@ func (m *mockArgoCDRedisWriter) writeToArgoCDRedisSocket(logCtx *logrus.Entry, b
 }
 
 func Test_handleInternalNotify(t *testing.T) {
-	logEntry := log()
+	logEntry := logging.GetDefaultLogger().ModuleLogger("RedisProxy")
 
 	t.Run("successful internal notify with valid command", func(t *testing.T) {
 		mockWriter := &mockArgoCDRedisWriter{}
@@ -164,7 +161,6 @@ func Test_handleInternalNotify(t *testing.T) {
 		require.Contains(t, err.Error(), "unable to write response")
 		require.True(t, mockWriter.writeToArgoCDRedisSocketCalled)
 	})
-
 }
 
 // mockSendSynchronousMessageToAgentFunc is a mock implementation of sendSynchronousMessageToAgentFuncType
@@ -185,8 +181,6 @@ func (m *mockSendSynchronousMessageToAgentFunc) call(agentName string, connectio
 }
 
 func Test_handleAgentGet(t *testing.T) {
-	logEntry := log()
-
 	t.Run("successful get with cache hit", func(t *testing.T) {
 		// Setup mocks
 		mockWriter := &mockArgoCDRedisWriter{}
@@ -204,6 +198,8 @@ func Test_handleAgentGet(t *testing.T) {
 		rp := &RedisProxy{
 			sendSynchronousMessageToAgentFn: mockSendFunc.call,
 		}
+
+		logEntry := rp.log()
 
 		// Setup connection state
 		ctx, cancel := context.WithCancel(context.Background())
@@ -254,6 +250,8 @@ func Test_handleAgentGet(t *testing.T) {
 			sendSynchronousMessageToAgentFn: mockSendFunc.call,
 		}
 
+		logEntry := rp.log()
+
 		// Setup connection state
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -296,6 +294,8 @@ func Test_handleAgentGet(t *testing.T) {
 		rp := &RedisProxy{
 			sendSynchronousMessageToAgentFn: mockSendFunc.call,
 		}
+
+		logEntry := rp.log()
 
 		// Setup connection state
 		ctx, cancel := context.WithCancel(context.Background())
@@ -340,6 +340,8 @@ func Test_handleAgentGet(t *testing.T) {
 			sendSynchronousMessageToAgentFn: mockSendFunc.call,
 		}
 
+		logEntry := rp.log()
+
 		// Setup connection state
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -363,12 +365,9 @@ func Test_handleAgentGet(t *testing.T) {
 		require.Equal(t, 1, mockSendFunc.callCount)
 		require.False(t, mockWriter.writeToArgoCDRedisSocketCalled)
 	})
-
 }
 
 func Test_handleAgentSubscribe(t *testing.T) {
-	logEntry := log()
-
 	t.Run("successful subscription", func(t *testing.T) {
 		// Setup mocks
 		mockWriter := &mockArgoCDRedisWriter{}
@@ -385,6 +384,8 @@ func Test_handleAgentSubscribe(t *testing.T) {
 			sendSynchronousMessageToAgentFn: mockSendFunc.call,
 			ConnectionIDTracker:             nil,
 		}
+
+		logEntry := rp.log()
 
 		// Setup connection state
 		ctx, cancel := context.WithCancel(context.Background())
@@ -420,5 +421,4 @@ func Test_handleAgentSubscribe(t *testing.T) {
 		// Check that ping routine was started
 		require.True(t, connState.pingRoutineStarted[agentName])
 	})
-
 }
