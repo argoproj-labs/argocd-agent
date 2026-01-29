@@ -57,9 +57,9 @@ argocd-agent principal \
   --client-cert-subject-match=true
 ```
 
-**Option 2: Extract from SPIFFE URI SANs**
+**Option 2: Extract from URI SANs**
 
-Use this when your PKI constrains Common Name (e.g., cert-manager policies requiring CN=namespace) and you need to identify agents via SPIFFE URIs:
+Agent identity can also be extracted from URI Subject Alternative Names (SANs) in the certificate. The regex is matched against each URI SAN until a match is found.
 
 ```yaml
 # ConfigMap (argocd-agent-params)
@@ -82,11 +82,11 @@ argocd-agent principal \
 |--------|-----------------|---------|
 | `mtls:<regex>` | Subject DN (backwards compatible) | `mtls:CN=([^,]+)` |
 | `mtls:subject:<regex>` | Subject DN (explicit) | `mtls:subject:CN=([^,]+)` |
-| `mtls:uri:<regex>` | First URI SAN | `mtls:uri:spiffe://[^/]+/ns/[^/]+/sa/(.+)` |
+| `mtls:uri:<regex>` | URI SANs (first match) | `mtls:uri:spiffe://[^/]+/ns/[^/]+/sa/(.+)` |
 
 **Parameter Explanation:**
 
-- `principal.auth: "mtls:..."` - Use mTLS authentication with a regex to extract agent ID. The first capture group becomes the agent ID.
+- `principal.auth: "mtls:..."` - Use mTLS authentication with a regex to extract agent ID. The first capture group becomes the agent ID. For URI mode, all URIs are checked until one matches.
 - `principal.tls.client-cert.require: "true"` - Require agents to present a client certificate
 - `principal.tls.client-cert.match-subject: "true"` - Validate that the certificate CN matches the registered agent name (only relevant for subject-based auth)
 

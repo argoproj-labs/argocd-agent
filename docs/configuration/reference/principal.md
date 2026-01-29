@@ -386,13 +386,13 @@ Authentication method and corresponding configuration.
 |--------|--------|----------|
 | `mtls:<regex>` | Subject DN | Default, backwards compatible |
 | `mtls:subject:<regex>` | Subject DN | Explicit subject extraction |
-| `mtls:uri:<regex>` | URI SANs | SPIFFE URIs when CN is constrained |
+| `mtls:uri:<regex>` | URI SANs (first match) | Extract identity from URI SANs |
 
 **Examples:**
 
 - mTLS (subject): `mtls:CN=([^,]+)`
 - mTLS (subject explicit): `mtls:subject:CN=([^,]+)`
-- mTLS (SPIFFE URI): `mtls:uri:spiffe://[^/]+/ns/[^/]+/sa/(.+)`
+- mTLS (URI): `mtls:uri:spiffe://[^/]+/ns/[^/]+/sa/(.+)`
 - Istio header: `header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)`
 - Custom header: `header:x-client-id:^(.+)$`
 

@@ -139,7 +139,7 @@ func Test_AuthenticateWithSPIFFE(t *testing.T) {
 		agentID, err := auth.Authenticate(ctx, nil)
 		assert.Empty(t, agentID)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "does not match the agent ID regex pattern")
+		assert.Contains(t, err.Error(), "no URI SAN matched")
 	})
 
 	t.Run("Authenticated using SPIFFE URI", func(t *testing.T) {
@@ -151,6 +151,18 @@ func Test_AuthenticateWithSPIFFE(t *testing.T) {
 		agentID, err := auth.Authenticate(ctx, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, "cluster-west-1", agentID)
+	})
+
+	t.Run("Matches second URI when first doesn't match", func(t *testing.T) {
+		otherURI, _ := url.Parse("https://example.com/some/other/uri")
+		spiffeURI, _ := url.Parse("spiffe://ea1t.us.a/ns/argocd-agent/sa/cluster-east-2")
+		cert := &x509.Certificate{
+			URIs: []*url.URL{otherURI, spiffeURI},
+		}
+		ctx := generateContext([][]*x509.Certificate{{cert}})
+		agentID, err := auth.Authenticate(ctx, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, "cluster-east-2", agentID)
 	})
 
 	t.Run("Invalid agent ID in SPIFFE URI", func(t *testing.T) {

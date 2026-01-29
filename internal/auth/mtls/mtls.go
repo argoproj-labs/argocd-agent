@@ -70,26 +70,38 @@ func (m *MTLSAuthentication) Authenticate(ctx context.Context, creds auth.Creden
 	cert := tlsInfo.State.VerifiedChains[0][0]
 
 	var identityString string
+	var agentID string
+
 	switch m.IdentitySource {
 	case IdentitySourceURI:
 		if len(cert.URIs) == 0 {
 			return "", fmt.Errorf("no URI SANs found in client certificate")
 		}
-		identityString = cert.URIs[0].String()
+		if m.AgentIDRegex != nil {
+			for _, uri := range cert.URIs {
+				matches := m.AgentIDRegex.FindStringSubmatch(uri.String())
+				if len(matches) >= 2 {
+					identityString = uri.String()
+					agentID = matches[1]
+					break
+				}
+			}
+		}
+		if agentID == "" {
+			return "", fmt.Errorf("no URI SAN matched the agent ID regex pattern")
+		}
 	default:
 		identityString = cert.Subject.String()
-	}
-
-	var agentID string
-	if m.AgentIDRegex != nil {
-		matches := m.AgentIDRegex.FindStringSubmatch(identityString)
-		if len(matches) < 2 {
-			return "", fmt.Errorf("certificate %s '%s' does not match the agent ID regex pattern", m.IdentitySource, identityString)
+		if m.AgentIDRegex != nil {
+			matches := m.AgentIDRegex.FindStringSubmatch(identityString)
+			if len(matches) < 2 {
+				return "", fmt.Errorf("certificate subject '%s' does not match the agent ID regex pattern", identityString)
+			}
+			agentID = matches[1]
 		}
-		agentID = matches[1]
-	}
-	if agentID == "" {
-		return "", fmt.Errorf("agent ID is empty")
+		if agentID == "" {
+			return "", fmt.Errorf("agent ID is empty")
+		}
 	}
 	errs := validation.NameIsDNSLabel(agentID, false)
 	if len(errs) > 0 {
