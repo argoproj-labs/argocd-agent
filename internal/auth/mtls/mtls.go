@@ -20,6 +20,7 @@ import (
 	"regexp"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"k8s.io/apimachinery/pkg/api/validation"
@@ -94,6 +95,12 @@ func (m *MTLSAuthentication) Authenticate(ctx context.Context, creds auth.Creden
 	if len(errs) > 0 {
 		return "", fmt.Errorf("invalid agent ID in client certificate: %v", errs)
 	}
+	logrus.WithFields(logrus.Fields{
+		"module":          "mtls",
+		"identity_source": m.IdentitySource,
+		"identity_value":  identityString,
+		"agent_id":        agentID,
+	}).Info("Extracted agent identity from client certificate")
 	return agentID, nil
 }
 
