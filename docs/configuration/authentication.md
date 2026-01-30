@@ -42,7 +42,7 @@ Configure the principal to require and validate client certificates:
 
 ```yaml
 # ConfigMap (argocd-agent-params)
-principal.auth: "mtls:CN=([^,]+)"
+principal.auth: "mtls:subject:CN=([^,]+)"
 principal.tls.client-cert.require: "true"
 principal.tls.client-cert.match-subject: "true"
 principal.tls.server.root-ca-secret-name: "argocd-agent-ca"
