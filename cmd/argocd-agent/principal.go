@@ -597,9 +597,9 @@ func parseHeaderAuth(config string) (string, *regexp.Regexp, error) {
 
 // parseMTLSConfig parses mTLS configuration in the format:
 //
-//	<regex>              -> source=subject (backwards compat)
+//	<regex>              -> source=subject (deprecated, logs warning)
 //	subject:<regex>      -> source=subject
-//	uri:<regex>          -> source=uri (for SPIFFE URIs)
+//	uri:<regex>          -> source=uri
 //
 // Example: "uri:spiffe://ea1t\\.us\\.a/ns/argocd-agent/sa/(.+)"
 func parseMTLSConfig(config string) (mtls.IdentitySource, string) {
@@ -609,6 +609,7 @@ func parseMTLSConfig(config string) (mtls.IdentitySource, string) {
 	if strings.HasPrefix(config, "uri:") {
 		return mtls.IdentitySourceURI, strings.TrimPrefix(config, "uri:")
 	}
+	logrus.Warn("DEPRECATED: mTLS auth config without explicit source (subject: or uri:). Please update to use 'mtls:subject:<regex>' or 'mtls:uri:<regex>'")
 	return mtls.IdentitySourceSubject, config
 }
 

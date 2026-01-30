@@ -384,14 +384,13 @@ Authentication method and corresponding configuration.
 
 | Format | Source | Use Case |
 |--------|--------|----------|
-| `mtls:<regex>` | Subject DN | Default, backwards compatible |
+| `mtls:<regex>` | Subject DN | **(deprecated)** Use explicit source |
 | `mtls:subject:<regex>` | Subject DN | Explicit subject extraction |
 | `mtls:uri:<regex>` | URI SANs (first match) | Extract identity from URI SANs |
 
 **Examples:**
 
-- mTLS (subject): `mtls:CN=([^,]+)`
-- mTLS (subject explicit): `mtls:subject:CN=([^,]+)`
+- mTLS (subject): `mtls:subject:CN=([^,]+)`
 - mTLS (URI): `mtls:uri:spiffe://[^/]+/ns/[^/]+/sa/(.+)`
 - Istio header: `header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)`
 - Custom header: `header:x-client-id:^(.+)$`

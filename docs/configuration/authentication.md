@@ -80,7 +80,7 @@ argocd-agent principal \
 
 | Format | Identity Source | Example |
 |--------|-----------------|---------|
-| `mtls:<regex>` | Subject DN (backwards compatible) | `mtls:CN=([^,]+)` |
+| `mtls:<regex>` | Subject DN | `mtls:CN=([^,]+)` **(deprecated)** |
 | `mtls:subject:<regex>` | Subject DN (explicit) | `mtls:subject:CN=([^,]+)` |
 | `mtls:uri:<regex>` | URI SANs (first match) | `mtls:uri:spiffe://[^/]+/ns/[^/]+/sa/(.+)` |
 
