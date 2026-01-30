@@ -124,7 +124,6 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 			logCtx.Errorf("could not match TLS certificate: %v", err)
 			return unauthenticated()
 		}
-		logCtx.Infof("Matched client cert subject to agent name")
 	}
 
 	// claims at this point is validated and we can propagate values to the

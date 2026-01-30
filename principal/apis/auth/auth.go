@@ -116,6 +116,7 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 		logCtx.WithError(err).WithField("client", clientID).Info("client authentication failed")
 		return nil, errAuthenticationFailed
 	}
+	logCtx.WithField("client", clientID).Info("client authentication successful")
 	subject := &auth.AuthSubject{ClientID: clientID, Mode: ar.Mode}
 	accessToken, refreshToken, err := s.issueTokens(subject, true)
 	if err != nil {

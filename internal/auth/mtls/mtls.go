@@ -20,21 +20,37 @@ import (
 	"regexp"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"k8s.io/apimachinery/pkg/api/validation"
 )
 
+// IdentitySource specifies where to extract the agent identity from
+type IdentitySource string
+
+const (
+	// IdentitySourceSubject extracts identity from cert.Subject (DN)
+	IdentitySourceSubject IdentitySource = "subject"
+	// IdentitySourceURI extracts identity from cert.URIs (e.g., SPIFFE)
+	IdentitySourceURI IdentitySource = "uri"
+)
+
 // MTLSAuthentication implements a mTLS authentication method
 //
-// It extracts the agent ID from the TLS certificate subject.
+// It extracts the agent ID from the TLS certificate subject or URI SANs.
 type MTLSAuthentication struct {
-	AgentIDRegex *regexp.Regexp
+	AgentIDRegex   *regexp.Regexp
+	IdentitySource IdentitySource
 }
 
-func NewMTLSAuthentication(regex *regexp.Regexp) *MTLSAuthentication {
+func NewMTLSAuthentication(regex *regexp.Regexp, source IdentitySource) *MTLSAuthentication {
+	if source == "" {
+		source = IdentitySourceSubject
+	}
 	return &MTLSAuthentication{
-		AgentIDRegex: regex,
+		AgentIDRegex:   regex,
+		IdentitySource: source,
 	}
 }
 
@@ -52,22 +68,51 @@ func (m *MTLSAuthentication) Authenticate(ctx context.Context, creds auth.Creden
 		return "", fmt.Errorf("no verified certificates found in TLS cred")
 	}
 	cert := tlsInfo.State.VerifiedChains[0][0]
-	subject := cert.Subject.String()
+
+	var identityString string
 	var agentID string
-	if m.AgentIDRegex != nil {
-		matches := m.AgentIDRegex.FindStringSubmatch(subject)
-		if len(matches) < 2 {
-			return "", fmt.Errorf("the TLS subject '%s' does not match the agent ID regex pattern", subject)
+
+	switch m.IdentitySource {
+	case IdentitySourceURI:
+		if len(cert.URIs) == 0 {
+			return "", fmt.Errorf("no URI SANs found in client certificate")
 		}
-		agentID = matches[1]
-	}
-	if agentID == "" {
-		return "", fmt.Errorf("agent ID is empty")
+		if m.AgentIDRegex != nil {
+			for _, uri := range cert.URIs {
+				matches := m.AgentIDRegex.FindStringSubmatch(uri.String())
+				if len(matches) >= 2 {
+					identityString = uri.String()
+					agentID = matches[1]
+					break
+				}
+			}
+		}
+		if agentID == "" {
+			return "", fmt.Errorf("no URI SAN matched the agent ID regex pattern")
+		}
+	default:
+		identityString = cert.Subject.String()
+		if m.AgentIDRegex != nil {
+			matches := m.AgentIDRegex.FindStringSubmatch(identityString)
+			if len(matches) < 2 {
+				return "", fmt.Errorf("certificate subject '%s' does not match the agent ID regex pattern", identityString)
+			}
+			agentID = matches[1]
+		}
+		if agentID == "" {
+			return "", fmt.Errorf("agent ID is empty")
+		}
 	}
 	errs := validation.NameIsDNSLabel(agentID, false)
 	if len(errs) > 0 {
 		return "", fmt.Errorf("invalid agent ID in client certificate: %v", errs)
 	}
+	logrus.WithFields(logrus.Fields{
+		"module":          "mtls",
+		"identity_source": m.IdentitySource,
+		"identity_value":  identityString,
+		"agent_id":        agentID,
+	}).Info("Extracted agent identity from client certificate")
 	return agentID, nil
 }
 
