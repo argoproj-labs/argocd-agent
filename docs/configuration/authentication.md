@@ -52,7 +52,7 @@ Or via command line:
 
 ```bash
 argocd-agent principal \
-  --auth="mtls:CN=([^,]+)" \
+  --auth="mtls:subject:CN=([^,]+)" \
   --require-client-certs=true \
   --client-cert-subject-match=true
 ```
