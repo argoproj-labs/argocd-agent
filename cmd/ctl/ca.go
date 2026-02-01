@@ -473,7 +473,7 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 			agentSecret := &corev1.Secret{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      config.SecretNameAgentCA,
-					Namespace: agentNamespace, // ← 여기만 다름 (globalOpts.agentNamespace → agentNamespace)
+					Namespace: agentNamespace,
 				},
 				Type: corev1.SecretTypeOpaque,
 				Data: map[string][]byte{
@@ -488,9 +488,9 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 					cmdutil.Fatal("Error getting agent CA secret: %v", err)
 				}
 			} else {
-				if !upsert { // ← 여기만 다름 (force → upsert)
+				if !upsert {
 					fmt.Printf("Agent CA secret already exists (use --upsert to update)\n")
-					return // ← Fatal 대신 return
+					return
 				}
 				exists = true
 			}
