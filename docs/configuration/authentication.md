@@ -20,7 +20,9 @@ Mutual TLS (mTLS) authentication uses client certificates to authenticate agents
 
 1. The agent presents a client certificate when connecting to the principal
 2. The principal validates the certificate against its CA
-3. The principal extracts the agent identity from the certificate's Common Name (CN)
+3. The principal extracts the agent identity from the certificate using one of:
+   - **Subject DN** (default): Extract from Common Name (CN) or other subject fields
+   - **URI SANs**: Extract from SPIFFE URIs in Subject Alternative Names
 
 ```mermaid
 sequenceDiagram
@@ -36,9 +38,11 @@ sequenceDiagram
 
 Configure the principal to require and validate client certificates:
 
+**Option 1: Extract from Subject DN (default)**
+
 ```yaml
 # ConfigMap (argocd-agent-params)
-principal.auth: "mtls:CN=([^,]+)"
+principal.auth: "mtls:subject:CN=([^,]+)"
 principal.tls.client-cert.require: "true"
 principal.tls.client-cert.match-subject: "true"
 principal.tls.server.root-ca-secret-name: "argocd-agent-ca"
@@ -48,16 +52,43 @@ Or via command line:
 
 ```bash
 argocd-agent principal \
-  --auth="mtls:CN=([^,]+)" \
+  --auth="mtls:subject:CN=([^,]+)" \
   --require-client-certs=true \
   --client-cert-subject-match=true
 ```
 
+**Option 2: Extract from URI SANs**
+
+Agent identity can also be extracted from URI Subject Alternative Names (SANs) in the certificate. The regex is matched against each URI SAN until a match is found.
+
+```yaml
+# ConfigMap (argocd-agent-params)
+principal.auth: "mtls:uri:spiffe://example\\.com/ns/argocd-agent/sa/(.+)"
+principal.tls.client-cert.require: "true"
+principal.tls.server.root-ca-secret-name: "argocd-agent-ca"
+```
+
+Or via command line:
+
+```bash
+argocd-agent principal \
+  --auth="mtls:uri:spiffe://example\\.com/ns/argocd-agent/sa/(.+)" \
+  --require-client-certs=true
+```
+
+**Auth Format:**
+
+| Format | Identity Source | Example |
+|--------|-----------------|---------|
+| `mtls:<regex>` | Subject DN | `mtls:CN=([^,]+)` **(deprecated)** |
+| `mtls:subject:<regex>` | Subject DN (explicit) | `mtls:subject:CN=([^,]+)` |
+| `mtls:uri:<regex>` | URI SANs (first match) | `mtls:uri:spiffe://[^/]+/ns/[^/]+/sa/(.+)` |
+
 **Parameter Explanation:**
 
-- `principal.auth: "mtls:CN=([^,]+)"` - Use mTLS authentication with a regex to extract agent ID from the certificate's Common Name
+- `principal.auth: "mtls:..."` - Use mTLS authentication with a regex to extract agent ID. The first capture group becomes the agent ID. For URI mode, all URIs are checked until one matches.
 - `principal.tls.client-cert.require: "true"` - Require agents to present a client certificate
-- `principal.tls.client-cert.match-subject: "true"` - Validate that the certificate CN matches the registered agent name
+- `principal.tls.client-cert.match-subject: "true"` - Validate that the certificate CN matches the registered agent name (only relevant for subject-based auth)
 
 ### Agent Configuration
 
@@ -85,8 +116,30 @@ argocd-agent agent \
 For mTLS to work properly:
 
 1. **Agent certificates** must be signed by the same CA configured on the principal
-2. **Certificate CN** should match the agent's registered name
+2. **Identity field** must contain an extractable agent ID:
+   - For subject-based auth: Certificate CN (or other DN field) should match the agent's registered name
+   - For URI-based auth: Certificate must include a URI SAN matching your regex pattern
 3. **Certificate** must include `clientAuth` in extended key usage
+
+**Example cert-manager Certificate for SPIFFE URI:**
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-agent
+  namespace: argocd-agent
+spec:
+  secretName: argocd-agent-client-tls
+  commonName: argocd-agent  # May be constrained by policy
+  uris:
+    - "spiffe://example.com/ns/argocd-agent/sa/cluster-west-1"
+  usages:
+    - client auth
+  issuerRef:
+    name: your-issuer
+    kind: ClusterIssuer
+```
 
 See [TLS & Certificates](tls-certificates.md) for detailed certificate setup instructions.
 
