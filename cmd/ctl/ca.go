@@ -453,6 +453,57 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 			issueAndSaveSecret(globalOpts.agentContext, config.SecretNameAgentClientCert, agentNamespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
 				return tlsutil.GenerateClientCertificate(agentName, c, pk)
 			})
+			ctx := context.TODO()
+
+			principalClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			if err != nil {
+				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
+			}
+
+			agentClt, err := kube.NewKubernetesClientFromConfig(ctx, agentNamespace, "", globalOpts.agentContext)
+			if err != nil {
+				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
+			}
+
+			caSecret, err := principalClt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			if err != nil {
+				cmdutil.Fatal("Error getting CA secret from principal: %v", err)
+			}
+
+			agentSecret := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      config.SecretNameAgentCA,
+					Namespace: agentNamespace, // ← 여기만 다름 (globalOpts.agentNamespace → agentNamespace)
+				},
+				Type: corev1.SecretTypeOpaque,
+				Data: map[string][]byte{
+					"ca.crt": caSecret.Data["tls.crt"],
+				},
+			}
+
+			exists := false
+			_, err = agentClt.Clientset.CoreV1().Secrets(agentNamespace).Get(ctx, config.SecretNameAgentCA, v1.GetOptions{})
+			if err != nil {
+				if !errors.IsNotFound(err) {
+					cmdutil.Fatal("Error getting agent CA secret: %v", err)
+				}
+			} else {
+				if !upsert { // ← 여기만 다름 (force → upsert)
+					fmt.Printf("Agent CA secret already exists (use --upsert to update)\n")
+					return // ← Fatal 대신 return
+				}
+				exists = true
+			}
+
+			if !exists {
+				_, err = agentClt.Clientset.CoreV1().Secrets(agentNamespace).Create(ctx, agentSecret, v1.CreateOptions{})
+			} else {
+				_, err = agentClt.Clientset.CoreV1().Secrets(agentNamespace).Update(ctx, agentSecret, v1.UpdateOptions{})
+			}
+			if err != nil {
+				cmdutil.Fatal("Error updating agent CA secret: %v", err)
+			}
+			fmt.Printf("Agent CA secret %s/%s created\n", agentNamespace, config.SecretNameAgentCA)
 		},
 	}
 
