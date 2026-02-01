@@ -125,7 +125,7 @@ argocd-agentctl jwt create-key \
 
 ### Step 5: Issue Agent Client Certificate
 
-For each agent, generate and deploy a client certificate:
+For each agent, generate and deploy a client certificate. This command automatically propagates the CA certificate to the agent cluster:
 
 ```bash
 argocd-agentctl pki issue agent <agent-name> \
@@ -135,9 +135,11 @@ argocd-agentctl pki issue agent <agent-name> \
   --upsert
 ```
 
-### Step 6: Propagate CA Certificate to Agents
+This command creates both:
+- `argocd-agent-client-tls` secret (client certificate) in the agent cluster
+- `argocd-agent-ca` secret (CA certificate) in the agent cluster
 
-Copy the CA certificate to agent clusters (without the private key):
+**Note**: If you need to propagate the CA certificate separately (e.g., for existing agents), you can still use:
 
 ```bash
 argocd-agentctl pki propagate \
