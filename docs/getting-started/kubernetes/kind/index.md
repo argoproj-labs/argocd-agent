@@ -347,10 +347,27 @@ This configuration includes:
 - ✅ **argocd-redis** (local state for the application controller)
 - ❌ **argocd-server** (runs on control plane only)
 - ❌ **argocd-dex-server** (runs on control plane only)
-- ❌ **argocd-applicationset-controller** (managed agents don't create their own ApplicationSets)
+- ❌ **argocd-applicationset-controller** (not included by default)
 
 !!! info "Why Application Controller Runs Here"
     The **argocd-application-controller** runs on workload clusters because it needs direct access to the Kubernetes API to create, update, and delete resources. The argocd-agent facilitates communication between the control plane and these controllers, enabling centralized management while maintaining local execution.
+
+### (Optional) Install Argo CD for Workload Cluster with ApplicationSet (Autonomous mode only)
+
+**Instead of the standard install above**, use the following command with `--server-side=true` (required due to the large ApplicationSet CRD):
+
+```bash
+kubectl apply -n $NAMESPACE_NAME --server-side=true \
+  -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous-appset?ref=$RELEASE_BRANCH" \
+  --context kind-$AGENT_CLUSTER_NAME
+```
+
+This configuration includes everything from the standard install, plus:
+
+- ✅ **argocd-applicationset-controller** (generates Applications from ApplicationSet templates)
+
+!!! info "Why ApplicationSet Controller Runs Here"
+    The **argocd-applicationset-controller** runs on workload clusters because it allows the cluster to generate Applications dynamically using ApplicationSet generators such as list, git, and cluster, enables autonomous mode with template-based application creation, and provides a way to manage multiple similar applications from a single ApplicationSet definition.
 
 ### Create Agent configuration
 Create Agent configuration on Principal. <br />

@@ -1,0 +1,16 @@
+resources:
+- https://github.com/argoproj/argo-cd/manifests/core-install?ref=stable
+
+patches:
+- target:
+    group: networking.k8s.io
+    version: v1
+    kind: NetworkPolicy
+    name: argocd-redis-network-policy
+  patch: |-
+    - op: add
+      path: /spec/ingress/0/from/-
+      value:
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: argocd-agent-agent
