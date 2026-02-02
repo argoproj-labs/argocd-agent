@@ -36,6 +36,18 @@ if [ -f "$E2E_ENV_FILE" ]; then
     export ARGOCD_AGENT_CREATE_NAMESPACE=${ARGOCD_AGENT_CREATE_NAMESPACE:-false}
 fi
 
+# Verify Redis TLS is configured (required for E2E tests)
+if ! kubectl --context=vcluster-agent-managed -n argocd get secret argocd-redis-tls >/dev/null 2>&1; then
+    echo "ERROR: Redis TLS not configured (secret argocd-redis-tls not found)" >&2
+    echo "Redis TLS is REQUIRED for E2E tests." >&2
+    echo "" >&2
+    echo "Please run:" >&2
+    echo " make setup-e2e" >&2
+    echo "" >&2
+    exit 1
+fi
+echo "Redis TLS enabled"
+
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode managed \
     --allowed-namespaces '*' \

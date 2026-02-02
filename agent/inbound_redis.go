@@ -16,7 +16,7 @@ package agent
 
 import (
 	"context"
-	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,6 +25,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	rediscache "github.com/go-redis/cache/v9"
 	"github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9/maintnotifications"
@@ -45,6 +46,12 @@ type redisProxyMsgHandler struct {
 
 	// connections maintains statistics about redis connections from principal
 	connections *connectionEntries
+
+	// Redis TLS configuration
+	redisTLSEnabled  bool
+	redisTLSCAPath   string
+	redisTLSCA       *x509.CertPool // CA cert pool loaded from secret
+	redisTLSInsecure bool
 }
 
 // connectionEntries maintains statistics about redis connections from principal
@@ -340,7 +347,18 @@ func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error
 }
 
 func (a *Agent) getRedisClientAndCache() (*redis.Client, *rediscache.Cache, error) {
-	var tlsConfig *tls.Config = nil
+	// Create TLS config for Redis client
+	tlsConfig, err := tlsutil.CreateRedisTLSConfig(
+		a.redisProxyMsgHandler.redisTLSEnabled,
+		a.redisProxyMsgHandler.redisAddress,
+		a.redisProxyMsgHandler.redisTLSInsecure,
+		a.redisProxyMsgHandler.redisTLSCA,
+		a.redisProxyMsgHandler.redisTLSCAPath,
+		"Redis client",
+	)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	opts := &redis.Options{
 		Addr:       a.redisProxyMsgHandler.redisAddress,
