@@ -38,6 +38,7 @@ fi
 
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode managed \
+    --allowed-namespaces '*' \
     --creds "mtls:any" \
     --server-address 127.0.0.1 \
     --kubecontext vcluster-agent-managed \
