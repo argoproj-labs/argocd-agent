@@ -167,8 +167,9 @@ apply() {
 
     # Run 'kubectl apply' twice, to avoid the following error that occurs during the first invocation:
     # - 'error: resource mapping not found for name: "default" namespace: "" from "(...)": no matches for kind "AppProject" in version "argoproj.io/v1alpha1"'
-    kubectl --context vcluster-$cluster apply -n $namespace -k ${TMP_DIR}/${cluster} || true
-    kubectl --context vcluster-$cluster apply -n $namespace -k ${TMP_DIR}/${cluster}
+    # Use --server-side to avoid "metadata.annotations: Too long" error with large CRDs like applicationsets.argoproj.io
+    kubectl --context vcluster-$cluster apply --server-side -n $namespace -k ${TMP_DIR}/${cluster} || true
+    kubectl --context vcluster-$cluster apply --server-side -n $namespace -k ${TMP_DIR}/${cluster}
 
     if [[ "$OPENSHIFT" != "" ]]; then
 
@@ -221,8 +222,9 @@ apply() {
         kubectl --context vcluster-$cluster create ns $namespace || true
 
         # Run 'kubectl apply' twice, to avoid error that occurs during the first invocation (see above for error)
-        kubectl --context vcluster-$cluster apply -n $namespace -k ${TMP_DIR}/${cluster} || true
-        kubectl --context vcluster-$cluster apply -n $namespace -k ${TMP_DIR}/${cluster}
+        # Use --server-side to avoid "metadata.annotations: Too long" error with large CRDs like applicationsets.argoproj.io
+        kubectl --context vcluster-$cluster apply --server-side -n $namespace -k ${TMP_DIR}/${cluster} || true
+        kubectl --context vcluster-$cluster apply --server-side -n $namespace -k ${TMP_DIR}/${cluster}
     done
 
     kubectl --context vcluster-control-plane create ns agent-autonomous || true
