@@ -134,7 +134,7 @@ func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) A
 	}
 }
 
-// WithCreateNamespaceIfNotExist configures the agent to automatically create
+// WithCreateNamespace configures the agent to automatically create
 // namespaces if they don't exist when syncing applications. This is used in
 // combination with destination-based mapping to ensure that target namespaces
 // exist before creating applications.

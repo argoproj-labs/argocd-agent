@@ -576,7 +576,6 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	// Create the namespace if it doesn't exist and the option is enabled
 	if a.createNamespace && a.destinationBasedMapping {
 		if err := a.ensureNamespaceExists(targetNamespace); err != nil {
-			logCtx.WithError(err).Errorf("Failed to ensure namespace %s exists", targetNamespace)
 			return nil, fmt.Errorf("failed to ensure namespace %s exists: %w", targetNamespace, err)
 		}
 	}
@@ -901,10 +900,7 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 // getTargetNamespaceForApp returns the namespace where the application should
 // be created on the agent. If destinationBasedMapping is enabled AND the agent
 // is in managed mode, it returns the original namespace from the principal.
-// For autonomous mode, apps always stay in the agent's namespace regardless of
-// destination-based mapping setting, since the agent is the source of truth.
 func (a *Agent) getTargetNamespaceForApp(app *v1alpha1.Application) string {
-	// Destination-based mapping only applies to managed mode.
 	if a.destinationBasedMapping && a.mode == types.AgentModeManaged {
 		return app.Namespace
 	}
@@ -936,7 +932,6 @@ func (a *Agent) ensureNamespaceExists(namespace string) error {
 	_, err = a.kubeClient.Clientset.CoreV1().Namespaces().Create(a.context, ns, metav1.CreateOptions{})
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			// Namespace was created by another process, that's fine
 			return nil
 		}
 		return fmt.Errorf("failed to create namespace %s: %w", namespace, err)

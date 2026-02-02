@@ -79,7 +79,7 @@ Enable destination-based mapping on both the principal and agent:
 
 ```bash
 # Via flag
-argocd-agent-principal --destination-based-mapping
+argocd-agent principal --destination-based-mapping
 
 # Via environment variable
 ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true
@@ -89,7 +89,7 @@ ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true
 
 ```bash
 # Via flag
-argocd-agent --destination-based-mapping --create-namespace
+argocd-agent agent --destination-based-mapping --create-namespace
 
 # Via environment variables
 ARGOCD_AGENT_DESTINATION_BASED_MAPPING=true
@@ -99,6 +99,14 @@ ARGOCD_AGENT_CREATE_NAMESPACE=true
 !!! note "Create Namespace"
     With destination based mapping, the agent creates the apps on the same namespace as the principal.
     Users can manually create this namespace on the agent or use the `--create-namespace` flag to allow the agent to create namespaces automatically when applications target namespaces that don't exist.
+
+!!! note "Allowed Namespaces"
+    With destination-based mapping, applications can exist in any namespace. Both principal and agent have `--allowed-namespaces` flags to control which namespaces they will manage:
+    
+    - **Principal**: Use `--allowed-namespaces` to restrict which namespaces the principal watches for Applications (e.g., `--allowed-namespaces='team-*,prod-*'`).
+    - **Agent**: Use `--allowed-namespaces` to specify additional namespaces beyond the agent's own namespace that the agent will accept Applications from (e.g., `--allowed-namespaces='team-alpha,team-beta'`).
+    
+    Both support glob patterns for flexible namespace matching.
 
 ### Example
 
@@ -144,11 +152,11 @@ metadata:
   namespace: argocd
 spec:
   sourceNamespaces:
-    - '*'  # Required for destination-based mapping
+    - <namespaces>  # Required for destination-based mapping
   # ... other configuration
 ```
 
-The agent automatically sets `sourceNamespaces: ['*']` on AppProjects when using destination-based mapping.
+Unlike the namespace based mapping where the `sourceNamespaces` field is removed, the `sourceNamespaces` field on AppProject is preserved when using destination-based mapping.
 
 ## Migration Guide
 
@@ -165,7 +173,7 @@ When migrating, be aware of these changes:
 |--------|-------------------------|--------------------------|
 | App location on agent | `argocd/app-name` | `original-namespace/app-name` |
 | Routing key | `app.metadata.namespace` | `app.spec.destination.name` |
-| Redis key format | Agent strips namespace prefix | Same format on both sides |
+| Redis key namespace | Agent name (e.g., `agent-managed_app`) | App namespace (e.g., `team-alpha_app`) |
 
 #### Migration Issues to Expect
 
@@ -198,15 +206,6 @@ When migrating, be aware of these changes:
 7. **Verify**: Check apps appear in correct namespaces on the agent.
 
 8. **Cleanup**: Delete orphaned apps from `argocd` namespace on agent if step 4 was skipped.
-
-#### Alternative: Blue-Green Migration (Safest)
-
-For zero-downtime migration:
-
-1. Deploy a **new agent** with destination-based mapping enabled.
-2. Update apps one-by-one to use `destination.name` pointing to the new agent.
-3. Verify each app syncs correctly to the new agent.
-4. After all apps migrated, decommission the old agent.
 
 ## Choosing the Right Mode
 
