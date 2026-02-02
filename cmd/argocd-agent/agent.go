@@ -87,6 +87,9 @@ func NewAgentRunCommand() *cobra.Command {
 		// Destination-based mapping options
 		createNamespace         bool
 		destinationBasedMapping bool
+
+		// Allowed namespaces for filtering applications
+		allowedNamespaces []string
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -238,6 +241,7 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
 			agentOpts = append(agentOpts, agent.WithCreateNamespace(createNamespace))
 			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
+			agentOpts = append(agentOpts, agent.WithAllowedNamespaces(allowedNamespaces...))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
@@ -362,6 +366,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&createNamespace, "create-namespace",
 		env.BoolWithDefault("ARGOCD_AGENT_CREATE_NAMESPACE", false),
 		"Create target namespace if it doesn't exist when syncing applications (used with destination-based-mapping)")
+	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
+		env.StringSliceWithDefault("ARGOCD_AGENT_ALLOWED_NAMESPACES", nil, []string{}),
+		"List of additional namespaces the agent is allowed to manage applications in")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
