@@ -487,6 +487,8 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string, dstMa
 	// This is required for destination-based mapping where Applications can be created
 	// in namespaces other than argocd.
 	if !dstMapping {
+		// Remove sourceNamespaces since they are not relevant on the workload cluster
+		// They are only used on the control plane to determine which agents should receive the AppProject
 		appProject.Spec.SourceNamespaces = nil
 	}
 
