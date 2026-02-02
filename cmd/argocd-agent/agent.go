@@ -93,6 +93,11 @@ func NewAgentRunCommand() *cobra.Command {
 
 		// Allowed namespaces for filtering applications
 		allowedNamespaces []string
+		// Redis TLS configuration
+		redisTLSEnabled      bool
+		redisTLSCAPath       string
+		redisTLSCASecretName string
+		redisTLSInsecure     bool
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -185,7 +190,7 @@ func NewAgentRunCommand() *cobra.Command {
 					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromFile(rootCAPath))
 				} else {
 					logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCASecretName)
-					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, namespace, rootCASecretName, ""))
+					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, namespace, rootCASecretName, "tls.crt"))
 				}
 
 				// If both a certificate and a key are specified on the command
@@ -240,6 +245,40 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithRedisUsername(redisUsername))
 			agentOpts = append(agentOpts, agent.WithRedisPassword(redisPassword))
 
+			// Configure Redis TLS
+			agentOpts = append(agentOpts, agent.WithRedisTLSEnabled(redisTLSEnabled))
+			if redisTLSEnabled {
+				// Validate Redis TLS configuration - only one mode can be specified
+				// This validation works for both CLI flags and environment variables
+				modesSet := 0
+				if redisTLSInsecure {
+					modesSet++
+				}
+				if redisTLSCAPath != "" {
+					modesSet++
+				}
+				// For secret name: count it if explicitly set (CLI) or if set to non-default value (env var)
+				// This allows the default secret name to be used as a fallback when no mode is explicitly specified
+				if c.Flags().Changed("redis-tls-ca-secret-name") || (redisTLSCASecretName != "" && redisTLSCASecretName != "argocd-redis-tls") {
+					modesSet++
+				}
+				if modesSet > 1 {
+					cmdutil.Fatal("Only one Redis TLS mode can be specified: --redis-tls-insecure, --redis-tls-ca-path, or --redis-tls-ca-secret-name")
+				}
+
+				// Redis TLS (for connections to agent's argocd-redis)
+				if redisTLSInsecure {
+					logrus.Warn("INSECURE: Not verifying Redis TLS certificate")
+					agentOpts = append(agentOpts, agent.WithRedisTLSInsecure(true))
+				} else if redisTLSCAPath != "" {
+					logrus.Infof("Loading Redis CA certificate from file %s", redisTLSCAPath)
+					agentOpts = append(agentOpts, agent.WithRedisTLSCAPath(redisTLSCAPath))
+				} else {
+					logrus.Infof("Loading Redis CA certificate from secret %s/%s", namespace, redisTLSCASecretName)
+					agentOpts = append(agentOpts, agent.WithRedisTLSCAFromSecret(kubeConfig.Clientset, namespace, redisTLSCASecretName, "ca.crt"))
+				}
+			}
+
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
@@ -283,6 +322,20 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&redisPassword, "redis-password",
 		env.StringWithDefault("REDIS_PASSWORD", nil, ""),
 		"The password to connect to redis with")
+
+	// Redis TLS flags
+	command.Flags().BoolVar(&redisTLSEnabled, "redis-tls-enabled",
+		env.BoolWithDefault("ARGOCD_AGENT_REDIS_TLS_ENABLED", true),
+		"Enable TLS for Redis connections (enabled by default for security)")
+	command.Flags().StringVar(&redisTLSCAPath, "redis-tls-ca-path",
+		env.StringWithDefault("ARGOCD_AGENT_REDIS_TLS_CA_PATH", nil, ""),
+		"Path to CA certificate for Redis TLS (for local development)")
+	command.Flags().StringVar(&redisTLSCASecretName, "redis-tls-ca-secret-name",
+		env.StringWithDefault("ARGOCD_AGENT_REDIS_TLS_CA_SECRET_NAME", nil, "argocd-redis-tls"),
+		"Secret name containing CA certificate for Redis TLS (for production deployment)")
+	command.Flags().BoolVar(&redisTLSInsecure, "redis-tls-insecure",
+		env.BoolWithDefault("ARGOCD_AGENT_REDIS_TLS_INSECURE", false),
+		"INSECURE: Do not verify Redis TLS certificate")
 
 	command.Flags().StringVar(&logFormat, "log-format",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),

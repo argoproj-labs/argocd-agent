@@ -16,7 +16,9 @@ package fixture
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
 	"time"
 
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -27,7 +29,20 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 )
+
+// extractServerName extracts the hostname or IP from a Redis address for TLS ServerName validation
+func extractServerName(addr string) string {
+	// Try to split host:port
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		// If no port, use the address as-is (e.g., "argocd-redis")
+		return addr
+	}
+	return host
+}
 
 const (
 	PrincipalName         = "principal"
@@ -38,12 +53,18 @@ const (
 
 type ClusterDetails struct {
 	// Managed agent Redis configuration
-	ManagedAgentRedisAddr     string
-	ManagedAgentRedisPassword string
+	ManagedAgentRedisAddr       string
+	ManagedAgentRedisPassword   string
+	ManagedAgentRedisTLSEnabled bool
 
 	// Principal Redis configuration
-	PrincipalRedisAddr     string
-	PrincipalRedisPassword string
+	PrincipalRedisAddr       string
+	PrincipalRedisPassword   string
+	PrincipalRedisTLSEnabled bool
+
+	// Kubernetes clients (for loading TLS certificates from secrets)
+	ManagedAgentClient KubeClient
+	PrincipalClient    KubeClient
 
 	// Cluster server addresses
 	ManagedClusterAddr    string
@@ -159,6 +180,7 @@ func GetPrincipalClusterInfo(agentName string, clusterDetails *ClusterDetails) (
 
 // getCacheInstance creates a new cache instance for the given source
 func getCacheInstance(source string, clusterDetails *ClusterDetails) *appstatecache.Cache {
+	ctx := context.Background()
 	redisOptions := &redis.Options{}
 	switch source {
 	case PrincipalName:
@@ -167,11 +189,49 @@ func getCacheInstance(source string, clusterDetails *ClusterDetails) *appstateca
 		redisOptions.MaintNotificationsConfig = &maintnotifications.Config{
 			Mode: maintnotifications.ModeDisabled,
 		}
+
+		// Enable TLS if configured
+		if clusterDetails.PrincipalRedisTLSEnabled {
+			tlsConfig := &tls.Config{
+				MinVersion: tls.VersionTLS12,
+				ServerName: extractServerName(clusterDetails.PrincipalRedisAddr),
+			}
+
+			// Load CA certificate directly from Kubernetes secret
+			certPool, err := tlsutil.X509CertPoolFromSecret(ctx, clusterDetails.PrincipalClient.Clientset,
+				"argocd", "argocd-redis-tls", "ca.crt")
+			if err != nil {
+				panic(fmt.Sprintf("Failed to load Principal Redis CA certificate from secret argocd-redis-tls: %v. "+
+					"Run 'make setup-e2e' to generate certificates.", err))
+			}
+
+			tlsConfig.RootCAs = certPool
+			redisOptions.TLSConfig = tlsConfig
+		}
 	case AgentManagedName:
 		redisOptions.Addr = clusterDetails.ManagedAgentRedisAddr
 		redisOptions.Password = clusterDetails.ManagedAgentRedisPassword
 		redisOptions.MaintNotificationsConfig = &maintnotifications.Config{
 			Mode: maintnotifications.ModeDisabled,
+		}
+
+		// Enable TLS if configured
+		if clusterDetails.ManagedAgentRedisTLSEnabled {
+			tlsConfig := &tls.Config{
+				MinVersion: tls.VersionTLS12,
+				ServerName: extractServerName(clusterDetails.ManagedAgentRedisAddr),
+			}
+
+			// Load CA certificate directly from Kubernetes secret
+			certPool, err := tlsutil.X509CertPoolFromSecret(ctx, clusterDetails.ManagedAgentClient.Clientset,
+				"argocd", "argocd-redis-tls", "ca.crt")
+			if err != nil {
+				panic(fmt.Sprintf("Failed to load Managed Agent Redis CA certificate from secret argocd-redis-tls: %v. "+
+					"Run 'make setup-e2e' to generate certificates.", err))
+			}
+
+			tlsConfig.RootCAs = certPool
+			redisOptions.TLSConfig = tlsConfig
 		}
 	default:
 		panic(fmt.Sprintf("invalid source: %s", source))
@@ -186,6 +246,10 @@ func getCacheInstance(source string, clusterDetails *ClusterDetails) *appstateca
 
 // getClusterConfigurations gets the cluster configurations from the managed and principal clusters
 func getClusterConfigurations(ctx context.Context, managedAgentClient KubeClient, principalClient KubeClient, clusterDetails *ClusterDetails) error {
+	// Store client references for TLS certificate loading
+	clusterDetails.ManagedAgentClient = managedAgentClient
+	clusterDetails.PrincipalClient = principalClient
+
 	// Get managed agent Redis config
 	if err := getManagedAgentRedisConfig(ctx, managedAgentClient, clusterDetails); err != nil {
 		return err
@@ -223,9 +287,13 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 			redisAddr = fmt.Sprintf("%s:6379", ingress.Hostname)
 		}
 	}
+
 	if redisAddr == "" {
 		return fmt.Errorf("could not get Redis server address from LoadBalancer ingress")
 	}
+
+	// Redis TLS is always enabled for E2E tests (CA loaded from Kubernetes secret)
+	clusterDetails.ManagedAgentRedisTLSEnabled = true
 	clusterDetails.ManagedAgentRedisAddr = redisAddr
 
 	// Fetch Redis secret to get the password
@@ -267,9 +335,13 @@ func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, cl
 			redisAddr = fmt.Sprintf("%s:6379", ingress.Hostname)
 		}
 	}
+
 	if redisAddr == "" {
-		return fmt.Errorf("could not get Principal Redis server address from LoadBalancer ingress")
+		return fmt.Errorf("redis service does not have a LoadBalancer IP or hostname")
 	}
+
+	// Redis TLS is always enabled for E2E tests (CA loaded from Kubernetes secret)
+	clusterDetails.PrincipalRedisTLSEnabled = true
 	clusterDetails.PrincipalRedisAddr = redisAddr
 
 	// Fetch Redis secret to get the password

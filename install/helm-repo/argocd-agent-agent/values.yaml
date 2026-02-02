@@ -153,6 +153,22 @@ destinationBasedMapping: false
 # Used with destination-based mapping.
 createNamespace: false
 
+## @section Redis TLS
+# -- Redis TLS configuration.
+redisTLS:
+  # -- Enable TLS for Redis connections.
+  enabled: true
+  # -- Path to CA certificate for verifying Redis TLS certificate.
+  # This path is where the CA certificate will be mounted inside the container.
+  caPath: "/app/config/redis-tls/ca.crt"
+  # -- Name of the Kubernetes Secret containing the Redis TLS CA certificate.
+  # The secret should have a key 'ca.crt' containing the CA certificate in PEM format.
+  # Set to empty string to disable mounting (requires system CAs or insecure mode).
+  secretName: "argocd-redis-tls"
+  # -- Skip verification of Redis TLS certificate (INSECURE - for development only).
+  insecure: false
+
+
 ## @section Services
 # -- Service configuration for metrics and healthz endpoints.
 service:

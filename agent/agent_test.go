@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,14 +35,14 @@ func newAgent(t *testing.T, apps ...runtime.Object) (*Agent, *kube.KubernetesCli
 	kubec := fakekube.NewKubernetesFakeClientWithApps("argocd", apps...)
 	remote, err := client.NewRemote("127.0.0.1", 8080)
 	require.NoError(t, err)
-	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote))
+	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithCacheRefreshInterval(10*time.Second))
 	require.NoError(t, err)
 	return agent, kubec
 }
 
 func Test_NewAgent(t *testing.T) {
 	kubec := fakekube.NewKubernetesFakeClientWithApps("agent")
-	agent, err := NewAgent(context.TODO(), kubec, "agent", WithRemote(&client.Remote{}))
+	agent, err := NewAgent(context.TODO(), kubec, "agent", WithRemote(&client.Remote{}), WithCacheRefreshInterval(10*time.Second))
 	require.NotNil(t, agent)
 	require.NoError(t, err)
 }

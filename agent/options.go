@@ -15,10 +15,14 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -153,6 +157,42 @@ func WithCreateNamespace(enabled bool) AgentOption {
 func WithDestinationBasedMapping(enabled bool) AgentOption {
 	return func(o *Agent) error {
 		o.destinationBasedMapping = enabled
+		return nil
+	}
+}
+
+// WithRedisTLSEnabled enables or disables TLS for Redis connections
+func WithRedisTLSEnabled(enabled bool) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisTLSEnabled = enabled
+		return nil
+	}
+}
+
+// WithRedisTLSCAPath sets the CA certificate path for Redis TLS
+func WithRedisTLSCAPath(caPath string) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisTLSCAPath = caPath
+		return nil
+	}
+}
+
+// WithRedisTLSCAFromSecret loads the CA certificate from a Kubernetes secret for Redis TLS
+func WithRedisTLSCAFromSecret(kube kubernetes.Interface, namespace, name, field string) AgentOption {
+	return func(o *Agent) error {
+		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, field)
+		if err != nil {
+			return err
+		}
+		o.redisProxyMsgHandler.redisTLSCA = pool
+		return nil
+	}
+}
+
+// WithRedisTLSInsecure enables insecure Redis TLS (for testing only)
+func WithRedisTLSInsecure(insecure bool) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisTLSInsecure = insecure
 		return nil
 	}
 }

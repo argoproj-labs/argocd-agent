@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
@@ -454,14 +455,14 @@ func Test_addClusterCacheInfoUpdateToQueue(t *testing.T) {
 	remote, err := client.NewRemote("127.0.0.1", 8080)
 	require.NoError(t, err)
 
-	a, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithRedisHost(miniRedis.Addr()))
+	a, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithRedisHost(miniRedis.Addr()), WithCacheRefreshInterval(10*time.Second))
 	require.NoError(t, err)
 
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
 	// First populate the cache with dummy data
-	clusterMgr, err := cluster.NewManager(a.context, a.namespace, miniRedis.Addr(), "", cacheutil.RedisCompressionGZip, a.kubeClient.Clientset)
+	clusterMgr, err := cluster.NewManager(a.context, a.namespace, miniRedis.Addr(), "", cacheutil.RedisCompressionGZip, a.kubeClient.Clientset, nil)
 	require.NoError(t, err)
 	err = clusterMgr.MapCluster("test-agent", &v1alpha1.Cluster{
 		Name:   "test-cluster",

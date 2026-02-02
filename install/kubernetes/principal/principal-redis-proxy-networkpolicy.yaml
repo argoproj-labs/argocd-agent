@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-agent-redis-proxy
+  labels:
+    app.kubernetes.io/name: argocd-agent-principal
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-agent-principal
+      app.kubernetes.io/component: principal
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow Redis proxy port (6379) only from Argo CD components
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: argocd
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow principal gRPC port (8443) from agents
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: argocd-agent
+          app.kubernetes.io/component: agent
+    ports:
+    - protocol: TCP
+      port: 8443
+  # Allow metrics and healthz from monitoring
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8000  # metrics
+    - protocol: TCP
+      port: 8003  # healthz
+

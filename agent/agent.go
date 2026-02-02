@@ -41,6 +41,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -204,6 +205,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 
 	if a.remote == nil {
 		return nil, fmt.Errorf("remote not defined")
+	}
+
+	if a.cacheRefreshInterval == 0 {
+		return nil, fmt.Errorf("cache refresh interval not set")
 	}
 
 	a.kubeClient = client
@@ -380,7 +385,20 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		connMap: map[string]connectionEntry{},
 	}
 
-	clusterCache, err := cluster.NewClusterCacheInstance(a.redisProxyMsgHandler.redisAddress, a.redisProxyMsgHandler.redisPassword, cacheutil.RedisCompressionGZip)
+	// Create TLS config for cluster cache Redis client (same as for Redis proxy)
+	clusterCacheTLSConfig, err := tlsutil.CreateRedisTLSConfig(
+		a.redisProxyMsgHandler.redisTLSEnabled,
+		a.redisProxyMsgHandler.redisAddress,
+		a.redisProxyMsgHandler.redisTLSInsecure,
+		a.redisProxyMsgHandler.redisTLSCA,
+		a.redisProxyMsgHandler.redisTLSCAPath,
+		"cluster cache",
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	clusterCache, err := cluster.NewClusterCacheInstance(a.redisProxyMsgHandler.redisAddress, a.redisProxyMsgHandler.redisPassword, cacheutil.RedisCompressionGZip, clusterCacheTLSConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
 	}

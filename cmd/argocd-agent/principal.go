@@ -106,6 +106,14 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 		enableSelfClusterRegistration bool
 		selfRegClientCertSecretName   string
+		// Redis TLS configuration
+		redisTLSEnabled               bool
+		redisProxyServerTLSCertPath   string
+		redisProxyServerTLSKeyPath    string
+		redisProxyServerTLSSecretName string
+		redisTLSCAPath                string
+		redisTLSCASecretName          string
+		redisTLSInsecure              bool
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -350,6 +358,51 @@ func NewPrincipalRunCommand() *cobra.Command {
 				opts = append(opts, principal.WithClientCertSecretName(selfRegClientCertSecretName))
 			}
 
+			// Configure Redis TLS
+			opts = append(opts, principal.WithRedisTLSEnabled(redisTLSEnabled))
+			if redisTLSEnabled {
+				// Redis proxy server TLS (for incoming connections from Argo CD)
+				if redisProxyServerTLSCertPath != "" && redisProxyServerTLSKeyPath != "" {
+					logrus.Infof("Loading Redis proxy server TLS configuration from files cert=%s and key=%s", redisProxyServerTLSCertPath, redisProxyServerTLSKeyPath)
+					opts = append(opts, principal.WithRedisProxyServerTLSFromPath(redisProxyServerTLSCertPath, redisProxyServerTLSKeyPath))
+				} else if (redisProxyServerTLSCertPath != "" && redisProxyServerTLSKeyPath == "") || (redisProxyServerTLSCertPath == "" && redisProxyServerTLSKeyPath != "") {
+					cmdutil.Fatal("Both --redis-proxy-server-tls-cert and --redis-proxy-server-tls-key have to be given")
+				} else {
+					logrus.Infof("Loading Redis proxy server TLS certificate from secret %s/%s", namespace, redisProxyServerTLSSecretName)
+					opts = append(opts, principal.WithRedisProxyServerTLSFromSecret(kubeConfig.Clientset, namespace, redisProxyServerTLSSecretName))
+				}
+
+				// Validate Redis TLS configuration - only one mode can be specified
+				// This validation works for both CLI flags and environment variables
+				modesSet := 0
+				if redisTLSInsecure {
+					modesSet++
+				}
+				if redisTLSCAPath != "" {
+					modesSet++
+				}
+				// For secret name: count it if explicitly set (CLI) or if set to non-default value (env var)
+				// This allows the default secret name to be used as a fallback when no mode is explicitly specified
+				if c.Flags().Changed("redis-ca-secret-name") || (redisTLSCASecretName != "" && redisTLSCASecretName != "argocd-redis-tls") {
+					modesSet++
+				}
+				if modesSet > 1 {
+					cmdutil.Fatal("Only one Redis TLS mode can be specified: --redis-tls-insecure, --redis-ca-path, or --redis-ca-secret-name")
+				}
+
+				// Redis TLS (for connections to principal's argocd-redis)
+				if redisTLSInsecure {
+					logrus.Warn("INSECURE: Not verifying Redis TLS certificate")
+					opts = append(opts, principal.WithRedisTLSInsecure(true))
+				} else if redisTLSCAPath != "" {
+					logrus.Infof("Loading Redis CA certificate from file %s", redisTLSCAPath)
+					opts = append(opts, principal.WithRedisTLSCAFromFile(redisTLSCAPath))
+				} else {
+					logrus.Infof("Loading Redis CA certificate from secret %s/%s", namespace, redisTLSCASecretName)
+					opts = append(opts, principal.WithRedisTLSCAFromSecret(kubeConfig.Clientset, namespace, redisTLSCASecretName, "ca.crt"))
+				}
+			}
+
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
 				cmdutil.Fatal("Could not create new server instance: %v", err)
@@ -506,6 +559,28 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_OTLP_INSECURE", false),
 		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
+	// Redis TLS flags
+	command.Flags().BoolVar(&redisTLSEnabled, "redis-tls-enabled",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_REDIS_TLS_ENABLED", true),
+		"Enable TLS for Redis connections (enabled by default for security)")
+	command.Flags().StringVar(&redisProxyServerTLSCertPath, "redis-proxy-server-tls-cert",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_CERT_PATH", nil, ""),
+		"Path to TLS certificate for Redis proxy server")
+	command.Flags().StringVar(&redisProxyServerTLSKeyPath, "redis-proxy-server-tls-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_KEY_PATH", nil, ""),
+		"Path to TLS private key for Redis proxy server")
+	command.Flags().StringVar(&redisProxyServerTLSSecretName, "redis-proxy-server-tls-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_SECRET_NAME", nil, "argocd-redis-proxy-tls"),
+		"Secret name containing TLS certificate and key for Redis proxy server")
+	command.Flags().StringVar(&redisTLSCAPath, "redis-ca-path",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_CA_PATH", nil, ""),
+		"Path to CA certificate for verifying Redis TLS certificate")
+	command.Flags().StringVar(&redisTLSCASecretName, "redis-ca-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_CA_SECRET_NAME", nil, "argocd-redis-tls"),
+		"Secret name containing CA certificate for verifying Redis TLS certificate")
+	command.Flags().BoolVar(&redisTLSInsecure, "redis-tls-insecure",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_REDIS_TLS_INSECURE", false),
+		"INSECURE: Do not verify Redis TLS certificate")
 
 	command.Flags().BoolVar(&destinationBasedMapping, "destination-based-mapping",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING", false),
