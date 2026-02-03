@@ -1896,6 +1896,82 @@ func TestServer_updateAppCallback(t *testing.T) {
 		assert.Len(t, agentResources2, 1, "New cluster should have the resource")
 		assert.Equal(t, newApp.Name, agentResources2[0].Name)
 	})
+
+	t.Run("destination-based mapping with empty new destination", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			namespaceMap:            map[string]types.AgentMode{},
+			appManager:              appManager,
+			resources:               resources.NewAgentResources(),
+			appToAgent:              newConcurrentStringMap(),
+			destinationBasedMapping: true,
+		}
+
+		// Create queues for both clusters
+		err = s.queues.Create("cluster-1")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "test-app",
+				Namespace:       "argocd",
+				ResourceVersion: "1",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "cluster-1", // Old destination
+				},
+			},
+		}
+
+		s.newAppCallback(oldApp)
+		drainQueue(t, s.queues.SendQ("cluster-1"))
+
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "test-app",
+				Namespace:       "argocd",
+				ResourceVersion: "2",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "", // Empty destination
+				},
+			},
+		}
+
+		s.updateAppCallback(oldApp, newApp)
+
+		// Verify delete event was sent to old cluster
+		sendQ1 := s.queues.SendQ("cluster-1")
+		require.NotNil(t, sendQ1)
+		assert.Equal(t, 1, sendQ1.Len())
+
+		if sendQ1.Len() > 0 {
+			ev, shutdown := sendQ1.Get()
+			require.False(t, shutdown)
+			assert.Equal(t, event.Delete.String(), ev.Type())
+			sendQ1.Done(ev)
+		}
+
+		assert.Equal(t, 1, s.queues.Len())
+
+		// Verify app-to-agent mapping was removed
+		assert.Empty(t, s.appToAgent.Get("argocd/test-app"))
+
+		// Verify resource tracking was removed
+		agentResources1 := s.resources.GetAllResources("cluster-1")
+		assert.Len(t, agentResources1, 0, "Old cluster should have no resources")
+	})
 }
 
 func TestServer_handleAppAgentChange(t *testing.T) {

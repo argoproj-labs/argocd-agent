@@ -103,6 +103,10 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		"application_name": old.Name,
 	})
 
+	if s.destinationBasedMapping {
+		s.handleAppAgentChange(ctx, old, new, logCtx)
+	}
+
 	agentName := s.getAgentNameForApp(new)
 	if agentName == "" {
 		logCtx.Error("Failed to get agent name for application")
@@ -110,10 +114,6 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 	}
 
 	logCtx = logCtx.WithField("queue", agentName)
-
-	if s.destinationBasedMapping {
-		s.handleAppAgentChange(ctx, old, new, logCtx)
-	}
 
 	if isResourceFromAutonomousAgent(new) {
 		// Remove finalizers from autonomous agent applications if it is being deleted
