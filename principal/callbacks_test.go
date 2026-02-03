@@ -2184,6 +2184,8 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 			// Create queues for agents involved
 			if tt.expectedDeleteAgent != "" {
 				s.queues.Create(tt.expectedDeleteAgent)
+				s.resources.Add(tt.expectedDeleteAgent, resources.NewResourceKeyFromApp(tt.oldApp))
+				s.appToAgent.Set(tt.oldApp.QualifiedName(), tt.expectedDeleteAgent)
 			}
 			if tt.expectedAddAgent != "" {
 				s.queues.Create(tt.expectedAddAgent)
@@ -2223,7 +2225,7 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 			// Verify resources added/removed
 			if tt.expectedDeleteAgent != "" {
 				resourceKey := resources.NewResourceKeyFromApp(tt.oldApp)
-				assert.NotContainsf(t, s.resources.Get(tt.expectedDeleteAgent).GetAll(), resourceKey, "Resource should be added to new agent")
+				assert.NotContainsf(t, s.resources.Get(tt.expectedDeleteAgent).GetAll(), resourceKey, "Resource should be removed from old agent")
 			}
 
 			if tt.expectedAddAgent != "" {
