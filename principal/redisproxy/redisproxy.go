@@ -824,16 +824,12 @@ func (rp *RedisProxy) extractAgentNameFromRedisCommandKey(redisKey string, logCt
 	appName := namespaceAndName[underscoreIdx+1:]
 
 	// Use lookup function if available (for destination-based mapping)
-	// Otherwise fall back to namespace (which equals agent name in namespace-based mapping)
 	if rp.agentLookupFn != nil {
-		if agent := rp.agentLookupFn(namespace, appName); agent != "" {
-			return agent, nil
-		}
+		return rp.agentLookupFn(namespace, appName), nil
 	}
 
 	// Namespace is the agent name for the default namespace-based mapping
 	return namespace, nil
-
 }
 
 func (rp *RedisProxy) log() *logrus.Entry {

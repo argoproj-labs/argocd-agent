@@ -6,14 +6,14 @@ argocd-agent supports two modes for mapping applications to agents: **namespace-
 
 When an Application is created on the control plane (principal), argocd-agent needs to determine which agent should manage it. The mapping mode controls how this routing decision is made.
 
-| Feature | Namespace-Based Mapping | Destination-Based Mapping |
-|---------|------------------------|---------------------------|
-| Routing mechanism | Application namespace | `spec.destination.name` |
-| Apps per namespace | Single agent | Multiple agents |
-| Multi-tenancy | Limited | Full support |
-| Configuration | Default (no config) | Requires flag |
-| App namespace on agent | Agent's namespace (typically `argocd`) | Preserves original namespace |
-| Supported agent modes | Managed and Autonomous | Managed only |
+| Feature                | Namespace-Based Mapping                  | Destination-Based Mapping    |
+|------------------------|------------------------------------------|------------------------------|
+| Routing mechanism      | Application namespace                    | `spec.destination.name`      |
+| Apps per namespace     | Single agent                             | Multiple agents              |
+| Multi-tenancy          | Limited                                  | Full support                 |
+| Configuration          | Default (no config)                      | Requires flag                |
+| App namespace on agent | Agent's namespace (typically `argocd`)   | Preserves original namespace |
+| Supported agent modes  | Managed and Autonomous                   | Managed only                 |
 
 ## Namespace-Based Mapping (Default)
 
@@ -97,7 +97,7 @@ ARGOCD_AGENT_CREATE_NAMESPACE=true
 ```
 
 !!! note "Create Namespace"
-    With destination based mapping, the agent creates the apps on the same namespace as the principal.
+    With destination-based mapping, the agent creates the apps on the same namespace as the principal.
     Users can manually create this namespace on the agent or use the `--create-namespace` flag to allow the agent to create namespaces automatically when applications target namespaces that don't exist.
 
 !!! note "Allowed Namespaces"
@@ -156,7 +156,7 @@ spec:
   # ... other configuration
 ```
 
-Unlike the namespace based mapping where the `sourceNamespaces` field is removed, the `sourceNamespaces` field on AppProject is preserved when using destination-based mapping.
+Unlike the namespace-based mapping where the `sourceNamespaces` field is removed, the `sourceNamespaces` field on AppProject is preserved when using destination-based mapping.
 
 ## Migration Guide
 
