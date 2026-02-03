@@ -50,6 +50,11 @@ var (
 
 type DestinationMappingTestSuite struct {
 	fixture.BaseSuite
+
+	// Original state to restore in TearDownSuite
+	origSourceNamespaces        []string
+	origAppNamespacesConfigured bool
+	origAppNamespacesValue      string
 }
 
 // SetupSuite runs before the tests in the suite are run.
@@ -79,13 +84,40 @@ ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true`)
 	fixture.RestartAgent(suite.T(), "principal")
 	fixture.CheckReadiness(suite.T(), "principal")
 
-	// Enable apps in any namespace on the agent
+	// Capture original AppProject SourceNamespaces before modifying
 	defaultAppProject := &v1alpha1.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "default",
 			Namespace: "argocd",
 		},
 	}
+	err = suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
+		Name:      "default",
+		Namespace: "argocd",
+	}, defaultAppProject, metav1.GetOptions{})
+	requires.NoError(err, "failed to read original AppProject state")
+	suite.origSourceNamespaces = defaultAppProject.Spec.SourceNamespaces
+
+	// Capture original ConfigMap state before modifying
+	origConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "argocd-cmd-params-cm",
+			Namespace: "argocd",
+		},
+	}
+	err = suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
+		Name:      "argocd-cmd-params-cm",
+		Namespace: "argocd",
+	}, origConfigMap, metav1.GetOptions{})
+	requires.NoError(err, "failed to read original ConfigMap state")
+	if origConfigMap.Data != nil {
+		if val, ok := origConfigMap.Data["application.namespaces"]; ok {
+			suite.origAppNamespacesConfigured = true
+			suite.origAppNamespacesValue = val
+		}
+	}
+
+	// Enable apps in any namespace on the agent
 	err = fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, defaultAppProject, func(obj fixture.KubeObject) {
 		appProject := obj.(*v1alpha1.AppProject)
 		appProject.Spec.SourceNamespaces = []string{"*"}
@@ -125,7 +157,7 @@ func (suite *DestinationMappingTestSuite) TearDownSuite() {
 	fixture.RestartAgent(suite.T(), "principal")
 	fixture.CheckReadiness(suite.T(), "principal")
 
-	// Revert apps in any namespace on the agent
+	// Restore original AppProject SourceNamespaces
 	defaultAppProject := &v1alpha1.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "default",
@@ -134,10 +166,11 @@ func (suite *DestinationMappingTestSuite) TearDownSuite() {
 	}
 	err := fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, defaultAppProject, func(obj fixture.KubeObject) {
 		appProject := obj.(*v1alpha1.AppProject)
-		appProject.Spec.SourceNamespaces = []string{"*"}
+		appProject.Spec.SourceNamespaces = suite.origSourceNamespaces
 	})
-	requires.NoError(err)
+	requires.NoError(err, "failed to restore original AppProject SourceNamespaces")
 
+	// Restore original ConfigMap state
 	acm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "argocd-cmd-params-cm",
@@ -146,11 +179,20 @@ func (suite *DestinationMappingTestSuite) TearDownSuite() {
 	}
 	err = fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, acm, func(obj fixture.KubeObject) {
 		configMap := obj.(*corev1.ConfigMap)
-		if configMap.Data != nil {
-			delete(configMap.Data, "application.namespaces")
+		if suite.origAppNamespacesConfigured {
+			// Restore the original value
+			if configMap.Data == nil {
+				configMap.Data = map[string]string{}
+			}
+			configMap.Data["application.namespaces"] = suite.origAppNamespacesValue
+		} else {
+			// Key was not present originally, remove it
+			if configMap.Data != nil {
+				delete(configMap.Data, "application.namespaces")
+			}
 		}
 	})
-	requires.NoError(err)
+	requires.NoError(err, "failed to restore original ConfigMap state")
 
 	suite.restartApplicationController()
 }

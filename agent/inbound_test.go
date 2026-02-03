@@ -91,10 +91,12 @@ func Test_CreateApplication(t *testing.T) {
 		defer func() {
 			a.destinationBasedMapping = false
 			a.createNamespace = false
+			a.allowedNamespaces = []string{}
 		}()
 
 		a.destinationBasedMapping = true
 		a.createNamespace = true
+		a.allowedNamespaces = []string{"principal-*"}
 
 		defer a.appManager.Unmanage(app.QualifiedName())
 		a.mode = types.AgentModeManaged

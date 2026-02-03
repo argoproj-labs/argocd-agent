@@ -29,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
@@ -523,6 +524,10 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 	// Create the namespace if it doesn't exist and the option is enabled
 	if a.createNamespace && a.destinationBasedMapping {
+		if !a.isNamespaceAllowed(targetNamespace) {
+			return nil, fmt.Errorf("namespace %s is not permitted: not in allowed namespaces list", targetNamespace)
+		}
+
 		if err := a.ensureNamespaceExists(targetNamespace); err != nil {
 			return nil, fmt.Errorf("failed to ensure namespace %s exists: %w", targetNamespace, err)
 		}
@@ -575,6 +580,10 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 	// Create the namespace if it doesn't exist and the option is enabled
 	if a.createNamespace && a.destinationBasedMapping {
+		if !a.isNamespaceAllowed(targetNamespace) {
+			return nil, fmt.Errorf("namespace %s is not permitted: not in allowed namespaces list", targetNamespace)
+		}
+
 		if err := a.ensureNamespaceExists(targetNamespace); err != nil {
 			return nil, fmt.Errorf("failed to ensure namespace %s exists: %w", targetNamespace, err)
 		}
@@ -905,6 +914,12 @@ func (a *Agent) getTargetNamespaceForApp(app *v1alpha1.Application) string {
 		return app.Namespace
 	}
 	return a.namespace
+}
+
+// isNamespaceAllowed checks if the given namespace is in the agent's allowed namespaces list.
+func (a *Agent) isNamespaceAllowed(namespace string) bool {
+	allowedList := append([]string{a.namespace}, a.allowedNamespaces...)
+	return glob.MatchStringInList(allowedList, namespace, glob.REGEXP)
 }
 
 // ensureNamespaceExists creates the namespace if it doesn't exist.

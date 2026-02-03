@@ -65,7 +65,7 @@ type Agent struct {
 	options  AgentOptions
 	// namespace is the namespace to manage applications in
 	namespace string
-	// allowedNamespaces is not currently used. See also 'namespaces' field in AgentOptions
+	// allowedNamespaces is the list of namespaces that the agent is allowed to manage applications in
 	allowedNamespaces []string
 	// infStopCh is not currently used
 	infStopCh chan struct{}
