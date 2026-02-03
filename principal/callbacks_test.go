@@ -2059,6 +2059,39 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 			expectedAddAgent:    "",
 			shouldTrackApp:      false,
 		},
+		{
+			name:                    "autonomous resource - no action taken",
+			destinationBasedMapping: true,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+					Annotations: map[string]string{
+						manager.SourceUIDAnnotation: "uid-123",
+					},
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "new-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "",
+			expectedDeleteEvent: false,
+			expectedAddAgent:    "",
+			shouldTrackApp:      false,
+		},
 	}
 
 	for _, tt := range tests {

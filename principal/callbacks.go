@@ -829,6 +829,10 @@ func (s *Server) GetAgentForApp(namespace, name string) string {
 // handleAppAgentChange handles the case when an application's destination.name changes,
 // meaning it needs to be moved from one agent to another.
 func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Application, logCtx *logrus.Entry) {
+	if isResourceFromAutonomousAgent(old) || isResourceFromAutonomousAgent(new) {
+		return
+	}
+
 	oldAgentName := old.Spec.Destination.Name
 	newAgentName := new.Spec.Destination.Name
 
