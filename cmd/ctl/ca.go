@@ -488,10 +488,6 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 					cmdutil.Fatal("Error getting agent CA secret: %v", err)
 				}
 			} else {
-				if !upsert {
-					fmt.Printf("Agent CA secret already exists (use --upsert to update)\n")
-					return
-				}
 				exists = true
 			}
 
