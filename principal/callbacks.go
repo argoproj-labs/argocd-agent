@@ -820,7 +820,7 @@ func (s *Server) GetAgentForApp(namespace, name string) string {
 		return namespace
 	}
 	if s.appToAgent == nil {
-		return namespace
+		return ""
 	}
 	qualifiedName := fmt.Sprintf("%s/%s", namespace, name)
 	return s.appToAgent.Get(qualifiedName)

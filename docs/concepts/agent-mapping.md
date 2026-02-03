@@ -101,12 +101,7 @@ ARGOCD_AGENT_CREATE_NAMESPACE=true
     Users can manually create this namespace on the agent or use the `--create-namespace` flag to allow the agent to create namespaces automatically when applications target namespaces that don't exist.
 
 !!! note "Allowed Namespaces"
-    With destination-based mapping, applications can exist in any namespace. Both principal and agent have `--allowed-namespaces` flags to control which namespaces they will manage:
-    
-    - **Principal**: Use `--allowed-namespaces` to restrict which namespaces the principal watches for Applications (e.g., `--allowed-namespaces='team-*,prod-*'`).
-    - **Agent**: Use `--allowed-namespaces` to specify additional namespaces beyond the agent's own namespace that the agent will accept Applications from (e.g., `--allowed-namespaces='team-alpha,team-beta'`).
-    
-    Both support glob patterns for flexible namespace matching.
+    With destination-based mapping, applications can exist in any namespace. Both principal and agent have `--allowed-namespaces` flags to control which namespaces they will manage. The flag supports glob patterns for flexible namespace matching.
 
 ### Example
 
