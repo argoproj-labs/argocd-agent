@@ -134,7 +134,8 @@ jobs:
         run: |
           go mod download
       - name: Run all unit tests
-        run: make test
+        run: |
+          GOTOOLCHAIN=go1.25.0+auto make test
       - name: Upload coverage results
         uses: codecov/codecov-action@v4
         with:
