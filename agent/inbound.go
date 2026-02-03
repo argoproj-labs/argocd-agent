@@ -523,13 +523,15 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	}
 
 	// Create the namespace if it doesn't exist and the option is enabled
-	if a.createNamespace && a.destinationBasedMapping {
+	if a.destinationBasedMapping {
 		if !a.isNamespaceAllowed(targetNamespace) {
 			return nil, fmt.Errorf("namespace %s is not permitted: not in allowed namespaces list", targetNamespace)
 		}
 
-		if err := a.ensureNamespaceExists(targetNamespace); err != nil {
-			return nil, fmt.Errorf("failed to ensure namespace %s exists: %w", targetNamespace, err)
+		if a.createNamespace {
+			if err := a.ensureNamespaceExists(targetNamespace); err != nil {
+				return nil, fmt.Errorf("failed to ensure namespace %s exists: %w", targetNamespace, err)
+			}
 		}
 	}
 
@@ -579,13 +581,15 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	}
 
 	// Create the namespace if it doesn't exist and the option is enabled
-	if a.createNamespace && a.destinationBasedMapping {
+	if a.destinationBasedMapping {
 		if !a.isNamespaceAllowed(targetNamespace) {
 			return nil, fmt.Errorf("namespace %s is not permitted: not in allowed namespaces list", targetNamespace)
 		}
 
-		if err := a.ensureNamespaceExists(targetNamespace); err != nil {
-			return nil, fmt.Errorf("failed to ensure namespace %s exists: %w", targetNamespace, err)
+		if a.createNamespace {
+			if err := a.ensureNamespaceExists(targetNamespace); err != nil {
+				return nil, fmt.Errorf("failed to ensure namespace %s exists: %w", targetNamespace, err)
+			}
 		}
 	}
 

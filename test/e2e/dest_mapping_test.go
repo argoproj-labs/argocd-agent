@@ -487,6 +487,7 @@ func (suite *DestinationMappingTestSuite) TestCascadeDelete() {
 		depl := obj.(*appsv1.Deployment)
 		depl.Finalizers = append(depl.Finalizers, "test-e2e/my-test-finalizer")
 	})
+	requires.NoError(err)
 
 	// Ensure that finalizer is removed from Deployment if the test ends prematurely
 	defer func() {
