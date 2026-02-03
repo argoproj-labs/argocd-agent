@@ -97,14 +97,19 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 	ctx, span := s.startSpan(operationupdate, "Application", old)
 	defer span.End()
 
-	agentName := s.getAgentNameForApp(new)
-
 	logCtx := log().WithFields(logrus.Fields{
 		"component":        "EventCallback",
-		"queue":            agentName,
 		"event":            "application_update",
 		"application_name": old.Name,
 	})
+
+	agentName := s.getAgentNameForApp(new)
+	if agentName == "" {
+		logCtx.Error("Failed to get agent name for application")
+		return
+	}
+
+	logCtx = logCtx.WithField("queue", agentName)
 
 	if s.destinationBasedMapping {
 		s.handleAppAgentChange(ctx, old, new, logCtx)
