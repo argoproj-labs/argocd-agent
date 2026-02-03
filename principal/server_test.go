@@ -127,6 +127,48 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, s)
 		assert.Equal(t, 60*time.Second, s.options.informerSyncTimeout)
 	})
+
+	t.Run("Cluster registration manager should be initialized", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.NotNil(t, s.clusterRegistrationManager)
+	})
+
+	t.Run("Cluster registration should be disabled by default", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.False(t, s.clusterRegistrationManager.IsSelfClusterRegistrationEnabled())
+	})
+
+	t.Run("Cluster registration should be enabled when configured", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+			WithClusterRegistration(true),
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.True(t, s.clusterRegistrationManager.IsSelfClusterRegistrationEnabled())
+	})
+
+	t.Run("Resource proxy address should be configurable", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+			WithResourceProxyAddress("custom-proxy:8443"),
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.Equal(t, "custom-proxy:8443", s.options.resourceProxyAddress)
+	})
 }
 
 func Test_handleResyncOnConnect(t *testing.T) {

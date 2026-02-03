@@ -21,11 +21,16 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 func setup(t *testing.T, redisAddress string) (string, *Manager) {
@@ -41,6 +46,25 @@ func setup(t *testing.T, redisAddress string) (string, *Manager) {
 	require.NoError(t, err)
 
 	return agentName, m
+}
+
+func createTestCASecret(t *testing.T, kubeclient kubernetes.Interface, namespace string) {
+	t.Helper()
+	caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA)
+	require.NoError(t, err, "generate CA certificate")
+
+	_, err = kubeclient.CoreV1().Secrets(namespace).Create(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.SecretNamePrincipalCA,
+			Namespace: namespace,
+		},
+		Type: corev1.SecretTypeTLS,
+		Data: map[string][]byte{
+			"tls.crt": []byte(caCertPEM),
+			"tls.key": []byte(caKeyPEM),
+		},
+	}, metav1.CreateOptions{})
+	require.NoError(t, err, "create CA secret")
 }
 
 func Test_UpdateClusterInfo(t *testing.T) {
@@ -311,5 +335,40 @@ func Test_RefreshClusterInfo(t *testing.T) {
 		require.NotPanics(t, func() {
 			invalidM.refreshClusterInfo()
 		})
+	})
+}
+
+func Test_CreateCluster(t *testing.T) {
+	const testNamespace = "argocd"
+	const testResourceProxyAddr = "resource-proxy:8443"
+
+	t.Run("Returns error when CA secret is missing", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+
+		err := CreateCluster(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "could not generate client certificate")
+	})
+
+	t.Run("Creates cluster secret successfully with valid CA", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+		createTestCASecret(t, kubeclient, testNamespace)
+
+		agentName := "test-agent"
+		err := CreateCluster(context.Background(), kubeclient, testNamespace, agentName, testResourceProxyAddr)
+
+		require.NoError(t, err)
+
+		secret, err := kubeclient.CoreV1().Secrets(testNamespace).Get(
+			context.Background(),
+			getClusterSecretName(agentName),
+			metav1.GetOptions{},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, secret)
+		require.Equal(t, getClusterSecretName(agentName), secret.Name)
+		require.Equal(t, agentName, secret.Labels[LabelKeyClusterAgentMapping])
+		require.Equal(t, "true", secret.Labels[LabelKeySelfRegisteredCluster])
 	})
 }

@@ -86,6 +86,9 @@ type ServerOptions struct {
 	// destinationBasedMapping enables mapping applications to agents based on
 	// spec.destination.name instead of the application's namespace
 	destinationBasedMapping bool
+
+	selfClusterRegistrationEnabled bool
+	resourceProxyAddress           string
 }
 
 type ServerOption func(o *Server) error
@@ -100,7 +103,8 @@ func defaultOptions() *ServerOptions {
 		eventProcessors:     10,
 		rootCa:              x509.NewCertPool(),
 		informerSyncTimeout: 60 * time.Second,
-		maxGRPCMessageSize:  grpcutil.DefaultGRPCMaxMessageSize,
+		maxGRPCMessageSize:   grpcutil.DefaultGRPCMaxMessageSize,
+		resourceProxyAddress: "argocd-agent-resource-proxy:9090",
 	}
 }
 
@@ -557,6 +561,20 @@ func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) S
 func WithDestinationBasedMapping(enabled bool) ServerOption {
 	return func(o *Server) error {
 		o.options.destinationBasedMapping = enabled
+		return nil
+	}
+}
+
+func WithClusterRegistration(enabled bool) ServerOption {
+	return func(o *Server) error {
+		o.options.selfClusterRegistrationEnabled = enabled
+		return nil
+	}
+}
+
+func WithResourceProxyAddress(address string) ServerOption {
+	return func(o *Server) error {
+		o.options.resourceProxyAddress = address
 		return nil
 	}
 }

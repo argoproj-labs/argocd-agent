@@ -15,11 +15,15 @@
 package cluster
 
 import (
+	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9/maintnotifications"
 	"github.com/sirupsen/logrus"
@@ -27,8 +31,13 @@ import (
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
+	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
+
+const LabelKeySelfRegisteredCluster = "argocd-agent.argoproj-labs.io/self-registered-cluster"
 
 // SetAgentConnectionStatus updates cluster info with connection state and time in mapped cluster at principal.
 // This is called when the agent is connected or disconnected with the principal.
@@ -180,4 +189,102 @@ func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressio
 		cacheutil.NewRedisCache(redisClient, 0, redisCompressionType)), 0)
 
 	return clusterCache, nil
+}
+
+// CreateCluster creates a cluster secret for an agent's cluster on the principal.
+func CreateCluster(ctx context.Context, kubeclient kubernetes.Interface, namespace, agentName, resourceProxyAddress string) error {
+
+	// Generate client certificate signed by principal's CA.
+	clientCert, clientKey, caData, err := generateAgentClientCert(ctx, kubeclient, namespace, agentName, config.SecretNamePrincipalCA)
+	if err != nil {
+		return fmt.Errorf("could not generate client certificate: %w", err)
+	}
+
+	// Note: this structure has to be same as manual creation done by `argocd-agentctl agent create <agent_name>`
+	cluster := &appv1.Cluster{
+		Server: fmt.Sprintf("https://%s?agentName=%s", resourceProxyAddress, agentName),
+		Name:   agentName,
+		Labels: map[string]string{
+			LabelKeyClusterAgentMapping:   agentName,
+			LabelKeySelfRegisteredCluster: "true",
+		},
+		Config: appv1.ClusterConfig{
+			TLSClientConfig: appv1.TLSClientConfig{
+				CertData: []byte(clientCert),
+				KeyData:  []byte(clientKey),
+				CAData:   []byte(caData),
+			},
+		},
+	}
+
+	// Convert cluster object to Kubernetes secret object
+	secret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      getClusterSecretName(agentName),
+			Namespace: namespace,
+		},
+	}
+	if err := ClusterToSecret(cluster, secret); err != nil {
+		return fmt.Errorf("could not convert cluster to secret: %w", err)
+	}
+
+	// Create the secret to register the agent's cluster.
+	// Handle AlreadyExists as success to make this idempotent and avoid TOCTOU race
+	// conditions where concurrent registrations both pass the existence check.
+	if _, err = kubeclient.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("could not create cluster secret to register agent's cluster: %w", err)
+	}
+
+	return nil
+}
+
+// ClusterSecretExists checks if a cluster secret exists for the given agent.
+func ClusterSecretExists(ctx context.Context, kubeclient kubernetes.Interface, namespace, agentName string) (bool, error) {
+	if _, err := kubeclient.CoreV1().Secrets(namespace).Get(ctx, getClusterSecretName(agentName), metav1.GetOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func generateAgentClientCert(ctx context.Context, kubeclient kubernetes.Interface, namespace, agentName, caSecretName string) (clientCert, clientKey, caData string, err error) {
+
+	// Read the CA certificate from the principal's CA secret
+	tlsCert, err := tlsutil.TLSCertFromSecret(ctx, kubeclient, namespace, caSecretName)
+	if err != nil {
+		err = fmt.Errorf("could not read CA secret: %w", err)
+		return
+	}
+
+	// Parse CA certificate from PEM format
+	signerCert, err := x509.ParseCertificate(tlsCert.Certificate[0])
+	if err != nil {
+		err = fmt.Errorf("could not parse CA certificate: %w", err)
+		return
+	}
+
+	// Generate a client cert with agent name as CN and sign it with the CA's cert and key
+	clientCert, clientKey, err = tlsutil.GenerateClientCertificate(agentName, signerCert, tlsCert.PrivateKey)
+	if err != nil {
+		err = fmt.Errorf("could not create client cert: %w", err)
+		return
+	}
+
+	// Convert CA certificate to PEM format
+	caData, err = tlsutil.CertDataToPEM(tlsCert.Certificate[0])
+	if err != nil {
+		err = fmt.Errorf("could not convert CA certificate to PEM format: %w", err)
+		return
+	}
+
+	return
+}
+
+func getClusterSecretName(agentName string) string {
+	return "cluster-" + agentName
 }

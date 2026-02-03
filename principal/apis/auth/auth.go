@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
+	"github.com/argoproj-labs/argocd-agent/principal/clusterregistration"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,6 +37,8 @@ type Server struct {
 	issuer      issuer.Issuer
 	options     *ServerOptions
 	queues      *queue.SendRecvQueues
+
+	clusterRegistrationManager *clusterregistration.ClusterRegistrationManager
 }
 
 const (
@@ -50,7 +53,9 @@ const (
 
 var errAuthenticationFailed = status.Error(codes.Unauthenticated, authFailedMessage)
 
-type ServerOptions struct{}
+type ServerOptions struct {
+	clusterRegistrationManager *clusterregistration.ClusterRegistrationManager
+}
 
 type ServerOption func(o *ServerOptions) error
 
@@ -72,6 +77,8 @@ func NewServer(queues *queue.SendRecvQueues, authMethods *auth.Methods, iss issu
 			return nil, err
 		}
 	}
+
+	s.clusterRegistrationManager = s.options.clusterRegistrationManager
 	return s, nil
 }
 
@@ -117,6 +124,15 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 		return nil, errAuthenticationFailed
 	}
 	logCtx.WithField("client", clientID).Info("client authentication successful")
+
+	// If self cluster registration is enabled, register the agent's cluster and create cluster secret if it doesn't exist
+	if s.clusterRegistrationManager != nil && s.clusterRegistrationManager.IsSelfClusterRegistrationEnabled() {
+		if err := s.clusterRegistrationManager.RegisterCluster(ctx, clientID); err != nil {
+			logCtx.WithError(err).WithField("client", clientID).Error("Failed to self register agent's cluster")
+			return nil, errAuthenticationFailed
+		}
+	}
+
 	subject := &auth.AuthSubject{ClientID: clientID, Mode: ar.Mode}
 	accessToken, refreshToken, err := s.issueTokens(subject, true)
 	if err != nil {
