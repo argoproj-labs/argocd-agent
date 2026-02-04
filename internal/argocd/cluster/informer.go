@@ -44,6 +44,7 @@ func (m *Manager) onClusterAdded(res *v1.Secret) {
 	cluster, err := db.SecretToCluster(res)
 	if err != nil {
 		log().WithError(err).Error("Not a cluster secret or malformed data")
+		return
 	}
 
 	// TODO(jannfis): Do we want to validate cluster configuration here?
@@ -78,7 +79,7 @@ func (m *Manager) onClusterUpdated(old *v1.Secret, new *v1.Secret) {
 
 	c, err := db.SecretToCluster(new)
 	if err != nil {
-		log().WithError(err).Errorf("Could not update ")
+		log().WithError(err).Errorf("Not a cluster secret or malformed data")
 		return
 	}
 
@@ -90,9 +91,11 @@ func (m *Manager) onClusterUpdated(old *v1.Secret, new *v1.Secret) {
 		}
 	}
 
-	// Unmap cluster from old agent
+	// Unmap cluster from old agent. If the cluster isn't mapped yet (that
+	// can happen if onClusterAdded found a malformed secret), we treat the
+	// operation as upsert instead of unmapping the old cluster.
 	log().Tracef("Unmapping cluster %s from agent %s", c.Name, oldAgent)
-	if err = m.unmapCluster(oldAgent); err != nil {
+	if err = m.unmapCluster(oldAgent); err != nil && err != ErrNotMapped {
 		log().WithError(err).Errorf("Could not unmap cluster %s from agent %s", c.Name, oldAgent)
 		return
 	}
