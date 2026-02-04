@@ -91,10 +91,9 @@ func (m *Manager) onClusterUpdated(old *v1.Secret, new *v1.Secret) {
 		}
 	}
 
-	// Unmap cluster from old agent. Cluster could not be mapped yet due to
-	// potential errors when adding the cluster to the manager (i.e. not being
-	// able to unmarshal the cluster from the secret). In this case, we don't
-	// want to return an error but add the cluster to the manager anyway.
+	// Unmap cluster from old agent. If the cluster isn't mapped yet (that
+	// can happen if onClusterAdded found a malformed secret), we treat the
+	// operation as upsert instead of unmapping the old cluster.
 	log().Tracef("Unmapping cluster %s from agent %s", c.Name, oldAgent)
 	if err = m.unmapCluster(oldAgent); err != nil && err != ErrNotMapped {
 		log().WithError(err).Errorf("Could not unmap cluster %s from agent %s", c.Name, oldAgent)
