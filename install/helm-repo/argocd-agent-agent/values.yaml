@@ -140,6 +140,18 @@ tlsMinVersion: ""
 tlsMaxVersion: ""
 # -- Comma-separated list of TLS cipher suites. Empty uses Go defaults.
 tlsCipherSuites: ""
+# -- Comma-separated list of additional namespaces the agent is allowed to
+# manage applications in. Supports glob patterns (e.g., "team-*,prod-*").
+allowedNamespaces: ""
+
+## @section Destination-Based Mapping
+# -- Whether to enable destination-based mapping. When enabled, the agent
+# creates applications in their original namespace (preserving the namespace
+# from the principal) instead of the agent's own namespace.
+destinationBasedMapping: false
+# -- Whether to create target namespaces automatically when they don't exist.
+# Used with destination-based mapping.
+createNamespace: false
 
 ## @section Services
 # -- Service configuration for metrics and healthz endpoints.

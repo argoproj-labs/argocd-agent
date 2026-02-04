@@ -187,6 +187,24 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.cache.refresh-interval
                 optional: true
+          - name: ARGOCD_AGENT_DESTINATION_BASED_MAPPING
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.destination-based-mapping
+                optional: true
+          - name: ARGOCD_AGENT_CREATE_NAMESPACE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.create-namespace
+                optional: true
+          - name: ARGOCD_AGENT_ALLOWED_NAMESPACES
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.allowed-namespaces
+                optional: true
           name: argocd-agent-agent
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}

@@ -26,10 +26,13 @@ Kubernetes: `>=1.24.0-0`
 |-----|------|---------|-------------|
 | affinity | object | `{}` | Affinity rules for the agent Pod. |
 | agentMode | string | `"autonomous"` | Agent mode of operation. |
+| allowedNamespaces | string | `""` | Comma-separated list of additional namespaces the agent is allowed to manage applications in. Supports glob patterns (e.g., "team-*,prod-*"). |
 | argoCdRedisPasswordKey | string | `"auth"` | ArgoCD Redis password key. |
 | argoCdRedisSecretName | string | `"argocd-redis"` | ArgoCD Redis password secret name. |
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
 | cacheRefreshInterval | string | `"10s"` | Cache refresh interval. |
+| createNamespace | bool | `false` | Whether to create target namespaces automatically when they don't exist. Used with destination-based mapping. |
+| destinationBasedMapping | bool | `false` | Whether to enable destination-based mapping. When enabled, the agent creates applications in their original namespace (preserving the namespace from the principal) instead of the agent's own namespace. |
 | enableCompression | bool | `false` | Whether to enable gRPC compression. |
 | enableResourceProxy | bool | `true` | Whether to enable resource proxy. |
 | enableWebSocket | bool | `false` | Whether to enable WebSocket connections. |

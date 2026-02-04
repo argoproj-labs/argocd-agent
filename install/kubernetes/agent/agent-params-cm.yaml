@@ -25,7 +25,7 @@ data:
   # Default: "argocd-agent-ca"
   agent.tls.root-ca-secret-name: "argocd-agent-ca"
   # agent.tls.root-ca-path: The path to a file containing the certificates for
-  # the TLS root certificate authority used to validate the remote principal. 
+  # the TLS root certificate authority used to validate the remote principal.
   # Default: ""
   agent.tls.root-ca-path: ""
   # agent.tls.secret-name: The name of the secret containing the agent
@@ -98,3 +98,16 @@ data:
   # agent.redis.address: The address of the Redis server.
   # Default: "argocd-redis:6379"
   agent.redis.address: "argocd-redis:6379"
+  # agent.destination-based-mapping: Whether to enable destination-based mapping.
+  # When enabled, the agent creates applications in their original namespace
+  # (preserving the namespace from the principal) instead of the agent's own namespace.
+  # Default: false
+  agent.destination-based-mapping: "false"
+  # agent.create-namespace: Whether to create target namespaces automatically
+  # when they don't exist (used with destination-based-mapping).
+  # Default: false
+  agent.create-namespace: "false"
+  # agent.allowed-namespaces: Comma-separated list of additional namespaces
+  # the agent is allowed to manage applications in. Supports glob patterns.
+  # Default: ""
+  agent.allowed-namespaces: ""
