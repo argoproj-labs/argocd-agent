@@ -87,8 +87,9 @@ type ServerOptions struct {
 	// spec.destination.name instead of the application's namespace
 	destinationBasedMapping bool
 
-	selfClusterRegistrationEnabled bool
-	resourceProxyAddress           string
+	selfClusterRegistrationEnabled    bool
+	resourceProxyAddress              string
+	selfClusterRegistrationSharedCert string
 }
 
 type ServerOption func(o *Server) error
@@ -575,6 +576,13 @@ func WithClusterRegistration(enabled bool) ServerOption {
 func WithResourceProxyAddress(address string) ServerOption {
 	return func(o *Server) error {
 		o.options.resourceProxyAddress = address
+		return nil
+	}
+}
+
+func WithSelfClusterRegistrationSharedCert(secretName string) ServerOption {
+	return func(o *Server) error {
+		o.options.selfClusterRegistrationSharedCert = secretName
 		return nil
 	}
 }

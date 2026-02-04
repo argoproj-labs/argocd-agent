@@ -61,7 +61,7 @@ func createTestCASecret(t *testing.T, kubeclient kubernetes.Interface, namespace
 func Test_NewClusterRegistrationManager(t *testing.T) {
 	t.Run("Create manager with self cluster registration enabled", func(t *testing.T) {
 		kubeclient := kube.NewFakeKubeClient(testNamespace)
-		mgr := NewClusterRegistrationManager(true, testNamespace, testResourceProxyAddr, kubeclient)
+		mgr := NewClusterRegistrationManager(true, testNamespace, testResourceProxyAddr, "", kubeclient)
 
 		require.NotNil(t, mgr)
 		assert.True(t, mgr.selfClusterRegistrationEnabled)
@@ -72,7 +72,7 @@ func Test_NewClusterRegistrationManager(t *testing.T) {
 
 	t.Run("Create manager with self cluster registration disabled", func(t *testing.T) {
 		kubeclient := kube.NewFakeKubeClient(testNamespace)
-		mgr := NewClusterRegistrationManager(false, testNamespace, testResourceProxyAddr, kubeclient)
+		mgr := NewClusterRegistrationManager(false, testNamespace, testResourceProxyAddr, "", kubeclient)
 
 		require.NotNil(t, mgr)
 		assert.False(t, mgr.selfClusterRegistrationEnabled)
@@ -84,7 +84,7 @@ func Test_NewClusterRegistrationManager(t *testing.T) {
 func Test_RegisterCluster(t *testing.T) {
 	t.Run("Returns nil when self cluster registration is disabled", func(t *testing.T) {
 		kubeclient := kube.NewFakeKubeClient(testNamespace)
-		mgr := NewClusterRegistrationManager(false, testNamespace, testResourceProxyAddr, kubeclient)
+		mgr := NewClusterRegistrationManager(false, testNamespace, testResourceProxyAddr, "", kubeclient)
 
 		err := mgr.RegisterCluster(context.Background(), testAgentName)
 
@@ -111,7 +111,7 @@ func Test_RegisterCluster(t *testing.T) {
 			},
 		}
 		kubeclient := kube.NewFakeClientsetWithResources(existingSecret)
-		mgr := NewClusterRegistrationManager(true, testNamespace, testResourceProxyAddr, kubeclient)
+		mgr := NewClusterRegistrationManager(true, testNamespace, testResourceProxyAddr, "", kubeclient)
 
 		err := mgr.RegisterCluster(context.Background(), testAgentName)
 
@@ -131,7 +131,7 @@ func Test_RegisterCluster(t *testing.T) {
 
 		kubeclient := kube.NewFakeClientsetWithResources()
 		createTestCASecret(t, kubeclient, testNamespace)
-		mgr := NewClusterRegistrationManager(true, testNamespace, testResourceProxyAddr, kubeclient)
+		mgr := NewClusterRegistrationManager(true, testNamespace, testResourceProxyAddr, "", kubeclient)
 
 		err := mgr.RegisterCluster(context.Background(), testAgentName)
 
@@ -150,7 +150,7 @@ func Test_RegisterCluster(t *testing.T) {
 
 	t.Run("Returns error when CA secret is missing", func(t *testing.T) {
 		kubeclient := kube.NewFakeClientsetWithResources()
-		mgr := NewClusterRegistrationManager(true, testNamespace, testResourceProxyAddr, kubeclient)
+		mgr := NewClusterRegistrationManager(true, testNamespace, testResourceProxyAddr, "", kubeclient)
 
 		err := mgr.RegisterCluster(context.Background(), testAgentName)
 
@@ -161,7 +161,7 @@ func Test_RegisterCluster(t *testing.T) {
 	t.Run("Creates cluster secret with correct agent name label", func(t *testing.T) {
 		kubeclient := kube.NewFakeClientsetWithResources()
 		createTestCASecret(t, kubeclient, testNamespace)
-		mgr := NewClusterRegistrationManager(true, testNamespace, testResourceProxyAddr, kubeclient)
+		mgr := NewClusterRegistrationManager(true, testNamespace, testResourceProxyAddr, "", kubeclient)
 
 		agentName := "my-special-agent"
 		err := mgr.RegisterCluster(context.Background(), agentName)

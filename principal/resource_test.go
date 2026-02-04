@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,13 +36,9 @@ func newResourceTestServer(t *testing.T) *Server {
 func Test_resourceRequester(t *testing.T) {
 	t.Run("Successfully request a resource", func(t *testing.T) {
 		s := newResourceTestServer(t)
-		r := httptest.NewRequest("GET", "/", nil)
+		r := httptest.NewRequest("GET", "/?agentName=agent", nil)
 		r.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{
-				{
-					Subject: pkix.Name{CommonName: "agent"},
-				},
-			},
+			PeerCertificates: []*x509.Certificate{{}},
 		}
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
@@ -75,7 +70,7 @@ func Test_resourceRequester(t *testing.T) {
 
 	t.Run("No TLS data in request", func(t *testing.T) {
 		s := newResourceTestServer(t)
-		r := httptest.NewRequest("GET", "/", nil)
+		r := httptest.NewRequest("GET", "/?agentName=agent", nil)
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
 		go func() {
@@ -89,16 +84,13 @@ func Test_resourceRequester(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "no authorization found", string(body))
 	})
-	t.Run("Invalid agent name", func(t *testing.T) {
+
+	t.Run("Missing agentName query parameter", func(t *testing.T) {
 		s := newResourceTestServer(t)
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
 		r.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{
-				{
-					Subject: pkix.Name{CommonName: "lob/bo"},
-				},
-			},
+			PeerCertificates: []*x509.Certificate{{}},
 		}
 		ch := make(chan interface{})
 		go func() {
@@ -110,20 +102,36 @@ func Test_resourceRequester(t *testing.T) {
 		defer w.Result().Body.Close()
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
-		assert.Equal(t, "invalid client certificate", string(body))
+		assert.Equal(t, "missing agentName query parameter", string(body))
+	})
+
+	t.Run("Invalid agent name", func(t *testing.T) {
+		s := newResourceTestServer(t)
+		r := httptest.NewRequest("GET", "/?agentName=lob/bo", nil)
+		w := httptest.NewRecorder()
+		r.TLS = &tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{{}},
+		}
+		ch := make(chan interface{})
+		go func() {
+			s.processResourceRequest(w, r, resourceproxy.NewParams())
+			ch <- 1
+		}()
+		<-ch
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		defer w.Result().Body.Close()
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, "invalid agentName query parameter", string(body))
 
 	})
 
 	t.Run("Agent not connected", func(t *testing.T) {
 		s := newResourceTestServer(t)
 		s.queues.Delete("agent", false)
-		r := httptest.NewRequest("GET", "/", nil)
+		r := httptest.NewRequest("GET", "/?agentName=agent", nil)
 		r.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{
-				{
-					Subject: pkix.Name{CommonName: "agent"},
-				},
-			},
+			PeerCertificates: []*x509.Certificate{{}},
 		}
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
@@ -138,13 +146,9 @@ func Test_resourceRequester(t *testing.T) {
 
 	t.Run("Receiving a different resource", func(t *testing.T) {
 		s := newResourceTestServer(t)
-		r := httptest.NewRequest("GET", "/", nil)
+		r := httptest.NewRequest("GET", "/?agentName=agent", nil)
 		r.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{
-				{
-					Subject: pkix.Name{CommonName: "agent"},
-				},
-			},
+			PeerCertificates: []*x509.Certificate{{}},
 		}
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
@@ -173,13 +177,9 @@ func Test_resourceRequester(t *testing.T) {
 
 	t.Run("Receiving a different event", func(t *testing.T) {
 		s := newResourceTestServer(t)
-		r := httptest.NewRequest("GET", "/", nil)
+		r := httptest.NewRequest("GET", "/?agentName=agent", nil)
 		r.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{
-				{
-					Subject: pkix.Name{CommonName: "agent"},
-				},
-			},
+			PeerCertificates: []*x509.Certificate{{}},
 		}
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})

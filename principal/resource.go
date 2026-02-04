@@ -56,23 +56,26 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// For now, we can only validate the first client cert presented by the
-	// client. Under normal circumstances, the client is the Argo CD API,
-	// which uses the client certificate of the cluster secret, which is
-	// usually configured by us.
-	cert := r.TLS.PeerCertificates[0]
-
-	// Make sure the agent name in the certificate is properly formatted
-	agentName := cert.Subject.CommonName
-	errs := validation.NameIsDNSLabel(agentName, false)
-	if len(errs) > 0 {
-		logCtx.Errorf("CRITICAL: Invalid agent name in client certificate: %v", errs)
+	// Get agent name from query parameter. The cluster secret URL format is:
+	// https://resource-proxy:8443?agentName=<agent-name>
+	agentName := r.URL.Query().Get("agentName")
+	if agentName == "" {
+		logCtx.Errorf("Missing agentName query parameter from client %s", r.RemoteAddr)
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte("invalid client certificate"))
+		_, _ = w.Write([]byte("missing agentName query parameter"))
 		return
 	}
 
-	logCtx = logCtx.WithField("agent", cert.Subject.CommonName)
+	// Validate the agent name format
+	errs := validation.NameIsDNSLabel(agentName, false)
+	if len(errs) > 0 {
+		logCtx.Errorf("Invalid agent name in query parameter: %v", errs)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("invalid agentName query parameter"))
+		return
+	}
+
+	logCtx = logCtx.WithField("agent", agentName)
 
 	// Handle exec subresource separately.
 	// because it requires WebSocket for bidirectional streaming

@@ -28,15 +28,17 @@ type ClusterRegistrationManager struct {
 	selfClusterRegistrationEnabled bool
 	namespace                      string
 	resourceProxyAddress           string
+	sharedClientCertSecretName     string
 	kubeclient                     kubernetes.Interface
 }
 
-func NewClusterRegistrationManager(enabled bool, namespace, resourceProxyAddress string,
+func NewClusterRegistrationManager(enabled bool, namespace, resourceProxyAddress, sharedClientCertSecretName string,
 	kubeclient kubernetes.Interface) *ClusterRegistrationManager {
 	return &ClusterRegistrationManager{
 		selfClusterRegistrationEnabled: enabled,
 		namespace:                      namespace,
 		resourceProxyAddress:           resourceProxyAddress,
+		sharedClientCertSecretName:     sharedClientCertSecretName,
 		kubeclient:                     kubeclient,
 	}
 }
@@ -54,7 +56,7 @@ func (mgr *ClusterRegistrationManager) RegisterCluster(ctx context.Context, agen
 	// Check if cluster secret already exists for the given agent
 	exists, err := cluster.ClusterSecretExists(ctx, mgr.kubeclient, mgr.namespace, agentName)
 	if err != nil {
-		return fmt.Errorf("error while checking if cluster secret exists: %w", err)
+		return fmt.Errorf("error while checking if cluster secret exists: %v", err)
 	}
 
 	if exists {
@@ -65,8 +67,8 @@ func (mgr *ClusterRegistrationManager) RegisterCluster(ctx context.Context, agen
 	// Create the cluster secret
 	logCtx.Info("Registering agent's cluster")
 
-	if err := cluster.CreateCluster(ctx, mgr.kubeclient, mgr.namespace, agentName, mgr.resourceProxyAddress); err != nil {
-		return fmt.Errorf("failed to self register agent's cluster and create cluster secret: %w", err)
+	if err := cluster.CreateCluster(ctx, mgr.kubeclient, mgr.namespace, agentName, mgr.resourceProxyAddress, mgr.sharedClientCertSecretName); err != nil {
+		return fmt.Errorf("failed to self register agent's cluster and create cluster secret: %v", err)
 	}
 
 	logCtx.Info("Agent's self cluster registration completed successfully")

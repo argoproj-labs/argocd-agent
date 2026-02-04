@@ -192,12 +192,32 @@ func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressio
 }
 
 // CreateCluster creates a cluster secret for an agent's cluster on the principal.
-func CreateCluster(ctx context.Context, kubeclient kubernetes.Interface, namespace, agentName, resourceProxyAddress string) error {
+// If sharedClientCertSecretName is provided, it reads the TLS credentials from that secret
+// (shared client cert mode). Otherwise, it generates a new client certificate signed
+// by the principal's CA (legacy mode, requires CA private key).
+func CreateCluster(ctx context.Context, kubeclient kubernetes.Interface, namespace, agentName, resourceProxyAddress, sharedClientCertSecretName string) error {
+	var clientCert, clientKey, caData string
+	var err error
 
-	// Generate client certificate signed by principal's CA.
-	clientCert, clientKey, caData, err := generateAgentClientCert(ctx, kubeclient, namespace, agentName, config.SecretNamePrincipalCA)
-	if err != nil {
-		return fmt.Errorf("could not generate client certificate: %w", err)
+	if sharedClientCertSecretName != "" {
+		// Shared client cert mode: read from existing secret
+		log().WithFields(logrus.Fields{
+			"agent":  agentName,
+			"secret": sharedClientCertSecretName,
+		}).Info("Using shared client certificate mode for cluster registration")
+
+		clientCert, clientKey, caData, err = readSharedClientCertFromSecret(ctx, kubeclient, namespace, sharedClientCertSecretName)
+		if err != nil {
+			return fmt.Errorf("could not read shared client certificate from secret %s: %v", sharedClientCertSecretName, err)
+		}
+	} else {
+		// Legacy mode: generate client certificate signed by principal's CA
+		log().WithField("agent", agentName).Info("Generating unique client certificate for cluster registration")
+
+		clientCert, clientKey, caData, err = generateAgentClientCert(ctx, kubeclient, namespace, agentName, config.SecretNamePrincipalCA)
+		if err != nil {
+			return fmt.Errorf("could not generate client certificate: %v", err)
+		}
 	}
 
 	// Note: this structure has to be same as manual creation done by `argocd-agentctl agent create <agent_name>`
@@ -225,20 +245,45 @@ func CreateCluster(ctx context.Context, kubeclient kubernetes.Interface, namespa
 		},
 	}
 	if err := ClusterToSecret(cluster, secret); err != nil {
-		return fmt.Errorf("could not convert cluster to secret: %w", err)
+		return fmt.Errorf("could not convert cluster to secret: %v", err)
 	}
 
 	// Create the secret to register the agent's cluster.
-	// Handle AlreadyExists as success to make this idempotent and avoid TOCTOU race
-	// conditions where concurrent registrations both pass the existence check.
 	if _, err = kubeclient.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			return nil
 		}
-		return fmt.Errorf("could not create cluster secret to register agent's cluster: %w", err)
+		return fmt.Errorf("could not create cluster secret to register agent's cluster: %v", err)
 	}
 
 	return nil
+}
+
+// readSharedClientCertFromSecret reads TLS credentials from an existing Kubernetes TLS secret.
+// The secret should contain tls.crt, tls.key, and ca.crt keys.
+func readSharedClientCertFromSecret(ctx context.Context, kubeclient kubernetes.Interface, namespace, sharedClientCertSecretName string) (clientCert, clientKey, caData string, err error) {
+	secret, err := kubeclient.CoreV1().Secrets(namespace).Get(ctx, sharedClientCertSecretName, metav1.GetOptions{})
+	if err != nil {
+		return "", "", "", fmt.Errorf("could not read TLS secret %s/%s: %v", namespace, sharedClientCertSecretName, err)
+	}
+
+	certData, ok := secret.Data["tls.crt"]
+	if !ok {
+		return "", "", "", fmt.Errorf("secret %s/%s missing tls.crt", namespace, sharedClientCertSecretName)
+	}
+
+	keyData, ok := secret.Data["tls.key"]
+	if !ok {
+		return "", "", "", fmt.Errorf("secret %s/%s missing tls.key", namespace, sharedClientCertSecretName)
+	}
+
+	// CA cert can be in ca.crt (cert-manager style) or tls.crt of a separate CA secret
+	caBytes, ok := secret.Data["ca.crt"]
+	if !ok {
+		return "", "", "", fmt.Errorf("secret %s/%s missing ca.crt", namespace, sharedClientCertSecretName)
+	}
+
+	return string(certData), string(keyData), string(caBytes), nil
 }
 
 // ClusterSecretExists checks if a cluster secret exists for the given agent.
@@ -257,28 +302,28 @@ func generateAgentClientCert(ctx context.Context, kubeclient kubernetes.Interfac
 	// Read the CA certificate from the principal's CA secret
 	tlsCert, err := tlsutil.TLSCertFromSecret(ctx, kubeclient, namespace, caSecretName)
 	if err != nil {
-		err = fmt.Errorf("could not read CA secret: %w", err)
+		err = fmt.Errorf("could not read CA secret: %v", err)
 		return
 	}
 
 	// Parse CA certificate from PEM format
 	signerCert, err := x509.ParseCertificate(tlsCert.Certificate[0])
 	if err != nil {
-		err = fmt.Errorf("could not parse CA certificate: %w", err)
+		err = fmt.Errorf("could not parse CA certificate: %v", err)
 		return
 	}
 
 	// Generate a client cert with agent name as CN and sign it with the CA's cert and key
 	clientCert, clientKey, err = tlsutil.GenerateClientCertificate(agentName, signerCert, tlsCert.PrivateKey)
 	if err != nil {
-		err = fmt.Errorf("could not create client cert: %w", err)
+		err = fmt.Errorf("could not create client cert: %v", err)
 		return
 	}
 
 	// Convert CA certificate to PEM format
 	caData, err = tlsutil.CertDataToPEM(tlsCert.Certificate[0])
 	if err != nil {
-		err = fmt.Errorf("could not convert CA certificate to PEM format: %w", err)
+		err = fmt.Errorf("could not convert CA certificate to PEM format: %v", err)
 		return
 	}
 

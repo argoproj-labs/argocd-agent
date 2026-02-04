@@ -443,6 +443,7 @@ func deleteClusterSecret(ctx context.Context, client fixture.KubeClient, agentNa
 
 func enableSelfClusterRegistration() error {
 	envVar := "ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION=true"
+
 	return os.WriteFile(fixture.EnvVariablesFromE2EFile, []byte(envVar+"\n"), 0644)
 }
 

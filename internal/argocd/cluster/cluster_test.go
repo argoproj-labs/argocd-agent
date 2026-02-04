@@ -345,7 +345,7 @@ func Test_CreateCluster(t *testing.T) {
 	t.Run("Returns error when CA secret is missing", func(t *testing.T) {
 		kubeclient := kube.NewFakeClientsetWithResources()
 
-		err := CreateCluster(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr)
+		err := CreateCluster(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, "")
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "could not generate client certificate")
@@ -356,7 +356,7 @@ func Test_CreateCluster(t *testing.T) {
 		createTestCASecret(t, kubeclient, testNamespace)
 
 		agentName := "test-agent"
-		err := CreateCluster(context.Background(), kubeclient, testNamespace, agentName, testResourceProxyAddr)
+		err := CreateCluster(context.Background(), kubeclient, testNamespace, agentName, testResourceProxyAddr, "")
 
 		require.NoError(t, err)
 
@@ -370,5 +370,125 @@ func Test_CreateCluster(t *testing.T) {
 		require.Equal(t, getClusterSecretName(agentName), secret.Name)
 		require.Equal(t, agentName, secret.Labels[LabelKeyClusterAgentMapping])
 		require.Equal(t, "true", secret.Labels[LabelKeySelfRegisteredCluster])
+	})
+
+	t.Run("Creates cluster secret with shared client cert", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+
+		// Create the shared client cert secret
+		sharedSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-client-cert",
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("shared-cert-data"),
+				"tls.key": []byte("shared-key-data"),
+				"ca.crt":  []byte("shared-ca-data"),
+			},
+		}
+		_, err := kubeclient.CoreV1().Secrets(testNamespace).Create(context.Background(), sharedSecret, metav1.CreateOptions{})
+		require.NoError(t, err)
+
+		agentName := "test-agent-shared"
+		err = CreateCluster(context.Background(), kubeclient, testNamespace, agentName, testResourceProxyAddr, "shared-client-cert")
+
+		require.NoError(t, err)
+
+		// Verify the cluster secret was created with shared cert data
+		secret, err := kubeclient.CoreV1().Secrets(testNamespace).Get(
+			context.Background(),
+			getClusterSecretName(agentName),
+			metav1.GetOptions{},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, secret)
+
+		// Verify the cluster secret contains the shared cert data (base64 encoded in JSON)
+		clusterData, ok := secret.Data["config"]
+		require.True(t, ok)
+		require.Contains(t, string(clusterData), "c2hhcmVkLWNlcnQtZGF0YQ==")
+		require.Contains(t, string(clusterData), "c2hhcmVkLWtleS1kYXRh")
+		require.Contains(t, string(clusterData), "c2hhcmVkLWNhLWRhdGE=")
+	})
+
+	t.Run("Returns error when shared client cert secret does not exist", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+
+		err := CreateCluster(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, "non-existent-secret")
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "could not read shared client certificate from secret")
+	})
+}
+
+func Test_CreateClusterWithSharedCert(t *testing.T) {
+	const testNamespace = "argocd"
+	const testResourceProxyAddr = "resource-proxy:8443"
+
+	t.Run("Returns error when shared secret is missing tls.crt", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "missing-cert",
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.key": []byte("key-data"),
+				"ca.crt":  []byte("ca-data"),
+			},
+		}
+		_, err := kubeclient.CoreV1().Secrets(testNamespace).Create(context.Background(), secret, metav1.CreateOptions{})
+		require.NoError(t, err)
+
+		err = CreateCluster(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, "missing-cert")
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "missing tls.crt")
+	})
+
+	t.Run("Returns error when shared secret is missing tls.key", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "missing-key",
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("cert-data"),
+				"ca.crt":  []byte("ca-data"),
+			},
+		}
+		_, err := kubeclient.CoreV1().Secrets(testNamespace).Create(context.Background(), secret, metav1.CreateOptions{})
+		require.NoError(t, err)
+
+		err = CreateCluster(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, "missing-key")
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "missing tls.key")
+	})
+
+	t.Run("Returns error when shared secret is missing ca.crt", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "missing-ca",
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("cert-data"),
+				"tls.key": []byte("key-data"),
+			},
+		}
+		_, err := kubeclient.CoreV1().Secrets(testNamespace).Create(context.Background(), secret, metav1.CreateOptions{})
+		require.NoError(t, err)
+
+		err = CreateCluster(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, "missing-ca")
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "missing ca.crt")
 	})
 }
