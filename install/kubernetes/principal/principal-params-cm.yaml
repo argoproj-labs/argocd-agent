@@ -162,3 +162,7 @@ data:
   # principal.redis.server.address: The address of the Redis server.
   # Default: "argocd-redis:6379"
   principal.redis.server.address: "argocd-redis:6379"
+  # principal.destination-based-mapping: Whether to use destination-based mapping
+  # for routing applications to agents based on spec.destination.name instead of namespace.
+  # Default: false
+  principal.destination-based-mapping: "false"

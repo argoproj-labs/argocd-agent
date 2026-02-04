@@ -243,6 +243,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.pprof.port
                 optional: true
+          - name: ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.destination-based-mapping
+                optional: true
           - name: REDIS_PASSWORD
             valueFrom:
               secretKeyRef:

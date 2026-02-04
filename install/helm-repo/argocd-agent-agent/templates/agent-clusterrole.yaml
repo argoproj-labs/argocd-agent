@@ -12,5 +12,19 @@ rules:
   resources:
   - namespaces
   verbs:
+  - create
+  - get
   - list
   - watch
+- apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - delete
+  - patch
