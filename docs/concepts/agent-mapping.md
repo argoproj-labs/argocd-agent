@@ -103,6 +103,9 @@ ARGOCD_AGENT_CREATE_NAMESPACE=true
 !!! note "Allowed Namespaces"
     With destination-based mapping, applications can exist in any namespace. Both principal and agent have `--allowed-namespaces` flags to control which namespaces they will manage. The flag supports glob patterns for flexible namespace matching.
 
+!!! note "RBAC Permissions"
+    The default installation grants cluster-wide Application permissions. For tighter security, use RoleBindings per namespace instead of ClusterRoleBinding.
+
 ### Example
 
 ```yaml
