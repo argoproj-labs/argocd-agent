@@ -88,6 +88,68 @@ argocd-agent agent --enable-resource-proxy=true
 
 **Note**: When disabled, the agent will not process resource requests from the principal, making live resource viewing unavailable for applications on this agent cluster.
 
+### Argo CD Server Configuration
+
+The control plane Argo CD server must be configured to use the principal's **Redis proxy** for live resources and application state caching to work correctly. The Redis proxy intercepts Redis commands and routes agent-specific requests to the appropriate agent's Redis instance via gRPC.
+
+#### Redis Proxy Architecture
+
+```
+Control Plane Argo CD Server
+        │
+        ▼
+   Redis Proxy (principal, port 6379)
+        │
+        ├──► Agent data (app|managed-resources|...) ──► Agent via gRPC
+        │
+        └──► Principal data ──► argocd-redis (actual Redis)
+```
+
+The proxy routes requests based on Redis key patterns:
+
+| Key Pattern | Routing |
+|-------------|---------|
+| `app\|managed-resources\|<agent>_*` | Agent's Redis via gRPC |
+| `app\|resources-tree\|<agent>_*` | Agent's Redis via gRPC |
+| All other keys | Principal's local Redis |
+
+#### Configure Argo CD to Use Redis Proxy
+
+Update the Argo CD server to point to the Redis proxy instead of the direct Redis instance:
+
+**Using ConfigMap:**
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+data:
+  redis.server: "argocd-agent-redis-proxy:6379"
+```
+
+**Using Environment Variable:**
+
+```yaml
+env:
+  - name: ARGOCD_REDIS_SERVER
+    value: "argocd-agent-redis-proxy:6379"
+```
+
+#### Redis Proxy Service
+
+The `argocd-agent-redis-proxy` Service is included in the principal installation manifests and exposes the Redis proxy on port 6379. No additional setup is required beyond configuring the Argo CD server to use it.
+
+#### Principal Redis Backend Configuration
+
+The principal needs the address of the actual Redis server for non-agent requests:
+
+| Parameter | CLI Flag | Environment Variable | Default |
+|-----------|----------|---------------------|---------|
+| Redis Address | `--redis-server-address` | `ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS` | `argocd-redis:6379` |
+| Redis Password | `--redis-password` | `REDIS_PASSWORD` | `""` |
+
 ## RBAC Requirements
 
 **IMPORTANT**: By default, agents are installed with minimal RBAC permissions that only allow access to Argo CD's own resources (Applications, AppProjects, etc.) and basic resources like Secrets and ConfigMaps. For the resource proxy to work correctly with live application resources, **agents need enhanced RBAC permissions**.
