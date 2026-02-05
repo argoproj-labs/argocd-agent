@@ -54,8 +54,8 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	logstream "github.com/argoproj-labs/argocd-agent/principal/apis/logstreamapi"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/terminalstream"
-	"github.com/argoproj-labs/argocd-agent/principal/clusterregistration"
 	"github.com/argoproj-labs/argocd-agent/principal/redisproxy"
+	"github.com/argoproj-labs/argocd-agent/principal/registration"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -180,8 +180,8 @@ type Server struct {
 	// based on spec.destination.name instead of namespace
 	destinationBasedMapping bool
 
-	// clusterRegistrationManager handles automatic cluster registration for agents
-	clusterRegistrationManager *clusterregistration.ClusterRegistrationManager
+	// agentRegistrationManager handles automatic registration of agents
+	agentRegistrationManager *registration.AgentRegistrationManager
 }
 
 type handlersOnConnect func(agent types.Agent) error
@@ -436,13 +436,14 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	s.logStream = logstream.NewServer()
 	s.terminalStreamServer = terminalstream.NewServer()
 
-	// Initialize cluster registration manager to handle automatic cluster registration for agents
-	s.clusterRegistrationManager = clusterregistration.NewClusterRegistrationManager(
-		s.options.selfClusterRegistrationEnabled,
+	// Initialize agent registration manager to handle self registration of agents
+	s.agentRegistrationManager = registration.NewAgentRegistrationManager(
+		s.options.selfAgentRegistrationEnabled,
 		namespace,
 		s.options.resourceProxyAddress,
-		s.options.selfClusterRegistrationSharedCert,
+		s.options.clientCertSecretName,
 		kubeClient.Clientset,
+		s.issuer,
 	)
 
 	return s, nil

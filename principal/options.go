@@ -87,9 +87,9 @@ type ServerOptions struct {
 	// spec.destination.name instead of the application's namespace
 	destinationBasedMapping bool
 
-	selfClusterRegistrationEnabled    bool
-	resourceProxyAddress              string
-	selfClusterRegistrationSharedCert string
+	selfAgentRegistrationEnabled bool
+	resourceProxyAddress         string
+	clientCertSecretName         string
 }
 
 type ServerOption func(o *Server) error
@@ -97,13 +97,13 @@ type ServerOption func(o *Server) error
 // defaultOptions returns a set of default options for the server
 func defaultOptions() *ServerOptions {
 	return &ServerOptions{
-		port:                443,
-		address:             "",
-		tlsMinVersion:       tls.VersionTLS13,
-		unauthMethods:       make(map[string]bool),
-		eventProcessors:     10,
-		rootCa:              x509.NewCertPool(),
-		informerSyncTimeout: 60 * time.Second,
+		port:                 443,
+		address:              "",
+		tlsMinVersion:        tls.VersionTLS13,
+		unauthMethods:        make(map[string]bool),
+		eventProcessors:      10,
+		rootCa:               x509.NewCertPool(),
+		informerSyncTimeout:  60 * time.Second,
 		maxGRPCMessageSize:   grpcutil.DefaultGRPCMaxMessageSize,
 		resourceProxyAddress: "argocd-agent-resource-proxy:9090",
 	}
@@ -566,9 +566,9 @@ func WithDestinationBasedMapping(enabled bool) ServerOption {
 	}
 }
 
-func WithClusterRegistration(enabled bool) ServerOption {
+func WithAgentRegistration(enabled bool) ServerOption {
 	return func(o *Server) error {
-		o.options.selfClusterRegistrationEnabled = enabled
+		o.options.selfAgentRegistrationEnabled = enabled
 		return nil
 	}
 }
@@ -580,9 +580,9 @@ func WithResourceProxyAddress(address string) ServerOption {
 	}
 }
 
-func WithSelfClusterRegistrationSharedCert(secretName string) ServerOption {
+func WithClientCertSecretName(name string) ServerOption {
 	return func(o *Server) error {
-		o.options.selfClusterRegistrationSharedCert = secretName
+		o.options.clientCertSecretName = name
 		return nil
 	}
 }

@@ -54,7 +54,6 @@ fi
 ARGOCD_AGENT_RESOURCE_PROXY=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
 export ARGOCD_AGENT_RESOURCE_PROXY
 
-SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent principal \
 	--allowed-namespaces '*' \
 	--kubecontext vcluster-control-plane \

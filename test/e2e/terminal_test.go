@@ -30,7 +30,7 @@ type TerminalStreamingTestSuite struct {
 	fixture.BaseSuite
 }
 
-func (suite *TerminalStreamingTestSuite) Test_terminal_streaming_managed() {
+func (suite *TerminalStreamingTestSuite) validateTerminalStreaming() {
 	requires := suite.Require()
 
 	app := &v1alpha1.Application{
@@ -133,6 +133,75 @@ func (suite *TerminalStreamingTestSuite) Test_terminal_streaming_managed() {
 	suite.T().Log("Test 3 passed: ls command executed successfully")
 
 	suite.T().Logf("All terminal commands executed successfully.")
+}
+
+// Test_terminal_streaming_managed tests terminal streaming with manually created cluster secret
+func (suite *TerminalStreamingTestSuite) Test_terminal_streaming_managed() {
+	suite.validateTerminalStreaming()
+}
+
+// Test_SelfRegisteredSecret_Terminal tests terminal streaming with self-registered cluster secret
+func (suite *TerminalStreamingTestSuite) Test_SelfRegisteredSecret_Terminal() {
+	requires := suite.Require()
+
+	// Get original secret before any modifications for restoration later
+	originalSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	requires.NoError(err)
+
+	// Enable self-registration
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
+	defer func() {
+		// Disable self-registration
+		_ = fixture.DisableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient)
+
+		// Delete the self-registered secret
+		_ = fixture.DeleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+
+		// Restore the original secret
+		originalSecret.ResourceVersion = "" // Clear for recreation
+		originalSecret.UID = ""
+		_ = suite.PrincipalClient.Create(suite.Ctx, originalSecret, metav1.CreateOptions{})
+
+		// Restart to use restored secret
+		fixture.RestartAgent(suite.T(), fixture.PrincipalName)
+		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+		fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
+		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
+	}()
+
+	// Stop agent
+	err = fixture.StopProcess(fixture.AgentManagedName)
+	requires.NoError(err)
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning(fixture.AgentManagedName)
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete manual secret
+	err = fixture.DeleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	requires.NoError(err)
+
+	// Wait for secret to be deleted
+	requires.Eventually(func() bool {
+		return !fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	}, 10*time.Second, 1*time.Second)
+
+	// Restart principal with self-registration enabled
+	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
+	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+
+	// Restart agent to trigger self-registration
+	fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
+	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
+
+	// Wait for self-registered secret to be created
+	requires.Eventually(func() bool {
+		return fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	}, 30*time.Second, 1*time.Second, "Self-registered cluster secret should be created")
+
+	suite.T().Log("Self-registered secret created, now testing terminal streaming")
+
+	// Run the same terminal validation
+	suite.validateTerminalStreaming()
 }
 
 func TestTerminalStreamingTestSuite(t *testing.T) {

@@ -26,7 +26,7 @@ import (
 	issuermock "github.com/argoproj-labs/argocd-agent/internal/issuer/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
-	"github.com/argoproj-labs/argocd-agent/principal/clusterregistration"
+	"github.com/argoproj-labs/argocd-agent/principal/registration"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -130,11 +130,11 @@ func Test_Authenticate(t *testing.T) {
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
 		iss.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("refresh", nil)
 
-		// Create manager with self cluster registration disabled
+		// Create manager with agent registration disabled
 		kubeclient := kube.NewFakeKubeClient("argocd")
-		mgr := clusterregistration.NewClusterRegistrationManager(false, "argocd", "resource-proxy:8443", "", kubeclient)
+		mgr := registration.NewAgentRegistrationManager(false, "argocd", "resource-proxy:8443", "", kubeclient, iss)
 
-		auths, err := NewServer(queues, ams, iss, WithClusterRegistrationManager(mgr))
+		auths, err := NewServer(queues, ams, iss, WithAgentRegistrationManager(mgr))
 		require.NoError(t, err)
 		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
@@ -147,17 +147,19 @@ func Test_Authenticate(t *testing.T) {
 		assert.Equal(t, "refresh", r.RefreshToken)
 	})
 
-	t.Run("Authentication fails when self cluster registration fails", func(t *testing.T) {
+	t.Run("Authentication fails when agent registration fails", func(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
 		ams.RegisterMethod("userpass", am)
 
-		// Create manager with self cluster registration enabled but no CA secret to make it fail
+		// Create manager with agent registration enabled but no CA cert path to make it fail
 		kubeclient := kube.NewFakeClientsetWithResources()
-		mgr := clusterregistration.NewClusterRegistrationManager(true, "argocd", "resource-proxy:8443", "", kubeclient)
+		mockIss := issuermock.NewIssuer(t)
+		mockIss.On("IssueResourceProxyToken", "user1").Return("test-token", nil)
+		mgr := registration.NewAgentRegistrationManager(true, "argocd", "resource-proxy:8443", "", kubeclient, mockIss)
 
-		auths, err := NewServer(queues, ams, nil, WithClusterRegistrationManager(mgr))
+		auths, err := NewServer(queues, ams, nil, WithAgentRegistrationManager(mgr))
 		require.NoError(t, err)
 
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{

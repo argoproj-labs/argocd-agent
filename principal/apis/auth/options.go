@@ -14,11 +14,11 @@
 
 package auth
 
-import "github.com/argoproj-labs/argocd-agent/principal/clusterregistration"
+import "github.com/argoproj-labs/argocd-agent/principal/registration"
 
-func WithClusterRegistrationManager(manager *clusterregistration.ClusterRegistrationManager) ServerOption {
+func WithAgentRegistrationManager(manager *registration.AgentRegistrationManager) ServerOption {
 	return func(o *ServerOptions) error {
-		o.clusterRegistrationManager = manager
+		o.agentRegistrationManager = manager
 		return nil
 	}
 }

@@ -25,7 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
-	"github.com/argoproj-labs/argocd-agent/principal/clusterregistration"
+	"github.com/argoproj-labs/argocd-agent/principal/registration"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -38,7 +38,7 @@ type Server struct {
 	options     *ServerOptions
 	queues      *queue.SendRecvQueues
 
-	clusterRegistrationManager *clusterregistration.ClusterRegistrationManager
+	agentRegistrationManager *registration.AgentRegistrationManager
 }
 
 const (
@@ -54,7 +54,7 @@ const (
 var errAuthenticationFailed = status.Error(codes.Unauthenticated, authFailedMessage)
 
 type ServerOptions struct {
-	clusterRegistrationManager *clusterregistration.ClusterRegistrationManager
+	agentRegistrationManager *registration.AgentRegistrationManager
 }
 
 type ServerOption func(o *ServerOptions) error
@@ -78,7 +78,7 @@ func NewServer(queues *queue.SendRecvQueues, authMethods *auth.Methods, iss issu
 		}
 	}
 
-	s.clusterRegistrationManager = s.options.clusterRegistrationManager
+	s.agentRegistrationManager = s.options.agentRegistrationManager
 	return s, nil
 }
 
@@ -125,10 +125,10 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 	}
 	logCtx.WithField("client", clientID).Info("client authentication successful")
 
-	// If self cluster registration is enabled, register the agent's cluster and create cluster secret if it doesn't exist
-	if s.clusterRegistrationManager != nil && s.clusterRegistrationManager.IsSelfClusterRegistrationEnabled() {
-		if err := s.clusterRegistrationManager.RegisterCluster(ctx, clientID); err != nil {
-			logCtx.WithError(err).WithField("client", clientID).Error("Failed to self register agent's cluster")
+	// If self agent registration is enabled, register the agent and create cluster secret if it doesn't exist
+	if s.agentRegistrationManager != nil && s.agentRegistrationManager.IsSelfAgentRegistrationEnabled() {
+		if err := s.agentRegistrationManager.RegisterAgent(ctx, clientID); err != nil {
+			logCtx.WithError(err).WithField("client", clientID).Error("Failed to register agent")
 			return nil, errAuthenticationFailed
 		}
 	}

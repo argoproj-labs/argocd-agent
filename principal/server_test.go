@@ -128,35 +128,35 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, 60*time.Second, s.options.informerSyncTimeout)
 	})
 
-	t.Run("Cluster registration manager should be initialized", func(t *testing.T) {
+	t.Run("Agent registration manager should be initialized", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 			WithGeneratedTokenSigningKey(),
 			WithRedisProxyDisabled(),
 		)
 		assert.NoError(t, err)
 		assert.NotNil(t, s)
-		assert.NotNil(t, s.clusterRegistrationManager)
+		assert.NotNil(t, s.agentRegistrationManager)
 	})
 
-	t.Run("Cluster registration should be disabled by default", func(t *testing.T) {
+	t.Run("Agent registration should be disabled by default", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 			WithGeneratedTokenSigningKey(),
 			WithRedisProxyDisabled(),
 		)
 		assert.NoError(t, err)
 		assert.NotNil(t, s)
-		assert.False(t, s.clusterRegistrationManager.IsSelfClusterRegistrationEnabled())
+		assert.False(t, s.agentRegistrationManager.IsSelfAgentRegistrationEnabled())
 	})
 
-	t.Run("Cluster registration should be enabled when configured", func(t *testing.T) {
+	t.Run("Agent registration should be enabled when configured", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 			WithGeneratedTokenSigningKey(),
 			WithRedisProxyDisabled(),
-			WithClusterRegistration(true),
+			WithAgentRegistration(true),
 		)
 		assert.NoError(t, err)
 		assert.NotNil(t, s)
-		assert.True(t, s.clusterRegistrationManager.IsSelfClusterRegistrationEnabled())
+		assert.True(t, s.agentRegistrationManager.IsSelfAgentRegistrationEnabled())
 	})
 
 	t.Run("Resource proxy address should be configurable", func(t *testing.T) {

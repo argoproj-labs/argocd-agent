@@ -15,9 +15,7 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -29,35 +27,32 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 )
 
-type SelfClusterRegistrationTestSuite struct {
+type SelfAgentRegistrationTestSuite struct {
 	fixture.BaseSuite
 	// originalSecret stores the default manually created cluster secret for restoration after tests
 	originalSecret *corev1.Secret
 }
 
-func TestSelfClusterRegistrationTestSuite(t *testing.T) {
-	suite.Run(t, new(SelfClusterRegistrationTestSuite))
+func TestSelfAgentRegistrationTestSuite(t *testing.T) {
+	suite.Run(t, new(SelfAgentRegistrationTestSuite))
 }
 
-func (suite *SelfClusterRegistrationTestSuite) SetupSuite() {
+func (suite *SelfAgentRegistrationTestSuite) SetupSuite() {
 	suite.BaseSuite.SetupSuite()
 
 	// Store the original manually-created cluster secret which is created by e2e setup
 	// This will be used to restore the secret after tests that modify/delete it
-	secret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
-	if err == nil {
-		suite.originalSecret = secret.DeepCopy()
-		suite.T().Logf("Stored original cluster secret: %s, UID: %s", secret.Name, secret.UID)
-	} else {
-		suite.T().Logf("Warning: Could not get original cluster secret: %v", err)
+	secret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	if err != nil {
+		suite.T().Fatalf("Failed to get original cluster secret: %v - tests cannot run without a restorable secret", err)
 	}
+	suite.originalSecret = secret.DeepCopy()
+	suite.T().Logf("Stored original cluster secret: %s, UID: %s", secret.Name, secret.UID)
 }
 
-func (suite *SelfClusterRegistrationTestSuite) SetupTest() {
+func (suite *SelfAgentRegistrationTestSuite) SetupTest() {
 	suite.BaseSuite.SetupTest()
 
 	if !fixture.IsProcessRunning(fixture.PrincipalName) {
@@ -78,12 +73,12 @@ func (suite *SelfClusterRegistrationTestSuite) SetupTest() {
 	suite.ensureOriginalSecretExists()
 }
 
-func (suite *SelfClusterRegistrationTestSuite) TearDownTest() {
+func (suite *SelfAgentRegistrationTestSuite) TearDownTest() {
 	// Delete self-registered secret and restore original manual secret
 	suite.restoreOriginalSecret()
 
-	// Always disable self cluster registration and restart principal to ensure clean state
-	_ = disableSelfClusterRegistration()
+	// Always disable self agent registration and restart principal to ensure clean state
+	_ = fixture.DisableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient)
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
@@ -97,12 +92,12 @@ func (suite *SelfClusterRegistrationTestSuite) TearDownTest() {
 }
 
 // ensureOriginalSecretExists ensures the original manually-created cluster secret exists before each test
-func (suite *SelfClusterRegistrationTestSuite) ensureOriginalSecretExists() {
+func (suite *SelfAgentRegistrationTestSuite) ensureOriginalSecretExists() {
 	if suite.originalSecret == nil {
 		return
 	}
 
-	currentSecret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	currentSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	if errors.IsNotFound(err) {
 		// Secret doesn't exist, restore the original
 		suite.T().Log("Original cluster secret not found, restoring it")
@@ -118,18 +113,18 @@ func (suite *SelfClusterRegistrationTestSuite) ensureOriginalSecretExists() {
 	// If current secret is self-registered, delete it and restore original
 	if currentSecret.Labels[cluster.LabelKeySelfRegisteredCluster] == "true" {
 		suite.T().Log("Found self-registered secret, replacing with original manual secret")
-		_ = deleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+		_ = fixture.DeleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 		suite.createOriginalSecret()
 	}
 }
 
 // restoreOriginalSecret deletes any self-registered secret and restores the original manual secret
-func (suite *SelfClusterRegistrationTestSuite) restoreOriginalSecret() {
+func (suite *SelfAgentRegistrationTestSuite) restoreOriginalSecret() {
 	if suite.originalSecret == nil {
 		return
 	}
 
-	currentSecret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	currentSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	if errors.IsNotFound(err) {
 		// Secret doesn't exist, restore the original
 		suite.T().Log("Cluster secret not found after test, restoring original")
@@ -145,13 +140,13 @@ func (suite *SelfClusterRegistrationTestSuite) restoreOriginalSecret() {
 	// If current secret is self-registered, delete it and restore original
 	if currentSecret.Labels[cluster.LabelKeySelfRegisteredCluster] == "true" {
 		suite.T().Log("Deleting self-registered secret and restoring original manual secret")
-		_ = deleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+		_ = fixture.DeleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 		suite.createOriginalSecret()
 	}
 }
 
 // createOriginalSecret creates the original manually-created cluster secret
-func (suite *SelfClusterRegistrationTestSuite) createOriginalSecret() {
+func (suite *SelfAgentRegistrationTestSuite) createOriginalSecret() {
 	if suite.originalSecret == nil {
 		return
 	}
@@ -176,16 +171,16 @@ func (suite *SelfClusterRegistrationTestSuite) createOriginalSecret() {
 
 // Create secret manually and enable self registration, agent should connect successfully
 // but self registration should skip because manually created secret already exists
-func (suite *SelfClusterRegistrationTestSuite) Test_ManualSecretWithSelfRegistrationEnabled() {
+func (suite *SelfAgentRegistrationTestSuite) Test_ManualSecretWithSelfRegistrationEnabled() {
 	requires := suite.Require()
 
 	// Store original secret UID
-	originalSecret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	originalSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 	originalUID := originalSecret.UID
 
-	// Enable self cluster registration
-	requires.NoError(enableSelfClusterRegistration())
+	// Enable self agent registration
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
@@ -203,7 +198,7 @@ func (suite *SelfClusterRegistrationTestSuite) Test_ManualSecretWithSelfRegistra
 
 	// Verify manually created cluster secret still exists and has the same UID
 	// This confirms self-registration was skipped
-	currentSecret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	currentSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 	requires.Equal(originalUID, currentSecret.UID,
 		"Cluster secret UID should not change - self registration should skip existing secret")
@@ -214,11 +209,11 @@ func (suite *SelfClusterRegistrationTestSuite) Test_ManualSecretWithSelfRegistra
 }
 
 // Create secret manually and disable self registration, agent should connect successfully
-func (suite *SelfClusterRegistrationTestSuite) Test_ManualSecretWithSelfRegistrationDisabled() {
+func (suite *SelfAgentRegistrationTestSuite) Test_ManualSecretWithSelfRegistrationDisabled() {
 	requires := suite.Require()
 
 	// Store original secret UID
-	originalSecret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	originalSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 	originalUID := originalSecret.UID
 
@@ -235,7 +230,7 @@ func (suite *SelfClusterRegistrationTestSuite) Test_ManualSecretWithSelfRegistra
 	}, 30*time.Second, 1*time.Second)
 
 	// Verify manually created cluster secret still exists and has the same UID
-	currentSecret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	currentSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 	requires.Equal(originalUID, currentSecret.UID,
 		"Manually created cluster secret UID should not change")
@@ -246,11 +241,11 @@ func (suite *SelfClusterRegistrationTestSuite) Test_ManualSecretWithSelfRegistra
 }
 
 // Enable self registration without manually created secret, self registration should register cluster successfully
-func (suite *SelfClusterRegistrationTestSuite) Test_SelfRegistrationCreatesSecret() {
+func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret() {
 	requires := suite.Require()
 
-	// Enable self cluster registration
-	requires.NoError(enableSelfClusterRegistration())
+	// Enable self agent registration
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
@@ -268,17 +263,17 @@ func (suite *SelfClusterRegistrationTestSuite) Test_SelfRegistrationCreatesSecre
 	}, 30*time.Second, 1*time.Second)
 
 	// Store secret UID of manually created secret
-	originalSecret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	originalSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 	originalUID := originalSecret.UID
 
 	// Delete manually created cluster secret
-	err = deleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	err = fixture.DeleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 
 	// Wait for manually created cluster secret to be deleted
 	requires.Eventually(func() bool {
-		return !clusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+		return !fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	}, 10*time.Second, 1*time.Second)
 
 	// Restart the agent to trigger agent connection with self-registration enabled
@@ -296,11 +291,11 @@ func (suite *SelfClusterRegistrationTestSuite) Test_SelfRegistrationCreatesSecre
 
 	// Verify secret was created
 	requires.Eventually(func() bool {
-		return clusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+		return fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	}, 30*time.Second, 1*time.Second)
 
 	// Verify it's a new secret and has different UID
-	newSecret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	newSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 	requires.NotEqual(originalUID, newSecret.UID,
 		"New cluster secret should have different UID")
@@ -316,15 +311,15 @@ func (suite *SelfClusterRegistrationTestSuite) Test_SelfRegistrationCreatesSecre
 }
 
 // Compare structure of manually created vs self-registered secrets, both should have same structure
-func (suite *SelfClusterRegistrationTestSuite) Test_ManuallyCreatedAndSelfRegisteredSecrets() {
+func (suite *SelfAgentRegistrationTestSuite) Test_ManuallyCreatedAndSelfRegisteredSecrets() {
 	requires := suite.Require()
 
 	// Get manually created cluster secret structure
-	manualSecret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	manualSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 
 	// Enable self registration
-	requires.NoError(enableSelfClusterRegistration())
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
@@ -337,12 +332,12 @@ func (suite *SelfClusterRegistrationTestSuite) Test_ManuallyCreatedAndSelfRegist
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete manually created cluster secret
-	err = deleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	err = fixture.DeleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 
 	// Wait for manually created cluster secret to be deleted
 	requires.Eventually(func() bool {
-		return !clusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+		return !fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	}, 10*time.Second, 1*time.Second)
 
 	// Restart agent to trigger agent connection with self-registration enabled
@@ -351,11 +346,11 @@ func (suite *SelfClusterRegistrationTestSuite) Test_ManuallyCreatedAndSelfRegist
 
 	// Verify self-registered cluster secret was created
 	requires.Eventually(func() bool {
-		return clusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+		return fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	}, 30*time.Second, 1*time.Second)
 
 	// Get self-registered cluster secret
-	selfRegSecret, err := getClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	selfRegSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 
 	// Compare structures, both should have same secret type and agent mapping labels
@@ -376,11 +371,11 @@ func (suite *SelfClusterRegistrationTestSuite) Test_ManuallyCreatedAndSelfRegist
 }
 
 // Delete manually created cluster secret and disable self registration, cluster secret should NOT be created
-func (suite *SelfClusterRegistrationTestSuite) Test_NoSecretAndSelfRegistrationDisabled() {
+func (suite *SelfAgentRegistrationTestSuite) Test_NoSecretAndSelfRegistrationDisabled() {
 	requires := suite.Require()
 
-	// Disable self cluster registration
-	_ = disableSelfClusterRegistration()
+	// Disable self agent registration
+	_ = fixture.DisableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient)
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
@@ -393,60 +388,21 @@ func (suite *SelfClusterRegistrationTestSuite) Test_NoSecretAndSelfRegistrationD
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete manually created cluster secret
-	err = deleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	err = fixture.DeleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	requires.NoError(err)
 
 	// Wait for manually created cluster secret to be deleted
 	requires.Eventually(func() bool {
-		return !clusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+		return !fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
 	}, 10*time.Second, 1*time.Second)
 
 	// Restart agent to trigger agent connection with self-registration disabled
 	fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
 	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 
-	// Verify cluster secret was NOT created because self-registration is disabled
-	requires.False(clusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName),
+	// Verify the secret is never created
+	requires.Never(func() bool {
+		return fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	}, 30*time.Second, 1*time.Second,
 		"Cluster secret should NOT be created when self-registration is disabled")
-}
-
-func getClusterSecret(ctx context.Context, client fixture.KubeClient, agentName string) (*corev1.Secret, error) {
-	secretName := "cluster-" + agentName
-	secret := &corev1.Secret{}
-	secretKey := types.NamespacedName{Name: secretName, Namespace: "argocd"}
-	err := client.Get(ctx, secretKey, secret, metav1.GetOptions{})
-	return secret, err
-}
-
-func clusterSecretExists(ctx context.Context, client fixture.KubeClient, agentName string) bool {
-	kubeclient, err := kubernetes.NewForConfig(client.Config)
-	if err != nil {
-		return false
-	}
-	exists, err := cluster.ClusterSecretExists(ctx, kubeclient, "argocd", agentName)
-	if err != nil {
-		return false
-	}
-	return exists
-}
-
-func deleteClusterSecret(ctx context.Context, client fixture.KubeClient, agentName string) error {
-	secretName := "cluster-" + agentName
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
-			Namespace: "argocd",
-		},
-	}
-	return client.Delete(ctx, secret, metav1.DeleteOptions{})
-}
-
-func enableSelfClusterRegistration() error {
-	envVar := "ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION=true"
-
-	return os.WriteFile(fixture.EnvVariablesFromE2EFile, []byte(envVar+"\n"), 0644)
-}
-
-func disableSelfClusterRegistration() error {
-	return os.Remove(fixture.EnvVariablesFromE2EFile)
 }

@@ -233,3 +233,74 @@ func Test_Issuer(t *testing.T) {
 	})
 
 }
+
+func Test_ResourceProxyToken(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	var tok string
+
+	t.Run("Issue a resource proxy token", func(t *testing.T) {
+		i, err := NewIssuer("server", WithRSAPrivateKey(key))
+		require.NoError(t, err)
+		tok, err = i.IssueResourceProxyToken("test-agent")
+		require.NoError(t, err)
+		require.NotEmpty(t, tok)
+	})
+
+	t.Run("Validate resource proxy token", func(t *testing.T) {
+		i, err := NewIssuer("server", WithRSAPrivateKey(key))
+		require.NoError(t, err)
+		c, err := i.ValidateResourceProxyToken(tok)
+		require.NoError(t, err)
+		sub, err := c.GetSubject()
+		require.NoError(t, err)
+		assert.Equal(t, "test-agent", sub)
+	})
+
+	t.Run("Resource proxy token should not validate as access token", func(t *testing.T) {
+		i, err := NewIssuer("server", WithRSAPrivateKey(key))
+		require.NoError(t, err)
+		c, err := i.ValidateAccessToken(tok)
+		require.Error(t, err)
+		require.Nil(t, c)
+	})
+
+	t.Run("Resource proxy token should not validate as refresh token", func(t *testing.T) {
+		i, err := NewIssuer("server", WithRSAPrivateKey(key))
+		require.NoError(t, err)
+		c, err := i.ValidateRefreshToken(tok)
+		require.Error(t, err)
+		require.Nil(t, c)
+	})
+
+	t.Run("Resource proxy token signed by another issuer should fail", func(t *testing.T) {
+		i1, err := NewIssuer("server", WithRSAPrivateKey(key))
+		require.NoError(t, err)
+		key2, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		i2, err := NewIssuer("server", WithRSAPrivateKey(key2))
+		require.NoError(t, err)
+		tok, err := i2.IssueResourceProxyToken("test-agent")
+		require.NoError(t, err)
+		c, err := i1.ValidateResourceProxyToken(tok)
+		assert.ErrorContains(t, err, jwt.ErrSignatureInvalid.Error())
+		assert.Nil(t, c)
+	})
+
+	t.Run("Resource proxy token with wrong audience should fail", func(t *testing.T) {
+		tok, err := signedTokenWithClaims(jwt.SigningMethodRS512, key, jwt.RegisteredClaims{
+			Issuer:    "server",
+			Subject:   "test-agent",
+			Audience:  jwt.ClaimStrings{"wrong-audience"},
+			NotBefore: jwt.NewNumericDate(time.Now()),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		})
+		require.NoError(t, err)
+		i, err := NewIssuer("server", WithRSAPrivateKey(key))
+		require.NoError(t, err)
+		c, err := i.ValidateResourceProxyToken(tok)
+		assert.ErrorContains(t, err, jwt.ErrTokenInvalidAudience.Error())
+		assert.Nil(t, c)
+	})
+}
