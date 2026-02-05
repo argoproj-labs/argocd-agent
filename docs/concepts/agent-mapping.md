@@ -61,7 +61,7 @@ spec:
 Destination-based mapping uses the Application's `spec.destination.name` field to determine which agent handles it. This enables more flexible routing and better multi-tenancy support.
 
 !!! important "Managed Mode Only"
-    Destination-based mapping only applies to **managed agents**. Autonomous agents do not require this feature because the agent is the source of truth and controls where applications are stored locally. On the principal, autonomous apps are always stored in the `{agentName}/` namespace for clear ownership.
+    Destination-based mapping only applies to **managed agents**. Autonomous agents do not require this feature because the agent is the source of truth and controls where applications are stored locally. On the principal, autonomous apps are always stored in the `{agentName}` namespace for clear ownership.
 
 ### How It Works
 
@@ -97,7 +97,7 @@ ARGOCD_AGENT_CREATE_NAMESPACE=true
 ```
 
 !!! note "Create Namespace"
-    With destination-based mapping, the agent creates the apps on the same namespace as the principal.
+    With destination-based mapping, the agent creates the apps in the same namespace as the principal.
     Users can manually create this namespace on the agent or use the `--create-namespace` flag to allow the agent to create namespaces automatically when applications target namespaces that don't exist.
 
 !!! note "Allowed Namespaces"
