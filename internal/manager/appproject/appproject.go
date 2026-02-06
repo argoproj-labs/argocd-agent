@@ -458,7 +458,7 @@ func isDenyPattern(pattern string) bool {
 // AgentSpecificAppProject returns an agent specific version of the given AppProject
 // We don't have to check for deny patterns because we only construct the agent specific AppProject
 // if the agent name matches the AppProject's destinations.
-func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alpha1.AppProject {
+func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string, dstMapping bool) v1alpha1.AppProject {
 	// Only keep the destinations that are relevant to the given agent
 	filteredDst := []v1alpha1.ApplicationDestination{}
 	for _, dst := range appProject.Spec.Destinations {
@@ -483,9 +483,14 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string) v1alp
 	}
 	appProject.Spec.Destinations = filteredDst
 
-	// Remove sourceNamespaces since they are not relevant on the workload cluster
-	// They are only used on the control plane to determine which agents should receive the AppProject
-	appProject.Spec.SourceNamespaces = nil
+	// Preserve sourceNamespaces to allow apps in any namespace on the workload cluster
+	// This is required for destination-based mapping where Applications can be created
+	// in namespaces other than argocd.
+	if !dstMapping {
+		// Remove sourceNamespaces since they are not relevant on the workload cluster
+		// They are only used on the control plane to determine which agents should receive the AppProject
+		appProject.Spec.SourceNamespaces = nil
+	}
 
 	// Remove the roles since they are not relevant on the workload cluster
 	appProject.Spec.Roles = []v1alpha1.ProjectRole{}

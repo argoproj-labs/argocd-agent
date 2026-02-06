@@ -35,6 +35,7 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 		key           string
 		value         string
 		errorExpected bool
+		agentFn       AgentLookupFunc
 	}
 
 	testEntries := []testEntry{
@@ -43,6 +44,15 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 			key:           "app|managed-resources|agent-managed_my-app|1.8.3",
 			value:         "agent-managed",
 			errorExpected: false,
+		},
+		{
+			name:          "'app|managed-resources' with name/namespace and custom agent lookup function",
+			key:           "app|managed-resources|agent-managed_my-app|1.8.3",
+			value:         "custom-agent-name",
+			errorExpected: false,
+			agentFn: func(namespace, name string) string {
+				return "custom-agent-name"
+			},
 		},
 		{
 			name:          "'app|resources-tree' with name/namespace",
@@ -84,7 +94,9 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 
 	for _, testEntry := range testEntries {
 		t.Run(testEntry.name, func(t *testing.T) {
-			res, err := extractAgentNameFromRedisCommandKey(testEntry.key, logEntry)
+			rp := &RedisProxy{}
+			rp.agentLookupFn = testEntry.agentFn
+			res, err := rp.extractAgentNameFromRedisCommandKey(testEntry.key, logEntry)
 
 			require.Equal(t, testEntry.value, res)
 			require.Equal(t, testEntry.errorExpected, err != nil, "err: %v", err)

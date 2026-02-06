@@ -143,9 +143,15 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 
 	logCtx.Tracef("Start processing redis SUBSCRIBE request with key '%s'", channelName)
 
-	channelName, err := stripNamespaceFromRedisKey(channelName, logCtx)
-	if err != nil {
-		return nil, fmt.Errorf("unable to transform SUBSCRIBE key for agent: %v", err)
+	// When destination-based mapping is enabled, the key format from the principal
+	// already matches the format used by ArgoCD on the agent (namespace_appname),
+	// so we don't need to strip the namespace.
+	if !a.destinationBasedMapping {
+		var err error
+		channelName, err = stripNamespaceFromRedisKey(channelName, logCtx)
+		if err != nil {
+			return nil, fmt.Errorf("unable to transform SUBSCRIBE key for agent: %v", err)
+		}
 	}
 
 	// Subscribe to the argo cd redis channel via redis client
@@ -245,16 +251,22 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 
 	logCtx.Tracef("Start processing redis GET request with key '%s'", key)
 
-	key, err := stripNamespaceFromRedisKey(key, logCtx)
-	if err != nil {
-		return nil, fmt.Errorf("unable to transform GET key for agent: %v", err)
+	// When destination-based mapping is enabled, the key format from the principal
+	// already matches the format used by ArgoCD on the agent (namespace_appname),
+	// so we don't need to strip the namespace.
+	if !a.destinationBasedMapping {
+		var err error
+		key, err = stripNamespaceFromRedisKey(key, logCtx)
+		if err != nil {
+			return nil, fmt.Errorf("unable to transform GET key for agent: %v", err)
+		}
 	}
 
 	// Connect to local redis to GET key/value, and store response
 	getBody := event.RedisResponseBodyGet{}
 
 	var data []byte
-	err = a.redisProxyMsgHandler.argoCDRedisCache.GetSkippingLocalCache(context.Background(), key, &data)
+	err := a.redisProxyMsgHandler.argoCDRedisCache.GetSkippingLocalCache(context.Background(), key, &data)
 	if errors.Is(err, rediscache.ErrCacheMiss) {
 		getBody.Bytes = nil
 		getBody.CacheHit = false

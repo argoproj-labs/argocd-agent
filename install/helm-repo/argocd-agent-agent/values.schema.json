@@ -221,6 +221,19 @@
       "description": "Comma-separated list of TLS cipher suites (empty uses Go defaults)"
     },
 
+    "destinationBasedMapping": {
+      "type": "boolean",
+      "description": "Whether to enable destination-based mapping. When enabled, the agent creates applications in their original namespace instead of the agent's own namespace."
+    },
+    "createNamespace": {
+      "type": "boolean",
+      "description": "Whether to create target namespaces automatically when they don't exist. Used with destination-based mapping."
+    },
+    "allowedNamespaces": {
+      "type": "string",
+      "description": "Comma-separated list of additional namespaces the agent is allowed to manage applications in. Supports glob patterns."
+    },
+
     "service": {
       "type": "object",
       "description": "Service configuration for metrics and healthz",

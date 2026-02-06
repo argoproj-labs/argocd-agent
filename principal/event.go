@@ -279,6 +279,9 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		if agentMode.IsAutonomous() {
 			s.deletions.MarkExpected(incoming.UID)
 
+			// Autonomous apps are always stored in the agent's namespace on the principal
+			incoming.SetNamespace(agentName)
+
 			deletionPropagation := backend.DeletePropagationForeground
 			err = s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
 			if err != nil {
@@ -295,7 +298,10 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 
 		} else if agentMode.IsManaged() {
 
-			incoming.SetNamespace(agentName)
+			// When destination-based mapping is disabled, apps are stored in the agent's namespace
+			if !s.destinationBasedMapping {
+				incoming.SetNamespace(agentName)
+			}
 			app, err := s.appManager.Get(ctx, incoming.Name, incoming.Namespace)
 			if err != nil {
 				if kerrors.IsNotFound(err) {
@@ -633,7 +639,8 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 		return fmt.Errorf("queue not found for agent: %s", agentName)
 	}
 
-	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx, manager.ManagerRolePrincipal, s.namespace)
+	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx, manager.ManagerRolePrincipal, s.namespace).
+		WithDestinationBasedMapping(s.destinationBasedMapping)
 
 	switch ev.Type() {
 	case event.SyncedResourceList.String():

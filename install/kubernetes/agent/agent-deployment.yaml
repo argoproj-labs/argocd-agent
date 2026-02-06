@@ -170,6 +170,24 @@ spec:
                 name: argocd-agent-params
                 key: agent.resource-proxy.enable
                 optional: true
+          - name: ARGOCD_AGENT_DESTINATION_BASED_MAPPING
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.destination-based-mapping
+                optional: true
+          - name: ARGOCD_AGENT_CREATE_NAMESPACE
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.create-namespace
+                optional: true
+          - name: ARGOCD_AGENT_ALLOWED_NAMESPACES
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.allowed-namespaces
+                optional: true
           image: argocd-agent
           imagePullPolicy: Always
           name: argocd-agent-agent

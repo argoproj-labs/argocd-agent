@@ -102,3 +102,14 @@ data:
   # agent.cache.refresh-interval: Cache refresh interval.
   # Default: "10s"
   agent.cache.refresh-interval: {{ .Values.cacheRefreshInterval | quote }}
+  # agent.destination-based-mapping: Whether to enable destination-based mapping.
+  # When enabled, the agent creates applications in their original namespace
+  # (preserving the namespace from the principal) instead of the agent's own namespace.
+  # Default: false
+  agent.destination-based-mapping: {{ .Values.destinationBasedMapping | quote }}
+  # agent.create-namespace: Whether to create target namespaces automatically.
+  # Default: false
+  agent.create-namespace: {{ .Values.createNamespace | quote }}
+  # agent.allowed-namespaces: Additional namespaces the agent can manage.
+  # Default: ""
+  agent.allowed-namespaces: {{ .Values.allowedNamespaces | quote }}

@@ -41,6 +41,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 )
 
 func TestMapAppProjectToAgents(t *testing.T) {
@@ -1155,6 +1156,253 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 	}
 }
 
+func TestServer_deleteAppCallback(t *testing.T) {
+	t.Run("handle delete app callback for namespace-based mapping", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
+			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
+			appToAgent:   newConcurrentStringMap(),
+		}
+
+		err = s.queues.Create("managed-agent")
+		require.NoError(t, err)
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "managed-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		// Pre-populate tracking
+		s.resources.Add("managed-agent", resources.NewResourceKeyFromApp(app))
+
+		s.deleteAppCallback(app)
+
+		// Verify delete event was sent to the queue
+		sendQ := s.queues.SendQ("managed-agent")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+
+		if sendQ.Len() > 0 {
+			ev, shutdown := sendQ.Get()
+			require.False(t, shutdown)
+			assert.Equal(t, event.Delete.String(), ev.Type())
+
+			deletedApp := &v1alpha1.Application{}
+			b := ev.Data()
+			err := json.Unmarshal(b, deletedApp)
+			require.NoError(t, err)
+			assert.Equal(t, app.Name, deletedApp.Name)
+			sendQ.Done(ev)
+		}
+
+		// Verify resource tracking was removed
+		agentResources := s.resources.GetAllResources("managed-agent")
+		assert.Len(t, agentResources, 0)
+	})
+
+	t.Run("handle delete app callback for destination-based mapping", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			namespaceMap:            map[string]types.AgentMode{},
+			appManager:              appManager,
+			resources:               resources.NewAgentResources(),
+			appToAgent:              newConcurrentStringMap(),
+			destinationBasedMapping: true,
+		}
+
+		err = s.queues.Create("target-cluster")
+		require.NoError(t, err)
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "argocd", // Different from destination
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "target-cluster", // This should be used as agent name
+				},
+			},
+		}
+
+		// Pre-populate tracking with destination name
+		s.resources.Add("target-cluster", resources.NewResourceKeyFromApp(app))
+		s.appToAgent.Set(app.QualifiedName(), "target-cluster")
+
+		s.deleteAppCallback(app)
+
+		// Verify delete event was sent to the correct queue (target-cluster, not argocd)
+		sendQ := s.queues.SendQ("target-cluster")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+
+		if sendQ.Len() > 0 {
+			ev, shutdown := sendQ.Get()
+			require.False(t, shutdown)
+			assert.Equal(t, event.Delete.String(), ev.Type())
+
+			deletedApp := &v1alpha1.Application{}
+			b := ev.Data()
+			err := json.Unmarshal(b, deletedApp)
+			require.NoError(t, err)
+			assert.Equal(t, app.Name, deletedApp.Name)
+			sendQ.Done(ev)
+		}
+
+		// Verify resource tracking was removed from destination cluster
+		agentResources := s.resources.GetAllResources("target-cluster")
+		assert.Len(t, agentResources, 0)
+
+		// Verify app-to-agent mapping was removed
+		agents := s.appToAgent.Get(app.QualifiedName())
+		assert.Empty(t, agents)
+	})
+}
+
+func TestServer_newAppCallback(t *testing.T) {
+	t.Run("sends create event to queue using namespace-based mapping", func(t *testing.T) {
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "managed-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		s.newAppCallback(app)
+
+		// Verify event was added to queue
+		sendQ := s.queues.SendQ("managed-agent")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+
+		ev, shutdown := sendQ.Get()
+		require.False(t, shutdown)
+		assert.Equal(t, event.Create.String(), ev.Type())
+
+		// Verify event contains the app
+		receivedApp := &v1alpha1.Application{}
+		err := json.Unmarshal(ev.Data(), receivedApp)
+		require.NoError(t, err)
+		assert.Equal(t, app.Name, receivedApp.Name)
+		assert.Equal(t, app.Namespace, receivedApp.Namespace)
+		sendQ.Done(ev)
+
+		// Verify resource tracking
+		agentResources := s.resources.GetAllResources("managed-agent")
+		assert.Len(t, agentResources, 1)
+		assert.Equal(t, app.Name, agentResources[0].Name)
+
+		assert.Empty(t, s.appToAgent.Get("managed-agent/test-app"))
+	})
+
+	t.Run("sends create event using destination-based mapping", func(t *testing.T) {
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			resources:               resources.NewAgentResources(),
+			appToAgent:              newConcurrentStringMap(),
+			destinationBasedMapping: true,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "argocd", // Different from agent name
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "target-cluster", // This should be used as agent name
+				},
+			},
+		}
+
+		s.newAppCallback(app)
+
+		// Verify event was added to the correct queue (target-cluster, not argocd)
+		sendQ := s.queues.SendQ("target-cluster")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+
+		ev, shutdown := sendQ.Get()
+		require.False(t, shutdown)
+		assert.Equal(t, event.Create.String(), ev.Type())
+		sendQ.Done(ev)
+
+		// Verify app-to-agent mapping was tracked
+		agent := s.appToAgent.Get("argocd/test-app")
+		assert.Equal(t, "target-cluster", agent)
+
+		// Verify resource tracking uses destination name
+		agentResources := s.resources.GetAllResources("target-cluster")
+		assert.Len(t, agentResources, 1)
+		assert.Equal(t, app.Name, agentResources[0].Name)
+	})
+
+	t.Run("destination.name is empty, should not process the app", func(t *testing.T) {
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			resources:               resources.NewAgentResources(),
+			appToAgent:              newConcurrentStringMap(),
+			destinationBasedMapping: true,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "fallback-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "", // Empty - should fall back to namespace
+				},
+			},
+		}
+
+		s.newAppCallback(app)
+
+		// Should not process the app
+		assert.Zero(t, s.queues.Len())
+	})
+}
+
 func TestServer_updateAppCallback(t *testing.T) {
 	t.Run("managed agent update sends event to queue", func(t *testing.T) {
 		mockBackend := &mocks.Application{}
@@ -1472,4 +1720,528 @@ func TestServer_updateAppCallback(t *testing.T) {
 			sendQ.Done(ev)
 		}
 	})
+
+	t.Run("update with destination-based mapping", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			namespaceMap:            map[string]types.AgentMode{},
+			appManager:              appManager,
+			resources:               resources.NewAgentResources(),
+			appToAgent:              newConcurrentStringMap(),
+			destinationBasedMapping: true,
+		}
+
+		// Create queue for the destination cluster
+		err = s.queues.Create("target-cluster")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "test-app",
+				Namespace:       "argocd", // Different from destination name
+				ResourceVersion: "1",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "target-cluster", // This should be used as agent name
+				},
+			},
+		}
+
+		s.newAppCallback(oldApp)
+		assert.Equal(t, 1, s.queues.Len())
+		drainQueue(t, s.queues.SendQ("target-cluster"))
+
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "test-app",
+				Namespace:       "argocd",
+				ResourceVersion: "2",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "updated-project",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "target-cluster", // Same destination
+				},
+			},
+		}
+
+		s.updateAppCallback(oldApp, newApp)
+
+		// Verify event was added to the correct queue (target-cluster, not argocd)
+		sendQ := s.queues.SendQ("target-cluster")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+
+		if sendQ.Len() > 0 {
+			ev, shutdown := sendQ.Get()
+			require.False(t, shutdown)
+			assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+
+			app := &v1alpha1.Application{}
+			b := ev.Data()
+			err := json.Unmarshal(b, app)
+			require.NoError(t, err)
+			assert.Equal(t, newApp, app)
+			sendQ.Done(ev)
+		}
+
+		// Verify app-to-agent mapping is maintained
+		agent := s.appToAgent.Get("argocd/test-app")
+		assert.Equal(t, "target-cluster", agent)
+
+		// Verify resource tracking uses destination name
+		agentResources := s.resources.GetAllResources("target-cluster")
+		assert.Len(t, agentResources, 1)
+		assert.Equal(t, newApp.Name, agentResources[0].Name)
+	})
+
+	t.Run("update changes destination in destination-based mapping", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			namespaceMap:            map[string]types.AgentMode{},
+			appManager:              appManager,
+			resources:               resources.NewAgentResources(),
+			appToAgent:              newConcurrentStringMap(),
+			destinationBasedMapping: true,
+		}
+
+		// Create queues for both clusters
+		err = s.queues.Create("cluster-1")
+		require.NoError(t, err)
+		err = s.queues.Create("cluster-2")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "test-app",
+				Namespace:       "argocd",
+				ResourceVersion: "1",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "cluster-1", // Old destination
+				},
+			},
+		}
+
+		s.newAppCallback(oldApp)
+		drainQueue(t, s.queues.SendQ("cluster-1"))
+
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "test-app",
+				Namespace:       "argocd",
+				ResourceVersion: "2",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "cluster-2", // New destination
+				},
+			},
+		}
+
+		s.updateAppCallback(oldApp, newApp)
+
+		// Verify delete event was sent to old cluster
+		sendQ1 := s.queues.SendQ("cluster-1")
+		require.NotNil(t, sendQ1)
+		assert.Equal(t, 1, sendQ1.Len())
+
+		if sendQ1.Len() > 0 {
+			ev, shutdown := sendQ1.Get()
+			require.False(t, shutdown)
+			assert.Equal(t, event.Delete.String(), ev.Type())
+			sendQ1.Done(ev)
+		}
+
+		// Verify spec update event was sent to new cluster
+		sendQ2 := s.queues.SendQ("cluster-2")
+		require.NotNil(t, sendQ2)
+		assert.Equal(t, 1, sendQ2.Len())
+
+		if sendQ2.Len() > 0 {
+			ev, shutdown := sendQ2.Get()
+			require.False(t, shutdown)
+			assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+			sendQ2.Done(ev)
+		}
+
+		// Verify app-to-agent mapping was updated
+		agent := s.appToAgent.Get("argocd/test-app")
+		assert.Equal(t, "cluster-2", agent)
+
+		// Verify resource tracking was updated
+		agentResources1 := s.resources.GetAllResources("cluster-1")
+		assert.Len(t, agentResources1, 0, "Old cluster should have no resources")
+
+		agentResources2 := s.resources.GetAllResources("cluster-2")
+		assert.Len(t, agentResources2, 1, "New cluster should have the resource")
+		assert.Equal(t, newApp.Name, agentResources2[0].Name)
+	})
+
+	t.Run("destination-based mapping with empty new destination", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			namespaceMap:            map[string]types.AgentMode{},
+			appManager:              appManager,
+			resources:               resources.NewAgentResources(),
+			appToAgent:              newConcurrentStringMap(),
+			destinationBasedMapping: true,
+		}
+
+		// Create queues for both clusters
+		err = s.queues.Create("cluster-1")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "test-app",
+				Namespace:       "argocd",
+				ResourceVersion: "1",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "cluster-1", // Old destination
+				},
+			},
+		}
+
+		s.newAppCallback(oldApp)
+		drainQueue(t, s.queues.SendQ("cluster-1"))
+
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "test-app",
+				Namespace:       "argocd",
+				ResourceVersion: "2",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Destination: v1alpha1.ApplicationDestination{
+					Name: "", // Empty destination
+				},
+			},
+		}
+
+		s.updateAppCallback(oldApp, newApp)
+
+		// Verify delete event was sent to old cluster
+		sendQ1 := s.queues.SendQ("cluster-1")
+		require.NotNil(t, sendQ1)
+		assert.Equal(t, 1, sendQ1.Len())
+
+		if sendQ1.Len() > 0 {
+			ev, shutdown := sendQ1.Get()
+			require.False(t, shutdown)
+			assert.Equal(t, event.Delete.String(), ev.Type())
+			sendQ1.Done(ev)
+		}
+
+		assert.Equal(t, 1, s.queues.Len())
+
+		// Verify app-to-agent mapping was removed
+		assert.Empty(t, s.appToAgent.Get("argocd/test-app"))
+
+		// Verify resource tracking was removed
+		agentResources1 := s.resources.GetAllResources("cluster-1")
+		assert.Len(t, agentResources1, 0, "Old cluster should have no resources")
+	})
+}
+
+func TestServer_handleAppAgentChange(t *testing.T) {
+	tests := []struct {
+		name                    string
+		destinationBasedMapping bool
+		oldApp                  *v1alpha1.Application
+		newApp                  *v1alpha1.Application
+		expectedDeleteAgent     string
+		expectedDeleteEvent     bool
+		expectedAddAgent        string
+		shouldTrackApp          bool
+	}{
+		{
+			name:                    "destination changed - moves app from old to new agent",
+			destinationBasedMapping: true,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "new-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "old-agent",
+			expectedDeleteEvent: true,
+			expectedAddAgent:    "new-agent",
+			shouldTrackApp:      true,
+		},
+		{
+			name:                    "destination unchanged - no action taken",
+			destinationBasedMapping: true,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "same-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "same-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "",
+			expectedDeleteEvent: false,
+			expectedAddAgent:    "",
+			shouldTrackApp:      false,
+		},
+		{
+			name:                    "destination-based mapping disabled - no action taken",
+			destinationBasedMapping: false,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "new-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "",
+			expectedDeleteEvent: false,
+			expectedAddAgent:    "",
+			shouldTrackApp:      false,
+		},
+		{
+			name:                    "old agent empty - only adds to new agent",
+			destinationBasedMapping: true,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "new-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "",
+			expectedDeleteEvent: false,
+			expectedAddAgent:    "new-agent",
+			shouldTrackApp:      true,
+		},
+		{
+			name:                    "new agent empty - only removes from old agent",
+			destinationBasedMapping: true,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "",
+					},
+				},
+			},
+			expectedDeleteAgent: "old-agent",
+			expectedDeleteEvent: true,
+			expectedAddAgent:    "",
+			shouldTrackApp:      false,
+		},
+		{
+			name:                    "autonomous resource - no action taken",
+			destinationBasedMapping: true,
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+					Annotations: map[string]string{
+						manager.SourceUIDAnnotation: "uid-123",
+					},
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "new-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "",
+			expectedDeleteEvent: false,
+			expectedAddAgent:    "",
+			shouldTrackApp:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				ctx:                     context.Background(),
+				queues:                  queue.NewSendRecvQueues(),
+				events:                  event.NewEventSource("test"),
+				resources:               resources.NewAgentResources(),
+				appToAgent:              newConcurrentStringMap(),
+				destinationBasedMapping: tt.destinationBasedMapping,
+			}
+
+			// Create queues for agents involved
+			if tt.expectedDeleteAgent != "" {
+				s.queues.Create(tt.expectedDeleteAgent)
+				s.resources.Add(tt.expectedDeleteAgent, resources.NewResourceKeyFromApp(tt.oldApp))
+				s.appToAgent.Set(tt.oldApp.QualifiedName(), tt.expectedDeleteAgent)
+			}
+			if tt.expectedAddAgent != "" {
+				s.queues.Create(tt.expectedAddAgent)
+			}
+
+			logCtx := logrus.WithField("test", "handleAppAgentChange")
+
+			// Execute the function under test
+			s.handleAppAgentChange(context.Background(), tt.oldApp, tt.newApp, logCtx)
+
+			// Verify delete event sent if expected
+			if tt.expectedDeleteEvent && tt.expectedDeleteAgent != "" {
+				q := s.queues.SendQ(tt.expectedDeleteAgent)
+				require.NotNil(t, q)
+				assert.Greater(t, q.Len(), 0, "Expected delete event in queue")
+
+				if q.Len() > 0 {
+					ev, shutdown := q.Get()
+					require.False(t, shutdown)
+					assert.Equal(t, event.Delete.String(), ev.Type())
+					q.Done(ev)
+				}
+			}
+
+			// Verify app tracking if expected
+			if tt.shouldTrackApp && tt.expectedAddAgent != "" {
+				trackedAgent := s.appToAgent.Get(tt.newApp.QualifiedName())
+				assert.Equal(t, tt.expectedAddAgent, trackedAgent, "App should be tracked to new agent")
+			}
+
+			// Verify app not tracked if not expected
+			if !tt.shouldTrackApp {
+				trackedAgent := s.appToAgent.Get(tt.newApp.QualifiedName())
+				assert.Empty(t, trackedAgent, "App should not be tracked")
+			}
+
+			// Verify resources added/removed
+			if tt.expectedDeleteAgent != "" {
+				resourceKey := resources.NewResourceKeyFromApp(tt.oldApp)
+				assert.NotContainsf(t, s.resources.Get(tt.expectedDeleteAgent).GetAll(), resourceKey, "Resource should be removed from old agent")
+			}
+
+			if tt.expectedAddAgent != "" {
+				resourceKey := resources.NewResourceKeyFromApp(tt.newApp)
+				assert.Containsf(t, s.resources.Get(tt.expectedAddAgent).GetAll(), resourceKey, "Resource should be added to new agent")
+			}
+		})
+	}
+}
+
+func drainQueue(t *testing.T, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) {
+	for q.Len() > 0 {
+		ev, shutdown := q.Get()
+		if shutdown {
+			break
+		}
+		q.Done(ev)
+	}
 }
