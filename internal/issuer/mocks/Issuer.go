@@ -252,6 +252,120 @@ func (_c *Issuer_ValidateRefreshToken_Call) RunAndReturn(run func(string) (issue
 	return _c
 }
 
+// IssueResourceProxyToken provides a mock function with given fields: agentName
+func (_m *Issuer) IssueResourceProxyToken(agentName string) (string, error) {
+	ret := _m.Called(agentName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for IssueResourceProxyToken")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(agentName)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(agentName)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(agentName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Issuer_IssueResourceProxyToken_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IssueResourceProxyToken'
+type Issuer_IssueResourceProxyToken_Call struct {
+	*mock.Call
+}
+
+// IssueResourceProxyToken is a helper method to define mock.On call
+//   - agentName string
+func (_e *Issuer_Expecter) IssueResourceProxyToken(agentName interface{}) *Issuer_IssueResourceProxyToken_Call {
+	return &Issuer_IssueResourceProxyToken_Call{Call: _e.mock.On("IssueResourceProxyToken", agentName)}
+}
+
+func (_c *Issuer_IssueResourceProxyToken_Call) Run(run func(agentName string)) *Issuer_IssueResourceProxyToken_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *Issuer_IssueResourceProxyToken_Call) Return(_a0 string, _a1 error) *Issuer_IssueResourceProxyToken_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Issuer_IssueResourceProxyToken_Call) RunAndReturn(run func(string) (string, error)) *Issuer_IssueResourceProxyToken_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ValidateResourceProxyToken provides a mock function with given fields: token
+func (_m *Issuer) ValidateResourceProxyToken(token string) (issuer.Claims, error) {
+	ret := _m.Called(token)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateResourceProxyToken")
+	}
+
+	var r0 issuer.Claims
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (issuer.Claims, error)); ok {
+		return rf(token)
+	}
+	if rf, ok := ret.Get(0).(func(string) issuer.Claims); ok {
+		r0 = rf(token)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(issuer.Claims)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(token)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Issuer_ValidateResourceProxyToken_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateResourceProxyToken'
+type Issuer_ValidateResourceProxyToken_Call struct {
+	*mock.Call
+}
+
+// ValidateResourceProxyToken is a helper method to define mock.On call
+//   - token string
+func (_e *Issuer_Expecter) ValidateResourceProxyToken(token interface{}) *Issuer_ValidateResourceProxyToken_Call {
+	return &Issuer_ValidateResourceProxyToken_Call{Call: _e.mock.On("ValidateResourceProxyToken", token)}
+}
+
+func (_c *Issuer_ValidateResourceProxyToken_Call) Run(run func(token string)) *Issuer_ValidateResourceProxyToken_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *Issuer_ValidateResourceProxyToken_Call) Return(_a0 issuer.Claims, _a1 error) *Issuer_ValidateResourceProxyToken_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Issuer_ValidateResourceProxyToken_Call) RunAndReturn(run func(string) (issuer.Claims, error)) *Issuer_ValidateResourceProxyToken_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewIssuer creates a new instance of Issuer. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewIssuer(t interface {

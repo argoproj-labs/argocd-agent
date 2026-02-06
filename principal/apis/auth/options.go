@@ -13,3 +13,12 @@
 // limitations under the License.
 
 package auth
+
+import "github.com/argoproj-labs/argocd-agent/principal/clusterregistration"
+
+func WithClusterRegistrationManager(manager *clusterregistration.ClusterRegistrationManager) ServerOption {
+	return func(o *ServerOptions) error {
+		o.clusterRegistrationManager = manager
+		return nil
+	}
+}
