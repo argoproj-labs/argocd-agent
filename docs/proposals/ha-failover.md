@@ -1080,20 +1080,244 @@ principal:
 
 ---
 
-## Design Decisions Summary
+## Option B: Simplified Operations Model (Recommended)
+
+The original design above (Option A) uses self-fencing, terms/epochs, heartbeat/ACK protocols, and automatic failover timers to handle split-brain prevention autonomously. After review, we propose a simpler model that eliminates most of this complexity by making **all promotion decisions external** to the principals.
+
+### Key Insight
+
+Split-brain only occurs when **both principals independently decide to go ACTIVE**. If promotion is always triggered by an external authority (operator or routing control), the principals never make that decision themselves — and the entire self-fencing/term/heartbeat subsystem becomes unnecessary.
+
+### What This Removes
+
+| Option A Concept | Option B | Why Not Needed |
+|---|---|---|
+| `StateFenced` | Removed | No autonomous promotion = no split-brain = no fencing |
+| Term/epoch system | Removed | Single external authority prevents stale writes |
+| Heartbeat/ACK protocol | Removed | Replication stream health is sufficient |
+| `ackTimeout` (15s) | Removed | No fencing decisions to make |
+| `heartbeatInterval` (5s) | Removed | No heartbeat protocol |
+| `recoveryTimeout` (60s) | Removed | No unfencing logic |
+| Automatic failover timer | Removed | External authority decides when to promote |
+| `StateStandby` | Removed | You're ACTIVE or you're not |
+| GSLB health-check-based failover | Removed | DNS is operator-managed, not health-driven |
+
+### Simplified State Machine
+
+```
+RECOVERING ──┬── config=primary & peer not ACTIVE ──→ ACTIVE
+             └── config=replica OR peer is ACTIVE ──→ SYNCING → REPLICATING
+
+REPLICATING ──── stream breaks ──→ DISCONNECTED
+DISCONNECTED ─── stream reconnects ──→ REPLICATING
+
+Operator-only transitions:
+  {REPLICATING, DISCONNECTED} ── promote ──→ ACTIVE
+  ACTIVE ── demote ──→ REPLICATING (or DISCONNECTED if peer unreachable)
+```
+
+4 states: `RECOVERING`, `ACTIVE`, `REPLICATING`, `DISCONNECTED`.
+
+### Health Check by State
+
+| State | `/healthz` | `/readyz` | Effect |
+|---|---|---|---|
+| RECOVERING | UNHEALTHY | UNHEALTHY | Determining role |
+| ACTIVE | **HEALTHY** | **HEALTHY** | Serving agents |
+| REPLICATING | UNHEALTHY | UNHEALTHY | Receiving replication, not serving |
+| DISCONNECTED | UNHEALTHY | UNHEALTHY | Lost replication stream |
+
+### Safety: Promote Refuses if Peer is ACTIVE
+
+The `promote` command checks peer state before allowing promotion. This prevents the most common operator error (promoting without demoting the other side):
+
+```go
+func (c *Controller) Promote(ctx context.Context, force bool) error {
+    if c.state == StateActive {
+        return fmt.Errorf("already active")
+    }
+
+    peer, err := c.checkPeerStatus(ctx)
+    if err == nil && peer.State == StateActive {
+        if !force {
+            return fmt.Errorf("peer is ACTIVE at %s — demote peer first, or use --force", c.options.PeerAddress)
+        }
+        log().Warn("Force-promoting while peer is ACTIVE")
+    }
+
+    c.transitionTo(StateActive)
+    return nil
+}
+```
+
+### Mode 1: Manual (Any DNS Provider)
+
+For open-source users without cloud-specific routing controls. Works with Route53, Cloudflare, CoreDNS, or any DNS provider.
+
+**DNS setup** — a single A record that all agents resolve:
+
+```
+principal.argocd.example.com.  60  IN  A  10.0.1.100   # Region A LB
+```
+
+**Agent config** — unchanged, points at the shared hostname:
+
+```yaml
+agent:
+  remote:
+    address: principal.argocd.example.com:8443
+```
+
+**Failover (primary dies):**
+
+```bash
+# 1. Promote replica
+$ argocd-agent ha promote                          # on Region B
+Checking peer... peer unreachable (safe to promote)
+State: DISCONNECTED → ACTIVE
+
+# 2. Update DNS to point to Region B
+$ aws route53 change-resource-record-sets \
+    --hosted-zone-id Z1234567890 \
+    --change-batch '{
+      "Changes": [{
+        "Action": "UPSERT",
+        "ResourceRecordSet": {
+          "Name": "principal.argocd.example.com",
+          "Type": "A",
+          "TTL": 60,
+          "ResourceRecords": [{"Value": "10.0.2.200"}]
+        }
+      }]
+    }'
+
+# Agents reconnect via DNS → Region B
+```
+
+**Failover (clean switch, primary still alive):**
+
+```bash
+# 1. Demote current primary — drops agent connections
+$ argocd-agent ha demote                           # on Region A
+
+# 2. Promote replica
+$ argocd-agent ha promote                          # on Region B
+
+# 3. Update DNS
+$ aws route53 change-resource-record-sets ...
+```
+
+**Failback (old primary recovers):**
+
+```bash
+# 1. Old primary auto-enters SYNCING → REPLICATING on startup
+
+# 2. Wait for sync
+$ argocd-agent ha status                           # on Region A
+Local:  REPLICATING (lag: 0s, synced)
+Peer:   ACTIVE (47 agents)
+
+# 3. Demote Region B, promote Region A
+$ argocd-agent ha demote                           # on Region B
+$ argocd-agent ha promote                          # on Region A
+
+# 4. Update DNS back to Region A
+```
+
+**Tradeoff:** RTO depends on operator response time. If primary dies at 3am, the system is down until someone intervenes. This is the same model as PostgreSQL manual failover, Redis without Sentinel, or any active/passive DR — acceptable for most deployments.
+
+### Mode 2: External Coordinator (Route53 ARC, etc.)
+
+For environments that want semi-automatic failover or stronger guarantees. An external routing control determines which principal is ACTIVE.
+
+**Interface:**
+
+```go
+// Coordinator is an external authority that determines which principal should be active.
+// Implementations: Route53 ARC, Consul, Kubernetes Lease, etc.
+type Coordinator interface {
+    // ShouldBeActive returns true if this principal should be serving agents.
+    ShouldBeActive(ctx context.Context) (bool, error)
+}
+```
+
+The principal polls the coordinator periodically and transitions accordingly:
+
+```go
+func (c *Controller) pollCoordinator(ctx context.Context) {
+    active, err := c.coordinator.ShouldBeActive(ctx)
+    if err != nil {
+        log().WithError(err).Warn("Coordinator check failed, maintaining current state")
+        return
+    }
+
+    if active && c.state != StateActive {
+        c.transitionTo(StateActive)
+    } else if !active && c.state == StateActive {
+        c.transitionTo(StateReplicating)
+        c.disconnectAllAgents()
+    }
+}
+```
+
+**Route53 ARC implementation** — ARC provides routing controls (on/off switches per region) with safety rules that prevent both being ON:
+
+```go
+type AWSARCCoordinator struct {
+    client            *route53recoverycontrolconfig.Client
+    routingControlArn string
+}
+
+func (a *AWSARCCoordinator) ShouldBeActive(ctx context.Context) (bool, error) {
+    resp, err := a.client.GetRoutingControlState(ctx, &route53recoverycontrolconfig.GetRoutingControlStateInput{
+        RoutingControlArn: aws.String(a.routingControlArn),
+    })
+    if err != nil {
+        return false, err
+    }
+    return resp.RoutingControlState == types.RoutingControlStateOn, nil
+}
+```
+
+**Configuration:**
+
+```yaml
+# Manual mode (default)
+principal:
+  ha:
+    enabled: true
+    mode: manual
+    preferredRole: primary
+    peerAddress: principal.region-b.internal:8404
+
+# Route53 ARC mode
+principal:
+  ha:
+    enabled: true
+    mode: coordinator
+    peerAddress: principal.region-b.internal:8404
+    coordinator:
+      type: aws-arc
+      pollInterval: 10s
+      aws:
+        routingControlArn: arn:aws:route53-recovery-control::123456789012:controlpanel/abc/routingcontrol/def
+```
+
+With ARC, failover is: flip the routing control (via console, CLI, or ARC's health-check automation). The principal sees the change on next poll and transitions automatically.
+
+### Design Decisions Summary (Option B)
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Split-brain prevention | Self-fencing on lost peer ACK | Primary must prove replica listening; no external quorum needed |
-| Consistency vs availability | Safety over availability | Accept brief outage to prevent corruption |
-| Term/epoch | Increment on promotion | Reject stale updates even if fencing imperfect |
-| Heartbeat interval | 5 seconds | Frequent enough for fast detection |
-| ACK timeout | 15 seconds | Balance between false positives and detection speed |
-| Failover timeout | 30 seconds | Time for replica to promote after stream breaks |
-| Recovery timeout | 60 seconds | Time before unfencing after peer confirmed dead |
-| Session termination on fence | Mandatory | Long-lived gRPC survives DNS changes |
+| Split-brain prevention | External authority (operator or coordinator) | No autonomous promotion = no split-brain |
+| Promotion model | Always external, never self-decided | Eliminates fencing, terms, heartbeats |
+| Failover trigger | Manual CLI or coordinator poll | Operator controls RTO vs complexity tradeoff |
+| Promote safety check | Refuse if peer is ACTIVE (unless --force) | Prevents common operator error |
 | Failback mode | Manual only | Prevents flapping, gives operator control |
-| External witness | Optional (pluggable) | Not required for correctness, adds defense in depth |
+| State count | 4 (down from 7) | RECOVERING, ACTIVE, REPLICATING, DISCONNECTED |
+| Replication | Kept from Option A | Fast recovery still requires state sync |
+| DNS integration | None (operator-managed) | Works with any DNS provider |
+| External coordinator | Optional (pluggable) | Manual mode sufficient for most users |
 
 ---
 
@@ -1105,7 +1329,6 @@ principal:
 
 3. **Partial Failures**: What if primary is reachable for replication but not for agents (port-specific partition)?
 
-4. **Term Persistence**: Should term be persisted to disk, or is increment-on-startup sufficient?
 
 ---
 
