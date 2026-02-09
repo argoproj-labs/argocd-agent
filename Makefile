@@ -86,7 +86,6 @@ endif
 ifneq (${ARGOCD_AGENT_IN_CLUSTER},)
 	./hack/dev-env/restart-all.sh
 endif
-	./hack/dev-env/setup-e2e-enable-redis-tls.sh
 
 .PHONY: teardown-e2e
 teardown-e2e:

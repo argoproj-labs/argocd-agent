@@ -561,8 +561,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
 	// Redis TLS flags
 	command.Flags().BoolVar(&redisTLSEnabled, "redis-tls-enabled",
-		env.BoolWithDefault("ARGOCD_PRINCIPAL_REDIS_TLS_ENABLED", true),
-		"Enable TLS for Redis connections (enabled by default for security)")
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_REDIS_TLS_ENABLED", false),
+		"Enable TLS for Redis connections")
 	command.Flags().StringVar(&redisProxyServerTLSCertPath, "redis-proxy-server-tls-cert",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_CERT_PATH", nil, ""),
 		"Path to TLS certificate for Redis proxy server")

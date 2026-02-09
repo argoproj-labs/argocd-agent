@@ -156,76 +156,6 @@ argocd-agentctl jwt create-key \
   --upsert
 ```
 
-### 2.4 Setup Redis TLS (Required)
-
-!!! warning "Redis TLS is Required"
-    Redis TLS is **enabled by default** in argocd-agent. All Redis connections must use TLS.
-
-!!! info "Reuse Agent CA"
-    Redis TLS uses the same agent CA created in step 2.1. This simplifies certificate management by using a single CA for all argocd-agent TLS certificates.
-
-#### Generate Certificates
-
-First, create the Redis server certificate:
-
-```bash
-argocd-agentctl redis generate-certs \
-  --principal-context <control-plane-context> \
-  --principal-namespace argocd
-```
-
-This command:
-- Extracts the agent CA from the `argocd-agent-ca` secret (created in step 2.1)
-- Generates a Redis server certificate signed by the agent CA
-- Creates the `argocd-redis-tls` secret with the certificate, key, and CA
-
-Next, create the Redis Proxy server certificate (principal only):
-
-```bash
-argocd-agentctl redis generate-certs \
-  --principal-context <control-plane-context> \
-  --principal-namespace argocd \
-  --secret-name argocd-redis-proxy-tls \
-  --dns argocd-redis-proxy \
-  --upsert
-```
-
-This command:
-- Generates a Redis Proxy server certificate (for accepting connections from Argo CD)
-- Creates the `argocd-redis-proxy-tls` secret with the certificate, key, and CA
-
-#### Configure Redis for TLS
-
-```bash
-argocd-agentctl redis configure-tls \
-  --principal-context <control-plane-context> \
-  --principal-namespace argocd
-```
-
-This command:
-- Patches the Redis deployment to add TLS volume mounts
-- Configures Redis to use TLS on port 6379
-- Configures Argo CD components to use Redis TLS
-- Restarts affected components to apply changes
-
-#### Verify Redis TLS
-
-```bash
-# Get Redis password
-REDIS_PASSWORD=$(kubectl get secret argocd-redis -n argocd --context <control-plane-context> \
-  -o jsonpath='{.data.auth}' | base64 -d)
-
-# Test TLS connection
-kubectl exec -n argocd --context <control-plane-context> deployment/argocd-redis -- \
-  redis-cli --tls --cacert /app/config/redis-tls/ca.crt -a "$REDIS_PASSWORD" ping
-# Should output: PONG
-```
-
-!!! info "Automatic TLS Configuration"
-    The installation manifests pre-configure Argo CD components and Principal/Agent to use Redis TLS. The `argocd-agentctl` commands handle all certificate generation and Redis configuration automatically.
-    
-    For detailed configuration options and troubleshooting, see [Redis TLS Configuration](../../configuration/redis-tls.md).
-
 ## Step 3: Install Principal
 
 ### 3.1 Deploy Principal Component
@@ -366,26 +296,7 @@ argocd-agentctl pki propagate \
   --agent-namespace argocd
 ```
 
-### 5.4 Setup Redis TLS on Workload Cluster
-
-Now that the agent CA is propagated, generate Redis certificates for the workload cluster:
-
-```bash
-# Generate Redis certificates and create argocd-redis-tls secret
-argocd-agentctl redis generate-certs \
-  --principal-context <workload-cluster-context> \
-  --principal-namespace argocd
-
-# Patch Redis deployment to enable TLS on port 6379
-argocd-agentctl redis configure-tls \
-  --principal-context <workload-cluster-context> \
-  --principal-namespace argocd
-```
-
-!!! note "Why This Step Comes After CA Propagation"
-    The `redis generate-certs` command reads the `argocd-agent-ca` secret to sign Redis certificates. This secret must exist on the workload cluster before generating Redis certificates, which is why we propagate the CA first in step 5.3.
-
-### 5.5 Verify Certificate Installation
+### 5.4 Verify Certificate Installation
 
 The agent client certificate should already be installed from step 5.2. Verify it exists:
 
@@ -397,7 +308,7 @@ kubectl get secret argocd-agent-client-tls -n argocd --context <workload-cluster
 kubectl get secret argocd-agent-ca -n argocd --context <workload-cluster-context>
 ```
 
-### 5.6 Create Agent Namespace on Principal
+### 5.5 Create Agent Namespace on Principal
 
 For managed agents, create a namespace on the principal where the agent's Applications will be created and managed:
 
@@ -405,7 +316,7 @@ For managed agents, create a namespace on the principal where the agent's Applic
 kubectl create namespace my-first-agent --context <control-plane-context>
 ```
 
-### 5.7 Deploy Agent
+### 5.6 Deploy Agent
 
 Replace <release-branch> with the version of the release you wish to use:
 
@@ -415,7 +326,7 @@ kubectl apply -n argocd \
   --context <workload-cluster-context>
 ```
 
-### 5.8 Configure Agent Connection
+### 5.7 Configure Agent Connection
 
 Update the agent configuration to connect to your principal using mTLS authentication:
 
@@ -614,4 +525,3 @@ kubectl patch secret argocd-secret -n argocd \
 - [Application Synchronization](../../user-guide/applications.md) - How apps sync between clusters
 - [AppProject Synchronization](../../user-guide/appprojects.md) - Managing project boundaries
 - [Live Resources](../../user-guide/live-resources.md) - Viewing resources across clusters
-- [Redis TLS Configuration](../../configuration/redis-tls.md) - Detailed Redis TLS setup and troubleshooting

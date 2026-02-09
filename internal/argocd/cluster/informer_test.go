@@ -30,7 +30,7 @@ func Test_onClusterAdded(t *testing.T) {
 		assert.Len(t, m.clusters, 1)
 	})
 	t.Run("Secret is malformed", func(t *testing.T) {
-		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"))
+		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"), nil)
 		require.NoError(t, err)
 		s := &v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -136,7 +136,7 @@ func Test_onClusterUpdated(t *testing.T) {
 				"name": []byte("cluster2"),
 			},
 		}
-		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"))
+		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"), nil)
 		require.NoError(t, err)
 		m.mapCluster("agent1", &v1alpha1.Cluster{Name: "cluster1"})
 		assert.NotNil(t, m.mapping("agent1"))

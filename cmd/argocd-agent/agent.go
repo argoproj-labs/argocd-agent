@@ -190,7 +190,7 @@ func NewAgentRunCommand() *cobra.Command {
 					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromFile(rootCAPath))
 				} else {
 					logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCASecretName)
-					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, namespace, rootCASecretName, "tls.crt"))
+					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, namespace, rootCASecretName, ""))
 				}
 
 				// If both a certificate and a key are specified on the command
@@ -325,8 +325,8 @@ func NewAgentRunCommand() *cobra.Command {
 
 	// Redis TLS flags
 	command.Flags().BoolVar(&redisTLSEnabled, "redis-tls-enabled",
-		env.BoolWithDefault("ARGOCD_AGENT_REDIS_TLS_ENABLED", true),
-		"Enable TLS for Redis connections (enabled by default for security)")
+		env.BoolWithDefault("ARGOCD_AGENT_REDIS_TLS_ENABLED", false),
+		"Enable TLS for Redis connections")
 	command.Flags().StringVar(&redisTLSCAPath, "redis-tls-ca-path",
 		env.StringWithDefault("ARGOCD_AGENT_REDIS_TLS_CA_PATH", nil, ""),
 		"Path to CA certificate for Redis TLS (for local development)")

@@ -157,7 +157,7 @@ createNamespace: false
 # -- Redis TLS configuration.
 redisTLS:
   # -- Enable TLS for Redis connections.
-  enabled: true
+  enabled: false
   # -- Path to CA certificate for verifying Redis TLS certificate.
   # This path is where the CA certificate will be mounted inside the container.
   caPath: "/app/config/redis-tls/ca.crt"
