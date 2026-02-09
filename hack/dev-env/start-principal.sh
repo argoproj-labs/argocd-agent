@@ -19,7 +19,6 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
     echo "kube context vcluster-control-plane is not configured; missing setup?" >&2
     exit 1
 fi
-SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 if test "${ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS}" = ""; then
        ipaddr=$(kubectl --context vcluster-control-plane -n argocd get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].ip}')

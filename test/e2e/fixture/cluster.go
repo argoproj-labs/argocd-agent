@@ -292,8 +292,7 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 		return fmt.Errorf("could not get Redis server address from LoadBalancer ingress")
 	}
 
-	// Redis TLS is always enabled for E2E tests (CA loaded from Kubernetes secret)
-	clusterDetails.ManagedAgentRedisTLSEnabled = true
+	clusterDetails.ManagedAgentRedisTLSEnabled = false
 	clusterDetails.ManagedAgentRedisAddr = redisAddr
 
 	// Fetch Redis secret to get the password
@@ -340,8 +339,7 @@ func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, cl
 		return fmt.Errorf("redis service does not have a LoadBalancer IP or hostname")
 	}
 
-	// Redis TLS is always enabled for E2E tests (CA loaded from Kubernetes secret)
-	clusterDetails.PrincipalRedisTLSEnabled = true
+	clusterDetails.PrincipalRedisTLSEnabled = false
 	clusterDetails.PrincipalRedisAddr = redisAddr
 
 	// Fetch Redis secret to get the password
