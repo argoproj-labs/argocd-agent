@@ -29,7 +29,8 @@ test -x ${AGENTCTL} || (echo "Please build the CLI" && exit 1)
 
 source ${SCRIPTPATH}/utility.sh
 
-IMAGE_NAME=ghcr.io/argoproj-labs/argocd-agent/argocd-agent:latest
+DEFAULT_IMAGE_NAME=ghcr.io/argoproj-labs/argocd-agent/argocd-agent:latest
+IMAGE_NAME=${DEFAULT_IMAGE_NAME}
 if test "$2" != ""; then
 	IMAGE_NAME="$2"
 fi
@@ -129,7 +130,8 @@ case "$1" in
 	undeploy_agent_autonomous || true
 	;;
 *)
-	echo "USAGE: $0 (deploy|undeploy)" >&2
+	echo "USAGE: $0 <deploy|undeploy> [image]" >&2
+	echo "[image] is optional and defaults to ${DEFAULT_IMAGE_NAME}"
 	exit 1
 esac
 
