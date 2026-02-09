@@ -131,7 +131,7 @@ case "$1" in
 	;;
 *)
 	echo "USAGE: $0 <deploy|undeploy> [image]" >&2
-	echo "[image] is optional and defaults to ${DEFAULT_IMAGE_NAME}"
+	echo "[image] is optional and defaults to ${DEFAULT_IMAGE_NAME}" >&2
 	exit 1
 esac
 
