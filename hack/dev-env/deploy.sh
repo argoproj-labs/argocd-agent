@@ -29,6 +29,13 @@ test -x ${AGENTCTL} || (echo "Please build the CLI" && exit 1)
 
 source ${SCRIPTPATH}/utility.sh
 
+DEFAULT_IMAGE_NAME=ghcr.io/argoproj-labs/argocd-agent/argocd-agent:latest
+IMAGE_NAME=${DEFAULT_IMAGE_NAME}
+if test "$2" != ""; then
+	IMAGE_NAME="$2"
+fi
+
+
 ARGOCD_AGENT_PRINCIPAL_CONTEXT=vcluster-control-plane
 ARGOCD_AGENT_MANAGED_CONTEXT=vcluster-agent-managed
 ARGOCD_AGENT_AUTONOMOUS_CONTEXT=vcluster-agent-autonomous
@@ -46,7 +53,10 @@ cp -a ${BASEPATH}/install/kubernetes/* ${TMPDIR}
 
 deploy_principal() {
 	(
-		cd ${TMPDIR}/principal && kustomize edit set namespace argocd
+		cd ${TMPDIR}/principal && (
+			kustomize edit set namespace argocd
+			kustomize edit set image argocd-agent=${IMAGE_NAME}
+		)
 		sed -i'' \
 			-e "s/  principal.allowed-namespaces:.*/  principal.allowed-namespaces: \"agent-*\"/" \
 			principal-params-cm.yaml
@@ -58,7 +68,10 @@ deploy_principal() {
 deploy_agent_managed() {
 	(
 		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
-		cd ${TMPDIR}/agent && kustomize edit set namespace argocd
+		cd ${TMPDIR}/agent && (
+			kustomize edit set namespace argocd
+			kustomize edit set image argocd-agent=${IMAGE_NAME}
+		)
 		sed -i'' \
 		        -e "s/  agent.mode:.*/  agent.mode: \"managed\"/" \
 			-e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
@@ -71,7 +84,10 @@ deploy_agent_managed() {
 deploy_agent_autonomous() {
 	(
 		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
-		cd ${TMPDIR}/agent && kustomize edit set namespace argocd
+		cd ${TMPDIR}/agent && (
+			kustomize edit set namespace argocd
+			kustomize edit set image argocd-agent=${IMAGE_NAME}
+		)
 		sed -i'' \
 		        -e "s/  agent.mode:.*/  agent.mode: \"autonomous\"/" \
 			-e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
@@ -114,7 +130,8 @@ case "$1" in
 	undeploy_agent_autonomous || true
 	;;
 *)
-	echo "USAGE: $0 (deploy|undeploy)" >&2
+	echo "USAGE: $0 <deploy|undeploy> [image]" >&2
+	echo "[image] is optional and defaults to ${DEFAULT_IMAGE_NAME}" >&2
 	exit 1
 esac
 
