@@ -46,6 +46,8 @@ const (
 
 var (
 	argoClient *fixture.ArgoRestClient
+	endpoint   string
+	password   string
 )
 
 type DestinationMappingTestSuite struct {
@@ -60,12 +62,13 @@ type DestinationMappingTestSuite struct {
 // SetupSuite runs before the tests in the suite are run.
 func (suite *DestinationMappingTestSuite) SetupSuite() {
 	suite.BaseSuite.SetupSuite()
+	var err error
 
 	requires := suite.Require()
-	endpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
+	endpoint, err = fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
 	requires.NoError(err)
 
-	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
+	password, err = fixture.GetInitialAdminSecret(suite.PrincipalClient)
 	requires.NoError(err)
 
 	argoClient = fixture.NewArgoClient(endpoint, "admin", password)
@@ -197,8 +200,8 @@ func (suite *DestinationMappingTestSuite) TearDownSuite() {
 	suite.restartApplicationController()
 }
 
-// createTestApp creates a standard test application for destination mapping tests (managed mode)
-func createTestApp(name, namespace string, autoSync bool) *v1alpha1.Application {
+// createAppForDestMappingTests creates a standard test application for destination mapping tests (managed mode)
+func createAppForDestMappingTests(name, namespace string, autoSync bool) *v1alpha1.Application {
 	app := &v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -228,8 +231,8 @@ func createTestApp(name, namespace string, autoSync bool) *v1alpha1.Application 
 	return app
 }
 
-// createAutonomousTestApp creates a test application for the autonomous agent
-func createAutonomousTestApp(name, namespace, targetNamespace string) *v1alpha1.Application {
+// createAutonomousAppForDestMappingTests creates a test application for the autonomous agent
+func createAutonomousAppForDestMappingTests(name, namespace, targetNamespace string) *v1alpha1.Application {
 	return &v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -264,7 +267,7 @@ func (suite *DestinationMappingTestSuite) TestAppCreatedInOriginalNamespace() {
 
 	appName := "destmap-test-app"
 	appNs := "test-namespace"
-	app := createTestApp(appName, appNs, true)
+	app := createAppForDestMappingTests(appName, appNs, true)
 
 	// Create the app namespace on the principal first (required for Application CR)
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: appNs}}
@@ -359,13 +362,13 @@ func (suite *DestinationMappingTestSuite) TestAppCreatedInOriginalNamespace() {
 }
 
 // TestRefreshPropagation verifies that refresh requests from the
-// principal are correctly propagated to the agent via the redis proxy.
+// principal are correctly propagated to the agent.
 func (suite *DestinationMappingTestSuite) TestRefreshPropagation() {
 	requires := suite.Require()
 	t := suite.T()
 
 	appName := "destmap-refresh-test"
-	app := createTestApp(appName, destMapAgentNamespace, true)
+	app := createAppForDestMappingTests(appName, destMapAgentNamespace, true)
 
 	t.Log("Create an application for refresh testing")
 	err := suite.PrincipalClient.Create(suite.Ctx, app, metav1.CreateOptions{})
@@ -451,7 +454,7 @@ func (suite *DestinationMappingTestSuite) TestCascadeDelete() {
 	t := suite.T()
 
 	appName := "destmap-delete-test"
-	app := createTestApp(appName, destMapAgentNamespace, true)
+	app := createAppForDestMappingTests(appName, destMapAgentNamespace, true)
 
 	t.Log("Create an application for cascade delete testing")
 	err := suite.PrincipalClient.Create(suite.Ctx, app, metav1.CreateOptions{})
@@ -558,7 +561,7 @@ func (suite *DestinationMappingTestSuite) TestRedisProxy() {
 	t := suite.T()
 
 	appName := "destmap-redis-test"
-	app := createTestApp(appName, destMapAgentNamespace, true)
+	app := createAppForDestMappingTests(appName, destMapAgentNamespace, true)
 
 	t.Log("Create an application for redis proxy testing")
 	err := suite.PrincipalClient.Create(suite.Ctx, app, metav1.CreateOptions{})
@@ -583,25 +586,15 @@ func (suite *DestinationMappingTestSuite) TestRedisProxy() {
 			principalApp.Status.Health.Status == health.HealthStatusHealthy
 	}, 120*time.Second, 2*time.Second)
 
-	t.Log("Verify we can fetch resources via ArgoCD API (which uses redis proxy)")
-	requires.Eventually(func() bool {
-		principalApp := &v1alpha1.Application{}
-		err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{
-			Namespace: destMapAgentNamespace,
-			Name:      appName,
-		}, principalApp, metav1.GetOptions{})
-		if err != nil {
-			return false
-		}
+	argocdClient, sessionToken, closer, err := createArgoCDAPIClient(suite.Ctx, endpoint, password)
+	requires.NoError(err)
+	defer closer.Close()
 
-		resource, err := argoClient.GetResource(principalApp,
-			"apps", "v1", "Deployment", destMapGuestbookNs, destMapGuestbookUIDepl)
-		if err != nil {
-			t.Logf("Failed to get resource: %v", err)
-			return false
-		}
-		return resource != ""
-	}, 60*time.Second, 2*time.Second, "Should be able to fetch managed resources via ArgoCD API")
+	closer, appClient, err := argocdClient.NewApplicationClient()
+	requires.NoError(err)
+	defer closer.Close()
+
+	verifyResourceTreeViaRedisProxy(&suite.BaseSuite, app, appClient, endpoint, sessionToken)
 }
 
 // TestSyncOperation verifies that sync operations work correctly
@@ -611,7 +604,7 @@ func (suite *DestinationMappingTestSuite) TestSyncOperation() {
 	t := suite.T()
 
 	appName := "destmap-sync-test"
-	app := createTestApp(appName, destMapAgentNamespace, false) // No auto-sync
+	app := createAppForDestMappingTests(appName, destMapAgentNamespace, false) // No auto-sync
 
 	t.Log("Create an application without auto-sync")
 	err := suite.PrincipalClient.Create(suite.Ctx, app, metav1.CreateOptions{})
@@ -680,7 +673,7 @@ func (suite *DestinationMappingTestSuite) TestAutonomousAppCreation() {
 	appNamespace := "argocd"
 	targetNamespace := "guestbook"
 
-	app := createAutonomousTestApp(appName, appNamespace, targetNamespace)
+	app := createAutonomousAppForDestMappingTests(appName, appNamespace, targetNamespace)
 
 	t.Log("Creating application on autonomous agent for creation test")
 	err := suite.AutonomousAgentClient.Create(suite.Ctx, app, metav1.CreateOptions{})
@@ -775,7 +768,7 @@ func (suite *DestinationMappingTestSuite) TestAutonomousSpecUpdate() {
 	appNamespace := "argocd"
 	targetNamespace := "guestbook"
 
-	app := createAutonomousTestApp(appName, appNamespace, targetNamespace)
+	app := createAutonomousAppForDestMappingTests(appName, appNamespace, targetNamespace)
 	app.Spec.SyncPolicy.Automated = &v1alpha1.SyncPolicyAutomated{}
 
 	t.Log("Creating application on autonomous agent for spec update test")

@@ -141,7 +141,7 @@ tlsMaxVersion: ""
 # -- Comma-separated list of TLS cipher suites. Empty uses Go defaults.
 tlsCipherSuites: ""
 # -- Comma-separated list of additional namespaces the agent is allowed to
-# manage applications in. Supports glob patterns (e.g., "team-*,prod-*").
+# manage applications in (used with applications in any namespace feature). Supports glob patterns (e.g., "team-*,prod-*").
 allowedNamespaces: ""
 
 ## @section Destination-Based Mapping

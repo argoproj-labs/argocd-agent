@@ -899,6 +899,8 @@ func (s *Server) startSpan(operation, resourceKind string, obj metav1.Object) (c
 	)
 }
 
+// concurrentMap should not be accessed via `m` field. To consume this map, use the `Get`, `Set`, and `Delete` methods.
+// Likewise, especially do not range over `m` field, as this is an unsynchronized operation.
 type concurrentMap[K comparable, V any] struct {
 	mu sync.RWMutex
 	m  map[K]V

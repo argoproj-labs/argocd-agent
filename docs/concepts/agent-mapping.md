@@ -2,18 +2,21 @@
 
 argocd-agent supports two modes for mapping applications to agents: **namespace-based mapping** (default) and **destination-based mapping**. This document explains both approaches, their trade-offs, and when to use each.
 
+!!! important "Managed Mode Only"
+    Destination-based mapping only applies to **managed agents**. Autonomous agents do not require this feature because the agent is the source of truth and controls where applications are stored locally. On the principal, autonomous apps are always stored in the `{agentName}` namespace for clear ownership.
+
 ## Overview
 
 When an Application is created on the control plane (principal), argocd-agent needs to determine which agent should manage it. The mapping mode controls how this routing decision is made.
 
-| Feature                | Namespace-Based Mapping                  | Destination-Based Mapping    |
-|------------------------|------------------------------------------|------------------------------|
-| Routing mechanism      | Application namespace                    | `spec.destination.name`      |
-| Apps per namespace     | Single agent                             | Multiple agents              |
-| Multi-tenancy          | Limited                                  | Full support                 |
-| Configuration          | Default (no config)                      | Requires flag                |
-| App namespace on agent | Agent's namespace (typically `argocd`)   | Preserves original namespace |
-| Supported agent modes  | Managed and Autonomous                   | Managed only                 |
+| Feature                  | Namespace-Based Mapping                  | Destination-Based Mapping              |
+|--------------------------|------------------------------------------|----------------------------------------|
+| Routing mechanism        | Application namespace                    | `spec.destination.name` on principal   |
+| App namespaces per agent | Single namespace                         | Multiple namespaces                    |
+| Multi-tenancy            | Limited                                  | Full support                           |
+| Configuration            | Default (no config)                      | Requires flag                          |
+| App namespace on agent   | Agent's namespace (typically `argocd`)   | Preserves original namespace           |
+| Supported agent modes    | Managed and Autonomous                   | Managed only                           |
 
 ## Namespace-Based Mapping (Default)
 
@@ -26,6 +29,8 @@ In namespace-based mapping, the **namespace of the Application resource** determ
 2. **Routing**: The principal uses the Application's namespace to route events to the correct agent.
 
 3. **Agent Processing**: The agent receives the Application and creates it in its configured namespace (typically `argocd`).
+
+For detailed namespace configuration (access control, auto-creation, best practices), see [Namespaces Configuration](../configuration/namespaces.md).
 
 ### Example
 
@@ -46,6 +51,31 @@ spec:
     namespace: guestbook
 ```
 
+The diagram below shows namespace-based mapping with two agents. Each agent has a dedicated namespace on the control plane (`agent-prod`, `agent-staging`), and applications placed in those namespaces are synced to the corresponding agent.
+
+```mermaid
+graph TB
+    subgraph control["Control Plane Cluster"]
+        principal[Principal]
+        argocd_ns["Namespace: argocd<br/>(Principal's namespace)"]
+        agent1_ns["Namespace: agent-prod<br/>(Agent's apps)"]
+        agent2_ns["Namespace: agent-staging<br/>(Agent's apps)"]
+    end
+    
+    subgraph workload1["Workload Cluster 1"]
+        agent1[Agent: agent-prod]
+    end
+    
+    subgraph workload2["Workload Cluster 2"]
+        agent2[Agent: agent-staging]
+    end
+    
+    principal --> agent1_ns
+    principal --> agent2_ns
+    agent1 -.->|syncs from| agent1_ns
+    agent2 -.->|syncs from| agent2_ns
+```
+
 ### Limitations
 
 1. **Single Agent Per Namespace**: Each namespace on the principal can only target one agent. You cannot have applications in the same namespace targeting different agents.
@@ -58,10 +88,7 @@ spec:
 
 ## Destination-Based Mapping
 
-Destination-based mapping uses the Application's `spec.destination.name` field to determine which agent handles it. This enables more flexible routing and better multi-tenancy support.
-
-!!! important "Managed Mode Only"
-    Destination-based mapping only applies to **managed agents**. Autonomous agents do not require this feature because the agent is the source of truth and controls where applications are stored locally. On the principal, autonomous apps are always stored in the `{agentName}` namespace for clear ownership.
+With Destination-based mapping, the principal uses the Application's `spec.destination.name` field to determine the target agent. This enables more flexible routing and better multi-tenancy support.
 
 ### How It Works
 
@@ -70,6 +97,31 @@ Destination-based mapping uses the Application's `spec.destination.name` field t
 2. **Routing**: The principal maintains a lookup table (`appToAgent`) mapping applications to agents based on `destination.name`.
 
 3. **Agent Processing**: The agent creates the Application in a namespace matching the original namespace from the principal (not forced to the agent's namespace).
+
+The diagram below shows destination-based mapping where multiple namespaces (`team-a`, `team-b`) can route applications to the same agent using `spec.destination.name`. Unlike namespace-based mapping, the original namespace is preserved on the agent side.
+
+```mermaid
+graph TB
+    subgraph control["Control Plane Cluster"]
+        principal[Principal]
+        argocd_ns["Namespace: argocd<br/>(Principal's namespace)"]
+        team_a_ns["Namespace: team-a<br/>Apps with destination.name: agent-prod"]
+        team_b_ns["Namespace: team-b<br/>Apps with destination.name: agent-prod"]
+    end
+    
+    subgraph workload["Workload Cluster"]
+        agent[Agent: agent-prod]
+        agent_team_a["Namespace: team-a<br/>(preserved)"]
+        agent_team_b["Namespace: team-b<br/>(preserved)"]
+    end
+    
+    principal --> team_a_ns
+    principal --> team_b_ns
+    team_a_ns -.->|"routed by destination.name"| agent
+    team_b_ns -.->|"routed by destination.name"| agent
+    agent --> agent_team_a
+    agent --> agent_team_b
+```
 
 ### Configuration
 
@@ -109,7 +161,7 @@ ARGOCD_AGENT_CREATE_NAMESPACE=true
 ### Example
 
 ```yaml
-# Application targeting agent-managed via destination.name
+# Application defined on principal targeting agent-managed via destination.name
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -235,8 +287,6 @@ When migrating, be aware of these changes:
 If you see "error getting cached app managed resources" in the ArgoCD UI:
 
 1. **Check Mapping Mode Consistency**: Ensure both principal and agent use the same mapping mode.
-
-2. **Verify Key Format**: In destination-based mode, Redis keys should include the application namespace (e.g., `team-alpha_guestbook`).
 
 ### Application Stuck in Wrong Namespace
 

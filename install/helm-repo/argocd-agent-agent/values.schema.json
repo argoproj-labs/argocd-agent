@@ -231,7 +231,7 @@
     },
     "allowedNamespaces": {
       "type": "string",
-      "description": "Comma-separated list of additional namespaces the agent is allowed to manage applications in. Supports glob patterns."
+      "description": "Comma-separated list of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature). Supports glob patterns."
     },
 
     "service": {

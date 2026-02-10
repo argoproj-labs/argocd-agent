@@ -368,7 +368,7 @@ func NewAgentRunCommand() *cobra.Command {
 		"Create target namespace if it doesn't exist when syncing applications (used with destination-based-mapping)")
 	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
 		env.StringSliceWithDefault("ARGOCD_AGENT_ALLOWED_NAMESPACES", nil, []string{}),
-		"List of additional namespaces the agent is allowed to manage applications in")
+		"List of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature)")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
