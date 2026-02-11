@@ -300,8 +300,7 @@ func TestEventWriter(t *testing.T) {
 		require.NotNil(t, sentMsg)
 
 		// Exhaust retries
-		maxRetries := sentMsg.backoff.Steps
-		for i := 0; i < maxRetries; i++ {
+		for i := 0; i <= maxEventRetries; i++ {
 			pastTime := time.Now().Add(-1 * time.Second)
 			sentMsg.retryAfter = &pastTime
 			evSender.retrySentEvent(resID, sentMsg)
