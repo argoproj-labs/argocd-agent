@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"k8s.io/apimachinery/pkg/util/wait"
 
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
@@ -145,17 +146,21 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 	}
 
 	grpcOpts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(s.options.maxGRPCMessageSize),
+		grpc.MaxSendMsgSize(s.options.maxGRPCMessageSize),
 		// Global stats handler for tracing
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		// Global interceptors for gRPC streams
 		grpc.ChainStreamInterceptor(
 			s.streamRequestLogger(), // logging
 			s.streamAuthInterceptor, // auth
+			grpcutil.StreamServerMsgSizeInterceptor(s.options.maxGRPCMessageSize), // message size warning
 		),
 		// Global interceptors for gRPC unary calls
 		grpc.ChainUnaryInterceptor(
 			s.unaryRequestLogger(), // logging
 			s.unaryAuthInterceptor, // auth
+			grpcutil.UnaryServerMsgSizeInterceptor(s.options.maxGRPCMessageSize), // message size warning
 		),
 	}
 

@@ -71,6 +71,7 @@ type ServerOptions struct {
 	healthzPort            int
 	redisProxyDisabled     bool
 	informerSyncTimeout    time.Duration
+	maxGRPCMessageSize     int
 
 	// insecurePlaintext disables TLS on the gRPC server. Use when Istio sidecar
 	// handles mTLS termination.
@@ -94,6 +95,7 @@ func defaultOptions() *ServerOptions {
 		eventProcessors:     10,
 		rootCa:              x509.NewCertPool(),
 		informerSyncTimeout: 60 * time.Second,
+		maxGRPCMessageSize:  200 * 1024 * 1024, // 200MB default, equivalent to Argo CD
 	}
 }
 
@@ -492,6 +494,18 @@ func WithHealthzPort(port int) ServerOption {
 		} else {
 			return fmt.Errorf("invalid port: %d", port)
 		}
+	}
+}
+
+// WithMaxGRPCMessageSize configures the maximum gRPC message size (in bytes)
+// for both sending and receiving on the principal server.
+func WithMaxGRPCMessageSize(size int) ServerOption {
+	return func(o *Server) error {
+		if size <= 0 {
+			return fmt.Errorf("grpc max message size must be greater than 0")
+		}
+		o.options.maxGRPCMessageSize = size
+		return nil
 	}
 }
 

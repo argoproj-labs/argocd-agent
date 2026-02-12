@@ -80,6 +80,8 @@ func NewAgentRunCommand() *cobra.Command {
 		// This is used to keep the connection alive through service meshes like Istio.
 		heartbeatInterval time.Duration
 
+		maxGRPCMessageSize int
+
 		// OpenTelemetry configuration
 		otlpAddress  string
 		otlpInsecure bool
@@ -210,6 +212,7 @@ func NewAgentRunCommand() *cobra.Command {
 			remoteOpts = append(remoteOpts, client.WithClientMode(types.AgentModeFromString(agentMode)))
 			remoteOpts = append(remoteOpts, client.WithKeepAlivePingInterval(keepAlivePingInterval))
 			remoteOpts = append(remoteOpts, client.WithCompression(enableCompression))
+			remoteOpts = append(remoteOpts, client.WithMaxGRPCMessageSize(maxGRPCMessageSize))
 
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
 				remote, err = client.NewRemote(serverAddress, serverPort, remoteOpts...)
@@ -342,6 +345,10 @@ func NewAgentRunCommand() *cobra.Command {
 		env.DurationWithDefault("ARGOCD_AGENT_HEARTBEAT_INTERVAL", nil, 0),
 		"Interval for application-level heartbeats over the Subscribe stream (e.g., 30s). "+
 			"Set to 0 to disable. Useful to keep connections alive through service meshes like Istio.")
+
+	command.Flags().IntVar(&maxGRPCMessageSize, "grpc-max-message-size",
+		env.NumWithDefault("ARGOCD_AGENT_GRPC_MAX_MESSAGE_SIZE", nil, 200*1024*1024),
+		"Maximum gRPC message size in bytes for send and receive (default: 200MB)")
 
 	command.Flags().StringVar(&otlpAddress, "otlp-address",
 		env.StringWithDefault("ARGOCD_AGENT_OTLP_ADDRESS", nil, ""),
