@@ -10,14 +10,14 @@ import (
 
 func TestResourceRequestRegexp(t *testing.T) {
 	tests := []struct {
-		name               string
-		path               string
-		shouldMatch        bool
-		expectedGroup      string
-		expectedVer        string
-		expectedNs         string
-		expectedRes        string
-		expectedName       string
+		name                string
+		path                string
+		shouldMatch         bool
+		expectedGroup       string
+		expectedVer         string
+		expectedNs          string
+		expectedRes         string
+		expectedName        string
 		expectedSubresource string
 	}{
 		// Current patterns that should work
@@ -28,21 +28,21 @@ func TestResourceRequestRegexp(t *testing.T) {
 			expectedVer: "v1",
 		},
 		{
-			name:          "Namespaced resource list",
-			path:          "/api/v1/namespaces/default/pods",
-			shouldMatch:   true,
-			expectedVer:   "v1",
-			expectedNs:    "default",
-			expectedRes:   "pods",
+			name:        "Namespaced resource list",
+			path:        "/api/v1/namespaces/default/pods",
+			shouldMatch: true,
+			expectedVer: "v1",
+			expectedNs:  "default",
+			expectedRes: "pods",
 		},
 		{
-			name:          "Specific namespaced resource",
-			path:          "/api/v1/namespaces/default/pods/my-pod",
-			shouldMatch:   true,
-			expectedVer:   "v1",
-			expectedNs:    "default",
-			expectedRes:   "pods",
-			expectedName:  "my-pod",
+			name:         "Specific namespaced resource",
+			path:         "/api/v1/namespaces/default/pods/my-pod",
+			shouldMatch:  true,
+			expectedVer:  "v1",
+			expectedNs:   "default",
+			expectedRes:  "pods",
+			expectedName: "my-pod",
 		},
 		{
 			name:          "Group API resource",
@@ -55,82 +55,82 @@ func TestResourceRequestRegexp(t *testing.T) {
 			expectedName:  "my-deployment",
 		},
 		{
-			name:          "Cluster-scoped resource",
-			path:          "/api/v1/nodes/my-node",
-			shouldMatch:   true,
-			expectedVer:   "v1",
-			expectedRes:   "nodes",
-			expectedName:  "my-node",
+			name:         "Cluster-scoped resource",
+			path:         "/api/v1/nodes/my-node",
+			shouldMatch:  true,
+			expectedVer:  "v1",
+			expectedRes:  "nodes",
+			expectedName: "my-node",
 		},
 		// Subresource patterns now work with the updated regex
 		{
-			name:               "Pod status subresource",
-			path:               "/api/v1/namespaces/default/pods/my-pod/status",
-			shouldMatch:        true, // Now matches with updated regex
-			expectedVer:        "v1",
-			expectedNs:         "default",
-			expectedRes:        "pods",
-			expectedName:       "my-pod",
+			name:                "Pod status subresource",
+			path:                "/api/v1/namespaces/default/pods/my-pod/status",
+			shouldMatch:         true, // Now matches with updated regex
+			expectedVer:         "v1",
+			expectedNs:          "default",
+			expectedRes:         "pods",
+			expectedName:        "my-pod",
 			expectedSubresource: "status",
 		},
 		{
-			name:               "Pod log subresource",
-			path:               "/api/v1/namespaces/default/pods/my-pod/log",
-			shouldMatch:        true, // Now matches with updated regex
-			expectedVer:        "v1",
-			expectedNs:         "default",
-			expectedRes:        "pods",
-			expectedName:       "my-pod",
+			name:                "Pod log subresource",
+			path:                "/api/v1/namespaces/default/pods/my-pod/log",
+			shouldMatch:         true, // Now matches with updated regex
+			expectedVer:         "v1",
+			expectedNs:          "default",
+			expectedRes:         "pods",
+			expectedName:        "my-pod",
 			expectedSubresource: "log",
 		},
 		{
-			name:               "Deployment scale subresource",
-			path:               "/apis/apps/v1/namespaces/default/deployments/my-deployment/scale",
-			shouldMatch:        true, // Now matches with updated regex
-			expectedGroup:      "apps",
-			expectedVer:        "v1",
-			expectedNs:         "default",
-			expectedRes:        "deployments",
-			expectedName:       "my-deployment",
+			name:                "Deployment scale subresource",
+			path:                "/apis/apps/v1/namespaces/default/deployments/my-deployment/scale",
+			shouldMatch:         true, // Now matches with updated regex
+			expectedGroup:       "apps",
+			expectedVer:         "v1",
+			expectedNs:          "default",
+			expectedRes:         "deployments",
+			expectedName:        "my-deployment",
 			expectedSubresource: "scale",
 		},
 		{
-			name:               "Service proxy subresource with port",
-			path:               "/api/v1/namespaces/default/services/my-service:80/proxy",
-			shouldMatch:        true, // Now matches with updated regex
-			expectedVer:        "v1",
-			expectedNs:         "default",
-			expectedRes:        "services",
-			expectedName:       "my-service:80",
+			name:                "Service proxy subresource with port",
+			path:                "/api/v1/namespaces/default/services/my-service:80/proxy",
+			shouldMatch:         true, // Now matches with updated regex
+			expectedVer:         "v1",
+			expectedNs:          "default",
+			expectedRes:         "services",
+			expectedName:        "my-service:80",
 			expectedSubresource: "proxy",
 		},
 		{
-			name:               "Node proxy subresource",
-			path:               "/api/v1/nodes/my-node/proxy",
-			shouldMatch:        true, // Now matches with updated regex
-			expectedVer:        "v1",
-			expectedRes:        "nodes",
-			expectedName:       "my-node",
+			name:                "Node proxy subresource",
+			path:                "/api/v1/nodes/my-node/proxy",
+			shouldMatch:         true, // Now matches with updated regex
+			expectedVer:         "v1",
+			expectedRes:         "nodes",
+			expectedName:        "my-node",
 			expectedSubresource: "proxy",
 		},
 		{
-			name:               "Pod exec subresource",
-			path:               "/api/v1/namespaces/default/pods/my-pod/exec",
-			shouldMatch:        true,
-			expectedVer:        "v1",
-			expectedNs:         "default",
-			expectedRes:        "pods",
-			expectedName:       "my-pod",
+			name:                "Pod exec subresource",
+			path:                "/api/v1/namespaces/default/pods/my-pod/exec",
+			shouldMatch:         true,
+			expectedVer:         "v1",
+			expectedNs:          "default",
+			expectedRes:         "pods",
+			expectedName:        "my-pod",
 			expectedSubresource: "exec",
 		},
 		{
-			name:               "Pod portforward subresource",
-			path:               "/api/v1/namespaces/default/pods/my-pod/portforward",
-			shouldMatch:        true,
-			expectedVer:        "v1",
-			expectedNs:         "default",
-			expectedRes:        "pods",
-			expectedName:       "my-pod",
+			name:                "Pod portforward subresource",
+			path:                "/api/v1/namespaces/default/pods/my-pod/portforward",
+			shouldMatch:         true,
+			expectedVer:         "v1",
+			expectedNs:          "default",
+			expectedRes:         "pods",
+			expectedName:        "my-pod",
 			expectedSubresource: "portforward",
 		},
 		// Negative test cases - patterns that should NOT match
@@ -198,4 +198,3 @@ func TestResourceRequestRegexp(t *testing.T) {
 		})
 	}
 }
-
