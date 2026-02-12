@@ -31,11 +31,12 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 	logEntry := logging.GetDefaultLogger().ModuleLogger("RedisProxy")
 
 	type testEntry struct {
-		name          string
-		key           string
-		value         string
-		errorExpected bool
-		agentFn       AgentLookupFunc
+		name               string
+		key                string
+		value              string
+		errorExpected      bool
+		agentFn            AgentLookupFunc
+		principalNamespace string
 	}
 
 	testEntries := []testEntry{
@@ -61,14 +62,27 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name:          "'app|managed-resources' with only namespace",
-			key:           "app|managed-resources|my-app|1.8.3",
-			value:         "",
-			errorExpected: true,
+			name:               "'app|managed-resources' app in principal namespace (no underscore), no agentFn",
+			key:                "app|managed-resources|my-app|1.8.3",
+			errorExpected:      true,
+			principalNamespace: "argocd",
 		},
 		{
-			name:          "'app|resources-tree' with only namespace",
-			key:           "app|resources-tree|my-app|1.8.3.gz",
+			name:               "'app|managed-resources' app in principal namespace with agentFn returning agent",
+			key:                "app|managed-resources|guestbook|1.8.3",
+			value:              "my-agent",
+			errorExpected:      false,
+			principalNamespace: "argocd",
+			agentFn: func(namespace, name string) string {
+				if namespace == "argocd" && name == "guestbook" {
+					return "my-agent"
+				}
+				return ""
+			},
+		},
+		{
+			name:          "'app|managed-resources' no underscore without agentFn (namespace-based mapping) should error",
+			key:           "app|managed-resources|my-app|1.8.3",
 			value:         "",
 			errorExpected: true,
 		},
@@ -96,6 +110,7 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 		t.Run(testEntry.name, func(t *testing.T) {
 			rp := &RedisProxy{}
 			rp.agentLookupFn = testEntry.agentFn
+			rp.principalNamespace = testEntry.principalNamespace
 			res, err := rp.extractAgentNameFromRedisCommandKey(testEntry.key, logEntry)
 
 			require.Equal(t, testEntry.value, res)

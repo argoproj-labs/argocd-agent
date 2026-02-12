@@ -386,8 +386,12 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	if !s.options.redisProxyDisabled {
 		s.redisProxy = redisproxy.New(defaultRedisProxyListenerAddr, s.options.redisAddress, s.sendSynchronousRedisMessageToAgent, s.options.redisProxyLogger)
-		// Set the agent lookup function for destination-based mapping support
-		s.redisProxy.SetAgentLookupFunc(s.GetAgentForApp)
+		// Set the principal namespace so the redis proxy can handle apps in the principal's namespace
+		s.redisProxy.SetPrincipalNamespace(s.namespace)
+		// Only set the agent lookup function for destination-based mapping
+		if s.destinationBasedMapping {
+			s.redisProxy.SetAgentLookupFunc(s.GetAgentForApp)
+		}
 	}
 
 	// Instantiate our ResourceProxy to intercept Kubernetes requests from Argo

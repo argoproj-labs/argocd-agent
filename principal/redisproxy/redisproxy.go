@@ -52,6 +52,10 @@ type RedisProxy struct {
 	// destination-based mapping is enabled. If nil, namespace-based mapping is used.
 	agentLookupFn AgentLookupFunc
 
+	// principalNamespace is the namespace where the principal runs (e.g., "argocd").
+	// This is needed to handle apps created in the principal's namespace that target agents.
+	principalNamespace string
+
 	// listenAddress is the address principal redis proxy will listen on
 	listenAddress string
 
@@ -98,6 +102,11 @@ func New(listenAddress string, principalRedisAddress string, sendSyncMessageToAg
 // This is used when destination-based mapping is enabled.
 func (rp *RedisProxy) SetAgentLookupFunc(fn AgentLookupFunc) {
 	rp.agentLookupFn = fn
+}
+
+// SetPrincipalNamespace sets the principal's namespace
+func (rp *RedisProxy) SetPrincipalNamespace(namespace string) {
+	rp.principalNamespace = namespace
 }
 
 // Start listening on redis proxy port, and handling connections
@@ -811,17 +820,26 @@ func (rp *RedisProxy) extractAgentNameFromRedisCommandKey(redisKey string, logCt
 
 	namespaceAndName := splitByPipe[2]
 
-	// It is not possible to create a namespace name containing a '_' value, so this is a correct delimiter
-	if !strings.Contains(namespaceAndName, "_") {
-		errMsg := fmt.Sprintf("unexpected lack of '_' namespace/name separate: '%s'", redisKey)
-		logCtx.Error(errMsg)
-		return "", fmt.Errorf("%s", errMsg)
+	var namespace, appName string
+	if strings.Contains(namespaceAndName, "_") {
+		// Parse namespace and app name from "namespace_appname" format
+		underscoreIdx := strings.Index(namespaceAndName, "_")
+		namespace = namespaceAndName[0:underscoreIdx]
+		appName = namespaceAndName[underscoreIdx+1:]
+	} else {
+		// No underscore means the app is in the principal's namespace.
+		// This happens when apps are created directly in the Argo CD namespace (e.g., "argocd")
+		// but may target an agent via destination-based mapping.
+		if rp.agentLookupFn == nil {
+			// agentLookupFn not set indicates namespace-based mapping mode,
+			// where missing underscore is an error
+			errMsg := fmt.Sprintf("unexpected lack of '_' namespace/name separator: '%s'", redisKey)
+			logCtx.Error(errMsg)
+			return "", fmt.Errorf("%s", errMsg)
+		}
+		namespace = rp.principalNamespace
+		appName = namespaceAndName
 	}
-
-	// Parse namespace and app name from "namespace_appname" format
-	underscoreIdx := strings.Index(namespaceAndName, "_")
-	namespace := namespaceAndName[0:underscoreIdx]
-	appName := namespaceAndName[underscoreIdx+1:]
 
 	// Use lookup function if available (for destination-based mapping)
 	if rp.agentLookupFn != nil {
