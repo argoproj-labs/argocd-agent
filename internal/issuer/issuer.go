@@ -29,4 +29,6 @@ type Issuer interface {
 	IssueRefreshToken(client string, exp time.Duration) (string, error)
 	ValidateAccessToken(token string) (Claims, error)
 	ValidateRefreshToken(token string) (Claims, error)
+	IssueResourceProxyToken(agentName string) (string, error)
+	ValidateResourceProxyToken(token string) (Claims, error)
 }
