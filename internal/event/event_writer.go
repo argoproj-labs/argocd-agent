@@ -15,6 +15,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
+const (
+	// maxEventRetries is the maximum number of times an event will be retried before giving up.
+	maxEventRetries = 5
+)
+
 type streamWriter interface {
 	Send(*eventstreamapi.Event) error
 	Context() context.Context
@@ -73,6 +78,16 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
 	ew.target = target
+
+	// Reset retry timers so events in sentEvents are retried immediately on the new connection.
+	// This is important for reconnection scenarios where the old connection died
+	// and ACKs will never arrive, so we want to give events a fresh chance on the new stream.
+	now := time.Now()
+	for _, msg := range ew.sentEvents {
+		msg.mu.Lock()
+		msg.retryAfter = &now
+		msg.mu.Unlock()
+	}
 }
 
 func (ew *EventWriter) Add(ev *cloudevents.Event) {
@@ -87,7 +102,7 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	defer ew.mu.Unlock()
 
 	defaultBackoff := wait.Backoff{
-		Steps:    5,
+		Steps:    maxEventRetries,
 		Duration: 5 * time.Second,
 		Factor:   2.0,
 		Jitter:   0.1,
@@ -276,8 +291,7 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 	})
 
 	// Check if we've exhausted retries
-	maxRetries := sentMsg.backoff.Steps
-	if sentMsg.retryCount >= maxRetries {
+	if sentMsg.retryCount >= maxEventRetries {
 		logCtx.Warnf("Event failed after %d retries, giving up to unblock queue", sentMsg.retryCount)
 		sentMsg.mu.Unlock()
 
