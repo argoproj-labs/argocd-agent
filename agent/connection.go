@@ -169,8 +169,14 @@ func (a *Agent) handleStreamEvents() error {
 		return err
 	}
 
-	a.eventWriter = event.NewEventWriter(stream)
-	go a.eventWriter.SendWaitingEvents(a.context)
+	if a.eventWriter != nil {
+		// Reuse the existing event writer if it exists.
+		a.eventWriter.UpdateTarget(stream)
+	} else {
+		// Create a new event writer if it doesn't exist.
+		a.eventWriter = event.NewEventWriter(stream)
+		go a.eventWriter.SendWaitingEvents(a.context)
+	}
 
 	logCtx := log().WithFields(logrus.Fields{
 		logfields.Module:     "StreamEvent",
