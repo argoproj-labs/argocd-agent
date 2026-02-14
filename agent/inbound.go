@@ -29,10 +29,12 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
@@ -145,8 +147,9 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		return err
 	}
 
-	// Applications must exist in the same namespace as the agent
-	incomingApp.SetNamespace(a.namespace)
+	// Determine the target namespace for the application
+	targetNamespace := a.getTargetNamespaceForApp(incomingApp)
+	incomingApp.SetNamespace(targetNamespace)
 
 	var exists, sourceUIDMatch bool
 
@@ -426,7 +429,8 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 		return fmt.Errorf("send queue not found for the default queue pair")
 	}
 
-	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent, a.namespace)
+	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent, a.namespace).
+		WithDestinationBasedMapping(a.destinationBasedMapping)
 	subject := &auth.AuthSubject{}
 	err = json.Unmarshal([]byte(a.remote.ClientID()), subject)
 	if err != nil {
@@ -493,8 +497,9 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 // createApplication creates an Application upon an event in the agent's work
 // queue.
 func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
-	// Applications must exist in the same namespace as the agent
-	incoming.SetNamespace(a.namespace)
+	// Determine the target namespace for the application
+	targetNamespace := a.getTargetNamespaceForApp(incoming)
+	incoming.SetNamespace(targetNamespace)
 
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method": "CreateApplication",
@@ -515,6 +520,19 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	if a.appManager.IsManaged(incoming.QualifiedName()) {
 		logCtx.Info("Discarding this event, because application is already managed on this agent")
 		return nil, event.NewEventDiscardedErr("application %s is already managed", incoming.QualifiedName())
+	}
+
+	// Create the namespace if it doesn't exist and the option is enabled
+	if a.destinationBasedMapping {
+		if !a.isNamespaceAllowed(targetNamespace) {
+			return nil, fmt.Errorf("namespace %s is not permitted: not in allowed namespaces list", targetNamespace)
+		}
+
+		if a.createNamespace {
+			if err := a.ensureNamespaceExists(targetNamespace); err != nil {
+				return nil, fmt.Errorf("failed to ensure namespace %s exists: %w", targetNamespace, err)
+			}
+		}
 	}
 
 	logCtx.Infof("Creating a new application on behalf of an incoming event")
@@ -545,8 +563,9 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 }
 
 func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
-	// Applications must exist in the same namespace as the agent
-	incoming.SetNamespace(a.namespace)
+	// Determine the target namespace for the application
+	targetNamespace := a.getTargetNamespaceForApp(incoming)
+	incoming.SetNamespace(targetNamespace)
 
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method":          "UpdateApplication",
@@ -559,6 +578,19 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 		return nil, event.NewEventDiscardedErr("the version %s has already been seen by this agent", incoming.ResourceVersion)
 	} else {
 		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
+	}
+
+	// Create the namespace if it doesn't exist and the option is enabled
+	if a.destinationBasedMapping {
+		if !a.isNamespaceAllowed(targetNamespace) {
+			return nil, fmt.Errorf("namespace %s is not permitted: not in allowed namespaces list", targetNamespace)
+		}
+
+		if a.createNamespace {
+			if err := a.ensureNamespaceExists(targetNamespace); err != nil {
+				return nil, fmt.Errorf("failed to ensure namespace %s exists: %w", targetNamespace, err)
+			}
+		}
 	}
 
 	// Set target cluster to a sensible value
@@ -588,8 +620,9 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 }
 
 func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
-	// Applications must exist in the same namespace as the agent
-	app.SetNamespace(a.namespace)
+	// Determine the target namespace for the application
+	targetNamespace := a.getTargetNamespaceForApp(app)
+	app.SetNamespace(targetNamespace)
 
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method": "DeleteApplication",
@@ -874,5 +907,55 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 		a.logGrpcEvent().Warnf("Could not unmanage repository %s: %v", repo.Name, err)
 	}
 
+	return nil
+}
+
+// getTargetNamespaceForApp returns the namespace where the application should
+// be created on the agent. If destinationBasedMapping is enabled AND the agent
+// is in managed mode, it returns the original namespace from the principal.
+func (a *Agent) getTargetNamespaceForApp(app *v1alpha1.Application) string {
+	if a.destinationBasedMapping && a.mode == types.AgentModeManaged {
+		return app.Namespace
+	}
+	return a.namespace
+}
+
+// isNamespaceAllowed checks if the given namespace is in the agent's allowed namespaces list.
+func (a *Agent) isNamespaceAllowed(namespace string) bool {
+	allowedList := append([]string{a.namespace}, a.allowedNamespaces...)
+	return glob.MatchStringInList(allowedList, namespace, glob.REGEXP)
+}
+
+// ensureNamespaceExists creates the namespace if it doesn't exist.
+// This is used when destinationBasedMapping is enabled to ensure
+// the target namespace exists before creating applications.
+func (a *Agent) ensureNamespaceExists(namespace string) error {
+	// Check if namespace already exists
+	_, err := a.kubeClient.Clientset.CoreV1().Namespaces().Get(a.context, namespace, metav1.GetOptions{})
+	if err == nil {
+		// Namespace already exists
+		return nil
+	}
+
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to check if namespace %s exists: %w", namespace, err)
+	}
+
+	// Create the namespace
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespace,
+		},
+	}
+
+	_, err = a.kubeClient.Clientset.CoreV1().Namespaces().Create(a.context, ns, metav1.CreateOptions{})
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to create namespace %s: %w", namespace, err)
+	}
+
+	log().Infof("Created namespace %s", namespace)
 	return nil
 }

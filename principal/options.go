@@ -80,6 +80,10 @@ type ServerOptions struct {
 	redisProxyLogger    *logging.CentralizedLogger
 	resourceProxyLogger *logging.CentralizedLogger
 	grpcEventLogger     *logging.CentralizedLogger
+
+	// destinationBasedMapping enables mapping applications to agents based on
+	// spec.destination.name instead of the application's namespace
+	destinationBasedMapping bool
 }
 
 type ServerOption func(o *Server) error
@@ -527,6 +531,17 @@ func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) S
 		} else {
 			o.options.grpcEventLogger = logging.GetDefaultLogger()
 		}
+		return nil
+	}
+}
+
+// WithDestinationBasedMapping enables destination-based mapping for applications.
+// When enabled, applications are mapped to agents based on spec.destination.name
+// instead of the application's namespace. This allows applications to exist in
+// any namespace on the principal while still being routed to the correct agent.
+func WithDestinationBasedMapping(enabled bool) ServerOption {
+	return func(o *Server) error {
+		o.options.destinationBasedMapping = enabled
 		return nil
 	}
 }

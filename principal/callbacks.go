@@ -17,6 +17,7 @@ package principal
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -50,23 +51,32 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 
 	logCtx := log().WithFields(logrus.Fields{
 		"component":        "EventCallback",
-		"queue":            outbound.Namespace,
 		"event":            "application_new",
 		"application_name": outbound.Name,
 	})
 
-	s.resources.Add(outbound.Namespace, resources.NewResourceKeyFromApp(outbound))
+	agentName := s.getAgentNameForApp(outbound)
+	if agentName == "" {
+		logCtx.Error("Failed to get agent name for application")
+		return
+	}
 
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		if err := s.queues.Create(outbound.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
+	logCtx = logCtx.WithField("queue", agentName)
+
+	s.resources.Add(agentName, resources.NewResourceKeyFromApp(outbound))
+	// Track the app-to-agent mapping for redis proxy routing
+	s.trackAppToAgent(outbound, agentName)
+
+	if !s.queues.HasQueuePair(agentName) {
+		if err := s.queues.Create(agentName); err != nil {
+			logCtx.WithError(err).Error("failed to create a queue pair for agent")
 			return
 		}
-		logCtx.Trace("Created a new queue pair for the existing namespace")
+		logCtx.Trace("Created a new queue pair for the agent")
 	}
-	q := s.queues.SendQ(outbound.Namespace)
+	q := s.queues.SendQ(agentName)
 	if q == nil {
-		logCtx.Errorf("Help! queue pair for namespace %s disappeared!", outbound.Namespace)
+		logCtx.Errorf("Help! queue pair for agent %s disappeared!", agentName)
 		return
 	}
 	ev := s.events.ApplicationEvent(event.Create, outbound)
@@ -89,10 +99,21 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 
 	logCtx := log().WithFields(logrus.Fields{
 		"component":        "EventCallback",
-		"queue":            old.Namespace,
 		"event":            "application_update",
 		"application_name": old.Name,
 	})
+
+	if s.destinationBasedMapping {
+		s.handleAppAgentChange(ctx, old, new, logCtx)
+	}
+
+	agentName := s.getAgentNameForApp(new)
+	if agentName == "" {
+		logCtx.Error("Failed to get agent name for application")
+		return
+	}
+
+	logCtx = logCtx.WithField("queue", agentName)
 
 	if isResourceFromAutonomousAgent(new) {
 		// Remove finalizers from autonomous agent applications if it is being deleted
@@ -117,14 +138,14 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
 		return
 	}
-	if !s.queues.HasQueuePair(old.Namespace) {
-		if err := s.queues.Create(old.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
+	if !s.queues.HasQueuePair(agentName) {
+		if err := s.queues.Create(agentName); err != nil {
+			logCtx.WithError(err).Error("failed to create a queue pair for agent")
 			return
 		}
-		logCtx.Trace("Created a new queue pair for the existing agent namespace")
+		logCtx.Trace("Created a new queue pair for the agent")
 	}
-	q := s.queues.SendQ(old.Namespace)
+	q := s.queues.SendQ(agentName)
 	if q == nil {
 		logCtx.Error("Help! Queue pair has disappeared!")
 		return
@@ -166,10 +187,17 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 
 	logCtx := log().WithFields(logrus.Fields{
 		"component":        "EventCallback",
-		"queue":            outbound.Namespace,
 		"event":            "application_delete",
 		"application_name": outbound.Name,
 	})
+
+	agentName := s.getAgentNameForApp(outbound)
+	if agentName == "" {
+		logCtx.Error("Failed to get agent name for application")
+		return
+	}
+
+	logCtx = logCtx.WithField("queue", agentName)
 
 	// Revert user-initiated deletion on autonomous agent applications
 	if isResourceFromAutonomousAgent(outbound) {
@@ -184,16 +212,18 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 		}
 	}
 
-	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromApp(outbound))
+	s.resources.Remove(agentName, resources.NewResourceKeyFromApp(outbound))
+	// Remove the app-to-agent mapping
+	s.untrackAppToAgent(outbound)
 
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		if err := s.queues.Create(outbound.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
+	if !s.queues.HasQueuePair(agentName) {
+		if err := s.queues.Create(agentName); err != nil {
+			logCtx.WithError(err).Error("failed to create a queue pair for agent")
 			return
 		}
-		logCtx.Trace("Created a new queue pair for the existing agent namespace")
+		logCtx.Trace("Created a new queue pair for the agent")
 	}
-	q := s.queues.SendQ(outbound.Namespace)
+	q := s.queues.SendQ(agentName)
 	if q == nil {
 		logCtx.Error("Help! Queue pair has disappeared!")
 		return
@@ -258,7 +288,7 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.Create, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
@@ -386,7 +416,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
@@ -602,7 +632,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*new, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
@@ -623,7 +653,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*new, agent)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
@@ -754,6 +784,95 @@ func isTerminateOperation(old, new *v1alpha1.Application) bool {
 		new.Status.OperationState.Phase == synccommon.OperationTerminating
 }
 
+// getAgentNameForApp returns the agent name that should handle the given application.
+// If destination-based mapping is enabled, the agent name is determined from
+// spec.destination.name. Otherwise, the agent name is the application's namespace.
+func (s *Server) getAgentNameForApp(app *v1alpha1.Application) string {
+	if isResourceFromAutonomousAgent(app) {
+		return app.Namespace
+	}
+
+	if s.destinationBasedMapping {
+		// Use destination.name as the agent identifier
+		return app.Spec.Destination.Name
+	}
+	return app.Namespace
+}
+
+// trackAppToAgent stores the mapping from application qualified name to agent name.
+// This is used by the redis proxy to route requests to the correct agent when
+// destination-based mapping is enabled.
+func (s *Server) trackAppToAgent(app *v1alpha1.Application, agentName string) {
+	if s.destinationBasedMapping && s.appToAgent != nil {
+		s.appToAgent.Set(app.QualifiedName(), agentName)
+	}
+}
+
+// untrackAppToAgent removes the mapping from application qualified name to agent name.
+func (s *Server) untrackAppToAgent(app *v1alpha1.Application) {
+	if s.destinationBasedMapping && s.appToAgent != nil {
+		s.appToAgent.Delete(app.QualifiedName())
+	}
+}
+
+// GetAgentForApp returns the agent name for the given application based on
+// the app's namespace and name. This is used by the redis proxy to route
+// requests to the correct agent when destination-based mapping is enabled.
+// Returns empty string if the app is not tracked or destination-based mapping is disabled.
+func (s *Server) GetAgentForApp(namespace, name string) string {
+	if !s.destinationBasedMapping {
+		// In namespace-based mapping, the namespace is the agent name
+		return namespace
+	}
+	if s.appToAgent == nil {
+		return ""
+	}
+	qualifiedName := fmt.Sprintf("%s/%s", namespace, name)
+	return s.appToAgent.Get(qualifiedName)
+}
+
+// handleAppAgentChange handles the case when an application's destination.name changes,
+// meaning it needs to be moved from one agent to another.
+func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Application, logCtx *logrus.Entry) {
+	if isResourceFromAutonomousAgent(old) || isResourceFromAutonomousAgent(new) {
+		return
+	}
+
+	oldAgentName := old.Spec.Destination.Name
+	newAgentName := new.Spec.Destination.Name
+
+	if !s.destinationBasedMapping || (oldAgentName == newAgentName) {
+		return
+	}
+
+	logCtx.Info("Application destination changed, moving app from old agent to new agent")
+
+	if oldAgentName != "" {
+		// Remove mapping and delete the app from the old agent
+		s.untrackAppToAgent(old)
+		s.resources.Remove(oldAgentName, resources.NewResourceKeyFromApp(old))
+
+		if !s.queues.HasQueuePair(oldAgentName) {
+			if err := s.queues.Create(oldAgentName); err != nil {
+				logCtx.WithError(err).Error("failed to create queue pair for old agent")
+			}
+		}
+		if oldQ := s.queues.SendQ(oldAgentName); oldQ != nil {
+			deleteEv := s.events.ApplicationEvent(event.Delete, old)
+			tracing.InjectTraceContext(ctx, deleteEv)
+			oldQ.Add(deleteEv)
+			logCtx.Debug("Sent delete event to old agent")
+		}
+
+	}
+
+	if newAgentName != "" {
+		// Add mapping for the new agent
+		s.trackAppToAgent(new, newAgentName)
+		s.resources.Add(newAgentName, resources.NewResourceKeyFromApp(new))
+	}
+}
+
 // startSpan creates a trace span for a principal callback with common attributes.
 // Returns the context with the span and the span itself for defer cleanup.
 func (s *Server) startSpan(operation, resourceKind string, obj metav1.Object) (context.Context, trace.Span) {
@@ -778,4 +897,33 @@ func (s *Server) startSpan(operation, resourceKind string, obj metav1.Object) (c
 			tracing.AttrResourceUID.String(string(obj.GetUID())),
 		),
 	)
+}
+
+// concurrentMap should not be accessed via `m` field. To consume this map, use the `Get`, `Set`, and `Delete` methods.
+// Likewise, especially do not range over `m` field, as this is an unsynchronized operation.
+type concurrentMap[K comparable, V any] struct {
+	mu sync.RWMutex
+	m  map[K]V
+}
+
+func newConcurrentStringMap() *concurrentMap[string, string] {
+	return &concurrentMap[string, string]{m: make(map[string]string)}
+}
+
+func (c *concurrentMap[K, V]) Get(key K) V {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.m[key]
+}
+
+func (c *concurrentMap[K, V]) Set(key K, value V) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m[key] = value
+}
+
+func (c *concurrentMap[K, V]) Delete(key K) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, key)
 }

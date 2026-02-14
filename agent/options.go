@@ -133,3 +133,26 @@ func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) A
 		return nil
 	}
 }
+
+// WithCreateNamespace configures the agent to automatically create
+// namespaces if they don't exist when syncing applications. This is used in
+// combination with destination-based mapping to ensure that target namespaces
+// exist before creating applications.
+func WithCreateNamespace(enabled bool) AgentOption {
+	return func(o *Agent) error {
+		o.createNamespace = enabled
+		return nil
+	}
+}
+
+// WithDestinationBasedMapping enables destination-based mapping mode on the agent.
+// When enabled, the agent will:
+// - Preserve the source namespace of applications (sync to the same namespace as on the principal)
+// - Watch for applications in all namespaces (not just the agent's namespace)
+// This should be enabled when the principal also has destination-based mapping enabled.
+func WithDestinationBasedMapping(enabled bool) AgentOption {
+	return func(o *Agent) error {
+		o.destinationBasedMapping = enabled
+		return nil
+	}
+}

@@ -46,8 +46,6 @@ type RedisProxyTestSuite struct {
 func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	requires := suite.Require()
 
-	t := suite.T()
-
 	// Get the Argo server endpoint to use
 	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
 	requires.NoError(err)
@@ -97,10 +95,22 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	err = ensureAppExistsAndIsSyncedAndHealthy(&appOnPrincipal, suite.PrincipalClient, &suite.BaseSuite)
 	requires.NoError(err)
 
+	verifyResourceTreeViaRedisProxy(&suite.BaseSuite, &appOnPrincipal, appClient, argoEndpoint, sessionToken)
+}
+
+func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
+	appOnPrincipal *v1alpha1.Application,
+	appClient application.ApplicationServiceClient,
+	endpoint string,
+	sessionToken string) {
+
+	requires := suite.Require()
+	t := suite.T()
+
 	cancellableContext, cancelFunc := context.WithCancel(suite.Ctx)
 	defer cancelFunc()
 
-	resourceTreeURL := "https://" + argoEndpoint + "/api/v1/stream/applications/" + appOnPrincipal.Name + "/resource-tree?appNamespace=" + appOnPrincipal.Namespace
+	resourceTreeURL := "https://" + endpoint + "/api/v1/stream/applications/" + appOnPrincipal.Name + "/resource-tree?appNamespace=" + appOnPrincipal.Namespace
 
 	// Wait for sucessful connection to event source
 	var msgChan chan string
@@ -120,7 +130,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	// Find pod on managed-agent client
 
 	var podList corev1.PodList
-	err = suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
+	err := suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
 	requires.NoError(err)
 
 	requires.True(len(podList.Items) == 1, fmt.Sprintf("should (only be) one kustomize-guestbook pod: %v", podList.Items))

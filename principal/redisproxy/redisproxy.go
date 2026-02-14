@@ -48,6 +48,14 @@ type RedisProxy struct {
 	// - currently the main implementation is: 'sendSynchronousRedisMessageToAgent'
 	sendSynchronousMessageToAgentFn sendSynchronousMessageToAgentFuncType
 
+	// agentLookupFn is used to look up the agent name for an application when
+	// destination-based mapping is enabled. If nil, namespace-based mapping is used.
+	agentLookupFn AgentLookupFunc
+
+	// principalNamespace is the namespace where the principal runs (e.g., "argocd").
+	// This is needed to handle apps created in the principal's namespace that target agents.
+	principalNamespace string
+
 	// listenAddress is the address principal redis proxy will listen on
 	listenAddress string
 
@@ -68,6 +76,11 @@ const (
 // sendSynchronousMessageToAgentFuncType is the function signature used to send a message (and wait for a response) to remote agent via principal's machinery
 type sendSynchronousMessageToAgentFuncType func(agentName string, connectionUUID string, body event.RedisCommandBody) *event.RedisResponseBody
 
+// AgentLookupFunc is the function signature for looking up which agent handles an application.
+// It takes the app's namespace and name, and returns the agent name.
+// Returns empty string if the app is not found or if namespace-based mapping should be used.
+type AgentLookupFunc func(namespace, name string) string
+
 func New(listenAddress string, principalRedisAddress string, sendSyncMessageToAgentFuncParam sendSynchronousMessageToAgentFuncType, logger *logging.CentralizedLogger) *RedisProxy {
 	if logger == nil {
 		logger = logging.GetDefaultLogger()
@@ -83,6 +96,17 @@ func New(listenAddress string, principalRedisAddress string, sendSyncMessageToAg
 	}
 
 	return res
+}
+
+// SetAgentLookupFunc sets the function used to look up agent names for applications.
+// This is used when destination-based mapping is enabled.
+func (rp *RedisProxy) SetAgentLookupFunc(fn AgentLookupFunc) {
+	rp.agentLookupFn = fn
+}
+
+// SetPrincipalNamespace sets the principal's namespace
+func (rp *RedisProxy) SetPrincipalNamespace(namespace string) {
+	rp.principalNamespace = namespace
 }
 
 // Start listening on redis proxy port, and handling connections
@@ -255,7 +279,7 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 
 			channelName := parsedReceived[1]
 
-			agentName, err := extractAgentNameFromRedisCommandKey(channelName, logCtx)
+			agentName, err := rp.extractAgentNameFromRedisCommandKey(channelName, logCtx)
 			if err != nil {
 				logCtx.WithError(err).Error("exit due to unable to get agent name: " + channelName)
 				return
@@ -278,7 +302,7 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 			// Determine if the command should be forwarded to agent (and which agent)
 			key := parsedReceived[1]
 
-			agentName, err := extractAgentNameFromRedisCommandKey(key, logCtx)
+			agentName, err := rp.extractAgentNameFromRedisCommandKey(key, logCtx)
 			if err != nil {
 				logCtx.WithError(err).Error("exit due to unable to get agent name: " + key)
 				return
@@ -382,7 +406,7 @@ func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, arg
 		},
 	}
 
-	agentName, err := extractAgentNameFromRedisCommandKey(key, logCtx)
+	agentName, err := rp.extractAgentNameFromRedisCommandKey(key, logCtx)
 	if err != nil {
 		logCtx.WithError(err).Error("unable to get agent name: " + key)
 		return err
@@ -752,7 +776,8 @@ func establishConnectionToPrincipalRedis(principalRedisAddress string, logCtx *l
 // - If the key is 'app|managed-resources|agent-managed_my-app|1.8.3'
 // - The extracted agent name will be 'agent-managed'
 //   - This value comes from the third field, before the '_' character
-func extractAgentNameFromRedisCommandKey(redisKey string, logCtx *logrus.Entry) (string, error) {
+func (rp *RedisProxy) extractAgentNameFromRedisCommandKey(redisKey string, logCtx *logrus.Entry) (string, error) {
+
 	// We only recognize agent names from these keys
 	if !strings.HasPrefix(redisKey, "app|managed-resources") && !strings.HasPrefix(redisKey, "app|resources-tree") {
 
@@ -795,17 +820,34 @@ func extractAgentNameFromRedisCommandKey(redisKey string, logCtx *logrus.Entry) 
 
 	namespaceAndName := splitByPipe[2]
 
-	// It is not possible to create a namespace name containing a '_' value, so this is a correct delimiter
-	if !strings.Contains(namespaceAndName, "_") {
-		errMsg := fmt.Sprintf("unexpected lack of '_' namespace/name separate: '%s'", redisKey)
-		logCtx.Error(errMsg)
-		return "", fmt.Errorf("%s", errMsg)
+	var namespace, appName string
+	if strings.Contains(namespaceAndName, "_") {
+		// Parse namespace and app name from "namespace_appname" format
+		underscoreIdx := strings.Index(namespaceAndName, "_")
+		namespace = namespaceAndName[0:underscoreIdx]
+		appName = namespaceAndName[underscoreIdx+1:]
+	} else {
+		// No underscore means the app is in the principal's namespace.
+		// This happens when apps are created directly in the Argo CD namespace (e.g., "argocd")
+		// but may target an agent via destination-based mapping.
+		if rp.agentLookupFn == nil {
+			// agentLookupFn not set indicates namespace-based mapping mode,
+			// where missing underscore is an error
+			errMsg := fmt.Sprintf("unexpected lack of '_' namespace/name separator: '%s'", redisKey)
+			logCtx.Error(errMsg)
+			return "", fmt.Errorf("%s", errMsg)
+		}
+		namespace = rp.principalNamespace
+		appName = namespaceAndName
 	}
 
-	// namespace is the agent name
-	res := namespaceAndName[0:strings.Index(namespaceAndName, "_")]
+	// Use lookup function if available (for destination-based mapping)
+	if rp.agentLookupFn != nil {
+		return rp.agentLookupFn(namespace, appName), nil
+	}
 
-	return res, nil
+	// Namespace is the agent name for the default namespace-based mapping
+	return namespace, nil
 }
 
 func (rp *RedisProxy) log() *logrus.Entry {

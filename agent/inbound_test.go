@@ -87,6 +87,38 @@ func Test_CreateApplication(t *testing.T) {
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
 	})
 
+	t.Run("Create application with destination based mapping", func(t *testing.T) {
+		defer func() {
+			a.destinationBasedMapping = false
+			a.createNamespace = false
+			a.allowedNamespaces = []string{}
+		}()
+
+		a.destinationBasedMapping = true
+		a.createNamespace = true
+		a.allowedNamespaces = []string{"principal-*"}
+
+		defer a.appManager.Unmanage(app.QualifiedName())
+		a.mode = types.AgentModeManaged
+
+		newApp := app.DeepCopy()
+		newApp.Namespace = "principal-namespace"
+
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(newApp, nil)
+		defer createMock.Unset()
+		napp, err := a.createApplication(newApp)
+		require.NoError(t, err)
+		require.NotNil(t, napp)
+
+		// Ensure that a new namespace is created
+		ns, err := a.kubeClient.Clientset.CoreV1().Namespaces().Get(context.Background(), "principal-namespace", v1.GetOptions{})
+		require.NoError(t, err)
+		require.Equal(t, newApp.Namespace, ns.Name)
+
+		require.NotEqual(t, a.namespace, newApp.Namespace)
+		require.Equal(t, "principal-namespace", newApp.Namespace, "Namespace should not be modified in destination based mapping")
+	})
+
 }
 
 func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {

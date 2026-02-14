@@ -65,7 +65,7 @@ type Agent struct {
 	options  AgentOptions
 	// namespace is the namespace to manage applications in
 	namespace string
-	// allowedNamespaces is not currently used. See also 'namespaces' field in AgentOptions
+	// allowedNamespaces is the list of namespaces that the agent is allowed to manage applications in
 	allowedNamespaces []string
 	// infStopCh is not currently used
 	infStopCh chan struct{}
@@ -124,6 +124,17 @@ type Agent struct {
 	resourceProxyLogger *logging.CentralizedLogger
 	redisProxyLogger    *logging.CentralizedLogger
 	grpcEventLogger     *logging.CentralizedLogger
+
+	// destinationBasedMapping when true, the agent operates in destination-based
+	// mapping mode where:
+	// - Applications are synced to their original namespace from the principal
+	// - The agent watches for applications in all namespaces
+	destinationBasedMapping bool
+
+	// createNamespace when true, the agent will create namespaces that
+	// don't exist before creating applications. This is used in combination with
+	// destination-based mapping.
+	createNamespace bool
 }
 
 const defaultQueueName = "default"
@@ -187,6 +198,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		a.grpcEventLogger = logging.GetDefaultLogger()
 	}
 
+	if a.createNamespace && !a.destinationBasedMapping {
+		return nil, fmt.Errorf("cannot create namespaces if destination based mapping is disabled")
+	}
+
 	if a.remote == nil {
 		return nil, fmt.Errorf("remote not defined")
 	}
@@ -212,12 +227,23 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, fmt.Errorf("unexpected agent mode: %v", a.mode)
 	}
 
+	if a.destinationBasedMapping && a.mode == types.AgentModeAutonomous {
+		return nil, fmt.Errorf("destination-based mapping is not supported for autonomous agents")
+	}
+
+	// Determine the namespace(s) to watch for applications
+	appNamespace := a.namespace
+	if a.destinationBasedMapping {
+		// Watch all namespaces when destination-based mapping is enabled
+		appNamespace = ""
+	}
+
 	// appListFunc and watchFunc are anonymous functions for the informer
 	appListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(a.namespace).List(ctx, config.DefaultLabelSelector())
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).List(ctx, config.DefaultLabelSelector())
 	}
 	appWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(a.namespace).Watch(ctx, config.DefaultLabelSelector())
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).Watch(ctx, config.DefaultLabelSelector())
 	}
 
 	appInformerOptions := []informer.InformerOption[*v1alpha1.Application]{
@@ -227,7 +253,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		informer.WithUpdateHandler[*v1alpha1.Application](a.addAppUpdateToQueue),
 		informer.WithDeleteHandler[*v1alpha1.Application](a.addAppDeletionToQueue),
 		informer.WithFilters[*v1alpha1.Application](a.DefaultAppFilterChain()),
-		informer.WithNamespaceScope[*v1alpha1.Application](a.namespace),
+		informer.WithNamespaceScope[*v1alpha1.Application](appNamespace),
 		informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
 	}
 
@@ -241,6 +267,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		application.WithRole(manager.ManagerRoleAgent),
 		application.WithMode(managerMode),
 		application.WithDeletionTracker(a.deletions),
+		application.WithDestinationBasedMapping(a.destinationBasedMapping),
 	}
 
 	if a.options.metricsPort > 0 {
@@ -538,7 +565,13 @@ func (a *Agent) healthzHandler(w http.ResponseWriter, r *http.Request) {
 
 func (a *Agent) populateSourceCache(ctx context.Context) error {
 	log().Infof("Recreating application spec cache from existing resources on cluster")
-	appList, err := a.appManager.List(ctx, backend.ApplicationSelector{Namespaces: []string{a.namespace}})
+	// When destination-based mapping is enabled, apps can be in any namespace,
+	// so we need to list from all namespaces
+	var namespaces []string
+	if !a.destinationBasedMapping {
+		namespaces = []string{a.namespace}
+	}
+	appList, err := a.appManager.List(ctx, backend.ApplicationSelector{Namespaces: namespaces})
 	if err != nil {
 		return err
 	}
