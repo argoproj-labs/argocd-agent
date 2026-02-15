@@ -15,6 +15,11 @@ data:
   #   extracting the agent ID from client cert subject.
   # Default: ""
   agent.creds: "userpass:/app/config/creds/userpass.creds"
+  # agent.tls.insecure-plaintext: Connect to the principal without TLS. Only use
+  # when running behind a service mesh (e.g., Istio) that handles mTLS at
+  # the sidecar level.
+  # Default: false
+  agent.tls.insecure-plaintext: "false"
   # agent.tls.client.insecure: Whether to skip the validation of the remote TLS
   # credentials. Insecure. Do only use for development purposes.
   # Default: false
