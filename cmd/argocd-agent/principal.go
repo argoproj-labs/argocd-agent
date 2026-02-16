@@ -202,7 +202,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 					opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
 				} else {
 					logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCaSecretName)
-					opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, namespace, rootCaSecretName, "tls.crt"))
+					opts = append(opts, principal.WithTLSRootCaFromSecret(kubeConfig.Clientset, namespace, rootCaSecretName, "tls.crt", "ca.crt"))
 				}
 			}
 
@@ -515,7 +515,7 @@ func getResourceProxyTLSConfigFromKube(kubeClient *kube.KubernetesClient, namesp
 		return nil, fmt.Errorf("error getting proxy certificate: %w", err)
 	}
 
-	clientCA, err := tlsutil.X509CertPoolFromSecret(ctx, kubeClient.Clientset, namespace, caName, "tls.crt")
+	clientCA, err := tlsutil.X509CertPoolFromSecret(ctx, kubeClient.Clientset, namespace, caName, "tls.crt", "ca.crt")
 	if err != nil {
 		return nil, fmt.Errorf("error getting client CA certificate: %w", err)
 	}

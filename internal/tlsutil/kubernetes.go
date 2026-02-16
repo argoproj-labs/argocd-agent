@@ -27,6 +27,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net/http"
+	"slices"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,10 +35,12 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-const tlsCertFieldName = "tls.crt"
-const tlsKeyFieldName = "tls.key"
-const tlsTypeLabelValue = "kubernetes.io/tls"
-const jwtKeyFieldName = "jwt.key"
+const (
+	tlsCertFieldName  = "tls.crt"
+	tlsKeyFieldName   = "tls.key"
+	tlsTypeLabelValue = "kubernetes.io/tls"
+	jwtKeyFieldName   = "jwt.key"
+)
 
 // TLSCertFromSecret reads a Kubernetes TLS secrets, and parses its data into
 // a tls.Certificate.
@@ -99,11 +102,11 @@ func TLSCertToSecret(ctx context.Context, kube kubernetes.Interface, namespace, 
 }
 
 // X509CertPoolFromSecret reads certificate data from a Kubernetes secret and
-// appends the data to a X509 cert pool to be returned. If field is given,
-// only data from this field will be parsed into the cert pool. Otherwise, if
-// field is the empty string, all fields in the secret are expected to have
+// appends the data to a X509 cert pool to be returned. If fields are given,
+// only data from these fields will be parsed into the cert pool. Otherwise, if
+// fields is the empty string, all fields in the secret are expected to have
 // valid certificate data and will be parsed.
-func X509CertPoolFromSecret(ctx context.Context, kube kubernetes.Interface, namespace, name, field string) (*x509.CertPool, error) {
+func X509CertPoolFromSecret(ctx context.Context, kube kubernetes.Interface, namespace, name string, fields ...string) (*x509.CertPool, error) {
 	secret, err := kube.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("could not read secret: %w", err)
@@ -112,16 +115,28 @@ func X509CertPoolFromSecret(ctx context.Context, kube kubernetes.Interface, name
 		return nil, fmt.Errorf("%s/%s: empty secret", namespace, name)
 	}
 
+	readAll := len(fields) == 0 || (len(fields) == 1 && fields[0] == "")
+
 	pool := x509.NewCertPool()
 	certsInPool := 0
 	for f, crtBytes := range secret.Data {
-		if field == "" || f == field {
+		if readAll {
 			ok := pool.AppendCertsFromPEM(crtBytes)
 			if !ok {
 				return nil, fmt.Errorf("%s/%s: field %s does not hold valid certificate data", namespace, name, f)
 			}
-			certsInPool += 1
+			certsInPool++
+		} else if slices.Contains(fields, f) {
+			ok := pool.AppendCertsFromPEM(crtBytes)
+			if !ok {
+				return nil, fmt.Errorf("%s/%s: field %s does not hold valid certificate data", namespace, name, f)
+			}
+			certsInPool++
 		}
+	}
+
+	if certsInPool == 0 {
+		return nil, fmt.Errorf("%s/%s: none of the requested fields %v were found in secret", namespace, name, fields)
 	}
 
 	return pool, nil

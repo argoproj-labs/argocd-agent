@@ -208,9 +208,9 @@ func WithRootAuthoritiesFromFile(caPath string) RemoteOption {
 // field. Otherwise, the ConfigMap is expected to contain one or more
 // certificates in each field of the ConfigMap, and all certificates will be
 // loaded into the certificate pool.
-func WithRootAuthoritiesFromSecret(kube kubernetes.Interface, namespace, name, field string) RemoteOption {
+func WithRootAuthoritiesFromSecret(kube kubernetes.Interface, namespace, name string, fields ...string) RemoteOption {
 	return func(r *Remote) error {
-		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, field)
+		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, fields...)
 		if err != nil {
 			return err
 		}
