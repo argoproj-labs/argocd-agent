@@ -40,7 +40,7 @@ export PATH="$PATH:$ISTIO_DIR/bin"
   (Control Plane Cluster)       (Workload Cluster(s))
 
 Pod CIDR: 10.245.0.0/16        Pod CIDR: 10.246.0.0/16...
-SVC CIDR: 10.97.0.0/12         SVC CIDR: 10.98.0.0/12...
+SVC CIDR: 10.97.0.0/16         SVC CIDR: 10.98.0.0/16...
 ┌─────────────────────────┐    ┌─────────────────────────┐
 │  Istio (shared root CA) │    │  Istio (shared root CA) │
 │ ┌─────────────────────┐ │    │ ┌─────────────────────┐ │
@@ -656,6 +656,10 @@ export AGENT_APP_NAME="agent-b"
 export AGENT_CLUSTER_NAME="argocd-agent2"
 export AGENT_POD_CIDR="10.$((244 + $AGENT_USER_ID)).0.0/16"
 export AGENT_SVC_CIDR="10.$((96 + $AGENT_USER_ID)).0.0/16"
+
+# Generate Istio intermediate CA for the new cluster
+cd /tmp/istio-certs
+make -f $ISTIO_DIR/tools/certs/Makefile.selfsigned.mk cluster${AGENT_USER_ID}-cacerts
 
 # (optional) Check variables
 echo "Agent App Name: $AGENT_APP_NAME"
