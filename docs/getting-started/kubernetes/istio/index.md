@@ -1,4 +1,4 @@
-# Getting Started with SPIFFE using Istio on Kind
+# Getting Started with SPIFFE Authentication via Istio on Kind
 
 This quick start guide walks you through setting up argocd-agent using [SPIFFE](https://spiffe.io/)-based authentication via a service mesh.
 Instead of mutual TLS (mTLS) client certificates, the service mesh handles identity and encryption automatically using SPIFFE identities.
