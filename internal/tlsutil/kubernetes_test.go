@@ -78,7 +78,6 @@ func Test_TLSCertFromSecret(t *testing.T) {
 		cert, err := TLSCertFromSecret(context.TODO(), kcl, "argocd", "tls-one")
 		assert.ErrorContains(t, err, "either cert or key is missing")
 		assert.NotNil(t, cert)
-
 	})
 	t.Run("Missing key in secret", func(t *testing.T) {
 		secret := &v1.Secret{
@@ -95,7 +94,6 @@ func Test_TLSCertFromSecret(t *testing.T) {
 		cert, err := TLSCertFromSecret(context.TODO(), kcl, "argocd", "tls-one")
 		assert.ErrorContains(t, err, "either cert or key is missing")
 		assert.NotNil(t, cert)
-
 	})
 
 	t.Run("Not a TLS secret", func(t *testing.T) {
@@ -113,7 +111,6 @@ func Test_TLSCertFromSecret(t *testing.T) {
 		cert, err := TLSCertFromSecret(context.TODO(), kcl, "argocd", "tls-one")
 		assert.ErrorContains(t, err, "not a TLS secret")
 		assert.NotNil(t, cert)
-
 	})
 
 	t.Run("Invalid data in secret", func(t *testing.T) {
@@ -132,9 +129,7 @@ func Test_TLSCertFromSecret(t *testing.T) {
 		cert, err := TLSCertFromSecret(context.TODO(), kcl, "argocd", "tls-one")
 		assert.ErrorContains(t, err, "invalid cert or key data")
 		assert.NotNil(t, cert)
-
 	})
-
 }
 
 func Test_TlsCertToSecret(t *testing.T) {
@@ -164,7 +159,6 @@ func Test_TlsCertToSecret(t *testing.T) {
 		_, err = kcl.CoreV1().Secrets("argocd").Get(context.TODO(), "tls-one", metav1.GetOptions{})
 		assert.True(t, errors.IsNotFound(err))
 	})
-
 }
 
 func Test_X509CertPoolFromSecret(t *testing.T) {
@@ -175,7 +169,8 @@ func Test_X509CertPoolFromSecret(t *testing.T) {
 			Namespace: "argocd",
 		},
 		Data: map[string][]byte{
-			"ca.crt": []byte(certPem),
+			"ca.crt":  []byte(certPem),
+			"tls.crt": []byte(certPem),
 		},
 	}
 	kcl := kube.NewFakeClientsetWithResources(s)
@@ -188,11 +183,19 @@ func Test_X509CertPoolFromSecret(t *testing.T) {
 		pool, err := X509CertPoolFromSecret(context.TODO(), kcl, "argocd", "ca-certs", "")
 		assert.NoError(t, err)
 		assert.NotNil(t, pool)
-	})
-	t.Run("Read pool from non-existing field", func(t *testing.T) {
-		pool, err := X509CertPoolFromSecret(context.TODO(), kcl, "argocd", "ca-certs", "")
+		pool, err = X509CertPoolFromSecret(context.TODO(), kcl, "argocd", "ca-certs")
 		assert.NoError(t, err)
 		assert.NotNil(t, pool)
+	})
+	t.Run("Read pool from multiple fields", func(t *testing.T) {
+		pool, err := X509CertPoolFromSecret(context.TODO(), kcl, "argocd", "ca-certs", "ca.crt", "tls.crt")
+		assert.NoError(t, err)
+		assert.NotNil(t, pool)
+	})
+	t.Run("Read pool from non-existing field", func(t *testing.T) {
+		pool, err := X509CertPoolFromSecret(context.TODO(), kcl, "argocd", "ca-certs", "nonexisting.crt")
+		assert.Error(t, err)
+		assert.Nil(t, pool)
 	})
 
 	t.Run("Read pool from non-existing secret", func(t *testing.T) {

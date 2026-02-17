@@ -225,9 +225,9 @@ func WithTLSRootCaFromFile(caPath string) ServerOption {
 // If field is non-empty, only loads certificates stored in the named field.
 // Otherwise, if field is empty, loads certificates from all fields in the
 // Secret.
-func WithTLSRootCaFromSecret(kube kubernetes.Interface, namespace, name, field string) ServerOption {
+func WithTLSRootCaFromSecret(kube kubernetes.Interface, namespace, name string, fields ...string) ServerOption {
 	return func(o *Server) error {
-		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, field)
+		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, fields...)
 		if err != nil {
 			return err
 		}
