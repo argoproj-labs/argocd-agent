@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
@@ -91,6 +92,9 @@ type Remote struct {
 
 	// Time interval for agent to principal ping
 	keepAlivePingInterval time.Duration
+
+	// The largest GRPC message size supported, configurable via env/param
+	MaxGRPCMessageSize int
 }
 
 type RemoteOption func(r *Remote) error
@@ -279,6 +283,18 @@ func WithCompression(flag bool) RemoteOption {
 	}
 }
 
+// WithMaxGRPCMessageSize configures the maximum gRPC message size (in bytes)
+// for both sending and receiving on the agent client connection.
+func WithMaxGRPCMessageSize(size int) RemoteOption {
+	return func(r *Remote) error {
+		if size <= 0 {
+			return fmt.Errorf("grpc max message size must be greater than 0")
+		}
+		r.MaxGRPCMessageSize = size
+		return nil
+	}
+}
+
 // WithMinimumTLSVersion configures the minimum TLS version the client will accept.
 func WithMinimumTLSVersion(version string) RemoteOption {
 	return func(r *Remote) error {
@@ -328,7 +344,8 @@ func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error)
 			Factor:   2,
 			Cap:      1 * time.Minute,
 		},
-		clientMode: types.AgentModeAutonomous,
+		clientMode:         types.AgentModeAutonomous,
+		MaxGRPCMessageSize: grpcutil.DefaultGRPCMaxMessageSize,
 	}
 	for _, o := range opts {
 		if err := o(r); err != nil {
@@ -413,11 +430,18 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 
 	// Some default options
 	opts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(r.MaxGRPCMessageSize), grpc.MaxCallSendMsgSize(r.MaxGRPCMessageSize)),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithConnectParams(cparams),
 		grpc.WithUserAgent("argocd-agent/v0.0.1"),
-		grpc.WithUnaryInterceptor(r.unaryAuthInterceptor),
-		grpc.WithStreamInterceptor(r.streamAuthInterceptor),
+		grpc.WithChainUnaryInterceptor(
+			r.unaryAuthInterceptor,
+			grpcutil.UnaryClientMsgSizeInterceptor(r.MaxGRPCMessageSize),
+		),
+		grpc.WithChainStreamInterceptor(
+			r.streamAuthInterceptor,
+			grpcutil.StreamClientMsgSizeInterceptor(r.MaxGRPCMessageSize),
+		),
 	}
 
 	if r.enableCompression {
