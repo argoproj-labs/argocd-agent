@@ -32,6 +32,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
@@ -93,6 +94,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisPassword        string
 		redisCompressionType string
 		healthzPort          int
+
+		maxGRPCMessageSize int
 
 		// OpenTelemetry configuration
 		otlpAddress  string
@@ -326,6 +329,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithRedis(redisAddress, redisPassword, redisCompressionType))
 			opts = append(opts, principal.WithHealthzPort(healthzPort))
 			opts = append(opts, principal.WithDestinationBasedMapping(destinationBasedMapping))
+			opts = append(opts, principal.WithMaxGRPCMessageSize(maxGRPCMessageSize))
 
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
@@ -468,6 +472,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().IntVar(&healthzPort, "healthz-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT", cmdutil.ValidPort, 8003),
 		"Port the health check server will listen on")
+
+	command.Flags().IntVar(&maxGRPCMessageSize, "grpc-max-message-size",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_GRPC_MAX_MESSAGE_SIZE", nil, grpcutil.DefaultGRPCMaxMessageSize),
+		"Maximum gRPC message size in bytes for send and receive (default: 200MB)")
 
 	command.Flags().StringVar(&otlpAddress, "otlp-address",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_OTLP_ADDRESS", nil, ""),
