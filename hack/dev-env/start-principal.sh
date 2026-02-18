@@ -45,13 +45,20 @@ if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
     export ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=${ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET:-false}
     export ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=${ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING:-false}
+    export ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION=${ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION:-false}
+    if [ -n "$ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET" ]; then
+        export ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET
+    fi
 fi
 
-SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+ARGOCD_AGENT_RESOURCE_PROXY=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+export ARGOCD_AGENT_RESOURCE_PROXY
+
 go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent principal \
 	--allowed-namespaces '*' \
 	--kubecontext vcluster-control-plane \
 	--log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} \
 	--namespace argocd \
 	--auth "mtls:CN=([^,]+)" \
+    --resource-proxy-address "${ARGOCD_AGENT_RESOURCE_PROXY}:9090" \
 	$ARGS

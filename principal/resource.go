@@ -48,31 +48,25 @@ const requestTimeout = 10 * time.Second
 func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, params resourceproxy.Params) {
 	logCtx := log().WithField("function", "resourceRequester")
 
-	// Make sure our request carries a client certificate
-	if r.TLS == nil || len(r.TLS.PeerCertificates) < 1 {
-		logCtx.Errorf("Unauthenticated request from client %s", r.RemoteAddr)
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte("no authorization found"))
+	// Extract agent name from JWT bearer token in Authorization header
+	agentName, err := s.extractAgentFromAuth(r)
+	if err != nil {
+		logCtx.WithError(err).Errorf("Authentication failed for client %s", r.RemoteAddr)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("authentication failed"))
 		return
 	}
 
-	// For now, we can only validate the first client cert presented by the
-	// client. Under normal circumstances, the client is the Argo CD API,
-	// which uses the client certificate of the cluster secret, which is
-	// usually configured by us.
-	cert := r.TLS.PeerCertificates[0]
-
-	// Make sure the agent name in the certificate is properly formatted
-	agentName := cert.Subject.CommonName
+	// Validate the agent name format
 	errs := validation.NameIsDNSLabel(agentName, false)
 	if len(errs) > 0 {
-		logCtx.Errorf("CRITICAL: Invalid agent name in client certificate: %v", errs)
+		logCtx.Errorf("CRITICAL: Invalid agent name in token: %v", errs)
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte("invalid client certificate"))
+		_, _ = w.Write([]byte("invalid agent name"))
 		return
 	}
 
-	logCtx = logCtx.WithField("agent", cert.Subject.CommonName)
+	logCtx = logCtx.WithField("agent", agentName)
 
 	// Handle exec subresource separately.
 	// because it requires WebSocket for bidirectional streaming
@@ -391,4 +385,46 @@ func (s *Server) sendSynchronousRedisMessageToAgent(agentName string, connection
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
+}
+
+// extractAgentFromAuth extracts the agent name from the request.
+// Authentication methods in order of preference:
+// 1. JWT bearer token in Authorization header (for self-registered clusters)
+// 2. TLS client certificate Common Name (for manually created cluster secrets)
+func (s *Server) extractAgentFromAuth(r *http.Request) (string, error) {
+	logCtx := log().WithField("function", "extractAgentFromAuth")
+
+	// Method 1: Try Authorization header first (Bearer token)
+	// Used by self-registered clusters that store JWT tokens in cluster secrets
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		logCtx.Info("Attempting JWT bearer token authentication")
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		claims, err := s.issuer.ValidateResourceProxyToken(token)
+		if err != nil {
+			logCtx.WithError(err).Info("Bearer token validation failed")
+			return "", fmt.Errorf("invalid bearer token: %v", err)
+		}
+		subject, err := claims.GetSubject()
+		if err != nil {
+			logCtx.WithError(err).Info("Could not get subject from token")
+			return "", fmt.Errorf("could not get subject from token: %v", err)
+		}
+		logCtx.WithField("agent", subject).Info("Successfully authenticated via bearer token")
+		return subject, nil
+	}
+
+	// Method 2: Extract agent name from TLS client certificate CN
+	// Used by manually created cluster secrets
+	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+		cert := r.TLS.PeerCertificates[0]
+		agentName := cert.Subject.CommonName
+		if agentName != "" {
+			logCtx.WithField("agent", agentName).Info("Successfully authenticated via TLS client certificate CN")
+			return agentName, nil
+		}
+		logCtx.Warn("TLS client certificate has empty Common Name")
+	}
+
+	return "", fmt.Errorf("no authorization found")
 }

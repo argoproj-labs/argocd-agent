@@ -26,6 +26,8 @@ import (
 	issuermock "github.com/argoproj-labs/argocd-agent/internal/issuer/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
+	"github.com/argoproj-labs/argocd-agent/principal/registration"
+	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -116,6 +118,80 @@ func Test_Authenticate(t *testing.T) {
 			Mode:        "managed",
 		})
 		require.ErrorContains(t, err, "authentication failed")
+	})
+
+	t.Run("Continue authentication even when self cluster registration is disabled", func(t *testing.T) {
+		ams := auth.NewMethods()
+		am := authmock.NewMethod(t)
+		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
+		ams.RegisterMethod("userpass", am)
+
+		iss := issuermock.NewIssuer(t)
+		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
+		iss.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("refresh", nil)
+
+		// Create manager with agent registration disabled
+		kubeclient := kube.NewFakeKubeClient("argocd")
+		mgr := registration.NewAgentRegistrationManager(false, "argocd", "resource-proxy:8443", "", kubeclient, iss)
+
+		auths, err := NewServer(queues, ams, iss, WithAgentRegistrationManager(mgr))
+		require.NoError(t, err)
+		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+			Method:      "userpass",
+			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
+			Mode:        "managed",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, r)
+		assert.Equal(t, "access", r.AccessToken)
+		assert.Equal(t, "refresh", r.RefreshToken)
+	})
+
+	t.Run("Authentication fails when agent registration fails", func(t *testing.T) {
+		ams := auth.NewMethods()
+		am := authmock.NewMethod(t)
+		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
+		ams.RegisterMethod("userpass", am)
+
+		// Create manager with agent registration enabled but no CA cert path to make it fail
+		kubeclient := kube.NewFakeClientsetWithResources()
+		mockIss := issuermock.NewIssuer(t)
+		mockIss.On("IssueResourceProxyToken", "user1").Return("test-token", nil)
+		mgr := registration.NewAgentRegistrationManager(true, "argocd", "resource-proxy:8443", "", kubeclient, mockIss)
+
+		auths, err := NewServer(queues, ams, nil, WithAgentRegistrationManager(mgr))
+		require.NoError(t, err)
+
+		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+			Method:      "userpass",
+			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
+			Mode:        "managed",
+		})
+		require.ErrorContains(t, err, "authentication failed")
+	})
+
+	t.Run("Authentication successful with nil cluster registration manager", func(t *testing.T) {
+		ams := auth.NewMethods()
+		am := authmock.NewMethod(t)
+		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
+		ams.RegisterMethod("userpass", am)
+
+		iss := issuermock.NewIssuer(t)
+		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
+		iss.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("refresh", nil)
+
+		// No cluster registration manager provided
+		auths, err := NewServer(queues, ams, iss)
+		require.NoError(t, err)
+		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+			Method:      "userpass",
+			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
+			Mode:        "managed",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, r)
+		assert.Equal(t, "access", r.AccessToken)
+		assert.Equal(t, "refresh", r.RefreshToken)
 	})
 
 }

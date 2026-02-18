@@ -86,6 +86,10 @@ type ServerOptions struct {
 	// destinationBasedMapping enables mapping applications to agents based on
 	// spec.destination.name instead of the application's namespace
 	destinationBasedMapping bool
+
+	selfAgentRegistrationEnabled bool
+	resourceProxyAddress         string
+	clientCertSecretName         string
 }
 
 type ServerOption func(o *Server) error
@@ -93,14 +97,15 @@ type ServerOption func(o *Server) error
 // defaultOptions returns a set of default options for the server
 func defaultOptions() *ServerOptions {
 	return &ServerOptions{
-		port:                443,
-		address:             "",
-		tlsMinVersion:       tls.VersionTLS13,
-		unauthMethods:       make(map[string]bool),
-		eventProcessors:     10,
-		rootCa:              x509.NewCertPool(),
-		informerSyncTimeout: 60 * time.Second,
-		maxGRPCMessageSize:  grpcutil.DefaultGRPCMaxMessageSize,
+		port:                 443,
+		address:              "",
+		tlsMinVersion:        tls.VersionTLS13,
+		unauthMethods:        make(map[string]bool),
+		eventProcessors:      10,
+		rootCa:               x509.NewCertPool(),
+		informerSyncTimeout:  60 * time.Second,
+		maxGRPCMessageSize:   grpcutil.DefaultGRPCMaxMessageSize,
+		resourceProxyAddress: "argocd-agent-resource-proxy:9090",
 	}
 }
 
@@ -557,6 +562,27 @@ func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) S
 func WithDestinationBasedMapping(enabled bool) ServerOption {
 	return func(o *Server) error {
 		o.options.destinationBasedMapping = enabled
+		return nil
+	}
+}
+
+func WithAgentRegistration(enabled bool) ServerOption {
+	return func(o *Server) error {
+		o.options.selfAgentRegistrationEnabled = enabled
+		return nil
+	}
+}
+
+func WithResourceProxyAddress(address string) ServerOption {
+	return func(o *Server) error {
+		o.options.resourceProxyAddress = address
+		return nil
+	}
+}
+
+func WithClientCertSecretName(name string) ServerOption {
+	return func(o *Server) error {
+		o.options.clientCertSecretName = name
 		return nil
 	}
 }

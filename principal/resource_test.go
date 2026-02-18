@@ -37,13 +37,15 @@ func newResourceTestServer(t *testing.T) *Server {
 func Test_resourceRequester(t *testing.T) {
 	t.Run("Successfully request a resource", func(t *testing.T) {
 		s := newResourceTestServer(t)
+		// Create a certificate with agent name in CN
+		cert := &x509.Certificate{
+			Subject: pkix.Name{
+				CommonName: "agent",
+			},
+		}
 		r := httptest.NewRequest("GET", "/", nil)
 		r.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{
-				{
-					Subject: pkix.Name{CommonName: "agent"},
-				},
-			},
+			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
@@ -83,23 +85,49 @@ func Test_resourceRequester(t *testing.T) {
 			ch <- 1
 		}()
 		<-ch
-		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		// No authentication method available
+		assert.Equal(t, http.StatusUnauthorized, w.Result().StatusCode)
 		defer w.Result().Body.Close()
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
-		assert.Equal(t, "no authorization found", string(body))
+		assert.Equal(t, "authentication failed", string(body))
 	})
-	t.Run("Invalid agent name", func(t *testing.T) {
+
+	t.Run("TLS cert with empty CN fails", func(t *testing.T) {
 		s := newResourceTestServer(t)
 		r := httptest.NewRequest("GET", "/", nil)
-		w := httptest.NewRecorder()
+		// TLS cert with empty Common Name
 		r.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{
-				{
-					Subject: pkix.Name{CommonName: "lob/bo"},
-				},
+			PeerCertificates: []*x509.Certificate{{}},
+		}
+		w := httptest.NewRecorder()
+		ch := make(chan interface{})
+		go func() {
+			s.processResourceRequest(w, r, resourceproxy.NewParams())
+			ch <- 1
+		}()
+		<-ch
+		// No bearer token and TLS cert has empty CN
+		assert.Equal(t, http.StatusUnauthorized, w.Result().StatusCode)
+		defer w.Result().Body.Close()
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, "authentication failed", string(body))
+	})
+
+	t.Run("Invalid agent name in TLS cert CN", func(t *testing.T) {
+		s := newResourceTestServer(t)
+		// Create a certificate with invalid agent name in CN
+		cert := &x509.Certificate{
+			Subject: pkix.Name{
+				CommonName: "lob/bo",
 			},
 		}
+		r := httptest.NewRequest("GET", "/", nil)
+		r.TLS = &tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		}
+		w := httptest.NewRecorder()
 		ch := make(chan interface{})
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
@@ -110,20 +138,21 @@ func Test_resourceRequester(t *testing.T) {
 		defer w.Result().Body.Close()
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
-		assert.Equal(t, "invalid client certificate", string(body))
-
+		assert.Equal(t, "invalid agent name", string(body))
 	})
 
 	t.Run("Agent not connected", func(t *testing.T) {
 		s := newResourceTestServer(t)
 		s.queues.Delete("agent", false)
+		// Create a certificate with agent name in CN
+		cert := &x509.Certificate{
+			Subject: pkix.Name{
+				CommonName: "agent",
+			},
+		}
 		r := httptest.NewRequest("GET", "/", nil)
 		r.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{
-				{
-					Subject: pkix.Name{CommonName: "agent"},
-				},
-			},
+			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
@@ -138,13 +167,15 @@ func Test_resourceRequester(t *testing.T) {
 
 	t.Run("Receiving a different resource", func(t *testing.T) {
 		s := newResourceTestServer(t)
+		// Create a certificate with agent name in CN
+		cert := &x509.Certificate{
+			Subject: pkix.Name{
+				CommonName: "agent",
+			},
+		}
 		r := httptest.NewRequest("GET", "/", nil)
 		r.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{
-				{
-					Subject: pkix.Name{CommonName: "agent"},
-				},
-			},
+			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
@@ -173,13 +204,15 @@ func Test_resourceRequester(t *testing.T) {
 
 	t.Run("Receiving a different event", func(t *testing.T) {
 		s := newResourceTestServer(t)
+		// Create a certificate with agent name in CN
+		cert := &x509.Certificate{
+			Subject: pkix.Name{
+				CommonName: "agent",
+			},
+		}
 		r := httptest.NewRequest("GET", "/", nil)
 		r.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{
-				{
-					Subject: pkix.Name{CommonName: "agent"},
-				},
-			},
+			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
 		ch := make(chan interface{})
@@ -256,4 +289,108 @@ func Test_resourceRegexp(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_extractAgentFromAuth(t *testing.T) {
+	t.Run("Extracts agent from valid bearer token", func(t *testing.T) {
+		s := newResourceTestServer(t)
+
+		// Issue a valid resource proxy token
+		token, err := s.issuer.IssueResourceProxyToken("test-agent")
+		require.NoError(t, err)
+
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+
+		agentName, err := s.extractAgentFromAuth(r)
+		require.NoError(t, err)
+		assert.Equal(t, "test-agent", agentName)
+	})
+
+	t.Run("Returns error for invalid bearer token", func(t *testing.T) {
+		s := newResourceTestServer(t)
+
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Header.Set("Authorization", "Bearer invalid-token")
+
+		_, err := s.extractAgentFromAuth(r)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid bearer token")
+	})
+
+	t.Run("No authorization returns error", func(t *testing.T) {
+		s := newResourceTestServer(t)
+
+		r := httptest.NewRequest("GET", "/", nil)
+
+		_, err := s.extractAgentFromAuth(r)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no authorization found")
+	})
+
+	t.Run("Legacy mode extracts agent from TLS cert CN", func(t *testing.T) {
+		s := newResourceTestServer(t)
+
+		// Create a certificate with a Common Name
+		cert := &x509.Certificate{
+			Subject: pkix.Name{
+				CommonName: "tls-cert-agent",
+			},
+		}
+
+		r := httptest.NewRequest("GET", "/", nil)
+		r.TLS = &tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		}
+
+		agentName, err := s.extractAgentFromAuth(r)
+		require.NoError(t, err)
+		assert.Equal(t, "tls-cert-agent", agentName)
+	})
+
+	t.Run("TLS cert with empty CN returns error", func(t *testing.T) {
+		s := newResourceTestServer(t)
+
+		// Create a certificate with empty Common Name
+		cert := &x509.Certificate{
+			Subject: pkix.Name{
+				CommonName: "",
+			},
+		}
+
+		r := httptest.NewRequest("GET", "/", nil)
+		r.TLS = &tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		}
+
+		_, err := s.extractAgentFromAuth(r)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no authorization found")
+	})
+
+	t.Run("Bearer token takes precedence over TLS cert CN", func(t *testing.T) {
+		s := newResourceTestServer(t)
+
+		token, err := s.issuer.IssueResourceProxyToken("token-agent")
+		require.NoError(t, err)
+
+		// Create a certificate with a different agent name
+		cert := &x509.Certificate{
+			Subject: pkix.Name{
+				CommonName: "cert-agent",
+			},
+		}
+
+		// Request has both bearer token and TLS cert with different agent names
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.TLS = &tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{cert},
+		}
+
+		agentName, err := s.extractAgentFromAuth(r)
+		require.NoError(t, err)
+		// Should use bearer token's agent name, not cert CN
+		assert.Equal(t, "token-agent", agentName)
+	})
 }
