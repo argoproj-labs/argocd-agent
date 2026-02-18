@@ -288,6 +288,12 @@ func RunPrincipalChecks(ctx context.Context, kubeClient *kube.KubernetesClient, 
 		}
 	}
 
+	// No Application CRs defined within the principal's Argo CD namespace
+	out = append(out, checkResult{
+		name: fmt.Sprintf("Verifying no Application CRs defined within the principal's Argo CD namespace"),
+		err:  principalNoApplicationCRs(ctx, kubeClient, principalNS),
+	})
+
 	return out
 }
 
@@ -531,6 +537,25 @@ func verifyRouteHostMatchesCert(ctx context.Context, kc *kube.KubernetesClient, 
 
 	// No route hostnames matched the certificate SANs
 	return fmt.Errorf("no OpenShift Route host in namespace matches TLS IPS/DNS")
+}
+
+func principalNoApplicationCRs(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
+	if kc.DynamicClient == nil {
+		return fmt.Errorf("dynamic client is not available, failed to check applications")
+	}
+
+	// list applications in namespace and check to see if there is any
+	gvr := schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+	apps, err := kc.DynamicClient.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed list applications in namespace %s: %v", ns, err)
+	}
+
+	if len(apps.Items) > 0 {
+		return fmt.Errorf("applications exist in principal namespace %s", ns)
+	}
+
+	return nil
 }
 
 func agentCASecretValid(ctx context.Context, kubeClient kubernetes.Interface, ns, name string) error {

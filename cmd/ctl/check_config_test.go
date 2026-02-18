@@ -167,6 +167,26 @@ func createCertWithEmptyCN(t *testing.T, signerCert *x509.Certificate, signerKey
 	return certPEM, keyPEM
 }
 
+// Helper that returns an unstructured that represents a fake application
+func createFakeApp() *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "argoproj.io/v1alpha1",
+			"kind":       "Application",
+			"metadata": map[string]interface{}{
+				"name":      "fake-app",
+				"namespace": "argocd",
+			},
+			"spec": map[string]interface{}{
+				"destination": map[string]interface{}{
+					"server":    "https://kubernetes.default.svc",
+					"namespace": "default",
+				},
+			},
+		},
+	}
+}
+
 func TestCheckConfigPrincipal(t *testing.T) {
 	t.Run("Valid configuration", func(t *testing.T) {
 		principalNS := "argocd"
@@ -780,6 +800,40 @@ func TestCheckConfigPrincipal(t *testing.T) {
 			}
 		}
 		require.True(t, hasRouteMismatchError, "expected error when Route host doesn't match certificate DNS")
+	})
+
+	t.Run("Argo CD namespace contains an application", func(t *testing.T) {
+		principalNS := "argocd"
+		cl := fake.NewSimpleClientset()
+
+		scheme := runtime.NewScheme()
+		app := createFakeApp()
+		dynCl := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1beta1", Resource: "argocds"}:       "ArgoCDList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}: "ApplicationList",
+		}, app)
+
+		_, err := cl.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: principalNS},
+		}, metav1.CreateOptions{})
+		require.NoError(t, err, "create namespace errored")
+
+		kubeClient := &kube.KubernetesClient{
+			Clientset:     cl,
+			DynamicClient: dynCl,
+			Context:       context.TODO(),
+			Namespace:     principalNS,
+		}
+
+		res := RunPrincipalChecks(context.Background(), kubeClient, principalNS)
+		hasApps := false
+		for _, r := range res {
+			if r.err != nil && strings.Contains(r.name, "no Application CRs defined") {
+				hasApps = true
+				require.NotEmpty(t, r.err.Error(), "error message should not be empty")
+			}
+		}
+		require.True(t, hasApps, "expected error when Application CRs exist in principal namespace")
 	})
 }
 
