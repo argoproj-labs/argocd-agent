@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/issuer"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
@@ -98,8 +99,13 @@ func (s *Server) issueTokens(subject *auth.AuthSubject, refresh bool) (accessTok
 //
 // A Server may support one or more authentication methods, and if the authz
 // request succeeds, a JWT will be issued to the client.
+//
+// This method also performs version handshake validation. The agent must send
+// its version number, and if it doesn't match the principal's version exactly,
+// the authentication will be rejected.
 func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*authapi.AuthResponse, error) {
 	logCtx := log().WithField("method", "Authenticate").WithField("authmethod", ar.Method)
+
 	switch ar.Mode {
 	case "managed", "autonomous":
 		break
@@ -116,6 +122,26 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 		logCtx.WithError(err).WithField("client", clientID).Info("client authentication failed")
 		return nil, errAuthenticationFailed
 	}
+
+	// Version handshake validation (after successful credential auth)
+	principalVersion := s.getPrincipalVersion()
+	agentVersion := ar.Version
+
+	if agentVersion == "" {
+		logCtx.Warn("Agent did not provide version information")
+		return nil, status.Error(codes.InvalidArgument, "agent version is required")
+	}
+
+	if agentVersion != principalVersion {
+		logCtx.Warnf("Version mismatch: rejecting connection (agent: %s, principal: %s)", agentVersion, principalVersion)
+		return nil, status.Errorf(codes.FailedPrecondition, "version mismatch")
+	}
+
+	logCtx.WithFields(logrus.Fields{
+		"agent_version":     agentVersion,
+		"principal_version": principalVersion,
+	}).Info("Version handshake successful")
+
 	logCtx.WithField("client", clientID).Info("client authentication successful")
 	subject := &auth.AuthSubject{ClientID: clientID, Mode: ar.Mode}
 	accessToken, refreshToken, err := s.issueTokens(subject, true)
@@ -132,6 +158,7 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 	return &authapi.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
+		Version:      principalVersion,
 	}, nil
 }
 
@@ -180,6 +207,12 @@ func (s *Server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenReques
 		return nil, errAuthenticationFailed
 	}
 	return &authapi.AuthResponse{AccessToken: accessToken, RefreshToken: refreshToken}, nil
+}
+
+// getPrincipalVersion returns the version of the principal for handshake validation
+func (s *Server) getPrincipalVersion() string {
+	v := version.New("argocd-agent")
+	return v.Version()
 }
 
 func log() *logrus.Entry {
