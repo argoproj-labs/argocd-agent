@@ -249,6 +249,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.destination-based-mapping
                 optional: true
+          - name: ARGOCD_PRINCIPAL_INSECURE_PLAINTEXT
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.tls.insecure-plaintext
+                optional: true
           - name: REDIS_PASSWORD
             valueFrom:
               secretKeyRef:

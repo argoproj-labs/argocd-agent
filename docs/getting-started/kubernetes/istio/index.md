@@ -1,7 +1,8 @@
-# Getting Started with Kind
+# Getting Started with SPIFFE Authentication via Istio on Kind
 
-This quick start guide walks you through setting up argocd-agent using Kind (Kubernetes in Docker).
-It provides a simple local environment to connect a principal (control plane) and agent (workload) cluster with mutual TLS (mTLS) authentication.
+This quick start guide walks you through setting up argocd-agent using [SPIFFE](https://spiffe.io/)-based authentication via a service mesh.
+Instead of mutual TLS (mTLS) client certificates, the service mesh handles identity and encryption automatically using SPIFFE identities.
+This guide uses [Istio](https://istio.io/) as the service mesh and Kind (Kubernetes in Docker) for a local environment.
 
 !!! info "Component Placement Overview"
     Before proceeding, make sure you understand [which Argo CD components run where](../../index.md#argo-cd-component-placement). This guide follows those placement requirements strictly.
@@ -13,8 +14,19 @@ Before starting, ensure you have:
 ### Tools
 - `kubectl` (v1.20 or later)
 - `argocd-agentctl` CLI tool ([download from releases](https://github.com/argoproj-labs/argocd-agent/releases))
-- `kustomize` (optional, for customization)
 - `kind` ([Kind Installation guide](https://kind.sigs.k8s.io/docs/user/quick-start/#installation))
+- `kustomize` (optional, for customization)
+- `istioctl` ([Istio Installation guide](https://istio.io/latest/docs/setup/getting-started/#download))
+
+### Installing Istio
+
+If you don't have Istio installed, download the distribution. This provides both `istioctl` and the certificate generation tools used later:
+
+```bash
+curl -L https://istio.io/downloadIstio | sh -
+export ISTIO_DIR=$PWD/$(ls -d istio-* | head -1)
+export PATH="$PATH:$ISTIO_DIR/bin"
+```
 
 ### Agent Planning
 
@@ -28,26 +40,26 @@ Before starting, ensure you have:
   (Control Plane Cluster)       (Workload Cluster(s))
 
 Pod CIDR: 10.245.0.0/16        Pod CIDR: 10.246.0.0/16...
-SVC CIDR: 10.97.0.0/12         SVC CIDR: 10.98.0.0/12...
-┌─────────────────────┐        ┌─────────────────────┐
-│ ┌─────────────────┐ │        │ ┌─────────────────┐ │
-│ │   Argo CD       │ │        │ │   Argo CD       │ │
-│ │ ┌─────────────┐ │ │        │ │ ┌─────────────┐ │ │
-│ │ │ API Server  │ │ │◄──────┐│ │ │   App       │ │ │
-│ │ │ Repository  │ │ │       ││ │ │ Controller  │ │ │
-│ │ │ Redis       │ │ │       ││ │ │ Repository  │ │ │
-│ │ │ Dex (SSO)   │ │ │       ││ │ │ Redis       │ │ │
-│ │ └─────────────┘ │ │       ││ │ └─────────────┘ │ │
-│ └─────────────────┘ │       ││ └─────────────────┘ │
-│ ┌─────────────────┐ │       ││ ┌─────────────────┐ │
-│ │   Principal     │ │◄──────┘│ │     Agent       │ │
-│ │ ┌─────────────┐ │ │        │ │                 │ │
-│ │ │ gRPC Server │ │ │        │ │                 │ │
-│ │ │ Resource    │ │ │        │ │                 │ │
-│ │ │ Proxy       │ │ │        │ │                 │ │
-│ │ └─────────────┘ │ │        │ └─────────────────┘ │
-│ └─────────────────┘ │        └─────────────────────┘
-└─────────────────────┘
+SVC CIDR: 10.97.0.0/16         SVC CIDR: 10.98.0.0/16...
+┌─────────────────────────┐    ┌─────────────────────────┐
+│  Istio (shared root CA) │    │  Istio (shared root CA) │
+│ ┌─────────────────────┐ │    │ ┌─────────────────────┐ │
+│ │   Argo CD           │ │    │ │   Argo CD           │ │
+│ │ ┌─────────────────┐ │ │    │ │ ┌─────────────────┐ │ │
+│ │ │ API Server      │ │ │◄──┐│ │ │   App           │ │ │
+│ │ │ Repository      │ │ │   ││ │ │ Controller      │ │ │
+│ │ │ Redis           │ │ │   ││ │ │ Repository      │ │ │
+│ │ │ Dex (SSO)       │ │ │   ││ │ │ Redis           │ │ │
+│ │ └─────────────────┘ │ │   ││ │ └─────────────────┘ │ │
+│ └─────────────────────┘ │   ││ └─────────────────────┘ │
+│ ┌─────────────────────┐ │   ││ ┌─────────────────────┐ │
+│ │   Principal         │ │◄──┘│ │     Agent           │ │
+│ │ ┌─────────────────┐ │ │    │ │ (SPIFFE identity:   │ │
+│ │ │ gRPC (plaintext)│ │ │    │ │  spiffe://cluster   │ │
+│ │ │ mesh encrypts   │ │ │    │ │  .local/ns/argocd/  │ │
+│ │ └─────────────────┘ │ │    │ │  sa/$AGENT_APP_NAME)│ │
+│ └─────────────────────┘ │    │ └─────────────────────┘ │
+└─────────────────────────┘    └─────────────────────────┘
 ```
 
 <br />
@@ -68,9 +80,9 @@ export CLUSTER_USER_ID=1
 export AGENT_USER_ID=2
 
 export PRINCIPAL_POD_CIDR="10.$((244 + $CLUSTER_USER_ID)).0.0/16"
-export PRINCIPAL_SVC_CIDR="10.$((96 + $CLUSTER_USER_ID)).0.0/12"
+export PRINCIPAL_SVC_CIDR="10.$((96 + $CLUSTER_USER_ID)).0.0/16"
 export AGENT_POD_CIDR="10.$((244 + $AGENT_USER_ID)).0.0/16"
-export AGENT_SVC_CIDR="10.$((96 + $AGENT_USER_ID)).0.0/12"
+export AGENT_SVC_CIDR="10.$((96 + $AGENT_USER_ID)).0.0/16"
 
 # (optional) Check variables
 echo "Principal Cluster: $PRINCIPAL_CLUSTER_NAME"
@@ -93,10 +105,20 @@ export RELEASE_BRANCH="main"
 echo "Release Branch: $RELEASE_BRANCH"
 ```
 
+## Generate Shared Root CA
+
+For SPIFFE identities to be trusted across clusters, both Istio installations must share the same root Certificate Authority. This must happen **before** installing Istio.
+
+```bash
+mkdir -p /tmp/istio-certs && cd /tmp/istio-certs
+make -f $ISTIO_DIR/tools/certs/Makefile.selfsigned.mk root-ca
+make -f $ISTIO_DIR/tools/certs/Makefile.selfsigned.mk cluster1-cacerts
+make -f $ISTIO_DIR/tools/certs/Makefile.selfsigned.mk cluster2-cacerts
+```
+
 ## Control Plane Setup
 
 ### Create cluster
-Add extraPortMappings for NodePort Binding
 ```bash
 cat <<EOF | kind create cluster --name $PRINCIPAL_CLUSTER_NAME --config=-
 kind: Cluster
@@ -108,12 +130,28 @@ networking:
 nodes:
   - role: control-plane
 EOF
+```
 
+### Install Istio with shared CA on Control Plane Cluster
+
+Install the shared CA certificate **before** installing Istio:
+
+```bash
+kubectl create namespace istio-system --context kind-$PRINCIPAL_CLUSTER_NAME
+
+kubectl create secret generic cacerts -n istio-system --context kind-$PRINCIPAL_CLUSTER_NAME \
+  --from-file=ca-cert.pem=/tmp/istio-certs/cluster1/ca-cert.pem \
+  --from-file=ca-key.pem=/tmp/istio-certs/cluster1/ca-key.pem \
+  --from-file=root-cert.pem=/tmp/istio-certs/cluster1/root-cert.pem \
+  --from-file=cert-chain.pem=/tmp/istio-certs/cluster1/cert-chain.pem
+
+istioctl install --context kind-$PRINCIPAL_CLUSTER_NAME --set profile=demo -y
 ```
 
 ### Create namespace
 ```bash
 kubectl create namespace $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
+kubectl label namespace $NAMESPACE_NAME istio-injection=enabled --context kind-$PRINCIPAL_CLUSTER_NAME
 ```
 
 ### Install Argo CD for Control Plane
@@ -170,72 +208,12 @@ kubectl apply -n $NAMESPACE_NAME \
   --context kind-$PRINCIPAL_CLUSTER_NAME
 ```
 
-### Check Principal configuration
-```bash
-# Check the principal authentication configuration
-kubectl get configmap argocd-agent-params \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME \
-  -o jsonpath='{.data.principal\.auth}'
-
-# Should output: mtls:CN=([^,]+)
-```
-
-### Update Principal configuration
-```bash
-kubectl patch configmap argocd-agent-params \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME \
-  --patch "{\"data\":{
-    \"principal.allowed-namespaces\":\"$AGENT_APP_NAME\"
-}}"
-
-kubectl rollout restart deployment argocd-agent-principal \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME
-
-kubectl get configmap argocd-agent-params \
-  -n "$NAMESPACE_NAME" \
-  --context "kind-$PRINCIPAL_CLUSTER_NAME" \
-  -o yaml | grep principal.allowed-namespaces
-
-# Expected output: 
-# principal.allowed-namespaces: $AGENT_APP_NAME
-# ($AGENT_APP_NAME should be replaced with the string value you set for your agent application name.)
-```
-
-### Verify Principal service exposure
-```bash
-# Option 1: NodePort
-kubectl patch svc argocd-agent-principal \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME \
-  --patch '{"spec":{"type":"NodePort"}}'
-
-kubectl get svc argocd-agent-principal \
-  -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME
-
-# Expected output:
-# NAME                     TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)         AGE
-# argocd-agent-principal   NodePort   10.106.231.64   <none>        443:32560/TCP   26s
-
-```
-
-<br />
-
-## PKI Setup
-
 ### Generate Principal certificates
 Issue gRPC server certificate (address for Agent connection) <br />
 ```bash
 # Check NodePort
 PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
 echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
-
-PRINCIPAL_NODE_PORT=$(kubectl get svc argocd-agent-principal -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -o jsonpath='{.spec.ports[0].nodePort}'
-)
-echo "<principal-node-port>: $PRINCIPAL_NODE_PORT"
 
 # Check DNS Name
 PRINCIPAL_DNS_NAME=$(kubectl get svc argocd-agent-principal -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -o jsonpath='{.metadata.name}.{.metadata.namespace}.svc.cluster.local')
@@ -282,6 +260,82 @@ argocd-agentctl jwt create-key \
   --upsert
 ```
 
+### Update Principal configuration
+
+!!! info "Why not bind the principal to `127.0.0.1`?"
+    The argocd-agent documentation recommends localhost binding for header-based auth, but this is incompatible with Istio. Istio's init container sets up iptables rules that redirect all inbound traffic through the sidecar. The sidecar then forwards to the application using the pod IP, not `127.0.0.1`. Binding to localhost makes the principal unreachable. With Istio, `STRICT` mTLS provides equivalent protection: iptables ensures no external traffic can bypass the sidecar, and the sidecar always overwrites the `x-forwarded-client-cert` header with the verified identity from the mTLS handshake. An attacker cannot forge this header without compromising the pod itself.
+
+```bash
+kubectl patch configmap argocd-agent-params \
+  -n $NAMESPACE_NAME \
+  --context kind-$PRINCIPAL_CLUSTER_NAME \
+  --patch "{\"data\":{
+    \"principal.tls.insecure-plaintext\":\"true\",
+    \"principal.auth\":\"header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)\",
+    \"principal.allowed-namespaces\":\"$AGENT_APP_NAME\"
+}}"
+
+kubectl patch svc argocd-agent-principal \
+  -n $NAMESPACE_NAME \
+  --context kind-$PRINCIPAL_CLUSTER_NAME \
+  --type='json' \
+  -p='[{"op":"replace","path":"/spec/ports/0/name","value":"grpc-principal"},{"op":"add","path":"/spec/ports/0/appProtocol","value":"grpc"}]'
+```
+
+```bash
+cat <<EOF | kubectl apply --context kind-$PRINCIPAL_CLUSTER_NAME -f -
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: argocd-agent-mtls
+  namespace: $NAMESPACE_NAME
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: argocd-agent-principal
+  namespace: $NAMESPACE_NAME
+spec:
+  host: argocd-agent-principal.$NAMESPACE_NAME.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      http:
+        idleTimeout: 300s
+    tls:
+      mode: ISTIO_MUTUAL
+EOF
+
+kubectl rollout restart deployment argocd-agent-principal \
+  -n $NAMESPACE_NAME \
+  --context kind-$PRINCIPAL_CLUSTER_NAME
+
+kubectl rollout status deployment argocd-agent-principal \
+  -n $NAMESPACE_NAME \
+  --context kind-$PRINCIPAL_CLUSTER_NAME \
+  --timeout=120s
+```
+
+### Verify Principal service exposure
+```bash
+# Option 1: NodePort
+kubectl patch svc argocd-agent-principal \
+  -n $NAMESPACE_NAME \
+  --context kind-$PRINCIPAL_CLUSTER_NAME \
+  --patch '{"spec":{"type":"NodePort"}}'
+
+kubectl get svc argocd-agent-principal \
+  -n $NAMESPACE_NAME \
+  --context kind-$PRINCIPAL_CLUSTER_NAME
+
+# Expected output:
+# NAME                     TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)         AGE
+# argocd-agent-principal   NodePort   10.106.231.64   <none>        443:32560/TCP   26s
+
+```
+
 ### Verify Principal installation
 ```bash
 kubectl get pods -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME | grep principal
@@ -289,18 +343,8 @@ kubectl get pods -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME | gre
 kubectl logs -n $NAMESPACE_NAME deployment/argocd-agent-principal --context kind-$PRINCIPAL_CLUSTER_NAME
 
 # Expected logs:
-# argocd-agent-principal-785cd96ddc-sm44r            1/1     Running   0          7s
-# {"level":"info","msg":"Setting loglevel to info","time":"2025-09-13T07:25:38Z"}
-# time="2025-09-13T07:25:38Z" level=info msg="Loading gRPC TLS certificate from secret argocd/argocd-agent-principal-tls" - Loading TLS certificate for gRPC communication from Kubernetes Secret
-# ...
-# time="2025-09-13T07:25:38Z" level=info msg="This server will require TLS client certs as part of authentication" module=server - TLS client certificates required for client authentication
-# ...
-# time="2025-09-13T07:25:38Z" level=info msg="Starting argocd-agent (server) v0.0.1-alpha (ns=$NAMESPACE_NAME, allowed_namespaces=[])" module=server - Starting argocd-agent server (version, namespace, allowed namespaces list)
-# ...
-# time="2025-09-13T07:25:38Z" level=info msg="Now listening on [::]:8443" module=server
-# time="2025-09-13T07:25:38Z" level=info msg="Application informer synced and ready" module=server
-# time="2025-09-13T07:25:38Z" level=info msg="AppProject informer synced and ready" module=server
-# time="2025-09-13T07:25:38Z" level=info msg="Repository informer synced and ready" module=server
+# level=warning msg="TLS disabled - running in plaintext mode for service mesh integration"
+# level=info msg="Now listening on [::]:8443"
 ```
 <br />
 
@@ -324,9 +368,26 @@ nodes:
 EOF
 ```
 
+### Install Istio with shared CA on Workload Cluster
+
+Install the shared CA certificate **before** installing Istio:
+
+```bash
+kubectl create namespace istio-system --context kind-$AGENT_CLUSTER_NAME
+
+kubectl create secret generic cacerts -n istio-system --context kind-$AGENT_CLUSTER_NAME \
+  --from-file=ca-cert.pem=/tmp/istio-certs/cluster2/ca-cert.pem \
+  --from-file=ca-key.pem=/tmp/istio-certs/cluster2/ca-key.pem \
+  --from-file=root-cert.pem=/tmp/istio-certs/cluster2/root-cert.pem \
+  --from-file=cert-chain.pem=/tmp/istio-certs/cluster2/cert-chain.pem
+
+istioctl install --context kind-$AGENT_CLUSTER_NAME --set profile=demo -y
+```
+
 ### Create namespace
 ```bash
 kubectl create namespace $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
+kubectl label namespace $NAMESPACE_NAME istio-injection=enabled --context kind-$AGENT_CLUSTER_NAME
 ```
 
 ### Install Argo CD for Workload Cluster
@@ -349,22 +410,58 @@ This configuration includes:
 !!! info "Why Application Controller Runs Here"
     The **argocd-application-controller** runs on workload clusters because it needs direct access to the Kubernetes API to create, update, and delete resources. The argocd-agent facilitates communication between the control plane and these controllers, enabling centralized management while maintaining local execution.
 
-### (Optional) Install Argo CD for Workload Cluster with ApplicationSet (Autonomous mode only)
-
-**Instead of the standard install above**, use the following command with `--server-side=true` (required due to the large ApplicationSet CRD):
+### Configure cross-cluster Istio mTLS
 
 ```bash
-kubectl apply -n $NAMESPACE_NAME --server-side=true \
-  -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous-appset?ref=$RELEASE_BRANCH" \
-  --context kind-$AGENT_CLUSTER_NAME
+PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
+echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
+
+PRINCIPAL_NODE_PORT=$(kubectl get svc argocd-agent-principal -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -o jsonpath='{.spec.ports[0].nodePort}')
+echo "<principal-node-port>: $PRINCIPAL_NODE_PORT"
+
+cat <<EOF | kubectl apply --context kind-$AGENT_CLUSTER_NAME -f -
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: argocd-agent-principal-external
+  namespace: $NAMESPACE_NAME
+spec:
+  hosts:
+  - argocd-agent-principal.external
+  addresses:
+  - $PRINCIPAL_EXTERNAL_IP
+  ports:
+  - number: $PRINCIPAL_NODE_PORT
+    name: grpc
+    protocol: GRPC
+  location: MESH_INTERNAL
+  resolution: STATIC
+  endpoints:
+  - address: $PRINCIPAL_EXTERNAL_IP
+    ports:
+      grpc: $PRINCIPAL_NODE_PORT
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: argocd-agent-principal-external
+  namespace: $NAMESPACE_NAME
+spec:
+  host: argocd-agent-principal.external
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: argocd-agent-mtls
+  namespace: $NAMESPACE_NAME
+spec:
+  mtls:
+    mode: STRICT
+EOF
 ```
-
-This configuration includes everything from the standard install, plus:
-
-- ✅ **argocd-applicationset-controller** (generates Applications from ApplicationSet templates)
-
-!!! info "Why ApplicationSet Controller Runs Here"
-    The **argocd-applicationset-controller** runs on workload clusters because it allows the cluster to generate Applications dynamically using ApplicationSet generators such as list, git, and cluster, enables autonomous mode with template-based application creation, and provides a way to manage multiple similar applications from a single ApplicationSet definition.
 
 ### Create Agent configuration
 Create Agent configuration on Principal. <br />
@@ -380,44 +477,6 @@ argocd-agentctl agent create $AGENT_APP_NAME \
   --resource-proxy-server ${PRINCIPAL_EXTERNAL_IP}:9090
 ```
 
-### Issue Agent client certificate
-
-```bash
-# Issue Agent client certificate
-argocd-agentctl pki issue agent $AGENT_APP_NAME \
-  --principal-context kind-$PRINCIPAL_CLUSTER_NAME \
-  --agent-context kind-$AGENT_CLUSTER_NAME \
-  --agent-namespace $NAMESPACE_NAME \
-  --upsert
-```
-
-### Propagate Certificate Authority to Agent
-
-```bash
-argocd-agentctl pki propagate \
-  --principal-context kind-$PRINCIPAL_CLUSTER_NAME \
-  --principal-namespace $NAMESPACE_NAME \
-  --agent-context kind-$AGENT_CLUSTER_NAME \
-  --agent-namespace $NAMESPACE_NAME
-```
-
-### Verify certificate installation
-Verify that Agent client certificates are properly installed:
-
-```bash
-kubectl get secret argocd-agent-client-tls -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
-
-# Expected result
-# NAME                      TYPE                DATA   AGE
-# argocd-agent-client-tls   kubernetes.io/tls   2      7s
-
-kubectl get secret argocd-agent-ca -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
-
-# Expected result
-# NAME              TYPE     DATA   AGE
-# argocd-agent-ca   Opaque   1      15s
-```
-
 ### Create Agent namespace on Principal
 ```bash
 kubectl create namespace $AGENT_APP_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
@@ -430,16 +489,32 @@ kubectl apply -n $NAMESPACE_NAME \
   --context kind-$AGENT_CLUSTER_NAME
 ```
 
-### Configure Agent connection
-Configure Agent to connect to Principal using mTLS authentication. 
+### Configure Agent SPIFFE identity and connection
+
+With SPIFFE authentication, the agent name is derived from the Kubernetes service account name in the SPIFFE URI. Create a service account matching `$AGENT_APP_NAME`, configure the connection, and update the agent deployment to use the new identity:
 
 ```bash
-# Check NodePort
+# Create service account and RBAC bindings
+kubectl create serviceaccount $AGENT_APP_NAME \
+  -n $NAMESPACE_NAME \
+  --context kind-$AGENT_CLUSTER_NAME
+
+kubectl create rolebinding $AGENT_APP_NAME \
+  --role=argocd-agent-agent \
+  --serviceaccount=$NAMESPACE_NAME:$AGENT_APP_NAME \
+  -n $NAMESPACE_NAME \
+  --context kind-$AGENT_CLUSTER_NAME
+
+kubectl create clusterrolebinding $AGENT_APP_NAME \
+  --clusterrole=argocd-agent-agent \
+  --serviceaccount=$NAMESPACE_NAME:$AGENT_APP_NAME \
+  --context kind-$AGENT_CLUSTER_NAME
+
+# Configure connection to Principal
 PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
 echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
 
-PRINCIPAL_NODE_PORT=$(kubectl get svc argocd-agent-principal -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -o jsonpath='{.spec.ports[0].nodePort}'
-)
+PRINCIPAL_NODE_PORT=$(kubectl get svc argocd-agent-principal -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -o jsonpath='{.spec.ports[0].nodePort}')
 echo "<principal-node-port>: $PRINCIPAL_NODE_PORT"
 
 kubectl patch configmap argocd-agent-params \
@@ -449,12 +524,20 @@ kubectl patch configmap argocd-agent-params \
     \"agent.server.address\":\"$PRINCIPAL_EXTERNAL_IP\",
     \"agent.server.port\":\"$PRINCIPAL_NODE_PORT\",
     \"agent.mode\":\"$AGENT_MODE\",
-    \"agent.creds\":\"mtls:any\"
+    \"agent.creds\":\"header:\",
+    \"agent.tls.insecure-plaintext\":\"true\"
   }}"
 
-kubectl rollout restart deployment argocd-agent-agent \
+# Update deployment with new service account (triggers rollout with all config changes)
+kubectl patch deployment argocd-agent-agent \
   -n $NAMESPACE_NAME \
-  --context kind-$AGENT_CLUSTER_NAME
+  --context kind-$AGENT_CLUSTER_NAME \
+  --patch '{"spec":{"template":{"spec":{"serviceAccountName":"'$AGENT_APP_NAME'"}}}}'
+
+kubectl rollout status deployment argocd-agent-agent \
+  -n $NAMESPACE_NAME \
+  --context kind-$AGENT_CLUSTER_NAME \
+  --timeout=120s
 ```
 
 <br />
@@ -466,9 +549,9 @@ kubectl rollout restart deployment argocd-agent-agent \
 kubectl logs -n $NAMESPACE_NAME deployment/argocd-agent-agent --context kind-$AGENT_CLUSTER_NAME
 
 # Expected output on success:
-# time="2025-10-09T09:11:22Z" level=info msg="Authentication successful" module=Connector
-# time="2025-10-09T09:11:22Z" level=info msg="Connected to argocd-agent-0.0.1-alpha" module=Connector
-# time="2025-10-09T09:11:23Z" level=info msg="Starting to send events to event stream" direction=send module=StreamEvent
+# time="..." level=info msg="Authentication successful" module=Connector
+# time="..." level=info msg="Connected to argocd-agent-..." module=Connector
+# time="..." level=info msg="Starting to send events to event stream" direction=send module=StreamEvent
 ```
 
 ### Verify Agent recognition on Principal
@@ -477,8 +560,9 @@ kubectl logs -n $NAMESPACE_NAME deployment/argocd-agent-agent --context kind-$AG
 kubectl logs -n $NAMESPACE_NAME deployment/argocd-agent-principal --context kind-$PRINCIPAL_CLUSTER_NAME
 
 # Expected output on success:
-# time="2025-10-09T09:11:23Z" level=info msg="An agent connected to the subscription stream" client=$AGENT_APP_NAME method=Subscribe
-# time="2025-10-09T09:11:23Z" level=info msg="Updated connection status to 'Successful' in Cluster: '$AGENT_APP_NAME'" component=ClusterManager
+# time="..." level=info msg="Successfully authenticated agent: $AGENT_APP_NAME" component=header-auth
+# time="..." level=info msg="An agent connected to the subscription stream" client=$AGENT_APP_NAME method=Subscribe
+# time="..." level=info msg="Updated connection status to 'Successful' in Cluster: '$AGENT_APP_NAME'" component=ClusterManager
 ```
 
 ### List connected Agents
@@ -510,8 +594,7 @@ kubectl get appprojs -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
 PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
 echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
 
-PRINCIPAL_NODE_PORT=$(kubectl get svc argocd-agent-principal -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -o jsonpath='{.spec.ports[0].nodePort}'
-)
+PRINCIPAL_NODE_PORT=$(kubectl get svc argocd-agent-principal -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -o jsonpath='{.spec.ports[0].nodePort}')
 echo "<principal-node-port>: $PRINCIPAL_NODE_PORT"
 
 cat <<EOF | kubectl apply -f - --context kind-$PRINCIPAL_CLUSTER_NAME
@@ -535,13 +618,14 @@ spec:
 EOF
 ```
 
-Verify that the application is synchronized to the Agent.
+Verify that the application is synchronized to the Agent:
 
 ```bash
-# Delete Application in wrong namespace
-kubectl delete application test-app -n $AGENT_APP_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
+# Check that the application exists on the principal
+kubectl get applications -n $AGENT_APP_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
 
-# Recreate in $NAMESPACE_NAME namespace (use the Application creation code above)
+# Check that the application appears on the workload cluster
+kubectl get applications -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
 ```
 
 ### Access ArgoCD UI
@@ -558,20 +642,27 @@ kubectl -n $NAMESPACE_NAME get secret argocd-initial-admin-secret --context kind
 - Username: `admin`
 - Password: Value confirmed by the command above
 - If SSL certificate warning appears in browser, click "Advanced" → "Proceed to unsafe"
-- You can verify that the Agent cluster (`agent-a`) is connected in the UI.
+- You can verify that the Agent cluster (`$AGENT_APP_NAME`) is connected in the UI.
 
 <br />
 
 ## Adding Another Agent Cluster
-To add another agent, simply **increment** the `AGENT_USER_ID` by `+1` and proceed to the **Workload Cluster Setup** section below.  
+To add another agent, simply **increment** the `AGENT_USER_ID` by `+1` and proceed to the **Workload Cluster Setup** section below.
 Each new agent automatically receives a **unique CIDR range** derived from its `AGENT_USER_ID` value.
 
 ```bash
 export AGENT_USER_ID=$((AGENT_USER_ID + 1))
+export AGENT_APP_NAME="agent-b"
+export AGENT_CLUSTER_NAME="argocd-agent2"
 export AGENT_POD_CIDR="10.$((244 + $AGENT_USER_ID)).0.0/16"
-export AGENT_SVC_CIDR="10.$((96 + $AGENT_USER_ID)).0.0/12"
+export AGENT_SVC_CIDR="10.$((96 + $AGENT_USER_ID)).0.0/16"
+
+# Generate Istio intermediate CA for the new cluster
+cd /tmp/istio-certs
+make -f $ISTIO_DIR/tools/certs/Makefile.selfsigned.mk cluster${AGENT_USER_ID}-cacerts
 
 # (optional) Check variables
+echo "Agent App Name: $AGENT_APP_NAME"
 echo "Agent Pod CIDR: $AGENT_POD_CIDR"
 echo "Agent Service CIDR: $AGENT_SVC_CIDR"
 ```
@@ -583,6 +674,14 @@ echo "Agent Service CIDR: $AGENT_SVC_CIDR"
 ## Troubleshooting
 
 ### Common Issues
+
+**Authentication failures with SPIFFE**
+
+If the `x-forwarded-client-cert` header is missing, check:
+
+1. The principal service has `appProtocol: grpc` or a port name starting with `grpc-`
+2. Both clusters use the same root CA (`cacerts` secret in `istio-system`)
+3. The agent cluster has a `ServiceEntry` with `location: MESH_INTERNAL` for the principal's address
 
 **Access Forbidden**
 ```bash
@@ -599,20 +698,6 @@ kubectl patch clusterrole argocd-agent-agent \
   --type='json' \
   -p='[{"op":"add","path":"/rules/-","value":{"apiGroups":["argoproj.io"],"resources":["applications","appprojects"],"verbs":["get","list","watch","create","update","patch","delete"]}}]'
 ```
-
-Verify the application is synchronized to the agent:
-
-```bash
-# Check that the application exists on the principal
-kubectl get applications -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
-
-# Check that the application appears on the workload cluster
-kubectl get applications -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
-
-# NAME         SYNC STATUS   HEALTH STATUS
-# test-app-2   Synced        Progressing
-```
-
 
 **Missing Server Secret Key**:
 ```bash
@@ -631,14 +716,12 @@ kubectl patch secret argocd-secret -n $NAMESPACE_NAME \
   --patch='{"data":{"server.secretkey":"'$(openssl rand -base64 32 | base64 -w 0)'"}}'
 ```
 
-**Auth Failure**:
+**Auth Failure (connection timeout)**:
 ```bash
-# The application status contains:
-"Auth failure: rpc error: code = Unavailable desc = connection error: desc = \"transport: Error while dialing: dial tcp $PRINCIPAL_EXTERNAL_IP:$PRINCIPAL_NODE_PORT: connect: connection timed out\" (retrying in 1.728s)"
-```
+# Re-check and restart agent deployment
+PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
+PRINCIPAL_NODE_PORT=$(kubectl get svc argocd-agent-principal -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -o jsonpath='{.spec.ports[0].nodePort}')
 
-```bash
-# Restart agent deployment
 kubectl patch configmap argocd-agent-params \
   -n $NAMESPACE_NAME \
   --context kind-$AGENT_CLUSTER_NAME \
@@ -646,7 +729,8 @@ kubectl patch configmap argocd-agent-params \
     \"agent.server.address\":\"$PRINCIPAL_EXTERNAL_IP\",
     \"agent.server.port\":\"$PRINCIPAL_NODE_PORT\",
     \"agent.mode\":\"$AGENT_MODE\",
-    \"agent.creds\":\"mtls:any\"
+    \"agent.creds\":\"header:\",
+    \"agent.tls.insecure-plaintext\":\"true\"
   }}"
 
 kubectl rollout restart deployment argocd-agent-agent \

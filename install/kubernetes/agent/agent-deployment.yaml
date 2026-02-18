@@ -188,6 +188,12 @@ spec:
                 name: argocd-agent-params
                 key: agent.allowed-namespaces
                 optional: true
+          - name: ARGOCD_AGENT_INSECURE_PLAINTEXT
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.tls.insecure-plaintext
+                optional: true
           image: argocd-agent
           imagePullPolicy: Always
           name: argocd-agent-agent
