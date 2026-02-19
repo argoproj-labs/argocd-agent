@@ -248,5 +248,5 @@ func SetTLSConfigFromFlags(tlsConfig *tls.Config, minVersion, maxVersion string,
 			return err
 		}
 	}
-	return nil
+	return ValidateTLSConfig(tlsConfig.MinVersion, tlsConfig.MaxVersion, tlsConfig.CipherSuites)
 }
