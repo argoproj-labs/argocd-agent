@@ -26,11 +26,15 @@ message AuthRequest {
     map<string,string> credentials = 2;
     // Agent's mode of operation, usually either managed or autonomous
     string mode = 3;
+    // Agent's version number for handshake validation
+    string version = 4;
 }
 
 message AuthResponse {
     string accessToken = 1;
     string refreshToken = 2;
+    // Principal's version number for handshake validation
+    string version = 3;
 }
 
 message RefreshTokenRequest {

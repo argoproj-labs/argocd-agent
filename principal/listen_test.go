@@ -170,12 +170,19 @@ func Test_Serve(t *testing.T) {
 	conn := grpcDialer(t, s)
 	defer conn.Close()
 	authC := authapi.NewAuthenticationClient(conn)
+	testVersion := s.version.Version()
 	a, err := authC.Authenticate(
 		context.Background(),
-		&authapi.AuthRequest{Method: "userpass", Credentials: creds("hello", "world"), Mode: types.AgentModeAutonomous.String()},
+		&authapi.AuthRequest{
+			Method:      "userpass",
+			Credentials: creds("hello", "world"),
+			Mode:        types.AgentModeAutonomous.String(),
+			Version:     testVersion,
+		},
 	)
 	require.NoError(t, err)
 	require.NotNil(t, a)
+	assert.Equal(t, testVersion, a.Version)
 	versionC := versionapi.NewVersionClient(conn)
 	v, err := versionC.Version(context.Background(), &versionapi.VersionRequest{})
 	require.NoError(t, err)
