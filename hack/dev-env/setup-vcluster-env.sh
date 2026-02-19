@@ -236,6 +236,11 @@ apply() {
     wait_for_pods vcluster-agent-autonomous agent
     wait_for_pods vcluster-agent-managed agent
 
+    # Workaround for web-based terminal issue caused in 3.3.1 release.
+    echo "-> Restarting argocd-server on control plane to pick up ConfigMap settings"
+    kubectl --context vcluster-control-plane -n argocd rollout restart deployment/argocd-server
+    kubectl --context vcluster-control-plane -n argocd rollout status deployment/argocd-server --timeout=180s
+
     echo "-> Service configuration on control plane"
     kubectl --context vcluster-control-plane -n argocd get services
 
