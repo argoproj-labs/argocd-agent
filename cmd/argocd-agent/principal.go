@@ -241,8 +241,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 					logrus.Infof("Loading resource proxy TLS certificate from secrets %s/%s and %s/%s", namespace, resourceProxySecretName, namespace, resourceProxyCaSecretName)
 					proxyTLS, err = getResourceProxyTLSConfigFromKube(kubeConfig, namespace, resourceProxySecretName, resourceProxyCaSecretName)
 				}
-				if err != nil {
-					cmdutil.Fatal("Error reading TLS config for resource proxy: %v", err)
+				if err != nil || proxyTLS == nil {
+					cmdutil.Fatal("Could not load resource proxy TLS configuration")
+				}
+				if err := tlsutil.SetTLSConfigFromFlags(proxyTLS, tlsMinVersion, tlsMaxVersion, tlsCipherSuites); err != nil {
+					cmdutil.Fatal("Could not set TLS configuration for resource proxy: %v", err)
 				}
 				opts = append(opts, principal.WithResourceProxyTLS(proxyTLS))
 				opts = append(opts, principal.WithResourceProxyAddress(resourceProxyAddress))
