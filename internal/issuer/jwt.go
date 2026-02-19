@@ -43,6 +43,7 @@ type JwtIssuer struct {
 	publicKey  crypto.PublicKey
 	atAudience string
 	rtAudience string
+	rpAudience string
 	clock      clock.Clock
 }
 
@@ -113,6 +114,7 @@ func NewIssuer(name string, opts ...JwtIssuerOption) (*JwtIssuer, error) {
 		name:       name,
 		atAudience: name + "-access",
 		rtAudience: name + "-refresh",
+		rpAudience: name + "-resource-proxy",
 		clock:      clock.StandardClock(),
 	}
 	for _, o := range opts {
@@ -196,4 +198,27 @@ func (i *JwtIssuer) ValidateAccessToken(token string) (Claims, error) {
 // the failure reason is returned.
 func (i *JwtIssuer) ValidateRefreshToken(token string) (Claims, error) {
 	return i.validateToken(token, i.rtAudience)
+}
+
+// IssueResourceProxyToken creates and signs a token for resource proxy authentication.
+// These tokens do not expire and are used by Argo CD to authenticate to the resource proxy.
+// The agent name is stored in the Subject claim.
+func (i *JwtIssuer) IssueResourceProxyToken(agentName string) (string, error) {
+	now := i.clock.Now()
+	t := jwt.NewWithClaims(jwt.SigningMethodRS512, jwt.RegisteredClaims{
+		ID:        uuid.New().String(),
+		Issuer:    i.name,
+		Subject:   agentName,
+		Audience:  jwt.ClaimStrings{i.rpAudience},
+		NotBefore: jwt.NewNumericDate(now),
+		IssuedAt:  jwt.NewNumericDate(now),
+	})
+	return t.SignedString(i.privateKey)
+}
+
+// ValidateResourceProxyToken validates a resource proxy token. On successful validation,
+// it returns the claims from the token containing the agent name in the Subject.
+// If validation fails, an error with the failure reason is returned.
+func (i *JwtIssuer) ValidateResourceProxyToken(token string) (Claims, error) {
+	return i.validateToken(token, i.rpAudience)
 }

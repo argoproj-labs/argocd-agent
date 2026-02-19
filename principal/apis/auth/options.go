@@ -13,3 +13,12 @@
 // limitations under the License.
 
 package auth
+
+import "github.com/argoproj-labs/argocd-agent/principal/registration"
+
+func WithAgentRegistrationManager(manager *registration.AgentRegistrationManager) ServerOption {
+	return func(o *ServerOptions) error {
+		o.agentRegistrationManager = manager
+		return nil
+	}
+}

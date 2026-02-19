@@ -26,6 +26,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
+	"github.com/argoproj-labs/argocd-agent/principal/registration"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -37,6 +38,8 @@ type Server struct {
 	issuer      issuer.Issuer
 	options     *ServerOptions
 	queues      *queue.SendRecvQueues
+
+	agentRegistrationManager *registration.AgentRegistrationManager
 }
 
 const (
@@ -51,7 +54,9 @@ const (
 
 var errAuthenticationFailed = status.Error(codes.Unauthenticated, authFailedMessage)
 
-type ServerOptions struct{}
+type ServerOptions struct {
+	agentRegistrationManager *registration.AgentRegistrationManager
+}
 
 type ServerOption func(o *ServerOptions) error
 
@@ -73,6 +78,8 @@ func NewServer(queues *queue.SendRecvQueues, authMethods *auth.Methods, iss issu
 			return nil, err
 		}
 	}
+
+	s.agentRegistrationManager = s.options.agentRegistrationManager
 	return s, nil
 }
 
@@ -143,6 +150,15 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 	}).Info("Version handshake successful")
 
 	logCtx.WithField("client", clientID).Info("client authentication successful")
+
+	// If self agent registration is enabled, register the agent and create cluster secret if it doesn't exist
+	if s.agentRegistrationManager != nil && s.agentRegistrationManager.IsSelfAgentRegistrationEnabled() {
+		if err := s.agentRegistrationManager.RegisterAgent(ctx, clientID); err != nil {
+			logCtx.WithError(err).WithField("client", clientID).Error("Failed to register agent")
+			return nil, errAuthenticationFailed
+		}
+	}
+
 	subject := &auth.AuthSubject{ClientID: clientID, Mode: ar.Mode}
 	accessToken, refreshToken, err := s.issueTokens(subject, true)
 	if err != nil {

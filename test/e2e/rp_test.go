@@ -162,14 +162,12 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	requires.Equal(http.StatusBadGateway, resp.StatusCode)
 }
 
-func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
+func (suite *ResourceProxyTestSuite) validateResourceProxyViaArgoAPI(appName string) {
 	requires := suite.Require()
 
 	// Get the Argo server endpoint to use
 	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
 	requires.NoError(err)
-
-	appName := "guestbook-rp"
 
 	// Read admin secret from principal's cluster
 	password, err := fixture.GetInitialAdminSecret(suite.PrincipalClient)
@@ -225,7 +223,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 				suite.T().Logf("Triggering re-sync")
 				err = argoClient.Sync(app)
 				if err != nil {
-					return true
+					suite.T().Logf("Re-sync failed: %v", err)
 				}
 			}
 			retries += 1
@@ -249,6 +247,75 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 	_, err = argoClient.GetResource(&app,
 		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-backend")
 	requires.Error(err)
+}
+
+// Test_ResourceProxy_Argo tests resource proxy via Argo CD API with manually created cluster secret
+func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
+	suite.validateResourceProxyViaArgoAPI("guestbook-rp")
+}
+
+// Test_SelfRegisteredSecret_ResourceProxy tests resource proxy via Argo CD API with self-registered cluster secret
+func (suite *ResourceProxyTestSuite) Test_SelfRegisteredSecret_ResourceProxy() {
+	requires := suite.Require()
+
+	// Get original secret before any modifications for restoration later
+	originalSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	requires.NoError(err)
+
+	// Enable self-registration
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
+	defer func() {
+		// Disable self-registration
+		_ = fixture.DisableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient)
+
+		// Delete the self-registered secret
+		_ = fixture.DeleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+
+		// Restore the original secret
+		originalSecret.ResourceVersion = "" // Clear for recreation
+		originalSecret.UID = ""
+		_ = suite.PrincipalClient.Create(suite.Ctx, originalSecret, metav1.CreateOptions{})
+
+		// Restart to use restored secret
+		fixture.RestartAgent(suite.T(), fixture.PrincipalName)
+		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+		fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
+		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
+	}()
+
+	// Stop agent
+	err = fixture.StopProcess(fixture.AgentManagedName)
+	requires.NoError(err)
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning(fixture.AgentManagedName)
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete manual secret
+	err = fixture.DeleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	requires.NoError(err)
+
+	// Wait for secret to be deleted
+	requires.Eventually(func() bool {
+		return !fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	}, 10*time.Second, 1*time.Second)
+
+	// Restart principal with self-registration enabled
+	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
+	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+
+	// Restart agent to trigger self-registration
+	fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
+	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
+
+	// Wait for self-registered secret to be created
+	requires.Eventually(func() bool {
+		return fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	}, 30*time.Second, 1*time.Second, "Self-registered cluster secret should be created")
+
+	suite.T().Log("Self-registered secret created, now testing resource proxy via Argo CD API")
+
+	// Run the same resource proxy validation with a different app name to avoid conflicts
+	suite.validateResourceProxyViaArgoAPI("guestbook-rp-selfreg")
 }
 
 func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
@@ -369,7 +436,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 				suite.T().Logf("Triggering re-sync")
 				err = argoClient.Sync(app)
 				if err != nil {
-					return true
+					suite.T().Logf("Re-sync failed: %v", err)
 				}
 			}
 			retries += 1
