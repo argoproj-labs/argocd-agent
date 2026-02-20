@@ -165,6 +165,43 @@ func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alph
 	return nil, err
 }
 
+// Upsert creates the AppProject or updates it if it already exists.
+// Used by HA replication to write resources to the replica cluster.
+func (m *AppProjectManager) Upsert(ctx context.Context, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+	created, err := m.Create(ctx, project)
+	if err == nil {
+		return created, nil
+	}
+	if !errors.IsAlreadyExists(err) {
+		return nil, err
+	}
+	existing, err := m.appprojectBackend.Get(ctx, project.Name, m.namespace)
+	if err != nil {
+		return nil, fmt.Errorf("get existing appproject for upsert: %w", err)
+	}
+	project.UID = existing.UID
+	project.ResourceVersion = existing.ResourceVersion
+	project.Generation = existing.Generation
+	project.Namespace = m.namespace
+	if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
+		if project.Annotations == nil {
+			project.Annotations = make(map[string]string)
+		}
+		project.Annotations[manager.SourceUIDAnnotation] = v
+	}
+	if m.role == manager.ManagerRolePrincipal {
+		stampLastUpdated(project)
+	}
+	updated, err := m.appprojectBackend.Update(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
+		log().Warnf("Could not ignore change %s for appproject %s: %v", updated.ResourceVersion, updated.Name, err)
+	}
+	return updated, nil
+}
+
 func (m *AppProjectManager) Get(ctx context.Context, name, namespace string) (*v1alpha1.AppProject, error) {
 	return m.appprojectBackend.Get(ctx, name, namespace)
 }
