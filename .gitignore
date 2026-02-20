@@ -6,3 +6,4 @@ vendor/
 build/
 __pycache__
 site/
+.claude/settings.local.json
