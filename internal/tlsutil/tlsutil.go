@@ -230,23 +230,40 @@ func SetTLSConfigFromFlags(tlsConfig *tls.Config, minVersion, maxVersion string,
 	if tlsConfig == nil {
 		return fmt.Errorf("tlsConfig is nil")
 	}
+	var (
+		minver  uint16
+		maxver  uint16
+		ciphers []uint16
+	)
 	if minVersion != "" {
-		tlsConfig.MinVersion, err = TLSVersionFromName(minVersion)
+		minver, err = TLSVersionFromName(minVersion)
 		if err != nil {
 			return err
 		}
 	}
 	if maxVersion != "" {
-		tlsConfig.MaxVersion, err = TLSVersionFromName(maxVersion)
+		maxver, err = TLSVersionFromName(maxVersion)
 		if err != nil {
 			return err
 		}
 	}
 	if len(cipherSuites) > 0 && (len(cipherSuites) != 1 || cipherSuites[0] != "") {
-		tlsConfig.CipherSuites, err = ParseCipherSuites(cipherSuites)
+		ciphers, err = ParseCipherSuites(cipherSuites)
 		if err != nil {
 			return err
 		}
 	}
-	return ValidateTLSConfig(tlsConfig.MinVersion, tlsConfig.MaxVersion, tlsConfig.CipherSuites)
+	if err := ValidateTLSConfig(minver, maxver, ciphers); err != nil {
+		return err
+	}
+	if minVersion != "" {
+		tlsConfig.MinVersion = minver
+	}
+	if maxVersion != "" {
+		tlsConfig.MaxVersion = maxver
+	}
+	if len(cipherSuites) > 0 && (len(cipherSuites) != 1 || cipherSuites[0] != "") {
+		tlsConfig.CipherSuites = ciphers
+	}
+	return nil
 }
