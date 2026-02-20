@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	issuermocks "github.com/argoproj-labs/argocd-agent/internal/issuer/mocks"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
+	"github.com/argoproj/argo-cd/v3/common"
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/stretchr/testify/mock"
@@ -358,6 +359,7 @@ func Test_CreateClusterWithBearerToken(t *testing.T) {
 		require.NotNil(t, secret)
 		require.Equal(t, "test-agent", secret.Labels[LabelKeyClusterAgentMapping])
 		require.Equal(t, "true", secret.Labels[LabelKeySelfRegisteredCluster])
+		require.Equal(t, "true", secret.Annotations[common.AnnotationKeyAppSkipReconcile])
 	})
 
 	t.Run("Returns error when client cert secret is missing", func(t *testing.T) {
