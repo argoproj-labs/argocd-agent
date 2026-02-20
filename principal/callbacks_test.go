@@ -1416,6 +1416,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 		}
 
 		err = s.queues.Create("managed-agent")
@@ -1457,6 +1458,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 		}
 
 		err = s.queues.Create("managed-agent")
@@ -1486,6 +1488,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 			sourceCache:  cache.NewSourceCache(),
 		}
 
@@ -1523,6 +1526,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 			sourceCache:  cache.NewSourceCache(),
 		}
 
@@ -1574,6 +1578,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 			sourceCache:  cache.NewSourceCache(),
 		}
 
@@ -1627,6 +1632,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 		}
 
 		err = s.queues.Create("managed-agent")
@@ -1687,6 +1693,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 		}
 
 		err = s.queues.Create("managed-agent")

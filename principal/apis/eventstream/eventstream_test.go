@@ -159,6 +159,84 @@ func Test_Subscribe(t *testing.T) {
 	})
 }
 
+func TestDisconnectAll(t *testing.T) {
+	clusterMgr := &cluster.Manager{}
+
+	t.Run("disconnects active agents", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("agent-a")
+		qs.Create("agent-b")
+		s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr)
+
+		done := make(chan string, 2)
+		// gate blocks recv hooks until released — simulates long-lived streams
+		gate := make(chan struct{})
+
+		for _, name := range []string{"agent-a", "agent-b"} {
+			name := name
+			st := &mock.MockEventServer{AgentName: name}
+			st.AddRecvHook(func(_ *mock.MockEventServer) error {
+				<-gate
+				return io.EOF
+			})
+			go func() {
+				_ = s.Subscribe(st)
+				done <- name
+			}()
+		}
+
+		require.Eventually(t, func() bool {
+			return s.ConnectedAgentCount() == 2
+		}, time.Second, 10*time.Millisecond)
+
+		s.DisconnectAll()
+		// Unblock recv hooks so goroutines can exit
+		close(gate)
+
+		require.Eventually(t, func() bool {
+			return s.ConnectedAgentCount() == 0
+		}, time.Second, 10*time.Millisecond)
+
+		<-done
+		<-done
+	})
+}
+
+func TestAcceptCheck(t *testing.T) {
+	clusterMgr := &cluster.Manager{}
+
+	t.Run("rejects when check returns error", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("default")
+		s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr,
+			WithAcceptCheck(func(_ string) error {
+				return fmt.Errorf("not accepting connections")
+			}),
+		)
+		st := &mock.MockEventServer{AgentName: "default"}
+		err := s.Subscribe(st)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not accepting connections")
+		assert.Equal(t, 0, s.ConnectedAgentCount())
+	})
+
+	t.Run("accepts when check returns nil", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("default")
+		s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr,
+			WithAcceptCheck(func(_ string) error {
+				return nil
+			}),
+		)
+		st := &mock.MockEventServer{AgentName: "default"}
+		st.AddRecvHook(func(_ *mock.MockEventServer) error {
+			return io.EOF
+		})
+		err := s.Subscribe(st)
+		require.NoError(t, err)
+	})
+}
+
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
 }

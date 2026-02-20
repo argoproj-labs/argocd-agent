@@ -156,6 +156,18 @@ func (r *AgentResources) Len() int {
 	return len(r.resources)
 }
 
+// Names returns all agent names that have tracked resources.
+func (r *AgentResources) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	names := make([]string, 0, len(r.resources))
+	for name := range r.resources {
+		names = append(names, name)
+	}
+	return names
+}
+
 func (r *AgentResources) Checksum(agent string) []byte {
 	r.mu.Lock()
 	defer r.mu.Unlock()

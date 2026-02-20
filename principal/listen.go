@@ -242,8 +242,14 @@ func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
 	opts := []eventstream.ServerOption{}
 	opts = append(opts, eventstream.WithNotifyOnConnect(s.notifyOnConnect))
 	opts = append(opts, eventstream.WithLogger(s.options.grpcEventLogger))
+	if s.ha != nil {
+		opts = append(opts, eventstream.WithAcceptCheck(func(agentName string) error {
+			return s.ha.Controller.OnAgentConnect(agentName)
+		}))
+	}
 
-	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues, s.eventWriters, metrics, s.clusterMgr, opts...))
+	s.eventStreamSrv = eventstream.NewServer(s.queues, s.eventWriters, metrics, s.clusterMgr, opts...)
+	eventstreamapi.RegisterEventStreamServer(s.grpcServer, s.eventStreamSrv)
 	// Proposal: register LogStream gRPC service for data-plane (use singleton instance)
 	logstreamapi.RegisterLogStreamServiceServer(s.grpcServer, s.logStream)
 	// Register TerminalStream gRPC service for web terminal sessions
