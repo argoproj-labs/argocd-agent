@@ -1,0 +1,25 @@
+{{- if .Values.metricsService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ .Values.namespace }}
+  name: {{ include "argocd-agent-principal.metricsServiceName" . }}
+  labels:
+    {{- include "argocd-agent-principal.labels" . | nindent 4 }}
+  {{- with .Values.metricsService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with include "argocd-agent-principal.annotations" . }}
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.metricsService.type }}
+  ports:
+    - name: metrics
+      protocol: TCP
+      port: {{ .Values.metricsService.port }}
+      targetPort: {{ .Values.principal.metrics.port }}
+  selector:
+    {{- include "argocd-agent-principal.selectorLabels" . | nindent 4 }}
+{{- end }}
