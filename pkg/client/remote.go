@@ -432,6 +432,11 @@ func connectBackoff() wait.Backoff {
 // When Connect returns nil, the connection was successfully established and an
 // authentication token has been received.
 func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
+	if r.conn != nil {
+		r.conn.Close()
+		r.conn = nil
+	}
+
 	cparams := grpc.ConnectParams{
 		MinConnectTimeout: 365 * 24 * time.Hour,
 	}
