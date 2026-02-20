@@ -52,6 +52,7 @@ func NewRootCommand() *cobra.Command {
 	command.AddCommand(NewCheckConfigCommand())
 	command.AddCommand(NewPKICommand())
 	command.AddCommand(NewJWTCommand())
+	command.AddCommand(NewHACommand())
 	command.AddCommand(NewVersionCommand())
 	addGlobalFlags(command, globalOpts)
 	return command

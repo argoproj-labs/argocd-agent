@@ -37,6 +37,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
+	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	"github.com/argoproj-labs/argocd-agent/principal"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 
@@ -95,6 +96,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisPassword        string
 		redisCredsDirPath    string
 		redisCompressionType string
+		disableRedisProxy    bool
 		healthzPort          int
 
 		maxGRPCMessageSize int
@@ -116,6 +118,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisTLSCAPath                string
 		redisTLSCASecretName          string
 		redisTLSInsecure              bool
+
+		// HA configuration
+		haEnabled         bool
+		haPreferredRole   string
+		haPeerAddress     string
+		haFailoverTimeout time.Duration
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -241,6 +249,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			opts = append(opts, principal.WithResourceProxyEnabled(enableResourceProxy))
+
+			if disableRedisProxy {
+				opts = append(opts, principal.WithRedisProxyDisabled())
+			}
 
 			if enableResourceProxy {
 				var proxyTLS *tls.Config
@@ -416,6 +428,24 @@ func NewPrincipalRunCommand() *cobra.Command {
 				}
 			}
 
+			// Configure HA if enabled
+			if haEnabled {
+				haOpts := []ha.Option{
+					ha.WithEnabled(true),
+				}
+				if haPreferredRole != "" {
+					haOpts = append(haOpts, ha.WithPreferredRole(haPreferredRole))
+				}
+				if haPeerAddress != "" {
+					haOpts = append(haOpts, ha.WithPeerAddress(haPeerAddress))
+				}
+				if haFailoverTimeout > 0 {
+					haOpts = append(haOpts, ha.WithFailoverTimeout(haFailoverTimeout))
+				}
+				opts = append(opts, principal.WithHA(haOpts...))
+				logrus.Infof("HA enabled (preferred role: %s, peer: %s)", haPreferredRole, haPeerAddress)
+			}
+
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
 				cmdutil.Fatal("Could not create new server instance: %v", err)
@@ -558,6 +588,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&redisCompressionType, "redis-compression-type",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),
 		"Compression algorithm required by Redis. (possible values: gzip, none. Default value: gzip)")
+	command.Flags().BoolVar(&disableRedisProxy, "disable-redis-proxy",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_DISABLE_REDIS_PROXY", false),
+		"Disable the Redis proxy (useful for testing multiple principals locally)")
 	command.Flags().IntVar(&pprofPort, "pprof-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_PPROF_PORT", cmdutil.ValidPort, 0),
 		"Port the pprof server will listen on")
@@ -615,6 +648,20 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&selfRegClientCertSecretName, "self-registration-client-cert-secret",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET", nil, ""),
 		"TLS secret containing shared client cert for self-registered cluster secrets (must have tls.crt, tls.key, ca.crt)")
+
+	// HA flags
+	command.Flags().BoolVar(&haEnabled, "ha-enabled",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_HA_ENABLED", false),
+		"Enable High Availability mode")
+	command.Flags().StringVar(&haPreferredRole, "ha-preferred-role",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_PREFERRED_ROLE", nil, "primary"),
+		"Preferred HA role: 'primary' or 'replica'")
+	command.Flags().StringVar(&haPeerAddress, "ha-peer-address",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_PEER_ADDRESS", nil, ""),
+		"Address of the HA peer principal (required for replicas, optional for primary)")
+	command.Flags().DurationVar(&haFailoverTimeout, "ha-failover-timeout",
+		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_FAILOVER_TIMEOUT", nil, 30*time.Second),
+		"Time to wait before promoting to primary after peer is unreachable")
 
 	return command
 }
