@@ -266,3 +266,172 @@ func Test_ValidateTLSConfig(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func Test_SetTLSConfigFromFlags(t *testing.T) {
+	t.Run("Nil tlsConfig returns error", func(t *testing.T) {
+		err := SetTLSConfigFromFlags(nil, "", "", nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "tlsConfig is nil")
+	})
+
+	t.Run("All empty params is a no-op", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, uint16(0), cfg.MinVersion)
+		assert.Equal(t, uint16(0), cfg.MaxVersion)
+		assert.Nil(t, cfg.CipherSuites)
+	})
+
+	t.Run("Valid minVersion only", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
+		assert.Equal(t, uint16(0), cfg.MaxVersion)
+	})
+
+	t.Run("Valid maxVersion only", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "tls1.3", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, uint16(0), cfg.MinVersion)
+		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion)
+	})
+
+	t.Run("Valid minVersion and maxVersion", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "tls1.3", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
+		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion)
+	})
+
+	t.Run("Invalid minVersion returns error", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "ssl3.0", "", nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not supported")
+		assert.Equal(t, uint16(0), cfg.MinVersion)
+	})
+
+	t.Run("Invalid maxVersion returns error", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "invalid", nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not supported")
+	})
+
+	t.Run("Valid cipher suites", func(t *testing.T) {
+		cs := tls.CipherSuites()[0]
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "", []string{cs.Name})
+		assert.NoError(t, err)
+		assert.Equal(t, []uint16{cs.ID}, cfg.CipherSuites)
+	})
+
+	t.Run("Invalid cipher suite returns error", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "", []string{"not-a-cipher"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no such cipher suite")
+	})
+
+	t.Run("Single empty string in cipher suites is treated as empty", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "", []string{""})
+		assert.NoError(t, err)
+		assert.Nil(t, cfg.CipherSuites)
+	})
+
+	t.Run("Empty slice of cipher suites is a no-op", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "", []string{})
+		assert.NoError(t, err)
+		assert.Nil(t, cfg.CipherSuites)
+	})
+
+	t.Run("All parameters set together", func(t *testing.T) {
+		ciphers := tls.CipherSuites()
+		// Pick a cipher that supports TLS 1.2
+		var cipherName string
+		var cipherID uint16
+		for _, cs := range ciphers {
+			for _, v := range cs.SupportedVersions {
+				if v == tls.VersionTLS12 {
+					cipherName = cs.Name
+					cipherID = cs.ID
+					break
+				}
+			}
+			if cipherName != "" {
+				break
+			}
+		}
+		require.NotEmpty(t, cipherName, "need at least one TLS 1.2 cipher to run this test")
+
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "tls1.3", []string{cipherName})
+		assert.NoError(t, err)
+		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
+		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion)
+		assert.Equal(t, []uint16{cipherID}, cfg.CipherSuites)
+	})
+
+	t.Run("Does not clear pre-existing config fields", func(t *testing.T) {
+		cfg := &tls.Config{
+			ServerName: "example.com",
+		}
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, "example.com", cfg.ServerName)
+		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
+	})
+
+	t.Run("Config unchanged when valid minVersion but invalid maxVersion", func(t *testing.T) {
+		cfg := &tls.Config{
+			MinVersion: tls.VersionTLS11,
+			MaxVersion: tls.VersionTLS13,
+		}
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "bogus", nil)
+		assert.Error(t, err)
+		assert.Equal(t, uint16(tls.VersionTLS11), cfg.MinVersion)
+		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion)
+		assert.Nil(t, cfg.CipherSuites)
+	})
+
+	t.Run("Config unchanged when valid versions but invalid cipher suite", func(t *testing.T) {
+		cfg := &tls.Config{
+			MinVersion: tls.VersionTLS11,
+		}
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "tls1.3", []string{"not-a-cipher"})
+		assert.Error(t, err)
+		assert.Equal(t, uint16(tls.VersionTLS11), cfg.MinVersion)
+		assert.Equal(t, uint16(0), cfg.MaxVersion)
+		assert.Nil(t, cfg.CipherSuites)
+	})
+
+	t.Run("Config unchanged when invalid minVersion with valid maxVersion", func(t *testing.T) {
+		cfg := &tls.Config{
+			MaxVersion: tls.VersionTLS12,
+		}
+		err := SetTLSConfigFromFlags(cfg, "bogus", "tls1.3", nil)
+		assert.Error(t, err)
+		assert.Equal(t, uint16(0), cfg.MinVersion)
+		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MaxVersion)
+	})
+
+	t.Run("Omitted params preserve existing config values", func(t *testing.T) {
+		cs := tls.CipherSuites()[0]
+		cfg := &tls.Config{
+			MinVersion:   tls.VersionTLS11,
+			MaxVersion:   tls.VersionTLS13,
+			CipherSuites: []uint16{cs.ID},
+		}
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
+		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion, "maxVersion should be preserved")
+		assert.Equal(t, []uint16{cs.ID}, cfg.CipherSuites, "cipherSuites should be preserved")
+	})
+}
