@@ -34,6 +34,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v3/util/db"
 	"github.com/spf13/cobra"
@@ -240,6 +241,11 @@ func NewAgentCreateCommand() *cobra.Command {
 				Server: serverURL,
 				Name:   agentName,
 				Labels: labels,
+				// Skip ArgoCD Application Controller reconciliation for this cluster.
+				// Available in ArgoCD v3.4+
+				Annotations: map[string]string{
+					common.AnnotationKeyAppSkipReconcile: "true",
+				},
 				Config: v1alpha1.ClusterConfig{
 					TLSClientConfig: v1alpha1.TLSClientConfig{
 						CertData: []byte(clientCert),

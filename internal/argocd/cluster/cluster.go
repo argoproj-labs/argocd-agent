@@ -26,6 +26,7 @@ import (
 	"github.com/redis/go-redis/v9/maintnotifications"
 	"github.com/sirupsen/logrus"
 
+	"github.com/argoproj/argo-cd/v3/common"
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
@@ -220,6 +221,11 @@ func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Int
 		Labels: map[string]string{
 			LabelKeyClusterAgentMapping:   agentName,
 			LabelKeySelfRegisteredCluster: "true",
+		},
+		Annotations: map[string]string{
+			// Skip ArgoCD Application Controller reconciliation for this cluster.
+			// Available in ArgoCD v3.4+
+			common.AnnotationKeyAppSkipReconcile: "true",
 		},
 		Config: appv1.ClusterConfig{
 			BearerToken: bearerToken,
