@@ -125,3 +125,14 @@ type Namespace interface {
 	StartInformer(ctx context.Context) error
 	EnsureSynced(duration time.Duration) error
 }
+
+// ApplicationSet defines a generic interface to store/track Argo CD ApplicationSet state.
+type ApplicationSet interface {
+	List(ctx context.Context, namespace string) ([]v1alpha1.ApplicationSet, error)
+	Create(ctx context.Context, appSet *v1alpha1.ApplicationSet) (*v1alpha1.ApplicationSet, error)
+	Get(ctx context.Context, name string, namespace string) (*v1alpha1.ApplicationSet, error)
+	Delete(ctx context.Context, name string, namespace string, deletionPropagation *DeletionPropagation) error
+	Update(ctx context.Context, appSet *v1alpha1.ApplicationSet) (*v1alpha1.ApplicationSet, error)
+	StartInformer(ctx context.Context) error
+	EnsureSynced(duration time.Duration) error
+}
