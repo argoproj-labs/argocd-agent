@@ -51,6 +51,8 @@ type AgentStateProvider interface {
 	IsAgentConnected(agentName string) bool
 	// GetAgentResources returns the resources managed by an agent
 	GetAgentResources(agentName string) []ResourceInfo
+	// GetPrincipalResources returns principal-scoped resources (e.g. ApplicationSets)
+	GetPrincipalResources() []ResourceInfo
 }
 
 // ResourceInfo contains information about a resource
@@ -471,6 +473,19 @@ func (s *Server) GetSnapshot(ctx context.Context, req *replicationapi.SnapshotRe
 	snapshot := &replicationapi.ReplicationSnapshot{
 		Agents:          make([]*replicationapi.AgentState, 0),
 		LastSequenceNum: s.forwarder.CurrentSequenceNum(),
+	}
+
+	// Populate principal-scoped resources (e.g. ApplicationSets)
+	principalResources := s.stateProvider.GetPrincipalResources()
+	for _, res := range principalResources {
+		snapshot.PrincipalResources = append(snapshot.PrincipalResources, &replicationapi.Resource{
+			Name:         res.Name,
+			Namespace:    res.Namespace,
+			Kind:         res.Kind,
+			Uid:          res.UID,
+			SpecChecksum: res.SpecChecksum,
+			Data:         res.Data,
+		})
 	}
 
 	agentNames := s.stateProvider.GetAllAgentNames()

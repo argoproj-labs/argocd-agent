@@ -755,12 +755,25 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 
 	t.Run("should return false if the UID doesn't match", func(t *testing.T) {
 		incoming := oldApp.DeepCopy()
+		// Clear source-uid so comparison falls back to incoming.UID (normal operation path)
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
 		incoming.UID = ktypes.UID("new_uid")
 
 		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
 		require.True(t, exists)
 		require.Nil(t, err)
 		require.False(t, uidMatch)
+	})
+
+	t.Run("should return true if incoming has matching source-uid annotation", func(t *testing.T) {
+		incoming := oldApp.DeepCopy()
+		incoming.UID = ktypes.UID("agent_uid")
+		incoming.Annotations[manager.SourceUIDAnnotation] = "old_uid"
+
+		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
+		require.True(t, exists)
+		require.Nil(t, err)
+		require.True(t, uidMatch)
 	})
 
 	t.Run("should return an error if there is no UID annotation", func(t *testing.T) {

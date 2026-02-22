@@ -483,6 +483,32 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	}
 }
 
+// newAppSetCallback forwards ApplicationSet create events to the replication layer only.
+// ApplicationSets are principal-local resources; agents don't receive them directly.
+func (s *Server) newAppSetCallback(outbound *v1alpha1.ApplicationSet) {
+	if !s.IsActive() {
+		return
+	}
+	ev := s.events.ApplicationSetEvent(event.Create, outbound)
+	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplicationSet), "", replication.DirectionOutbound)
+}
+
+func (s *Server) updateAppSetCallback(old *v1alpha1.ApplicationSet, new *v1alpha1.ApplicationSet) {
+	if !s.IsActive() {
+		return
+	}
+	ev := s.events.ApplicationSetEvent(event.SpecUpdate, new)
+	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplicationSet), "", replication.DirectionOutbound)
+}
+
+func (s *Server) deleteAppSetCallback(outbound *v1alpha1.ApplicationSet) {
+	if !s.IsActive() {
+		return
+	}
+	ev := s.events.ApplicationSetEvent(event.Delete, outbound)
+	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplicationSet), "", replication.DirectionOutbound)
+}
+
 func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
 	ctx, span := s.startSpan(operationcreate, "Repository", outbound)
 	defer span.End()
