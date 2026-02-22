@@ -256,7 +256,7 @@ func TestDefaultAppFilterChain_IgnoreUnmanagedApps(t *testing.T) {
 
 	newAgent := func(t *testing.T, ignore bool) *Agent {
 		t.Helper()
-		opts := []AgentOption{WithRemote(remote)}
+		opts := []AgentOption{WithRemote(remote), WithCacheRefreshInterval(10 * time.Second)}
 		if ignore {
 			opts = append(opts, WithIgnoreUnmanagedApps(true))
 		}

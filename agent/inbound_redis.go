@@ -16,9 +16,11 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -348,16 +350,29 @@ func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error
 
 func (a *Agent) getRedisClientAndCache() (*redis.Client, *rediscache.Cache, error) {
 	// Create TLS config for Redis client
-	tlsConfig, err := tlsutil.CreateRedisTLSConfig(
-		a.redisProxyMsgHandler.redisTLSEnabled,
-		a.redisProxyMsgHandler.redisAddress,
-		a.redisProxyMsgHandler.redisTLSInsecure,
-		a.redisProxyMsgHandler.redisTLSCA,
-		a.redisProxyMsgHandler.redisTLSCAPath,
-		"Redis client",
-	)
-	if err != nil {
-		return nil, nil, err
+	var tlsConfig *tls.Config
+	if a.redisProxyMsgHandler.redisTLSEnabled {
+		serverName, _, err := net.SplitHostPort(a.redisProxyMsgHandler.redisAddress)
+		if err != nil {
+			serverName = a.redisProxyMsgHandler.redisAddress
+		}
+		tlsConfig = &tls.Config{
+			ServerName: serverName,
+		}
+		if a.redisProxyMsgHandler.redisTLSInsecure {
+			tlsConfig.InsecureSkipVerify = true
+			log().Warn("INSECURE: Redis client not verifying Redis TLS certificate")
+		} else if a.redisProxyMsgHandler.redisTLSCA != nil {
+			tlsConfig.RootCAs = a.redisProxyMsgHandler.redisTLSCA
+		} else if a.redisProxyMsgHandler.redisTLSCAPath != "" {
+			caPool, err := tlsutil.X509CertPoolFromFile(a.redisProxyMsgHandler.redisTLSCAPath)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to load Redis CA certificate: %w", err)
+			}
+			tlsConfig.RootCAs = caPool
+		} else {
+			return nil, nil, fmt.Errorf("redis TLS enabled but no CA certificate configured for Redis client")
+		}
 	}
 
 	opts := &redis.Options{
