@@ -351,7 +351,13 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 		return true, false, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
 	}
 
-	return true, string(incoming.UID) == sourceUID, nil
+	// On failover, apps replicated to the replica carry source-uid = primary's UID.
+	// Use that as the incoming UID if present so we match and update rather than delete.
+	incomingUID := string(incoming.UID)
+	if srcUID, ok := incoming.Annotations[manager.SourceUIDAnnotation]; ok && srcUID != "" {
+		incomingUID = srcUID
+	}
+	return true, incomingUID == sourceUID, nil
 }
 
 // UpdateAutonomousApp updates the Application resource on the control plane side
