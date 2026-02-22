@@ -52,8 +52,6 @@ func (m *ApplicationSetManager) Create(ctx context.Context, appSet *v1alpha1.App
 	}
 	appSet.Annotations[manager.SourceUIDAnnotation] = string(appSet.UID)
 
-	appSet.Namespace = m.namespace
-
 	created, err := m.appSetBackend.Create(ctx, appSet)
 	if err != nil {
 		return nil, err
@@ -73,7 +71,7 @@ func (m *ApplicationSetManager) Upsert(ctx context.Context, appSet *v1alpha1.App
 		return nil, err
 	}
 
-	existing, err := m.appSetBackend.Get(ctx, appSet.Name, m.namespace)
+	existing, err := m.appSetBackend.Get(ctx, appSet.Name, appSet.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("get existing applicationset for upsert: %w", err)
 	}
@@ -81,7 +79,6 @@ func (m *ApplicationSetManager) Upsert(ctx context.Context, appSet *v1alpha1.App
 	appSet.UID = existing.UID
 	appSet.ResourceVersion = existing.ResourceVersion
 	appSet.Generation = existing.Generation
-	appSet.Namespace = m.namespace
 
 	if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
 		if appSet.Annotations == nil {
@@ -108,9 +105,9 @@ func (m *ApplicationSetManager) Delete(ctx context.Context, namespace string, ap
 	return m.appSetBackend.Delete(ctx, appSet.Name, namespace, opts)
 }
 
-// List lists all ApplicationSets in the manager's namespace.
+// List lists all ApplicationSets across all namespaces.
 func (m *ApplicationSetManager) List(ctx context.Context) ([]v1alpha1.ApplicationSet, error) {
-	return m.appSetBackend.List(ctx, m.namespace)
+	return m.appSetBackend.List(ctx, "")
 }
 
 // EnsureSynced waits until the backend is synced.

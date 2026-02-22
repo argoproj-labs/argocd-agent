@@ -348,10 +348,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	appSetInformerOpts := []informer.InformerOption[*v1alpha1.ApplicationSet]{
 		informer.WithListHandler[*v1alpha1.ApplicationSet](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets(namespace).List(ctx, v1.ListOptions{})
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets("").List(ctx, v1.ListOptions{})
 		}),
 		informer.WithWatchHandler[*v1alpha1.ApplicationSet](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets(namespace).Watch(ctx, v1.ListOptions{})
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets("").Watch(ctx, v1.ListOptions{})
 		}),
 		informer.WithAddHandler[*v1alpha1.ApplicationSet](s.newAppSetCallback),
 		informer.WithUpdateHandler[*v1alpha1.ApplicationSet](s.updateAppSetCallback),
@@ -599,6 +599,15 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}()
 
+	// The applicationset informer lives in its own go routine
+	go func() {
+		if err := s.appSetManager.StartBackend(s.ctx); err != nil {
+			log().WithError(err).Error("ApplicationSet backend has exited non-successfully")
+		} else {
+			log().Info("ApplicationSet backend has exited")
+		}
+	}()
+
 	// The namespace informer lives in its own go routine
 	go func() {
 		if err := s.namespaceManager.StartInformer(s.ctx); err != nil {
@@ -639,6 +648,11 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		return fmt.Errorf("unable to sync AppProject informer: %w", err)
 	}
 	log().Infof("AppProject informer synced and ready")
+
+	if err := s.appSetManager.EnsureSynced(syncTimeout); err != nil {
+		return fmt.Errorf("unable to sync ApplicationSet informer: %w", err)
+	}
+	log().Infof("ApplicationSet informer synced and ready")
 
 	if err := s.repoManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Repository informer: %w", err)
