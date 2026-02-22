@@ -372,58 +372,96 @@ func TestSyncAppProjectUpdatesToAgents(t *testing.T) {
 
 func TestIsResourceFromAutonomousAgent(t *testing.T) {
 	tests := []struct {
-		name    string
-		project v1alpha1.AppProject
-		want    bool
+		name         string
+		project      v1alpha1.AppProject
+		namespaceMap map[string]types.AgentMode
+		want         bool
 	}{
 		{
-			name: "project with SourceUID annotation is autonomous",
+			name: "source-uid with autonomous mode",
 			project: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-project",
+					Name:      "test-project",
+					Namespace: "agent1",
 					Annotations: map[string]string{
 						manager.SourceUIDAnnotation: "some-uid",
 					},
 				},
 			},
-			want: true,
+			namespaceMap: map[string]types.AgentMode{"agent1": types.AgentModeAutonomous},
+			want:         true,
+		},
+		{
+			name: "source-uid with managed mode is not autonomous",
+			project: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-project",
+					Namespace: "agent1",
+					Annotations: map[string]string{
+						manager.SourceUIDAnnotation: "some-uid",
+					},
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+			want:         false,
+		},
+		{
+			name: "source-uid with unknown mode is not autonomous",
+			project: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-project",
+					Namespace: "agent1",
+					Annotations: map[string]string{
+						manager.SourceUIDAnnotation: "some-uid",
+					},
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{},
+			want:         false,
 		},
 		{
 			name: "project without annotations is not autonomous",
 			project: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-project",
+					Name:      "test-project",
+					Namespace: "agent1",
 				},
 			},
-			want: false,
+			namespaceMap: map[string]types.AgentMode{"agent1": types.AgentModeAutonomous},
+			want:         false,
 		},
 		{
 			name: "project with empty annotations is not autonomous",
 			project: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-project",
+					Namespace:   "agent1",
 					Annotations: map[string]string{},
 				},
 			},
-			want: false,
+			namespaceMap: map[string]types.AgentMode{"agent1": types.AgentModeAutonomous},
+			want:         false,
 		},
 		{
 			name: "project with other annotations but no SourceUID is not autonomous",
 			project: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-project",
+					Name:      "test-project",
+					Namespace: "agent1",
 					Annotations: map[string]string{
 						"other-annotation": "value",
 					},
 				},
 			},
-			want: false,
+			namespaceMap: map[string]types.AgentMode{"agent1": types.AgentModeAutonomous},
+			want:         false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isResourceFromAutonomousAgent(&tt.project)
+			s := &Server{namespaceMap: tt.namespaceMap}
+			got := s.isResourceFromAutonomousAgent(&tt.project)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -1121,6 +1159,9 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 				appManager:  appManager,
 				sourceCache: cache.NewSourceCache(),
 				deletions:   manager.NewDeletionTracker(),
+				namespaceMap: map[string]types.AgentMode{
+					"autonomous-agent": types.AgentModeAutonomous,
+				},
 			}
 
 			// Create send queue for the agent
@@ -1148,7 +1189,7 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 			if tt.shouldRecreate {
 				// If we recreated, callback should have returned early - no events in queue
 				assert.Equal(t, 0, sendQ.Len(), "Queue should be empty when recreation happens")
-			} else if !isResourceFromAutonomousAgent(tt.app) {
+			} else if !s.isResourceFromAutonomousAgent(tt.app) {
 				// If not autonomous agent app, normal deletion flow should add event to queue
 				assert.Equal(t, 1, sendQ.Len(), "Queue should contain delete event for normal apps")
 			}
@@ -1620,6 +1661,49 @@ func TestServer_updateAppCallback(t *testing.T) {
 		assert.Equal(t, 1, sendQ.Len())
 	})
 
+	t.Run("autonomous agent finalizer removal marks deletion as expected", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		deletions := manager.NewDeletionTracker()
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
+			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
+			sourceCache:  cache.NewSourceCache(),
+			deletions:    deletions,
+		}
+
+		err = s.queues.Create("autonomous-agent")
+		require.NoError(t, err)
+
+		deletionTime := metav1.Now()
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
+				Annotations:       map[string]string{manager.SourceUIDAnnotation: "uid-xyz"},
+				DeletionTimestamp: &deletionTime,
+				Finalizers:        []string{"resources-finalizer.argocd.argoproj.io"},
+			},
+		}
+		appWithoutFinalizers2 := newApp.DeepCopy()
+		appWithoutFinalizers2.Finalizers = nil
+
+		mockBackend.On("Get", mock.Anything, "test-app", "autonomous-agent").Return(newApp, nil)
+		mockBackend.On("SupportsPatch").Return(false)
+		mockBackend.On("Update", mock.Anything, mock.Anything).Return(appWithoutFinalizers2, nil)
+
+		s.updateAppCallback(newApp, newApp)
+
+		// Deletion must be pre-registered so deleteAppCallback won't recreate the app.
+		assert.True(t, deletions.RemoveExpected(k8stypes.UID("uid-xyz")), "expected deletion to be marked as expected after finalizer removal")
+	})
+
 	t.Run("include operation in event if it is initiated for the first time", func(t *testing.T) {
 		mockBackend := &mocks.Application{}
 
@@ -1985,6 +2069,7 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 	tests := []struct {
 		name                    string
 		destinationBasedMapping bool
+		namespaceMap            map[string]types.AgentMode
 		oldApp                  *v1alpha1.Application
 		newApp                  *v1alpha1.Application
 		expectedDeleteAgent     string
@@ -2145,6 +2230,7 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 		{
 			name:                    "autonomous resource - no action taken",
 			destinationBasedMapping: true,
+			namespaceMap:            map[string]types.AgentMode{"default": types.AgentModeAutonomous},
 			oldApp: &v1alpha1.Application{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-app",
@@ -2186,6 +2272,7 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 				resources:               resources.NewAgentResources(),
 				appToAgent:              newConcurrentStringMap(),
 				destinationBasedMapping: tt.destinationBasedMapping,
+				namespaceMap:            tt.namespaceMap,
 			}
 
 			// Create queues for agents involved
