@@ -16,7 +16,9 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -386,16 +388,29 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	}
 
 	// Create TLS config for cluster cache Redis client (same as for Redis proxy)
-	clusterCacheTLSConfig, err := tlsutil.CreateRedisTLSConfig(
-		a.redisProxyMsgHandler.redisTLSEnabled,
-		a.redisProxyMsgHandler.redisAddress,
-		a.redisProxyMsgHandler.redisTLSInsecure,
-		a.redisProxyMsgHandler.redisTLSCA,
-		a.redisProxyMsgHandler.redisTLSCAPath,
-		"cluster cache",
-	)
-	if err != nil {
-		return nil, err
+	var clusterCacheTLSConfig *tls.Config
+	if a.redisProxyMsgHandler.redisTLSEnabled {
+		serverName, _, err := net.SplitHostPort(a.redisProxyMsgHandler.redisAddress)
+		if err != nil {
+			serverName = a.redisProxyMsgHandler.redisAddress
+		}
+		clusterCacheTLSConfig = &tls.Config{
+			ServerName: serverName,
+		}
+		if a.redisProxyMsgHandler.redisTLSInsecure {
+			clusterCacheTLSConfig.InsecureSkipVerify = true
+			log().Warn("INSECURE: cluster cache not verifying Redis TLS certificate")
+		} else if a.redisProxyMsgHandler.redisTLSCA != nil {
+			clusterCacheTLSConfig.RootCAs = a.redisProxyMsgHandler.redisTLSCA
+		} else if a.redisProxyMsgHandler.redisTLSCAPath != "" {
+			caPool, err := tlsutil.X509CertPoolFromFile(a.redisProxyMsgHandler.redisTLSCAPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load Redis CA certificate: %w", err)
+			}
+			clusterCacheTLSConfig.RootCAs = caPool
+		} else {
+			return nil, fmt.Errorf("redis TLS enabled but no CA certificate configured for cluster cache")
+		}
 	}
 
 	clusterCache, err := cluster.NewClusterCacheInstance(a.redisProxyMsgHandler.redisAddress, a.redisProxyMsgHandler.redisPassword, cacheutil.RedisCompressionGZip, clusterCacheTLSConfig)

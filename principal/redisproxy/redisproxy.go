@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +31,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/principal/tracker"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
@@ -78,6 +78,9 @@ type RedisProxy struct {
 	tlsServerKey      crypto.PrivateKey
 	tlsServerCertPath string
 	tlsServerKeyPath  string
+	tlsMinVersion     uint16
+	tlsMaxVersion     uint16
+	tlsCipherSuites   []uint16
 
 	// TLS configuration for Redis (connections to principal's argocd-redis)
 	redisTLSCA       *x509.CertPool
@@ -142,6 +145,13 @@ func (rp *RedisProxy) SetServerTLSFromPath(certPath, keyPath string) {
 	rp.tlsServerKeyPath = keyPath
 }
 
+// SetServerTLSConfig sets the TLS protocol configuration for the Redis proxy server
+func (rp *RedisProxy) SetServerTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16) {
+	rp.tlsMinVersion = minVersion
+	rp.tlsMaxVersion = maxVersion
+	rp.tlsCipherSuites = cipherSuites
+}
+
 // SetUpstreamTLSCA sets the CA certificate pool for verifying upstream Redis TLS
 func (rp *RedisProxy) SetUpstreamTLSCA(ca *x509.CertPool) {
 	rp.redisTLSCA = ca
@@ -179,7 +189,9 @@ func (rp *RedisProxy) createServerTLSConfig() (*tls.Config, error) {
 
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
+		MinVersion:   rp.tlsMinVersion,
+		MaxVersion:   rp.tlsMaxVersion,
+		CipherSuites: rp.tlsCipherSuites,
 	}, nil
 }
 
@@ -189,26 +201,19 @@ func (rp *RedisProxy) Start() error {
 	var err error
 
 	if rp.tlsEnabled {
-		// Create TLS configuration for the listener
-		tlsConfig, err := rp.createServerTLSConfig()
+		var tlsConfig *tls.Config
+		tlsConfig, err = rp.createServerTLSConfig()
 		if err != nil {
 			rp.log().WithError(err).Error("error creating TLS config for Redis proxy server")
 			return err
 		}
-
 		l, err = tls.Listen("tcp", rp.listenAddress, tlsConfig)
-		if err != nil {
-			rp.log().WithError(err).Error("error occurred on listening to addr with TLS: " + rp.listenAddress)
-			return err
-		}
-		rp.log().Infof("Redis proxy started on %s with TLS", rp.listenAddress)
 	} else {
 		l, err = net.Listen("tcp", rp.listenAddress)
-		if err != nil {
-			rp.log().WithError(err).Error("error occurred on listening to addr: " + rp.listenAddress)
-			return err
-		}
-		rp.log().Infof("Redis proxy started on %s without TLS", rp.listenAddress)
+	}
+	if err != nil {
+		rp.log().WithError(err).WithField("tls", rp.tlsEnabled).Error("Unable to listen on " + rp.listenAddress)
+		return err
 	}
 
 	rp.listener = l
@@ -224,6 +229,8 @@ func (rp *RedisProxy) Start() error {
 			go rp.handleConnection(conn)
 		}
 	}()
+
+	rp.log().WithField("tls", rp.tlsEnabled).Infof("Redis proxy started on %s", rp.listenAddress)
 
 	return nil
 }
@@ -863,42 +870,30 @@ func (rp *RedisProxy) establishConnectionToPrincipalRedis(logCtx *logrus.Entry) 
 	// Check if upstream TLS configuration is provided
 	hasUpstreamTLSConfig := rp.redisTLSCA != nil || rp.redisTLSCAPath != "" || rp.redisTLSInsecure
 
-	// Fail if server TLS is enabled but upstream TLS is not configured
-	// This prevents a security gap: agent→proxy is encrypted, but proxy→redis is not
+	// Warn if server TLS is enabled but upstream TLS is not configured
+	// This creates a security gap: agent→proxy is encrypted, but proxy→redis is not
 	if rp.tlsEnabled && !hasUpstreamTLSConfig {
-		conn.Close()
-		return nil, fmt.Errorf("SECURITY ERROR: Redis proxy server has TLS enabled, but no upstream TLS configuration provided. " +
-			"This would create an unencrypted connection to principal Redis. " +
-			"Configure upstream TLS using --redis-ca-path, --redis-ca-secret-name, or --redis-tls-insecure")
+		logCtx.Warn("SECURITY WARNING: Redis proxy server has TLS enabled, but no upstream TLS configuration provided. " +
+			"This creates an unencrypted connection to principal Redis. " +
+			"Consider configuring upstream TLS using --redis-ca-path, --redis-ca-secret-name, or --redis-tls-insecure")
 	}
 
 	// If upstream TLS is configured, wrap the connection with TLS
 	// This is independent of server TLS configuration
 	if hasUpstreamTLSConfig {
-		tlsConfig := &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		}
+		tlsConfig := &tls.Config{}
 
 		if rp.redisTLSInsecure {
 			logCtx.Warn("INSECURE: Not verifying upstream Redis TLS certificate")
 			tlsConfig.InsecureSkipVerify = true
-			// Warn if CA configuration is provided but will be ignored
-			if rp.redisTLSCA != nil || rp.redisTLSCAPath != "" {
-				logCtx.Warn("CA configuration provided but ignored due to InsecureSkipVerify=true")
-			}
 		} else if rp.redisTLSCA != nil {
 			tlsConfig.RootCAs = rp.redisTLSCA
 			logCtx.Trace("Using provided CA certificate pool for upstream Redis TLS")
 		} else if rp.redisTLSCAPath != "" {
-			caCert, err := os.ReadFile(rp.redisTLSCAPath)
+			caCertPool, err := tlsutil.X509CertPoolFromFile(rp.redisTLSCAPath)
 			if err != nil {
 				conn.Close()
-				return nil, fmt.Errorf("failed to read CA certificate: %w", err)
-			}
-			caCertPool := x509.NewCertPool()
-			if !caCertPool.AppendCertsFromPEM(caCert) {
-				conn.Close()
-				return nil, fmt.Errorf("failed to append CA certificate")
+				return nil, fmt.Errorf("failed to load CA certificate: %w", err)
 			}
 			tlsConfig.RootCAs = caCertPool
 			logCtx.Debugf("Using CA certificate from %s for upstream Redis TLS", rp.redisTLSCAPath)
