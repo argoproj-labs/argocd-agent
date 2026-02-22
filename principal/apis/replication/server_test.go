@@ -87,6 +87,10 @@ func (m *mockStateProvider) GetAgentResources(agentName string) []ResourceInfo {
 	return nil
 }
 
+func (m *mockStateProvider) GetPrincipalResources() []ResourceInfo {
+	return nil
+}
+
 // mockReplicaStream implements replicationapi.Replication_SubscribeServer for testing
 type mockGrpcStream struct {
 	ctx         context.Context

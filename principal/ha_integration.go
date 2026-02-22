@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -143,6 +144,36 @@ func (p *serverStateProvider) GetAgentResources(agentName string) []replications
 	}
 
 	return resources
+}
+
+// GetPrincipalResources returns principal-scoped resources (ApplicationSets) for snapshot.
+func (p *serverStateProvider) GetPrincipalResources() []replicationserver.ResourceInfo {
+	if p.server.appSetManager == nil {
+		return nil
+	}
+	ctx := p.server.ctx
+	appSets, err := p.server.appSetManager.List(ctx)
+	if err != nil {
+		log().WithError(err).Warn("HA: failed to list ApplicationSets for snapshot")
+		return nil
+	}
+	result := make([]replicationserver.ResourceInfo, 0, len(appSets))
+	for i := range appSets {
+		as := &appSets[i]
+		data, err := json.Marshal(as)
+		if err != nil {
+			log().WithField("applicationset", as.Name).WithError(err).Warn("HA: skipping ApplicationSet serialization")
+			continue
+		}
+		result = append(result, replicationserver.ResourceInfo{
+			Name:      as.Name,
+			Namespace: as.Namespace,
+			Kind:      "ApplicationSet",
+			UID:       string(as.UID),
+			Data:      data,
+		})
+	}
+	return result
 }
 
 func (p *serverStateProvider) serializeResource(key resources.ResourceKey) ([]byte, error) {
@@ -522,6 +553,7 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 		key := resources.NewResourceKeyFromApp(app)
 		switch evType {
 		case event.Create, event.SpecUpdate, event.StatusUpdate, event.TerminateOperation:
+			h.remapAppSetOwnerRefs(ctx, app)
 			if _, err := server.appManager.Upsert(ctx, app); err != nil {
 				log().WithField("app", app.QualifiedName()).WithError(err).Warn("HA: failed to upsert application from replicated event")
 			}
@@ -551,6 +583,22 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 			}
 			server.resources.Remove(ev.AgentName, key)
 		}
+
+	case event.TargetApplicationSet:
+		appSet, err := ev.Event.ApplicationSet()
+		if err != nil {
+			return fmt.Errorf("failed to decode applicationset from replicated event: %w", err)
+		}
+		switch evType {
+		case event.Create, event.SpecUpdate:
+			if _, err := server.appSetManager.Upsert(ctx, appSet); err != nil {
+				log().WithField("applicationset", appSet.Name).WithError(err).Warn("HA: failed to upsert applicationset from replicated event")
+			}
+		case event.Delete:
+			if err := server.appSetManager.Delete(ctx, appSet.Namespace, appSet, nil); err != nil && !k8serrors.IsNotFound(err) {
+				log().WithField("applicationset", appSet.Name).WithError(err).Warn("HA: failed to delete applicationset from replicated event")
+			}
+		}
 	}
 
 	return nil
@@ -566,9 +614,17 @@ func (h *HAComponents) handleSnapshot(snapshot *replicationapi.ReplicationSnapsh
 	server := h.stateProvider.server
 
 	log().WithFields(map[string]any{
-		"agents":        len(snapshot.Agents),
-		"last_sequence": snapshot.LastSequenceNum,
+		"agents":              len(snapshot.Agents),
+		"principal_resources": len(snapshot.PrincipalResources),
+		"last_sequence":       snapshot.LastSequenceNum,
 	}).Info("HA: Applying snapshot from primary")
+
+	// Process principal resources first (ApplicationSets) so apps can reference them
+	for _, res := range snapshot.PrincipalResources {
+		if err := h.upsertResourceFromSnapshot(server.ctx, server, res); err != nil {
+			log().WithField("resource", res.Kind+"/"+res.Name).WithError(err).Warn("HA: failed to upsert principal resource from snapshot")
+		}
+	}
 
 	for _, agentState := range snapshot.Agents {
 		log().WithFields(map[string]any{
@@ -634,6 +690,7 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 		if err := json.Unmarshal(res.Data, &app); err != nil {
 			return fmt.Errorf("unmarshal application: %w", err)
 		}
+		h.remapAppSetOwnerRefs(ctx, &app)
 		if _, err := server.appManager.Upsert(ctx, &app); err != nil {
 			return fmt.Errorf("upsert application: %w", err)
 		}
@@ -644,6 +701,14 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 		}
 		if _, err := server.projectManager.Upsert(ctx, &proj); err != nil {
 			return fmt.Errorf("upsert appproject: %w", err)
+		}
+	case "ApplicationSet":
+		var appSet v1alpha1.ApplicationSet
+		if err := json.Unmarshal(res.Data, &appSet); err != nil {
+			return fmt.Errorf("unmarshal applicationset: %w", err)
+		}
+		if _, err := server.appSetManager.Upsert(ctx, &appSet); err != nil {
+			return fmt.Errorf("upsert applicationset: %w", err)
 		}
 	}
 	return nil
@@ -666,6 +731,37 @@ func (h *HAComponents) deleteStaleResource(ctx context.Context, server *Server, 
 			}, nil); err != nil && !k8serrors.IsNotFound(err) {
 				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale appproject")
 			}
+		}
+	case "ApplicationSet":
+		if server.appSetManager != nil {
+			if err := server.appSetManager.Delete(ctx, key.Namespace, &v1alpha1.ApplicationSet{
+				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
+			}, nil); err != nil && !k8serrors.IsNotFound(err) {
+				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale applicationset")
+			}
+		}
+	}
+}
+
+// remapAppSetOwnerRefs updates ownerReference UIDs for ApplicationSet owners
+// so the replica's AppSet controller can adopt apps correctly on promotion.
+// If the local ApplicationSet is not yet synced, the ownerRef is stripped to
+// avoid Kubernetes GC deleting the app before the AppSet arrives.
+func (h *HAComponents) remapAppSetOwnerRefs(ctx context.Context, app *v1alpha1.Application) {
+	if h == nil || h.stateProvider == nil || h.stateProvider.server.appSetManager == nil {
+		return
+	}
+	for i := len(app.OwnerReferences) - 1; i >= 0; i-- {
+		ref := app.OwnerReferences[i]
+		if ref.Kind != "ApplicationSet" || !strings.HasPrefix(ref.APIVersion, "argoproj.io/") {
+			continue
+		}
+		localAS, err := h.stateProvider.server.appSetManager.Get(ctx, ref.Name, app.Namespace)
+		if err == nil {
+			app.OwnerReferences[i].UID = localAS.UID
+		} else {
+			// AppSet not yet synced — strip ownerRef to avoid k8s GC
+			app.OwnerReferences = append(app.OwnerReferences[:i], app.OwnerReferences[i+1:]...)
 		}
 	}
 }
@@ -775,15 +871,15 @@ func (h *HAComponents) GetHAStatus() *HAStatus {
 
 // HAStatus represents the current HA status
 type HAStatus struct {
-	Enabled           bool
-	State             ha.State
-	PreferredRole     ha.Role
-	PeerAddress       string
-	PeerReachable     bool
-	PeerState         ha.State
-	ConnectedReplicas int
+	Enabled            bool
+	State              ha.State
+	PreferredRole      ha.Role
+	PeerAddress        string
+	PeerReachable      bool
+	PeerState          ha.State
+	ConnectedReplicas  int
 	LastEventTimestamp int64
-	LastSequenceNum   uint64
+	LastSequenceNum    uint64
 }
 
 // haStatusProvider implements haadmin.StatusProvider using HAComponents

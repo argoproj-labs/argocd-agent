@@ -17,8 +17,10 @@ package event
 import (
 	"testing"
 
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
 )
 
 func TestResourceRequest_IsEmpty(t *testing.T) {
@@ -496,6 +498,46 @@ func TestTargetTerminal(t *testing.T) {
 
 	t.Run("TerminalRequest event type string representation", func(t *testing.T) {
 		require.Equal(t, "io.argoproj.argocd-agent.event.terminal-request", TerminalRequest.String())
+	})
+}
+
+func TestApplicationSetEventRoundtrip(t *testing.T) {
+	es := NewEventSource("test-source")
+	appSet := &v1alpha1.ApplicationSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-appset",
+			Namespace: "argocd",
+			UID:       ktypes.UID("test-uid-123"),
+		},
+		Spec: v1alpha1.ApplicationSetSpec{
+			Generators: []v1alpha1.ApplicationSetGenerator{},
+		},
+	}
+
+	t.Run("Create event roundtrip", func(t *testing.T) {
+		cev := es.ApplicationSetEvent(Create, appSet)
+		require.NotNil(t, cev)
+		require.Equal(t, Create.String(), cev.Type())
+		require.Equal(t, TargetApplicationSet.String(), cev.DataSchema())
+
+		wrapped := New(cev, TargetApplicationSet)
+		require.Equal(t, TargetApplicationSet, wrapped.Target())
+
+		decoded, err := wrapped.ApplicationSet()
+		require.NoError(t, err)
+		require.Equal(t, "my-appset", decoded.Name)
+		require.Equal(t, "argocd", decoded.Namespace)
+	})
+
+	t.Run("Delete event roundtrip", func(t *testing.T) {
+		cev := es.ApplicationSetEvent(Delete, appSet)
+		require.NotNil(t, cev)
+		require.Equal(t, Delete.String(), cev.Type())
+
+		wrapped := New(cev, TargetApplicationSet)
+		decoded, err := wrapped.ApplicationSet()
+		require.NoError(t, err)
+		require.Equal(t, appSet.Name, decoded.Name)
 	})
 }
 

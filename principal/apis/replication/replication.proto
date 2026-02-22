@@ -46,6 +46,9 @@ message ReplicationSnapshot {
 
     // The sequence number of the last event included in this snapshot
     uint64 last_sequence_num = 2;
+
+    // Principal-scoped resources (e.g. ApplicationSets) not associated with any agent
+    repeated Resource principal_resources = 3;
 }
 
 // AgentState represents the replicated state for a single agent

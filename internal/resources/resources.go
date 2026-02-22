@@ -27,9 +27,10 @@ import (
 )
 
 const (
-	applicationKind = "Application"
-	appProjectKind  = "AppProject"
-	repositoryKind  = "Repository"
+	applicationKind    = "Application"
+	appProjectKind     = "AppProject"
+	repositoryKind     = "Repository"
+	applicationSetKind = "ApplicationSet"
 )
 
 // ResourceKey uniquely identifies a resource in the cluster
@@ -68,6 +69,14 @@ func NewResourceKeyFromAppProject(appProject *v1alpha1.AppProject) ResourceKey {
 	}
 
 	return newResourceKey(appProjectKind, appProject.Name, appProject.Namespace, string(appProject.UID))
+}
+
+func NewResourceKeyFromApplicationSet(appSet *v1alpha1.ApplicationSet) ResourceKey {
+	sourceUID, ok := appSet.Annotations[manager.SourceUIDAnnotation]
+	if ok {
+		return newResourceKey(applicationSetKind, appSet.Name, appSet.Namespace, sourceUID)
+	}
+	return newResourceKey(applicationSetKind, appSet.Name, appSet.Namespace, string(appSet.UID))
 }
 
 func NewResourceKeyFromRepository(repo *corev1.Secret) ResourceKey {

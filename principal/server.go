@@ -29,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
+	kubeappset "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/applicationset"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
@@ -42,6 +43,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/applicationset"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -93,6 +95,7 @@ type Server struct {
 	ctxCancel      context.CancelFunc
 	appManager     *application.ApplicationManager
 	projectManager *appproject.AppProjectManager
+	appSetManager  *applicationset.ApplicationSetManager
 
 	namespaceManager *kubenamespace.KubernetesBackend
 
@@ -157,8 +160,8 @@ type Server struct {
 	// handlers to run when an agent connects to the principal
 	handlersOnConnect []handlersOnConnect
 
-	eventWriters    *event.EventWritersMap
-	eventStreamSrv  *eventstream.Server
+	eventWriters   *event.EventWritersMap
+	eventStreamSrv *eventstream.Server
 
 	// sourceCache is a cache of resources from the source. We use it to revert any changes made to the local resources.
 	sourceCache *cache.SourceCache
@@ -342,6 +345,29 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	if err != nil {
 		return nil, err
 	}
+
+	appSetInformerOpts := []informer.InformerOption[*v1alpha1.ApplicationSet]{
+		informer.WithListHandler[*v1alpha1.ApplicationSet](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets(namespace).List(ctx, v1.ListOptions{})
+		}),
+		informer.WithWatchHandler[*v1alpha1.ApplicationSet](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets(namespace).Watch(ctx, v1.ListOptions{})
+		}),
+		informer.WithAddHandler[*v1alpha1.ApplicationSet](s.newAppSetCallback),
+		informer.WithUpdateHandler[*v1alpha1.ApplicationSet](s.updateAppSetCallback),
+		informer.WithDeleteHandler[*v1alpha1.ApplicationSet](s.deleteAppSetCallback),
+		informer.WithGroupResource[*v1alpha1.ApplicationSet]("argoproj.io", "applicationsets"),
+	}
+
+	appSetInformer, err := informer.NewInformer(s.ctx, appSetInformerOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	s.appSetManager = applicationset.NewApplicationSetManager(
+		kubeappset.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appSetInformer),
+		s.namespace,
+	)
 
 	nsInformerOpts := []informer.InformerOption[*corev1.Namespace]{
 		informer.WithListHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {

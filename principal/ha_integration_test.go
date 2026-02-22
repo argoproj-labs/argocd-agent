@@ -434,6 +434,27 @@ func TestHandleReplicatedEvent_EventDecoding(t *testing.T) {
 		assert.Equal(t, "test project", decoded.Spec.Description)
 	})
 
+	t.Run("applicationset create event can be decoded", func(t *testing.T) {
+		appSet := &v1alpha1.ApplicationSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-appset",
+				Namespace: "argocd",
+				UID:       "uid-appset-1",
+			},
+		}
+
+		ce := evSource.ApplicationSetEvent(event.Create, appSet)
+		ev := event.New(ce, event.TargetApplicationSet)
+
+		assert.Equal(t, event.TargetApplicationSet, event.Target(ev.CloudEvent()))
+		assert.Equal(t, event.Create, event.EventType(ev.CloudEvent().Type()))
+
+		decoded, err := ev.ApplicationSet()
+		require.NoError(t, err)
+		assert.Equal(t, "my-appset", decoded.Name)
+		assert.Equal(t, "argocd", decoded.Namespace)
+	})
+
 	t.Run("outbound spec update event preserves data", func(t *testing.T) {
 		app := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
@@ -466,5 +487,57 @@ func TestHandleReplicatedEvent_EventDecoding(t *testing.T) {
 		assert.Equal(t, "production", decoded.Spec.Project)
 		assert.Equal(t, "https://github.com/example/repo", decoded.Spec.Source.RepoURL)
 		assert.Equal(t, uint64(42), replEv.SequenceNum)
+	})
+}
+
+func TestRemapAppSetOwnerRefs(t *testing.T) {
+	t.Run("no-op when HA components nil", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "ApplicationSet", APIVersion: "argoproj.io/v1alpha1", Name: "my-appset", UID: "old-uid"},
+				},
+			},
+		}
+		var h *HAComponents
+		h.remapAppSetOwnerRefs(context.Background(), app)
+		// Should not panic, ownerRef unchanged
+		assert.Equal(t, "old-uid", string(app.OwnerReferences[0].UID))
+	})
+
+	t.Run("no-op when appSetManager nil", func(t *testing.T) {
+		ctx := context.Background()
+		server := createTestServer()
+		components, err := NewHAComponents(ctx, server)
+		require.NoError(t, err)
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "ApplicationSet", APIVersion: "argoproj.io/v1alpha1", Name: "my-appset", UID: "old-uid"},
+				},
+			},
+		}
+		// server.appSetManager is nil, so remapAppSetOwnerRefs returns early (no-op)
+		components.remapAppSetOwnerRefs(ctx, app)
+		assert.Len(t, app.OwnerReferences, 1)
+	})
+
+	t.Run("non-ApplicationSet ownerRefs are preserved", func(t *testing.T) {
+		ctx := context.Background()
+		server := createTestServer()
+		components, err := NewHAComponents(ctx, server)
+		require.NoError(t, err)
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "SomethingElse", APIVersion: "v1", Name: "other", UID: "uid-other"},
+				},
+			},
+		}
+		components.remapAppSetOwnerRefs(ctx, app)
+		assert.Len(t, app.OwnerReferences, 1)
+		assert.Equal(t, "uid-other", string(app.OwnerReferences[0].UID))
 	})
 }
