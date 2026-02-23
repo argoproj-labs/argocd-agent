@@ -134,6 +134,10 @@ apply() {
     else
         LATEST_RELEASE_TAG=${ARGOCD_VERSION}
     fi
+    if [ -z "${LATEST_RELEASE_TAG}" ]; then
+        echo "ERROR: Could not determine Argo CD release tag. Check network/API access." >&2
+        exit 1
+    fi
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/control-plane/kustomization.yaml
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/agent-autonomous/kustomization.yaml
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/agent-managed/kustomization.yaml
