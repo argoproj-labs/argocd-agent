@@ -18,6 +18,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"time"
+
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 )
 
 // Options contains configuration for the HA controller
@@ -40,6 +42,16 @@ type Options struct {
 	// TLSConfig is the TLS configuration for replication connections
 	TLSConfig *tls.Config
 
+	// AdminPort is the port for the localhost-only admin gRPC server (HAAdmin)
+	AdminPort int
+
+	// AllowedReplicationClients is the list of identities allowed to connect
+	// for replication. Identities are extracted via AuthMethod.
+	AllowedReplicationClients []string
+
+	// AuthMethod is the auth method used to authenticate replication connections
+	AuthMethod auth.Method
+
 	// ReconnectBackoffInitial is the initial backoff duration for reconnection attempts
 	ReconnectBackoffInitial time.Duration
 
@@ -57,6 +69,7 @@ func DefaultOptions() *Options {
 		PreferredRole:           RoleReplica,
 		FailoverTimeout:         30 * time.Second,
 		ReplicationPort:         8404,
+		AdminPort:               8405,
 		ReconnectBackoffInitial: 1 * time.Second,
 		ReconnectBackoffMax:     30 * time.Second,
 		ReconnectBackoffFactor:  1.5,
@@ -123,6 +136,33 @@ func WithReplicationPort(port int) Option {
 func WithTLSConfig(config *tls.Config) Option {
 	return func(o *Options) error {
 		o.TLSConfig = config
+		return nil
+	}
+}
+
+// WithAdminPort sets the port for the localhost-only admin gRPC server
+func WithAdminPort(port int) Option {
+	return func(o *Options) error {
+		if port < 1 || port > 65535 {
+			return fmt.Errorf("admin port must be between 1 and 65535")
+		}
+		o.AdminPort = port
+		return nil
+	}
+}
+
+// WithAllowedReplicationClients sets the list of identities allowed to connect for replication
+func WithAllowedReplicationClients(clients []string) Option {
+	return func(o *Options) error {
+		o.AllowedReplicationClients = clients
+		return nil
+	}
+}
+
+// WithAuthMethod sets the auth method for authenticating replication connections
+func WithAuthMethod(method auth.Method) Option {
+	return func(o *Options) error {
+		o.AuthMethod = method
 		return nil
 	}
 }
