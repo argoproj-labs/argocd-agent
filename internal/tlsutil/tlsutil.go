@@ -221,3 +221,49 @@ func ValidateTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16) err
 
 	return nil
 }
+
+// SetTLSConfigFromFlags sets the TLS configuration parameters from the command line flags.
+// It returns an error if any of the parameters are invalid.
+// tlsConfig must be a pointer to an initialized tls.Config struct and will be modified in place.
+func SetTLSConfigFromFlags(tlsConfig *tls.Config, minVersion, maxVersion string, cipherSuites []string) error {
+	var err error
+	if tlsConfig == nil {
+		return fmt.Errorf("tlsConfig is nil")
+	}
+	var (
+		minver  uint16
+		maxver  uint16
+		ciphers []uint16
+	)
+	if minVersion != "" {
+		minver, err = TLSVersionFromName(minVersion)
+		if err != nil {
+			return err
+		}
+	}
+	if maxVersion != "" {
+		maxver, err = TLSVersionFromName(maxVersion)
+		if err != nil {
+			return err
+		}
+	}
+	if len(cipherSuites) > 0 && (len(cipherSuites) != 1 || cipherSuites[0] != "") {
+		ciphers, err = ParseCipherSuites(cipherSuites)
+		if err != nil {
+			return err
+		}
+	}
+	if err := ValidateTLSConfig(minver, maxver, ciphers); err != nil {
+		return err
+	}
+	if minVersion != "" {
+		tlsConfig.MinVersion = minver
+	}
+	if maxVersion != "" {
+		tlsConfig.MaxVersion = maxver
+	}
+	if len(cipherSuites) > 0 && (len(cipherSuites) != 1 || cipherSuites[0] != "") {
+		tlsConfig.CipherSuites = ciphers
+	}
+	return nil
+}

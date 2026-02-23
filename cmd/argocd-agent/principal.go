@@ -242,7 +242,13 @@ func NewPrincipalRunCommand() *cobra.Command {
 					proxyTLS, err = getResourceProxyTLSConfigFromKube(kubeConfig, namespace, resourceProxySecretName, resourceProxyCaSecretName)
 				}
 				if err != nil {
-					cmdutil.Fatal("Error reading TLS config for resource proxy: %v", err)
+					cmdutil.Fatal("Could not load resource proxy TLS configuration: %v", err)
+				}
+				if proxyTLS == nil {
+					cmdutil.Fatal("Could not load resource proxy TLS configuration: result is nil")
+				}
+				if err := tlsutil.SetTLSConfigFromFlags(proxyTLS, tlsMinVersion, tlsMaxVersion, tlsCipherSuites); err != nil {
+					cmdutil.Fatal("Could not set TLS configuration for resource proxy: %v", err)
 				}
 				opts = append(opts, principal.WithResourceProxyTLS(proxyTLS))
 				opts = append(opts, principal.WithResourceProxyAddress(resourceProxyAddress))
