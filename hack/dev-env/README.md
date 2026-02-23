@@ -97,6 +97,14 @@ You will need `vcluster` in your `$PATH`, and the current kubeconfig context mus
 
 Please note: The script requires `vcluster` version 0.20-beta4 or newer to function correctly.
 
+If you need to develop or test against a specific Argo CD version, you can instruct the script to install that version for you. You just need to set the environment variable `ARGOCD_VERSION` before running the script, for example:
+
+```shell
+ARGOCD_VERSION=latest ./hack/dev-env/setup-vcluster-env.sh create
+```
+
+The `ARGOCD_VERSION` can be set to either `stable` (the default, will pull in the current stable version), `latest` which uses the latest build off the master branch or a specific version (e.g. `v3.2.2`).
+
 ## Details
 
 ### Endpoints
