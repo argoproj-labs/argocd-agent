@@ -16,12 +16,14 @@ package replication
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
@@ -31,6 +33,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 )
 
@@ -83,15 +86,22 @@ type Server struct {
 
 	// Listener for the gRPC server
 	listener net.Listener
-
-	// Additional gRPC services to register alongside replication
-	additionalRegistrations []func(grpc.ServiceRegistrar)
 }
 
 // ServerOptions configures the replication server
 type ServerOptions struct {
 	// MaxReplicaConnections limits the number of concurrent replica connections
 	MaxReplicaConnections int
+
+	// TLSConfig is the TLS config for the gRPC server (nil = no TLS)
+	TLSConfig *tls.Config
+
+	// AuthMethod authenticates incoming replication connections
+	AuthMethod auth.Method
+
+	// AllowedClients is the allowlist of identities permitted to replicate.
+	// Only checked when AuthMethod is set. Empty = allow all authenticated.
+	AllowedClients []string
 }
 
 // ServerOption configures the server
@@ -101,6 +111,27 @@ type ServerOption func(*ServerOptions)
 func WithMaxReplicaConnections(max int) ServerOption {
 	return func(o *ServerOptions) {
 		o.MaxReplicaConnections = max
+	}
+}
+
+// WithTLSConfig sets the TLS configuration for the replication server
+func WithTLSConfig(config *tls.Config) ServerOption {
+	return func(o *ServerOptions) {
+		o.TLSConfig = config
+	}
+}
+
+// WithAuthMethod sets the auth method for authenticating replication connections
+func WithAuthMethod(method auth.Method) ServerOption {
+	return func(o *ServerOptions) {
+		o.AuthMethod = method
+	}
+}
+
+// WithAllowedClients sets the allowlist of identities permitted to replicate
+func WithAllowedClients(clients []string) ServerOption {
+	return func(o *ServerOptions) {
+		o.AllowedClients = clients
 	}
 }
 
@@ -131,14 +162,8 @@ func NewServer(forwarder *replication.Forwarder, stateProvider AgentStateProvide
 	}
 }
 
-// RegisterAdditionalService registers an additional gRPC service on the
-// replication server. Must be called before Start.
-func (s *Server) RegisterAdditionalService(register func(grpc.ServiceRegistrar)) {
-	s.additionalRegistrations = append(s.additionalRegistrations, register)
-}
-
-// Start starts the gRPC server on the specified port
-// This method is idempotent - calling it when already started will return nil
+// Start starts the gRPC server on the specified port.
+// This method is idempotent - calling it when already started will return nil.
 func (s *Server) Start(port int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,21 +182,22 @@ func (s *Server) Start(port int) error {
 	}
 	s.listener = listener
 
-	// Create gRPC server
-	s.grpcServer = grpc.NewServer()
-	replicationapi.RegisterReplicationServer(s.grpcServer, s)
-
-	// Register additional services (e.g., HAAdmin)
-	for _, register := range s.additionalRegistrations {
-		register(s.grpcServer)
+	// Build gRPC server options
+	var grpcOpts []grpc.ServerOption
+	if s.options.TLSConfig != nil {
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(s.options.TLSConfig)))
 	}
+	if s.options.AuthMethod != nil {
+		grpcOpts = append(grpcOpts, grpc.StreamInterceptor(s.authStreamInterceptor()))
+	}
+
+	s.grpcServer = grpc.NewServer(grpcOpts...)
+	replicationapi.RegisterReplicationServer(s.grpcServer, s)
 
 	log().WithField("port", port).Info("Starting replication gRPC server")
 
-	// Start serving in a goroutine
 	go func() {
 		if err := s.grpcServer.Serve(listener); err != nil {
-			// Only log if not a clean shutdown
 			s.mu.RLock()
 			isRunning := s.grpcServer != nil
 			s.mu.RUnlock()
@@ -182,6 +208,31 @@ func (s *Server) Start(port int) error {
 	}()
 
 	return nil
+}
+
+// authStreamInterceptor returns a stream interceptor that authenticates the
+// caller using the configured AuthMethod and checks it against AllowedClients.
+func (s *Server) authStreamInterceptor() grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		identity, err := s.options.AuthMethod.Authenticate(ss.Context(), auth.Credentials{})
+		if err != nil {
+			return status.Errorf(codes.Unauthenticated, "replication auth failed: %v", err)
+		}
+		if len(s.options.AllowedClients) > 0 {
+			allowed := false
+			for _, c := range s.options.AllowedClients {
+				if identity == c {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return status.Errorf(codes.PermissionDenied, "identity %q not in allowed replication clients", identity)
+			}
+		}
+		log().WithField("identity", identity).Debug("Replication connection authenticated")
+		return handler(srv, ss)
+	}
 }
 
 // Subscribe handles the bidirectional replication stream.
