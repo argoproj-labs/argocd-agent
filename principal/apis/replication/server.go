@@ -189,6 +189,7 @@ func (s *Server) Start(port int) error {
 	}
 	if s.options.AuthMethod != nil {
 		grpcOpts = append(grpcOpts, grpc.StreamInterceptor(s.authStreamInterceptor()))
+		grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(s.authUnaryInterceptor()))
 	}
 
 	s.grpcServer = grpc.NewServer(grpcOpts...)
@@ -216,6 +217,7 @@ func (s *Server) authStreamInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		identity, err := s.options.AuthMethod.Authenticate(ss.Context(), auth.Credentials{})
 		if err != nil {
+			log().WithError(err).Warn("Replication stream rejected: authentication failed")
 			return status.Errorf(codes.Unauthenticated, "replication auth failed: %v", err)
 		}
 		if len(s.options.AllowedClients) > 0 {
@@ -227,11 +229,38 @@ func (s *Server) authStreamInterceptor() grpc.StreamServerInterceptor {
 				}
 			}
 			if !allowed {
+				log().WithField("identity", identity).Warn("Replication stream rejected: identity not in allowed replication clients")
 				return status.Errorf(codes.PermissionDenied, "identity %q not in allowed replication clients", identity)
 			}
 		}
-		log().WithField("identity", identity).Debug("Replication connection authenticated")
+		log().WithField("identity", identity).Debug("Replication stream authenticated")
 		return handler(srv, ss)
+	}
+}
+
+// authUnaryInterceptor returns a unary interceptor that authenticates the
+// caller using the configured AuthMethod and checks it against AllowedClients.
+func (s *Server) authUnaryInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		identity, err := s.options.AuthMethod.Authenticate(ctx, auth.Credentials{})
+		if err != nil {
+			log().WithError(err).Warn("Replication unary rejected: authentication failed")
+			return nil, status.Errorf(codes.Unauthenticated, "replication auth failed: %v", err)
+		}
+		if len(s.options.AllowedClients) > 0 {
+			allowed := false
+			for _, c := range s.options.AllowedClients {
+				if identity == c {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				log().WithField("identity", identity).Warn("Replication unary rejected: identity not in allowed replication clients")
+				return nil, status.Errorf(codes.PermissionDenied, "identity %q not in allowed replication clients", identity)
+			}
+		}
+		return handler(ctx, req)
 	}
 }
 
