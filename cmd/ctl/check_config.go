@@ -29,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -301,6 +302,11 @@ func RunPrincipalChecks(ctx context.Context, kubeClient *kube.KubernetesClient, 
 		err:  principalVerifyClusterSecretServer(ctx, kubeClient, principalNS),
 	})
 
+	out = append(out, checkResult{
+		name: fmt.Sprintf("Verifying agent cluster secrets contain the skip-reconcile annotation and that it's set to true"),
+		err:  principalVerifyClusterSecretAnnotation(ctx, kubeClient, principalNS),
+	})
+
 	return out
 }
 
@@ -566,8 +572,29 @@ func principalNoApplicationCRs(ctx context.Context, kc *kube.KubernetesClient, n
 	return nil
 }
 
-// principalVerifyClusterSecretServer verifies that the cluster secrets in the principal's namespace begin with https://
-// and include the agentName query parameter
+// helper function to filter secrets list to argo cd cluster secrets that are managed by argocd-agent
+func filterManagedClusterSecrets(secrets *corev1.SecretList) []corev1.Secret {
+	var filtered []corev1.Secret
+	for _, secret := range secrets.Items {
+		isManaged := false
+		if manager, ok := secret.Annotations["managed-by"]; ok && manager == "argocd-agent" {
+			isManaged = true
+		}
+
+		isClusterSecret := false
+		if val, ok := secret.Labels[common.LabelKeySecretType]; ok && val == common.LabelValueSecretTypeCluster {
+			isClusterSecret = true
+		}
+
+		if isManaged && isClusterSecret {
+			filtered = append(filtered, secret)
+		}
+	}
+	return filtered
+}
+
+// principalVerifyClusterSecretServer verifies that the server in the cluster secrets that are managed by argocd agent in the
+// principal's namespace begin with https:// and include the agentName query parameter
 func principalVerifyClusterSecretServer(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
 	if kc.Clientset == nil {
 		return fmt.Errorf("client set is not available, failed to check secrets")
@@ -580,23 +607,22 @@ func principalVerifyClusterSecretServer(ctx context.Context, kc *kube.Kubernetes
 
 	var noHttps []string
 	var noAgentParam []string
-	for _, secret := range secrets.Items {
-		if val, ok := secret.Labels[common.LabelKeySecretType]; ok && val == common.LabelValueSecretTypeCluster {
-			urlBytes := string(secret.Data["server"])
-			agentUrl, err := url.Parse(urlBytes)
-			if err != nil {
-				return fmt.Errorf("failed to prase url for %s/%s: %s", ns, secret.Name, err.Error())
-			}
+	filteredSecrets := filterManagedClusterSecrets(secrets)
+	for _, secret := range filteredSecrets {
+		urlBytes := string(secret.Data["server"])
+		agentUrl, err := url.Parse(urlBytes)
+		if err != nil {
+			return fmt.Errorf("failed to prase url for %s/%s: %s", ns, secret.Name, err.Error())
+		}
 
-			if agentUrl.Scheme != "https" {
-				noHttps = append(noHttps, secret.Name)
-			}
+		if agentUrl.Scheme != "https" {
+			noHttps = append(noHttps, secret.Name)
+		}
 
-			query := agentUrl.Query()
-			_, exists := query["agentName"]
-			if !exists {
-				noAgentParam = append(noAgentParam, secret.Name)
-			}
+		query := agentUrl.Query()
+		_, exists := query["agentName"]
+		if !exists {
+			noAgentParam = append(noAgentParam, secret.Name)
 		}
 	}
 
@@ -611,6 +637,35 @@ func principalVerifyClusterSecretServer(ctx context.Context, kc *kube.Kubernetes
 
 	if len(errParts) > 0 {
 		return fmt.Errorf("%s", strings.Join(errParts, "\n"))
+	}
+
+	return nil
+}
+
+// principalVerifyClusterSecretAnnotation verifies that each cluster secret that is managed by argocd agent
+// includes the skip-reconcile annoation
+func principalVerifyClusterSecretAnnotation(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
+	if kc.Clientset == nil {
+		return fmt.Errorf("client set is not available, failed to check secrets")
+	}
+
+	secrets, err := kc.Clientset.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed list secrets in namespace %s: %s", ns, err.Error())
+	}
+
+	var noAnnotation []string
+	filteredSecrets := filterManagedClusterSecrets(secrets)
+	for _, secret := range filteredSecrets {
+		val, ok := secret.Annotations[common.AnnotationKeyAppSkipReconcile]
+		fmt.Println(val, ok)
+		if val, ok := secret.Annotations[common.AnnotationKeyAppSkipReconcile]; !ok || val != "true" {
+			noAnnotation = append(noAnnotation, secret.Name)
+		}
+	}
+
+	if len(noAnnotation) > 0 {
+		return fmt.Errorf("the following agent cluster secrets in %s are missing the skip-reconcile annotation or it is not set to true: %s", ns, strings.Join(noAnnotation, ", "))
 	}
 
 	return nil

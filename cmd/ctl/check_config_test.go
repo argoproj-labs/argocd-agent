@@ -24,6 +24,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"strings"
@@ -33,6 +34,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -200,6 +202,9 @@ func createFakeSecret(name, server string) *corev1.Secret {
 			Labels: map[string]string{
 				"argocd-agent.argoproj-labs.io/agent-name": name,
 				"argocd.argoproj.io/secret-type":           "cluster",
+			},
+			Annotations: map[string]string{
+				"managed-by": "argocd-agent",
 			},
 		},
 		Type: corev1.SecretTypeOpaque,
@@ -895,6 +900,53 @@ func TestCheckConfigPrincipal(t *testing.T) {
 					strings.Contains(r.err.Error(), "invalid-agent") &&
 					strings.Contains(r.err.Error(), "http-agent") &&
 					strings.Count(r.err.Error(), "wrong-agent") == 2
+			}
+		}
+		require.True(t, caughtOnlyInvalid)
+	})
+
+	t.Run("Cluster secrets include skip-reconcile annotation", func(t *testing.T) {
+		principalNS := "argocd"
+
+		validSecret := createFakeSecret("fake-agent", "")
+		validSecret.SetAnnotations(map[string]string{
+			common.AnnotationKeyAppSkipReconcile: "true",
+			"managed-by":                         "argocd-agent",
+		})
+		invalidSecret := createFakeSecret("invalid-agent", "")
+		invalidSecret.SetAnnotations(map[string]string{
+			common.AnnotationKeyAppSkipReconcile: "false",
+			"managed-by":                         "argocd-agent",
+		})
+		missingAnnotationSecret := createFakeSecret("missing-agent", "")
+
+		cl := fake.NewSimpleClientset(validSecret, invalidSecret, missingAnnotationSecret)
+		scheme := runtime.NewScheme()
+		dynCl := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1beta1", Resource: "argocds"}:       "ArgoCDList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}: "ApplicationList",
+		})
+
+		_, err := cl.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: principalNS},
+		}, metav1.CreateOptions{})
+		require.NoError(t, err, "error creating namespace")
+
+		kubeClient := &kube.KubernetesClient{
+			Clientset:     cl,
+			DynamicClient: dynCl,
+			Context:       context.TODO(),
+			Namespace:     principalNS,
+		}
+
+		res := RunPrincipalChecks(context.Background(), kubeClient, principalNS)
+		caughtOnlyInvalid := false
+		for _, r := range res {
+			if r.err != nil && strings.Contains(r.name, "skip-reconcile annotation") {
+				fmt.Println(r.err.Error())
+				caughtOnlyInvalid = !strings.Contains(r.err.Error(), "fake-agent") &&
+					strings.Contains(r.err.Error(), "invalid-agent") &&
+					strings.Contains(r.err.Error(), "missing-agent")
 			}
 		}
 		require.True(t, caughtOnlyInvalid)
