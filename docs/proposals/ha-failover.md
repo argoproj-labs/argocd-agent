@@ -174,48 +174,64 @@ Because the replica has been continuously replicating and writing resources to i
 
 ---
 
+## Security
+
+The replication port uses **mTLS** for principal-to-principal connections. Each principal presents its own TLS certificate; the peer's certificate must be signed by the shared CA, and its extracted identity must appear in `--ha-allowed-replication-clients`.
+
+Identity extraction uses the same `MTLSAuthentication` mechanism as agent auth. Supported sources:
+
+| Source | Flag value | Example |
+|--------|-----------|---------|
+| Subject CN | `mtls:subject:<regex>` | `mtls:subject:CN=(.+)` |
+| SPIFFE URI SAN | `mtls:uri:<regex>` | `mtls:uri:spiffe://example.com/principal/(.+)` |
+
+The admin gRPC server (`ha status`, `ha promote`, `ha demote`) binds to `127.0.0.1:8405` only and has **no TLS**. Access requires `kubectl port-forward` — Kubernetes RBAC is the gate.
+
+---
+
 ## Configuration
 
-```yaml
-# Region A — Preferred Primary
-principal:
-  ha:
-    enabled: true
-    preferredRole: primary
-    peerAddress: principal.region-b.internal:8404
-  replication:
-    port: 8404
-    tls:
-      certFile: /etc/argocd-agent/replication/tls.crt
-      keyFile: /etc/argocd-agent/replication/tls.key
-      caFile: /etc/argocd-agent/replication/ca.crt
+Flags for Region A (preferred primary):
+
+```
+--ha-enabled
+--ha-preferred-role=primary
+--ha-peer-address=principal.region-b.internal:8080
+
+# Replication port mTLS
+--ha-replication-tls-cert=/etc/argocd-agent/replication/tls.crt
+--ha-replication-tls-key=/etc/argocd-agent/replication/tls.key
+--ha-replication-tls-ca=/etc/argocd-agent/replication/ca.crt
+
+# Peer identity allowlist
+--ha-replication-auth=mtls:uri:spiffe://example.com/principal/(.+)
+--ha-allowed-replication-clients=region-b
 ```
 
-```yaml
-# Region B — Preferred Replica
-principal:
-  ha:
-    enabled: true
-    preferredRole: replica
-    peerAddress: principal.region-a.internal:8404
-  replication:
-    port: 8404
-    tls: ...  # same structure
-```
+Flags for Region B (preferred replica) are symmetric — swap peer address and allowed client identity.
+
+All flags have `ARGOCD_PRINCIPAL_HA_*` environment variable equivalents.
 
 Agent configuration is **unchanged** — agents connect to a single GSLB/DNS endpoint:
 
-```yaml
-agent:
-  remote:
-    address: principal.argocd.example.com:8403
 ```
+--address=principal.argocd.example.com:8443
+```
+
+### Ports
+
+| Port | Bind | TLS | Purpose |
+|------|------|-----|---------|
+| 8404 | `0.0.0.0` | mTLS (required) | Principal-to-principal replication |
+| 8405 | `127.0.0.1` | None | HAAdmin gRPC (status/promote/demote) |
+
+Override defaults with `--ha-replication-port` and `--ha-admin-port`.
 
 ---
 
 ## CLI
 
-The `argocd-agentctl ha` subcommand manages HA state. It auto port-forwards to the principal pod via `--principal-context`, or accepts `--address` for direct gRPC.
+The `argocd-agentctl ha` subcommand manages HA state. It auto port-forwards to the principal pod's admin port (`8405`) via `--principal-context`, or accepts `--address` for a direct connection.
 
 | Command | Description |
 |---------|-------------|
