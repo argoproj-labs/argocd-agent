@@ -110,10 +110,17 @@ func NewPrincipalRunCommand() *cobra.Command {
 		selfRegClientCertSecretName   string
 
 		// HA configuration
-		haEnabled         bool
-		haPreferredRole   string
-		haPeerAddress     string
-		haFailoverTimeout time.Duration
+		haEnabled            bool
+		haPreferredRole      string
+		haPeerAddress        string
+		haFailoverTimeout    time.Duration
+		haReplicationPort    int
+		haAdminPort          int
+		haReplicationTLSCert string
+		haReplicationTLSKey  string
+		haReplicationTLSCA   string
+		haReplicationAuth    string
+		haAllowedReplClients []string
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -368,11 +375,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 				opts = append(opts, principal.WithClientCertSecretName(selfRegClientCertSecretName))
 			}
 
-			// Configure HA if enabled
 			if haEnabled {
-				haOpts := []ha.Option{
-					ha.WithEnabled(true),
-				}
+				haOpts := []ha.Option{ha.WithEnabled(true)}
 				if haPreferredRole != "" {
 					haOpts = append(haOpts, ha.WithPreferredRole(haPreferredRole))
 				}
@@ -382,8 +386,45 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if haFailoverTimeout > 0 {
 					haOpts = append(haOpts, ha.WithFailoverTimeout(haFailoverTimeout))
 				}
+				if haReplicationPort > 0 {
+					haOpts = append(haOpts, ha.WithReplicationPort(haReplicationPort))
+				}
+				if haAdminPort > 0 {
+					haOpts = append(haOpts, ha.WithAdminPort(haAdminPort))
+				}
+				if haReplicationTLSCert != "" && haReplicationTLSKey != "" {
+					replTLS, err := buildHAReplicationTLSConfig(haReplicationTLSCert, haReplicationTLSKey, haReplicationTLSCA)
+					if err != nil {
+						cmdutil.Fatal("Error loading HA replication TLS: %v", err)
+					}
+					haOpts = append(haOpts, ha.WithTLSConfig(replTLS))
+					logrus.Infof("HA replication: loaded TLS cert=%s key=%s", haReplicationTLSCert, haReplicationTLSKey)
+				}
+				if haReplicationAuth != "" {
+					method, authCfg, err := parseAuth(haReplicationAuth)
+					if err != nil {
+						cmdutil.Fatal("Could not parse ha-replication-auth: %v", err)
+					}
+					if method != "mtls" {
+						cmdutil.Fatal("ha-replication-auth only supports mtls")
+					}
+					source, regexStr := parseMTLSConfig(authCfg)
+					var regex *regexp.Regexp
+					if regexStr != "" {
+						regex, err = regexp.Compile(regexStr)
+						if err != nil {
+							cmdutil.Fatal("Error compiling ha-replication-auth regex: %v", err)
+						}
+					}
+					haOpts = append(haOpts, ha.WithAuthMethod(mtls.NewMTLSAuthentication(regex, source)))
+					logrus.Infof("HA replication: using mTLS auth (source: %s, pattern: %s)", source, regexStr)
+				}
+				if len(haAllowedReplClients) > 0 {
+					haOpts = append(haOpts, ha.WithAllowedReplicationClients(haAllowedReplClients))
+					logrus.Infof("HA replication: %d allowed client(s)", len(haAllowedReplClients))
+				}
 				opts = append(opts, principal.WithHA(haOpts...))
-				logrus.Infof("HA enabled (preferred role: %s, peer: %s)", haPreferredRole, haPeerAddress)
+				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
 			}
 
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
@@ -560,7 +601,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.StringWithDefault("ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET", nil, ""),
 		"TLS secret containing shared client cert for self-registered cluster secrets (must have tls.crt, tls.key, ca.crt)")
 
-	// HA flags
 	command.Flags().BoolVar(&haEnabled, "ha-enabled",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_HA_ENABLED", false),
 		"Enable High Availability mode")
@@ -573,6 +613,27 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&haFailoverTimeout, "ha-failover-timeout",
 		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_FAILOVER_TIMEOUT", nil, 30*time.Second),
 		"Time to wait before promoting to primary after peer is unreachable")
+	command.Flags().IntVar(&haReplicationPort, "ha-replication-port",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_PORT", cmdutil.ValidPort, 0),
+		"Port for principal-to-principal replication (default: 8404)")
+	command.Flags().IntVar(&haAdminPort, "ha-admin-port",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_PORT", cmdutil.ValidPort, 0),
+		"Port for the localhost-only HAAdmin gRPC server (default: 8405)")
+	command.Flags().StringVar(&haReplicationTLSCert, "ha-replication-tls-cert",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_TLS_CERT", nil, ""),
+		"Path to TLS certificate for the replication port")
+	command.Flags().StringVar(&haReplicationTLSKey, "ha-replication-tls-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_TLS_KEY", nil, ""),
+		"Path to TLS private key for the replication port")
+	command.Flags().StringVar(&haReplicationTLSCA, "ha-replication-tls-ca",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_TLS_CA", nil, ""),
+		"Path to CA certificate for verifying replication peer certificates")
+	command.Flags().StringVar(&haReplicationAuth, "ha-replication-auth",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_AUTH", nil, ""),
+		"Auth method for replication peer identity. Only mtls is supported (e.g. 'mtls:uri:<regex>')")
+	command.Flags().StringSliceVar(&haAllowedReplClients, "ha-allowed-replication-clients",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS", nil, []string{}),
+		"Comma-separated list of peer identities allowed to connect for replication")
 
 	return command
 }
@@ -644,6 +705,29 @@ func getResourceProxyTLSConfigFromFiles(certPath, keyPath, caPath string) (*tls.
 	}
 
 	return proxyTLS, nil
+}
+
+// buildHAReplicationTLSConfig builds a *tls.Config for the HA replication port from
+// cert/key/CA files. The same config is used by both the replication server (as server
+// cert) and the replication client (as client cert when connecting to the primary).
+// ha_integration.go forces ClientAuth=RequireAndVerifyClientCert on the server side.
+func buildHAReplicationTLSConfig(certPath, keyPath, caPath string) (*tls.Config, error) {
+	cert, err := tlsutil.TLSCertFromFile(certPath, keyPath, false)
+	if err != nil {
+		return nil, fmt.Errorf("error loading replication TLS cert/key: %w", err)
+	}
+	cfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+	if caPath != "" {
+		caPool, err := tlsutil.X509CertPoolFromFile(caPath)
+		if err != nil {
+			return nil, fmt.Errorf("error loading replication CA: %w", err)
+		}
+		cfg.RootCAs = caPool
+		cfg.ClientCAs = caPool
+	}
+	return cfg, nil
 }
 
 // parseAuth parses an authentication string and extracts the authentication method
