@@ -187,6 +187,30 @@ func createFakeApp() *unstructured.Unstructured {
 	}
 }
 
+// Helper to create a fake cluster secret with some options
+func createFakeSecret(name, server string) *corev1.Secret {
+	return &corev1.Secret{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Secret",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "argocd",
+			Labels: map[string]string{
+				"argocd-agent.argoproj-labs.io/agent-name": name,
+				"argocd.argoproj.io/secret-type":           "cluster",
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"config": []byte(`{"tlsClientConfig":{"insecure":false}}`),
+			"name":   []byte(name),
+			"server": []byte(server),
+		},
+	}
+}
+
 func TestCheckConfigPrincipal(t *testing.T) {
 	t.Run("Valid configuration", func(t *testing.T) {
 		principalNS := "argocd"
@@ -816,7 +840,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		_, err := cl.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: principalNS},
 		}, metav1.CreateOptions{})
-		require.NoError(t, err, "create namespace errored")
+		require.NoError(t, err, "error creating namespace")
 
 		kubeClient := &kube.KubernetesClient{
 			Clientset:     cl,
@@ -834,6 +858,46 @@ func TestCheckConfigPrincipal(t *testing.T) {
 			}
 		}
 		require.True(t, hasApps, "expected error when Application CRs exist in principal namespace")
+	})
+
+	t.Run("Cluster secrets server URL includes agentName and https", func(t *testing.T) {
+		principalNS := "argocd"
+
+		validSecret := createFakeSecret("fake-agent", "https://fake-url.io?agentName=fake-agent")
+		invalidSecret := createFakeSecret("invalid-agent", "https://fake-url.io?invalidField=fake-agent")
+		httpSecret := createFakeSecret("http-agent", "http://fake-url.io?agentName=http-agent")
+		wrongSecret := createFakeSecret("wrong-agent", "http://fake-url.io?invalidField=wrong-agent")
+
+		cl := fake.NewSimpleClientset(validSecret, invalidSecret, httpSecret, wrongSecret)
+		scheme := runtime.NewScheme()
+		dynCl := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1beta1", Resource: "argocds"}:       "ArgoCDList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}: "ApplicationList",
+		})
+
+		_, err := cl.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: principalNS},
+		}, metav1.CreateOptions{})
+		require.NoError(t, err, "error creating namespace")
+
+		kubeClient := &kube.KubernetesClient{
+			Clientset:     cl,
+			DynamicClient: dynCl,
+			Context:       context.TODO(),
+			Namespace:     principalNS,
+		}
+
+		res := RunPrincipalChecks(context.Background(), kubeClient, principalNS)
+		caughtOnlyInvalid := false
+		for _, r := range res {
+			if r.err != nil && strings.Contains(r.name, "query parameter on server url") {
+				caughtOnlyInvalid = !strings.Contains(r.err.Error(), "fake-agent") &&
+					strings.Contains(r.err.Error(), "invalid-agent") &&
+					strings.Contains(r.err.Error(), "http-agent") &&
+					strings.Count(r.err.Error(), "wrong-agent") == 2
+			}
+		}
+		require.True(t, caughtOnlyInvalid)
 	})
 }
 

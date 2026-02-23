@@ -19,6 +19,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/spf13/cobra"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -290,8 +292,13 @@ func RunPrincipalChecks(ctx context.Context, kubeClient *kube.KubernetesClient, 
 
 	// No Application CRs defined within the principal's Argo CD namespace
 	out = append(out, checkResult{
-		name: fmt.Sprintf("Verifying no Application CRs defined within the principal's Argo CD namespace"),
+		name: fmt.Sprintf("Verifying no Application CRs defined within the principal's Argo CD namespace: %s", principalNS),
 		err:  principalNoApplicationCRs(ctx, kubeClient, principalNS),
+	})
+
+	out = append(out, checkResult{
+		name: fmt.Sprintf("Verifying agent cluster secrets contain correct query parameter on server url"),
+		err:  principalVerifyClusterSecretServer(ctx, kubeClient, principalNS),
 	})
 
 	return out
@@ -539,6 +546,7 @@ func verifyRouteHostMatchesCert(ctx context.Context, kc *kube.KubernetesClient, 
 	return fmt.Errorf("no OpenShift Route host in namespace matches TLS IPS/DNS")
 }
 
+// principalNoApplicationCRs checks the principal's namespace to ensure that no applications exist in it
 func principalNoApplicationCRs(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
 	if kc.DynamicClient == nil {
 		return fmt.Errorf("dynamic client is not available, failed to check applications")
@@ -553,6 +561,56 @@ func principalNoApplicationCRs(ctx context.Context, kc *kube.KubernetesClient, n
 
 	if len(apps.Items) > 0 {
 		return fmt.Errorf("applications exist in principal namespace %s", ns)
+	}
+
+	return nil
+}
+
+// principalVerifyClusterSecretServer verifies that the cluster secrets in the principal's namespace begin with https://
+// and include the agentName query parameter
+func principalVerifyClusterSecretServer(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
+	if kc.Clientset == nil {
+		return fmt.Errorf("client set is not available, failed to check secrets")
+	}
+
+	secrets, err := kc.Clientset.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed list secrets in namespace %s: %s", ns, err.Error())
+	}
+
+	var noHttps []string
+	var noAgentParam []string
+	for _, secret := range secrets.Items {
+		if val, ok := secret.Labels[common.LabelKeySecretType]; ok && val == common.LabelValueSecretTypeCluster {
+			urlBytes := string(secret.Data["server"])
+			agentUrl, err := url.Parse(urlBytes)
+			if err != nil {
+				return fmt.Errorf("failed to prase url for %s/%s: %s", ns, secret.Name, err.Error())
+			}
+
+			if agentUrl.Scheme != "https" {
+				noHttps = append(noHttps, secret.Name)
+			}
+
+			query := agentUrl.Query()
+			_, exists := query["agentName"]
+			if !exists {
+				noAgentParam = append(noAgentParam, secret.Name)
+			}
+		}
+	}
+
+	var errParts []string
+	if len(noHttps) > 0 {
+		errParts = append(errParts, fmt.Sprintf("the following agent cluster secrets in %s are not https: %s", ns, strings.Join(noHttps, ", ")))
+	}
+
+	if len(noAgentParam) > 0 {
+		errParts = append(errParts, fmt.Sprintf("the following agent cluster secrets in %s are missing the agentName param: %s", ns, strings.Join(noAgentParam, ", ")))
+	}
+
+	if len(errParts) > 0 {
+		return fmt.Errorf("%s", strings.Join(errParts, "\n"))
 	}
 
 	return nil
