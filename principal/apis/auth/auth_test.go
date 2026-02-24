@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	issuermock "github.com/argoproj-labs/argocd-agent/internal/issuer/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/principal/registration"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
@@ -37,6 +38,8 @@ import (
 func Test_Authenticate(t *testing.T) {
 	encodedSubject := `{"clientID":"user1","mode":"managed"}`
 	queues := queue.NewSendRecvQueues()
+	testVersion := version.New("argocd-agent").Version()
+
 	t.Run("Authentication method unsupported", func(t *testing.T) {
 		auths, err := NewServer(queues, nil, nil)
 		require.NoError(t, err)
@@ -44,9 +47,47 @@ func Test_Authenticate(t *testing.T) {
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
+			Version:     testVersion,
 		})
 		assert.ErrorContains(t, err, authFailedMessage)
 	})
+
+	t.Run("Missing version", func(t *testing.T) {
+		ams := auth.NewMethods()
+		am := authmock.NewMethod(t)
+		// Mock authentication to succeed so we reach version validation
+		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
+		ams.RegisterMethod("userpass", am)
+
+		auths, err := NewServer(queues, ams, nil)
+		require.NoError(t, err)
+		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+			Method:      "userpass",
+			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
+			Mode:        "managed",
+			Version:     "",
+		})
+		assert.ErrorContains(t, err, "agent version is required")
+	})
+
+	t.Run("Version mismatch", func(t *testing.T) {
+		ams := auth.NewMethods()
+		am := authmock.NewMethod(t)
+		// Mock authentication to succeed so we reach version validation
+		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
+		ams.RegisterMethod("userpass", am)
+
+		auths, err := NewServer(queues, ams, nil)
+		require.NoError(t, err)
+		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
+			Method:      "userpass",
+			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
+			Mode:        "managed",
+			Version:     testVersion + "-mismatch",
+		})
+		assert.ErrorContains(t, err, "version mismatch")
+	})
+
 	t.Run("Authentication successful", func(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
@@ -63,11 +104,13 @@ func Test_Authenticate(t *testing.T) {
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
+			Version:     testVersion,
 		})
 		require.NoError(t, err)
 		require.NotNil(t, r)
 		assert.Equal(t, "access", r.AccessToken)
 		assert.Equal(t, "refresh", r.RefreshToken)
+		assert.Equal(t, testVersion, r.Version)
 	})
 
 	t.Run("Wrong credentials", func(t *testing.T) {
@@ -81,6 +124,7 @@ func Test_Authenticate(t *testing.T) {
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "wordpass"},
 			Mode:        "managed",
+			Version:     testVersion,
 		})
 		require.ErrorContains(t, err, "authentication failed")
 	})
@@ -98,6 +142,7 @@ func Test_Authenticate(t *testing.T) {
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "wordpass"},
 			Mode:        "managed",
+			Version:     testVersion,
 		})
 		require.ErrorContains(t, err, "authentication failed")
 	})
@@ -116,6 +161,7 @@ func Test_Authenticate(t *testing.T) {
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "wordpass"},
 			Mode:        "managed",
+			Version:     testVersion,
 		})
 		require.ErrorContains(t, err, "authentication failed")
 	})
@@ -140,6 +186,7 @@ func Test_Authenticate(t *testing.T) {
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
+			Version:     testVersion,
 		})
 		require.NoError(t, err)
 		require.NotNil(t, r)
@@ -166,6 +213,7 @@ func Test_Authenticate(t *testing.T) {
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
+			Version:     testVersion,
 		})
 		require.ErrorContains(t, err, "authentication failed")
 	})
@@ -187,6 +235,7 @@ func Test_Authenticate(t *testing.T) {
 			Method:      "userpass",
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
+			Version:     testVersion,
 		})
 		require.NoError(t, err)
 		require.NotNil(t, r)
