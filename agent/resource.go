@@ -86,7 +86,7 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 			}
 		} else {
 			if gvr.Resource != "" {
-				unlist, err = a.getAvailableResources(ctx, gvr, namespace)
+				unlist, err = a.getAvailableResources(ctx, gvr, namespace, rreq.Params)
 			} else {
 				logCtx.Debugf("Fetching APIs for group %s and version %s", gvr.Group, gvr.Version)
 				unres, err = a.getAvailableAPIs(ctx, gvr.Group, gvr.Version)
@@ -331,10 +331,37 @@ func (a *Agent) getManagedResource(ctx context.Context, gvr schema.GroupVersionR
 	return res, err
 }
 
+// listOptionsFromParams builds a v1.ListOptions from the given HTTP query
+// parameter map. Unknown keys are silently ignored.
+func listOptionsFromParams(params map[string]string) v1.ListOptions {
+	opts := v1.ListOptions{}
+	if params == nil {
+		return opts
+	}
+	if v, ok := params["fieldSelector"]; ok {
+		opts.FieldSelector = v
+	}
+	if v, ok := params["labelSelector"]; ok {
+		opts.LabelSelector = v
+	}
+	if v, ok := params["resourceVersion"]; ok {
+		opts.ResourceVersion = v
+	}
+	if v, ok := params["continue"]; ok {
+		opts.Continue = v
+	}
+	if v, ok := params["limit"]; ok {
+		if limit, err := strconv.ParseInt(v, 10, 64); err == nil {
+			opts.Limit = limit
+		}
+	}
+	return opts
+}
+
 // getAvailableResources retrieves a list of available resources for a given
 // combination of group and version specified in gvr. The resource in the gvr
 // must be empty, otherwise an error is returned.
-func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersionResource, namespace string) (*unstructured.UnstructuredList, error) {
+func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersionResource, namespace string, params map[string]string) (*unstructured.UnstructuredList, error) {
 	var err error
 	var res *unstructured.UnstructuredList
 
@@ -345,19 +372,18 @@ func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersi
 	case "":
 		break
 	case "events":
-		// We do allow listing events for now. We have to figure out how to
-		// properly filter the events for the resource in question.
 		break
 	default:
 		return nil, fmt.Errorf("not authorized to list resources: %s", gvr.String())
 	}
 
+	listOpts := listOptionsFromParams(params)
 	rif := a.kubeClient.DynamicClient.Resource(gvr)
 
 	if namespace != "" {
-		res, err = rif.Namespace(namespace).List(ctx, v1.ListOptions{})
+		res, err = rif.Namespace(namespace).List(ctx, listOpts)
 	} else {
-		res, err = rif.List(ctx, v1.ListOptions{})
+		res, err = rif.List(ctx, listOpts)
 	}
 
 	return res, err
