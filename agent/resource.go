@@ -331,13 +331,42 @@ func (a *Agent) getManagedResource(ctx context.Context, gvr schema.GroupVersionR
 	return res, err
 }
 
+// isKnownListOption checks if a given field name is a known and processable list option.
+func isKnownListOption(fieldName string) bool {
+	knownFields := map[string]struct{}{
+		"fieldSelector":   {},
+		"labelSelector":   {},
+		"resourceVersion": {},
+		"continue":        {},
+		"limit":           {},
+	}
+	if _, ok := knownFields[fieldName]; !ok {
+		return false
+	}
+	return true
+}
+
 // listOptionsFromParams builds a v1.ListOptions from the given HTTP query
 // parameter map. Unknown keys are silently ignored.
 func listOptionsFromParams(params map[string]string) v1.ListOptions {
 	opts := v1.ListOptions{}
+	logCtx := log().WithFields(logrus.Fields{
+		"method": "listOptionsFromParams",
+		"module": "ResourceProxy",
+	})
 	if params == nil {
 		return opts
 	}
+
+	// The incoming request parameters are expected to be valid list options.
+	// If an unknown option is found, we log a warning and continue. This can
+	// help identify misbehaving clients.
+	for k := range params {
+		if !isKnownListOption(k) {
+			logCtx.Warnf("Unknown list option found in resource proxy request: %s", k)
+		}
+	}
+
 	if v, ok := params["fieldSelector"]; ok {
 		opts.FieldSelector = v
 	}

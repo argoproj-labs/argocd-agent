@@ -819,6 +819,40 @@ func Test_getAvailableResources(t *testing.T) {
 	})
 }
 
+func Test_isKnownListOption(t *testing.T) {
+	knownOptions := []string{
+		"fieldSelector",
+		"labelSelector",
+		"resourceVersion",
+		"continue",
+		"limit",
+	}
+	for _, opt := range knownOptions {
+		t.Run("Known option: "+opt, func(t *testing.T) {
+			assert.True(t, isKnownListOption(opt))
+		})
+	}
+
+	unknownOptions := []string{
+		"watch",
+		"timeout",
+		"allowWatchBookmarks",
+		"dryRun",
+		"fieldManager",
+		"force",
+		"",
+		"FieldSelector",
+		"FIELDSELECTOR",
+		"field_selector",
+		"unknown",
+	}
+	for _, opt := range unknownOptions {
+		t.Run("Unknown option: "+opt, func(t *testing.T) {
+			assert.False(t, isKnownListOption(opt))
+		})
+	}
+}
+
 func Test_listOptionsFromParams(t *testing.T) {
 	t.Run("Nil params returns empty ListOptions", func(t *testing.T) {
 		opts := listOptionsFromParams(nil)
