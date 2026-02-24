@@ -139,6 +139,8 @@ The replication server uses mTLS for authentication. The replica presents a clie
 
 Both streaming (`Subscribe`) and unary (`GetSnapshot`, `Status`) RPCs are protected via separate gRPC interceptors. A stream interceptor alone is insufficient — unary RPCs require a dedicated unary interceptor.
 
+The HA admin server (port 8405) has no TLS and binds `127.0.0.1` only. Operators access it via `kubectl port-forward`; Kubernetes RBAC is the auth boundary.
+
 ```
 Replica → primary replication server (port 8404)
   TLS: mutual, replica presents cert signed by shared CA
@@ -210,7 +212,7 @@ Because the replica has been continuously replicating and writing resources to i
 
 ## CLI
 
-The `argocd-agentctl ha` subcommand manages HA state. It auto port-forwards to the principal pod via `--principal-context`, or accepts `--address` for direct gRPC.
+The `argocd-agentctl ha` subcommand manages HA state. It auto port-forwards to the principal pod's admin port (8405) via `--principal-context`, or accepts `--address` for a direct connection. The connection is plain gRPC (no TLS).
 
 | Command | Description |
 |---------|-------------|
@@ -237,11 +239,14 @@ For environments that only have simple DNS (no GSLB health checks), the operator
 
 ### Ports
 
-| Port | Purpose |
-|------|---------|
-| 8443 | Agent gRPC (mTLS) |
-| 8404 | Replication server (mTLS, primary listens) |
-| 8003 | Health check HTTP (`/healthz`) |
+| Port | Bind | TLS | Purpose |
+|------|------|-----|---------|
+| 8443 | `0.0.0.0` | mTLS | Agent gRPC |
+| 8404 | `0.0.0.0` | mTLS | Principal-to-principal replication |
+| 8405 | `127.0.0.1` | None | HAAdmin gRPC (`ha status/promote/demote`) |
+| 8003 | `0.0.0.0` | None | Health check HTTP (`/healthz`) |
+
+The admin port (8405) binds localhost only — no TLS. `argocd-agentctl` establishes a `kubectl port-forward` automatically; Kubernetes RBAC is the auth boundary.
 
 ---
 
