@@ -499,7 +499,9 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 
 		// Disconnect and prepare for reconnection
-		c.Disconnect()
+		if derr := c.Disconnect(); derr != nil {
+			log().WithError(derr).Warn("Error during disconnect")
+		}
 	}
 }
 
@@ -680,39 +682,38 @@ func (c *Client) receiveEvents(ctx context.Context, stream replicationapi.Replic
 	}
 }
 
-// sendAcks periodically sends acknowledgments to the primary
+// sendAcks periodically sends acknowledgments to the primary.
+// ackCh acts as a wake-up signal that new events have been processed;
+// the actual sequence number is always read from c.lastSequenceNum.
 func (c *Client) sendAcks(ctx context.Context, stream replicationapi.Replication_SubscribeClient, ackCh <-chan uint64) {
 	ticker := time.NewTicker(c.ackInterval)
 	defer ticker.Stop()
 
-	var lastAcked uint64
+	var lastSentAck uint64
+
+	trySendAck := func() {
+		currentSeq := c.lastSequenceNum.Load()
+		if currentSeq > 0 && currentSeq > lastSentAck {
+			if err := stream.Send(&replicationapi.ReplicationAck{AckedSequenceNum: currentSeq}); err != nil {
+				log().WithError(err).Warn("Failed to send ACK")
+				return
+			}
+			lastSentAck = currentSeq
+			log().WithField("acked_seq", currentSeq).Trace("Sent ACK to primary")
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			// Send final ACK before exiting
-			if lastSeq := c.lastSequenceNum.Load(); lastSeq > lastAcked {
-				_ = stream.Send(&replicationapi.ReplicationAck{AckedSequenceNum: lastSeq})
-			}
+			trySendAck()
 			return
 
-		case seq := <-ackCh:
-			// Track the highest sequence number received
-			if seq > lastAcked {
-				lastAcked = seq
-			}
+		case <-ackCh:
+			trySendAck()
 
 		case <-ticker.C:
-			// Send periodic ACK with highest processed sequence
-			currentSeq := c.lastSequenceNum.Load()
-			if currentSeq > 0 && currentSeq != lastAcked {
-				if err := stream.Send(&replicationapi.ReplicationAck{AckedSequenceNum: currentSeq}); err != nil {
-					log().WithError(err).Warn("Failed to send ACK")
-					return
-				}
-				lastAcked = currentSeq
-				log().WithField("acked_seq", currentSeq).Trace("Sent ACK to primary")
-			}
+			trySendAck()
 		}
 	}
 }
@@ -825,9 +826,8 @@ func (c *Client) GetSnapshot(ctx context.Context) (*replicationapi.ReplicationSn
 			}
 		}
 		c.metrics.LastSequenceNumber.Set(float64(c.lastSequenceNum.Load()))
+		log().WithField("agents", len(snapshot.Agents)).WithField("sequence", snapshot.LastSequenceNum).Info("Received snapshot from primary")
 	}
-
-	log().WithField("agents", len(snapshot.Agents)).WithField("sequence", snapshot.LastSequenceNum).Info("Received snapshot from primary")
 
 	return snapshot, nil
 }
