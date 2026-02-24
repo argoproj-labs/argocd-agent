@@ -15,7 +15,6 @@ exec "$SCRIPT_DIR/argocd-agent" principal \
     --insecure-jwt-generate \
     --auth "mtls:" \
     --enable-resource-proxy=false \
-    --disable-redis-proxy \
     --ha-enabled \
     --ha-preferred-role replica \
     --ha-peer-address "localhost:8003" \

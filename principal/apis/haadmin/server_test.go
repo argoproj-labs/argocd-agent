@@ -32,7 +32,7 @@ type fakeStatusProvider struct {
 }
 
 func (f *fakeStatusProvider) ConnectedReplicaCount() int { return f.replicas }
-func (f *fakeStatusProvider) LastEventTimestamp() int64   { return f.lag }
+func (f *fakeStatusProvider) LastEventTimestamp() int64  { return f.lag }
 func (f *fakeStatusProvider) LastSequenceNum() uint64    { return f.seq }
 func (f *fakeStatusProvider) ConnectedAgentCount() int   { return f.agents }
 
