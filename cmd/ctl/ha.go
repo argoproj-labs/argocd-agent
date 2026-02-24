@@ -237,7 +237,7 @@ func dialHAAdmin(address string) (haadminapi.HAAdminClient, *grpc.ClientConn, er
 }
 
 // portForwardToPrincipal finds the principal pod via --principal-context and
-// sets up a port-forward to port 8404. Returns the local port and a stop channel.
+// sets up a port-forward to port 8405. Returns the local port and a stop channel.
 func portForwardToPrincipal(ctx context.Context) (uint16, chan struct{}, error) {
 	kubeClient, err := kube.NewKubernetesClientFromConfig(
 		ctx,
