@@ -30,9 +30,9 @@ This proposal adds active/passive High Availability to the argocd-agent principa
   │   REGION A (Primary) │      │  REGION B (Replica)  │
   │                      │      │                      │
   │  Principal Server    │◄─────│  Replication Client  │
-  │  - gRPC :8403        │      │  - gRPC :8403        │
+  │  - gRPC :8443        │      │  - gRPC :8443        │
   │  - Replication :8404 │─────►│  - Mirrors state     │
-  │  - /healthz :8080    │      │  - /healthz :8080    │
+  │  - /healthz :8003    │      │  - /healthz :8003    │
   │                      │      │                      │
   │  ArgoCD Instance     │      │  ArgoCD Instance     │
   │  (source of truth)   │      │  (standby, receives  │
@@ -51,7 +51,7 @@ This proposal adds active/passive High Availability to the argocd-agent principa
        └───────────────────────────────────────────────┘
 ```
 
-Primary and Replica run in **separate Kubernetes clusters**. The Replica's cluster starts empty — Applications and AppProjects are populated entirely via replication.
+Primary and Replica run in **separate Kubernetes clusters**. The Replica's cluster starts empty — Applications, AppProjects, and ApplicationSets are populated entirely via replication.
 
 ---
 
@@ -97,6 +97,7 @@ The Replica runs a **Replication Client** that connects to the Primary's **Repli
 |------|--------|
 | Applications | Full objects in snapshot + incremental CloudEvents. Written to replica's K8s cluster. |
 | AppProjects | Full objects in snapshot + incremental CloudEvents. Written to replica's K8s cluster. |
+| ApplicationSets | Full objects in snapshot + incremental CloudEvents. Written to replica's K8s cluster. |
 | Agent connection metadata | Snapshot (agent name, mode, connected state) |
 | Resource keys | Snapshot + event-driven |
 | Queue state | Queue pairs created on snapshot; events flow as queued |
@@ -113,18 +114,51 @@ Three RPCs defined in `principal/apis/replication/replication.proto`:
 
 Each `ReplicatedEvent` wraps a CloudEvent with: agent name, direction (inbound/outbound), sequence number, and timestamp. Events are tagged with direction so the replica knows whether to update its local state (inbound) or queue for future agent delivery (outbound).
 
+Both `Subscribe` and `GetSnapshot` are protected by mTLS authentication and the allowlist check (see Security section).
+
 ### Sync Flow
 
-1. Replica connects to primary
-2. Calls `GetSnapshot` — receives all agent states with full serialized resources
-3. Writes Applications/AppProjects to its local K8s cluster (upsert)
-4. Opens `Subscribe` stream — receives incremental events
+1. Replica opens `Subscribe` stream — primary begins buffering incremental events
+2. Replica calls `GetSnapshot` — receives all agent states with full serialized resources
+3. Writes Applications/AppProjects/ApplicationSets to its local K8s cluster (upsert)
+4. Sends initial ACK on the `Subscribe` stream with snapshot sequence number
 5. Sends periodic ACKs (every 5s) with last processed sequence number
 6. Runs periodic reconciliation (every 1m) — compares sequences via `Status` RPC, re-fetches snapshot if gaps detected
+
+Subscribe is opened before GetSnapshot so the primary buffers events during the snapshot transfer. Without this ordering, events occurring between snapshot start and stream open would be silently lost.
 
 ### Gap Recovery
 
 The forwarder queue (1000 events) drops events on overflow. The client detects sequence gaps and marks itself for reconciliation. On the next reconciliation tick, it re-fetches a full snapshot to catch up. This bounds drift to at most 1 minute.
+
+---
+
+## Security
+
+The replication server uses mTLS for authentication. The replica presents a client certificate; the primary extracts the SPIFFE URI SAN identity and checks it against the `--ha-allowed-replication-clients` allowlist.
+
+Both streaming (`Subscribe`) and unary (`GetSnapshot`, `Status`) RPCs are protected via separate gRPC interceptors. A stream interceptor alone is insufficient — unary RPCs require a dedicated unary interceptor.
+
+```
+Replica → primary replication server (port 8404)
+  TLS: mutual, replica presents cert signed by shared CA
+  Auth: primary extracts SPIFFE identity, checks allowlist
+  Rejection: codes.PermissionDenied with identity logged at WARN level
+```
+
+Configuration:
+
+```
+--ha-enabled                       Enable HA mode
+--ha-preferred-role primary|replica Role this principal prefers on startup
+--ha-peer-address <host:port>      Replication server address of the peer
+--ha-allowed-replication-clients   Comma-separated allowlist of replica identities
+--ha-replication-tls-cert          TLS cert for replication server
+--ha-replication-tls-key           TLS key for replication server
+--ha-replication-tls-ca            CA cert for validating replica client certs
+```
+
+Or via environment variables (e.g., `ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS=identity1,identity2`).
 
 ---
 
@@ -174,45 +208,6 @@ Because the replica has been continuously replicating and writing resources to i
 
 ---
 
-## Configuration
-
-```yaml
-# Region A — Preferred Primary
-principal:
-  ha:
-    enabled: true
-    preferredRole: primary
-    peerAddress: principal.region-b.internal:8404
-  replication:
-    port: 8404
-    tls:
-      certFile: /etc/argocd-agent/replication/tls.crt
-      keyFile: /etc/argocd-agent/replication/tls.key
-      caFile: /etc/argocd-agent/replication/ca.crt
-```
-
-```yaml
-# Region B — Preferred Replica
-principal:
-  ha:
-    enabled: true
-    preferredRole: replica
-    peerAddress: principal.region-a.internal:8404
-  replication:
-    port: 8404
-    tls: ...  # same structure
-```
-
-Agent configuration is **unchanged** — agents connect to a single GSLB/DNS endpoint:
-
-```yaml
-agent:
-  remote:
-    address: principal.argocd.example.com:8403
-```
-
----
-
 ## CLI
 
 The `argocd-agentctl ha` subcommand manages HA state. It auto port-forwards to the principal pod via `--principal-context`, or accepts `--address` for direct gRPC.
@@ -231,7 +226,7 @@ Any GSLB or DNS provider that supports health checks works. Requirements:
 
 | Requirement | Detail |
 |-------------|--------|
-| Health check | Poll `/healthz` on each principal (port 8080) |
+| Health check | Poll `/healthz` on each principal (port 8003) |
 | Failover routing | Route to healthy endpoint |
 | DNS TTL | Recommend 60s |
 | Single endpoint | Agents resolve one DNS name |
@@ -239,6 +234,14 @@ Any GSLB or DNS provider that supports health checks works. Requirements:
 DNS is operator-managed. The principal's health endpoint reflects HA state — only ACTIVE returns 200.
 
 For environments that only have simple DNS (no GSLB health checks), the operator manually updates the DNS A record as part of the failover procedure.
+
+### Ports
+
+| Port | Purpose |
+|------|---------|
+| 8443 | Agent gRPC (mTLS) |
+| 8404 | Replication server (mTLS, primary listens) |
+| 8003 | Health check HTTP (`/healthz`) |
 
 ---
 
@@ -277,6 +280,8 @@ Recommended alerts:
 | State count | 5 | RECOVERING, SYNCING, REPLICATING, DISCONNECTED, ACTIVE |
 | Resource replication | Full objects written to replica K8s cluster | Separate clusters, no shared state |
 | Replication backpressure | Drop + metric + reconcile | Simple for v1; bounded 1-min drift via reconciliation |
+| Sync flow order | Subscribe first, then GetSnapshot | Primary buffers events during snapshot transfer; prevents loss between snapshot point and stream open |
+| Interceptor split | Both stream and unary interceptors registered | `grpc.StreamInterceptor` does not cover unary RPCs; `GetSnapshot`/`Status` require a separate unary interceptor |
 | Secrets | Operator configures manually | Avoid replicating sensitive data |
 | Agent changes | None | GSLB/DNS transparent failover |
 | DNS integration | None (operator-managed) | Works with any provider |
@@ -351,4 +356,5 @@ Recommended alerts:
 - [HA Controller](../../pkg/ha/controller.go)
 - [Replication Client](../../pkg/replication/client.go)
 - [Replication Forwarder](../../pkg/replication/forwarder.go)
-- [HA Integration](../../principal/ha_integration.go)
+- [Replication Server (auth)](../../principal/apis/replication/server.go)
+- [ApplicationSet Replication](../../principal/callbacks.go)
