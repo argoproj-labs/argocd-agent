@@ -96,6 +96,9 @@ type Remote struct {
 
 	// The largest GRPC message size supported, configurable via env/param
 	MaxGRPCMessageSize int
+
+	// agentVersion is the version of the agent, used for handshake validation
+	agentVersion string
 }
 
 type RemoteOption func(r *Remote) error
@@ -347,6 +350,7 @@ func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error)
 		},
 		clientMode:         types.AgentModeAutonomous,
 		MaxGRPCMessageSize: grpcutil.DefaultGRPCMaxMessageSize,
+		agentVersion:       version.New("argocd-agent").Version(),
 	}
 	for _, o := range opts {
 		if err := o(r); err != nil {
@@ -496,10 +500,6 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 	authenticated := false
 	cBackoff := connectBackoff()
 
-	// Get agent version for handshake validation
-	agentVersion := version.New("argocd-agent").Version()
-	log().Infof("Attempting to connect to principal at %s (agent version: %s)", r.Addr(), agentVersion)
-
 	// We try to authenticate to the remote repeatedly, until either of the
 	// following events happen:
 	//
@@ -510,7 +510,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		case <-ctx.Done():
 			return status.Error(codes.Canceled, "context canceled")
 		default:
-			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String(), Version: agentVersion})
+			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String(), Version: r.agentVersion})
 			if ierr != nil {
 				st, ok := status.FromError(ierr)
 				if ok {
@@ -526,9 +526,6 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
 				return ierr
 			}
-
-			// Version handshake successful - principal validated and returned matching version
-			log().Infof("Version handshake successful with principal (version: %s)", resp.Version)
 
 			r.accessToken, ierr = NewToken(resp.AccessToken)
 			if ierr != nil {

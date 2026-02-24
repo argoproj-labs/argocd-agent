@@ -40,6 +40,9 @@ type Server struct {
 	queues      *queue.SendRecvQueues
 
 	agentRegistrationManager *registration.AgentRegistrationManager
+
+	// principalVersion is the version of the principal, used for handshake validation
+	principalVersion string
 }
 
 const (
@@ -80,6 +83,7 @@ func NewServer(queues *queue.SendRecvQueues, authMethods *auth.Methods, iss issu
 	}
 
 	s.agentRegistrationManager = s.options.agentRegistrationManager
+	s.principalVersion = version.New("argocd-agent").Version()
 	return s, nil
 }
 
@@ -130,8 +134,6 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 		return nil, errAuthenticationFailed
 	}
 
-	// Version handshake validation (after successful credential auth)
-	principalVersion := s.getPrincipalVersion()
 	agentVersion := ar.Version
 
 	if agentVersion == "" {
@@ -139,17 +141,12 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 		return nil, status.Error(codes.InvalidArgument, "agent version is required")
 	}
 
-	if agentVersion != principalVersion {
-		logCtx.Warnf("Version mismatch: rejecting connection (agent: %s, principal: %s)", agentVersion, principalVersion)
+	if agentVersion != s.principalVersion {
+		logCtx.Warnf("Version mismatch: rejecting connection (agent: %s, principal: %s)", agentVersion, s.principalVersion)
 		return nil, status.Errorf(codes.FailedPrecondition, "version mismatch")
 	}
 
-	logCtx.WithFields(logrus.Fields{
-		"agent_version":     agentVersion,
-		"principal_version": principalVersion,
-	}).Info("Version handshake successful")
-
-	logCtx.WithField("client", clientID).Info("client authentication successful")
+	logCtx.WithField("client", clientID).WithField("agent_version", agentVersion).Info("client authentication successful")
 
 	// If self agent registration is enabled, register the agent and create cluster secret if it doesn't exist
 	if s.agentRegistrationManager != nil && s.agentRegistrationManager.IsSelfAgentRegistrationEnabled() {
@@ -174,7 +171,7 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 	return &authapi.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		Version:      principalVersion,
+		Version:      s.principalVersion,
 	}, nil
 }
 
@@ -223,12 +220,6 @@ func (s *Server) RefreshToken(ctx context.Context, r *authapi.RefreshTokenReques
 		return nil, errAuthenticationFailed
 	}
 	return &authapi.AuthResponse{AccessToken: accessToken, RefreshToken: refreshToken}, nil
-}
-
-// getPrincipalVersion returns the version of the principal for handshake validation
-func (s *Server) getPrincipalVersion() string {
-	v := version.New("argocd-agent")
-	return v.Version()
 }
 
 func log() *logrus.Entry {
