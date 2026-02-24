@@ -405,9 +405,9 @@ func (c *Client) GetStatus() *ClientStatus {
 
 // ClientStatus represents the current status of the replication client
 type ClientStatus struct {
-	State             ClientState
-	PrimaryAddress    string
-	LastSequenceNum   uint64
+	State              ClientState
+	PrimaryAddress     string
+	LastSequenceNum    uint64
 	LastEventTimestamp int64
 }
 

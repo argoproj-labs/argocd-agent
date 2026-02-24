@@ -93,13 +93,13 @@ func (m *mockStateProvider) GetPrincipalResources() []ResourceInfo {
 
 // mockReplicaStream implements replicationapi.Replication_SubscribeServer for testing
 type mockGrpcStream struct {
-	ctx         context.Context
-	cancelFn    context.CancelFunc
-	sentEvents  []*replicationapi.ReplicatedEvent
-	recvAcks    chan *replicationapi.ReplicationAck
-	recvErr     error
-	sendErr     error
-	mu          sync.Mutex
+	ctx        context.Context
+	cancelFn   context.CancelFunc
+	sentEvents []*replicationapi.ReplicatedEvent
+	recvAcks   chan *replicationapi.ReplicationAck
+	recvErr    error
+	sendErr    error
+	mu         sync.Mutex
 }
 
 func newMockGrpcStream() *mockGrpcStream {

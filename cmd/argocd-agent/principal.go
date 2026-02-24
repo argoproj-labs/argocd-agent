@@ -95,7 +95,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisAddress         string
 		redisPassword        string
 		redisCompressionType string
-		disableRedisProxy    bool
 		healthzPort          int
 
 		maxGRPCMessageSize int
@@ -246,10 +245,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			opts = append(opts, principal.WithResourceProxyEnabled(enableResourceProxy))
-
-			if disableRedisProxy {
-				opts = append(opts, principal.WithRedisProxyDisabled())
-			}
 
 			if enableResourceProxy {
 				var proxyTLS *tls.Config
@@ -566,9 +561,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&redisCompressionType, "redis-compression-type",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),
 		"Compression algorithm required by Redis. (possible values: gzip, none. Default value: gzip)")
-	command.Flags().BoolVar(&disableRedisProxy, "disable-redis-proxy",
-		env.BoolWithDefault("ARGOCD_PRINCIPAL_DISABLE_REDIS_PROXY", false),
-		"Disable the Redis proxy (useful for testing multiple principals locally)")
 	command.Flags().IntVar(&pprofPort, "pprof-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_PPROF_PORT", cmdutil.ValidPort, 0),
 		"Port the pprof server will listen on")
