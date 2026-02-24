@@ -347,7 +347,8 @@ func isKnownListOption(fieldName string) bool {
 }
 
 // listOptionsFromParams builds a v1.ListOptions from the given HTTP query
-// parameter map. Unknown keys are silently ignored.
+// parameter map. Unknown keys in the request parameters will be logged as
+// warnings.
 func listOptionsFromParams(params map[string]string) v1.ListOptions {
 	opts := v1.ListOptions{}
 	logCtx := log().WithFields(logrus.Fields{
