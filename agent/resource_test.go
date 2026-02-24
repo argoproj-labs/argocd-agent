@@ -649,7 +649,7 @@ func Test_getAvailableResources(t *testing.T) {
 			Resource: "pods", // Resource should be empty for API discovery
 		}
 
-		_, err := agent.getAvailableResources(context.Background(), gvr, "")
+		_, err := agent.getAvailableResources(context.Background(), gvr, "", nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not authorized to list resources")
 	})
@@ -683,7 +683,7 @@ func Test_getAvailableResources(t *testing.T) {
 			Resource: "apiresources",
 		}
 
-		list, err := agent.getAvailableResources(context.Background(), gvr, "default")
+		list, err := agent.getAvailableResources(context.Background(), gvr, "default", nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, list)
 	})
@@ -715,9 +715,186 @@ func Test_getAvailableResources(t *testing.T) {
 			Resource: "apigroups",
 		}
 
-		list, err := agent.getAvailableResources(context.Background(), gvr, "")
+		list, err := agent.getAvailableResources(context.Background(), gvr, "", nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, list)
+	})
+
+	t.Run("Passes field and label selectors to list call", func(t *testing.T) {
+		kubeClient := kube.NewDynamicFakeClient()
+		scheme := runtime.NewScheme()
+		_ = corev1.AddToScheme(scheme)
+		fakeDyn := fake.NewSimpleDynamicClient(scheme)
+
+		var capturedListRestrictions k8stesting.ListRestrictions
+		fakeDyn.PrependReactor("list", "events", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			listAction := action.(k8stesting.ListAction)
+			capturedListRestrictions = listAction.GetListRestrictions()
+			return true, &unstructured.UnstructuredList{}, nil
+		})
+		kubeClient.DynamicClient = fakeDyn
+
+		agent := &Agent{
+			context:             context.Background(),
+			kubeClient:          kubeClient,
+			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(""),
+		}
+
+		gvr := schema.GroupVersionResource{
+			Group:    "",
+			Version:  "v1",
+			Resource: "events",
+		}
+
+		params := map[string]string{
+			"fieldSelector": "involvedObject.name=my-pod,involvedObject.namespace=default",
+			"labelSelector": "app=test",
+		}
+
+		_, err := agent.getAvailableResources(context.Background(), gvr, "default", params)
+		assert.NoError(t, err)
+		assert.Equal(t, "involvedObject.name=my-pod,involvedObject.namespace=default", capturedListRestrictions.Fields.String())
+		assert.Equal(t, "app=test", capturedListRestrictions.Labels.String())
+	})
+
+	t.Run("Passes limit and continue to list call", func(t *testing.T) {
+		kubeClient := kube.NewDynamicFakeClient()
+		scheme := runtime.NewScheme()
+		_ = corev1.AddToScheme(scheme)
+		fakeDyn := fake.NewSimpleDynamicClient(scheme)
+
+		var capturedAction k8stesting.ListAction
+		fakeDyn.PrependReactor("list", "events", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			capturedAction = action.(k8stesting.ListAction)
+			return true, &unstructured.UnstructuredList{}, nil
+		})
+		kubeClient.DynamicClient = fakeDyn
+
+		agent := &Agent{
+			context:             context.Background(),
+			kubeClient:          kubeClient,
+			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(""),
+		}
+
+		gvr := schema.GroupVersionResource{
+			Group:    "",
+			Version:  "v1",
+			Resource: "events",
+		}
+
+		params := map[string]string{
+			"limit":    "100",
+			"continue": "abc123",
+		}
+
+		_, err := agent.getAvailableResources(context.Background(), gvr, "default", params)
+		assert.NoError(t, err)
+		assert.NotNil(t, capturedAction)
+	})
+
+	t.Run("Nil params does not panic", func(t *testing.T) {
+		kubeClient := kube.NewDynamicFakeClient()
+		scheme := runtime.NewScheme()
+		_ = corev1.AddToScheme(scheme)
+		fakeDyn := fake.NewSimpleDynamicClient(scheme)
+		kubeClient.DynamicClient = fakeDyn
+
+		agent := &Agent{
+			context:             context.Background(),
+			kubeClient:          kubeClient,
+			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(""),
+		}
+
+		gvr := schema.GroupVersionResource{
+			Group:    "",
+			Version:  "v1",
+			Resource: "events",
+		}
+
+		_, err := agent.getAvailableResources(context.Background(), gvr, "default", nil)
+		assert.NoError(t, err)
+	})
+}
+
+func Test_isKnownListOption(t *testing.T) {
+	knownOptions := []string{
+		"fieldSelector",
+		"labelSelector",
+		"resourceVersion",
+		"continue",
+		"limit",
+	}
+	for _, opt := range knownOptions {
+		t.Run("Known option: "+opt, func(t *testing.T) {
+			assert.True(t, isKnownListOption(opt))
+		})
+	}
+
+	unknownOptions := []string{
+		"watch",
+		"timeout",
+		"allowWatchBookmarks",
+		"dryRun",
+		"fieldManager",
+		"force",
+		"",
+		"FieldSelector",
+		"FIELDSELECTOR",
+		"field_selector",
+		"unknown",
+	}
+	for _, opt := range unknownOptions {
+		t.Run("Unknown option: "+opt, func(t *testing.T) {
+			assert.False(t, isKnownListOption(opt))
+		})
+	}
+}
+
+func Test_listOptionsFromParams(t *testing.T) {
+	t.Run("Nil params returns empty ListOptions", func(t *testing.T) {
+		opts := listOptionsFromParams(nil)
+		assert.Equal(t, v1.ListOptions{}, opts)
+	})
+
+	t.Run("Empty params returns empty ListOptions", func(t *testing.T) {
+		opts := listOptionsFromParams(map[string]string{})
+		assert.Equal(t, v1.ListOptions{}, opts)
+	})
+
+	t.Run("All supported params are mapped", func(t *testing.T) {
+		params := map[string]string{
+			"fieldSelector":   "metadata.name=foo",
+			"labelSelector":   "app=bar",
+			"resourceVersion": "12345",
+			"continue":        "token-abc",
+			"limit":           "500",
+		}
+		opts := listOptionsFromParams(params)
+		assert.Equal(t, "metadata.name=foo", opts.FieldSelector)
+		assert.Equal(t, "app=bar", opts.LabelSelector)
+		assert.Equal(t, "12345", opts.ResourceVersion)
+		assert.Equal(t, "token-abc", opts.Continue)
+		assert.Equal(t, int64(500), opts.Limit)
+	})
+
+	t.Run("Invalid limit is ignored", func(t *testing.T) {
+		params := map[string]string{
+			"limit": "not-a-number",
+		}
+		opts := listOptionsFromParams(params)
+		assert.Equal(t, int64(0), opts.Limit)
+	})
+
+	t.Run("Unknown params are ignored", func(t *testing.T) {
+		params := map[string]string{
+			"unknown":       "value",
+			"fieldSelector": "status.phase=Running",
+		}
+		opts := listOptionsFromParams(params)
+		assert.Equal(t, "status.phase=Running", opts.FieldSelector)
 	})
 }
 
