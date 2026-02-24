@@ -383,6 +383,8 @@ func listOptionsFromParams(params map[string]string) v1.ListOptions {
 	if v, ok := params["limit"]; ok {
 		if limit, err := strconv.ParseInt(v, 10, 64); err == nil {
 			opts.Limit = limit
+		} else {
+			logCtx.Warnf("Invalid limit value in resource proxy request: %s", v)
 		}
 	}
 	return opts
