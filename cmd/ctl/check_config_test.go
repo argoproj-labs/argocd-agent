@@ -37,6 +37,7 @@ import (
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -216,10 +217,56 @@ func createFakeSecret(name, server string) *corev1.Secret {
 	}
 }
 
+// Helper to create a fake network policy
+func createFakeNetworkPolicy(component string) *networkingv1.NetworkPolicy {
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "argocd-redis-network-policy",
+			Namespace: "argocd",
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app.kubernetes.io/name": "argocd-redis",
+				},
+			},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									common.LabelKeyAppName: fmt.Sprintf("argocd-agent-%s", component),
+								},
+							},
+						},
+						{
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									common.LabelKeyAppName: "argocd-server",
+								},
+							},
+						},
+						{
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									common.LabelKeyAppName: "argocd-application-controller",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func TestCheckConfigPrincipal(t *testing.T) {
 	t.Run("Valid configuration", func(t *testing.T) {
 		principalNS := "argocd"
-		cl := fake.NewSimpleClientset()
+
+		networkPolicy := createFakeNetworkPolicy("principal")
+		cl := fake.NewSimpleClientset(networkPolicy)
 
 		// Create a scheme and register ArgoCD CRD
 		scheme := runtime.NewScheme()
@@ -943,7 +990,6 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		caughtOnlyInvalid := false
 		for _, r := range res {
 			if r.err != nil && strings.Contains(r.name, "skip-reconcile annotation") {
-				fmt.Println(r.err.Error())
 				caughtOnlyInvalid = !strings.Contains(r.err.Error(), "fake-agent") &&
 					strings.Contains(r.err.Error(), "invalid-agent") &&
 					strings.Contains(r.err.Error(), "missing-agent")
@@ -951,14 +997,51 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		}
 		require.True(t, caughtOnlyInvalid)
 	})
+
+	t.Run("Network policy ingress allows traffic from principal", func(t *testing.T) {
+		principalNS := "argocd"
+
+		networkPolicy := createFakeNetworkPolicy("")
+		cl := fake.NewSimpleClientset(networkPolicy)
+		scheme := runtime.NewScheme()
+		dynCl := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1beta1", Resource: "argocds"}:       "ArgoCDList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}: "ApplicationList",
+		})
+
+		_, err := cl.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: principalNS},
+		}, metav1.CreateOptions{})
+		require.NoError(t, err, "error creating namespace")
+
+		kubeClient := &kube.KubernetesClient{
+			Clientset:     cl,
+			DynamicClient: dynCl,
+			Context:       context.TODO(),
+			Namespace:     principalNS,
+		}
+
+		res := RunPrincipalChecks(context.Background(), kubeClient, principalNS)
+		caughtPolicy := false
+		for _, r := range res {
+			if r.err != nil && strings.Contains(r.name, "ingress from principal") {
+				caughtPolicy = strings.Contains(r.err.Error(), "does not allow traffic")
+			}
+		}
+		require.True(t, caughtPolicy)
+	})
 }
 
 func TestCheckConfigAgent(t *testing.T) {
 	t.Run("Valid configuration", func(t *testing.T) {
 		agentNS := "argocd"
 		principalNS := "argocd"
-		agentCl := fake.NewSimpleClientset()
-		principalCl := fake.NewSimpleClientset()
+
+		agentNetPolicy := createFakeNetworkPolicy("agent")
+		principalNetPolicy := createFakeNetworkPolicy("principal")
+
+		agentCl := fake.NewSimpleClientset(agentNetPolicy)
+		principalCl := fake.NewSimpleClientset(principalNetPolicy)
 
 		scheme := runtime.NewScheme()
 		agentDynCl := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
@@ -1361,5 +1444,50 @@ func TestCheckConfigAgent(t *testing.T) {
 			}
 		}
 		require.True(t, hasEmptyCNError, "expected error when agent cert has empty CN")
+	})
+
+	t.Run("Network policy ingress allows traffic from agent", func(t *testing.T) {
+		agentNS := "argocd"
+		principalNS := "argocd"
+
+		networkPolicy := createFakeNetworkPolicy("")
+		agentCl := fake.NewSimpleClientset(networkPolicy)
+		principalCl := fake.NewSimpleClientset(networkPolicy)
+
+		scheme := runtime.NewScheme()
+		agentDynCl := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1beta1", Resource: "argocds"}: "ArgoCDList",
+		})
+		principalDynCl := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1beta1", Resource: "argocds"}: "ArgoCDList",
+		})
+
+		_, err := agentCl.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: principalNS},
+		}, metav1.CreateOptions{})
+		require.NoError(t, err, "error creating namespace")
+
+		agentKubeClient := &kube.KubernetesClient{
+			Clientset:     agentCl,
+			DynamicClient: agentDynCl,
+			Context:       context.TODO(),
+			Namespace:     agentNS,
+		}
+
+		principalKubeClient := &kube.KubernetesClient{
+			Clientset:     principalCl,
+			DynamicClient: principalDynCl,
+			Context:       context.TODO(),
+			Namespace:     principalNS,
+		}
+
+		res := RunAgentChecks(context.Background(), agentKubeClient, agentNS, principalKubeClient, principalNS)
+		caughtPolicy := false
+		for _, r := range res {
+			if r.err != nil && strings.Contains(r.name, "ingress from agent") {
+				caughtPolicy = strings.Contains(r.err.Error(), "does not allow traffic")
+			}
+		}
+		require.True(t, caughtPolicy)
 	})
 }

@@ -298,13 +298,18 @@ func RunPrincipalChecks(ctx context.Context, kubeClient *kube.KubernetesClient, 
 	})
 
 	out = append(out, checkResult{
-		name: fmt.Sprintf("Verifying agent cluster secrets contain correct query parameter on server url"),
+		name: "Verifying agent cluster secrets contain correct query parameter on server url",
 		err:  principalVerifyClusterSecretServer(ctx, kubeClient, principalNS),
 	})
 
 	out = append(out, checkResult{
-		name: fmt.Sprintf("Verifying agent cluster secrets contain the skip-reconcile annotation and that it's set to true"),
+		name: "Verifying agent cluster secrets contain the skip-reconcile annotation and that it's set to true",
 		err:  principalVerifyClusterSecretAnnotation(ctx, kubeClient, principalNS),
+	})
+
+	out = append(out, checkResult{
+		name: fmt.Sprintf("Verifying argo cd network policy allows for ingress from principal"),
+		err:  bothVerifyRedisNetworkPolicy(ctx, kubeClient, principalNS, "principal"),
 	})
 
 	return out
@@ -358,6 +363,12 @@ func RunAgentChecks(ctx context.Context, agentKubeClient *kube.KubernetesClient,
 	out = append(out, checkResult{
 		name: "Verifying agent mTLS certificate is signed by principal CA certificate",
 		err:  clientCertSignedByPrincipalCA(ctx, agentKubeClient.Clientset, agentNS, agentClientCertSecretName, principalKubeClient.Clientset, principalNS, principalCASecretName),
+	})
+
+	// Agent Argo CD redis network policy allows for ingress from agent
+	out = append(out, checkResult{
+		name: "Verifying argo cd network policy allows for ingress from agent",
+		err:  bothVerifyRedisNetworkPolicy(ctx, agentKubeClient, agentNS, "agent"),
 	})
 
 	return out
@@ -657,8 +668,6 @@ func principalVerifyClusterSecretAnnotation(ctx context.Context, kc *kube.Kubern
 	var noAnnotation []string
 	filteredSecrets := filterManagedClusterSecrets(secrets)
 	for _, secret := range filteredSecrets {
-		val, ok := secret.Annotations[common.AnnotationKeyAppSkipReconcile]
-		fmt.Println(val, ok)
 		if val, ok := secret.Annotations[common.AnnotationKeyAppSkipReconcile]; !ok || val != "true" {
 			noAnnotation = append(noAnnotation, secret.Name)
 		}
@@ -756,4 +765,54 @@ func x509FromTLSSecret(ctx context.Context, kubeClient kubernetes.Interface, ns,
 		return nil, fmt.Errorf("could not parse certificate in secret %s/%s: %w", ns, name, err)
 	}
 	return parsed, nil
+}
+
+// bothVerifyRedisNetworkPolicy verifies that the network policy for Argo CD allows ingress traffic
+// from either the principal or agent
+func bothVerifyRedisNetworkPolicy(ctx context.Context, kc *kube.KubernetesClient, ns, component string) error {
+	if kc.Clientset == nil {
+		return fmt.Errorf("client set is not available, failed to check network policies")
+	}
+
+	componentName := fmt.Sprintf("argocd-agent-%s", component)
+
+	netPolicies, err := kc.Clientset.NetworkingV1().NetworkPolicies(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list network policies in namespace %s: %s", ns, err.Error())
+	}
+
+	policyExists := false
+	ingressAllowed := false
+	for _, policy := range netPolicies.Items {
+		name, exists := policy.Spec.PodSelector.MatchLabels[common.LabelKeyAppName]
+		if !exists || name != common.DefaultRedisName {
+			continue
+		}
+
+		policyExists = true
+		for _, ingress := range policy.Spec.Ingress {
+			for _, from := range ingress.From {
+				if from.PodSelector == nil {
+					continue
+				}
+
+				if name, exists := from.PodSelector.MatchLabels[common.LabelKeyAppName]; exists && name == componentName {
+					ingressAllowed = true
+				}
+			}
+			if ingressAllowed {
+				break
+			}
+		}
+	}
+
+	if !policyExists {
+		return fmt.Errorf("network policy for argo cd redis does not exist in %s", ns)
+	}
+
+	if !ingressAllowed {
+		return fmt.Errorf("network policy for argo cd redis does not allow traffic from %s", componentName)
+	}
+
+	return nil
 }
