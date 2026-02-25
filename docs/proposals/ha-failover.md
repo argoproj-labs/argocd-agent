@@ -18,7 +18,7 @@ This proposal adds active/passive High Availability to the argocd-agent principa
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Global DNS / GSLB                           │
 │                principal.argocd.example.com                     │
@@ -59,7 +59,7 @@ Primary and Replica run in **separate Kubernetes clusters**. The Replica's clust
 
 Five states, with only operator-triggered promotion:
 
-```
+```text
 RECOVERING ──┬── config=primary & peer not ACTIVE ──→ ACTIVE
              └── config=replica OR peer is ACTIVE ──→ SYNCING → REPLICATING
 
@@ -132,7 +132,7 @@ The forwarder queue (1000 events) drops events on overflow. The client detects s
 
 ### Primary Dies
 
-```
+```text
 T+0s   Primary dies. Replica detects stream break → DISCONNECTED.
 T+30s  Operator notified via alert. Both principals unhealthy from GSLB perspective.
 T+31s  Operator runs: argocd-agentctl ha promote [--force]
@@ -145,7 +145,7 @@ No full resync needed — replica already has all resources written to its K8s c
 
 ### Clean Switchover (Primary Alive)
 
-```
+```bash
 $ argocd-agentctl ha demote    # on Region A — drops agents, stops serving
 $ argocd-agentctl ha promote   # on Region B — becomes ACTIVE
 # Update DNS to point to Region B
@@ -153,7 +153,7 @@ $ argocd-agentctl ha promote   # on Region B — becomes ACTIVE
 
 ### Failback
 
-```
+```text
 T+0    Old primary restarts → RECOVERING → SYNCING (peer is ACTIVE)
        Connects to Region B as replica → REPLICATING
 T+2m   Caught up (lag: 0s)
@@ -193,7 +193,7 @@ The admin gRPC server (`ha status`, `ha promote`, `ha demote`) binds to `127.0.0
 
 Flags for Region A (preferred primary):
 
-```
+```text
 --ha-enabled
 --ha-preferred-role=primary
 --ha-peer-address=principal.region-b.internal:8443
@@ -209,7 +209,7 @@ All flags have `ARGOCD_PRINCIPAL_HA_*` environment variable equivalents.
 
 Agent configuration is **unchanged** — agents connect to a single GSLB/DNS endpoint:
 
-```
+```text
 --address=principal.argocd.example.com:8443
 ```
 
@@ -242,7 +242,7 @@ Any GSLB or DNS provider that supports health checks works. Requirements:
 
 | Requirement | Detail |
 |-------------|--------|
-| Health check | Poll `/healthz` on each principal (port 8080) |
+| Health check | Poll `/healthz` on each principal (port 8003) |
 | Failover routing | Route to healthy endpoint |
 | DNS TTL | Recommend 60s |
 | Single endpoint | Agents resolve one DNS name |

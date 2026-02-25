@@ -162,6 +162,9 @@ func (s *Server) authenticateReplication(ctx context.Context) error {
 	opts := s.ha.Controller.Options()
 
 	if opts.AuthMethod == nil {
+		if len(opts.AllowedReplicationClients) > 0 {
+			return status.Errorf(codes.PermissionDenied, "allowed replication clients configured but no auth method set")
+		}
 		return nil
 	}
 
