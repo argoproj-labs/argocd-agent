@@ -342,6 +342,21 @@ Use compression while sending data between Principal and Agent using gRPC.
 
 The redis host to connect to.
 
+### Redis Credentials directory path
+
+| | |
+|---|---|
+| **CLI Flag** | `--redis-creds-dir-path` |
+| **Environment Variable** | `REDIS_CREDS_DIR_PATH` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+The directory with `auth_username` file for Redis username (optional) and `auth` for Redis password.
+In kubernetes, this is intended to read a Secret mounted as a directory.
+
+Cannot be used together with `--redis-username` or `--redis-password`, or their respective environment variables.
+
 ### Redis Username
 
 | | |
@@ -352,7 +367,7 @@ The redis host to connect to.
 | **Type** | String |
 | **Default** | `""` |
 
-The username to connect to redis with.
+The username to connect to redis with. Prefer `--redis-creds-dir-path` for added security benefits.
 
 ### Redis Password
 
@@ -364,7 +379,7 @@ The username to connect to redis with.
 | **Type** | String |
 | **Default** | `""` |
 
-The password to connect to redis with.
+The password to connect to redis with. Prefer `--redis-creds-dir-path` for added security benefits.
 
 ## Resource Proxy Configuration
 
