@@ -195,13 +195,14 @@ func (f *Forwarder) RegisterReplica(id string, stream ReplicaStream) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if _, exists := f.replicas[id]; !exists {
+		f.metrics.ReplicasConnected.Inc()
+		log().WithField("replica_id", id).Info("Replica connected for replication")
+	}
 	f.replicas[id] = &replicaConnection{
 		id:     id,
 		stream: stream,
 	}
-	f.metrics.ReplicasConnected.Inc()
-
-	log().WithField("replica_id", id).Info("Replica connected for replication")
 }
 
 // UnregisterReplica removes a replica connection
@@ -279,9 +280,11 @@ func (f *Forwarder) broadcastToReplicas(ev *ReplicatedEvent) {
 	if len(dead) > 0 {
 		f.mu.Lock()
 		for _, id := range dead {
-			delete(f.replicas, id)
-			f.metrics.ReplicasConnected.Dec()
-			log().WithField("replica_id", id).Info("Removed dead replica during broadcast")
+			if _, ok := f.replicas[id]; ok {
+				delete(f.replicas, id)
+				f.metrics.ReplicasConnected.Dec()
+				log().WithField("replica_id", id).Info("Removed dead replica during broadcast")
+			}
 		}
 		f.mu.Unlock()
 	}
