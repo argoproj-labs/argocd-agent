@@ -16,6 +16,7 @@ package replication
 
 import (
 	"context"
+	"crypto/tls"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -230,6 +231,50 @@ func TestClientConnect_Errors(t *testing.T) {
 		err := c.Connect(ctx)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "TLS configuration required")
+	})
+
+	// Regression: server.tlsConfig is nil when NewHAComponents runs because
+	// Listen() hasn't been called yet. WithTLSConfigFunc evaluates lazily at
+	// dial time so it picks up the config once the server is ready.
+	t.Run("WithTLSConfigFunc nil at init returns TLS required error (retryable)", func(t *testing.T) {
+		ctx := context.Background()
+		c := NewClient(ctx,
+			WithPrimaryAddress("primary.example.com:8404"),
+			WithTLSConfigFunc(func() *tls.Config { return nil }),
+		)
+
+		assert.False(t, c.insecure)
+		assert.Nil(t, c.tlsConfig)
+		assert.NotNil(t, c.tlsConfigFn)
+
+		err := c.Connect(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "TLS configuration required")
+	})
+
+	t.Run("WithTLSConfigFunc provides config at dial time", func(t *testing.T) {
+		ctx := context.Background()
+		var cfg *tls.Config
+
+		c := NewClient(ctx,
+			WithPrimaryAddress("localhost:0"),
+			WithTLSConfigFunc(func() *tls.Config { return cfg }),
+		)
+
+		// Initially nil — same as "TLS required" error
+		err := c.Connect(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "TLS configuration required")
+
+		// Simulate Listen() running and populating the TLS config
+		cfg = &tls.Config{MinVersion: tls.VersionTLS12}
+		_ = c.Disconnect()
+
+		// Now the fn returns a non-nil config — Connect proceeds past the TLS
+		// check. grpc.NewClient is lazy so it succeeds even if the server isn't
+		// actually listening.
+		err = c.Connect(ctx)
+		require.NoError(t, err)
 	})
 }
 
