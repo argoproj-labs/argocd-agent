@@ -36,6 +36,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/terminalstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/auth"
@@ -254,5 +255,11 @@ func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
 	logstreamapi.RegisterLogStreamServiceServer(s.grpcServer, s.logStream)
 	// Register TerminalStream gRPC service for web terminal sessions
 	terminalstreamapi.RegisterTerminalStreamServiceServer(s.grpcServer, s.terminalStreamServer)
+
+	// Register replication service when HA is enabled
+	if s.ha != nil && s.ha.ReplicationServer != nil {
+		replicationapi.RegisterReplicationServer(s.grpcServer, s.ha.ReplicationServer)
+	}
+
 	return nil
 }

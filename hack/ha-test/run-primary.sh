@@ -17,5 +17,5 @@ exec "$SCRIPT_DIR/argocd-agent" principal \
     --enable-resource-proxy=false \
     --ha-enabled \
     --ha-preferred-role primary \
-    --ha-peer-address "localhost:8004" \
+    --ha-peer-address "localhost:8444" \
     --ha-failover-timeout 10s
