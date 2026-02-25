@@ -15,7 +15,6 @@
 package ha
 
 import (
-	"crypto/tls"
 	"testing"
 	"time"
 
@@ -29,7 +28,7 @@ func TestDefaultOptions(t *testing.T) {
 	assert.False(t, opts.Enabled)
 	assert.Equal(t, RoleReplica, opts.PreferredRole)
 	assert.Equal(t, 30*time.Second, opts.FailoverTimeout)
-	assert.Equal(t, 8404, opts.ReplicationPort)
+	assert.Equal(t, 8405, opts.AdminPort)
 	assert.Equal(t, 1*time.Second, opts.ReconnectBackoffInitial)
 	assert.Equal(t, 30*time.Second, opts.ReconnectBackoffMax)
 	assert.Equal(t, 1.5, opts.ReconnectBackoffFactor)
@@ -68,9 +67,9 @@ func TestWithPreferredRole(t *testing.T) {
 func TestWithPeerAddress(t *testing.T) {
 	t.Run("valid address", func(t *testing.T) {
 		opts := DefaultOptions()
-		err := WithPeerAddress("peer.example.com:8404")(opts)
+		err := WithPeerAddress("peer.example.com:8443")(opts)
 		require.NoError(t, err)
-		assert.Equal(t, "peer.example.com:8404", opts.PeerAddress)
+		assert.Equal(t, "peer.example.com:8443", opts.PeerAddress)
 	})
 
 	t.Run("empty address", func(t *testing.T) {
@@ -95,37 +94,6 @@ func TestWithFailoverTimeout(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot be negative")
 	})
-}
-
-func TestWithReplicationPort(t *testing.T) {
-	t.Run("valid port", func(t *testing.T) {
-		opts := DefaultOptions()
-		err := WithReplicationPort(8405)(opts)
-		require.NoError(t, err)
-		assert.Equal(t, 8405, opts.ReplicationPort)
-	})
-
-	t.Run("port too low", func(t *testing.T) {
-		opts := DefaultOptions()
-		err := WithReplicationPort(0)(opts)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "must be between 1 and 65535")
-	})
-
-	t.Run("port too high", func(t *testing.T) {
-		opts := DefaultOptions()
-		err := WithReplicationPort(65536)(opts)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "must be between 1 and 65535")
-	})
-}
-
-func TestWithTLSConfig(t *testing.T) {
-	opts := DefaultOptions()
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	err := WithTLSConfig(tlsConfig)(opts)
-	require.NoError(t, err)
-	assert.Equal(t, tlsConfig, opts.TLSConfig)
 }
 
 func TestWithReconnectBackoff(t *testing.T) {
@@ -190,7 +158,7 @@ func TestOptionsValidate(t *testing.T) {
 	t.Run("valid enabled options with peer", func(t *testing.T) {
 		opts := DefaultOptions()
 		opts.Enabled = true
-		opts.PeerAddress = "peer:8404"
+		opts.PeerAddress = "peer:8443"
 		err := opts.Validate()
 		require.NoError(t, err)
 	})

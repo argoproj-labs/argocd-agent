@@ -202,16 +202,17 @@ func (p *serverStateProvider) serializeResource(key resources.ResourceKey) ([]by
 	}
 }
 
-// NewHAComponents creates and initializes HA components for the server
+// NewHAComponents creates and initializes HA components for the server.
+// The replication service is registered on the main gRPC server (no separate
+// port/listener). Auth for replication RPCs is handled by the main server's
+// interceptors which delegate to authenticateReplication.
 func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (*HAComponents, error) {
 	components := &HAComponents{
 		stateProvider: &serverStateProvider{server: server},
 	}
 
-	// Create the replication forwarder
 	components.ReplicationForwarder = replication.NewForwarder()
 
-	// Create the HA controller first so we can read its options for mTLS
 	controller, err := ha.NewController(ctx, haOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HA controller: %w", err)
@@ -220,51 +221,26 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 
 	haOptions := controller.Options()
 
-	// Create the replication server with mTLS options from HA config
-	var replServerOpts []replicationserver.ServerOption
-	if haOptions.TLSConfig != nil {
-		tlsConfig := haOptions.TLSConfig.Clone()
-		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-		replServerOpts = append(replServerOpts, replicationserver.WithTLSConfig(tlsConfig))
-	}
-	if haOptions.AuthMethod != nil {
-		replServerOpts = append(replServerOpts, replicationserver.WithAuthMethod(haOptions.AuthMethod))
-	}
-	if len(haOptions.AllowedReplicationClients) > 0 {
-		replServerOpts = append(replServerOpts, replicationserver.WithAllowedClients(haOptions.AllowedReplicationClients))
-	}
+	// Replication server — no TLS/auth options; the main gRPC server handles that
 	components.ReplicationServer = replicationserver.NewServer(
 		components.ReplicationForwarder,
 		components.stateProvider,
-		replServerOpts...,
 	)
 
-	// Create the HAAdmin server
 	components.HAAdminServer = haadmin.NewServer(controller, &haStatusProvider{components: components, server: server})
 
-	// Create the localhost-only admin gRPC server (no TLS — access via kubectl port-forward)
 	components.adminGRPCServer = grpc.NewServer()
 	haadminapi.RegisterHAAdminServer(components.adminGRPCServer, components.HAAdminServer)
 
-	// Create the replication client if HA is enabled
+	// Create the replication client — connects to the peer's main gRPC port
 	if haOptions.Enabled && haOptions.PeerAddress != "" {
-		// Build the replication address from peer address (health port) and replication port
-		// PeerAddress is in the format "host:healthPort", we need to extract just the host
-		peerHost, _, err := net.SplitHostPort(haOptions.PeerAddress)
-		if err != nil {
-			// If there's no port in the address, use it as-is
-			peerHost = haOptions.PeerAddress
-		}
-		replicationAddr := fmt.Sprintf("%s:%d", peerHost, haOptions.ReplicationPort)
-
 		clientOpts := []replication.ClientOption{
-			replication.WithPrimaryAddress(replicationAddr),
+			replication.WithPrimaryAddress(haOptions.PeerAddress),
 			replication.WithReconnectBackoff(
 				haOptions.ReconnectBackoffInitial,
 				haOptions.ReconnectBackoffMax,
 				haOptions.ReconnectBackoffFactor,
 			),
-			// Wire up callbacks to HA controller
 			replication.WithOnConnected(func() {
 				log().Info("HA: Replication stream connected to primary")
 				controller.OnReplicationConnected()
@@ -277,15 +253,18 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 				log().Info("HA: Initial sync from primary complete")
 				controller.OnSyncComplete()
 			}),
-			// Snapshot handler to apply initial state from primary
 			replication.WithSnapshotHandler(components.handleSnapshot),
-			// Event handler to apply incremental events
 			replication.WithEventHandler(components.handleReplicatedEvent),
 		}
 
-		// Configure TLS
-		if haOptions.TLSConfig != nil {
-			clientOpts = append(clientOpts, replication.WithClientTLS(haOptions.TLSConfig))
+		// Derive client TLS from the main server's TLS materials: our server
+		// cert becomes the client identity and the server CA verifies the peer.
+		if server.tlsConfig != nil {
+			clientTLS := &tls.Config{
+				Certificates: server.tlsConfig.Certificates,
+				RootCAs:      server.tlsConfig.ClientCAs,
+			}
+			clientOpts = append(clientOpts, replication.WithClientTLS(clientTLS))
 		} else {
 			clientOpts = append(clientOpts, replication.WithInsecure())
 		}
@@ -293,7 +272,6 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 		components.ReplicationClient = replication.NewClient(ctx, clientOpts...)
 	}
 
-	// Set up callbacks for state changes
 	controller.SetOnStateChange(func(from, to ha.State) {
 		log().WithField("from", from).WithField("to", to).Info("HA state changed")
 	})
@@ -301,9 +279,6 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 	controller.SetOnBecomeActive(func(ctx context.Context) {
 		log().Info("HA: This principal has become ACTIVE")
 		components.stopReplicationClient()
-		if err := components.ReplicationServer.Start(haOptions.ReplicationPort); err != nil {
-			log().WithError(err).Error("HA: Failed to start replication server on become active")
-		}
 		components.startForwarder(ctx)
 		if err := server.populateSourceCache(ctx); err != nil {
 			log().WithError(err).Error("HA: Failed to populate source cache on promotion")
@@ -322,26 +297,25 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 	return components, nil
 }
 
-// StartHA starts the HA components
+// StartHA starts the HA components.
+// The replication gRPC service is already registered on the main server
+// (see registerGrpcServices), so we only start the admin server and
+// state-dependent components here.
 func (h *HAComponents) StartHA(ctx context.Context) error {
 	if h == nil {
 		return nil
 	}
 
-	// Start the HA controller - this determines initial state
 	if err := h.Controller.Start(); err != nil {
 		return fmt.Errorf("failed to start HA controller: %w", err)
 	}
 
-	// Start components based on initial state
 	initialState := h.Controller.State()
 	log().WithField("initial_state", initialState).Info("HA: Starting components based on initial state")
 
-	// Get replication port for the server
 	haOptions := h.Controller.Options()
 
 	// Start the localhost-only admin gRPC server for HAAdmin (status/promote/demote).
-	// Binding to 127.0.0.1 means access requires kubectl port-forward — no mTLS needed.
 	adminAddr := fmt.Sprintf("127.0.0.1:%d", haOptions.AdminPort)
 	adminListener, err := net.Listen("tcp", adminAddr)
 	if err != nil {
@@ -353,11 +327,6 @@ func (h *HAComponents) StartHA(ctx context.Context) error {
 			log().WithError(err).Error("HA admin gRPC server error")
 		}
 	}()
-
-	// Start the replication server (mTLS, principal-to-principal only)
-	if err := h.ReplicationServer.Start(haOptions.ReplicationPort); err != nil {
-		return fmt.Errorf("failed to start replication server: %w", err)
-	}
 
 	switch initialState {
 	case ha.StateActive:
@@ -374,7 +343,9 @@ func (h *HAComponents) StartHA(ctx context.Context) error {
 	return nil
 }
 
-// ShutdownHA gracefully shuts down HA components
+// ShutdownHA gracefully shuts down HA components.
+// The main gRPC server handles the replication service shutdown;
+// we only need to disconnect replicas and stop auxiliary components.
 func (h *HAComponents) ShutdownHA(ctx context.Context) error {
 	if h == nil {
 		return nil
@@ -382,25 +353,21 @@ func (h *HAComponents) ShutdownHA(ctx context.Context) error {
 
 	var errs []error
 
-	// Stop the HA controller
 	if err := h.Controller.Shutdown(); err != nil {
 		errs = append(errs, fmt.Errorf("HA controller shutdown error: %w", err))
 	}
 
-	// Shutdown the replication server
-	if err := h.ReplicationServer.Shutdown(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("replication server shutdown error: %w", err))
+	// Disconnect all replica streams (main gRPC server will stop the transport)
+	if h.ReplicationServer != nil {
+		h.ReplicationServer.DisconnectAllReplicas()
 	}
 
-	// Shutdown the admin gRPC server
 	if h.adminGRPCServer != nil {
 		h.adminGRPCServer.GracefulStop()
 	}
 
-	// Stop the forwarder if running
 	h.stopForwarder()
 
-	// Stop the replication client if running
 	h.stopReplicationClient()
 	if h.ReplicationClient != nil {
 		if err := h.ReplicationClient.Stop(); err != nil {
