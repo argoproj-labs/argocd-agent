@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
@@ -71,6 +72,7 @@ type Server struct {
 // ServerOptions configures the replication server
 type ServerOptions struct {
 	MaxReplicaConnections int
+	InitialAckTimeout     time.Duration
 }
 
 // ServerOption configures the server
@@ -97,6 +99,7 @@ type replicaClient struct {
 func NewServer(forwarder *replication.Forwarder, stateProvider AgentStateProvider, opts ...ServerOption) *Server {
 	options := &ServerOptions{
 		MaxReplicaConnections: 10,
+		InitialAckTimeout:     30 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(options)
@@ -149,9 +152,26 @@ func (s *Server) Subscribe(stream replicationapi.Replication_SubscribeServer) er
 		client.logCtx.Info("Replica disconnected from replication")
 	}()
 
-	firstAck, err := client.stream.Recv()
-	if err != nil {
-		return fmt.Errorf("waiting for initial ACK: %w", err)
+	type ackResult struct {
+		ack *replicationapi.ReplicationAck
+		err error
+	}
+	ackCh := make(chan ackResult, 1)
+	ackCtx, ackCancel := context.WithTimeout(ctx, s.options.InitialAckTimeout)
+	defer ackCancel()
+	go func() {
+		ack, err := client.stream.Recv()
+		ackCh <- ackResult{ack, err}
+	}()
+	var firstAck *replicationapi.ReplicationAck
+	select {
+	case res := <-ackCh:
+		if res.err != nil {
+			return fmt.Errorf("waiting for initial ACK: %w", res.err)
+		}
+		firstAck = res.ack
+	case <-ackCtx.Done():
+		return fmt.Errorf("waiting for initial ACK: timed out after %s", s.options.InitialAckTimeout)
 	}
 	s.forwarder.UpdateReplicaAck(replicaID, firstAck.AckedSequenceNum)
 	client.logCtx.WithField("acked_seq", firstAck.AckedSequenceNum).Info("Replica snapshot applied, flushing buffered events")

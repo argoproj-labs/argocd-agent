@@ -262,7 +262,11 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 		if server.tlsConfig != nil {
 			clientTLS := &tls.Config{
 				Certificates: server.tlsConfig.Certificates,
+				// Reuse ClientCAs as RootCAs — assumes the same CA signs both client and server certs
 				RootCAs:      server.tlsConfig.ClientCAs,
+				MinVersion:   server.tlsConfig.MinVersion,
+				MaxVersion:   server.tlsConfig.MaxVersion,
+				CipherSuites: server.tlsConfig.CipherSuites,
 			}
 			clientOpts = append(clientOpts, replication.WithClientTLS(clientTLS))
 		} else {
@@ -726,9 +730,10 @@ func (h *HAComponents) remapAppSetOwnerRefs(ctx context.Context, app *v1alpha1.A
 		localAS, err := h.stateProvider.server.appSetManager.Get(ctx, ref.Name, app.Namespace)
 		if err == nil {
 			app.OwnerReferences[i].UID = localAS.UID
-		} else {
-			// AppSet not yet synced — strip ownerRef to avoid k8s GC
+		} else if k8serrors.IsNotFound(err) {
 			app.OwnerReferences = append(app.OwnerReferences[:i], app.OwnerReferences[i+1:]...)
+		} else {
+			log().WithError(err).WithField("appset", ref.Name).Warn("HA: Failed to look up local ApplicationSet")
 		}
 	}
 }
@@ -745,11 +750,16 @@ func (h *HAComponents) ForwardEventForReplication(ev *event.Event, agentName str
 		return
 	}
 
+	ce := ev.CloudEvent()
+	if ce == nil {
+		return
+	}
+
 	log().WithFields(map[string]any{
 		"agent":     agentName,
 		"direction": direction,
-		"target":    event.Target(ev.CloudEvent()),
-		"type":      ev.CloudEvent().Type(),
+		"target":    event.Target(ce),
+		"type":      ce.Type(),
 	}).Debug("HA: Forwarding event for replication")
 
 	h.ReplicationServer.ForwardEvent(ev, agentName, direction)

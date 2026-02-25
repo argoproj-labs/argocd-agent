@@ -592,7 +592,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		"Time to wait before promoting to primary after peer is unreachable")
 	command.Flags().IntVar(&haAdminPort, "ha-admin-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_PORT", cmdutil.ValidPort, 0),
-		"Port for the localhost-only HAAdmin gRPC server (default: 8405)")
+		"Port for the localhost-only HAAdmin gRPC server (0 uses ha.Options default 8405)")
 	command.Flags().StringVar(&haReplicationAuth, "ha-replication-auth",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_AUTH", nil, ""),
 		"Auth method for replication peer identity. Only mtls is supported (e.g. 'mtls:uri:<regex>')")
