@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run the replica principal for HA testing
 
-SCRIPT_DIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+SCRIPT_DIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 || exit 1; pwd -P )"
 
 exec "$SCRIPT_DIR/argocd-agent" principal \
     --listen-port 8444 \
