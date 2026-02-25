@@ -58,9 +58,9 @@ type Server struct {
 	metrics    *metrics.PrincipalMetrics
 	clusterMgr *cluster.Manager
 
-	// activeClients tracks cancel functions for connected agent streams,
-	// keyed by agent name. Used by DisconnectAll to tear down connections.
-	activeClients   map[string]context.CancelFunc
+	// activeClients tracks active client connections keyed by agent name.
+	// Used by DisconnectAll and to guard against stale cleanup races.
+	activeClients   map[string]*client
 	activeClientsMu sync.Mutex
 }
 
@@ -131,7 +131,7 @@ func NewServer(queues queue.QueuePair, eventWriters *event.EventWritersMap, metr
 		eventWriters:  eventWriters,
 		metrics:       metrics,
 		clusterMgr:    clusterMgr,
-		activeClients: make(map[string]context.CancelFunc),
+		activeClients: make(map[string]*client),
 	}
 }
 
@@ -357,7 +357,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
 
 	s.activeClientsMu.Lock()
-	s.activeClients[c.agentName] = c.cancelFn
+	s.activeClients[c.agentName] = c
 	s.activeClientsMu.Unlock()
 
 	if s.metrics != nil {
@@ -441,7 +441,9 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	c.logCtx.Info("Closing EventStream")
 
 	s.activeClientsMu.Lock()
-	delete(s.activeClients, c.agentName)
+	if s.activeClients[c.agentName] == c {
+		delete(s.activeClients, c.agentName)
+	}
 	s.activeClientsMu.Unlock()
 
 	if s.metrics != nil {
@@ -466,12 +468,12 @@ func (s *Server) ConnectedAgentCount() int {
 func (s *Server) DisconnectAll() {
 	s.activeClientsMu.Lock()
 	clients := s.activeClients
-	s.activeClients = make(map[string]context.CancelFunc)
+	s.activeClients = make(map[string]*client)
 	s.activeClientsMu.Unlock()
 
-	for name, cancel := range clients {
+	for name, c := range clients {
 		logrus.WithField("agent", name).Info("Disconnecting agent (HA demote)")
-		cancel()
+		c.cancelFn()
 	}
 }
 

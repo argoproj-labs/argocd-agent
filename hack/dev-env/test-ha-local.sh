@@ -25,10 +25,11 @@ REPLICA_HEALTH=8004
 
 # Cleanup function
 cleanup() {
+    local rc=$?
     echo "Cleaning up..."
     kill $PRIMARY_PID 2>/dev/null || true
     kill $REPLICA_PID 2>/dev/null || true
-    exit 0
+    exit $rc
 }
 trap cleanup SIGINT SIGTERM EXIT
 
@@ -72,7 +73,15 @@ if test "${ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS}" = ""; then
 fi
 
 if test "${REDIS_PASSWORD}" = ""; then
-    export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-control-plane -n argocd -o jsonpath='{.data.auth}' | base64 --decode)
+    _rp=$(kubectl get secret argocd-redis --context=vcluster-control-plane -n argocd -o jsonpath='{.data.auth}' | base64 --decode) || {
+        echo "Failed to retrieve Redis password" >&2
+        exit 1
+    }
+    if test -z "$_rp"; then
+        echo "Redis password is empty" >&2
+        exit 1
+    fi
+    export REDIS_PASSWORD="$_rp"
 fi
 
 echo "Starting PRIMARY principal (preferred role: primary)..."
