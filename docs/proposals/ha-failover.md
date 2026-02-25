@@ -30,9 +30,9 @@ This proposal adds active/passive High Availability to the argocd-agent principa
   │   REGION A (Primary) │      │  REGION B (Replica)  │
   │                      │      │                      │
   │  Principal Server    │◄─────│  Replication Client  │
-  │  - gRPC :8403        │      │  - gRPC :8403        │
-  │  - Replication :8404 │─────►│  - Mirrors state     │
-  │  - /healthz :8080    │      │  - /healthz :8080    │
+  │  - gRPC :8443        │      │  - gRPC :8443        │
+  │  - HAAdmin :8405     │─────►│  - Mirrors state     │
+  │  - /healthz :8003    │      │  - /healthz :8003    │
   │                      │      │                      │
   │  ArgoCD Instance     │      │  ArgoCD Instance     │
   │  (source of truth)   │      │  (standby, receives  │
@@ -89,7 +89,7 @@ The `promote` command checks whether the local principal is still actively repli
 
 ### Model
 
-The Replica runs a **Replication Client** that connects to the Primary's **Replication Forwarder** via a bidirectional gRPC stream on port 8404. Unlike regular agents (namespace-scoped), the replication peer receives ALL events across all agents.
+The Replica runs a **Replication Client** that connects to the Primary's main gRPC server (port 8443) via a bidirectional gRPC stream. The replication service is registered on the same server as the agent API, with per-method auth routing in the interceptors. Unlike regular agents (namespace-scoped), the replication peer receives ALL events across all agents.
 
 ### What Gets Replicated
 
@@ -176,7 +176,7 @@ Because the replica has been continuously replicating and writing resources to i
 
 ## Security
 
-The replication port uses **mTLS** for principal-to-principal connections. Each principal presents its own TLS certificate; the peer's certificate must be signed by the shared CA, and its extracted identity must appear in `--ha-allowed-replication-clients`.
+Replication RPCs are served on the **main gRPC port** (8443) alongside agent traffic. The main server's interceptors route replication methods (`/replicationapi.Replication/*`) through a separate auth path that uses the HA controller's `AuthMethod` and `AllowedReplicationClients`. This reuses the existing mTLS infrastructure — no separate port, listener, or TLS config needed.
 
 Identity extraction uses the same `MTLSAuthentication` mechanism as agent auth. Supported sources:
 
@@ -196,14 +196,9 @@ Flags for Region A (preferred primary):
 ```
 --ha-enabled
 --ha-preferred-role=primary
---ha-peer-address=principal.region-b.internal:8080
+--ha-peer-address=principal.region-b.internal:8443
 
-# Replication port mTLS
---ha-replication-tls-cert=/etc/argocd-agent/replication/tls.crt
---ha-replication-tls-key=/etc/argocd-agent/replication/tls.key
---ha-replication-tls-ca=/etc/argocd-agent/replication/ca.crt
-
-# Peer identity allowlist
+# Peer identity allowlist (replication uses the main server's mTLS)
 --ha-replication-auth=mtls:uri:spiffe://example.com/principal/(.+)
 --ha-allowed-replication-clients=region-b
 ```
@@ -222,10 +217,10 @@ Agent configuration is **unchanged** — agents connect to a single GSLB/DNS end
 
 | Port | Bind | TLS | Purpose |
 |------|------|-----|---------|
-| 8404 | `0.0.0.0` | mTLS (required) | Principal-to-principal replication |
+| 8443 | `0.0.0.0` | mTLS | Agent gRPC + replication (shared) |
 | 8405 | `127.0.0.1` | None | HAAdmin gRPC (status/promote/demote) |
 
-Override defaults with `--ha-replication-port` and `--ha-admin-port`.
+Override admin port with `--ha-admin-port`.
 
 ---
 

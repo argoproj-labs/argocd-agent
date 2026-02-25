@@ -167,7 +167,6 @@ func TestServerGetSnapshot(t *testing.T) {
 	forwarder := replication.NewForwarder()
 	stateProvider := newMockStateProvider()
 
-	// Add some agents
 	stateProvider.AddAgent("agent1", "managed", true, []ResourceInfo{
 		{Name: "app1", Namespace: "default", Kind: "Application", UID: "uid1"},
 	})
@@ -185,7 +184,6 @@ func TestServerGetSnapshot(t *testing.T) {
 
 	assert.Len(t, snapshot.Agents, 2)
 
-	// Find agents by name
 	agentMap := make(map[string]*replicationapi.AgentState)
 	for _, agent := range snapshot.Agents {
 		agentMap[agent.Name] = agent
@@ -219,7 +217,6 @@ func TestServerStatus(t *testing.T) {
 	stateProvider := newMockStateProvider()
 	server := NewServer(forwarder, stateProvider)
 
-	// Queue some events
 	forwarder.Forward(nil, "agent1", replication.DirectionInbound)
 	forwarder.Forward(nil, "agent2", replication.DirectionOutbound)
 
@@ -239,28 +236,23 @@ func TestServerSubscribe(t *testing.T) {
 		stateProvider := newMockStateProvider()
 		server := NewServer(forwarder, stateProvider)
 
-		// Start forwarder
 		ctx, cancel := context.WithCancel(context.Background())
 		go forwarder.Run(ctx)
 		defer cancel()
 
 		stream := newMockGrpcStream()
 
-		// Run subscribe in background
 		done := make(chan error)
 		go func() {
 			done <- server.Subscribe(stream)
 		}()
 
-		// Send initial ACK to unblock the server's flush handshake
 		stream.recvAcks <- &replicationapi.ReplicationAck{AckedSequenceNum: 0}
 
-		// Wait for registration + flush
 		time.Sleep(50 * time.Millisecond)
 		assert.Equal(t, 1, server.ConnectedReplicaCount())
 		assert.Equal(t, 1, forwarder.ReplicaCount())
 
-		// Disconnect
 		stream.cancelFn()
 
 		select {
@@ -270,7 +262,6 @@ func TestServerSubscribe(t *testing.T) {
 			t.Fatal("Subscribe did not return")
 		}
 
-		// Should be cleaned up
 		time.Sleep(50 * time.Millisecond)
 		assert.Equal(t, 0, server.ConnectedReplicaCount())
 	})
@@ -284,20 +275,17 @@ func TestServerSubscribe(t *testing.T) {
 		go forwarder.Run(ctx)
 		defer cancel()
 
-		// First connection should succeed
 		stream1 := newMockGrpcStream()
 		go server.Subscribe(stream1)
 		stream1.recvAcks <- &replicationapi.ReplicationAck{AckedSequenceNum: 0}
 		time.Sleep(50 * time.Millisecond)
 		assert.Equal(t, 1, server.ConnectedReplicaCount())
 
-		// Second connection should be rejected
 		stream2 := newMockGrpcStream()
 		err := server.Subscribe(stream2)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "max replica connections")
 
-		// Cleanup
 		stream1.cancelFn()
 	})
 }
@@ -322,14 +310,12 @@ func TestServerReplicaManagement(t *testing.T) {
 	go forwarder.Run(ctx)
 	defer cancel()
 
-	// Connect replicas
 	stream1 := newMockGrpcStream()
 	stream2 := newMockGrpcStream()
 
 	go server.Subscribe(stream1)
 	go server.Subscribe(stream2)
 
-	// Send initial ACKs to unblock flush handshake
 	stream1.recvAcks <- &replicationapi.ReplicationAck{AckedSequenceNum: 0}
 	stream2.recvAcks <- &replicationapi.ReplicationAck{AckedSequenceNum: 0}
 
@@ -339,15 +325,12 @@ func TestServerReplicaManagement(t *testing.T) {
 	ids := server.GetReplicaIDs()
 	assert.Len(t, ids, 2)
 
-	// Disconnect one by cancelling its stream context (simulates client disconnect)
 	stream1.cancelFn()
 
-	// Wait for cleanup with polling
 	assert.Eventually(t, func() bool {
 		return server.ConnectedReplicaCount() == 1
 	}, time.Second, 10*time.Millisecond, "expected 1 replica after disconnect")
 
-	// Cleanup remaining
 	stream2.cancelFn()
 }
 
@@ -362,7 +345,6 @@ func TestServerForwardEvent_RoundTrip(t *testing.T) {
 
 	stream := newMockGrpcStream()
 	go server.Subscribe(stream)
-	// Send initial ACK to unblock flush handshake
 	stream.recvAcks <- &replicationapi.ReplicationAck{AckedSequenceNum: 0}
 	time.Sleep(50 * time.Millisecond)
 
@@ -412,14 +394,11 @@ func TestBufferingAdapter(t *testing.T) {
 		require.NoError(t, adapter.Send(ev1))
 		require.NoError(t, adapter.Send(ev2))
 
-		// Nothing sent to stream yet
 		assert.Empty(t, stream.SentEvents())
 
-		// Flush
 		require.NoError(t, adapter.Flush())
 		assert.Len(t, stream.SentEvents(), 2)
 
-		// After flush, sends go through directly
 		ev3 := &replication.ReplicatedEvent{AgentName: "a3", SequenceNum: 3}
 		require.NoError(t, adapter.Send(ev3))
 		assert.Len(t, stream.SentEvents(), 3)
@@ -440,22 +419,17 @@ func TestBufferingAdapter(t *testing.T) {
 			done <- server.Subscribe(stream)
 		}()
 
-		// Give Subscribe time to register the buffering adapter
 		time.Sleep(50 * time.Millisecond)
 
-		// Forward an event while the replica hasn't ACK'd (should be buffered)
 		server.ForwardEvent(nil, "agent-pre", replication.DirectionInbound)
 		time.Sleep(50 * time.Millisecond)
 		assert.Empty(t, stream.SentEvents())
 
-		// Replica sends initial ACK — triggers flush
 		stream.recvAcks <- &replicationapi.ReplicationAck{AckedSequenceNum: 0}
 		time.Sleep(50 * time.Millisecond)
 
-		// Buffered event should now be delivered
 		assert.Len(t, stream.SentEvents(), 1)
 
-		// Events after flush go through directly
 		server.ForwardEvent(nil, "agent-post", replication.DirectionInbound)
 		time.Sleep(50 * time.Millisecond)
 		assert.Len(t, stream.SentEvents(), 2)
@@ -465,7 +439,7 @@ func TestBufferingAdapter(t *testing.T) {
 	})
 }
 
-func TestServerShutdown(t *testing.T) {
+func TestDisconnectAllReplicas(t *testing.T) {
 	forwarder := replication.NewForwarder()
 	stateProvider := newMockStateProvider()
 	server := NewServer(forwarder, stateProvider)
@@ -474,34 +448,26 @@ func TestServerShutdown(t *testing.T) {
 	go forwarder.Run(ctx)
 	defer cancel()
 
-	// Connect replicas
 	stream1 := newMockGrpcStream()
 	stream2 := newMockGrpcStream()
 
 	go server.Subscribe(stream1)
 	go server.Subscribe(stream2)
 
-	// Send initial ACKs to unblock flush handshake
 	stream1.recvAcks <- &replicationapi.ReplicationAck{AckedSequenceNum: 0}
 	stream2.recvAcks <- &replicationapi.ReplicationAck{AckedSequenceNum: 0}
 
 	time.Sleep(50 * time.Millisecond)
 	assert.Equal(t, 2, server.ConnectedReplicaCount())
 
-	// Cancel stream contexts to simulate client disconnects during shutdown
-	// In real gRPC, server.Shutdown would propagate through to close streams
+	// DisconnectAllReplicas cancels internal contexts; in real gRPC the
+	// transport close propagates to Recv. Simulate that by also cancelling
+	// the mock stream contexts (the parent of the client context).
+	server.DisconnectAllReplicas()
 	stream1.cancelFn()
 	stream2.cancelFn()
 
-	// Shutdown should complete quickly when streams are already closing
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer shutdownCancel()
-
-	err := server.Shutdown(shutdownCtx)
-	require.NoError(t, err)
-
-	// Verify cleanup
 	assert.Eventually(t, func() bool {
 		return server.ConnectedReplicaCount() == 0
-	}, time.Second, 10*time.Millisecond, "expected all replicas disconnected after shutdown")
+	}, 2*time.Second, 10*time.Millisecond, "expected all replicas disconnected")
 }

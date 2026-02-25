@@ -15,7 +15,6 @@
 package ha
 
 import (
-	"crypto/tls"
 	"fmt"
 	"time"
 
@@ -24,23 +23,10 @@ import (
 
 // Options contains configuration for the HA controller
 type Options struct {
-	// Enabled indicates whether HA is enabled
-	Enabled bool
-
-	// PreferredRole is the preferred role for this principal ("primary" or "replica")
-	PreferredRole Role
-
-	// PeerAddress is the address of the peer principal (host:port)
-	PeerAddress string
-
-	// FailoverTimeout is how long to wait before promoting to standby after losing primary
+	Enabled         bool
+	PreferredRole   Role
+	PeerAddress     string
 	FailoverTimeout time.Duration
-
-	// ReplicationPort is the port to use for replication traffic
-	ReplicationPort int
-
-	// TLSConfig is the TLS configuration for replication connections
-	TLSConfig *tls.Config
 
 	// AdminPort is the port for the localhost-only admin gRPC server (HAAdmin)
 	AdminPort int
@@ -49,17 +35,12 @@ type Options struct {
 	// for replication. Identities are extracted via AuthMethod.
 	AllowedReplicationClients []string
 
-	// AuthMethod is the auth method used to authenticate replication connections
+	// AuthMethod authenticates replication connections (identity extraction)
 	AuthMethod auth.Method
 
-	// ReconnectBackoffInitial is the initial backoff duration for reconnection attempts
 	ReconnectBackoffInitial time.Duration
-
-	// ReconnectBackoffMax is the maximum backoff duration for reconnection attempts
-	ReconnectBackoffMax time.Duration
-
-	// ReconnectBackoffFactor is the factor to multiply backoff by after each attempt
-	ReconnectBackoffFactor float64
+	ReconnectBackoffMax     time.Duration
+	ReconnectBackoffFactor  float64
 }
 
 // DefaultOptions returns the default HA options
@@ -68,7 +49,6 @@ func DefaultOptions() *Options {
 		Enabled:                 false,
 		PreferredRole:           RoleReplica,
 		FailoverTimeout:         30 * time.Second,
-		ReplicationPort:         8404,
 		AdminPort:               8405,
 		ReconnectBackoffInitial: 1 * time.Second,
 		ReconnectBackoffMax:     30 * time.Second,
@@ -117,25 +97,6 @@ func WithFailoverTimeout(timeout time.Duration) Option {
 			return fmt.Errorf("failover timeout cannot be negative")
 		}
 		o.FailoverTimeout = timeout
-		return nil
-	}
-}
-
-// WithReplicationPort sets the port for replication traffic
-func WithReplicationPort(port int) Option {
-	return func(o *Options) error {
-		if port < 1 || port > 65535 {
-			return fmt.Errorf("replication port must be between 1 and 65535")
-		}
-		o.ReplicationPort = port
-		return nil
-	}
-}
-
-// WithTLSConfig sets the TLS configuration for replication
-func WithTLSConfig(config *tls.Config) Option {
-	return func(o *Options) error {
-		o.TLSConfig = config
 		return nil
 	}
 }

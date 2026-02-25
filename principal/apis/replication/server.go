@@ -16,14 +16,10 @@ package replication
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
-	"net"
 	"sync"
-	"time"
 
-	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
@@ -31,9 +27,7 @@ import (
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 )
 
@@ -43,15 +37,10 @@ func log() *logrus.Entry {
 
 // AgentStateProvider provides agent state for snapshots
 type AgentStateProvider interface {
-	// GetAllAgentNames returns the names of all known agents
 	GetAllAgentNames() []string
-	// GetAgentMode returns the mode of an agent ("autonomous" or "managed")
 	GetAgentMode(agentName string) string
-	// IsAgentConnected returns whether an agent is currently connected
 	IsAgentConnected(agentName string) bool
-	// GetAgentResources returns the resources managed by an agent
 	GetAgentResources(agentName string) []ResourceInfo
-	// GetPrincipalResources returns principal-scoped resources (e.g. ApplicationSets)
 	GetPrincipalResources() []ResourceInfo
 }
 
@@ -65,45 +54,23 @@ type ResourceInfo struct {
 	Data         []byte
 }
 
-// Server implements the gRPC replication service
+// Server implements the gRPC replication service.
+// Auth is handled by the main server's interceptors; this struct only
+// contains service logic and replica tracking.
 type Server struct {
 	replicationapi.UnimplementedReplicationServer
 
 	mu sync.RWMutex
 
-	// Forwarder handles event distribution to replicas
-	forwarder *replication.Forwarder
-
-	// State provider for snapshots
+	forwarder     *replication.Forwarder
 	stateProvider AgentStateProvider
-
-	// Options
-	options *ServerOptions
-
-	// Connected replicas (for management)
-	replicas map[string]*replicaClient
-
-	// gRPC server for replication
-	grpcServer *grpc.Server
-
-	// Listener for the gRPC server
-	listener net.Listener
+	options       *ServerOptions
+	replicas      map[string]*replicaClient
 }
 
 // ServerOptions configures the replication server
 type ServerOptions struct {
-	// MaxReplicaConnections limits the number of concurrent replica connections
 	MaxReplicaConnections int
-
-	// TLSConfig is the TLS config for the gRPC server (nil = no TLS)
-	TLSConfig *tls.Config
-
-	// AuthMethod authenticates incoming replication connections
-	AuthMethod auth.Method
-
-	// AllowedClients is the allowlist of identities permitted to replicate.
-	// Only checked when AuthMethod is set. Empty = allow all authenticated.
-	AllowedClients []string
 }
 
 // ServerOption configures the server
@@ -113,27 +80,6 @@ type ServerOption func(*ServerOptions)
 func WithMaxReplicaConnections(max int) ServerOption {
 	return func(o *ServerOptions) {
 		o.MaxReplicaConnections = max
-	}
-}
-
-// WithTLSConfig sets the TLS configuration for the replication server
-func WithTLSConfig(config *tls.Config) ServerOption {
-	return func(o *ServerOptions) {
-		o.TLSConfig = config
-	}
-}
-
-// WithAuthMethod sets the auth method for authenticating replication connections
-func WithAuthMethod(method auth.Method) ServerOption {
-	return func(o *ServerOptions) {
-		o.AuthMethod = method
-	}
-}
-
-// WithAllowedClients sets the allowlist of identities permitted to replicate
-func WithAllowedClients(clients []string) ServerOption {
-	return func(o *ServerOptions) {
-		o.AllowedClients = clients
 	}
 }
 
@@ -150,7 +96,7 @@ type replicaClient struct {
 // NewServer creates a new replication server
 func NewServer(forwarder *replication.Forwarder, stateProvider AgentStateProvider, opts ...ServerOption) *Server {
 	options := &ServerOptions{
-		MaxReplicaConnections: 10, // Default max replicas
+		MaxReplicaConnections: 10,
 	}
 	for _, opt := range opts {
 		opt(options)
@@ -164,113 +110,8 @@ func NewServer(forwarder *replication.Forwarder, stateProvider AgentStateProvide
 	}
 }
 
-// Start starts the gRPC server on the specified port.
-// This method is idempotent - calling it when already started will return nil.
-func (s *Server) Start(port int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Already running
-	if s.grpcServer != nil {
-		log().Debug("Replication server already running")
-		return nil
-	}
-
-	addr := fmt.Sprintf("0.0.0.0:%d", port)
-
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", addr, err)
-	}
-	s.listener = listener
-
-	// Build gRPC server options
-	var grpcOpts []grpc.ServerOption
-	if s.options.TLSConfig != nil {
-		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(s.options.TLSConfig)))
-	}
-	if s.options.AuthMethod != nil {
-		grpcOpts = append(grpcOpts, grpc.StreamInterceptor(s.authStreamInterceptor()))
-		grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(s.authUnaryInterceptor()))
-	}
-
-	s.grpcServer = grpc.NewServer(grpcOpts...)
-	replicationapi.RegisterReplicationServer(s.grpcServer, s)
-
-	log().WithField("port", port).Info("Starting replication gRPC server")
-
-	go func() {
-		if err := s.grpcServer.Serve(listener); err != nil {
-			s.mu.RLock()
-			isRunning := s.grpcServer != nil
-			s.mu.RUnlock()
-			if isRunning {
-				log().WithError(err).Error("Replication gRPC server error")
-			}
-		}
-	}()
-
-	return nil
-}
-
-// authStreamInterceptor returns a stream interceptor that authenticates the
-// caller using the configured AuthMethod and checks it against AllowedClients.
-func (s *Server) authStreamInterceptor() grpc.StreamServerInterceptor {
-	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		identity, err := s.options.AuthMethod.Authenticate(ss.Context(), auth.Credentials{})
-		if err != nil {
-			log().WithError(err).Warn("Replication stream rejected: authentication failed")
-			return status.Errorf(codes.Unauthenticated, "replication auth failed: %v", err)
-		}
-		if len(s.options.AllowedClients) > 0 {
-			allowed := false
-			for _, c := range s.options.AllowedClients {
-				if identity == c {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				log().WithField("identity", identity).Warn("Replication stream rejected: identity not in allowed replication clients")
-				return status.Errorf(codes.PermissionDenied, "identity %q not in allowed replication clients", identity)
-			}
-		}
-		log().WithField("identity", identity).Debug("Replication stream authenticated")
-		return handler(srv, ss)
-	}
-}
-
-// authUnaryInterceptor returns a unary interceptor that authenticates the
-// caller using the configured AuthMethod and checks it against AllowedClients.
-func (s *Server) authUnaryInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		identity, err := s.options.AuthMethod.Authenticate(ctx, auth.Credentials{})
-		if err != nil {
-			log().WithError(err).Warn("Replication unary rejected: authentication failed")
-			return nil, status.Errorf(codes.Unauthenticated, "replication auth failed: %v", err)
-		}
-		if len(s.options.AllowedClients) > 0 {
-			allowed := false
-			for _, c := range s.options.AllowedClients {
-				if identity == c {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				log().WithField("identity", identity).Warn("Replication unary rejected: identity not in allowed replication clients")
-				return nil, status.Errorf(codes.PermissionDenied, "identity %q not in allowed replication clients", identity)
-			}
-		}
-		return handler(ctx, req)
-	}
-}
-
 // Subscribe handles the bidirectional replication stream.
-// Replicas call this to receive events and send acknowledgments.
-// Implements replicationapi.ReplicationServer interface.
 func (s *Server) Subscribe(stream replicationapi.Replication_SubscribeServer) error {
-	// Generate a unique ID for this replica connection
 	replicaID := uuid.New().String()[:8]
 
 	ctx, cancel := context.WithCancel(stream.Context())
@@ -284,7 +125,6 @@ func (s *Server) Subscribe(stream replicationapi.Replication_SubscribeServer) er
 		}),
 	}
 
-	// Check if we're at max capacity
 	s.mu.Lock()
 	if len(s.replicas) >= s.options.MaxReplicaConnections {
 		s.mu.Unlock()
@@ -296,13 +136,10 @@ func (s *Server) Subscribe(stream replicationapi.Replication_SubscribeServer) er
 
 	client.logCtx.Info("Replica connected for replication")
 
-	// Register a buffering adapter so events are queued (not lost) while
-	// the replica fetches and applies its snapshot.
 	inner := &streamAdapter{stream: stream, replicaID: replicaID}
 	adapter := newBufferingAdapter(inner)
 	s.forwarder.RegisterReplica(replicaID, adapter)
 
-	// Ensure cleanup on exit
 	defer func() {
 		s.forwarder.UnregisterReplica(replicaID)
 		s.mu.Lock()
@@ -312,8 +149,6 @@ func (s *Server) Subscribe(stream replicationapi.Replication_SubscribeServer) er
 		client.logCtx.Info("Replica disconnected from replication")
 	}()
 
-	// Wait for the replica's first ACK which signals that it has applied its
-	// snapshot. Then flush buffered events and continue with normal streaming.
 	firstAck, err := client.stream.Recv()
 	if err != nil {
 		return fmt.Errorf("waiting for initial ACK: %w", err)
@@ -325,21 +160,18 @@ func (s *Server) Subscribe(stream replicationapi.Replication_SubscribeServer) er
 		return fmt.Errorf("flushing buffered events: %w", err)
 	}
 
-	// Start ACK receiver goroutine for subsequent ACKs
 	client.wg.Add(1)
 	go func() {
 		defer client.wg.Done()
 		s.receiveAcks(client)
 	}()
 
-	// Wait for context cancellation or error
 	<-ctx.Done()
 
 	client.wg.Wait()
 	return ctx.Err()
 }
 
-// streamAdapter adapts Replication_SubscribeServer to replication.ReplicaStream
 type streamAdapter struct {
 	stream    replicationapi.Replication_SubscribeServer
 	replicaID string
@@ -357,9 +189,6 @@ func (a *streamAdapter) Context() context.Context {
 	return a.stream.Context()
 }
 
-// bufferingAdapter wraps streamAdapter to buffer events until the replica
-// signals it has applied its snapshot. This eliminates the gap between
-// snapshot generation and stream subscription where events could be lost.
 type bufferingAdapter struct {
 	inner     *streamAdapter
 	mu        sync.Mutex
@@ -388,7 +217,6 @@ func (b *bufferingAdapter) Context() context.Context {
 	return b.inner.Context()
 }
 
-// Flush sends all buffered events and switches to pass-through mode.
 func (b *bufferingAdapter) Flush() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -402,7 +230,6 @@ func (b *bufferingAdapter) Flush() error {
 	return nil
 }
 
-// convertToProto converts an internal ReplicatedEvent to the proto message
 func convertToProto(ev *replication.ReplicatedEvent) (*replicationapi.ReplicatedEvent, error) {
 	var protoEvent *replicationapi.ReplicatedEvent
 
@@ -430,7 +257,6 @@ func convertToProto(ev *replication.ReplicatedEvent) (*replicationapi.Replicated
 	return protoEvent, nil
 }
 
-// receiveAcks handles incoming acknowledgments from a replica
 func (s *Server) receiveAcks(client *replicaClient) {
 	for {
 		select {
@@ -455,16 +281,12 @@ func (s *Server) receiveAcks(client *replicaClient) {
 			return
 		}
 
-		// Update the forwarder with the ACK
 		s.forwarder.UpdateReplicaAck(client.id, ack.AckedSequenceNum)
 		client.logCtx.WithField("acked_seq", ack.AckedSequenceNum).Trace("Received ACK from replica")
 	}
 }
 
 // GetSnapshot returns the current state snapshot for initial sync.
-// TODO: use req.SinceSequenceNum to return an incremental snapshot
-// instead of the full state on every reconnect.
-// Implements replicationapi.ReplicationServer interface.
 func (s *Server) GetSnapshot(ctx context.Context, req *replicationapi.SnapshotRequest) (*replicationapi.ReplicationSnapshot, error) {
 	if s.stateProvider == nil {
 		return nil, status.Errorf(codes.Internal, "state provider not configured")
@@ -475,7 +297,6 @@ func (s *Server) GetSnapshot(ctx context.Context, req *replicationapi.SnapshotRe
 		LastSequenceNum: s.forwarder.CurrentSequenceNum(),
 	}
 
-	// Populate principal-scoped resources (e.g. ApplicationSets)
 	principalResources := s.stateProvider.GetPrincipalResources()
 	for _, res := range principalResources {
 		snapshot.PrincipalResources = append(snapshot.PrincipalResources, &replicationapi.Resource{
@@ -521,7 +342,6 @@ func (s *Server) GetSnapshot(ctx context.Context, req *replicationapi.SnapshotRe
 }
 
 // Status returns the current replication status.
-// Implements replicationapi.ReplicationServer interface.
 func (s *Server) Status(ctx context.Context, req *replicationapi.StatusRequest) (*replicationapi.ReplicationStatus, error) {
 	forwarderStatus := s.forwarder.GetStatus()
 
@@ -537,7 +357,7 @@ func (s *Server) ForwardEvent(ev *event.Event, agentName string, direction repli
 	s.forwarder.Forward(ev, agentName, direction)
 }
 
-// GetForwarder returns the underlying forwarder (for integration)
+// GetForwarder returns the underlying forwarder
 func (s *Server) GetForwarder() *replication.Forwarder {
 	return s.forwarder
 }
@@ -572,50 +392,11 @@ func (s *Server) DisconnectReplica(replicaID string) {
 	}
 }
 
-// Shutdown gracefully shuts down the server
-func (s *Server) Shutdown(ctx context.Context) error {
-	log().Info("Shutting down replication server")
-
-	// Stop the gRPC server first
-	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
-		s.grpcServer = nil
-	}
-
-	// Close the listener
-	if s.listener != nil {
-		s.listener.Close()
-		s.listener = nil
-	}
-
-	// Cancel all replica connections
+// DisconnectAllReplicas cancels all connected replica streams
+func (s *Server) DisconnectAllReplicas() {
 	s.mu.Lock()
 	for _, client := range s.replicas {
 		client.cancelFn()
 	}
 	s.mu.Unlock()
-
-	// Wait for all replicas to disconnect (with timeout)
-	done := make(chan struct{})
-	go func() {
-		for {
-			s.mu.RLock()
-			count := len(s.replicas)
-			s.mu.RUnlock()
-			if count == 0 {
-				close(done)
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}()
-
-	select {
-	case <-done:
-		log().Info("All replicas disconnected")
-	case <-ctx.Done():
-		log().Warn("Shutdown timeout, some replicas may not have disconnected cleanly")
-	}
-
-	return nil
 }
