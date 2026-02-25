@@ -36,6 +36,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -266,7 +267,48 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		principalNS := "argocd"
 
 		networkPolicy := createFakeNetworkPolicy("principal")
-		cl := fake.NewSimpleClientset(networkPolicy)
+		repoServerDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-repo-server",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "repo-server",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+		serverDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-server",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "server",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+		redisDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-redis",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "redis",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+		dexServerDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-dex-server",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "dex-server",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+
+		cl := fake.NewSimpleClientset(networkPolicy, repoServerDeployment, serverDeployment, redisDeployment, dexServerDeployment)
 
 		// Create a scheme and register ArgoCD CRD
 		scheme := runtime.NewScheme()
@@ -1030,6 +1072,75 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		}
 		require.True(t, caughtPolicy)
 	})
+
+	t.Run("Components are missing or incorrectly deployed on principal", func(t *testing.T) {
+		principalNS := "argocd"
+
+		repoServerDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-repo-server",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "repo-server",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+		appControllerSet := &appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-application-controller",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "application-controller",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+		appSetControllerDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-applicationset-controller",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "applicationset-controller",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+
+		cl := fake.NewSimpleClientset(repoServerDeployment, appControllerSet, appSetControllerDeployment)
+		scheme := runtime.NewScheme()
+		dynCl := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1beta1", Resource: "argocds"}:       "ArgoCDList",
+			{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}: "ApplicationList",
+		})
+
+		_, err := cl.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: principalNS},
+		}, metav1.CreateOptions{})
+		require.NoError(t, err, "error creating namespace")
+
+		kubeClient := &kube.KubernetesClient{
+			Clientset:     cl,
+			DynamicClient: dynCl,
+			Context:       context.TODO(),
+			Namespace:     principalNS,
+		}
+
+		res := RunPrincipalChecks(context.Background(), kubeClient, principalNS)
+		caughtInvalid := false
+		caughtMissing := false
+		for _, r := range res {
+			if r.err != nil && strings.Contains(r.name, "deployed Argo CD components") {
+				caughtInvalid = strings.Contains(r.err.Error(), "application-controller") &&
+					strings.Contains(r.err.Error(), "applicationset-controller")
+				caughtMissing = strings.Contains(r.err.Error(), "server") &&
+					strings.Contains(r.err.Error(), "redis") &&
+					strings.Contains(r.err.Error(), "dex-server")
+			}
+		}
+		require.True(t, caughtInvalid)
+		require.True(t, caughtMissing)
+	})
 }
 
 func TestCheckConfigAgent(t *testing.T) {
@@ -1040,7 +1151,38 @@ func TestCheckConfigAgent(t *testing.T) {
 		agentNetPolicy := createFakeNetworkPolicy("agent")
 		principalNetPolicy := createFakeNetworkPolicy("principal")
 
-		agentCl := fake.NewSimpleClientset(agentNetPolicy)
+		repoServerDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-repo-server",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "repo-server",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+		redisDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-redis",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "redis",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+		appControllerSet := &appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-application-controller",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "application-controller",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+
+		agentCl := fake.NewSimpleClientset(agentNetPolicy, repoServerDeployment, redisDeployment, appControllerSet)
 		principalCl := fake.NewSimpleClientset(principalNetPolicy)
 
 		scheme := runtime.NewScheme()
@@ -1489,5 +1631,85 @@ func TestCheckConfigAgent(t *testing.T) {
 			}
 		}
 		require.True(t, caughtPolicy)
+	})
+
+	t.Run("Components are missing or incorrectly deployed on principal", func(t *testing.T) {
+		agentNS := "argocd"
+		principalNS := "argocd"
+
+		repoServerDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-repo-server",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "repo-server",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+		serverDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-server",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "server",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+		dexServerDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-dex-server",
+				Namespace: "argocd",
+				Labels: map[string]string{
+					"app.kubernetes.io/component": "dex-server",
+					"app.kubernetes.io/part-of":   "argocd",
+				},
+			},
+		}
+
+		agentCl := fake.NewSimpleClientset(repoServerDeployment, serverDeployment, dexServerDeployment)
+		principalCl := fake.NewSimpleClientset()
+
+		scheme := runtime.NewScheme()
+		agentDynCl := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1beta1", Resource: "argocds"}: "ArgoCDList",
+		})
+		principalDynCl := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+			{Group: "argoproj.io", Version: "v1beta1", Resource: "argocds"}: "ArgoCDList",
+		})
+
+		_, err := agentCl.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: principalNS},
+		}, metav1.CreateOptions{})
+		require.NoError(t, err, "error creating namespace")
+
+		agentKubeClient := &kube.KubernetesClient{
+			Clientset:     agentCl,
+			DynamicClient: agentDynCl,
+			Context:       context.TODO(),
+			Namespace:     agentNS,
+		}
+
+		principalKubeClient := &kube.KubernetesClient{
+			Clientset:     principalCl,
+			DynamicClient: principalDynCl,
+			Context:       context.TODO(),
+			Namespace:     principalNS,
+		}
+
+		res := RunAgentChecks(context.Background(), agentKubeClient, agentNS, principalKubeClient, principalNS)
+		caughtInvalid := false
+		caughtMissing := false
+		for _, r := range res {
+			if r.err != nil && strings.Contains(r.name, "deployed Argo CD components") {
+				caughtInvalid = strings.Contains(r.err.Error(), "server") &&
+					strings.Contains(r.err.Error(), "de")
+				caughtMissing = strings.Contains(r.err.Error(), "application-controller") &&
+					strings.Contains(r.err.Error(), "redis")
+			}
+		}
+		require.True(t, caughtInvalid)
+		require.True(t, caughtMissing)
 	})
 }

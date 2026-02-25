@@ -308,8 +308,13 @@ func RunPrincipalChecks(ctx context.Context, kubeClient *kube.KubernetesClient, 
 	})
 
 	out = append(out, checkResult{
-		name: fmt.Sprintf("Verifying argo cd network policy allows for ingress from principal"),
+		name: fmt.Sprintf("Verifying Argo CD network policy allows for ingress from principal"),
 		err:  bothVerifyRedisNetworkPolicy(ctx, kubeClient, principalNS, "principal"),
+	})
+
+	out = append(out, checkResult{
+		name: "Verifying deployed Argo CD components on principal",
+		err:  principalVerifyDeployedComponents(ctx, kubeClient, principalNS),
 	})
 
 	return out
@@ -367,8 +372,13 @@ func RunAgentChecks(ctx context.Context, agentKubeClient *kube.KubernetesClient,
 
 	// Agent Argo CD redis network policy allows for ingress from agent
 	out = append(out, checkResult{
-		name: "Verifying argo cd network policy allows for ingress from agent",
+		name: "Verifying Argo CD network policy allows for ingress from agent",
 		err:  bothVerifyRedisNetworkPolicy(ctx, agentKubeClient, agentNS, "agent"),
+	})
+
+	out = append(out, checkResult{
+		name: "Verifying deployed Argo CD components on agent",
+		err:  agentVerifyDeployedComponents(ctx, agentKubeClient, agentNS),
 	})
 
 	return out
@@ -680,6 +690,101 @@ func principalVerifyClusterSecretAnnotation(ctx context.Context, kc *kube.Kubern
 	return nil
 }
 
+// listDeployedArgoCDComponents parses the specified namespace for Argo CD components and returns them as a map where the key
+// is the component and value is the name
+func listDeployedArgoCDComponents(ctx context.Context, kc *kube.KubernetesClient, ns string) (map[string]string, error) {
+	if kc.Clientset == nil {
+		return nil, fmt.Errorf("client set is not avilable, failed to list deployed components")
+	}
+
+	components := make(map[string]string)
+
+	deployments, err := kc.Clientset.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, deploy := range deployments.Items {
+		if partof, exists := deploy.Labels["app.kubernetes.io/part-of"]; exists && partof != "argocd" {
+			continue
+		}
+		component, exists := deploy.Labels["app.kubernetes.io/component"]
+		if !exists {
+			continue
+		}
+		components[component] = deploy.Name
+	}
+
+	statefulsets, err := kc.Clientset.AppsV1().StatefulSets(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, set := range statefulsets.Items {
+		if partof, exists := set.Labels["app.kubernetes.io/part-of"]; exists && partof != "argocd" {
+			continue
+		}
+		component, exists := set.Labels["app.kubernetes.io/component"]
+		if !exists {
+			continue
+		}
+		components[component] = set.Name
+	}
+
+	return components, nil
+}
+
+// parseDeployedComponents is a helper function to format the output for the deployed component checks
+func parseDeployedComponents(components map[string]string, validComponents, invalidComponents []string) string {
+	var missingComponents []string
+	for _, component := range validComponents {
+		if _, exists := components[component]; !exists {
+			missingComponents = append(missingComponents, component)
+		}
+	}
+
+	var foundInvalidComponents []string
+	for _, component := range invalidComponents {
+		if name, exists := components[component]; exists {
+			foundInvalidComponents = append(foundInvalidComponents, fmt.Sprintf("%s (%s)", component, name))
+		}
+	}
+
+	var errParts []string
+	if len(missingComponents) > 0 {
+		errParts = append(errParts, fmt.Sprintf("the following components were missing: %s", strings.Join(missingComponents, ", ")))
+	}
+
+	if len(foundInvalidComponents) > 0 {
+		errParts = append(errParts, fmt.Sprintf("the following invalid components were found: %s", strings.Join(foundInvalidComponents, ", ")))
+	}
+
+	return strings.Join(errParts, "\n")
+}
+
+// principalVerifyDeployedComponents verifies that there is neither an application or application set
+// controller on the principal and that the repo-server, dex-server, redis, and argocd-server are deployed
+func principalVerifyDeployedComponents(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
+	if kc.Clientset == nil {
+		return fmt.Errorf("client set is not available, failed to list deployed components")
+	}
+
+	components, err := listDeployedArgoCDComponents(ctx, kc, ns)
+	if err != nil {
+		return fmt.Errorf("failed to list Argo CD components in namespace %s: %s", ns, err.Error())
+	}
+
+	validComponents := []string{common.LabelValueComponentRepoServer, "redis", "dex-server", "server"}
+	invalidComponents := []string{"application-controller", "applicationset-controller"}
+	result := parseDeployedComponents(components, validComponents, invalidComponents)
+
+	if result != "" {
+		return fmt.Errorf("%s", result)
+	}
+
+	return nil
+}
+
 func agentCASecretValid(ctx context.Context, kubeClient kubernetes.Interface, ns, name string) error {
 	sec, err := kubeClient.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -765,6 +870,27 @@ func x509FromTLSSecret(ctx context.Context, kubeClient kubernetes.Interface, ns,
 		return nil, fmt.Errorf("could not parse certificate in secret %s/%s: %w", ns, name, err)
 	}
 	return parsed, nil
+}
+
+func agentVerifyDeployedComponents(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
+	if kc.Clientset == nil {
+		return fmt.Errorf("client set is not available, failed to list deployed components")
+	}
+
+	components, err := listDeployedArgoCDComponents(ctx, kc, ns)
+	if err != nil {
+		return fmt.Errorf("failed to list Argo CD components in %s: %s", ns, err.Error())
+	}
+
+	validComponents := []string{common.LabelValueComponentRepoServer, "application-controller", "redis"}
+	invalidComponents := []string{"server", "dex-server"}
+	result := parseDeployedComponents(components, validComponents, invalidComponents)
+
+	if result != "" {
+		return fmt.Errorf("%s", result)
+	}
+
+	return nil
 }
 
 // bothVerifyRedisNetworkPolicy verifies that the network policy for Argo CD allows ingress traffic
