@@ -15,12 +15,19 @@
 package ha
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeAuthMethod struct{}
+
+func (f *fakeAuthMethod) Init() error                                                     { return nil }
+func (f *fakeAuthMethod) Authenticate(_ context.Context, _ auth.Credentials) (string, error) { return "test", nil }
 
 func TestDefaultOptions(t *testing.T) {
 	opts := DefaultOptions()
@@ -125,6 +132,58 @@ func TestWithReconnectBackoff(t *testing.T) {
 		err := WithReconnectBackoff(1*time.Second, 60*time.Second, 0.5)(opts)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "backoff factor must be at least 1.0")
+	})
+}
+
+func TestWithAdminPort(t *testing.T) {
+	t.Run("valid port", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminPort(9090)(opts)
+		require.NoError(t, err)
+		assert.Equal(t, 9090, opts.AdminPort)
+	})
+
+	t.Run("port zero", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminPort(0)(opts)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "admin port must be between")
+	})
+
+	t.Run("negative port", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminPort(-1)(opts)
+		require.Error(t, err)
+	})
+
+	t.Run("port exceeds max", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminPort(65536)(opts)
+		require.Error(t, err)
+	})
+}
+
+func TestWithAuthMethod(t *testing.T) {
+	opts := DefaultOptions()
+	m := &fakeAuthMethod{}
+	err := WithAuthMethod(m)(opts)
+	require.NoError(t, err)
+	assert.Equal(t, m, opts.AuthMethod)
+}
+
+func TestWithAllowedReplicationClients(t *testing.T) {
+	t.Run("set clients", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAllowedReplicationClients([]string{"region-a", "region-b"})(opts)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"region-a", "region-b"}, opts.AllowedReplicationClients)
+	})
+
+	t.Run("empty list", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAllowedReplicationClients([]string{})(opts)
+		require.NoError(t, err)
+		assert.Empty(t, opts.AllowedReplicationClients)
 	})
 }
 
