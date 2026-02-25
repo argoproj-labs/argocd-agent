@@ -257,21 +257,22 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 			replication.WithEventHandler(components.handleReplicatedEvent),
 		}
 
-		// Derive client TLS from the main server's TLS materials: our server
-		// cert becomes the client identity and the server CA verifies the peer.
-		if server.tlsConfig != nil {
-			clientTLS := &tls.Config{
+		// Derive client TLS lazily from the server's TLS config, which isn't
+		// populated until Listen() is called (after NewHAComponents returns).
+		// The server cert acts as the client identity; ClientCAs (rootCa) is
+		// reused as RootCAs — assumes the same CA signs both client and server certs.
+		clientOpts = append(clientOpts, replication.WithTLSConfigFunc(func() *tls.Config {
+			if server.tlsConfig == nil {
+				return nil
+			}
+			return &tls.Config{
 				Certificates: server.tlsConfig.Certificates,
-				// Reuse ClientCAs as RootCAs — assumes the same CA signs both client and server certs
 				RootCAs:      server.tlsConfig.ClientCAs,
 				MinVersion:   server.tlsConfig.MinVersion,
 				MaxVersion:   server.tlsConfig.MaxVersion,
 				CipherSuites: server.tlsConfig.CipherSuites,
 			}
-			clientOpts = append(clientOpts, replication.WithClientTLS(clientTLS))
-		} else {
-			clientOpts = append(clientOpts, replication.WithInsecure())
-		}
+		}))
 
 		components.ReplicationClient = replication.NewClient(ctx, clientOpts...)
 	}
