@@ -175,7 +175,11 @@ func (a *Agent) handleStreamEvents() error {
 	streamCtx, streamCancel := context.WithCancel(a.context)
 	defer streamCancel()
 
-	a.eventWriter = event.NewEventWriter(stream)
+	if a.eventWriter == nil {
+		a.eventWriter = event.NewEventWriter(stream)
+	} else {
+		a.eventWriter.UpdateTarget(stream)
+	}
 	go a.eventWriter.SendWaitingEvents(streamCtx)
 
 	logCtx := log().WithFields(logrus.Fields{

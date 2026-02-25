@@ -71,7 +71,7 @@ func (be *KubernetesBackend) Delete(ctx context.Context, name string, namespace 
 		case backend.DeletePropagationOrphan:
 			k8sPropagationPolicy = v1.DeletePropagationOrphan
 		default:
-			return fmt.Errorf("unexpected propagationPolicy value: '%v'", deletionPropagation)
+			return fmt.Errorf("unexpected propagationPolicy value: '%v'", *deletionPropagation)
 		}
 	}
 
