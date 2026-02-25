@@ -55,9 +55,10 @@ type Client struct {
 	mu sync.RWMutex
 
 	// Connection settings
-	primaryAddr string
-	tlsConfig   *tls.Config
-	insecure    bool
+	primaryAddr   string
+	tlsConfig     *tls.Config
+	tlsConfigFn   func() *tls.Config
+	insecure      bool
 
 	// gRPC connection
 	conn *grpc.ClientConn
@@ -186,6 +187,15 @@ func WithClientTLS(config *tls.Config) ClientOption {
 	}
 }
 
+// WithTLSConfigFunc sets a lazy TLS config provider evaluated at dial time.
+// Use this when the TLS config isn't available at client construction time.
+func WithTLSConfigFunc(fn func() *tls.Config) ClientOption {
+	return func(c *Client) {
+		c.tlsConfigFn = fn
+		c.insecure = false
+	}
+}
+
 // WithInsecure disables TLS for the client connection
 func WithInsecure() ClientOption {
 	return func(c *Client) {
@@ -286,10 +296,15 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	dialOpts := []grpc.DialOption{}
 
+	tlsCfg := c.tlsConfig
+	if tlsCfg == nil && c.tlsConfigFn != nil {
+		tlsCfg = c.tlsConfigFn()
+	}
+
 	if c.insecure {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	} else if c.tlsConfig != nil {
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(c.tlsConfig)))
+	} else if tlsCfg != nil {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	} else {
 		return fmt.Errorf("TLS configuration required (or use WithInsecure)")
 	}
