@@ -28,6 +28,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -95,6 +96,9 @@ type Remote struct {
 
 	// The largest GRPC message size supported, configurable via env/param
 	MaxGRPCMessageSize int
+
+	// agentVersion is the version of the agent, used for handshake validation
+	agentVersion string
 }
 
 type RemoteOption func(r *Remote) error
@@ -346,6 +350,7 @@ func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error)
 		},
 		clientMode:         types.AgentModeAutonomous,
 		MaxGRPCMessageSize: grpcutil.DefaultGRPCMaxMessageSize,
+		agentVersion:       version.New("argocd-agent").Version(),
 	}
 	for _, o := range opts {
 		if err := o(r); err != nil {
@@ -383,8 +388,11 @@ func (r *Remote) Creds() auth.Credentials {
 
 func (r *Remote) retriable(err error) bool {
 	st, ok := status.FromError(err)
-	if ok && st.Code() == codes.Canceled {
-		return false
+	if ok {
+		switch st.Code() {
+		case codes.Canceled, codes.FailedPrecondition, codes.InvalidArgument:
+			return false
+		}
 	}
 	return true
 }
@@ -502,11 +510,23 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		case <-ctx.Done():
 			return status.Error(codes.Canceled, "context canceled")
 		default:
-			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String()})
+			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String(), Version: r.agentVersion})
 			if ierr != nil {
+				st, ok := status.FromError(ierr)
+				if ok {
+					if st.Code() == codes.FailedPrecondition {
+						log().Errorf("Version mismatch with principal: %v", st.Message())
+						return ierr // preserve gRPC status for retriable() check
+					}
+					if st.Code() == codes.InvalidArgument {
+						log().Errorf("Agent version validation failed: %v", st.Message())
+						return ierr // preserve gRPC status for retriable() check
+					}
+				}
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
 				return ierr
 			}
+
 			r.accessToken, ierr = NewToken(resp.AccessToken)
 			if ierr != nil {
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())

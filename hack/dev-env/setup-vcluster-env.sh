@@ -19,6 +19,10 @@ set -o pipefail
 # enable for debugging:
 # set -x
 
+# ARGOCD_VERSION specifies the version of Argo CD to install.
+# Can be one of stable, latest or a specific version (e.g. v3.2.2)
+ARGOCD_VERSION=${ARGOCD_VERSION:-stable}
+
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 VCLUSTERS="control-plane:argocd agent-managed:argocd agent-autonomous:argocd"
 VCLUSTERS_AGENTS="agent-managed:argocd agent-autonomous:argocd"
@@ -102,7 +106,12 @@ apply() {
     cd ${TMP_DIR}/argo-cd
     git init
     git remote add origin https://github.com/argoproj/argo-cd
-    git fetch --depth=1 origin stable
+    if [ "$ARGOCD_VERSION" = "latest" ]; then
+        fetch_branch=master
+    else
+        fetch_branch=${ARGOCD_VERSION}
+    fi
+    git fetch --depth=1 origin ${fetch_branch}
     git checkout FETCH_HEAD
     cd -
 
@@ -120,7 +129,15 @@ apply() {
     fi
 
     # Get the most recent version of Argo CD from the releases page
-    LATEST_RELEASE_TAG=`curl -s "https://api.github.com/repos/argoproj/argo-cd/releases" | jq -r '.[].tag_name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1`
+    if [ "$ARGOCD_VERSION" = "stable" ]; then
+        LATEST_RELEASE_TAG=`curl -s "https://api.github.com/repos/argoproj/argo-cd/releases" | jq -r '.[].tag_name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1`
+    else
+        LATEST_RELEASE_TAG=${ARGOCD_VERSION}
+    fi
+    if [ -z "${LATEST_RELEASE_TAG}" ]; then
+        echo "ERROR: Could not determine Argo CD release tag. Check network/API access." >&2
+        exit 1
+    fi
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/control-plane/kustomization.yaml
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/agent-autonomous/kustomization.yaml
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/agent-managed/kustomization.yaml
