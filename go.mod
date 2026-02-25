@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0
-	github.com/alicebob/miniredis/v2 v2.36.1
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/argoproj/argo-cd/v3 v3.3.2
 	github.com/argoproj/gitops-engine v0.7.1-0.20250908182407-97ad5b59a627
 	github.com/cenkalti/backoff/v4 v4.3.0
