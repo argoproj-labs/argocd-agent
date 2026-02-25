@@ -508,15 +508,17 @@ func TestStateCallbacks(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	var transitions []string
+	done := make(chan string, 1)
 	c.SetOnStateChange(func(from, to State) {
-		transitions = append(transitions, fmt.Sprintf("%s->%s", from, to))
+		done <- fmt.Sprintf("%s->%s", from, to)
 	})
 
 	c.transitionTo(StateActive)
 
-	time.Sleep(50 * time.Millisecond)
-
-	assert.Len(t, transitions, 1)
-	assert.Equal(t, "recovering->active", transitions[0])
+	select {
+	case got := <-done:
+		assert.Equal(t, "recovering->active", got)
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for state callback")
+	}
 }
