@@ -55,10 +55,10 @@ type Client struct {
 	mu sync.RWMutex
 
 	// Connection settings
-	primaryAddr   string
-	tlsConfig     *tls.Config
-	tlsConfigFn   func() *tls.Config
-	insecure      bool
+	primaryAddr string
+	tlsConfig   *tls.Config
+	tlsConfigFn func() *tls.Config
+	insecure    bool
 
 	// gRPC connection
 	conn *grpc.ClientConn
