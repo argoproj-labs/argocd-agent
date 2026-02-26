@@ -297,21 +297,25 @@ func RunPrincipalChecks(ctx context.Context, kubeClient *kube.KubernetesClient, 
 		err:  principalNoApplicationCRs(ctx, kubeClient, principalNS),
 	})
 
+	// Cluster secrets for agents are https and have the agentName query param
 	out = append(out, checkResult{
 		name: "Verifying agent cluster secrets contain correct query parameter on server url",
 		err:  principalVerifyClusterSecretServer(ctx, kubeClient, principalNS),
 	})
 
+	// Cluster secrets for agents have the skip-reconcile annotation set to true
 	out = append(out, checkResult{
 		name: "Verifying agent cluster secrets contain the skip-reconcile annotation and that it's set to true",
 		err:  principalVerifyClusterSecretAnnotation(ctx, kubeClient, principalNS),
 	})
 
+	// Argo CD redis network policy allows ingress from principal
 	out = append(out, checkResult{
-		name: fmt.Sprintf("Verifying Argo CD network policy allows for ingress from principal"),
+		name: "Verifying Argo CD network policy allows for ingress from principal",
 		err:  bothVerifyRedisNetworkPolicy(ctx, kubeClient, principalNS, "principal"),
 	})
 
+	// Ensures correct components are deployed on the principal
 	out = append(out, checkResult{
 		name: "Verifying deployed Argo CD components on principal",
 		err:  principalVerifyDeployedComponents(ctx, kubeClient, principalNS),
@@ -376,6 +380,7 @@ func RunAgentChecks(ctx context.Context, agentKubeClient *kube.KubernetesClient,
 		err:  bothVerifyRedisNetworkPolicy(ctx, agentKubeClient, agentNS, "agent"),
 	})
 
+	// Ensures correct components are deployed on the agent
 	out = append(out, checkResult{
 		name: "Verifying deployed Argo CD components on agent",
 		err:  agentVerifyDeployedComponents(ctx, agentKubeClient, agentNS),
@@ -630,6 +635,7 @@ func principalVerifyClusterSecretServer(ctx context.Context, kc *kube.Kubernetes
 	var noAgentParam []string
 	filteredSecrets := filterManagedClusterSecrets(secrets)
 	for _, secret := range filteredSecrets {
+		// parse url to see if https and has the agentName query param
 		urlBytes := string(secret.Data["server"])
 		agentUrl, err := url.Parse(urlBytes)
 		if err != nil {
@@ -647,6 +653,7 @@ func principalVerifyClusterSecretServer(ctx context.Context, kc *kube.Kubernetes
 		}
 	}
 
+	// combine parse results for a verbose error on which secret was missing what
 	var errParts []string
 	if len(noHttps) > 0 {
 		errParts = append(errParts, fmt.Sprintf("the following agent cluster secrets in %s are not https: %s", ns, strings.Join(noHttps, ", ")))
@@ -691,7 +698,7 @@ func principalVerifyClusterSecretAnnotation(ctx context.Context, kc *kube.Kubern
 }
 
 // listDeployedArgoCDComponents parses the specified namespace for Argo CD components and returns them as a map where the key
-// is the component and value is the name
+// is the component and value is the name of the resource
 func listDeployedArgoCDComponents(ctx context.Context, kc *kube.KubernetesClient, ns string) (map[string]string, error) {
 	if kc.Clientset == nil {
 		return nil, fmt.Errorf("client set is not avilable, failed to list deployed components")
@@ -704,6 +711,7 @@ func listDeployedArgoCDComponents(ctx context.Context, kc *kube.KubernetesClient
 		return nil, err
 	}
 
+	// use the part-of and component labels to tell what argocd component resource is
 	for _, deploy := range deployments.Items {
 		if partof, exists := deploy.Labels["app.kubernetes.io/part-of"]; exists && partof != "argocd" {
 			continue
@@ -746,10 +754,12 @@ func parseDeployedComponents(components map[string]string, validComponents, inva
 	var foundInvalidComponents []string
 	for _, component := range invalidComponents {
 		if name, exists := components[component]; exists {
+			// print result out with name of resource for more information
 			foundInvalidComponents = append(foundInvalidComponents, fmt.Sprintf("%s (%s)", component, name))
 		}
 	}
 
+	// combine results for more informative output
 	var errParts []string
 	if len(missingComponents) > 0 {
 		errParts = append(errParts, fmt.Sprintf("the following components were missing: %s", strings.Join(missingComponents, ", ")))
@@ -882,6 +892,7 @@ func agentVerifyDeployedComponents(ctx context.Context, kc *kube.KubernetesClien
 		return fmt.Errorf("failed to list Argo CD components in %s: %s", ns, err.Error())
 	}
 
+	// applicationset controller is optional so it is not checked
 	validComponents := []string{common.LabelValueComponentRepoServer, "application-controller", "redis"}
 	invalidComponents := []string{"server", "dex-server"}
 	result := parseDeployedComponents(components, validComponents, invalidComponents)
@@ -910,6 +921,7 @@ func bothVerifyRedisNetworkPolicy(ctx context.Context, kc *kube.KubernetesClient
 	policyExists := false
 	ingressAllowed := false
 	for _, policy := range netPolicies.Items {
+		// use pod selector to determine which network policy targets argocd redis
 		name, exists := policy.Spec.PodSelector.MatchLabels[common.LabelKeyAppName]
 		if !exists || name != common.DefaultRedisName {
 			continue
