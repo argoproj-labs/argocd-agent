@@ -588,7 +588,7 @@ func principalNoApplicationCRs(ctx context.Context, kc *kube.KubernetesClient, n
 	gvr := schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
 	apps, err := kc.DynamicClient.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("failed list applications in namespace %s: %v", ns, err)
+		return fmt.Errorf("failed to list applications in namespace %s: %v", ns, err)
 	}
 
 	if len(apps.Items) > 0 {
@@ -631,32 +631,31 @@ func principalVerifyClusterSecretServer(ctx context.Context, kc *kube.Kubernetes
 		return fmt.Errorf("failed list secrets in namespace %s: %s", ns, err.Error())
 	}
 
-	var noHttps []string
+	var noHTTPS []string
 	var noAgentParam []string
 	filteredSecrets := filterManagedClusterSecrets(secrets)
 	for _, secret := range filteredSecrets {
 		// parse url to see if https and has the agentName query param
 		urlBytes := string(secret.Data["server"])
-		agentUrl, err := url.Parse(urlBytes)
+		agentURL, err := url.Parse(urlBytes)
 		if err != nil {
 			return fmt.Errorf("failed to prase url for %s/%s: %s", ns, secret.Name, err.Error())
 		}
 
-		if agentUrl.Scheme != "https" {
-			noHttps = append(noHttps, secret.Name)
+		if !strings.HasPrefix(urlBytes, "https://") {
+			noHTTPS = append(noHTTPS, secret.Name)
 		}
 
-		query := agentUrl.Query()
-		_, exists := query["agentName"]
-		if !exists {
+		query := agentURL.Query()
+		if strings.TrimSpace(query.Get("agentName")) == "" {
 			noAgentParam = append(noAgentParam, secret.Name)
 		}
 	}
 
 	// combine parse results for a verbose error on which secret was missing what
 	var errParts []string
-	if len(noHttps) > 0 {
-		errParts = append(errParts, fmt.Sprintf("the following agent cluster secrets in %s are not https: %s", ns, strings.Join(noHttps, ", ")))
+	if len(noHTTPS) > 0 {
+		errParts = append(errParts, fmt.Sprintf("the following agent cluster secrets in %s are not https: %s", ns, strings.Join(noHTTPS, ", ")))
 	}
 
 	if len(noAgentParam) > 0 {
@@ -671,7 +670,7 @@ func principalVerifyClusterSecretServer(ctx context.Context, kc *kube.Kubernetes
 }
 
 // principalVerifyClusterSecretAnnotation verifies that each cluster secret that is managed by argocd agent
-// includes the skip-reconcile annoation
+// includes the skip-reconcile annotation
 func principalVerifyClusterSecretAnnotation(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
 	if kc.Clientset == nil {
 		return fmt.Errorf("client set is not available, failed to check secrets")
@@ -679,7 +678,7 @@ func principalVerifyClusterSecretAnnotation(ctx context.Context, kc *kube.Kubern
 
 	secrets, err := kc.Clientset.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("failed list secrets in namespace %s: %s", ns, err.Error())
+		return fmt.Errorf("failed to list secrets in namespace %s: %s", ns, err.Error())
 	}
 
 	var noAnnotation []string
@@ -701,7 +700,7 @@ func principalVerifyClusterSecretAnnotation(ctx context.Context, kc *kube.Kubern
 // is the component and value is the name of the resource
 func listDeployedArgoCDComponents(ctx context.Context, kc *kube.KubernetesClient, ns string) (map[string]string, error) {
 	if kc.Clientset == nil {
-		return nil, fmt.Errorf("client set is not avilable, failed to list deployed components")
+		return nil, fmt.Errorf("client set is not available, failed to list deployed components")
 	}
 
 	components := make(map[string]string)
@@ -713,7 +712,7 @@ func listDeployedArgoCDComponents(ctx context.Context, kc *kube.KubernetesClient
 
 	// use the part-of and component labels to tell what argocd component resource is
 	for _, deploy := range deployments.Items {
-		if partof, exists := deploy.Labels["app.kubernetes.io/part-of"]; exists && partof != "argocd" {
+		if deploy.Labels["app.kubernetes.io/part-of"] != "argocd" {
 			continue
 		}
 		component, exists := deploy.Labels["app.kubernetes.io/component"]
@@ -729,7 +728,7 @@ func listDeployedArgoCDComponents(ctx context.Context, kc *kube.KubernetesClient
 	}
 
 	for _, set := range statefulsets.Items {
-		if partof, exists := set.Labels["app.kubernetes.io/part-of"]; exists && partof != "argocd" {
+		if set.Labels["app.kubernetes.io/part-of"] != "argocd" {
 			continue
 		}
 		component, exists := set.Labels["app.kubernetes.io/component"]

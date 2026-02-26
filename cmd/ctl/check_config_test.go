@@ -1659,7 +1659,7 @@ func TestCheckConfigCombined(t *testing.T) {
 		for _, r := range agentRes {
 			if r.err != nil && strings.Contains(r.name, "deployed Argo CD components") {
 				caughtInvalid = strings.Contains(r.err.Error(), "server") &&
-					strings.Contains(r.err.Error(), "de")
+					strings.Contains(r.err.Error(), "dex-server")
 				caughtMissing = strings.Contains(r.err.Error(), "application-controller") &&
 					strings.Contains(r.err.Error(), "redis")
 			}
