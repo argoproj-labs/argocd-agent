@@ -157,5 +157,9 @@ func (o *Options) Validate() error {
 		return fmt.Errorf("peer address is required for replica role")
 	}
 
+	if o.AuthMethod == nil {
+		return fmt.Errorf("ha-replication-auth is required when HA is enabled")
+	}
+
 	return nil
 }

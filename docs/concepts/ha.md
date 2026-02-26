@@ -3,7 +3,7 @@
 argocd-agent supports active/passive High Availability for the principal component, enabling cross-region disaster recovery with operator-driven failover.
 
 !!! important "HA Feature Stability"
-    Principal HA & Replication is currentl in Beta.
+    Principal HA & Replication is currently in Beta.
 
 ## Overview
 
@@ -57,8 +57,8 @@ Only ACTIVE returns a healthy response. GSLB routes agents exclusively to the ac
 **Transitions:**
 
 ```text
-RECOVERING ── config=primary & peer not ACTIVE ──> ACTIVE
-RECOVERING ── config=replica OR peer is ACTIVE --> SYNCING --> REPLICATING
+RECOVERING ── config=primary ──> ACTIVE
+RECOVERING ── config=replica ──> SYNCING --> REPLICATING
 REPLICATING ── stream breaks ──> DISCONNECTED
 DISCONNECTED ── stream reconnects ──> REPLICATING
 
@@ -84,10 +84,10 @@ The replica runs a **Replication Client** that connects to the primary's gRPC se
 ### Sync Flow
 
 1. Replica connects to primary
-2. Calls `GetSnapshot` — receives all agent states with full serialized resources
-3. Writes Applications/AppProjects to its local K8s cluster (upsert)
-4. Opens `Subscribe` stream — receives incremental events
-5. Sends periodic ACKs with last processed sequence number
+2. Opens `Subscribe` stream first (events are buffered server-side)
+3. Calls `GetSnapshot` — receives all agent states with full serialized resources
+4. Writes Applications/AppProjects to its local K8s cluster (upsert)
+5. Sends initial ACK to flush buffered events, then periodic ACKs with last processed sequence number
 6. Runs periodic reconciliation — compares sequences via `Status` RPC, re-fetches snapshot if gaps detected
 
 ### Gap Recovery
@@ -102,7 +102,7 @@ The admin server (`ha status/promote/demote`) binds to `127.0.0.1:8405` with no 
 
 ## Limitations
 
-- **Preferred Role is not durable** Preferred role changes made with ha admin apis resets on pod restart.
+- **Preferred Role is startup configuration only.** Preferred role is configured via flags/env and is not changed by HA admin APIs (`status/promote/demote` only).
 - **Split-brain is possible with operator error.** The promote safety check only verifies the local replication stream state. If two operators independently promote during a partition, both go ACTIVE. Mitigate by using `--force` only when the peer is confirmed dead.
 - **Recovery time depends on replication lag at failure time.** Events not yet delivered to the replica are lost. Under normal load this is sub-second; under burst with queue overflow, up to 60s (bounded by reconciliation).
 - **Full snapshot on gap recovery is O(N).** At scale, re-fetching all resources can be expensive.

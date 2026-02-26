@@ -205,11 +205,22 @@ func TestOptionsValidate(t *testing.T) {
 		assert.Contains(t, err.Error(), "peer address is required for replica")
 	})
 
+	t.Run("enabled without auth method returns error", func(t *testing.T) {
+		opts := DefaultOptions()
+		opts.Enabled = true
+		opts.PreferredRole = RolePrimary
+		opts.AuthMethod = nil
+		err := opts.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ha-replication-auth is required")
+	})
+
 	t.Run("enabled primary without peer address is valid", func(t *testing.T) {
 		opts := DefaultOptions()
 		opts.Enabled = true
 		opts.PreferredRole = RolePrimary
 		opts.PeerAddress = ""
+		opts.AuthMethod = &fakeAuthMethod{}
 		err := opts.Validate()
 		require.NoError(t, err)
 	})
@@ -218,6 +229,7 @@ func TestOptionsValidate(t *testing.T) {
 		opts := DefaultOptions()
 		opts.Enabled = true
 		opts.PeerAddress = "peer:8443"
+		opts.AuthMethod = &fakeAuthMethod{}
 		err := opts.Validate()
 		require.NoError(t, err)
 	})

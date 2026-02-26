@@ -38,7 +38,7 @@ func TestNewController(t *testing.T) {
 	t.Run("creates controller with HA enabled", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 			WithPreferredRole("primary"),
 		)
@@ -52,7 +52,7 @@ func TestNewController(t *testing.T) {
 	t.Run("fails with invalid options - replica without peer", func(t *testing.T) {
 		ctx := context.Background()
 		_, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPreferredRole("replica"),
 			// Missing peer address
 		)
@@ -63,7 +63,7 @@ func TestNewController(t *testing.T) {
 	t.Run("primary without peer address succeeds", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPreferredRole("primary"),
 		)
 		require.NoError(t, err)
@@ -97,7 +97,7 @@ func TestControllerStart_Disabled(t *testing.T) {
 func TestControllerStart_PrimaryNoPeerAddress(t *testing.T) {
 	ctx := context.Background()
 	c, err := NewController(ctx,
-		WithEnabled(true),
+		WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 		WithPreferredRole("primary"),
 	)
 	require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestControllerStart_PrimaryNoPeerAddress(t *testing.T) {
 func TestControllerStart_PrimaryWithPeer(t *testing.T) {
 	ctx := context.Background()
 	c, err := NewController(ctx,
-		WithEnabled(true),
+		WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 		WithPeerAddress("peer.example.com:8404"),
 		WithPreferredRole("primary"),
 	)
@@ -136,7 +136,7 @@ func TestControllerStart_PrimaryWithPeer(t *testing.T) {
 func TestControllerStart_Replica(t *testing.T) {
 	ctx := context.Background()
 	c, err := NewController(ctx,
-		WithEnabled(true),
+		WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 		WithPeerAddress("peer.example.com:8404"),
 		WithPreferredRole("replica"),
 	)
@@ -165,7 +165,7 @@ func TestControllerOnAgentConnect(t *testing.T) {
 	t.Run("rejects connection in replicating state", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -182,7 +182,7 @@ func TestControllerOnAgentConnect(t *testing.T) {
 	t.Run("rejects connection in disconnected state", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestControllerReplicationCallbacks(t *testing.T) {
 	t.Run("OnReplicationConnected transitions from disconnected to replicating", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestControllerReplicationCallbacks(t *testing.T) {
 	t.Run("OnReplicationConnected transitions from syncing to replicating", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -233,7 +233,7 @@ func TestControllerReplicationCallbacks(t *testing.T) {
 	t.Run("OnReplicationDisconnected transitions to disconnected", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -249,7 +249,7 @@ func TestControllerReplicationCallbacks(t *testing.T) {
 	t.Run("OnSyncComplete transitions from syncing to replicating", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -267,7 +267,7 @@ func TestControllerPromote(t *testing.T) {
 	t.Run("promotes from disconnected without force", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -292,7 +292,7 @@ func TestControllerPromote(t *testing.T) {
 	t.Run("promotes from replicating with force", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -309,7 +309,7 @@ func TestControllerPromote(t *testing.T) {
 	t.Run("refuses promote from replicating without force", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -326,7 +326,7 @@ func TestControllerPromote(t *testing.T) {
 	t.Run("refuses if already active", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -343,7 +343,7 @@ func TestControllerPromote(t *testing.T) {
 	t.Run("refuses from recovering state", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -358,7 +358,7 @@ func TestControllerDemote(t *testing.T) {
 	t.Run("demotes from active to replicating", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -383,7 +383,7 @@ func TestControllerDemote(t *testing.T) {
 	t.Run("fails to demote from non-active state", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -412,7 +412,7 @@ func TestControllerHealthStatus(t *testing.T) {
 	t.Run("unhealthy in replicating state", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -428,7 +428,7 @@ func TestControllerHealthStatus(t *testing.T) {
 	t.Run("unhealthy in disconnected state", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -446,7 +446,7 @@ func TestControllerGetStatus(t *testing.T) {
 	t.Run("active state shows peer reachable false", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 			WithPreferredRole("primary"),
 		)
@@ -466,7 +466,7 @@ func TestControllerGetStatus(t *testing.T) {
 	t.Run("replicating state shows peer reachable true", func(t *testing.T) {
 		ctx := context.Background()
 		c, err := NewController(ctx,
-			WithEnabled(true),
+			WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 			WithPeerAddress("peer.example.com:8404"),
 		)
 		require.NoError(t, err)
@@ -503,7 +503,7 @@ func TestControllerShutdown(t *testing.T) {
 func TestStateCallbacks(t *testing.T) {
 	ctx := context.Background()
 	c, err := NewController(ctx,
-		WithEnabled(true),
+		WithEnabled(true), WithAuthMethod(&fakeAuthMethod{}),
 		WithPeerAddress("peer.example.com:8404"),
 	)
 	require.NoError(t, err)

@@ -25,7 +25,6 @@ State:             active
 Preferred Role:    primary
 Peer Address:      principal.region-b.internal:8443
 Peer Reachable:    true
-Peer State:        replicating
 Connected Replicas: 1
 Connected Agents:  12
 Last Event:        2s ago
@@ -96,7 +95,7 @@ When both principals are healthy and you want to switch the active role.
 
 Restore the original primary after an unplanned failover.
 
-1. Old primary restarts -> RECOVERING -> detects peer is ACTIVE -> SYNCING -> REPLICATING
+1. Old primary restarts -> RECOVERING -> SYNCING -> REPLICATING
 2. Wait for replication to catch up:
    ```bash
    argocd-agentctl ha status   # on old primary, look for "replicating"
@@ -136,7 +135,7 @@ Replication metrics are exposed at the principal's metrics endpoint (default por
 | Metric | Type | Description |
 |--------|------|-------------|
 | `argocd_agent_ha_state` | Gauge | Current HA state (labeled) |
-| `argocd_agent_ha_state_transitions_total` | Counter | State transition count |
+| `argocd_agent_ha_transitions_total` | Counter | State transition count |
 | `argocd_agent_ha_failovers_total` | Counter | Promotion events |
 
 ### Recommended Alerts
@@ -156,7 +155,7 @@ Check network connectivity between regions:
 
 ```bash
 # From the replica pod
-kubectl exec -it <replica-pod> -- curl -k https://<primary-addr>:8443/healthz
+kubectl exec -it <replica-pod> -- curl -sS http://<primary-addr>:8003/healthz
 ```
 
 Check that replication auth is configured correctly — the replica needs a client certificate the primary trusts, and the extracted identity must be in `--ha-allowed-replication-clients`.
