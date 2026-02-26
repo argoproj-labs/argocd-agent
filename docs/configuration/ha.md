@@ -1,7 +1,7 @@
 # High Availability Configuration
 
 !!! important "HA Feature Stability"
-    Principal HA & Replication is currentl in Beta.
+    Principal HA & Replication is currently in Beta.
 
 This page covers configuration for running the principal in active/passive HA mode. See [HA concepts](../concepts/ha.md) for an overview of how it works.
 
@@ -36,7 +36,7 @@ Must be set to `true` on both principals.
 | **Default** | `primary` |
 | **Valid values** | `primary`, `replica` |
 
-Role this principal prefers on startup. On startup, a principal configured as `primary` will go ACTIVE if it cannot detect an active peer. A principal configured as `replica` will always start in SYNCING.
+Role this principal prefers on startup. On startup, a principal configured as `primary` starts in ACTIVE. A principal configured as `replica` starts in SYNCING.
 
 ### Peer Address
 
