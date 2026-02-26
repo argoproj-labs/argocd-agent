@@ -75,7 +75,7 @@ echo "*** building release images"
 
 export IMAGE_REPOSITORY="quay.io/argoprojlabs"
 export IMAGE_TAG="${TARGET_TAG}"
-make image
+make image-multiarch
 
 echo "*** creating release tag"
 
@@ -87,8 +87,11 @@ echo "To finalize release: "
 echo
 echo "1) Push images:"
 echo
-echo "podman push ${IMAGE_REPOSITORY}/argocd-agent-agent:${TARGET_TAG}"
-echo "podman push ${IMAGE_REPOSITORY}/argocd-agent-principal:${TARGET_TAG}"
+echo "(if built with podman):"
+echo "podman manifest push ${IMAGE_REPOSITORY}/argocd-agent:${TARGET_TAG}"
+echo
+echo "(or if built with docker buildx):"
+echo "docker push ${IMAGE_REPOSITORY}/argocd-agent:${TARGET_TAG}"
 echo
 echo "2) Push Git changes and tag"
 echo
