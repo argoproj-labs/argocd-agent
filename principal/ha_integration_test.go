@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
@@ -31,6 +32,11 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+type fakeAuthMethod struct{}
+
+func (f *fakeAuthMethod) Init() error                                                         { return nil }
+func (f *fakeAuthMethod) Authenticate(_ context.Context, _ auth.Credentials) (string, error) { return "test", nil }
 
 // createTestServer creates a minimal Server for testing HA integration
 func createTestServer() *Server {
@@ -61,7 +67,7 @@ func TestNewHAComponents(t *testing.T) {
 		server := createTestServer()
 
 		components, err := NewHAComponents(ctx, server,
-			ha.WithEnabled(true),
+			ha.WithEnabled(true), ha.WithAuthMethod(&fakeAuthMethod{}),
 			ha.WithPreferredRole("primary"),
 			ha.WithPeerAddress("peer.example.com:8443"),
 		)
@@ -286,7 +292,7 @@ func TestGetHAStatus(t *testing.T) {
 		server := createTestServer()
 
 		components, err := NewHAComponents(ctx, server,
-			ha.WithEnabled(true),
+			ha.WithEnabled(true), ha.WithAuthMethod(&fakeAuthMethod{}),
 			ha.WithPreferredRole("primary"),
 			ha.WithPeerAddress("peer:8443"),
 		)
@@ -354,7 +360,7 @@ func TestForwardEventForReplication(t *testing.T) {
 		server := createTestServer()
 
 		components, err := NewHAComponents(ctx, server,
-			ha.WithEnabled(true),
+			ha.WithEnabled(true), ha.WithAuthMethod(&fakeAuthMethod{}),
 			ha.WithPreferredRole("replica"),
 			ha.WithPeerAddress("peer:8443"),
 		)
