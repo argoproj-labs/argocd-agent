@@ -18,11 +18,17 @@ import (
 	"context"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/haadminapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeAuthMethod struct{}
+
+func (f *fakeAuthMethod) Init() error                                                         { return nil }
+func (f *fakeAuthMethod) Authenticate(_ context.Context, _ auth.Credentials) (string, error) { return "test", nil }
 
 type fakeStatusProvider struct {
 	replicas int
@@ -41,6 +47,7 @@ func newTestController(t *testing.T, preferred ha.Role, peerAddr string) *ha.Con
 	opts := []ha.Option{
 		ha.WithEnabled(true),
 		ha.WithPreferredRole(string(preferred)),
+		ha.WithAuthMethod(&fakeAuthMethod{}),
 	}
 	if peerAddr != "" {
 		opts = append(opts, ha.WithPeerAddress(peerAddr))
