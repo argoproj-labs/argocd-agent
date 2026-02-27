@@ -23,6 +23,7 @@ package cluster
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"sync"
 	"time"
@@ -67,7 +68,7 @@ type Manager struct {
 }
 
 // NewManager instantiates and initializes a new Manager.
-func NewManager(ctx context.Context, namespace, redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType, kubeclient kubernetes.Interface) (*Manager, error) {
+func NewManager(ctx context.Context, namespace, redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType, kubeclient kubernetes.Interface, tlsConfig *tls.Config) (*Manager, error) {
 	var err error
 	m := &Manager{
 		clusters:   make(map[string]*v1alpha1.Cluster),
@@ -77,7 +78,7 @@ func NewManager(ctx context.Context, namespace, redisAddress, redisPassword stri
 		filters:    filter.NewFilterChain[*v1.Secret](),
 	}
 
-	m.clusterCache, err = NewClusterCacheInstance(redisAddress, redisPassword, redisCompressionType)
+	m.clusterCache, err = NewClusterCacheInstance(redisAddress, redisPassword, redisCompressionType, tlsConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
 	}

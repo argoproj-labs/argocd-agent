@@ -90,6 +90,15 @@ type ServerOptions struct {
 	selfAgentRegistrationEnabled bool
 	resourceProxyAddress         string
 	clientCertSecretName         string
+	// Redis TLS configuration
+	redisTLSEnabled             bool
+	redisProxyServerTLSCert     *x509.Certificate
+	redisProxyServerTLSKey      crypto.PrivateKey
+	redisProxyServerTLSCertPath string
+	redisProxyServerTLSKeyPath  string
+	redisTLSCA                  *x509.CertPool
+	redisTLSCAPath              string
+	redisTLSInsecure            bool
 }
 
 type ServerOption func(o *Server) error
@@ -284,7 +293,14 @@ func WithTLSKeyPairFromSecret(kube kubernetes.Interface, namespace, name string)
 		if err != nil {
 			return err
 		}
-		o.options.tlsCert = c.Leaf
+		if len(c.Certificate) == 0 || c.Certificate[0] == nil {
+			return fmt.Errorf("no certificate data in secret %s/%s", namespace, name)
+		}
+		cert, err := x509.ParseCertificate(c.Certificate[0])
+		if err != nil {
+			return fmt.Errorf("could not parse certificate: %w", err)
+		}
+		o.options.tlsCert = cert
 		o.options.tlsKey = c.PrivateKey
 		return nil
 	}
@@ -583,6 +599,72 @@ func WithResourceProxyAddress(address string) ServerOption {
 func WithClientCertSecretName(name string) ServerOption {
 	return func(o *Server) error {
 		o.options.clientCertSecretName = name
+		return nil
+	}
+}
+
+// WithRedisTLSEnabled enables or disables TLS for Redis connections
+func WithRedisTLSEnabled(enabled bool) ServerOption {
+	return func(o *Server) error {
+		o.options.redisTLSEnabled = enabled
+		return nil
+	}
+}
+
+// WithRedisProxyServerTLSFromPath configures the TLS certificate and private key for the Redis proxy server
+func WithRedisProxyServerTLSFromPath(certPath, keyPath string) ServerOption {
+	return func(o *Server) error {
+		o.options.redisProxyServerTLSCertPath = certPath
+		o.options.redisProxyServerTLSKeyPath = keyPath
+		return nil
+	}
+}
+
+// WithRedisProxyServerTLSFromSecret configures the TLS certificate and private key for the Redis proxy server from a Kubernetes secret
+func WithRedisProxyServerTLSFromSecret(kube kubernetes.Interface, namespace, name string) ServerOption {
+	return func(o *Server) error {
+		c, err := tlsutil.TLSCertFromSecret(context.Background(), kube, namespace, name)
+		if err != nil {
+			return err
+		}
+		if len(c.Certificate) == 0 || c.Certificate[0] == nil {
+			return fmt.Errorf("no certificate data in secret %s/%s", namespace, name)
+		}
+		cert, err := x509.ParseCertificate(c.Certificate[0])
+		if err != nil {
+			return fmt.Errorf("could not parse certificate: %w", err)
+		}
+
+		o.options.redisProxyServerTLSCert = cert
+		o.options.redisProxyServerTLSKey = c.PrivateKey
+		return nil
+	}
+}
+
+// WithRedisTLSCAFromFile loads the CA certificate to validate the Redis TLS certificate
+func WithRedisTLSCAFromFile(caPath string) ServerOption {
+	return func(o *Server) error {
+		o.options.redisTLSCAPath = caPath
+		return nil
+	}
+}
+
+// WithRedisTLSCAFromSecret loads the CA certificate from a Kubernetes secret to validate the Redis TLS certificate
+func WithRedisTLSCAFromSecret(kube kubernetes.Interface, namespace, name, field string) ServerOption {
+	return func(o *Server) error {
+		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, field)
+		if err != nil {
+			return err
+		}
+		o.options.redisTLSCA = pool
+		return nil
+	}
+}
+
+// WithRedisTLSInsecure allows insecure TLS connections to Redis (for testing only)
+func WithRedisTLSInsecure(insecure bool) ServerOption {
+	return func(o *Server) error {
+		o.options.redisTLSInsecure = insecure
 		return nil
 	}
 }

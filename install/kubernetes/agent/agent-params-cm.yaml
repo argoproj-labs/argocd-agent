@@ -116,3 +116,14 @@ data:
   # the agent is allowed to manage applications in. Supports glob patterns.
   # Default: ""
   agent.allowed-namespaces: ""
+  # agent.redis.tls.enabled: Whether to enable TLS for Redis connections.
+  # Default: false
+  agent.redis.tls.enabled: "false"
+  # agent.redis.tls.ca-path: Path to CA certificate for Redis TLS.
+  # This should match the mount path in the Deployment.
+  # Set to empty string to use system CAs (not recommended for self-signed certs).
+  # Default: "/app/config/redis-tls/ca.crt"
+  agent.redis.tls.ca-path: "/app/config/redis-tls/ca.crt"
+  # agent.redis.tls.insecure: INSECURE: Do not verify Redis TLS certificate.
+  # Default: false
+  agent.redis.tls.insecure: "false"

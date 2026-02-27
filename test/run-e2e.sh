@@ -14,7 +14,8 @@
 # limitations under the License.
 
 set -ex -o pipefail
-ARGS=$*
+
+# Check if vcluster context exists
 if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^vcluster-control-plane$'; then
     echo "kube context vcluster-control-plane is not configured; missing setup?" >&2
     exit 1

@@ -128,7 +128,6 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 	requires.NotNil(msgChan)
 
 	// Find pod on managed-agent client
-
 	var podList corev1.PodList
 	err := suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
 	requires.NoError(err)
@@ -146,24 +145,39 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 	}
 	requires.NotEmpty(oldPod.Name)
 
-	// Ensure that the pod appears in the resource tree value returned by Argo CD server (this will only be true if redis proxy is working)
-	tree, err := appClient.ResourceTree(suite.Ctx, &application.ResourcesQuery{
-		ApplicationName: &appOnPrincipal.Name,
-		AppNamespace:    &appOnPrincipal.Namespace,
-		Project:         &appOnPrincipal.Spec.Project,
-	})
-	requires.NoError(err)
+	// Wait for the old pod to appear in the resource tree
+	// This ensures that Redis proxy is fully working before proceeding
+	// (the pod will only appear in the resource tree if redis is fully available)
+	t.Logf("Waiting for pod %s to appear in resource tree (verifying Redis proxy is working)...", oldPod.Name)
+	var tree *v1alpha1.ApplicationTree
+	requires.Eventually(func() bool {
+		var err error
+		tree, err = appClient.ResourceTree(suite.Ctx, &application.ResourcesQuery{
+			ApplicationName: &appOnPrincipal.Name,
+			AppNamespace:    &appOnPrincipal.Namespace,
+			Project:         &appOnPrincipal.Spec.Project,
+		})
+		if err != nil {
+			t.Logf("ResourceTree error: %v", err)
+			return false
+		}
+		if tree == nil {
+			t.Logf("ResourceTree returned nil")
+			return false
+		}
+
+		// Check if the old pod appears in the resource tree
+		for _, node := range tree.Nodes {
+			if node.Kind == "Pod" && node.Name == oldPod.Name {
+				t.Logf("Pod %s found in resource tree - Redis proxy is working", oldPod.Name)
+				return true
+			}
+		}
+		return false
+
+	}, time.Second*60, time.Second*5)
 
 	requires.NotNil(tree)
-
-	matchFound := false
-	for _, node := range tree.Nodes {
-		if node.Kind == "Pod" && node.Name == oldPod.Name {
-			matchFound = true
-			break
-		}
-	}
-	requires.True(matchFound)
 
 	// Delete pod on managed agent cluster
 	err = suite.ManagedAgentClient.Delete(suite.Ctx, &oldPod, metav1.DeleteOptions{})
@@ -186,7 +200,7 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 
 		return newPod.Name != ""
 
-	}, time.Second*30, time.Second*5)
+	}, time.Second*60, time.Second*5)
 
 	// Verify the name of the new pod exists in what has been sent from the channel (this will only be true if redis proxy subscription is working)
 	requires.Eventually(func() bool {
@@ -214,7 +228,8 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 	requires.NoError(err)
 	requires.NotNil(tree)
 
-	matchFound = false
+	// Verify that the new pod appears in the resource tree
+	matchFound := false
 	for _, node := range tree.Nodes {
 		if node.Kind == "Pod" && node.Name == newPod.Name {
 			matchFound = true
@@ -295,7 +310,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 
 	t.Log("beginning stream", time.Now())
 
-	// Wait for sucessful connection to event source
+	// Wait for successful connection to event source
 	var msgChan chan string
 	requires.Eventually(func() bool {
 		var err error
@@ -311,7 +326,6 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	requires.NotNil(msgChan)
 
 	// Find pod of deployed Application, on autonomous cluster
-
 	var podList corev1.PodList
 	err = suite.AutonomousAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
 	requires.NoError(err)
@@ -329,34 +343,39 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	}
 	requires.NotEmpty(oldPod.Name)
 
+	// Wait for the old pod to appear in the resource tree
+	// This ensures that Redis proxy is fully working before proceeding
+	// (the pod will only appear in the resource tree if redis is fully available)
+	t.Logf("Waiting for pod %s to appear in resource tree (verifying Redis proxy is working)...", oldPod.Name)
 	var tree *v1alpha1.ApplicationTree
 	requires.Eventually(func() bool {
 		var err error
-		// Ensure that the pod appears in the resource tree value returned by Argo CD server
 		tree, err = appClient.ResourceTree(suite.Ctx, &application.ResourcesQuery{
 			ApplicationName: &appOnPrincipal.Name,
 			AppNamespace:    &appOnPrincipal.Namespace,
 			Project:         &appOnPrincipal.Spec.Project,
 		})
 		if err != nil {
-			t.Log(err)
+			t.Logf("ResourceTree error: %v", err)
+			return false
+		}
+		if tree == nil {
+			t.Logf("ResourceTree returned nil")
 			return false
 		}
 
-		return true
+		// Check if the old pod appears in the resource tree
+		for _, node := range tree.Nodes {
+			if node.Kind == "Pod" && node.Name == oldPod.Name {
+				t.Logf("Pod %s found in resource tree - Redis proxy is working", oldPod.Name)
+				return true
+			}
+		}
+		return false
 
 	}, time.Second*60, time.Second*5)
 
 	requires.NotNil(tree)
-
-	matchFound := false
-	for _, node := range tree.Nodes {
-		if node.Kind == "Pod" && node.Name == oldPod.Name {
-			matchFound = true
-			break
-		}
-	}
-	requires.True(matchFound)
 
 	t.Log("deleting pod", time.Now())
 
@@ -381,7 +400,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 
 		return newPod.Name != ""
 
-	}, time.Second*30, time.Second*5)
+	}, time.Second*60, time.Second*5)
 
 	// Verify the name of the new pod exists in what has been sent on the subscribe channel
 
@@ -410,7 +429,8 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	requires.NoError(err)
 	requires.NotNil(tree)
 
-	matchFound = false
+	// Verify that the new pod appears in the resource tree
+	matchFound := false
 	for _, node := range tree.Nodes {
 		if node.Kind == "Pod" && node.Name == newPod.Name {
 			matchFound = true

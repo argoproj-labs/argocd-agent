@@ -324,6 +324,36 @@
           "description": "Test image tag"
         }
       }
+    },
+
+    "redisTLS": {
+      "type": "object",
+      "description": "Redis TLS configuration",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "anyOf": [
+            { "type": "string", "enum": ["true", "false"] },
+            { "type": "boolean" }
+          ],
+          "description": "Enable TLS for Redis connections (can be boolean or string)"
+        },
+        "caPath": {
+          "type": "string",
+          "description": "Path to CA certificate for verifying Redis TLS certificate"
+        },
+        "secretName": {
+          "type": "string",
+          "description": "Name of the Kubernetes Secret containing the Redis TLS CA certificate"
+        },
+        "insecure": {
+          "anyOf": [
+            { "type": "string", "enum": ["true", "false"] },
+            { "type": "boolean" }
+          ],
+          "description": "Skip verification of Redis TLS certificate (INSECURE - for development only, can be boolean or string)"
+        }
+      }
     }
   }
 }
