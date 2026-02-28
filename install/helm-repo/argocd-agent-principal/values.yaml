@@ -1,0 +1,181 @@
+namespace: argocd
+
+# Image configuration
+image:
+  repository: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
+  tag: "d7ee8580"  # Use specific version instead of latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+resources:
+  limits:
+    cpu: 2
+    memory: 4Gi
+  requests:
+    cpu: 2
+    memory: 4Gi
+
+# Service configuration with LoadBalancer
+service:
+  type: LoadBalancer
+  port: 443
+  targetPort: 8443
+  annotations:
+    networking.gke.io/load-balancer-type: "Internal"
+
+# Metrics service for monitoring
+metricsService:
+  enabled: true
+  type: ClusterIP
+  port: 8000
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+
+# Health check service
+healthzService:
+  enabled: true
+  type: ClusterIP
+  port: 8003
+
+# Principal configuration for production
+principal:
+  # Additional arguments apart from default 'principal' command
+  additionalArgs: []
+  # Example:
+  # additionalArgs:
+  #  - --redis-server-address
+  #  - argocd-argo-cd-redis:6379
+  metrics:
+    port: 8000
+  healthz:
+    port: 8003
+  listen:
+    port: 8443
+  # Logging
+  log:
+    level: info
+  
+  # Namespace configuration
+  namespace: "argocd"
+  allowedNamespaces: "argocd,argocd-apps,default"
+  
+  # Namespace creation (usually disabled in production)
+  namespaceCreate:
+    enable: true
+    pattern: "-agent"
+    labels: "managed-by=argocd-agent,environment=production"
+  
+  # TLS configuration - secure setup
+  tls:
+    secretName: "argocd-agent-principal-tls"
+    server:
+      certPath: ""
+      keyPath: ""
+      allowGenerate: false  # Never allow in production
+      rootCaSecretName: "argocd-agent-ca"
+      rootCaPath: ""
+    clientCert:
+      require: true  # Require client certificates
+      matchSubject: true  # Match subject to agent name
+  
+  # Resource proxy configuration
+  redis:
+    compressionType: "gzip"
+    server:
+      address: "argocd-self-hosted-redis:6379" # Defaults to argocd-redis:6379 if not provided
+  resourceProxy:
+    enabled: true
+    secretName: "argocd-agent-resource-proxy-tls"
+    tls:
+      certPath: ""
+      keyPath: ""
+    ca:
+      secretName: "argocd-agent-ca"
+      path: ""
+  
+  # JWT configuration
+  jwt:
+    allowGenerate: false  # Never allow in production
+    secretName: "argocd-agent-jwt"
+    keyPath: ""
+  
+  # Authentication - use mTLS in production
+  auth: "mtls:CN=([^,]+)"
+
+  # Security context for production
+  securityContext:
+    capabilities:
+      drop:
+        - ALL
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+
+  # Node affinity for production workloads
+  affinity: {}
+
+  # Tolerations for dedicated nodes
+  tolerations: {}
+
+  # Node selector for dedicated nodes
+  nodeSelector: {}
+
+  # Secrets configuration -Use create and base64 encoded values to create k8s secrets
+  secrets:
+    ca:
+      tls:  
+        create: true
+        key: "BASE_64_ENCODED_KEY"
+        crt: "BASE_64_ENCODED_CRT"
+    server:
+      tls:
+        create: true
+        crt: "BASE_64_ENCODED_CRT"
+        key: "BASE_64_ENCODED_KEY"
+    proxy:
+      tls:
+        create: true # Make false if secrets are created directly in k8s
+        crt: "BASE_64_ENCODED_CRT"
+        key: "BASE_64_ENCODED_KEY"
+    userpass:
+      create: false  # Not used with mTLS
+    jwt:
+      create: true  # Managed externally
+      key: "BASE_64_ENCODED_JWT_KEY"
+
+  # RBAC configuration
+  rbac:
+    create: true
+    createClusterRole: true
+
+  # Service account
+  serviceAccount:
+    create: true
+    annotations: {}
+      # Add any required annotations for IRSA, Workload Identity, etc.
+
+  # Additional labels for compliance/governance
+  labels:
+    environment: production
+    team: platform
+    app: argocd-agent
+    version: latest
+
+  # Monitoring annotations
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
