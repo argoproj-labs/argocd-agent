@@ -96,6 +96,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisPassword        string
 		redisCredsDirPath    string
 		redisCompressionType string
+		disableRedisProxy    bool
 		healthzPort          int
 
 		maxGRPCMessageSize int
@@ -354,6 +355,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 				cmdutil.Fatal("Failed loading Redis credentials: %s", err.Error())
 			}
 			opts = append(opts, principal.WithRedis(redisAddress, redisPassword, redisCompressionType))
+			if disableRedisProxy {
+				opts = append(opts, principal.WithRedisProxyDisabled())
+			}
 			opts = append(opts, principal.WithHealthzPort(healthzPort))
 			opts = append(opts, principal.WithDestinationBasedMapping(destinationBasedMapping))
 			opts = append(opts, principal.WithAppLabelSelector(appLabelSelector))
@@ -552,6 +556,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&redisCredsDirPath, "redis-creds-dir-path",
 		env.StringWithDefault("REDIS_CREDS_DIR_PATH", nil, ""),
 		"The redis directory with 'auth' file for Redis password")
+
+	command.Flags().BoolVar(&disableRedisProxy, "disable-redis-proxy",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_DISABLE_REDIS_PROXY", false),
+		"Disable the local Redis proxy")
 
 	command.Flags().StringVar(&redisCompressionType, "redis-compression-type",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),

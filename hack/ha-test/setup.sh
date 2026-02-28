@@ -29,8 +29,9 @@ echo "=== Creating namespace and installing Argo CD CRDs ==="
 kubectl --context kind-ha-test create namespace argocd 2>/dev/null || true
 
 # Install Argo CD CRDs
-kubectl --context kind-ha-test apply -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds/application-crd.yaml
-kubectl --context kind-ha-test apply -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds/appproject-crd.yaml
+kubectl --context kind-ha-test apply --server-side -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds/application-crd.yaml
+kubectl --context kind-ha-test apply --server-side -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds/appproject-crd.yaml
+kubectl --context kind-ha-test apply --server-side -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/crds/applicationset-crd.yaml
 
 # Create a dummy Redis (just for the principal to start - won't actually use it for HA test)
 kubectl --context kind-ha-test apply -f - <<EOF
@@ -80,14 +81,31 @@ openssl genrsa -out "$TMPDIR/ca.key" 2048 2>/dev/null
 openssl req -x509 -new -nodes -key "$TMPDIR/ca.key" -sha256 -days 1 \
     -out "$TMPDIR/ca.crt" -subj "/CN=test-ca" 2>/dev/null
 
-# Create the CA secret
+# Create the CA secret (recreate if it already exists)
 kubectl --context kind-ha-test -n argocd create secret tls argocd-agent-ca \
     --cert="$TMPDIR/ca.crt" \
     --key="$TMPDIR/ca.key" \
-    2>/dev/null || kubectl --context kind-ha-test -n argocd delete secret argocd-agent-ca && \
+    2>/dev/null || {
+    kubectl --context kind-ha-test -n argocd delete secret argocd-agent-ca
     kubectl --context kind-ha-test -n argocd create secret tls argocd-agent-ca \
-    --cert="$TMPDIR/ca.crt" \
-    --key="$TMPDIR/ca.key"
+        --cert="$TMPDIR/ca.crt" \
+        --key="$TMPDIR/ca.key"
+}
+
+echo "=== Generating server certificates signed by the CA ==="
+CERTS_DIR="$SCRIPT_DIR/certs"
+mkdir -p "$CERTS_DIR"
+cp "$TMPDIR/ca.crt" "$CERTS_DIR/ca.crt"
+
+for name in primary replica; do
+    openssl genrsa -out "$CERTS_DIR/$name.key" 2048 2>/dev/null
+    openssl req -new -key "$CERTS_DIR/$name.key" \
+        -out "$TMPDIR/$name.csr" -subj "/CN=$name" 2>/dev/null
+    openssl x509 -req -in "$TMPDIR/$name.csr" \
+        -CA "$TMPDIR/ca.crt" -CAkey "$TMPDIR/ca.key" -CAcreateserial \
+        -out "$CERTS_DIR/$name.crt" -days 1 -sha256 \
+        -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1") 2>/dev/null
+done
 
 rm -rf "$TMPDIR"
 
