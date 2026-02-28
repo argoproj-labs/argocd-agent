@@ -449,6 +449,14 @@ func WithWebSocket(enableWebSocket bool) ServerOption {
 	}
 }
 
+// WithRedisProxyDisabled disables the Redis proxy for testing.
+func WithRedisProxyDisabled() ServerOption {
+	return func(o *Server) error {
+		o.options.redisProxyDisabled = true
+		return nil
+	}
+}
+
 // WithInformerSyncTimeout sets the informer sync timeout duration.
 func WithInformerSyncTimeout(timeout time.Duration) ServerOption {
 	return func(o *Server) error {

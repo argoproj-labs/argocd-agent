@@ -11,11 +11,16 @@ exec "$SCRIPT_DIR/argocd-agent" principal \
     --kubecontext kind-ha-test \
     --log-level debug \
     --namespace argocd \
-    --insecure-tls-generate \
+    --tls-cert "$SCRIPT_DIR/certs/replica.crt" \
+    --tls-key "$SCRIPT_DIR/certs/replica.key" \
+    --root-ca-path "$SCRIPT_DIR/certs/ca.crt" \
     --insecure-jwt-generate \
     --auth "mtls:" \
     --enable-resource-proxy=false \
+    --disable-redis-proxy \
     --ha-enabled \
     --ha-preferred-role replica \
     --ha-peer-address "localhost:8443" \
+    --ha-replication-auth "mtls:subject:CN=([^,]+)" \
+    --ha-admin-port 8406 \
     --ha-failover-timeout 10s
