@@ -24,11 +24,8 @@ HA Status
 State:             active
 Preferred Role:    primary
 Peer Address:      principal.region-b.internal:8443
-Peer Reachable:    true
 Connected Replicas: 1
 Connected Agents:  12
-Last Event:        2s ago
-Last Sequence:     48291
 ```
 
 ### ha promote
