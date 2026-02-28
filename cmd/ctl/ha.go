@@ -330,13 +330,11 @@ func printHAStatus(resp *haadminapi.HAStatusResponse, format string) error {
 		fmt.Printf("Preferred Role:    %s\n", resp.PreferredRole)
 		if resp.PeerAddress != "" {
 			fmt.Printf("Peer Address:      %s\n", resp.PeerAddress)
-			fmt.Printf("Peer Reachable:    %v\n", resp.PeerReachable)
-			if resp.PeerState != "" {
-				fmt.Printf("Peer State:        %s\n", resp.PeerState)
-			}
 		}
 		if resp.State == string(ha.StateActive) {
 			fmt.Printf("Connected Replicas: %d\n", resp.ConnectedReplicas)
+		} else {
+			fmt.Printf("Replicating:       %v\n", resp.PeerReachable)
 		}
 		fmt.Printf("Connected Agents:  %d\n", resp.ConnectedAgents)
 		if resp.LastEventTimestamp > 0 {
