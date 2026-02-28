@@ -352,14 +352,3 @@ Recommended alerts:
 4. **Multi-replica** — Multiple replicas for additional redundancy.
 5. **Automatic failback** — Auto-failback when preferred primary is synced and healthy for N minutes.
 6. **CLI-integrated DNS** — `ha failover` optionally updates DNS records directly.
-
----
-
-## References
-
-- [argocd-agent Architecture](../../README.md)
-- [Replication Proto](../../principal/apis/replication/replication.proto)
-- [HA Controller](../../pkg/ha/controller.go)
-- [Replication Client](../../pkg/replication/client.go)
-- [Replication Forwarder](../../pkg/replication/forwarder.go)
-- [HA Integration](../../principal/ha_integration.go)
