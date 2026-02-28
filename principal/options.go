@@ -35,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
@@ -90,6 +91,9 @@ type ServerOptions struct {
 	selfAgentRegistrationEnabled bool
 	resourceProxyAddress         string
 	clientCertSecretName         string
+
+	// haOptions contains HA configuration options
+	haOptions []ha.Option
 }
 
 type ServerOption func(o *Server) error
@@ -583,6 +587,14 @@ func WithResourceProxyAddress(address string) ServerOption {
 func WithClientCertSecretName(name string) ServerOption {
 	return func(o *Server) error {
 		o.options.clientCertSecretName = name
+		return nil
+	}
+}
+
+// WithHA configures High Availability options for the server.
+func WithHA(opts ...ha.Option) ServerOption {
+	return func(o *Server) error {
+		o.options.haOptions = append(o.options.haOptions, opts...)
 		return nil
 	}
 }

@@ -50,7 +50,7 @@ argocd-agent is in active development. Current functionality provides a solid fo
 
 - **ApplicationSet Support**: Limited support for ApplicationSets in the current implementation
 - **Terminal Access**: Direct pod terminal access through the control plane is planned but not available
-- **High Availability**: Principal component does not yet support high availability configurations
+- **High Availability**: Principal component does not yet support horizontal scaling & high availability configurations.
 - **Advanced RBAC**: Multi-tenancy and advanced role-based access control features are still being developed
 
 ## Development Roadmap

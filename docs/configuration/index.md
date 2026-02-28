@@ -86,6 +86,7 @@ This section is organized by task to help you find what you need:
 | [TLS & Certificates](tls-certificates.md) | Set up PKI, manage certificates, configure TLS settings |
 | [Namespaces](namespaces.md) | Namespace model, access control, automatic namespace creation |
 | [Networking](networking.md) | Transport protocols, compression, keepalives, service mesh integration |
+| [High Availability](ha.md) | Configure active/passive HA with replication |
 | [Observability](observability.md) | Logging, metrics, profiling, and health checks |
 | [Reference: Principal](reference/principal.md) | Complete principal parameter reference |
 | [Reference: Agent](reference/agent.md) | Complete agent parameter reference |

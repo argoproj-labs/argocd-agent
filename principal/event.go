@@ -28,6 +28,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
+	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -41,6 +42,18 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/workqueue"
 )
+
+// skipReplication returns true for event targets that are operational noise and
+// should not be forwarded to HA replicas. Replicas get fresh data from agents
+// on promotion.
+func skipReplication(target event.EventTarget) bool {
+	switch target {
+	case event.TargetHeartbeat, event.TargetClusterCacheInfoUpdate:
+		return true
+	default:
+		return false
+	}
+}
 
 // processRecvQueue processes an entry from the receiver queue, which holds the
 // events received by agents. It will trigger updates of resources in the
@@ -123,6 +136,12 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 
 	// Mark event as processed
 	q.Done(ev)
+
+	// Forward successfully processed events to replicas, skipping operational
+	// noise that replicas don't need. Replicas get fresh data from agents on promotion.
+	if err == nil && s.ha != nil && !skipReplication(target) {
+		s.ha.ForwardEventForReplication(event.New(ev, target), agentName, replication.DirectionInbound)
+	}
 
 	// Stop and log checkpoint information
 	cp.End()

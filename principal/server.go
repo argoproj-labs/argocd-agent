@@ -29,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
+	kubeappset "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/applicationset"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
@@ -42,6 +43,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/applicationset"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -52,6 +54,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	logstream "github.com/argoproj-labs/argocd-agent/principal/apis/logstreamapi"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/terminalstream"
 	"github.com/argoproj-labs/argocd-agent/principal/redisproxy"
@@ -92,6 +95,7 @@ type Server struct {
 	ctxCancel      context.CancelFunc
 	appManager     *application.ApplicationManager
 	projectManager *appproject.AppProjectManager
+	appSetManager  *applicationset.ApplicationSetManager
 
 	namespaceManager *kubenamespace.KubernetesBackend
 
@@ -156,7 +160,8 @@ type Server struct {
 	// handlers to run when an agent connects to the principal
 	handlersOnConnect []handlersOnConnect
 
-	eventWriters *event.EventWritersMap
+	eventWriters   *event.EventWritersMap
+	eventStreamSrv *eventstream.Server
 
 	// sourceCache is a cache of resources from the source. We use it to revert any changes made to the local resources.
 	sourceCache *cache.SourceCache
@@ -182,6 +187,9 @@ type Server struct {
 
 	// agentRegistrationManager handles automatic registration of agents
 	agentRegistrationManager *registration.AgentRegistrationManager
+
+	// ha holds HA components for high availability support
+	ha *HAComponents
 }
 
 type handlersOnConnect func(agent types.Agent) error
@@ -338,6 +346,29 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
+	appSetInformerOpts := []informer.InformerOption[*v1alpha1.ApplicationSet]{
+		informer.WithListHandler[*v1alpha1.ApplicationSet](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets("").List(ctx, v1.ListOptions{})
+		}),
+		informer.WithWatchHandler[*v1alpha1.ApplicationSet](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets("").Watch(ctx, v1.ListOptions{})
+		}),
+		informer.WithAddHandler[*v1alpha1.ApplicationSet](s.newAppSetCallback),
+		informer.WithUpdateHandler[*v1alpha1.ApplicationSet](s.updateAppSetCallback),
+		informer.WithDeleteHandler[*v1alpha1.ApplicationSet](s.deleteAppSetCallback),
+		informer.WithGroupResource[*v1alpha1.ApplicationSet]("argoproj.io", "applicationsets"),
+	}
+
+	appSetInformer, err := informer.NewInformer(s.ctx, appSetInformerOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	s.appSetManager = applicationset.NewApplicationSetManager(
+		kubeappset.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appSetInformer),
+		s.namespace,
+	)
+
 	nsInformerOpts := []informer.InformerOption[*corev1.Namespace]{
 		informer.WithListHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 			return kubeClient.Clientset.CoreV1().Namespaces().List(ctx, opts)
@@ -446,6 +477,19 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		s.issuer,
 	)
 
+	// Initialize HA components if HA options are configured
+	if len(s.options.haOptions) > 0 {
+		s.ha, err = NewHAComponents(ctx, s, s.options.haOptions...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize HA components: %w", err)
+		}
+		// Add HA handler for agent connections
+		s.handlersOnConnect = append(s.handlersOnConnect, func(agent types.Agent) error {
+			return s.ha.OnAgentConnect(agent)
+		})
+		log().Info("HA components initialized")
+	}
+
 	return s, nil
 }
 
@@ -503,6 +547,14 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		return err
 	}
 
+	// Start HA components if configured
+	if s.ha != nil {
+		if err := s.ha.StartHA(ctx); err != nil {
+			log().WithError(err).Error("failed to start HA components")
+			return err
+		}
+	}
+
 	if s.options.serveGRPC {
 		if err := s.serveGRPC(ctx, s.metrics, errch); err != nil {
 			return err
@@ -547,6 +599,15 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}()
 
+	// The applicationset informer lives in its own go routine
+	go func() {
+		if err := s.appSetManager.StartBackend(s.ctx); err != nil {
+			log().WithError(err).Error("ApplicationSet backend has exited non-successfully")
+		} else {
+			log().Info("ApplicationSet backend has exited")
+		}
+	}()
+
 	// The namespace informer lives in its own go routine
 	go func() {
 		if err := s.namespaceManager.StartInformer(s.ctx); err != nil {
@@ -588,6 +649,11 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 	log().Infof("AppProject informer synced and ready")
 
+	if err := s.appSetManager.EnsureSynced(syncTimeout); err != nil {
+		return fmt.Errorf("unable to sync ApplicationSet informer: %w", err)
+	}
+	log().Infof("ApplicationSet informer synced and ready")
+
 	if err := s.repoManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Repository informer: %w", err)
 	}
@@ -614,7 +680,12 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	if s.options.healthzPort > 0 {
 		// Endpoint to check if the principal is up and running
-		http.HandleFunc("/healthz", s.healthzHandler)
+		// Wrap with HA handler if HA is configured
+		healthzHandler := s.healthzHandler
+		if s.ha != nil {
+			healthzHandler = s.ha.HAHealthzHandler(s.healthzHandler)
+		}
+		http.HandleFunc("/healthz", healthzHandler)
 		healthzAddr := fmt.Sprintf(":%d", s.options.healthzPort)
 
 		log().Infof("Starting healthz server on %s", healthzAddr)
@@ -845,6 +916,14 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 func (s *Server) Shutdown() error {
 	var err error
 
+	// Shutdown HA components first
+	if s.ha != nil {
+		if err = s.ha.ShutdownHA(s.ctx); err != nil {
+			log().WithError(err).Warn("HA shutdown encountered errors")
+			// Continue with shutdown even if HA shutdown has errors
+		}
+	}
+
 	if s.resourceProxy != nil {
 		if err = s.resourceProxy.Stop(s.ctx); err != nil {
 			return err
@@ -1034,4 +1113,33 @@ func (s *Server) populateSourceCache(ctx context.Context) error {
 
 	log().Infof("Source cache populated successfully")
 	return nil
+}
+
+// HAComponents returns the HA components, or nil if HA is not configured
+func (s *Server) HAComponents() *HAComponents {
+	return s.ha
+}
+
+// IsActive returns true if this principal is currently active (or if HA is not configured)
+func (s *Server) IsActive() bool {
+	if s.ha == nil {
+		return true
+	}
+	return s.ha.IsActive()
+}
+
+// ShouldAcceptAgents returns true if this principal should accept agent connections
+func (s *Server) ShouldAcceptAgents() bool {
+	if s.ha == nil {
+		return true
+	}
+	return s.ha.ShouldAcceptAgents()
+}
+
+// GetHAStatus returns the current HA status, or nil if HA is not configured
+func (s *Server) GetHAStatus() *HAStatus {
+	if s.ha == nil {
+		return nil
+	}
+	return s.ha.GetHAStatus()
 }

@@ -80,6 +80,7 @@ const (
 	TargetContainerLog           EventTarget = "containerlog"
 	TargetHeartbeat              EventTarget = "heartbeat"
 	TargetTerminal               EventTarget = "terminal"
+	TargetApplicationSet         EventTarget = "applicationset"
 )
 
 const (
@@ -177,6 +178,18 @@ func (evs EventSource) AppProjectEvent(evType EventType, appProject *v1alpha1.Ap
 	cev.SetDataSchema(TargetAppProject.String())
 	// TODO: Handle this error situation?
 	_ = cev.SetData(cloudevents.ApplicationJSON, appProject)
+	return &cev
+}
+
+func (evs EventSource) ApplicationSetEvent(evType EventType, appSet *v1alpha1.ApplicationSet) *cloudevents.Event {
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(evType.String())
+	cev.SetExtension(eventID, createEventID(appSet.ObjectMeta))
+	cev.SetExtension(resourceID, createResourceID(appSet.ObjectMeta))
+	cev.SetDataSchema(TargetApplicationSet.String())
+	_ = cev.SetData(cloudevents.ApplicationJSON, appSet)
 	return &cev
 }
 
@@ -615,6 +628,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetHeartbeat
 	case TargetTerminal.String():
 		return TargetTerminal
+	case TargetApplicationSet.String():
+		return TargetApplicationSet
 	}
 	return ""
 }
@@ -667,6 +682,12 @@ func (ev Event) AppProject() (*v1alpha1.AppProject, error) {
 	proj := &v1alpha1.AppProject{}
 	err := ev.event.DataAs(proj)
 	return proj, err
+}
+
+func (ev Event) ApplicationSet() (*v1alpha1.ApplicationSet, error) {
+	appSet := &v1alpha1.ApplicationSet{}
+	err := ev.event.DataAs(appSet)
+	return appSet, err
 }
 
 func (ev Event) Repository() (*corev1.Secret, error) {

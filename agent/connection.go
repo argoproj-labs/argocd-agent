@@ -15,6 +15,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -169,14 +170,17 @@ func (a *Agent) handleStreamEvents() error {
 		return err
 	}
 
-	if a.eventWriter != nil {
-		// Reuse the existing event writer if it exists.
-		a.eventWriter.UpdateTarget(stream)
-	} else {
-		// Create a new event writer if it doesn't exist.
+	// Per-stream context: cancelled when this stream dies so all child
+	// goroutines (recv, send, heartbeat) exit and don't leak across reconnects.
+	streamCtx, streamCancel := context.WithCancel(a.context)
+	defer streamCancel()
+
+	if a.eventWriter == nil {
 		a.eventWriter = event.NewEventWriter(stream)
-		go a.eventWriter.SendWaitingEvents(a.context)
+	} else {
+		a.eventWriter.UpdateTarget(stream)
 	}
+	go a.eventWriter.SendWaitingEvents(streamCtx)
 
 	logCtx := log().WithFields(logrus.Fields{
 		logfields.Module:     "StreamEvent",
@@ -250,20 +254,17 @@ func (a *Agent) handleStreamEvents() error {
 			ticker := time.NewTicker(a.options.heartbeatInterval)
 			defer ticker.Stop()
 
-			for a.IsConnected() {
+			for {
 				select {
-				case <-a.context.Done():
-					logCtx.Debug("Heartbeat sender stopped due to context cancellation")
+				case <-streamCtx.Done():
+					logCtx.Debug("Heartbeat sender stopped")
 					return
 				case <-ticker.C:
-					// Add heartbeat to EventWriter for thread-safe sending
-					// EventWriter will send it without ACK tracking (fire-and-forget)
 					pingEvent := a.emitter.HeartbeatEvent(event.Ping)
 					a.eventWriter.Add(pingEvent)
 					logCtx.Debug("Queued heartbeat ping")
 				}
 			}
-			logCtx.Debug("Heartbeat sender stopped")
 		}()
 	}
 

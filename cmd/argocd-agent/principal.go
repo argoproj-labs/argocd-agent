@@ -37,6 +37,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
+	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	"github.com/argoproj-labs/argocd-agent/principal"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 
@@ -94,6 +95,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisAddress         string
 		redisPassword        string
 		redisCompressionType string
+		disableRedisProxy    bool
 		healthzPort          int
 
 		maxGRPCMessageSize int
@@ -106,6 +108,15 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 		enableSelfClusterRegistration bool
 		selfRegClientCertSecretName   string
+
+		// HA configuration
+		haEnabled            bool
+		haPreferredRole      string
+		haPeerAddress        string
+		haFailoverTimeout    time.Duration
+		haAdminPort          int
+		haReplicationAuth    string
+		haAllowedReplClients []string
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -338,6 +349,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithWebSocket(enableWebSocket))
 			opts = append(opts, principal.WithKeepAliveMinimumInterval(keepAliveMinimumInterval))
 			opts = append(opts, principal.WithRedis(redisAddress, redisPassword, redisCompressionType))
+			if disableRedisProxy {
+				opts = append(opts, principal.WithRedisProxyDisabled())
+			}
 			opts = append(opts, principal.WithHealthzPort(healthzPort))
 			opts = append(opts, principal.WithDestinationBasedMapping(destinationBasedMapping))
 			opts = append(opts, principal.WithMaxGRPCMessageSize(maxGRPCMessageSize))
@@ -354,6 +368,47 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithAgentRegistration(enableSelfClusterRegistration))
 			if selfRegClientCertSecretName != "" {
 				opts = append(opts, principal.WithClientCertSecretName(selfRegClientCertSecretName))
+			}
+
+			if haEnabled {
+				haOpts := []ha.Option{ha.WithEnabled(true)}
+				if haPreferredRole != "" {
+					haOpts = append(haOpts, ha.WithPreferredRole(haPreferredRole))
+				}
+				if haPeerAddress != "" {
+					haOpts = append(haOpts, ha.WithPeerAddress(haPeerAddress))
+				}
+				if haFailoverTimeout > 0 {
+					haOpts = append(haOpts, ha.WithFailoverTimeout(haFailoverTimeout))
+				}
+				if haAdminPort > 0 {
+					haOpts = append(haOpts, ha.WithAdminPort(haAdminPort))
+				}
+				if haReplicationAuth != "" {
+					method, authCfg, err := parseAuth(haReplicationAuth)
+					if err != nil {
+						cmdutil.Fatal("Could not parse ha-replication-auth: %v", err)
+					}
+					if method != "mtls" {
+						cmdutil.Fatal("ha-replication-auth only supports mtls")
+					}
+					source, regexStr := parseMTLSConfig(authCfg)
+					var regex *regexp.Regexp
+					if regexStr != "" {
+						regex, err = regexp.Compile(regexStr)
+						if err != nil {
+							cmdutil.Fatal("Error compiling ha-replication-auth regex: %v", err)
+						}
+					}
+					haOpts = append(haOpts, ha.WithAuthMethod(mtls.NewMTLSAuthentication(regex, source)))
+					logrus.Infof("HA replication: using mTLS auth (source: %s, pattern: %s)", source, regexStr)
+				}
+				if len(haAllowedReplClients) > 0 {
+					haOpts = append(haOpts, ha.WithAllowedReplicationClients(haAllowedReplClients))
+					logrus.Infof("HA replication: %d allowed client(s)", len(haAllowedReplClients))
+				}
+				opts = append(opts, principal.WithHA(haOpts...))
+				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
 			}
 
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
@@ -492,6 +547,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.StringWithDefault("REDIS_PASSWORD", nil, ""),
 		"The password to connect to redis with")
 
+	command.Flags().BoolVar(&disableRedisProxy, "disable-redis-proxy",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_DISABLE_REDIS_PROXY", false),
+		"Disable the local Redis proxy")
+
 	command.Flags().StringVar(&redisCompressionType, "redis-compression-type",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),
 		"Compression algorithm required by Redis. (possible values: gzip, none. Default value: gzip)")
@@ -526,6 +585,28 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&selfRegClientCertSecretName, "self-registration-client-cert-secret",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET", nil, ""),
 		"TLS secret containing shared client cert for self-registered cluster secrets (must have tls.crt, tls.key, ca.crt)")
+
+	command.Flags().BoolVar(&haEnabled, "ha-enabled",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_HA_ENABLED", false),
+		"Enable High Availability mode")
+	command.Flags().StringVar(&haPreferredRole, "ha-preferred-role",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_PREFERRED_ROLE", nil, "primary"),
+		"Preferred HA role: 'primary' or 'replica'")
+	command.Flags().StringVar(&haPeerAddress, "ha-peer-address",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_PEER_ADDRESS", nil, ""),
+		"Address of the HA peer principal (required for replicas, optional for primary)")
+	command.Flags().DurationVar(&haFailoverTimeout, "ha-failover-timeout",
+		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_FAILOVER_TIMEOUT", nil, 30*time.Second),
+		"Time to wait before promoting to primary after peer is unreachable")
+	command.Flags().IntVar(&haAdminPort, "ha-admin-port",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_PORT", cmdutil.ValidPort, 0),
+		"Port for the localhost-only HAAdmin gRPC server (0 uses ha.Options default 8405)")
+	command.Flags().StringVar(&haReplicationAuth, "ha-replication-auth",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_AUTH", nil, ""),
+		"Auth method for replication peer identity. Only mtls is supported (e.g. 'mtls:uri:<regex>')")
+	command.Flags().StringSliceVar(&haAllowedReplClients, "ha-allowed-replication-clients",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS", nil, []string{}),
+		"Comma-separated list of peer identities allowed to connect for replication")
 
 	return command
 }
