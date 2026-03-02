@@ -19,6 +19,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -26,7 +27,9 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -288,6 +291,36 @@ func RunPrincipalChecks(ctx context.Context, kubeClient *kube.KubernetesClient, 
 		}
 	}
 
+	// No Application CRs defined within the principal's Argo CD namespace
+	out = append(out, checkResult{
+		name: fmt.Sprintf("Verifying no Application CRs defined within the principal's Argo CD namespace: %s", principalNS),
+		err:  principalNoApplicationCRs(ctx, kubeClient, principalNS),
+	})
+
+	// Cluster secrets for agents are https and have the agentName query param
+	out = append(out, checkResult{
+		name: "Verifying agent cluster secrets contain correct query parameter on server url",
+		err:  principalVerifyClusterSecretServer(ctx, kubeClient, principalNS),
+	})
+
+	// Cluster secrets for agents have the skip-reconcile annotation set to true
+	out = append(out, checkResult{
+		name: "Verifying agent cluster secrets contain the skip-reconcile annotation and that it's set to true",
+		err:  principalVerifyClusterSecretAnnotation(ctx, kubeClient, principalNS),
+	})
+
+	// Argo CD redis network policy allows ingress from principal
+	out = append(out, checkResult{
+		name: "Verifying Argo CD network policy allows for ingress from principal",
+		err:  bothVerifyRedisNetworkPolicy(ctx, kubeClient, principalNS, "principal"),
+	})
+
+	// Ensures correct components are deployed on the principal
+	out = append(out, checkResult{
+		name: "Verifying deployed Argo CD components on principal",
+		err:  principalVerifyDeployedComponents(ctx, kubeClient, principalNS),
+	})
+
 	return out
 }
 
@@ -339,6 +372,18 @@ func RunAgentChecks(ctx context.Context, agentKubeClient *kube.KubernetesClient,
 	out = append(out, checkResult{
 		name: "Verifying agent mTLS certificate is signed by principal CA certificate",
 		err:  clientCertSignedByPrincipalCA(ctx, agentKubeClient.Clientset, agentNS, agentClientCertSecretName, principalKubeClient.Clientset, principalNS, principalCASecretName),
+	})
+
+	// Agent Argo CD redis network policy allows for ingress from agent
+	out = append(out, checkResult{
+		name: "Verifying Argo CD network policy allows for ingress from agent",
+		err:  bothVerifyRedisNetworkPolicy(ctx, agentKubeClient, agentNS, "agent"),
+	})
+
+	// Ensures correct components are deployed on the agent
+	out = append(out, checkResult{
+		name: "Verifying deployed Argo CD components on agent",
+		err:  agentVerifyDeployedComponents(ctx, agentKubeClient, agentNS),
 	})
 
 	return out
@@ -533,6 +578,222 @@ func verifyRouteHostMatchesCert(ctx context.Context, kc *kube.KubernetesClient, 
 	return fmt.Errorf("no OpenShift Route host in namespace matches TLS IPS/DNS")
 }
 
+// principalNoApplicationCRs checks the principal's namespace to ensure that no applications exist in it
+func principalNoApplicationCRs(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
+	if kc.DynamicClient == nil {
+		return fmt.Errorf("dynamic client is not available, failed to check applications")
+	}
+
+	// list applications in namespace and check to see if there is any
+	gvr := schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+	apps, err := kc.DynamicClient.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list applications in namespace %s: %v", ns, err)
+	}
+
+	if len(apps.Items) > 0 {
+		return fmt.Errorf("applications exist in principal namespace %s", ns)
+	}
+
+	return nil
+}
+
+// helper function to filter secrets list to argo cd cluster secrets that are managed by argocd-agent
+func filterManagedClusterSecrets(secrets *corev1.SecretList) []corev1.Secret {
+	var filtered []corev1.Secret
+	for _, secret := range secrets.Items {
+		isManaged := false
+		if manager, ok := secret.Annotations["managed-by"]; ok && manager == "argocd-agent" {
+			isManaged = true
+		}
+
+		isClusterSecret := false
+		if val, ok := secret.Labels[common.LabelKeySecretType]; ok && val == common.LabelValueSecretTypeCluster {
+			isClusterSecret = true
+		}
+
+		if isManaged && isClusterSecret {
+			filtered = append(filtered, secret)
+		}
+	}
+	return filtered
+}
+
+// principalVerifyClusterSecretServer verifies that the server in the cluster secrets that are managed by argocd agent in the
+// principal's namespace begin with https:// and include the agentName query parameter
+func principalVerifyClusterSecretServer(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
+	if kc.Clientset == nil {
+		return fmt.Errorf("client set is not available, failed to check secrets")
+	}
+
+	secrets, err := kc.Clientset.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed list secrets in namespace %s: %s", ns, err.Error())
+	}
+
+	var noHTTPS []string
+	var noAgentParam []string
+	filteredSecrets := filterManagedClusterSecrets(secrets)
+	for _, secret := range filteredSecrets {
+		// parse url to see if https and has the agentName query param
+		urlBytes := string(secret.Data["server"])
+		agentURL, err := url.Parse(urlBytes)
+		if err != nil {
+			return fmt.Errorf("failed to prase url for %s/%s: %s", ns, secret.Name, err.Error())
+		}
+
+		if !strings.HasPrefix(urlBytes, "https://") {
+			noHTTPS = append(noHTTPS, secret.Name)
+		}
+
+		query := agentURL.Query()
+		if strings.TrimSpace(query.Get("agentName")) == "" {
+			noAgentParam = append(noAgentParam, secret.Name)
+		}
+	}
+
+	// combine parse results for a verbose error on which secret was missing what
+	var errParts []string
+	if len(noHTTPS) > 0 {
+		errParts = append(errParts, fmt.Sprintf("the following agent cluster secrets in %s are not https: %s", ns, strings.Join(noHTTPS, ", ")))
+	}
+
+	if len(noAgentParam) > 0 {
+		errParts = append(errParts, fmt.Sprintf("the following agent cluster secrets in %s are missing the agentName param: %s", ns, strings.Join(noAgentParam, ", ")))
+	}
+
+	if len(errParts) > 0 {
+		return fmt.Errorf("%s", strings.Join(errParts, "\n"))
+	}
+
+	return nil
+}
+
+// principalVerifyClusterSecretAnnotation verifies that each cluster secret that is managed by argocd agent
+// includes the skip-reconcile annotation
+func principalVerifyClusterSecretAnnotation(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
+	if kc.Clientset == nil {
+		return fmt.Errorf("client set is not available, failed to check secrets")
+	}
+
+	secrets, err := kc.Clientset.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list secrets in namespace %s: %s", ns, err.Error())
+	}
+
+	var noAnnotation []string
+	filteredSecrets := filterManagedClusterSecrets(secrets)
+	for _, secret := range filteredSecrets {
+		if val, ok := secret.Annotations[common.AnnotationKeyAppSkipReconcile]; !ok || val != "true" {
+			noAnnotation = append(noAnnotation, secret.Name)
+		}
+	}
+
+	if len(noAnnotation) > 0 {
+		return fmt.Errorf("the following agent cluster secrets in %s are missing the skip-reconcile annotation or it is not set to true: %s", ns, strings.Join(noAnnotation, ", "))
+	}
+
+	return nil
+}
+
+// listDeployedArgoCDComponents parses the specified namespace for Argo CD components and returns them as a map where the key
+// is the component and value is the name of the resource
+func listDeployedArgoCDComponents(ctx context.Context, kc *kube.KubernetesClient, ns string) (map[string]string, error) {
+	if kc.Clientset == nil {
+		return nil, fmt.Errorf("client set is not available, failed to list deployed components")
+	}
+
+	components := make(map[string]string)
+
+	deployments, err := kc.Clientset.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	// use the part-of and component labels to tell what argocd component resource is
+	for _, deploy := range deployments.Items {
+		if deploy.Labels["app.kubernetes.io/part-of"] != "argocd" {
+			continue
+		}
+		component, exists := deploy.Labels["app.kubernetes.io/component"]
+		if !exists {
+			continue
+		}
+		components[component] = deploy.Name
+	}
+
+	statefulsets, err := kc.Clientset.AppsV1().StatefulSets(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, set := range statefulsets.Items {
+		if set.Labels["app.kubernetes.io/part-of"] != "argocd" {
+			continue
+		}
+		component, exists := set.Labels["app.kubernetes.io/component"]
+		if !exists {
+			continue
+		}
+		components[component] = set.Name
+	}
+
+	return components, nil
+}
+
+// parseDeployedComponents is a helper function to format the output for the deployed component checks
+func parseDeployedComponents(components map[string]string, validComponents, invalidComponents []string) string {
+	var missingComponents []string
+	for _, component := range validComponents {
+		if _, exists := components[component]; !exists {
+			missingComponents = append(missingComponents, component)
+		}
+	}
+
+	var foundInvalidComponents []string
+	for _, component := range invalidComponents {
+		if name, exists := components[component]; exists {
+			// print result out with name of resource for more information
+			foundInvalidComponents = append(foundInvalidComponents, fmt.Sprintf("%s (%s)", component, name))
+		}
+	}
+
+	// combine results for more informative output
+	var errParts []string
+	if len(missingComponents) > 0 {
+		errParts = append(errParts, fmt.Sprintf("the following components were missing: %s", strings.Join(missingComponents, ", ")))
+	}
+
+	if len(foundInvalidComponents) > 0 {
+		errParts = append(errParts, fmt.Sprintf("the following invalid components were found: %s", strings.Join(foundInvalidComponents, ", ")))
+	}
+
+	return strings.Join(errParts, "\n")
+}
+
+// principalVerifyDeployedComponents verifies that there is neither an application or application set
+// controller on the principal and that the repo-server, dex-server, redis, and argocd-server are deployed
+func principalVerifyDeployedComponents(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
+	if kc.Clientset == nil {
+		return fmt.Errorf("client set is not available, failed to list deployed components")
+	}
+
+	components, err := listDeployedArgoCDComponents(ctx, kc, ns)
+	if err != nil {
+		return fmt.Errorf("failed to list Argo CD components in namespace %s: %s", ns, err.Error())
+	}
+
+	validComponents := []string{common.LabelValueComponentRepoServer, "redis", "dex-server", "server"}
+	invalidComponents := []string{"application-controller", "applicationset-controller"}
+	result := parseDeployedComponents(components, validComponents, invalidComponents)
+
+	if result != "" {
+		return fmt.Errorf("%s", result)
+	}
+
+	return nil
+}
+
 func agentCASecretValid(ctx context.Context, kubeClient kubernetes.Interface, ns, name string) error {
 	sec, err := kubeClient.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -618,4 +879,77 @@ func x509FromTLSSecret(ctx context.Context, kubeClient kubernetes.Interface, ns,
 		return nil, fmt.Errorf("could not parse certificate in secret %s/%s: %w", ns, name, err)
 	}
 	return parsed, nil
+}
+
+func agentVerifyDeployedComponents(ctx context.Context, kc *kube.KubernetesClient, ns string) error {
+	if kc.Clientset == nil {
+		return fmt.Errorf("client set is not available, failed to list deployed components")
+	}
+
+	components, err := listDeployedArgoCDComponents(ctx, kc, ns)
+	if err != nil {
+		return fmt.Errorf("failed to list Argo CD components in %s: %s", ns, err.Error())
+	}
+
+	// applicationset controller is optional so it is not checked
+	validComponents := []string{common.LabelValueComponentRepoServer, "application-controller", "redis"}
+	invalidComponents := []string{"server", "dex-server"}
+	result := parseDeployedComponents(components, validComponents, invalidComponents)
+
+	if result != "" {
+		return fmt.Errorf("%s", result)
+	}
+
+	return nil
+}
+
+// bothVerifyRedisNetworkPolicy verifies that the network policy for Argo CD allows ingress traffic
+// from either the principal or agent
+func bothVerifyRedisNetworkPolicy(ctx context.Context, kc *kube.KubernetesClient, ns, component string) error {
+	if kc.Clientset == nil {
+		return fmt.Errorf("client set is not available, failed to check network policies")
+	}
+
+	componentName := fmt.Sprintf("argocd-agent-%s", component)
+
+	netPolicies, err := kc.Clientset.NetworkingV1().NetworkPolicies(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list network policies in namespace %s: %s", ns, err.Error())
+	}
+
+	policyExists := false
+	ingressAllowed := false
+	for _, policy := range netPolicies.Items {
+		// use pod selector to determine which network policy targets argocd redis
+		name, exists := policy.Spec.PodSelector.MatchLabels[common.LabelKeyAppName]
+		if !exists || name != common.DefaultRedisName {
+			continue
+		}
+
+		policyExists = true
+		for _, ingress := range policy.Spec.Ingress {
+			for _, from := range ingress.From {
+				if from.PodSelector == nil {
+					continue
+				}
+
+				if name, exists := from.PodSelector.MatchLabels[common.LabelKeyAppName]; exists && name == componentName {
+					ingressAllowed = true
+				}
+			}
+			if ingressAllowed {
+				break
+			}
+		}
+	}
+
+	if !policyExists {
+		return fmt.Errorf("network policy for argo cd redis does not exist in %s", ns)
+	}
+
+	if !ingressAllowed {
+		return fmt.Errorf("network policy for argo cd redis does not allow traffic from %s", componentName)
+	}
+
+	return nil
 }
