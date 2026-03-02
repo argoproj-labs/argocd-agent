@@ -61,7 +61,7 @@ Before enabling self-registration, ensure you have:
   (`--enable-resource-proxy=true`, which is the default)
 - **PKI initialized** -- CA, principal TLS certificate, and resource proxy TLS
   certificate (see [Step 1 in Adding an agent](./adding-agents.md#step-1-setup-pki-one-time))
-- **JWT signing key** created (see [JWT key management](../cli-jwt-commands.md))
+- **JWT signing key** created (see [JWT key management](../operations/jwt-signing-keys.md))
 - **Shared client certificate secret** -- a Kubernetes TLS secret on the
   principal cluster (see [Step 1](#step-1-create-the-shared-client-certificate-secret) below)
 
