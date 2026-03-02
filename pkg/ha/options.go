@@ -17,8 +17,6 @@ package ha
 import (
 	"fmt"
 	"time"
-
-	"github.com/argoproj-labs/argocd-agent/internal/auth"
 )
 
 // Options contains configuration for the HA controller
@@ -32,11 +30,8 @@ type Options struct {
 	AdminPort int
 
 	// AllowedReplicationClients is the list of identities allowed to connect
-	// for replication. Identities are extracted via AuthMethod.
+	// for replication. When empty, any authenticated peer is allowed.
 	AllowedReplicationClients []string
-
-	// AuthMethod authenticates replication connections (identity extraction)
-	AuthMethod auth.Method
 
 	ReconnectBackoffInitial time.Duration
 	ReconnectBackoffMax     time.Duration
@@ -120,14 +115,6 @@ func WithAllowedReplicationClients(clients []string) Option {
 	}
 }
 
-// WithAuthMethod sets the auth method for authenticating replication connections
-func WithAuthMethod(method auth.Method) Option {
-	return func(o *Options) error {
-		o.AuthMethod = method
-		return nil
-	}
-}
-
 // WithReconnectBackoff sets the reconnection backoff parameters
 func WithReconnectBackoff(initial, max time.Duration, factor float64) Option {
 	return func(o *Options) error {
@@ -155,10 +142,6 @@ func (o *Options) Validate() error {
 
 	if o.PeerAddress == "" && o.PreferredRole == RoleReplica {
 		return fmt.Errorf("peer address is required for replica role")
-	}
-
-	if o.AuthMethod == nil {
-		return fmt.Errorf("ha-replication-auth is required when HA is enabled")
 	}
 
 	return nil

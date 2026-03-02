@@ -21,5 +21,4 @@ exec "$SCRIPT_DIR/argocd-agent" principal \
     --ha-enabled \
     --ha-preferred-role primary \
     --ha-peer-address "localhost:8444" \
-    --ha-replication-auth "mtls:subject:CN=([^,]+)" \
     --ha-failover-timeout 10s
