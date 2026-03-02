@@ -155,7 +155,7 @@ Check network connectivity between regions:
 kubectl exec -it <replica-pod> -- curl -sS http://<primary-addr>:8003/healthz
 ```
 
-Check that replication auth is configured correctly — the replica needs a client certificate the primary trusts, and the extracted identity must be in `--ha-allowed-replication-clients`.
+Check that the server's `--auth` method is configured correctly — the replica needs a client certificate the primary trusts, and the extracted identity must be in `--ha-allowed-replication-clients`.
 
 ### Promote refuses (replication stream active)
 

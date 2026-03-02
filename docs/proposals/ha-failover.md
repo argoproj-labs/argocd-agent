@@ -176,14 +176,7 @@ Because the replica has been continuously replicating and writing resources to i
 
 ## Security
 
-Replication RPCs are served on the **main gRPC port** (8443) alongside agent traffic. The main server's interceptors route replication methods (`/replicationapi.Replication/*`) through a separate auth path that uses the HA controller's `AuthMethod` and `AllowedReplicationClients`. This reuses the existing mTLS infrastructure — no separate port, listener, or TLS config needed.
-
-Identity extraction uses the same `MTLSAuthentication` mechanism as agent auth. Supported sources:
-
-| Source | Flag value | Example |
-|--------|-----------|---------|
-| Subject CN | `mtls:subject:<regex>` | `mtls:subject:CN=(.+)` |
-| SPIFFE URI SAN | `mtls:uri:<regex>` | `mtls:uri:spiffe://example.com/principal/(.+)` |
+Replication RPCs are served on the **main gRPC port** (8443) alongside agent traffic. The main server's interceptors route replication methods (`/replicationapi.Replication/*`) through the server's `--auth` method and check the extracted identity against `--ha-allowed-replication-clients`. This reuses the existing mTLS infrastructure — no separate port, listener, or TLS config needed.
 
 The admin gRPC server (`ha status`, `ha promote`, `ha demote`) binds to `127.0.0.1:8405` only and has **no TLS**. Access requires `kubectl port-forward` — Kubernetes RBAC is the gate.
 
@@ -198,8 +191,7 @@ Flags for Region A (preferred primary):
 --ha-preferred-role=primary
 --ha-peer-address=principal.region-b.internal:8443
 
-# Peer identity allowlist (replication uses the main server's mTLS)
---ha-replication-auth=mtls:uri:spiffe://example.com/principal/(.+)
+# Peer identity allowlist (replication uses the server's --auth method)
 --ha-allowed-replication-clients=region-b
 ```
 

@@ -115,7 +115,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 		haPeerAddress        string
 		haFailoverTimeout    time.Duration
 		haAdminPort          int
-		haReplicationAuth    string
 		haAllowedReplClients []string
 	)
 	command := &cobra.Command{
@@ -384,28 +383,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if haAdminPort > 0 {
 					haOpts = append(haOpts, ha.WithAdminPort(haAdminPort))
 				}
-				if haReplicationAuth != "" {
-					method, authCfg, err := parseAuth(haReplicationAuth)
-					if err != nil {
-						cmdutil.Fatal("Could not parse ha-replication-auth: %v", err)
-					}
-					if method != "mtls" {
-						cmdutil.Fatal("ha-replication-auth only supports mtls")
-					}
-					source, regexStr := parseMTLSConfig(authCfg)
-					var regex *regexp.Regexp
-					if regexStr != "" {
-						regex, err = regexp.Compile(regexStr)
-						if err != nil {
-							cmdutil.Fatal("Error compiling ha-replication-auth regex: %v", err)
-						}
-					}
-					haOpts = append(haOpts, ha.WithAuthMethod(mtls.NewMTLSAuthentication(regex, source)))
-					logrus.Infof("HA replication: using mTLS auth (source: %s, pattern: %s)", source, regexStr)
-				}
 				if len(haAllowedReplClients) > 0 {
 					haOpts = append(haOpts, ha.WithAllowedReplicationClients(haAllowedReplClients))
-					logrus.Infof("HA replication: %d allowed client(s)", len(haAllowedReplClients))
 				}
 				opts = append(opts, principal.WithHA(haOpts...))
 				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
@@ -601,9 +580,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().IntVar(&haAdminPort, "ha-admin-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_PORT", cmdutil.ValidPort, 0),
 		"Port for the localhost-only HAAdmin gRPC server (0 uses ha.Options default 8405)")
-	command.Flags().StringVar(&haReplicationAuth, "ha-replication-auth",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_AUTH", nil, ""),
-		"Auth method for replication peer identity. Only mtls is supported (e.g. 'mtls:uri:<regex>')")
 	command.Flags().StringSliceVar(&haAllowedReplClients, "ha-allowed-replication-clients",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS", nil, []string{}),
 		"Comma-separated list of peer identities allowed to connect for replication")

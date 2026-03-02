@@ -97,7 +97,6 @@ echo "Starting PRIMARY principal (preferred role: primary)..."
     --ha-enabled \
     --ha-preferred-role primary \
     --ha-peer-address "localhost:$REPLICA_PORT" \
-    --ha-replication-auth "mtls:CN=([^,]+)" \
     --ha-failover-timeout 10s \
     2>&1 | sed 's/^/[PRIMARY] /' &
 PRIMARY_PID=$!
@@ -117,7 +116,6 @@ echo "Starting REPLICA principal (preferred role: replica)..."
     --ha-enabled \
     --ha-preferred-role replica \
     --ha-peer-address "localhost:$PRIMARY_PORT" \
-    --ha-replication-auth "mtls:CN=([^,]+)" \
     --ha-admin-port 8406 \
     --ha-failover-timeout 10s \
     2>&1 | sed 's/^/[REPLICA] /' &
