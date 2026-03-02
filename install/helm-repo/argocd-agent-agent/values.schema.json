@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "additionalProperties": false,
+  "additionalProperties": true,
   "properties": {
     "affinity": {
-      "additionalProperties": false,
+      "additionalProperties": true,
       "description": "Affinity rules for the agent Pod.",
       "required": [],
       "title": "affinity",
@@ -155,21 +155,21 @@
       "type": "string"
     },
     "nodeSelector": {
-      "additionalProperties": false,
+      "additionalProperties": true,
       "description": "#\nNode selector for scheduling the agent Pod.",
       "required": [],
       "title": "nodeSelector",
       "type": "object"
     },
     "podAnnotations": {
-      "additionalProperties": false,
+      "additionalProperties": true,
       "description": "Additional annotations to add to the agent Pod.",
       "required": [],
       "title": "podAnnotations",
       "type": "object"
     },
     "podLabels": {
-      "additionalProperties": false,
+      "additionalProperties": true,
       "description": "Additional labels to add to the agent Pod.",
       "required": [],
       "title": "podLabels",
@@ -423,7 +423,7 @@
           "additionalProperties": false,
           "properties": {
             "annotations": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "description": "Annotations to add to the healthz Service.",
               "required": [],
               "title": "annotations",
@@ -454,7 +454,7 @@
           "additionalProperties": false,
           "properties": {
             "annotations": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "description": "Annotations to add to the metrics Service.",
               "required": [],
               "title": "annotations",
@@ -494,7 +494,7 @@
       "description": "#\nServiceAccount configuration.",
       "properties": {
         "annotations": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "description": "Annotations to add to the ServiceAccount.",
           "required": [],
           "title": "annotations",
@@ -533,14 +533,14 @@
       "description": "#\nPrometheus ServiceMonitor configuration.",
       "properties": {
         "additionalLabels": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "description": "Prometheus ServiceMonitor labels",
           "required": [],
           "title": "additionalLabels",
           "type": "object"
         },
         "annotations": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "description": "Prometheus ServiceMonitor annotations",
           "required": [],
           "title": "annotations",
@@ -599,7 +599,7 @@
           "type": "string"
         },
         "tlsConfig": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "description": "Prometheus ServiceMonitor tlsConfig",
           "required": [],
           "title": "tlsConfig",
