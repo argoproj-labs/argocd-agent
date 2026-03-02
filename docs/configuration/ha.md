@@ -52,24 +52,6 @@ Address of the peer principal's gRPC server. Required on the replica; optional o
 
 **Example:** `principal.region-b.internal:8443`
 
-### Replication Auth
-
-| | |
-|---|---|
-| **CLI Flag** | `--ha-replication-auth` |
-| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_REPLICATION_AUTH` |
-| **Type** | String |
-| **Default** | `""` |
-
-Authentication method for verifying the connecting replication peer's identity. Only `mtls` is supported.
-
-| Format | Source | Example |
-|--------|--------|---------|
-| `mtls:subject:<regex>` | Subject CN | `mtls:subject:CN=(.+)` |
-| `mtls:uri:<regex>` | URI SAN (SPIFFE) | `mtls:uri:spiffe://example.com/principal/(.+)` |
-
-The first capture group is the extracted peer identity, which is matched against `--ha-allowed-replication-clients`.
-
 ### Allowed Replication Clients
 
 | | |
@@ -79,7 +61,7 @@ The first capture group is the extracted peer identity, which is matched against
 | **Type** | String slice (comma-separated) |
 | **Default** | `[]` (any authenticated peer allowed) |
 
-Explicit allowlist of peer identities permitted to connect for replication. Identities are extracted from the certificate using `--ha-replication-auth`.
+Explicit allowlist of peer identities permitted to connect for replication. Identities are extracted using the server's `--auth` method.
 
 **Example:** `region-b,principal-replica`
 
@@ -110,7 +92,6 @@ argocd-agent principal \
   --ha-enabled \
   --ha-preferred-role=primary \
   --ha-peer-address=principal.region-b.internal:8443 \
-  --ha-replication-auth=mtls:uri:spiffe://example.com/principal/(.+) \
   --ha-allowed-replication-clients=region-b
 ```
 
@@ -121,7 +102,6 @@ argocd-agent principal \
   --ha-enabled \
   --ha-preferred-role=replica \
   --ha-peer-address=principal.region-a.internal:8443 \
-  --ha-replication-auth=mtls:uri:spiffe://example.com/principal/(.+) \
   --ha-allowed-replication-clients=region-a
 ```
 

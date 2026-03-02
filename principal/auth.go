@@ -156,26 +156,24 @@ func isReplicationMethod(fullMethod string) bool {
 	return strings.HasPrefix(fullMethod, fmt.Sprintf("/%s/", replicationapi.Replication_ServiceDesc.ServiceName))
 }
 
-// authenticateReplication authenticates a replication request using the HA
-// controller's configured auth method and allowed client list.
+// authenticateReplication authenticates a replication request using the
+// server's mTLS auth method (same as agent auth) and optionally checks
+// the extracted identity against the allowed replication clients list.
 func (s *Server) authenticateReplication(ctx context.Context) error {
-	opts := s.ha.Controller.Options()
-
-	if opts.AuthMethod == nil {
-		if len(opts.AllowedReplicationClients) > 0 {
-			return status.Errorf(codes.PermissionDenied, "allowed replication clients configured but no auth method set")
-		}
-		return nil
+	mtlsMethod := s.authMethods.Method("mtls")
+	if mtlsMethod == nil {
+		return status.Errorf(codes.Unauthenticated, "replication requires mTLS auth but no mtls method configured")
 	}
 
-	identity, err := opts.AuthMethod.Authenticate(ctx, auth.Credentials{})
+	identity, err := mtlsMethod.Authenticate(ctx, auth.Credentials{})
 	if err != nil {
 		log().WithError(err).Warn("Replication request rejected: authentication failed")
 		return status.Errorf(codes.Unauthenticated, "replication auth failed: %v", err)
 	}
 
-	if len(opts.AllowedReplicationClients) > 0 {
-		for _, c := range opts.AllowedReplicationClients {
+	allowed := s.ha.Controller.Options().AllowedReplicationClients
+	if len(allowed) > 0 {
+		for _, c := range allowed {
 			if identity == c {
 				return nil
 			}

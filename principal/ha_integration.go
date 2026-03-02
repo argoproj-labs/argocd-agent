@@ -259,8 +259,8 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 
 		// Derive client TLS lazily from the server's TLS config, which isn't
 		// populated until Listen() is called (after NewHAComponents returns).
-		// The server cert acts as the client identity; ClientCAs (rootCa) is
-		// reused as RootCAs — assumes the same CA signs both client and server certs.
+		// The server cert acts as the client identity; ClientCAs (root CA) is
+		// reused as RootCAs to verify the peer's server cert.
 		clientOpts = append(clientOpts, replication.WithTLSConfigFunc(func() *tls.Config {
 			if server.tlsConfig == nil {
 				return nil
