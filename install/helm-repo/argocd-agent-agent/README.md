@@ -30,6 +30,7 @@ Kubernetes: `>=1.24.0-0`
 | argoCdRedisPasswordKey | string | `"auth"` | ArgoCD Redis password key. |
 | argoCdRedisSecretName | string | `"argocd-redis"` | ArgoCD Redis password secret name. |
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
+| automountServiceAccountToken | bool | `true` | Automount API credentials for the Service Account into the pod. |
 | cacheRefreshInterval | string | `"10s"` | Cache refresh interval. |
 | createNamespace | bool | `false` | Whether to create target namespaces automatically when they don't exist. Used with destination-based mapping. |
 | destinationBasedMapping | bool | `false` | Whether to enable destination-based mapping. When enabled, the agent creates applications in their original namespace (preserving the namespace from the principal) instead of the agent's own namespace. |
@@ -74,10 +75,23 @@ Kubernetes: `>=1.24.0-0`
 | service.metrics.annotations | object | `{}` | Annotations to add to the metrics Service. |
 | service.metrics.port | int | `8181` | Service port for metrics. |
 | service.metrics.targetPort | int | `8181` | Target port for metrics. |
-| serviceAccount | object | `{"annotations":{},"create":true,"name":""}` | ServiceAccount configuration. |
+| serviceAccount | object | `{"annotations":{},"automountServiceAccountToken":true,"create":true,"name":""}` | ServiceAccount configuration. |
 | serviceAccount.annotations | object | `{}` | Annotations to add to the ServiceAccount. |
+| serviceAccount.automountServiceAccountToken | bool | `true` | Automount API credentials for the Service Account |
 | serviceAccount.create | bool | `true` | Whether to create the ServiceAccount. |
 | serviceAccount.name | string | `""` | Name of the ServiceAccount to use. If empty, a name is generated. |
+| serviceMonitor | object | `{"additionalLabels":{},"annotations":{},"enabled":false,"honorLabels":false,"interval":"30s","metricRelabelings":[],"namespace":"","relabelings":[],"scheme":"","scrapeTimeout":"10s","tlsConfig":{}}` | Prometheus ServiceMonitor configuration. |
+| serviceMonitor.additionalLabels | object | `{}` | Prometheus ServiceMonitor labels |
+| serviceMonitor.annotations | object | `{}` | Prometheus ServiceMonitor annotations |
+| serviceMonitor.enabled | bool | `false` | Whether to create a ServiceMonitor resource. |
+| serviceMonitor.honorLabels | bool | `false` | When true, honorLabels preserves the metric’s labels when they collide with the target’s labels. |
+| serviceMonitor.interval | string | `"30s"` | Prometheus scrape interval. Must be a valid duration string (e.g. "30s"). |
+| serviceMonitor.metricRelabelings | list | `[]` | Prometheus [MetricRelabelConfigs] to apply to samples before ingestion |
+| serviceMonitor.namespace | string | `""` | Namespace where the ServiceMonitor should be created. Defaults to release namespace. |
+| serviceMonitor.relabelings | list | `[]` | Prometheus [RelabelConfigs] to apply to samples before scraping |
+| serviceMonitor.scheme | string | `""` | Prometheus ServiceMonitor scheme |
+| serviceMonitor.scrapeTimeout | string | `"10s"` | Prometheus scrape timeout. Must be a valid duration string (e.g. "10s"). |
+| serviceMonitor.tlsConfig | object | `{}` | Prometheus ServiceMonitor tlsConfig |
 | tests | object | `{"enabled":false,"image":"bitnamilegacy/kubectl","tag":"1.33.4"}` | Configuration for helm-chart tests. |
 | tests.enabled | bool | `false` | By default, chart tests are disabled. |
 | tests.image | string | `"bitnamilegacy/kubectl"` | Test image. |

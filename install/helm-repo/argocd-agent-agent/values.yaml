@@ -11,7 +11,7 @@ image:
   # -- Container image repository for the agent.
   repository: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
   # -- Container image tag for the agent.
-  tag: latest 
+  tag: latest
   # -- Image pull policy for the agent container.
   pullPolicy: "Always"
 
@@ -32,6 +32,8 @@ resources:
   requests:
     cpu: 100m
     memory: 128Mi
+# -- Automount API credentials for the Service Account into the pod.
+automountServiceAccountToken: true
 
 ## @section ServiceAccount
 # -- ServiceAccount configuration.
@@ -42,6 +44,8 @@ serviceAccount:
   name: ""
   # -- Annotations to add to the ServiceAccount.
   annotations: {}
+  # -- Automount API credentials for the Service Account
+  automountServiceAccountToken: true
 
 ## @section Pod Scheduling and Metadata
 # -- Node selector for scheduling the agent Pod.
@@ -170,6 +174,32 @@ service:
     targetPort: 8002
     # -- Annotations to add to the healthz Service.
     annotations: {}
+
+## @section ServiceMonitor
+# -- Prometheus ServiceMonitor configuration.
+serviceMonitor:
+  # -- Whether to create a ServiceMonitor resource.
+  enabled: false
+  # -- Prometheus ServiceMonitor labels
+  additionalLabels: {}
+  # -- Prometheus ServiceMonitor annotations
+  annotations: {}
+  # -- Namespace where the ServiceMonitor should be created. Defaults to release namespace.
+  namespace: ""
+  # -- Prometheus scrape interval. Must be a valid duration string (e.g. "30s").
+  interval: "30s"
+  # -- Prometheus scrape timeout. Must be a valid duration string (e.g. "10s").
+  scrapeTimeout: "10s"
+  # -- Prometheus [RelabelConfigs] to apply to samples before scraping
+  relabelings: []
+  # -- Prometheus [MetricRelabelConfigs] to apply to samples before ingestion
+  metricRelabelings: []
+  # -- When true, honorLabels preserves the metric’s labels when they collide with the target’s labels.
+  honorLabels: false
+  # -- Prometheus ServiceMonitor scheme
+  scheme: ""
+  # -- Prometheus ServiceMonitor tlsConfig
+  tlsConfig: {}
 
 ## @section Tests
 # -- Configuration for helm-chart tests.

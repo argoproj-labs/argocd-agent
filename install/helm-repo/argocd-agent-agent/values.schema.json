@@ -1,331 +1,775 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "$id": "https://argoproj-labs.github.io/argocd-agent/values.schema.json",
-  "title": "argocd-agent-agent chart values",
-  "type": "object",
-  "additionalProperties": true,
+  "additionalProperties": false,
   "properties": {
-    "namespaceOverride": {
-      "type": "string",
-      "description": "Override namespace to deploy the agent into"
-    },
-
-    "tlsSecretName": {
-      "type": "string",
-      "description": "Secret name containing client TLS cert/key for agent"
-    },
-    "tlsRootCASecretName": {
-      "type": "string",
-      "description": "Name of the Secret containing root CA certificate"
-    },
-    "userPasswordSecretName": {
-      "type": "string",
-      "description": "Secret name containing optional user/password credentials"
-    },
-
-    "image": {
-      "type": "object",
-      "description": "Container image configuration",
-      "additionalProperties": false,
-      "properties": {
-        "repository": {
-          "type": "string",
-          "description": "Container image repository for the agent"
-        },
-        "tag": {
-          "type": "string",
-          "description": "Container image tag"
-        },
-        "pullPolicy": {
-          "type": "string",
-          "enum": ["Always", "IfNotPresent", "Never"],
-          "description": "Image pull policy"
-        }
-      }
-    },
-
-    "replicaCount": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Number of replicas for the Deployment"
-    },
-
-    "resources": {
-      "type": "object",
-      "description": "Container resource requests/limits",
-      "additionalProperties": true,
-      "properties": {
-        "limits": {
-          "type": "object",
-          "additionalProperties": true,
-          "properties": {
-            "cpu": { "type": "string" },
-            "memory": { "type": "string" }
-          }
-        },
-        "requests": {
-          "type": "object",
-          "additionalProperties": true,
-          "properties": {
-            "cpu": { "type": "string" },
-            "memory": { "type": "string" }
-          }
-        }
-      }
-    },
-
-    "nodeSelector": {
-      "type": "object",
-      "additionalProperties": { "type": "string" },
-      "description": "Node selector for pod scheduling"
-    },
     "affinity": {
-      "type": "object",
-      "additionalProperties": true,
-      "description": "Pod affinity/anti-affinity rules"
-    },
-    "tolerations": {
-      "type": "array",
-      "items": { "type": "object" },
-      "description": "Tolerations for tainted nodes"
-    },
-
-    "podAnnotations": {
-      "type": "object",
-      "additionalProperties": { "type": "string" },
-      "description": "Annotations to add to the pod"
-    },
-    "podLabels": {
-      "type": "object",
-      "additionalProperties": { "type": "string" },
-      "description": "Labels to add to the pod"
-    },
-
-    "priorityClassName": {
-      "type": "string",
-      "description": "PriorityClass name for the pod"
-    },
-
-    "serviceAccount": {
-      "type": "object",
-      "description": "ServiceAccount configuration",
       "additionalProperties": false,
-      "properties": {
-        "create": { "type": "boolean", "default": true },
-        "name": { "type": "string" },
-        "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
-      }
+      "description": "Affinity rules for the agent Pod.",
+      "required": [],
+      "title": "affinity",
+      "type": "object"
     },
-
     "agentMode": {
-      "type": "string",
-      "description": "Agent mode (e.g., 'autonomous' or 'managed')",  
-      "enum": ["autonomous", "managed"]
-    },
-    "auth": {
-      "type": "string",
-      "description": "Authentication mode (e.g., 'mtls:any')"
-    },
-    "logLevel": {
-      "type": "string",
-      "description": "Log level (debug, info, warn, error)"
-    },
-    "logFormat": {
-      "type": "string",
-      "enum": ["text", "json"],
-      "description": "Log format for the agent (text or json)"
-    },
-    "server": {
-      "type": "string",
-      "description": "Remote principal server address"
-    },
-    "serverPort": {
-      "type": "string",
-      "pattern": "^[0-9]+$",
-      "description": "Remote principal server port"
-    },
-    "metricsPort": {
-      "type": "string",
-      "pattern": "^[0-9]+$",
-      "description": "Agent metrics port (env/config value)"
-    },
-    "tlsClientInSecure": {
-      "anyOf": [
-        { "type": "string", "enum": ["true", "false"] },
-        { "type": "boolean" }
-      ],
-      "description": "Whether to skip TLS verification for client (can be boolean or string)"
-    },
-    "healthzPort": {
-      "type": "string",
-      "pattern": "^[0-9]+$",
-      "description": "Agent healthz port (env/config value)"
-    },
-    "redisAddress": {
-      "type": "string",
-      "description": "Redis address (host:port)"
-    },
-    "redisUsername": {
-      "type": "string",
-      "description": "Redis username for authentication"
-    },
-    "argoCdRedisSecretName": {
-      "type": "string",
-      "description": "ArgoCD Redis password secret name"
-    },
-    "argoCdRedisPasswordKey": {
-      "type": "string",
-      "description": "ArgoCD Redis password key"
-    },
-    "enableWebSocket": {
-      "type": "boolean",
-      "description": "Whether to enable WebSocket connections"
-    },
-    "enableCompression": {
-      "type": "boolean",
-      "description": "Whether to enable gRPC compression"
-    },
-    "pprofPort": {
-      "type": "string",
-      "description": "Port for pprof server (0 disables pprof)"
-    },
-    "enableResourceProxy": {
-      "type": "boolean",
-      "description": "Whether to enable resource proxy"
-    },
-    "cacheRefreshInterval": {
-      "type": "string",
-      "pattern": "^[0-9]+(ms|s|m|h)$",
-      "description": "Cache refresh interval"
-    },
-    "keepAliveInterval": {
-      "type": "string",
-      "pattern": "^[0-9]+(ms|s|m|h)$",
-      "description": "Keep-alive interval for connections"
-    },
-    "tlsClientKeyPath": { "type": "string", "description": "Path to client key inside container" },
-    "tlsClientCertPath": { "type": "string", "description": "Path to client cert inside container" },
-    "tlsRootCAPath": { "type": "string", "description": "Path to Root CA inside container" },
-    "tlsMinVersion": {
-      "type": "string",
-      "enum": ["", "tls1.1", "tls1.2", "tls1.3"],
-      "description": "Minimum TLS version to use (empty uses Go default)"
-    },
-    "tlsMaxVersion": {
-      "type": "string",
-      "enum": ["", "tls1.1", "tls1.2", "tls1.3"],
-      "description": "Maximum TLS version to use (empty uses highest available)"
-    },
-    "tlsCipherSuites": {
-      "type": "string",
-      "description": "Comma-separated list of TLS cipher suites (empty uses Go defaults)"
-    },
-
-    "destinationBasedMapping": {
-      "type": "boolean",
-      "description": "Whether to enable destination-based mapping. When enabled, the agent creates applications in their original namespace instead of the agent's own namespace."
-    },
-    "createNamespace": {
-      "type": "boolean",
-      "description": "Whether to create target namespaces automatically when they don't exist. Used with destination-based mapping."
+      "default": "autonomous",
+      "description": "#\nAgent mode of operation.",
+      "title": "agentMode",
+      "type": "string"
     },
     "allowedNamespaces": {
-      "type": "string",
-      "description": "Comma-separated list of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature). Supports glob patterns."
+      "default": "",
+      "description": "Comma-separated list of additional namespaces the agent is allowed to\nmanage applications in (used with applications in any namespace feature). Supports glob patterns (e.g., \"team-*,prod-*\").",
+      "title": "allowedNamespaces",
+      "type": "string"
     },
-
-    "service": {
-      "type": "object",
-      "description": "Service configuration for metrics and healthz",
-      "additionalProperties": false,
-      "properties": {
-        "metrics": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-            "targetPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
-            "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
-          }
-        },
-        "healthz": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-            "targetPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
-            "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
-          }
-        }
-      }
+    "argoCdRedisPasswordKey": {
+      "default": "auth",
+      "description": "ArgoCD Redis password key.",
+      "title": "argoCdRedisPasswordKey",
+      "type": "string"
     },
-
-    "probes": {
-      "type": "object",
-      "description": "Liveness and readiness probe configuration",
-      "additionalProperties": false,
-      "properties": {
-        "liveness": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "httpGet": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "path": { "type": "string" },
-                "port": { "type": ["string", "integer"] }
-              }
-            },
-            "initialDelaySeconds": { "type": "integer", "minimum": 0 },
-            "periodSeconds": { "type": "integer", "minimum": 1 },
-            "timeoutSeconds": { "type": "integer", "minimum": 1 },
-            "failureThreshold": { "type": "integer", "minimum": 1 }
-          }
-        },
-        "readiness": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "httpGet": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "path": { "type": "string" },
-                "port": { "type": ["string", "integer"] }
-              }
-            },
-            "initialDelaySeconds": { "type": "integer", "minimum": 0 },
-            "periodSeconds": { "type": "integer", "minimum": 1 },
-            "timeoutSeconds": { "type": "integer", "minimum": 1 },
-            "failureThreshold": { "type": "integer", "minimum": 1 }
-          }
-        }
-      }
+    "argoCdRedisSecretName": {
+      "default": "argocd-redis",
+      "description": "ArgoCD Redis password secret name.",
+      "title": "argoCdRedisSecretName",
+      "type": "string"
     },
-
-    "tests": {
-      "type": "object",
-      "description": "Configuration for chart tests",
+    "auth": {
+      "default": "mtls:any",
+      "description": "Authentication mode for connecting to the principal.",
+      "title": "auth",
+      "type": "string"
+    },
+    "automountServiceAccountToken": {
+      "default": true,
+      "description": "Automount API credentials for the Service Account into the pod.",
+      "title": "automountServiceAccountToken",
+      "type": "boolean"
+    },
+    "cacheRefreshInterval": {
+      "default": "10s",
+      "description": "Cache refresh interval.",
+      "title": "cacheRefreshInterval",
+      "type": "string"
+    },
+    "createNamespace": {
+      "default": false,
+      "description": "Whether to create target namespaces automatically when they don't exist.\nUsed with destination-based mapping.",
+      "title": "createNamespace",
+      "type": "boolean"
+    },
+    "destinationBasedMapping": {
+      "default": false,
+      "description": "#\nWhether to enable destination-based mapping. When enabled, the agent\ncreates applications in their original namespace (preserving the namespace\nfrom the principal) instead of the agent's own namespace.",
+      "title": "destinationBasedMapping",
+      "type": "boolean"
+    },
+    "enableCompression": {
+      "default": false,
+      "description": "Whether to enable gRPC compression.",
+      "title": "enableCompression",
+      "type": "boolean"
+    },
+    "enableResourceProxy": {
+      "default": true,
+      "description": "Whether to enable resource proxy.",
+      "title": "enableResourceProxy",
+      "type": "boolean"
+    },
+    "enableWebSocket": {
+      "default": false,
+      "description": "Whether to enable WebSocket connections.",
+      "title": "enableWebSocket",
+      "type": "boolean"
+    },
+    "global": {
+      "description": "Global values are values that can be accessed from any chart or subchart by exactly the same name.",
+      "required": [],
+      "title": "global",
+      "type": "object"
+    },
+    "healthzPort": {
+      "default": "8002",
+      "description": "Healthz server port exposed by the agent.",
+      "title": "healthzPort",
+      "type": "string"
+    },
+    "image": {
       "additionalProperties": false,
+      "description": "#",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Enable chart tests"
+        "pullPolicy": {
+          "default": "Always",
+          "description": "Image pull policy for the agent container.",
+          "title": "pullPolicy",
+          "type": "string"
         },
-        "image": {
-          "type": "string",
-          "description": "Test image"
+        "repository": {
+          "default": "ghcr.io/argoproj-labs/argocd-agent/argocd-agent",
+          "description": "Container image repository for the agent.",
+          "title": "repository",
+          "type": "string"
         },
         "tag": {
-          "type": "string",
-          "description": "Test image tag"
+          "default": "latest",
+          "description": "Container image tag for the agent.",
+          "title": "tag",
+          "type": "string"
         }
-      }
+      },
+      "required": [
+        "repository",
+        "tag",
+        "pullPolicy"
+      ],
+      "title": "image",
+      "type": "object"
+    },
+    "keepAliveInterval": {
+      "default": "50s",
+      "description": "Keep-alive interval for connections.",
+      "title": "keepAliveInterval",
+      "type": "string"
+    },
+    "logFormat": {
+      "default": "text",
+      "description": "Log format for the agent (text or json).",
+      "title": "logFormat",
+      "type": "string"
+    },
+    "logLevel": {
+      "default": "info",
+      "description": "Log level for the agent.",
+      "title": "logLevel",
+      "type": "string"
+    },
+    "metricsPort": {
+      "default": "8181",
+      "description": "Metrics server port exposed by the agent.",
+      "title": "metricsPort",
+      "type": "string"
+    },
+    "namespaceOverride": {
+      "default": "",
+      "description": "#\nOverride namespace to deploy the agent into. Leave empty to use the release namespace.",
+      "title": "namespaceOverride",
+      "type": "string"
+    },
+    "nodeSelector": {
+      "additionalProperties": false,
+      "description": "#\nNode selector for scheduling the agent Pod.",
+      "required": [],
+      "title": "nodeSelector",
+      "type": "object"
+    },
+    "podAnnotations": {
+      "additionalProperties": false,
+      "description": "Additional annotations to add to the agent Pod.",
+      "required": [],
+      "title": "podAnnotations",
+      "type": "object"
+    },
+    "podLabels": {
+      "additionalProperties": false,
+      "description": "Additional labels to add to the agent Pod.",
+      "required": [],
+      "title": "podLabels",
+      "type": "object"
+    },
+    "pprofPort": {
+      "default": "0",
+      "description": "Port for pprof server (0 disables pprof).",
+      "title": "pprofPort",
+      "type": "string"
+    },
+    "priorityClassName": {
+      "default": "",
+      "description": "PriorityClassName for the agent Pod.",
+      "title": "priorityClassName",
+      "type": "string"
+    },
+    "probes": {
+      "additionalProperties": false,
+      "description": "#\nLiveness and readiness probe configuration.",
+      "properties": {
+        "liveness": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "default": true,
+              "description": "Enable the liveness probe.",
+              "title": "enabled",
+              "type": "boolean"
+            },
+            "failureThreshold": {
+              "default": 3,
+              "description": "Failure threshold for liveness probe.",
+              "title": "failureThreshold",
+              "type": "integer"
+            },
+            "httpGet": {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "default": "/healthz",
+                  "title": "path",
+                  "type": "string"
+                },
+                "port": {
+                  "default": "healthz",
+                  "title": "port",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "port"
+              ],
+              "title": "httpGet",
+              "type": "object"
+            },
+            "initialDelaySeconds": {
+              "default": 10,
+              "description": "Initial delay before the first liveness probe.",
+              "title": "initialDelaySeconds",
+              "type": "integer"
+            },
+            "periodSeconds": {
+              "default": 10,
+              "description": "Frequency of liveness probes.",
+              "title": "periodSeconds",
+              "type": "integer"
+            },
+            "timeoutSeconds": {
+              "default": 2,
+              "description": "Timeout for liveness probe.",
+              "title": "timeoutSeconds",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "enabled",
+            "httpGet",
+            "initialDelaySeconds",
+            "periodSeconds",
+            "timeoutSeconds",
+            "failureThreshold"
+          ],
+          "title": "liveness",
+          "type": "object"
+        },
+        "readiness": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "default": true,
+              "description": "Enable the readiness probe.",
+              "title": "enabled",
+              "type": "boolean"
+            },
+            "failureThreshold": {
+              "default": 3,
+              "description": "Failure threshold for readiness probe.",
+              "title": "failureThreshold",
+              "type": "integer"
+            },
+            "httpGet": {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "default": "/healthz",
+                  "title": "path",
+                  "type": "string"
+                },
+                "port": {
+                  "default": "healthz",
+                  "title": "port",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "port"
+              ],
+              "title": "httpGet",
+              "type": "object"
+            },
+            "initialDelaySeconds": {
+              "default": 5,
+              "description": "Initial delay before the first readiness probe.",
+              "title": "initialDelaySeconds",
+              "type": "integer"
+            },
+            "periodSeconds": {
+              "default": 10,
+              "description": "Frequency of readiness probes.",
+              "title": "periodSeconds",
+              "type": "integer"
+            },
+            "timeoutSeconds": {
+              "default": 2,
+              "description": "Timeout for readiness probe.",
+              "title": "timeoutSeconds",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "enabled",
+            "httpGet",
+            "initialDelaySeconds",
+            "periodSeconds",
+            "timeoutSeconds",
+            "failureThreshold"
+          ],
+          "title": "readiness",
+          "type": "object"
+        }
+      },
+      "required": [
+        "liveness",
+        "readiness"
+      ],
+      "title": "probes",
+      "type": "object"
+    },
+    "redisAddress": {
+      "default": "argocd-redis:6379",
+      "description": "Redis address used by the agent.",
+      "title": "redisAddress",
+      "type": "string"
+    },
+    "redisUsername": {
+      "default": "",
+      "description": "Redis username for authentication.",
+      "title": "redisUsername",
+      "type": "string"
+    },
+    "replicaCount": {
+      "default": 1,
+      "description": "#\nNumber of replicas for the agent Deployment.",
+      "title": "replicaCount",
+      "type": "integer"
+    },
+    "resources": {
+      "additionalProperties": false,
+      "description": "Resource requests and limits for the agent Pod.",
+      "properties": {
+        "limits": {
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "default": "500m",
+              "title": "cpu",
+              "type": "string"
+            },
+            "memory": {
+              "default": "512Mi",
+              "title": "memory",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cpu",
+            "memory"
+          ],
+          "title": "limits",
+          "type": "object"
+        },
+        "requests": {
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "default": "100m",
+              "title": "cpu",
+              "type": "string"
+            },
+            "memory": {
+              "default": "128Mi",
+              "title": "memory",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cpu",
+            "memory"
+          ],
+          "title": "requests",
+          "type": "object"
+        }
+      },
+      "required": [
+        "limits",
+        "requests"
+      ],
+      "title": "resources",
+      "type": "object"
+    },
+    "server": {
+      "default": "principal.server.address.com",
+      "description": "Principal server address (hostname or host:port).",
+      "title": "server",
+      "type": "string"
+    },
+    "serverPort": {
+      "default": "443",
+      "description": "Principal server port.",
+      "title": "serverPort",
+      "type": "string"
+    },
+    "service": {
+      "additionalProperties": false,
+      "description": "#\nService configuration for metrics and healthz endpoints.",
+      "properties": {
+        "healthz": {
+          "additionalProperties": false,
+          "properties": {
+            "annotations": {
+              "additionalProperties": false,
+              "description": "Annotations to add to the healthz Service.",
+              "required": [],
+              "title": "annotations",
+              "type": "object"
+            },
+            "port": {
+              "default": 8002,
+              "description": "Service port for healthz.",
+              "title": "port",
+              "type": "integer"
+            },
+            "targetPort": {
+              "default": 8002,
+              "description": "Target port for healthz.",
+              "title": "targetPort",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "port",
+            "targetPort",
+            "annotations"
+          ],
+          "title": "healthz",
+          "type": "object"
+        },
+        "metrics": {
+          "additionalProperties": false,
+          "properties": {
+            "annotations": {
+              "additionalProperties": false,
+              "description": "Annotations to add to the metrics Service.",
+              "required": [],
+              "title": "annotations",
+              "type": "object"
+            },
+            "port": {
+              "default": 8181,
+              "description": "Service port for metrics.",
+              "title": "port",
+              "type": "integer"
+            },
+            "targetPort": {
+              "default": 8181,
+              "description": "Target port for metrics.",
+              "title": "targetPort",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "port",
+            "targetPort",
+            "annotations"
+          ],
+          "title": "metrics",
+          "type": "object"
+        }
+      },
+      "required": [
+        "metrics",
+        "healthz"
+      ],
+      "title": "service",
+      "type": "object"
+    },
+    "serviceAccount": {
+      "additionalProperties": false,
+      "description": "#\nServiceAccount configuration.",
+      "properties": {
+        "annotations": {
+          "additionalProperties": false,
+          "description": "Annotations to add to the ServiceAccount.",
+          "required": [],
+          "title": "annotations",
+          "type": "object"
+        },
+        "automountServiceAccountToken": {
+          "default": true,
+          "description": "Automount API credentials for the Service Account",
+          "title": "automountServiceAccountToken",
+          "type": "boolean"
+        },
+        "create": {
+          "default": true,
+          "description": "Whether to create the ServiceAccount.",
+          "title": "create",
+          "type": "boolean"
+        },
+        "name": {
+          "default": "",
+          "description": "Name of the ServiceAccount to use. If empty, a name is generated.",
+          "title": "name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "create",
+        "name",
+        "annotations",
+        "automountServiceAccountToken"
+      ],
+      "title": "serviceAccount",
+      "type": "object"
+    },
+    "serviceMonitor": {
+      "additionalProperties": false,
+      "description": "#\nPrometheus ServiceMonitor configuration.",
+      "properties": {
+        "additionalLabels": {
+          "additionalProperties": false,
+          "description": "Prometheus ServiceMonitor labels",
+          "required": [],
+          "title": "additionalLabels",
+          "type": "object"
+        },
+        "annotations": {
+          "additionalProperties": false,
+          "description": "Prometheus ServiceMonitor annotations",
+          "required": [],
+          "title": "annotations",
+          "type": "object"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Whether to create a ServiceMonitor resource.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "honorLabels": {
+          "default": false,
+          "description": "When true, honorLabels preserves the metric’s labels when they collide with the target’s labels.",
+          "title": "honorLabels",
+          "type": "boolean"
+        },
+        "interval": {
+          "default": "30s",
+          "description": "Prometheus scrape interval. Must be a valid duration string (e.g. \"30s\").",
+          "title": "interval",
+          "type": "string"
+        },
+        "metricRelabelings": {
+          "description": "Prometheus [MetricRelabelConfigs] to apply to samples before ingestion",
+          "items": {
+            "required": []
+          },
+          "title": "metricRelabelings",
+          "type": "array"
+        },
+        "namespace": {
+          "default": "",
+          "description": "Namespace where the ServiceMonitor should be created. Defaults to release namespace.",
+          "title": "namespace",
+          "type": "string"
+        },
+        "relabelings": {
+          "description": "Prometheus [RelabelConfigs] to apply to samples before scraping",
+          "items": {
+            "required": []
+          },
+          "title": "relabelings",
+          "type": "array"
+        },
+        "scheme": {
+          "default": "",
+          "description": "Prometheus ServiceMonitor scheme",
+          "title": "scheme",
+          "type": "string"
+        },
+        "scrapeTimeout": {
+          "default": "10s",
+          "description": "Prometheus scrape timeout. Must be a valid duration string (e.g. \"10s\").",
+          "title": "scrapeTimeout",
+          "type": "string"
+        },
+        "tlsConfig": {
+          "additionalProperties": false,
+          "description": "Prometheus ServiceMonitor tlsConfig",
+          "required": [],
+          "title": "tlsConfig",
+          "type": "object"
+        }
+      },
+      "required": [
+        "enabled",
+        "additionalLabels",
+        "annotations",
+        "namespace",
+        "interval",
+        "scrapeTimeout",
+        "relabelings",
+        "metricRelabelings",
+        "honorLabels",
+        "scheme",
+        "tlsConfig"
+      ],
+      "title": "serviceMonitor",
+      "type": "object"
+    },
+    "tests": {
+      "additionalProperties": false,
+      "description": "#\nConfiguration for helm-chart tests.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "By default, chart tests are disabled.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "image": {
+          "default": "bitnamilegacy/kubectl",
+          "description": "Test image.",
+          "title": "image",
+          "type": "string"
+        },
+        "tag": {
+          "default": "1.33.4",
+          "description": "Test image tag.",
+          "title": "tag",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "image",
+        "tag"
+      ],
+      "title": "tests",
+      "type": "object"
+    },
+    "tlsCipherSuites": {
+      "default": "",
+      "description": "Comma-separated list of TLS cipher suites. Empty uses Go defaults.",
+      "title": "tlsCipherSuites",
+      "type": "string"
+    },
+    "tlsClientCertPath": {
+      "default": "",
+      "description": "Path to the TLS client certificate.",
+      "title": "tlsClientCertPath",
+      "type": "string"
+    },
+    "tlsClientInSecure": {
+      "default": "false",
+      "description": "Whether to skip TLS verification for client connections.",
+      "title": "tlsClientInSecure",
+      "type": "string"
+    },
+    "tlsClientKeyPath": {
+      "default": "",
+      "description": "Path to the TLS client key.",
+      "title": "tlsClientKeyPath",
+      "type": "string"
+    },
+    "tlsMaxVersion": {
+      "default": "",
+      "description": "Maximum TLS version to use (tls1.1, tls1.2, tls1.3). Empty uses highest available.",
+      "title": "tlsMaxVersion",
+      "type": "string"
+    },
+    "tlsMinVersion": {
+      "default": "",
+      "description": "Minimum TLS version to use (tls1.1, tls1.2, tls1.3). Empty uses Go default.",
+      "title": "tlsMinVersion",
+      "type": "string"
+    },
+    "tlsRootCAPath": {
+      "default": "",
+      "description": "Path to the TLS root CA certificate.",
+      "title": "tlsRootCAPath",
+      "type": "string"
+    },
+    "tlsRootCASecretName": {
+      "default": "argocd-agent-ca",
+      "description": "Name of the Secret containing root CA certificate.",
+      "title": "tlsRootCASecretName",
+      "type": "string"
+    },
+    "tlsSecretName": {
+      "default": "argocd-agent-client-tls",
+      "description": "Name of the TLS Secret containing client cert/key for mTLS.",
+      "title": "tlsSecretName",
+      "type": "string"
+    },
+    "tolerations": {
+      "description": "Tolerations for the agent Pod.",
+      "items": {
+        "required": []
+      },
+      "title": "tolerations",
+      "type": "array"
+    },
+    "userPasswordSecretName": {
+      "default": "argocd-agent-agent-userpass",
+      "description": "Name of the Secret containing agent username/password (if used).",
+      "title": "userPasswordSecretName",
+      "type": "string"
     }
-  }
+  },
+  "required": [
+    "namespaceOverride",
+    "image",
+    "replicaCount",
+    "tlsSecretName",
+    "tlsRootCASecretName",
+    "userPasswordSecretName",
+    "resources",
+    "automountServiceAccountToken",
+    "serviceAccount",
+    "nodeSelector",
+    "affinity",
+    "tolerations",
+    "podAnnotations",
+    "podLabels",
+    "priorityClassName",
+    "probes",
+    "agentMode",
+    "auth",
+    "logLevel",
+    "logFormat",
+    "server",
+    "serverPort",
+    "metricsPort",
+    "tlsClientInSecure",
+    "healthzPort",
+    "redisAddress",
+    "redisUsername",
+    "argoCdRedisSecretName",
+    "argoCdRedisPasswordKey",
+    "enableWebSocket",
+    "enableCompression",
+    "pprofPort",
+    "enableResourceProxy",
+    "cacheRefreshInterval",
+    "keepAliveInterval",
+    "tlsClientKeyPath",
+    "tlsClientCertPath",
+    "tlsRootCAPath",
+    "tlsMinVersion",
+    "tlsMaxVersion",
+    "tlsCipherSuites",
+    "allowedNamespaces",
+    "destinationBasedMapping",
+    "createNamespace",
+    "service",
+    "serviceMonitor",
+    "tests"
+  ],
+  "type": "object"
 }
-
-

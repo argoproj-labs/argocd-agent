@@ -1,28 +1,42 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  labels:
-    app.kubernetes.io/name: argocd-agent-agent
-    app.kubernetes.io/part-of: argocd-agent
-    app.kubernetes.io/component: agent
   name: {{ include "argocd-agent-agent.agentDeploymentName" . }}
-  namespace: {{ include  "argocd-agent-agent.namespace" . }}
+  namespace: {{ include "argocd-agent-agent.namespace" . }}
+  labels:
+    {{- include "argocd-agent-agent.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: argocd-agent-agent
-      app.kubernetes.io/part-of: argocd-agent
-      app.kubernetes.io/component: agent
+      {{- include "argocd-agent-agent.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: argocd-agent-agent
-        app.kubernetes.io/part-of: argocd-agent
-        app.kubernetes.io/component: agent
+        {{- include "argocd-agent-agent.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
+      serviceAccountName: {{ include "argocd-agent-agent.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        fsGroup: 999
+        fsGroupChangePolicy: "OnRootMismatch"
+        runAsGroup: 999
+        runAsNonRoot: true
+        runAsUser: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-        - args:
+        - name: argocd-agent-agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
             - agent
           env:
           - name: ARGOCD_AGENT_REMOTE_SERVER
@@ -205,14 +219,13 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.allowed-namespaces
                 optional: true
-          name: argocd-agent-agent
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - containerPort: 8000
-              name: metrics
-            - containerPort: 8002
-              name: healthz
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+              protocol: TCP
+            - name: healthz
+              containerPort: {{ .Values.healthzPort }}
+              protocol: TCP
           {{- if .Values.probes.liveness.enabled }}
           livenessProbe:
             httpGet:
@@ -234,37 +247,40 @@ spec:
             failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
           {{- end }}
           securityContext:
+            allowPrivilegeEscalation: false
             capabilities:
               drop:
                 - ALL
-            allowPrivilegeEscalation: false
+            privileged: false
             readOnlyRootFilesystem: true
+            runAsGroup: 999
             runAsNonRoot: true
+            runAsUser: 999
             seccompProfile:
               type: RuntimeDefault
           resources:
-{{ toYaml .Values.resources | indent 12 }}
+            {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: userpass-passwd
               mountPath: /app/config/creds
-      serviceAccountName: {{ include "argocd-agent-agent.serviceAccountName" . }}
+              readOnly: true
+      volumes:
+        - name: userpass-passwd
+          secret:
+            secretName: {{ .Values.userPasswordSecretName }}
+            items:
+              - key: credentials
+                path: userpass.creds
+            optional: true
       {{- with .Values.nodeSelector }}
       nodeSelector:
-{{ toYaml . | indent 8 }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.affinity }}
       affinity:
-{{ toYaml . | indent 8 }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
-{{ toYaml . | indent 8 }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
-      volumes:
-      - name: userpass-passwd
-        secret:
-          secretName: {{ .Values.userPasswordSecretName }}
-          items:
-          - key: credentials
-            path: userpass.creds
-          optional: true

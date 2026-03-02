@@ -1,11 +1,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  labels:
-    app.kubernetes.io/name: argocd-agent-agent
-    app.kubernetes.io/part-of: argocd-agent
-    app.kubernetes.io/component: agent
   name: {{ include "argocd-agent-agent.clusterRoleBindingName" . }}
+  labels:
+    {{- include "argocd-agent-agent.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -13,4 +11,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: {{ include "argocd-agent-agent.serviceAccountName" . }}
-  namespace: {{ include  "argocd-agent-agent.namespace" . }}
+  namespace: {{ include "argocd-agent-agent.namespace" . }}
