@@ -28,7 +28,7 @@ import (
 
 var _ backend.ApplicationSet = &KubernetesBackend{}
 
-// KubernetesBackend implements backend.ApplicationSet using the Argo CD client.
+// KubernetesBackend implements backend.ApplicationSet using a Kubernetes client for Argo CD ApplicationSet CRDs.
 type KubernetesBackend struct {
 	appClient appclientset.Interface
 	informer  informer.InformerInterface
@@ -43,12 +43,20 @@ func NewKubernetesBackend(appClient appclientset.Interface, namespace string, in
 	}
 }
 
-func (be *KubernetesBackend) List(ctx context.Context, namespace string) ([]v1alpha1.ApplicationSet, error) {
-	l, err := be.appClient.ArgoprojV1alpha1().ApplicationSets(namespace).List(ctx, v1.ListOptions{})
-	if err != nil {
-		return nil, err
+func (be *KubernetesBackend) List(ctx context.Context, selector backend.ApplicationSetSelector) ([]v1alpha1.ApplicationSet, error) {
+	namespaces := selector.Namespaces
+	if len(namespaces) == 0 {
+		namespaces = []string{""}
 	}
-	return l.Items, nil
+	var result []v1alpha1.ApplicationSet
+	for _, ns := range namespaces {
+		l, err := be.appClient.ArgoprojV1alpha1().ApplicationSets(ns).List(ctx, v1.ListOptions{})
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, l.Items...)
+	}
+	return result, nil
 }
 
 func (be *KubernetesBackend) Create(ctx context.Context, appSet *v1alpha1.ApplicationSet) (*v1alpha1.ApplicationSet, error) {

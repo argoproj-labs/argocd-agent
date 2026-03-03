@@ -278,6 +278,7 @@ func (a *Agent) handleStreamEvents() error {
 	}
 
 	log().WithField(logfields.Component, "EventHandler").Info("Stream closed")
+	a.remote.Disconnect()
 
 	return nil
 }
