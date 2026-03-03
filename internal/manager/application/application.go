@@ -189,9 +189,7 @@ func (m *ApplicationManager) Upsert(ctx context.Context, app *v1alpha1.Applicati
 	if err != nil {
 		return nil, fmt.Errorf("get existing application for upsert: %w", err)
 	}
-	app.UID = existing.UID
 	app.ResourceVersion = existing.ResourceVersion
-	app.Generation = existing.Generation
 	if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
 		if app.Annotations == nil {
 			app.Annotations = make(map[string]string)

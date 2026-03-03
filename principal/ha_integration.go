@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/haadminapi"
@@ -152,7 +153,9 @@ func (p *serverStateProvider) GetPrincipalResources() []replicationserver.Resour
 		return nil
 	}
 	ctx := p.server.ctx
-	appSets, err := p.server.appSetManager.List(ctx)
+	appSets, err := p.server.appSetManager.List(ctx, backend.ApplicationSetSelector{
+		Namespaces: []string{p.server.namespace},
+	})
 	if err != nil {
 		log().WithError(err).Warn("HA: failed to list ApplicationSets for snapshot")
 		return nil

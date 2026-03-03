@@ -63,8 +63,8 @@ func (m *mockBackend) Delete(ctx context.Context, name, namespace string, prop *
 	return m.Called(ctx, name, namespace, prop).Error(0)
 }
 
-func (m *mockBackend) List(ctx context.Context, namespace string) ([]v1alpha1.ApplicationSet, error) {
-	args := m.Called(ctx, namespace)
+func (m *mockBackend) List(ctx context.Context, selector backend.ApplicationSetSelector) ([]v1alpha1.ApplicationSet, error) {
+	args := m.Called(ctx, selector)
 	return args.Get(0).([]v1alpha1.ApplicationSet), args.Error(1)
 }
 

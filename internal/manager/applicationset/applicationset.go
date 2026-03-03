@@ -76,9 +76,7 @@ func (m *ApplicationSetManager) Upsert(ctx context.Context, appSet *v1alpha1.App
 		return nil, fmt.Errorf("get existing applicationset for upsert: %w", err)
 	}
 
-	appSet.UID = existing.UID
 	appSet.ResourceVersion = existing.ResourceVersion
-	appSet.Generation = existing.Generation
 
 	if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
 		if appSet.Annotations == nil {
@@ -105,9 +103,9 @@ func (m *ApplicationSetManager) Delete(ctx context.Context, namespace string, ap
 	return m.appSetBackend.Delete(ctx, appSet.Name, namespace, opts)
 }
 
-// List lists all ApplicationSets across all namespaces.
-func (m *ApplicationSetManager) List(ctx context.Context) ([]v1alpha1.ApplicationSet, error) {
-	return m.appSetBackend.List(ctx, "")
+// List lists ApplicationSets matching the given selector.
+func (m *ApplicationSetManager) List(ctx context.Context, selector backend.ApplicationSetSelector) ([]v1alpha1.ApplicationSet, error) {
+	return m.appSetBackend.List(ctx, selector)
 }
 
 // EnsureSynced waits until the backend is synced.
