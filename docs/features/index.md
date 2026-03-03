@@ -24,7 +24,9 @@ argocd-agent transforms traditional multi-cluster Argo CD deployments by inverti
 
 **mTLS Security**: All communication is secured with mutual TLS authentication. Agents authenticate to the principal using client certificates, eliminating the need for the control plane to store cluster credentials.
 
-**Pluggable Authentication**: Extensible authentication framework supporting mTLS and username/password methods out of the box, with plans for SPIFFE integration.
+**Pluggable Authentication**: Extensible authentication framework supporting mTLS and header-based methods out of the box. SPIFFE identity is supported through Envoy/Istio service meshes; first-class native SPIFFE support is still planned.
+
+**[OpenTelemetry Tracing](../operations/tracing.md)**: Distributed tracing support using OpenTelemetry with OTLP export. Provides visibility into gRPC communication, resource synchronization, event processing, and Kubernetes operations across the distributed architecture.
 
 ### Resource Management
 
@@ -35,6 +37,12 @@ argocd-agent transforms traditional multi-cluster Argo CD deployments by inverti
 **Live Resource Access**: Transparent proxying of Kubernetes API requests to workload clusters through the control plane, enabling direct resource inspection and manipulation from the central Argo CD interface despite the distributed architecture.
 
 **Custom Resource Actions**: Full support for executing Argo CD resource actions on workload clusters, allowing custom operations and workflows to be triggered from the central control plane.
+
+**ApplicationSet Support**: ApplicationSets can run on either the control plane or the agent, with generated Applications synced through the normal agent protocol. In Managed mode, destination-based agent mapping enables ApplicationSets to generate Applications that are routed to the appropriate agents according to their target cluster destinations. ApplicationSet resources themselves are not synced between principal and agent, as the architecture operates at the Application level.
+
+**Terminal Access**: Web-based terminal access to pods running on remote clusters, accessible directly from the Argo CD UI. The principal bridges WebSocket connections from the browser to agents via gRPC, and agents execute into pods using the Kubernetes exec API.
+
+**Log Streaming**: Access pod logs from remote clusters through the control plane, enabling centralized log viewing from the Argo CD UI without direct cluster access.
 
 ### Management Tools
 
@@ -48,8 +56,6 @@ argocd-agent is in active development. Current functionality provides a solid fo
 
 ### Known Limitations
 
-- **ApplicationSet Support**: Limited support for ApplicationSets in the current implementation
-- **Terminal Access**: Direct pod terminal access through the control plane is planned but not available
 - **High Availability**: Principal component does not yet support high availability configurations
 - **Advanced RBAC**: Multi-tenancy and advanced role-based access control features are still being developed
 
@@ -57,15 +63,8 @@ argocd-agent is in active development. Current functionality provides a solid fo
 
 ### Near and Mid-term
 
-**Enhanced Observability**
-
-- [Terminal access](https://github.com/argoproj-labs/argocd-agent/issues/129) to pods on remote clusters
 - [Desired manifest access](https://github.com/argoproj-labs/argocd-agent/issues/344) for better debugging
-
-**Protocol Improvements**
-
-- [OpenTelemetry integration](https://github.com/argoproj-labs/argocd-agent/issues/119) for distributed tracing
-- [SPIFFE authentication](https://github.com/argoproj-labs/argocd-agent/issues/345) support
+- [First-class SPIFFE authentication](https://github.com/argoproj-labs/argocd-agent/issues/345) via the SPIFFE Workload API
 
 ### Long-term Vision
 
