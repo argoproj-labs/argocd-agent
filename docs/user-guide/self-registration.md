@@ -38,7 +38,7 @@ flowchart TD
 ```
 
 1. The agent connects to the principal and authenticates using its configured
-   method (mTLS, userpass, or header-based).
+   method (mTLS, or header-based).
 2. If self-registration is enabled, the principal checks whether a cluster
    secret already exists for this agent.
 3. If a **manually created** secret exists (created via `argocd-agentctl`), it
