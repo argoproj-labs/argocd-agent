@@ -32,3 +32,27 @@ Changes to `Application` resources on the workload cluster that are not originat
 * In the case the control plane cluster is compromised, it may affect workload clusters in managed mode, too
 * As noted [previously](#architectural-considerations), the control plane cluster might become a SPoF
 
+## Pre-existing Applications
+
+When deploying the agent to a cluster with existing Argo CD applications, those applications won't have the source UID annotation that the agent uses to track managed resources. By default, the agent logs errors during resync for these unmanaged applications.
+
+To suppress these errors, enable the `--ignore-unmanaged-apps` flag:
+
+```bash
+argocd-agent agent --ignore-unmanaged-apps
+```
+
+Or via environment variable:
+
+```bash
+ARGOCD_AGENT_IGNORE_UNMANAGED_APPS=true
+```
+
+When enabled, applications without the source UID annotation are silently skipped during resync. This is useful for:
+
+* Gradual migration from standalone Argo CD to agent-managed deployments
+* Clusters with a mix of managed and unmanaged applications
+* Avoiding noisy error logs in environments with pre-existing applications
+
+See the [Agent Configuration Reference](../../configuration/reference/agent.md#ignore-unmanaged-apps) for more details.
+

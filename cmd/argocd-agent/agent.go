@@ -90,6 +90,7 @@ func NewAgentRunCommand() *cobra.Command {
 		// Destination-based mapping options
 		createNamespace         bool
 		destinationBasedMapping bool
+		ignoreUnmanagedApps     bool
 
 		// Allowed namespaces for filtering applications
 		allowedNamespaces []string
@@ -245,6 +246,7 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
 			agentOpts = append(agentOpts, agent.WithCreateNamespace(createNamespace))
 			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
+			agentOpts = append(agentOpts, agent.WithIgnoreUnmanagedApps(ignoreUnmanagedApps))
 			agentOpts = append(agentOpts, agent.WithAllowedNamespaces(allowedNamespaces...))
 
 			if metricsPort > 0 {
@@ -374,6 +376,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&createNamespace, "create-namespace",
 		env.BoolWithDefault("ARGOCD_AGENT_CREATE_NAMESPACE", false),
 		"Create target namespace if it doesn't exist when syncing applications (used with destination-based-mapping)")
+	command.Flags().BoolVar(&ignoreUnmanagedApps, "ignore-unmanaged-apps",
+		env.BoolWithDefault("ARGOCD_AGENT_IGNORE_UNMANAGED_APPS", false),
+		"Ignore applications without the source UID annotation during resync instead of logging errors")
 	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
 		env.StringSliceWithDefault("ARGOCD_AGENT_ALLOWED_NAMESPACES", nil, []string{}),
 		"List of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature)")

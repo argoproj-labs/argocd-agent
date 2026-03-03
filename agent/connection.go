@@ -312,7 +312,8 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 		}
 
 		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent, a.namespace).
-			WithDestinationBasedMapping(a.destinationBasedMapping)
+			WithDestinationBasedMapping(a.destinationBasedMapping).
+			WithIgnoreUnmanagedApps(a.ignoreUnmanagedApps)
 		go resyncHandler.SendRequestUpdates(a.context)
 
 		// Agent should request SyncedResourceList from the principal to detect deleted
