@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -161,6 +162,62 @@ func Test_ProcessIncomingSyncedResource(t *testing.T) {
 		checksum, err := generateSpecChecksum(resource)
 		assert.Nil(t, err)
 		assert.Equal(t, checksum, got.Checksum)
+	})
+}
+
+func Test_ProcessIncomingSyncedResource_MissingSourceUID(t *testing.T) {
+	gvr, err := getGroupVersionResource("Application")
+	require.Nil(t, err)
+
+	newHandlerWithFlag := func(t *testing.T, ignore bool) *RequestHandler {
+		t.Helper()
+		h := createFakeHandler(t)
+		h.WithIgnoreUnmanagedApps(ignore)
+		return h
+	}
+
+	setupApp := func(t *testing.T, h *RequestHandler, withAnnotation bool) {
+		t.Helper()
+		resource := fakeUnresApp()
+		if withAnnotation {
+			resource.SetAnnotations(map[string]string{manager.SourceUIDAnnotation: "source-uid"})
+		}
+		_, err := h.dynClient.Resource(gvr).Namespace("default").Create(context.Background(), resource, v1.CreateOptions{})
+		require.Nil(t, err)
+	}
+
+	incoming := &event.SyncedResource{
+		Name:      "test-app",
+		Namespace: "default",
+		Kind:      "Application",
+		UID:       "test-uid",
+	}
+
+	t.Run("flag disabled: missing source-uid returns wrapped sentinel error", func(t *testing.T) {
+		h := newHandlerWithFlag(t, false)
+		setupApp(t, h, false)
+
+		err := h.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
+		assert.ErrorIs(t, err, ErrSourceUIDNotFound)
+		assert.Equal(t, 0, h.sendQ.Len())
+	})
+
+	t.Run("flag enabled: missing source-uid suppresses error and sends nothing", func(t *testing.T) {
+		h := newHandlerWithFlag(t, true)
+		setupApp(t, h, false)
+
+		err := h.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
+		assert.Nil(t, err)
+		assert.Equal(t, 0, h.sendQ.Len())
+	})
+
+	t.Run("flag enabled: present source-uid still sends request update", func(t *testing.T) {
+		h := newHandlerWithFlag(t, true)
+		setupApp(t, h, true)
+
+		err := h.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
+		assert.Nil(t, err)
+		assert.Equal(t, 1, h.sendQ.Len())
 	})
 }
 

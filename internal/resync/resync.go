@@ -162,7 +162,11 @@ func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, inco
 	} else {
 		reqUpdate, err = newRequestUpdateFromObject(res, incoming.Kind)
 		if err != nil {
-			return fmt.Errorf("failed to construct a request update for resource: %s", res.GetName())
+			if errors.Is(err, ErrSourceUIDNotFound) && r.ignoreUnmanagedApps {
+				logCtx.WithField(logfields.Name, res.GetName()).Debug("skipping resource without source UID annotation")
+				return nil
+			}
+			return fmt.Errorf("newRequestUpdateFromObject failed: %w", err)
 		}
 	}
 
