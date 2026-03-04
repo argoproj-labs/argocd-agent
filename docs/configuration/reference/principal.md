@@ -525,6 +525,33 @@ Redis server hostname and port.
 
 Compression algorithm required by Redis.
 
+### Redis Credentials directory path
+
+| | |
+|---|---|
+| **CLI Flag** | `--redis-creds-dir-path` |
+| **Environment Variable** | `REDIS_CREDS_DIR_PATH` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+The directory with `auth` file for Redis password.
+In kubernetes, this is intended to read a Secret mounted as a directory.
+
+Cannot be used together with `--redis-password`, or its respective environment variables.
+
+### Redis Password
+
+| | |
+|---|---|
+| **CLI Flag** | `--redis-password` |
+| **Environment Variable** | `REDIS_PASSWORD` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+The password to connect to redis with. Prefer `--redis-creds-dir-path` for added security benefits.
+
 ## Kubernetes Configuration
 
 ### Kubeconfig

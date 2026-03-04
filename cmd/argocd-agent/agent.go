@@ -17,10 +17,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -68,6 +70,7 @@ func NewAgentRunCommand() *cobra.Command {
 		redisAddr           string
 		redisUsername       string
 		redisPassword       string
+		redisCredsDirPath   string
 		enableResourceProxy bool
 
 		// Time interval for agent to principal ping
@@ -237,6 +240,11 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithHealthzPort(healthzPort))
 
 			agentOpts = append(agentOpts, agent.WithRedisHost(redisAddr))
+
+			redisUsername, redisPassword, err = redisCreds(redisCredsDirPath, redisUsername, redisPassword)
+			if err != nil {
+				cmdutil.Fatal("Failed loading Redis credentials: %s", err.Error())
+			}
 			agentOpts = append(agentOpts, agent.WithRedisUsername(redisUsername))
 			agentOpts = append(agentOpts, agent.WithRedisPassword(redisPassword))
 
@@ -276,10 +284,12 @@ func NewAgentRunCommand() *cobra.Command {
 		env.StringWithDefault("REDIS_ADDR", nil, "argocd-redis:6379"),
 		"The redis host to connect to")
 
+	command.Flags().StringVar(&redisCredsDirPath, "redis-creds-dir-path",
+		env.StringWithDefault("REDIS_CREDS_DIR_PATH", nil, ""),
+		"The redis directory with 'auth_username' file for Redis username (optional) and 'auth' for Redis password")
 	command.Flags().StringVar(&redisUsername, "redis-username",
 		env.StringWithDefault("REDIS_USERNAME", nil, ""),
 		"The username to connect to redis with")
-
 	command.Flags().StringVar(&redisPassword, "redis-password",
 		env.StringWithDefault("REDIS_PASSWORD", nil, ""),
 		"The password to connect to redis with")
@@ -426,4 +436,34 @@ func loadCreds(path string) (auth.Credentials, error) {
 		userpass.ClientSecretField: c[1],
 	}
 	return creds, nil
+}
+
+// redisCreds read the credentials from a REDIS_CREDS_DIR_PATH https://argo-cd.readthedocs.io/en/stable/faq/#using-file-based-redis-credentials-via-redis_creds_dir_path.
+// This does not read the sentinel auth.
+func redisCreds(credsDirPath string, username string, password string) (outUsername string, outPassword string, err error) {
+	if credsDirPath != "" {
+		if username != "" || password != "" {
+			return "", "", errors.New("dir path cannot be combined with username / password")
+		}
+
+		usernameFile := filepath.Join(credsDirPath, "auth_username")
+		usernameData, err := os.ReadFile(usernameFile)
+		if err != nil {
+			// The file is optional, use an empty username if missing
+			if !os.IsNotExist(err) {
+				return "", "", fmt.Errorf("failed reading username from '%s': %v", usernameFile, err)
+			}
+			usernameData = []byte{}
+		}
+		username = strings.TrimSpace(string(usernameData))
+
+		passwordFile := filepath.Join(credsDirPath, "auth")
+		passwordData, err := os.ReadFile(passwordFile)
+		if err != nil {
+			return "", "", fmt.Errorf("failed reading password from '%s': %v", passwordFile, err)
+		}
+		password = strings.TrimSpace(string(passwordData))
+	}
+
+	return username, password, nil
 }
