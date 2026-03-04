@@ -38,6 +38,10 @@ func Test_redisCreds(t *testing.T) {
 	usernameUnreadable := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(usernameUnreadable, "auth_username"), 0600))
 
+	emptyFileCreds := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(emptyFileCreds, "auth"), []byte{}, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(emptyFileCreds, "auth_username"), []byte{}, 0600))
+
 	tests := []struct {
 		name         string
 		credsDirPath string
@@ -102,6 +106,11 @@ func Test_redisCreds(t *testing.T) {
 			credsDirPath: fullCreds,
 			expUsername:  expUser,
 			expPassword:  expPwd,
+		}, {
+			name:         "read creds from dir even when empty",
+			credsDirPath: emptyFileCreds,
+			expUsername:  "",
+			expPassword:  "",
 		},
 	}
 	for _, tt := range tests {
