@@ -298,6 +298,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		informer.WithAddHandler[*v1alpha1.AppProject](a.addAppProjectCreationToQueue),
 		informer.WithUpdateHandler[*v1alpha1.AppProject](a.addAppProjectUpdateToQueue),
 		informer.WithDeleteHandler[*v1alpha1.AppProject](a.addAppProjectDeletionToQueue),
+		informer.WithFilters[*v1alpha1.AppProject](a.DefaultAppProjectFilterChain()),
 		informer.WithGroupResource[*v1alpha1.AppProject]("argoproj.io", "appprojects"),
 	}
 

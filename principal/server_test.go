@@ -23,13 +23,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
+	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
+	"github.com/argoproj/argo-cd/v3/common"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 )
 
@@ -268,6 +279,221 @@ func Test_ServerStartWithDefaultSyncTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	defer s.Shutdown()
+}
+
+func Test_SendCurrentStateToAgent(t *testing.T) {
+	const agentName = "test-agent"
+	const ns = "argocd"
+
+	// newServer returns a Server obj with appropriate mock harness
+	newServer := func(t *testing.T, mockProjBackend *mocks.AppProject, mockRepoBackend *mocks.Repository) *Server {
+		t.Helper()
+		projMgr, err := appproject.NewAppProjectManager(mockProjBackend, ns)
+		require.NoError(t, err)
+		repoMgr := repository.NewManager(mockRepoBackend, ns, false)
+		s := &Server{
+			ctx:            context.Background(),
+			namespace:      ns,
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			projectManager: projMgr,
+			repoManager:    repoMgr,
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+		}
+		require.NoError(t, s.queues.Create(agentName))
+		return s
+	}
+
+	// generateAppProject returns a simple AppProject with the given name, which allows Applications (et al) from agent namespace
+	generateAppProject := func(name string) v1alpha1.AppProject {
+		return v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations: []v1alpha1.ApplicationDestination{
+					{Name: agentName, Namespace: "*", Server: "*"},
+				},
+				SourceNamespaces: []string{agentName},
+			},
+		}
+	}
+
+	// generateRepoSecret returns an simple Argo CD repository Secret for a given project
+	generateRepoSecret := func(name, projectName string) corev1.Secret {
+		return corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: ns,
+				Labels: map[string]string{
+					common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
+				},
+			},
+			Data: map[string][]byte{
+				"project": []byte(projectName),
+			},
+		}
+	}
+
+	t.Run("sends matching project to agent", func(t *testing.T) {
+		proj := generateAppProject("proj1")
+
+		mockProjBackend := &mocks.AppProject{}
+		mockRepoBackend := &mocks.Repository{}
+		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
+		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
+
+		s := newServer(t, mockProjBackend, mockRepoBackend)
+		err := s.sendCurrentStateToAgent(agentName)
+		require.NoError(t, err)
+
+		sendQ := s.queues.SendQ(agentName)
+		assert.Equal(t, 1, sendQ.Len())
+
+		ev, shutdown := sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+		assert.Equal(t, event.TargetAppProject.String(), ev.DataSchema())
+	})
+
+	t.Run("skips project that does not match the agent", func(t *testing.T) {
+		proj := v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "proj1", Namespace: ns},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations: []v1alpha1.ApplicationDestination{
+					{Name: "other-agent", Namespace: "*", Server: "*"},
+				},
+				SourceNamespaces: []string{"other-agent"},
+			},
+		}
+
+		mockProjBackend := &mocks.AppProject{}
+		mockRepoBackend := &mocks.Repository{}
+		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
+		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
+
+		s := newServer(t, mockProjBackend, mockRepoBackend)
+		err := s.sendCurrentStateToAgent(agentName)
+		require.NoError(t, err)
+
+		sendQ := s.queues.SendQ(agentName)
+		assert.Equal(t, 0, sendQ.Len())
+	})
+
+	t.Run("skips project with SourceUIDAnnotation", func(t *testing.T) {
+		proj := generateAppProject("proj1")
+		proj.Annotations = map[string]string{manager.SourceUIDAnnotation: "some-uid"}
+
+		mockProjBackend := &mocks.AppProject{}
+		mockRepoBackend := &mocks.Repository{}
+		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
+		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
+
+		s := newServer(t, mockProjBackend, mockRepoBackend)
+		err := s.sendCurrentStateToAgent(agentName)
+		require.NoError(t, err)
+
+		sendQ := s.queues.SendQ(agentName)
+		assert.Equal(t, 0, sendQ.Len())
+	})
+
+	t.Run("skips project with SkipSyncLabel=true", func(t *testing.T) {
+		proj := generateAppProject("proj1")
+		proj.Labels = map[string]string{config.SkipSyncLabel: "true"}
+
+		mockProjBackend := &mocks.AppProject{}
+		mockRepoBackend := &mocks.Repository{}
+		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
+		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
+
+		s := newServer(t, mockProjBackend, mockRepoBackend)
+		err := s.sendCurrentStateToAgent(agentName)
+		require.NoError(t, err)
+
+		sendQ := s.queues.SendQ(agentName)
+		assert.Equal(t, 0, sendQ.Len())
+	})
+
+	t.Run("does not skip project with SkipSyncLabel=false", func(t *testing.T) {
+		proj := generateAppProject("proj1")
+		proj.Labels = map[string]string{config.SkipSyncLabel: "false"}
+
+		mockProjBackend := &mocks.AppProject{}
+		mockRepoBackend := &mocks.Repository{}
+		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
+		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
+
+		s := newServer(t, mockProjBackend, mockRepoBackend)
+		err := s.sendCurrentStateToAgent(agentName)
+		require.NoError(t, err)
+
+		sendQ := s.queues.SendQ(agentName)
+		assert.Equal(t, 1, sendQ.Len())
+	})
+
+	t.Run("sends repository for matching project and updates mappings", func(t *testing.T) {
+		proj := generateAppProject("proj1")
+		repo := generateRepoSecret("repo1", "proj1")
+
+		mockProjBackend := &mocks.AppProject{}
+		mockRepoBackend := &mocks.Repository{}
+		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
+		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{repo}, nil)
+
+		s := newServer(t, mockProjBackend, mockRepoBackend)
+		err := s.sendCurrentStateToAgent(agentName)
+		require.NoError(t, err)
+
+		// 1 project event + 1 repository event
+		sendQ := s.queues.SendQ(agentName)
+		assert.Equal(t, 2, sendQ.Len())
+
+		assert.True(t, s.projectToRepos.Get("proj1")["repo1"])
+		assert.True(t, s.repoToAgents.Get("repo1")[agentName])
+	})
+
+	t.Run("skips repository whose project was not sent to agent", func(t *testing.T) {
+		proj := generateAppProject("proj1")
+		repo := generateRepoSecret("repo1", "unknown-project")
+
+		mockProjBackend := &mocks.AppProject{}
+		mockRepoBackend := &mocks.Repository{}
+		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
+		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{repo}, nil)
+
+		s := newServer(t, mockProjBackend, mockRepoBackend)
+		err := s.sendCurrentStateToAgent(agentName)
+		require.NoError(t, err)
+
+		// Only 1 project event, no repository event
+		sendQ := s.queues.SendQ(agentName)
+		assert.Equal(t, 1, sendQ.Len())
+	})
+
+	t.Run("sends projects and repos for wildcard destination match", func(t *testing.T) {
+		proj := v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "proj1", Namespace: ns},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations: []v1alpha1.ApplicationDestination{
+					{Name: "test-*", Namespace: "*", Server: "*"},
+				},
+				SourceNamespaces: []string{"test-*"},
+			},
+		}
+		repo := generateRepoSecret("repo1", "proj1")
+
+		mockProjBackend := &mocks.AppProject{}
+		mockRepoBackend := &mocks.Repository{}
+		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
+		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{repo}, nil)
+
+		s := newServer(t, mockProjBackend, mockRepoBackend)
+		err := s.sendCurrentStateToAgent(agentName)
+		require.NoError(t, err)
+
+		sendQ := s.queues.SendQ(agentName)
+		assert.Equal(t, 2, sendQ.Len())
+	})
+
 }
 
 func init() {
