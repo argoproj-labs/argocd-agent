@@ -300,6 +300,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		informer.WithUpdateHandler[*v1alpha1.AppProject](s.updateAppProjectCallback),
 		informer.WithDeleteHandler[*v1alpha1.AppProject](s.deleteAppProjectCallback),
 		informer.WithGroupResource[*v1alpha1.AppProject]("argoproj.io", "appprojects"),
+		informer.WithFilters[*v1alpha1.AppProject](s.defaultAppProjectFilterChain()),
 	}
 
 	projManagerOpts := []appproject.AppProjectManagerOption{
@@ -792,6 +793,13 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			continue
 		}
 
+		// Don't send AppProjects that have SkipSyncLabel=true
+		if appProject.Labels != nil {
+			if val, ok := appProject.Labels[config.SkipSyncLabel]; ok && val == "true" {
+				continue
+			}
+		}
+
 		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		tracing.PopulateSpanFromObject(span, &appProject)
@@ -939,6 +947,19 @@ func (s *Server) defaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 	// Ignore applications that have the skip sync label
 	c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
 		if v, ok := res.Labels[config.SkipSyncLabel]; ok && v == "true" {
+			return false
+		}
+		return true
+	})
+	return c
+}
+
+// defaultAppFilterChain returns the default filter chain for server s to use
+func (s *Server) defaultAppProjectFilterChain() *filter.Chain[*v1alpha1.AppProject] {
+	c := filter.NewFilterChain[*v1alpha1.AppProject]()
+	// Ignore AppProjects that have the skip sync label
+	c.AppendAdmitFilter(func(appProj *v1alpha1.AppProject) bool {
+		if v, ok := appProj.Labels[config.SkipSyncLabel]; ok && v == "true" {
 			return false
 		}
 		return true
