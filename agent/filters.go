@@ -53,3 +53,20 @@ func (a *Agent) DefaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 
 func (a *Agent) WithLabelFilter() {
 }
+
+// DefaultAppProjectFilterChain returns a FilterChain for AppProject resources.
+// This chain contains a set of default filters that the agent will
+// evaluate for every change.
+func (a *Agent) DefaultAppProjectFilterChain() *filter.Chain[*v1alpha1.AppProject] {
+	fc := &filter.Chain[*v1alpha1.AppProject]{}
+
+	// Ignore appprojects that have the skip sync label
+	fc.AppendAdmitFilter(func(appProject *v1alpha1.AppProject) bool {
+		if v, ok := appProject.Labels[config.SkipSyncLabel]; ok && v == "true" {
+			return false
+		}
+		return true
+	})
+
+	return fc
+}
