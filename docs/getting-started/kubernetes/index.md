@@ -67,6 +67,7 @@ Install a customized Argo CD instance that excludes components that will run on 
 ```bash
 # Apply the principal-specific Argo CD configuration
 kubectl apply -n argocd \
+  --server-side  \
   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/principal?ref=<release-branch>' \
   --context <control-plane-context>
 ```
@@ -241,11 +242,13 @@ Replace <release-branch> with the release you wish to use:
 ```bash
 # For managed agents
 kubectl apply -n argocd \
+  --server-side \
   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-managed?ref=<release-branch>' \
   --context <workload-cluster-context>
 
 # For autonomous agents (alternative)
 # kubectl apply -n argocd \
+#   --server-side \
 #   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous?ref=<release-branch>' \
 #   --context <workload-cluster-context>
 ```
