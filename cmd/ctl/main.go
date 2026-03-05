@@ -49,6 +49,7 @@ func NewRootCommand() *cobra.Command {
 	configGroup := &cobra.Group{ID: "config", Title: "Configuration"}
 	command.AddGroup(configGroup)
 	command.AddCommand(NewAgentCommand())
+	command.AddCommand(NewCreateConfigCommand())
 	command.AddCommand(NewCheckConfigCommand())
 	command.AddCommand(NewPKICommand())
 	command.AddCommand(NewJWTCommand())
@@ -58,9 +59,7 @@ func NewRootCommand() *cobra.Command {
 }
 
 func NewVersionCommand() *cobra.Command {
-	var (
-		indent bool
-	)
+	var indent bool
 	command := &cobra.Command{
 		Use:   "version",
 		Short: "Display the version of argocd-agent-ctl",

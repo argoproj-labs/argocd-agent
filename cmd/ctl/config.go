@@ -17,7 +17,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -37,6 +39,15 @@ type componentConfig struct {
 type localConfig struct {
 	Contexts         contexts `yaml:"contexts"`
 	DefaultPrincipal string   `yaml:"default-principal"`
+}
+
+// helper function that returns the default path for the config
+func getDefaultCfgPath() string {
+	homedir, err := os.UserHomeDir()
+	if err != nil {
+		cmdutil.Fatal("Error getting home direcotry: %v", err)
+	}
+	return filepath.Join(homedir, ".config", "argocd-agent", "ctl.conf")
 }
 
 // helper function that validates a configuration returns an error with
@@ -88,9 +99,17 @@ func validateConfig(cfg *localConfig) error {
 	return nil
 }
 
-// helper function that writes the yaml for the local config to specified path
+// helper function that writes the yaml for the local config to specified path and creates all directories
+// needed for it
 func writeLocalConfig(cfg *localConfig, path string) error {
 	bytes, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+
+	// create subdirectories that need to exist for file to exist
+	dirPath := filepath.Dir(path)
+	err = os.MkdirAll(dirPath, 0o744)
 	if err != nil {
 		return err
 	}
