@@ -62,6 +62,11 @@ Kubernetes: `>=1.24.0-0`
 | probes.readiness.periodSeconds | int | `10` | Frequency of readiness probes. |
 | probes.readiness.timeoutSeconds | int | `2` | Timeout for readiness probe. |
 | redisAddress | string | `"argocd-redis:6379"` | Redis address used by the agent. |
+| redisTLS | object | `{"caPath":"/app/config/redis-tls/ca.crt","enabled":false,"insecure":false,"secretName":"argocd-redis-tls"}` | Redis TLS configuration. |
+| redisTLS.caPath | string | `"/app/config/redis-tls/ca.crt"` | Path to CA certificate for verifying Redis TLS certificate. This path is where the CA certificate will be mounted inside the container. |
+| redisTLS.enabled | bool | `false` | Enable TLS for Redis connections. |
+| redisTLS.insecure | bool | `false` | Skip verification of Redis TLS certificate (INSECURE - for development only). |
+| redisTLS.secretName | string | `"argocd-redis-tls"` | Name of the Kubernetes Secret containing the Redis TLS CA certificate. The secret should have a key 'ca.crt' containing the CA certificate in PEM format. Set to empty string to disable mounting (requires system CAs or insecure mode). |
 | redisUsername | string | `""` | Redis username for authentication. |
 | replicaCount | int | `1` | Number of replicas for the agent Deployment. |
 | resources | object | `{"limits":{"cpu":"500m","memory":"512Mi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Resource requests and limits for the agent Pod. |

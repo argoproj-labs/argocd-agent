@@ -113,3 +113,12 @@ data:
   # agent.allowed-namespaces: Additional namespaces the agent can manage.
   # Default: ""
   agent.allowed-namespaces: {{ .Values.allowedNamespaces | quote }}
+  # agent.redis.tls.enabled: Whether to enable TLS for Redis connections.
+  # Default: true
+  agent.redis.tls.enabled: {{ .Values.redisTLS.enabled }}
+  # agent.redis.tls.ca-path: Path to CA certificate for verifying Redis TLS certificate.
+  # Default: ""
+  agent.redis.tls.ca-path: {{ .Values.redisTLS.caPath | quote }}
+  # agent.redis.tls.insecure: INSECURE: Do not verify Redis TLS certificate.
+  # Default: false
+  agent.redis.tls.insecure: {{ .Values.redisTLS.insecure }}

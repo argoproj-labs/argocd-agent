@@ -260,6 +260,48 @@ spec:
               secretKeyRef:
                 name: argocd-redis
                 key: auth
+          - name: ARGOCD_PRINCIPAL_REDIS_TLS_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.redis.tls.enabled
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_CERT_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.redis.proxy.server.tls.cert-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_KEY_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.redis.proxy.server.tls.key-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.redis.proxy.server.tls.secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.redis.ca-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_CA_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.redis.ca-secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_TLS_INSECURE
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.redis.tls.insecure
+                optional: true
 
           image: argocd-agent
           imagePullPolicy: Always
@@ -267,6 +309,8 @@ spec:
           ports:
             - containerPort: 8443
               name: principal
+            - containerPort: 6379
+              name: redis-proxy
             - containerPort: 8000
               name: metrics
             - containerPort: 8003
@@ -285,6 +329,12 @@ spec:
               mountPath: /app/config/jwt
             - name: userpass-passwd
               mountPath: /app/config/userpass
+            - name: redis-proxy-server-tls
+              mountPath: /app/config/redis-proxy-server-tls
+              readOnly: true
+            - name: redis-tls-ca
+              mountPath: /app/config/redis-tls
+              readOnly: true
       serviceAccountName: argocd-agent-principal
       volumes:
       - name: userpass-passwd
@@ -301,3 +351,19 @@ spec:
           - key: jwt.key
             path: jwt.key
           optional: true
+      - name: redis-proxy-server-tls
+        secret:
+          secretName: argocd-redis-proxy-tls
+          items:
+          - key: tls.crt
+            path: tls.crt
+          - key: tls.key
+            path: tls.key
+          optional: false
+      - name: redis-tls-ca
+        secret:
+          secretName: argocd-redis-tls
+          items:
+          - key: ca.crt
+            path: ca.crt
+          optional: false

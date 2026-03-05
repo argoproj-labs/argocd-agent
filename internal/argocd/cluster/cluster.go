@@ -16,6 +16,7 @@ package cluster
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"time"
@@ -174,7 +175,7 @@ func (m *Manager) setClusterInfo(clusterServer, agentName, clusterName string, c
 }
 
 // NewClusterCacheInstance creates a new cache instance with Redis connection
-func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType) (*appstatecache.Cache, error) {
+func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType, tlsConfig *tls.Config) (*appstatecache.Cache, error) {
 
 	redisOptions := &redis.Options{
 		Addr:     redisAddress,
@@ -182,6 +183,7 @@ func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressio
 		MaintNotificationsConfig: &maintnotifications.Config{
 			Mode: maintnotifications.ModeDisabled,
 		},
+		TLSConfig: tlsConfig,
 	}
 	redisClient := redis.NewClient(redisOptions)
 

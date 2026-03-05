@@ -90,7 +90,7 @@ func generateAgentClientCert(agentName string, clt *kube.KubernetesClient) (clie
 	// We need to re-encode the CA's public certificate back to PEM.
 	// It's a little stupid, because it is stored in the secret as
 	// PEM already, but the tls.Certificate contains only RAW byte.
-	caData, err = tlsutil.CertDataToPEM([]byte(tlsCert.Certificate[0]))
+	caData, err = tlsutil.CertDataToPEM(tlsCert.Certificate[0])
 	if err != nil {
 		err = fmt.Errorf("could not encode CA cert to PEM: %v", err)
 		return

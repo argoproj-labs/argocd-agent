@@ -151,6 +151,24 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.redis.username
                 optional: true
+          - name: ARGOCD_AGENT_REDIS_TLS_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.redis.tls.enabled
+                optional: true
+          - name: ARGOCD_AGENT_REDIS_TLS_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.redis.tls.ca-path
+                optional: true
+          - name: ARGOCD_AGENT_REDIS_TLS_INSECURE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.redis.tls.insecure
+                optional: true
           - name: ARGOCD_PRINCIPAL_LOG_FORMAT
             valueFrom:
               configMapKeyRef:
@@ -247,6 +265,11 @@ spec:
           volumeMounts:
             - name: userpass-passwd
               mountPath: /app/config/creds
+{{- if .Values.redisTLS.secretName }}
+            - name: redis-tls-ca
+              mountPath: /app/config/redis-tls
+              readOnly: true
+{{- end }}
       serviceAccountName: {{ include "argocd-agent-agent.serviceAccountName" . }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
@@ -268,3 +291,12 @@ spec:
           - key: credentials
             path: userpass.creds
           optional: true
+{{- if .Values.redisTLS.secretName }}
+      - name: redis-tls-ca
+        secret:
+          secretName: {{ .Values.redisTLS.secretName }}
+          items:
+          - key: ca.crt
+            path: ca.crt
+          optional: true
+{{- end }}
