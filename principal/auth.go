@@ -18,10 +18,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/session"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
 	"google.golang.org/grpc"
@@ -149,6 +151,40 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 	return authCtx, nil
 }
 
+// isReplicationMethod returns true if the gRPC method belongs to the replication service.
+func isReplicationMethod(fullMethod string) bool {
+	return strings.HasPrefix(fullMethod, fmt.Sprintf("/%s/", replicationapi.Replication_ServiceDesc.ServiceName))
+}
+
+// authenticateReplication authenticates a replication request using the
+// server's mTLS auth method (same as agent auth) and optionally checks
+// the extracted identity against the allowed replication clients list.
+func (s *Server) authenticateReplication(ctx context.Context) error {
+	mtlsMethod := s.authMethods.Method("mtls")
+	if mtlsMethod == nil {
+		return status.Errorf(codes.Unauthenticated, "replication requires mTLS auth but no mtls method configured")
+	}
+
+	identity, err := mtlsMethod.Authenticate(ctx, auth.Credentials{})
+	if err != nil {
+		log().WithError(err).Warn("Replication request rejected: authentication failed")
+		return status.Errorf(codes.Unauthenticated, "replication auth failed: %v", err)
+	}
+
+	allowed := s.ha.Controller.Options().AllowedReplicationClients
+	if len(allowed) > 0 {
+		for _, c := range allowed {
+			if identity == c {
+				return nil
+			}
+		}
+		log().WithField("identity", identity).Warn("Replication request rejected: identity not in allowed clients")
+		return status.Errorf(codes.PermissionDenied, "identity %q not in allowed replication clients", identity)
+	}
+
+	return nil
+}
+
 // unaryAuthInterceptor is a server interceptor for unary gRPC requests.
 //
 // It enforces authentication on incoming gRPC calls according to settings of
@@ -156,6 +192,15 @@ func (s *Server) authenticate(ctx context.Context) (context.Context, error) {
 // authentication is skipped.
 func (s *Server) unaryAuthInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	if _, ok := s.noauth[info.FullMethod]; ok {
+		return handler(ctx, req)
+	}
+	if isReplicationMethod(info.FullMethod) {
+		if s.ha == nil {
+			return nil, status.Error(codes.Unimplemented, "replication not enabled")
+		}
+		if err := s.authenticateReplication(ctx); err != nil {
+			return nil, err
+		}
 		return handler(ctx, req)
 	}
 	newCtx, err := s.authenticate(ctx)
@@ -172,6 +217,15 @@ func (s *Server) unaryAuthInterceptor(ctx context.Context, req any, info *grpc.U
 // authentication is skipped.
 func (s *Server) streamAuthInterceptor(srv any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	if _, ok := s.noauth[info.FullMethod]; ok {
+		return handler(srv, stream)
+	}
+	if isReplicationMethod(info.FullMethod) {
+		if s.ha == nil {
+			return status.Error(codes.Unimplemented, "replication not enabled")
+		}
+		if err := s.authenticateReplication(stream.Context()); err != nil {
+			return err
+		}
 		return handler(srv, stream)
 	}
 	newCtx, err := s.authenticate(stream.Context())
