@@ -295,7 +295,7 @@ func TestDefaultAppFilterChain_IgnoreUnmanagedApps(t *testing.T) {
 		assert.False(t, fc.Admit(withoutSourceUID))
 	})
 
-	t.Run("flag enabled: app with empty source-uid annotation is rejected", func(t *testing.T) {
+	t.Run("flag enabled: app with empty source-uid annotation is admitted", func(t *testing.T) {
 		fc := newAgent(t, true).DefaultAppFilterChain()
 		app := withoutSourceUID.DeepCopy()
 		app.Annotations = map[string]string{manager.SourceUIDAnnotation: ""}
