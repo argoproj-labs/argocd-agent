@@ -56,34 +56,6 @@ func TestValidateConfig(t *testing.T) {
 			valid: true,
 		},
 		{
-			name: "blank default principal",
-			cfg: localConfig{
-				Contexts: contexts{
-					Principals: map[string]componentConfig{
-						"test-principal": {
-							KubeContext: "kind-test-principal",
-							Namespace:   "argocd",
-						},
-						"test-principal-aws": {
-							KubeContext: "eks-test-principal",
-							Namespace:   "argocd",
-						},
-					},
-					Agents: map[string]componentConfig{
-						"test-agent": {
-							KubeContext: "test-agent",
-							Namespace:   "argocd",
-						},
-						"test-agent-on-prem": {
-							KubeContext: "test-agent",
-							Namespace:   "argocd",
-						},
-					},
-				},
-			},
-			valid: false,
-		},
-		{
 			name: "blank agent kubecontext",
 			cfg: localConfig{
 				Contexts: contexts{
@@ -258,25 +230,6 @@ func TestValidateConfig(t *testing.T) {
 			valid: false,
 		},
 		{
-			name: "no principals listed",
-			cfg: localConfig{
-				Contexts: contexts{
-					Agents: map[string]componentConfig{
-						"test-agent": {
-							KubeContext: "test-agent",
-							Namespace:   "argocd",
-						},
-						"test-agent-on-prem": {
-							KubeContext: "test-agent",
-							Namespace:   "argocd",
-						},
-					},
-				},
-				DefaultPrincipal: "test-principal",
-			},
-			valid: false,
-		},
-		{
 			name: "default principal does not exist in principal contexts",
 			cfg: localConfig{
 				Contexts: contexts{
@@ -312,6 +265,133 @@ func TestValidateConfig(t *testing.T) {
 			err := validateConfig(&tt.cfg)
 			// true is valid and false is invalid
 			require.Equal(t, tt.valid, err == nil, "was not the correct result")
+		})
+	}
+}
+
+func TestDetermineConfigs(t *testing.T) {
+	localCfg := &localConfig{
+		Contexts: contexts{
+			Principals: map[string]componentConfig{
+				"test-principal": {
+					KubeContext: "kind-test-principal",
+					Namespace:   "argocd",
+				},
+				"test-principal-aws": {
+					KubeContext: "eks-test-principal",
+					Namespace:   "argocd",
+				},
+			},
+			Agents: map[string]componentConfig{
+				"test-agent": {
+					KubeContext: "kind-test-agent",
+					Namespace:   "argocd",
+				},
+				"test-agent-on-prem": {
+					KubeContext: "test-agent",
+					Namespace:   "argocd",
+				},
+			},
+		},
+		DefaultPrincipal: "test-principal-aws",
+	}
+
+	tests := []struct {
+		name                 string
+		principal            string
+		principalNS          string
+		principalKC          string
+		agent                string
+		agentNS              string
+		agentKC              string
+		expectedPrincipalCfg componentConfig
+		expectedAgentCfg     componentConfig
+	}{
+		{
+			name:        "follows order with prinicpal and agent context and namespace being highest",
+			principal:   "test-principal",
+			principalNS: "not-argocd",
+			principalKC: "a-principal-not-in-config",
+			agent:       "test-agent",
+			agentNS:     "not-argocd",
+			agentKC:     "an-agent-not-in-config",
+			expectedPrincipalCfg: componentConfig{
+				KubeContext: "a-principal-not-in-config",
+				Namespace:   "not-argocd",
+			},
+			expectedAgentCfg: componentConfig{
+				KubeContext: "an-agent-not-in-config",
+				Namespace:   "not-argocd",
+			},
+		},
+		{
+			name:        "follows order if no context or namespace flags",
+			principal:   "test-principal",
+			principalNS: "",
+			principalKC: "",
+			agent:       "test-agent",
+			agentNS:     "",
+			agentKC:     "",
+			expectedPrincipalCfg: componentConfig{
+				KubeContext: "kind-test-principal",
+				Namespace:   "argocd",
+			},
+			expectedAgentCfg: componentConfig{
+				KubeContext: "kind-test-agent",
+				Namespace:   "argocd",
+			},
+		},
+		{
+			name:        "follows order if no flags are present, agent will be blank",
+			principal:   "",
+			principalNS: "",
+			principalKC: "",
+			agent:       "",
+			agentNS:     "",
+			agentKC:     "",
+			expectedPrincipalCfg: componentConfig{
+				KubeContext: "eks-test-principal",
+				Namespace:   "argocd",
+			},
+			expectedAgentCfg: componentConfig{
+				KubeContext: "",
+				Namespace:   "",
+			},
+		},
+		{
+			name:        "principal and agent are independent",
+			principal:   "test-principal",
+			principalNS: "",
+			principalKC: "",
+			agent:       "test-agent",
+			agentNS:     "not-argocd",
+			agentKC:     "an-agent-not-in-config",
+			expectedPrincipalCfg: componentConfig{
+				KubeContext: "kind-test-principal",
+				Namespace:   "argocd",
+			},
+			expectedAgentCfg: componentConfig{
+				KubeContext: "an-agent-not-in-config",
+				Namespace:   "not-argocd",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(*testing.T) {
+			opts := &GlobalFlags{}
+			opts.principal = tt.principal
+			opts.principalContext = tt.principalKC
+			opts.principalNamespace = tt.principalNS
+			opts.agent = tt.agent
+			opts.agentContext = tt.agentKC
+			opts.agentNamespace = tt.agentNS
+
+			principalCfg, agentCfg := determineConfigs(opts, localCfg)
+			require.Equal(t, tt.expectedPrincipalCfg.KubeContext, principalCfg.KubeContext, "Principal kubecontext is not equal")
+			require.Equal(t, tt.expectedPrincipalCfg.Namespace, principalCfg.Namespace, "Principal namespace is not equal")
+			require.Equal(t, tt.expectedAgentCfg.KubeContext, agentCfg.KubeContext, "Agent kubecontext is not equal")
+			require.Equal(t, tt.expectedAgentCfg.Namespace, agentCfg.Namespace, "Agent namespace is not equal")
 		})
 	}
 }

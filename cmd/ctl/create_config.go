@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"github.com/spf13/cobra"
@@ -81,18 +82,22 @@ func CreateLocalConfig(kubeConfigPath, outputPath string) {
 
 		fmt.Printf("Which namespace is the %s installed in? ", contextType)
 		fmt.Scanln(&namespace)
+		namespace = strings.TrimSpace(namespace)
 
 		for namespace == "" {
 			fmt.Print("Invalid input, namespace cannot be blank: ")
 			fmt.Scanln(&namespace)
+			namespace = strings.TrimSpace(namespace)
 		}
 
 		fmt.Printf("What name would you like to use for this %s? ", contextType)
 		fmt.Scanln(&name)
+		namespace = strings.TrimSpace(namespace)
 
 		for name == "" {
 			fmt.Print("Invalid input, name cannot be blank: ")
 			fmt.Scanln(&name)
+			namespace = strings.TrimSpace(namespace)
 		}
 
 		componentCfg := componentConfig{KubeContext: context, Namespace: namespace}

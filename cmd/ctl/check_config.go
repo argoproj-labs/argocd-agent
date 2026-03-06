@@ -73,11 +73,12 @@ func NewCheckConfigPrincipalCommand() *cobra.Command {
 				cmdutil.Fatal("--principal-namespace is required")
 			}
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 			}
-			results := RunPrincipalChecks(ctx, clt, globalOpts.principalNamespace)
+			results := RunPrincipalChecks(ctx, clt, principalCfg.Namespace)
 			printResultsAndExit(results)
 		},
 	}
@@ -89,25 +90,26 @@ func NewCheckConfigAgentCommand() *cobra.Command {
 		Use:   "agent",
 		Short: "Validate agent configuration (and principal cross-checks)",
 		Run: func(cmd *cobra.Command, args []string) {
-			if strings.TrimSpace(globalOpts.agentContext) == "" ||
-				strings.TrimSpace(globalOpts.agentNamespace) == "" ||
-				strings.TrimSpace(globalOpts.principalContext) == "" ||
-				strings.TrimSpace(globalOpts.principalNamespace) == "" {
-				cmdutil.Fatal("--agent-context, --agent-namespace, --principal-context, --principal-namespace are all required")
+			if principalCfg.KubeContext == "" ||
+				principalCfg.Namespace == "" ||
+				agentCfg.KubeContext == "" ||
+				agentCfg.Namespace == "" {
+				cmdutil.Fatal("An agent and principal must be provided for this command, use -h flag to see ways to provide them")
 			}
+
 			ctx := context.TODO()
-			agentClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.agentNamespace, "", globalOpts.agentContext)
+			agentClt, err := kube.NewKubernetesClientFromConfig(ctx, agentCfg.Namespace, "", agentCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create agent Kubernetes client: %v", err)
 			}
-			principalClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			principalClt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create principal Kubernetes client: %v", err)
 			}
 			// Run principal checks as part of agent checks
 			results := []checkResult{}
-			results = append(results, RunPrincipalChecks(ctx, principalClt, globalOpts.principalNamespace)...)
-			results = append(results, RunAgentChecks(ctx, agentClt, globalOpts.agentNamespace, principalClt, globalOpts.principalNamespace)...)
+			results = append(results, RunPrincipalChecks(ctx, principalClt, principalCfg.Namespace)...)
+			results = append(results, RunAgentChecks(ctx, agentClt, agentCfg.Namespace, principalClt, principalCfg.Namespace)...)
 			printResultsAndExit(results)
 		},
 	}

@@ -41,6 +41,11 @@ type localConfig struct {
 	DefaultPrincipal string   `yaml:"default-principal"`
 }
 
+var (
+	principalCfg componentConfig
+	agentCfg     componentConfig
+)
+
 // helper function that returns the default path for the config
 func getDefaultCfgPath() string {
 	homedir, err := os.UserHomeDir()
@@ -50,17 +55,41 @@ func getDefaultCfgPath() string {
 	return filepath.Join(homedir, ".config", "argocd-agent", "ctl.conf")
 }
 
+// helper function that determines which context and namespace to use based on the globals opts
+// Priority follows the below order:
+// Principal: (Highest Priority) Context and Namespace flags -> Principal flag (config lookup) -> Default principal in config -> Current context selected in kubeconfig(Lowest Priority)
+// Agent: (Highest Priority) Context and namespace flags -> Agent flag (config lookup) -> Current context selected in kubeconfig (Lowest Priority)
+func determineConfigs(opts *GlobalFlags, cfg *localConfig) (principal, agent componentConfig) {
+	if opts.principalContext != "" {
+		principal.KubeContext = opts.principalContext
+		principal.Namespace = opts.principalNamespace
+	} else if opts.principal != "" {
+		config, exists := cfg.Contexts.Principals[opts.principal]
+		if !exists {
+			cmdutil.Fatal("Principal %s does not exist in config", opts.principal)
+		}
+		principal = config
+	} else if config, exists := cfg.Contexts.Principals[cfg.DefaultPrincipal]; exists {
+		principal = config
+	}
+
+	if opts.agentContext != "" {
+		agent.KubeContext = opts.agentContext
+		agent.Namespace = opts.agentNamespace
+	} else if opts.agent != "" {
+		config, exists := cfg.Contexts.Agents[opts.agent]
+		if !exists {
+			cmdutil.Fatal("agent %s does not exist in config", opts.agent)
+		}
+		agent = config
+	}
+
+	return principal, agent
+}
+
 // helper function that validates a configuration returns an error with
 // details on the issues if something is wrong
 func validateConfig(cfg *localConfig) error {
-	if cfg.DefaultPrincipal == "" {
-		return fmt.Errorf("Invalid config: default principal is empty")
-	}
-
-	if len(cfg.Contexts.Principals) == 0 {
-		return fmt.Errorf("Invalid config: No principals defined")
-	}
-
 	// check agent for anything blank
 	for agent, agentCfg := range cfg.Contexts.Agents {
 		if agent == "" {
@@ -72,7 +101,7 @@ func validateConfig(cfg *localConfig) error {
 		}
 
 		if agentCfg.Namespace == "" {
-			return fmt.Errorf("Invalid config: agent %s has blank kube-context", agent)
+			return fmt.Errorf("Invalid config: agent %s has blank namespace", agent)
 		}
 	}
 
@@ -87,12 +116,12 @@ func validateConfig(cfg *localConfig) error {
 		}
 
 		if principalCfg.Namespace == "" {
-			return fmt.Errorf("Invalid config: principal %s has blank kube-context", principal)
+			return fmt.Errorf("Invalid config: principal %s has blank namespace", principal)
 		}
 	}
 
 	// check if default principal exists in principal contexts
-	if _, exists := cfg.Contexts.Principals[cfg.DefaultPrincipal]; !exists {
+	if _, exists := cfg.Contexts.Principals[cfg.DefaultPrincipal]; !exists && cfg.DefaultPrincipal != "" {
 		return fmt.Errorf("Invalid config: the default principal %s does not exist in principal contexts", cfg.DefaultPrincipal)
 	}
 
@@ -118,8 +147,8 @@ func writeLocalConfig(cfg *localConfig, path string) error {
 	return err
 }
 
-// helper function that loads the config for a local config
-func loadLocalConfig(path string) (*localConfig, error) {
+// helper function that reads the config for a local config from a file
+func readLocalConfig(path string) (*localConfig, error) {
 	bytes, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -132,4 +161,25 @@ func loadLocalConfig(path string) (*localConfig, error) {
 	}
 
 	return &cfg, nil
+}
+
+// helper function that loads, validates, and determines which configs to use
+func loadLocalConfig() (principal, agent componentConfig) {
+	localCfg, err := readLocalConfig(globalOpts.configPath)
+	if err != nil {
+		// only print a warning based if failed read is not a file not found
+		if !os.IsNotExist(err) {
+			cmdutil.Warn("An error occured while reading config, no config will be used: %v", err)
+		}
+		localCfg = &localConfig{}
+	}
+
+	err = validateConfig(localCfg)
+	if err != nil {
+		cmdutil.Warn("%v, defauling to using no config", err)
+		localCfg = &localConfig{}
+	}
+
+	principal, agent = determineConfigs(globalOpts, localCfg)
+	return principal, agent
 }
