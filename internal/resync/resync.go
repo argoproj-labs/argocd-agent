@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -38,6 +39,10 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/workqueue"
 )
+
+// ErrSourceUIDNotFound is returned when a resource does not have the source UID annotation.
+// Resources without this annotation are not managed by the agent and should be skipped.
+var ErrSourceUIDNotFound = errors.New("source UID annotation not found")
 
 // RequestHandler handles all the resync requests that are exchanged when the agent/principal process restarts.
 // Depending on the agent mode, the sync messages are common to both the agent and the principal.
@@ -60,6 +65,10 @@ type RequestHandler struct {
 	// by their actual namespace instead of assuming the agent name is the namespace.
 	// This is used when destination-based mapping is enabled on the principal.
 	destinationBasedMapping bool
+
+	// ignoreUnmanagedApps indicates that resources without the source UID annotation
+	// should be silently skipped during resync instead of causing an error.
+	ignoreUnmanagedApps bool
 }
 
 func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLimitingInterface[*cloudevent.Event], events *event.EventSource, resources *resources.Resources, log *logrus.Entry, role manager.ManagerRole, namespace string) *RequestHandler {
@@ -79,6 +88,14 @@ func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLim
 // assuming the agent name equals the namespace for Applications.
 func (r *RequestHandler) WithDestinationBasedMapping(enabled bool) *RequestHandler {
 	r.destinationBasedMapping = enabled
+	return r
+}
+
+// WithIgnoreUnmanagedApps sets whether resources without the source UID annotation
+// should be silently skipped during resync. When enabled, unmanaged resources
+// (those not created via the agent) will be ignored instead of causing errors.
+func (r *RequestHandler) WithIgnoreUnmanagedApps(enabled bool) *RequestHandler {
+	r.ignoreUnmanagedApps = enabled
 	return r
 }
 
@@ -145,7 +162,11 @@ func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, inco
 	} else {
 		reqUpdate, err = newRequestUpdateFromObject(res, incoming.Kind)
 		if err != nil {
-			return fmt.Errorf("failed to construct a request update for resource: %s", res.GetName())
+			if errors.Is(err, ErrSourceUIDNotFound) && r.ignoreUnmanagedApps {
+				logCtx.WithField(logfields.Name, res.GetName()).Debug("skipping resource without source UID annotation")
+				return nil
+			}
+			return fmt.Errorf("newRequestUpdateFromObject failed: %w", err)
 		}
 	}
 
@@ -199,6 +220,10 @@ func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resourc
 
 	reqUpdate, err := newRequestUpdateFromObject(res, resource.Kind)
 	if err != nil {
+		if errors.Is(err, ErrSourceUIDNotFound) && r.ignoreUnmanagedApps {
+			r.log.WithField(logfields.Name, resource.Name).Debug("skipping resource without source UID annotation")
+			return nil
+		}
 		return fmt.Errorf("failed to construct a request update from resource %s: %w", resource.Name, err)
 	}
 
@@ -447,7 +472,7 @@ func newRequestUpdateFromObject(res *unstructured.Unstructured, kind string) (*e
 	annotations := res.GetAnnotations()
 	sourceUID, ok := annotations[manager.SourceUIDAnnotation]
 	if !ok {
-		return nil, fmt.Errorf("source UID annotation not found for resource: %s", res.GetName())
+		return nil, ErrSourceUIDNotFound
 	}
 
 	checksum, err := generateSpecChecksum(res)

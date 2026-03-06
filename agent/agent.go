@@ -131,6 +131,10 @@ type Agent struct {
 	// - The agent watches for applications in all namespaces
 	destinationBasedMapping bool
 
+	// ignoreUnmanagedApps when true, resources without the source UID annotation
+	// will be silently skipped during resync instead of causing errors.
+	ignoreUnmanagedApps bool
+
 	// createNamespace when true, the agent will create namespaces that
 	// don't exist before creating applications. This is used in combination with
 	// destination-based mapping.

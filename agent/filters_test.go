@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/config"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -244,6 +245,77 @@ func TestDefaultAppFilterChain_ProcessChange(t *testing.T) {
 	// Test that change processing works (no change filters are currently implemented)
 	result := filterChain.ProcessChange(oldApp, newApp)
 	assert.True(t, result, "ProcessChange should return true when no change filters are defined")
+}
+
+func TestDefaultAppFilterChain_IgnoreUnmanagedApps(t *testing.T) {
+	kubec := fakekube.NewKubernetesFakeClientWithApps("argocd")
+	remote, err := client.NewRemote("127.0.0.1", 8080)
+	require.NoError(t, err)
+
+	newAgent := func(t *testing.T, ignore bool) *Agent {
+		t.Helper()
+		opts := []AgentOption{WithRemote(remote)}
+		if ignore {
+			opts = append(opts, WithIgnoreUnmanagedApps(true))
+		}
+		a, err := NewAgent(context.TODO(), kubec, "argocd", opts...)
+		require.NoError(t, err)
+		return a
+	}
+
+	withSourceUID := &v1alpha1.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "managed-app",
+			Namespace: "argocd",
+			Annotations: map[string]string{
+				manager.SourceUIDAnnotation: "some-uid",
+			},
+		},
+	}
+	withoutSourceUID := &v1alpha1.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unmanaged-app",
+			Namespace: "argocd",
+		},
+	}
+
+	t.Run("flag disabled: apps without source-uid are admitted", func(t *testing.T) {
+		fc := newAgent(t, false).DefaultAppFilterChain()
+		assert.True(t, fc.Admit(withoutSourceUID))
+		assert.True(t, fc.Admit(withSourceUID))
+	})
+
+	t.Run("flag enabled: app with source-uid annotation is admitted", func(t *testing.T) {
+		fc := newAgent(t, true).DefaultAppFilterChain()
+		assert.True(t, fc.Admit(withSourceUID))
+	})
+
+	t.Run("flag enabled: app without source-uid annotation is rejected", func(t *testing.T) {
+		fc := newAgent(t, true).DefaultAppFilterChain()
+		assert.False(t, fc.Admit(withoutSourceUID))
+	})
+
+	t.Run("flag enabled: app with empty source-uid annotation is admitted", func(t *testing.T) {
+		fc := newAgent(t, true).DefaultAppFilterChain()
+		app := withoutSourceUID.DeepCopy()
+		app.Annotations = map[string]string{manager.SourceUIDAnnotation: ""}
+		// empty string is still a present annotation — should be admitted
+		assert.True(t, fc.Admit(app))
+	})
+
+	t.Run("flag enabled: namespace filter still applies", func(t *testing.T) {
+		fc := newAgent(t, true).DefaultAppFilterChain()
+		app := withSourceUID.DeepCopy()
+		app.Namespace = "wrong-namespace"
+		assert.False(t, fc.Admit(app))
+	})
+
+	t.Run("flag enabled: skip-sync label still applies", func(t *testing.T) {
+		fc := newAgent(t, true).DefaultAppFilterChain()
+		app := withSourceUID.DeepCopy()
+		app.Labels = map[string]string{config.SkipSyncLabel: "true"}
+		assert.False(t, fc.Admit(app))
+	})
 }
 
 func init() {

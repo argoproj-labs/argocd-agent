@@ -17,6 +17,7 @@ package agent
 import (
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v3/util/glob"
 )
@@ -47,6 +48,17 @@ func (a *Agent) DefaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 		}
 		return true
 	})
+
+	// When ignoreUnmanagedApps is set, filter out apps that were not created
+	// via argocd-agent (i.e. no source-uid annotation). Without this, the agent
+	// marks them as managed and sends status events to the principal, which
+	// errors because the app doesn't exist there.
+	if a.ignoreUnmanagedApps {
+		fc.AppendAdmitFilter(func(app *v1alpha1.Application) bool {
+			_, ok := app.Annotations[manager.SourceUIDAnnotation]
+			return ok
+		})
+	}
 
 	return fc
 }

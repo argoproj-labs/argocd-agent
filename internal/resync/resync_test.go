@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -164,6 +165,62 @@ func Test_ProcessIncomingSyncedResource(t *testing.T) {
 	})
 }
 
+func Test_ProcessIncomingSyncedResource_MissingSourceUID(t *testing.T) {
+	gvr, err := getGroupVersionResource("Application")
+	require.Nil(t, err)
+
+	newHandlerWithFlag := func(t *testing.T, ignore bool) *RequestHandler {
+		t.Helper()
+		h := createFakeHandler(t)
+		h.WithIgnoreUnmanagedApps(ignore)
+		return h
+	}
+
+	setupApp := func(t *testing.T, h *RequestHandler, withAnnotation bool) {
+		t.Helper()
+		resource := fakeUnresApp()
+		if withAnnotation {
+			resource.SetAnnotations(map[string]string{manager.SourceUIDAnnotation: "source-uid"})
+		}
+		_, err := h.dynClient.Resource(gvr).Namespace("default").Create(context.Background(), resource, v1.CreateOptions{})
+		require.Nil(t, err)
+	}
+
+	incoming := &event.SyncedResource{
+		Name:      "test-app",
+		Namespace: "default",
+		Kind:      "Application",
+		UID:       "test-uid",
+	}
+
+	t.Run("flag disabled: missing source-uid returns wrapped sentinel error", func(t *testing.T) {
+		h := newHandlerWithFlag(t, false)
+		setupApp(t, h, false)
+
+		err := h.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
+		assert.ErrorIs(t, err, ErrSourceUIDNotFound)
+		assert.Equal(t, 0, h.sendQ.Len())
+	})
+
+	t.Run("flag enabled: missing source-uid suppresses error and sends nothing", func(t *testing.T) {
+		h := newHandlerWithFlag(t, true)
+		setupApp(t, h, false)
+
+		err := h.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
+		assert.Nil(t, err)
+		assert.Equal(t, 0, h.sendQ.Len())
+	})
+
+	t.Run("flag enabled: present source-uid still sends request update", func(t *testing.T) {
+		h := newHandlerWithFlag(t, true)
+		setupApp(t, h, true)
+
+		err := h.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
+		assert.Nil(t, err)
+		assert.Equal(t, 1, h.sendQ.Len())
+	})
+}
+
 func Test_ProcessIncomingResourceResyncRequest(t *testing.T) {
 	handler := createFakeHandler(t)
 
@@ -240,6 +297,211 @@ func Test_generateSpecChecksum(t *testing.T) {
 		checksum, err := generateSpecChecksum(resource)
 		assert.Nil(t, err)
 		assert.NotNil(t, checksum)
+	})
+}
+
+func Test_newRequestUpdateFromObject(t *testing.T) {
+	t.Run("return ErrSourceUIDNotFound when annotation missing", func(t *testing.T) {
+		resource := fakeUnresApp()
+
+		_, err := newRequestUpdateFromObject(resource, "Application")
+		assert.ErrorIs(t, err, ErrSourceUIDNotFound)
+	})
+
+	t.Run("return ErrSourceUIDNotFound when annotations nil", func(t *testing.T) {
+		resource := fakeUnresApp()
+		resource.SetAnnotations(nil)
+
+		_, err := newRequestUpdateFromObject(resource, "Application")
+		assert.ErrorIs(t, err, ErrSourceUIDNotFound)
+	})
+
+	t.Run("return request update when annotation present", func(t *testing.T) {
+		resource := fakeUnresApp()
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid-123",
+		})
+
+		reqUpdate, err := newRequestUpdateFromObject(resource, "Application")
+		assert.Nil(t, err)
+		assert.NotNil(t, reqUpdate)
+		assert.Equal(t, "test-app", reqUpdate.Name)
+		assert.Equal(t, "default", reqUpdate.Namespace)
+		assert.Equal(t, "Application", reqUpdate.Kind)
+		assert.Equal(t, "source-uid-123", reqUpdate.UID)
+		assert.NotEmpty(t, reqUpdate.Checksum)
+	})
+}
+
+func Test_sendRequestUpdate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("skip resource without source UID annotation when ignore flag enabled", func(t *testing.T) {
+		handler := createFakeHandler(t).WithIgnoreUnmanagedApps(true)
+
+		resource := fakeUnresApp()
+
+		gvr, err := getGroupVersionResource("Application")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("default").
+			Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		err = handler.sendRequestUpdate(ctx, resources.ResourceKey{
+			Name:      "test-app",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "test-uid",
+		})
+
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len())
+	})
+
+	t.Run("error on resource without source UID annotation when ignore flag disabled", func(t *testing.T) {
+		handler := createFakeHandler(t)
+
+		resource := fakeUnresApp()
+
+		gvr, err := getGroupVersionResource("Application")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("default").
+			Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		err = handler.sendRequestUpdate(ctx, resources.ResourceKey{
+			Name:      "test-app",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "test-uid",
+		})
+
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "source UID annotation not found")
+	})
+
+	t.Run("send request update for resource with source UID annotation", func(t *testing.T) {
+		handler := createFakeHandler(t)
+
+		resource := fakeUnresApp()
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+
+		gvr, err := getGroupVersionResource("Application")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("default").
+			Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		err = handler.sendRequestUpdate(ctx, resources.ResourceKey{
+			Name:      "test-app",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "test-uid",
+		})
+
+		assert.Nil(t, err)
+		assert.Equal(t, 1, handler.sendQ.Len())
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestUpdate.String(), ev.Type())
+	})
+
+	t.Run("return error for non-existent resource", func(t *testing.T) {
+		handler := createFakeHandler(t)
+
+		err := handler.sendRequestUpdate(ctx, resources.ResourceKey{
+			Name:      "non-existent",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "test-uid",
+		})
+
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "failed to get resource")
+	})
+}
+
+func Test_SendRequestUpdates(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("skip resources without source UID when ignore flag enabled", func(t *testing.T) {
+		handler := createFakeHandler(t).WithIgnoreUnmanagedApps(true)
+
+		gvr, err := getGroupVersionResource("Application")
+		assert.Nil(t, err)
+
+		resourceWithAnnotation := fakeUnresApp()
+		resourceWithAnnotation.SetName("app-with-annotation")
+		resourceWithAnnotation.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err = handler.dynClient.Resource(gvr).Namespace("default").
+			Create(ctx, resourceWithAnnotation, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		resourceWithoutAnnotation := fakeUnresApp()
+		resourceWithoutAnnotation.SetName("app-without-annotation")
+		_, err = handler.dynClient.Resource(gvr).Namespace("default").
+			Create(ctx, resourceWithoutAnnotation, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		handler.resources.Add(resources.ResourceKey{
+			Name:      "app-with-annotation",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "uid-1",
+		})
+		handler.resources.Add(resources.ResourceKey{
+			Name:      "app-without-annotation",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "uid-2",
+		})
+
+		handler.SendRequestUpdates(ctx)
+
+		assert.Equal(t, 1, handler.sendQ.Len())
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestUpdate.String(), ev.Type())
+
+		got := &event.RequestUpdate{}
+		err = ev.DataAs(got)
+		assert.Nil(t, err)
+		assert.Equal(t, "app-with-annotation", got.Name)
+	})
+
+	t.Run("skip all unmanaged resources when ignore flag enabled", func(t *testing.T) {
+		handler := createFakeHandler(t).WithIgnoreUnmanagedApps(true)
+
+		gvr, err := getGroupVersionResource("Application")
+		assert.Nil(t, err)
+
+		for i := 0; i < 3; i++ {
+			resource := fakeUnresApp()
+			resource.SetName(fmt.Sprintf("unmanaged-app-%d", i))
+			_, err = handler.dynClient.Resource(gvr).Namespace("default").
+				Create(ctx, resource, v1.CreateOptions{})
+			assert.Nil(t, err)
+
+			handler.resources.Add(resources.ResourceKey{
+				Name:      fmt.Sprintf("unmanaged-app-%d", i),
+				Namespace: "default",
+				Kind:      "Application",
+				UID:       fmt.Sprintf("uid-%d", i),
+			})
+		}
+
+		handler.SendRequestUpdates(ctx)
+
+		assert.Zero(t, handler.sendQ.Len())
 	})
 }
 
