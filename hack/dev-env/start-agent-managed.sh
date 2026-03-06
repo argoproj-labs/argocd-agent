@@ -36,7 +36,7 @@ if [ -f "$E2E_ENV_FILE" ]; then
     export ARGOCD_AGENT_CREATE_NAMESPACE=${ARGOCD_AGENT_CREATE_NAMESPACE:-false}
 fi
 
-go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
+"${SCRIPTPATH}/go-run-race-wrapper.sh" go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode managed \
     --allowed-namespaces '*' \
     --creds "mtls:any" \
