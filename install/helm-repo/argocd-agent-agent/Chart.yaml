@@ -7,7 +7,7 @@ type: application
 # chart version 
 version: 0.1.0
 
-# applicaation version, ArgoCD Agent version
+# application version, ArgoCD Agent version
 appVersion: 0.4.1
 
 

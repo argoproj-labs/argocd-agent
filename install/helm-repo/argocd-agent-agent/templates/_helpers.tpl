@@ -117,7 +117,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 Selector labels
 */}}
 {{- define "argocd-agent-agent.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "argocd-agent-agent.name" . }}
+app.kubernetes.io/name: argocd-agent-agent
+app.kubernetes.io/part-of: argocd-agent
+app.kubernetes.io/component: agent
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
@@ -136,6 +138,12 @@ Create the name of the service account to use
 {{- end }}
 {{- end }}
 
+{{/*
+Name for the agent service monitor.
+*/}}
+{{- define "argocd-agent-agent.agentServiceMonitorName" -}}
+{{- include "argocd-agent-agent.resourceName" (dict "root" . "suffix" "servicemonitor") }}
+{{- end }}
 
 {{/*
 Expand the namespace of the release.

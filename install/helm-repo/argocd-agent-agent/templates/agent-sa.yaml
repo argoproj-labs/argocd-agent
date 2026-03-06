@@ -1,9 +1,14 @@
+{{- if .Values.serviceAccount.create }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  labels:
-    app.kubernetes.io/name: argocd-agent-agent
-    app.kubernetes.io/part-of: argocd-agent
-    app.kubernetes.io/component: agent
   name: {{ include "argocd-agent-agent.serviceAccountName" . }}
-  namespace: {{ include  "argocd-agent-agent.namespace" . }}
+  namespace: {{ include "argocd-agent-agent.namespace" . }}
+  labels:
+    {{- include "argocd-agent-agent.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+{{- end }}
