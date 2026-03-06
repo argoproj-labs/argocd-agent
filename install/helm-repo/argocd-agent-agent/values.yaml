@@ -32,8 +32,6 @@ resources:
   requests:
     cpu: 100m
     memory: 128Mi
-# -- Automount API credentials for the Service Account into the pod.
-automountServiceAccountToken: true
 
 ## @section ServiceAccount
 # -- ServiceAccount configuration.

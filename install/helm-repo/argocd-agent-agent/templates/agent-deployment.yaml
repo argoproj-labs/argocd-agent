@@ -20,7 +20,7 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "argocd-agent-agent.serviceAccountName" . }}
-      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}

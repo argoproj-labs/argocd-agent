@@ -30,7 +30,6 @@ Kubernetes: `>=1.24.0-0`
 | argoCdRedisPasswordKey | string | `"auth"` | ArgoCD Redis password key. |
 | argoCdRedisSecretName | string | `"argocd-redis"` | ArgoCD Redis password secret name. |
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
-| automountServiceAccountToken | bool | `true` | Automount API credentials for the Service Account into the pod. |
 | cacheRefreshInterval | string | `"10s"` | Cache refresh interval. |
 | createNamespace | bool | `false` | Whether to create target namespaces automatically when they don't exist. Used with destination-based mapping. |
 | destinationBasedMapping | bool | `false` | Whether to enable destination-based mapping. When enabled, the agent creates applications in their original namespace (preserving the namespace from the principal) instead of the agent's own namespace. |

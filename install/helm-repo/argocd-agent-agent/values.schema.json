@@ -39,12 +39,6 @@
       "title": "auth",
       "type": "string"
     },
-    "automountServiceAccountToken": {
-      "default": true,
-      "description": "Automount API credentials for the Service Account into the pod.",
-      "title": "automountServiceAccountToken",
-      "type": "boolean"
-    },
     "cacheRefreshInterval": {
       "default": "10s",
       "description": "Cache refresh interval.",
@@ -730,7 +724,6 @@
     "tlsRootCASecretName",
     "userPasswordSecretName",
     "resources",
-    "automountServiceAccountToken",
     "serviceAccount",
     "nodeSelector",
     "affinity",
