@@ -1,0 +1,153 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: {{ .Values.namespace }}
+  name: {{ include "argocd-agent-principal.configMapName" . }}
+  labels:
+    {{- include "argocd-agent-principal.labels" . | nindent 4 }}
+  {{- with include "argocd-agent-principal.annotations" . }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+data:
+  # principal.listen.host: The interface address to listen on. Leave empty
+  # for all interfaces.
+  # Default: ""
+  principal.listen.host: {{ .Values.principal.listen.host | quote }}
+  # principal.listen.port: The port the gRPC server should listen on.
+  # Default: 8443
+  principal.listen.port: {{ .Values.principal.listen.port | quote }}
+  # principal.log.level: The logging level to use. One of trace, debug, info,
+  # warn or error.
+  # Default: info
+  principal.log.level: {{ .Values.principal.log.level | default "info" | quote }}
+  # principal.log.format: The log format principal should use. Valid values are
+  # "json" or "text".
+  # Default: "text"
+  principal.log.format: {{ .Values.principal.log.format | default "text" | quote }}
+  # principal.metrics.port: The port the metrics server should listen on.
+  # Default: 8000
+  principal.metrics.port: {{ .Values.principal.metrics.port | quote }}
+  # principal.healthz.port: The port the health check server should listen on.
+  # Default: 8003
+  principal.healthz.port: {{ .Values.principal.healthz.port | quote }}
+  # principal.namespace: The namespace the principal will operate in. If left
+  # blank, the namespace where the pod is running in will be used.
+  # Default: "argocd"
+  principal.namespace: {{ .Values.principal.namespace | quote }}
+  # principal.allowed-namespaces: A list of namespaces the principal shall
+  # watch and process Argo CD resources in. Seperate entries using commas.
+  # Entries may contain shell-style wildcards.
+  # Default: ""
+  principal.allowed-namespaces: {{ .Values.principal.allowedNamespaces | quote }}
+  # principal.namespace-create.enable: Whether the principal is allowed to
+  # create namespaces for agents if they don't exist yet. Either "true" or
+  # "false".
+  # Default: "false"
+  principal.namespace-create.enable: {{ .Values.principal.namespaceCreate.enable | quote }}
+  # principal.namespace-create.pattern: A regexp pattern to restrict the names
+  # of namespaces to be created. If empty, all patterns are allowed.
+  # Default: ""
+  principal.namespace-create.pattern: {{ .Values.principal.namespaceCreate.pattern | quote }}
+  # principal.namespace-create.labels: A set of labels to apply to namespaces
+  # created for agents. Each label definition needs to be in the format of
+  # "key=value". Empty values are not allowed. Multiple labels can be given
+  # as a comma separated list, e.g. "foo=bar,bar=baz"
+  principal.namespace-create.labels: {{ .Values.principal.namespaceCreate.labels | quote }}
+  # principal.tls.secret-name: The name of the secret containing the TLS certificate and key.
+  # Default: "argocd-agent-principal-tls"
+  principal.tls.secret-name: {{ .Values.principal.tls.secretName | quote }}
+  # principal.tls.server.cert-path: Path to the TLS certificate to be used by
+  # the gRPC server.
+  # Default: ""
+  principal.tls.server.cert-path: {{ .Values.principal.tls.server.certPath | quote }}
+  # principal.tls.server.key-path: Path to the TLS private key to be used by
+  # the gRPC server.
+  # Default: ""
+  principal.tls.server.key-path: {{ .Values.principal.tls.server.keyPath | quote }}
+  # principal.tls.server.allow-generate: Whether to allow the principal to
+  # generate its own set of TLS cert and key on startup when none are
+  # configured. This is insecure. Do only use for development.
+  # Default: false
+  principal.tls.server.allow-generate: {{ .Values.principal.tls.server.allowGenerate | quote }}
+  # principal.tls.client-cert.require: Whether to require client certs from
+  # agents upon connection.
+  # Default: false
+  principal.tls.client-cert.require: {{ .Values.principal.tls.clientCert.require | quote }}
+  # principal.tls.server.secret-name: The name of the secret containing the root CA TLS certificate.
+  # Default: "argocd-agent-ca"
+  principal.tls.server.root-ca-secret-name: {{ .Values.principal.tls.server.rootCaSecretName | quote }}
+  # principal.tls.server.root-ca-path: Path to a TLS root certificate authority
+  # to be used to validate agent's client certificates against.
+  # Default: ""
+  principal.tls.server.root-ca-path: {{ .Values.principal.tls.server.rootCaPath | quote }}
+  # principal.tls.client-cert.match-subject: Whether to match the subject field
+  # in a client certificate presented by an agent to the agent's name.
+  # Default: false
+  principal.tls.client-cert.match-subject: {{ .Values.principal.tls.clientCert.matchSubject | quote }}
+  # principal.resource-proxy.secret-name: The name of the secret containing
+  # the TLS certificate and key for the resource proxy.
+  # Default: "argocd-agent-resource-proxy-tls"
+  principal.resource-proxy.secret-name: {{ .Values.principal.resourceProxy.secretName | quote }}
+  # principal.resource-proxy.tls.cert-path: Path to the TLS certificate to be used by
+  # the resource proxy.
+  # Default: ""
+  principal.resource-proxy.tls.cert-path: {{ .Values.principal.resourceProxy.tls.certPath | quote }}
+  # principal.resource-proxy.tls.key-path: Path to the TLS private key to be used by
+  # the resource proxy.
+  # Default: ""
+  principal.resource-proxy.tls.key-path: {{ .Values.principal.resourceProxy.tls.keyPath | quote }}
+  # principal.resource-proxy.ca.secret-name: The name of the secret containing
+  # the CA certificate for the resource proxy.
+  # Default: "argocd-agent-ca"
+  principal.resource-proxy.ca.secret-name: {{ .Values.principal.resourceProxy.ca.secretName | quote }}
+  # principal.resource-proxy.ca.path: Path to the CA certificate to be used by
+  # the resource proxy.
+  # Default: ""
+  principal.resource-proxy.ca.path: {{ .Values.principal.resourceProxy.ca.path | quote }}
+  # principal.jwt.allow-generate: Whether to allow the principal to generate
+  # its own private key for signing JWT tokens. This is insecure. Do only use
+  # for development.
+  # Default: false
+  principal.jwt.allow-generate: {{ .Values.principal.jwt.allowGenerate | quote }}
+  # principal.jwt.secret-name: The name of the secret containing the JWT signing key.
+  # Default: "argocd-agent-jwt"
+  principal.jwt.secret-name: {{ .Values.principal.jwt.secretName | quote }}
+  # principal.jwt.key-path: Path to the private key to be used for signing JWT
+  # tokens.
+  # Default: ""
+  principal.jwt.key-path: {{ .Values.principal.jwt.keyPath | quote }}
+  # principal.auth: The authentication method. Must be in the
+  # format <method>:<configuration>. Valid values are:
+  # - "userpass:_path_to_encrypted_creds_" where _path_to_encrypted_creds_ is
+  #   the path to the file containing encrypted credentials for authenticating
+  #   agent connections.
+  # - "mtls:_agent_id_regex_" where _agent_id_regex_ is the regex pattern for
+  #   extracting the agent ID from client cert subject. Use "mtls:any" to
+  #   accept any client cert.
+  # Default: userpass:_path_to_encrypted_creds_
+  principal.auth: {{ .Values.principal.auth | quote }}
+  # principal.websocket.enable: Whether to use the websocket to stream events to the
+  # agent.
+  # Default: false
+  principal.websocket.enable: {{ dig "principal" "websocket" "enable" "false" .Values | quote }}
+  # principal.redis.compression.type: The compression type to use for the Redis
+  # connection.
+  # Default: "gzip"
+  principal.redis.compression.type: {{ dig "principal" "redis" "compressionType" "gzip" .Values | quote }}
+  # principal.resource-proxy.enable: Whether to enable the resource proxy.
+  # Default: true
+  principal.resource-proxy.enable: {{ dig "principal" "resourceProxy" "enable" "true" .Values | quote }}
+  # principal.keep-alive.min-interval: Drop agent connections that send keepalive pings 
+  # more often than the specified interval.
+  # Default: 0
+  principal.keep-alive.min-interval: {{ dig "principal" "keepAlive" "minInterval" "0" .Values | quote }}
+  # principal.pprof.port: The port the pprof server will listen on.
+  # Default: 0
+  principal.pprof.port: {{ dig "principal" "pprof" "port" "0" .Values | quote }}
+  # principal.redis.server.address: The address of the Redis server.
+  # Default: "argocd-redis:6379"
+  principal.redis.server.address: {{ dig "principal" "redis" "server" "address" "argocd-redis:6379" .Values | quote }}
+  {{- range $key, $value := .Values.configMapData }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
