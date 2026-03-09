@@ -36,6 +36,26 @@ func TestDefaultLabelSelector(t *testing.T) {
 		"DefaultLabelSelector should return a v1.ListOptions")
 }
 
+func TestAppLabelSelector(t *testing.T) {
+	t.Run("empty extra selector returns default only", func(t *testing.T) {
+		selector := AppLabelSelector("")
+		expected := fmt.Sprintf("%s!=true", SkipSyncLabel)
+		assert.Equal(t, expected, selector.LabelSelector)
+	})
+	t.Run("extra selector is appended", func(t *testing.T) {
+		extra := "argocd-agent.argoproj-labs.io/managed=true"
+		selector := AppLabelSelector(extra)
+		expected := fmt.Sprintf("%s!=true,%s", SkipSyncLabel, extra)
+		assert.Equal(t, expected, selector.LabelSelector)
+	})
+	t.Run("complex extra selector", func(t *testing.T) {
+		extra := "env=prod,team=platform"
+		selector := AppLabelSelector(extra)
+		expected := fmt.Sprintf("%s!=true,%s", SkipSyncLabel, extra)
+		assert.Equal(t, expected, selector.LabelSelector)
+	})
+}
+
 func TestDefaultLabelSelector_Integration(t *testing.T) {
 	// This test verifies that the selector would work correctly with Kubernetes API
 	selector := DefaultLabelSelector()

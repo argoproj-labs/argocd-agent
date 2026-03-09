@@ -104,6 +104,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		otlpInsecure bool
 
 		destinationBasedMapping bool
+		appLabelSelector        string
 
 		enableSelfClusterRegistration bool
 		selfRegClientCertSecretName   string
@@ -345,6 +346,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithRedis(redisAddress, redisPassword, redisCompressionType))
 			opts = append(opts, principal.WithHealthzPort(healthzPort))
 			opts = append(opts, principal.WithDestinationBasedMapping(destinationBasedMapping))
+			opts = append(opts, principal.WithAppLabelSelector(appLabelSelector))
 			opts = append(opts, principal.WithMaxGRPCMessageSize(maxGRPCMessageSize))
 
 			// Self agent registration validation and options
@@ -524,6 +526,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&destinationBasedMapping, "destination-based-mapping",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING", false),
 		"Map applications to agents based on spec.destination.name instead of namespace")
+
+	command.Flags().StringVar(&appLabelSelector, "app-label-selector",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_APP_LABEL_SELECTOR", nil, ""),
+		"Kubernetes label selector to restrict which Applications the principal watches")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
