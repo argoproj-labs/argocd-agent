@@ -33,6 +33,30 @@ They are as follows:
 --principal-namespace string   The Kubernetes namespace the principal is installed in (default "argocd")
 ```
 
+Below is the priority of flags for both the agent and principal:
+
+**Agent:**
+
+(Highest Priority)
+
+1. `--agent-context` and  `--agent-namespace` flags
+2. `--agent` flag
+3. Default Principal in Config
+4. Current context selected in kubeconfig in `argocd` namespace (no flags or default provided)
+
+(Lowest Priority)
+
+**Principal:**
+
+(Highest Priority)
+
+1. `--principal-context` and  `--principal-namespace` flags
+2. `--principal` flag
+3. Default Principal in Config
+4. Current context selected in kubeconfig in `argocd` namespace (no flags or default provided)
+
+(Lowest Priority)
+
 ## Local Configuration
 
 argocd-agentctl supports a local configuration file to enhance ease of use. 
