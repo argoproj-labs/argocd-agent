@@ -90,7 +90,7 @@ type GlobalFlags struct {
 	principalNamespace string // Namespace where the principal component is installed on target cluster
 	agent              string // Symbolic name for an agent in the config file
 	agentContext       string // Kube context for agent
-	agentNamespace     string // Namespace where the principal component is installed on target cluster
+	agentNamespace     string // Namespace where the agent component is installed on target cluster
 	configPath         string // Path to the local config for the ctl
 }
 
