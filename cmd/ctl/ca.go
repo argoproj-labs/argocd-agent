@@ -440,11 +440,12 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 				os.Exit(1)
 			}
 			agentName := args[0]
-			if (principalCfg.KubeContext == agentCfg.KubeContext) ||
-				(principalCfg.KubeContext != "" && agentCfg.KubeContext == "") &&
-					!sameContext {
-				fmt.Println("PKI and agent usually do not reside within the same context. Use --same-context if you really mean it.")
-				os.Exit(1)
+			if principalCfg.KubeContext == "" || agentCfg.KubeContext == "" {
+				cmdutil.Fatal("Both principal and agent kubecontext must be set.")
+			}
+
+			if principalCfg.KubeContext == agentCfg.KubeContext && !sameContext {
+				cmdutil.Fatal("PKI and agent usually do not reside within the same context. Use --same-context if you really mean it.")
 			}
 			issueAndSaveSecret(agentCfg.KubeContext, config.SecretNameAgentClientCert, agentNamespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
 				return tlsutil.GenerateClientCertificate(agentName, c, pk)

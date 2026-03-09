@@ -308,7 +308,7 @@ func TestDetermineConfigs(t *testing.T) {
 		expectedAgentCfg     componentConfig
 	}{
 		{
-			name:        "follows order with prinicpal and agent context and namespace being highest",
+			name:        "follows order with principal and agent context and namespace being highest",
 			principal:   "test-principal",
 			principalNS: "not-argocd",
 			principalKC: "a-principal-not-in-config",

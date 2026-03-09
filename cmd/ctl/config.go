@@ -167,9 +167,9 @@ func readLocalConfig(path string) (*localConfig, error) {
 func loadLocalConfig() (principal, agent componentConfig) {
 	localCfg, err := readLocalConfig(globalOpts.configPath)
 	if err != nil {
-		// only print a warning based if failed read is not a file not found
+		// Fail if there is a problem with the config
 		if !os.IsNotExist(err) {
-			cmdutil.Warn("An error occurred while reading config, no config will be used: %v", err)
+			cmdutil.Fatal("An error occurred while reading config: %v", err)
 		}
 		localCfg = &localConfig{}
 	}

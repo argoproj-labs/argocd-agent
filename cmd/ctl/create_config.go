@@ -121,8 +121,26 @@ func CreateLocalConfig(kubeConfigPath, outputPath string) {
 		componentCfg := componentConfig{KubeContext: context, Namespace: namespace}
 		switch contextType {
 		case "principal":
+			_, exists := cfg.Contexts.Principals[name]
+			for exists {
+				fmt.Printf("Name for principal, %s, already exists. Enter a new name: ", name)
+				_, err = fmt.Scanln(&name)
+				if err != nil {
+					cmdutil.Fatal("Error reading input: %v", err)
+				}
+				_, exists = cfg.Contexts.Principals[name]
+			}
 			cfg.Contexts.Principals[name] = componentCfg
 		case "agent":
+			_, exists := cfg.Contexts.Agents[name]
+			for exists {
+				fmt.Printf("Name for agent, %s, already exists. Enter a new name: ", name)
+				_, err = fmt.Scanln(&name)
+				if err != nil {
+					cmdutil.Fatal("Error reading input: %v", err)
+				}
+				_, exists = cfg.Contexts.Agents[name]
+			}
 			cfg.Contexts.Agents[name] = componentCfg
 		}
 

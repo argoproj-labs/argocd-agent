@@ -2,7 +2,7 @@
 
 This document will explain how to use argocd-agentctl to assist in management of argocd-agent components.
 
-## Availble Commands
+## Available Commands
 
 These are the available commands for argocd-agentctl. Some of subcommands which are listed in the below sections
 for each command.
@@ -11,7 +11,7 @@ for each command.
 
 `check-config` - Validate principal and agent configurations by running a series of tests
 
-`create-config` - Creates and populaters a local user config file for Argo CD Agent
+`create-config` - Creates and populates a local user config file for Argo CD Agent
 
 `jwt` - Inspect and manage JWT signing keys
 
@@ -19,8 +19,9 @@ for each command.
 
 ## Global Flags
 
-The tool supports the following global flags for specifying which principal or agent cluster to taret.
+The tool supports the following global flags for specifying which principal or agent cluster to target.
 They are as follows:
+
 ```
 --config string                The path to the local config file to use (default "/Users/ccoco/.config/argocd-agent/ctl.conf")
 
@@ -41,8 +42,7 @@ Below is the priority of flags for both the agent and principal:
 
 1. `--agent-context` and  `--agent-namespace` flags
 2. `--agent` flag
-3. Default Principal in Config
-4. Current context selected in kubeconfig in `argocd` namespace (no flags or default provided)
+3. Current context selected in kubeconfig in `argocd` namespace (no flags or default provided)
 
 (Lowest Priority)
 
@@ -59,7 +59,7 @@ Below is the priority of flags for both the agent and principal:
 
 ## Local Configuration
 
-argocd-agentctl supports a local configuration file to enhance ease of use. 
+argocd-agentctl supports a local configuration file to enhance ease of use.
 This file lets you refer to principals/agents by a symbolic name when calling the command line,
 stopping you from needing to provide the `--principal/agent-context` and `--principal/agent-namespace` flags.
 
@@ -69,6 +69,7 @@ or use the `create-config` command to generate a config file from your kubeconfi
 It also supports setting a default principal that will be selected when you do not provide any flags.
 
 Below is the format of the config file.
+
 ```
 contexts:
     principals:
@@ -117,7 +118,7 @@ Creates and populates a local user config file for Argo CD Agent by parsing the 
 
 ## `jwt` Command
 
-The jwt command provides functions to create, inspect and manage JWT signing keys for argocd-agent 
+The jwt command provides functions to create, inspect and manage JWT signing keys for argocd-agent
 principal. JWT signing keys are used by the principal to sign authentication tokens for agents.
 
 **Subcommands:**
@@ -149,3 +150,4 @@ OR TO PROTECT ANY KIND OF DATA.
 `issue` - NON-PROD!! Issue TLS certificates signed by the PKI's CA
 
 `propagate` - NON-PROD!! Propagate the PKI to the agent
+
