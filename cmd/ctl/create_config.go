@@ -28,7 +28,7 @@ import (
 func getDefaultKubeConfig() string {
 	homedir, err := os.UserHomeDir()
 	if err != nil {
-		cmdutil.Fatal("Error getting home direcotry: %v", err)
+		cmdutil.Fatal("error getting home directory: %v", err)
 	}
 	return filepath.Join(homedir, ".kube", "config")
 }
@@ -68,11 +68,17 @@ func CreateLocalConfig(kubeConfigPath, outputPath string) {
 		var name string
 
 		fmt.Printf("Found context %s, is this a principal or agent, if it is neither type skip? ", context)
-		fmt.Scanln(&contextType)
+		_, err := fmt.Scanln(&contextType)
+		if err != nil {
+			cmdutil.Fatal("Error reading input: %v", err)
+		}
 
 		for contextType != "principal" && contextType != "agent" && contextType != "skip" {
 			fmt.Print("Invalid input, please enter principal, agent, or skip: ")
-			fmt.Scanln(&contextType)
+			_, err = fmt.Scanln(&contextType)
+			if err != nil {
+				cmdutil.Fatal("Error reading input: %v", err)
+			}
 		}
 
 		if contextType == "skip" {
@@ -81,29 +87,42 @@ func CreateLocalConfig(kubeConfigPath, outputPath string) {
 		}
 
 		fmt.Printf("Which namespace is the %s installed in? ", contextType)
-		fmt.Scanln(&namespace)
+		_, err = fmt.Scanln(&namespace)
+		if err != nil {
+			cmdutil.Fatal("Error reading input: %v", err)
+		}
 		namespace = strings.TrimSpace(namespace)
 
 		for namespace == "" {
 			fmt.Print("Invalid input, namespace cannot be blank: ")
-			fmt.Scanln(&namespace)
+			_, err = fmt.Scanln(&namespace)
+			if err != nil {
+				cmdutil.Fatal("Error reading input: %v", err)
+			}
 			namespace = strings.TrimSpace(namespace)
 		}
 
 		fmt.Printf("What name would you like to use for this %s? ", contextType)
-		fmt.Scanln(&name)
+		_, err = fmt.Scanln(&name)
+		if err != nil {
+			cmdutil.Fatal("Error reading input: %v", err)
+		}
 		namespace = strings.TrimSpace(namespace)
 
 		for name == "" {
 			fmt.Print("Invalid input, name cannot be blank: ")
-			fmt.Scanln(&name)
+			_, err = fmt.Scanln(&name)
+			if err != nil {
+				cmdutil.Fatal("Error reading input: %v", err)
+			}
 			namespace = strings.TrimSpace(namespace)
 		}
 
 		componentCfg := componentConfig{KubeContext: context, Namespace: namespace}
-		if contextType == "principal" {
+		switch contextType {
+		case "principal":
 			cfg.Contexts.Principals[name] = componentCfg
-		} else if contextType == "agent" {
+		case "agent":
 			cfg.Contexts.Agents[name] = componentCfg
 		}
 
@@ -117,12 +136,18 @@ func CreateLocalConfig(kubeConfigPath, outputPath string) {
 
 		var defaultPrincipal string
 		fmt.Printf("Which of the above principals do you want to use as the default? ")
-		fmt.Scanln(&defaultPrincipal)
+		_, err = fmt.Scanln(&defaultPrincipal)
+		if err != nil {
+			cmdutil.Fatal("Error reading input: %v", err)
+		}
 
 		_, exists := cfg.Contexts.Principals[defaultPrincipal]
 		for !exists {
 			fmt.Printf("Invalid input, selected principal %s is not a valid principal: ", defaultPrincipal)
-			fmt.Scanln(&defaultPrincipal)
+			_, err = fmt.Scanln(&defaultPrincipal)
+			if err != nil {
+				cmdutil.Fatal("Error reading input: %v", err)
+			}
 			_, exists = cfg.Contexts.Principals[defaultPrincipal]
 		}
 		cfg.DefaultPrincipal = defaultPrincipal

@@ -93,7 +93,6 @@ func NewPKIInitCommand() *cobra.Command {
 		Short: "NON-PROD!! Initialize the PKI for use with argocd-agent",
 		Use:   "init",
 		Run: func(c *cobra.Command, args []string) {
-			fmt.Println(principalCfg)
 			ctx := context.TODO()
 			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {

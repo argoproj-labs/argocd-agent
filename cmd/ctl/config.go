@@ -50,7 +50,7 @@ var (
 func getDefaultCfgPath() string {
 	homedir, err := os.UserHomeDir()
 	if err != nil {
-		cmdutil.Fatal("Error getting home direcotry: %v", err)
+		cmdutil.Fatal("Error getting home directory: %v", err)
 	}
 	return filepath.Join(homedir, ".config", "argocd-agent", "ctl.conf")
 }
@@ -93,36 +93,36 @@ func validateConfig(cfg *localConfig) error {
 	// check agent for anything blank
 	for agent, agentCfg := range cfg.Contexts.Agents {
 		if agent == "" {
-			return fmt.Errorf("Invalid config: agent name cannot be empty")
+			return fmt.Errorf("invalid config: agent name cannot be empty")
 		}
 
 		if agentCfg.KubeContext == "" {
-			return fmt.Errorf("Invalid config: agent %s has blank kube-context", agent)
+			return fmt.Errorf("invalid config: agent %s has blank kube-context", agent)
 		}
 
 		if agentCfg.Namespace == "" {
-			return fmt.Errorf("Invalid config: agent %s has blank namespace", agent)
+			return fmt.Errorf("invalid config: agent %s has blank namespace", agent)
 		}
 	}
 
 	// check agent for anything blank
 	for principal, principalCfg := range cfg.Contexts.Principals {
 		if principal == "" {
-			return fmt.Errorf("Invalid config: principal name cannot be empty")
+			return fmt.Errorf("invalid config: principal name cannot be empty")
 		}
 
 		if principalCfg.KubeContext == "" {
-			return fmt.Errorf("Invalid config: principal %s has blank kube-context", principal)
+			return fmt.Errorf("invalid config: principal %s has blank kube-context", principal)
 		}
 
 		if principalCfg.Namespace == "" {
-			return fmt.Errorf("Invalid config: principal %s has blank namespace", principal)
+			return fmt.Errorf("invalid config: principal %s has blank namespace", principal)
 		}
 	}
 
 	// check if default principal exists in principal contexts
 	if _, exists := cfg.Contexts.Principals[cfg.DefaultPrincipal]; !exists && cfg.DefaultPrincipal != "" {
-		return fmt.Errorf("Invalid config: the default principal %s does not exist in principal contexts", cfg.DefaultPrincipal)
+		return fmt.Errorf("invalid config: the default principal %s does not exist in principal contexts", cfg.DefaultPrincipal)
 	}
 
 	return nil
@@ -169,7 +169,7 @@ func loadLocalConfig() (principal, agent componentConfig) {
 	if err != nil {
 		// only print a warning based if failed read is not a file not found
 		if !os.IsNotExist(err) {
-			cmdutil.Warn("An error occured while reading config, no config will be used: %v", err)
+			cmdutil.Warn("An error occurred while reading config, no config will be used: %v", err)
 		}
 		localCfg = &localConfig{}
 	}
