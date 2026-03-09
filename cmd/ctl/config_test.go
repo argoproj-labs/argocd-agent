@@ -378,7 +378,7 @@ func TestDetermineConfigs(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(*testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			opts := &GlobalFlags{}
 			opts.principal = tt.principal
 			opts.principalContext = tt.principalKC

@@ -107,7 +107,7 @@ func CreateLocalConfig(kubeConfigPath, outputPath string) {
 		if err != nil {
 			cmdutil.Fatal("Error reading input: %v", err)
 		}
-		namespace = strings.TrimSpace(namespace)
+		name = strings.TrimSpace(namespace)
 
 		for name == "" {
 			fmt.Print("Invalid input, name cannot be blank: ")
@@ -115,7 +115,7 @@ func CreateLocalConfig(kubeConfigPath, outputPath string) {
 			if err != nil {
 				cmdutil.Fatal("Error reading input: %v", err)
 			}
-			namespace = strings.TrimSpace(namespace)
+			name = strings.TrimSpace(namespace)
 		}
 
 		componentCfg := componentConfig{KubeContext: context, Namespace: namespace}
@@ -128,6 +128,7 @@ func CreateLocalConfig(kubeConfigPath, outputPath string) {
 				if err != nil {
 					cmdutil.Fatal("Error reading input: %v", err)
 				}
+				name = strings.TrimSpace(name)
 				_, exists = cfg.Contexts.Principals[name]
 			}
 			cfg.Contexts.Principals[name] = componentCfg
@@ -139,6 +140,7 @@ func CreateLocalConfig(kubeConfigPath, outputPath string) {
 				if err != nil {
 					cmdutil.Fatal("Error reading input: %v", err)
 				}
+				name = strings.TrimSpace(name)
 				_, exists = cfg.Contexts.Agents[name]
 			}
 			cfg.Contexts.Agents[name] = componentCfg

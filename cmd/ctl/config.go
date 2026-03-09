@@ -90,7 +90,7 @@ func determineConfigs(opts *GlobalFlags, cfg *localConfig) (principal, agent com
 // helper function that validates a configuration returns an error with
 // details on the issues if something is wrong
 func validateConfig(cfg *localConfig) error {
-	// check agent for anything blank
+	// check agents for anything blank
 	for agent, agentCfg := range cfg.Contexts.Agents {
 		if agent == "" {
 			return fmt.Errorf("invalid config: agent name cannot be empty")
@@ -105,7 +105,7 @@ func validateConfig(cfg *localConfig) error {
 		}
 	}
 
-	// check agent for anything blank
+	// check principals for anything blank
 	for principal, principalCfg := range cfg.Contexts.Principals {
 		if principal == "" {
 			return fmt.Errorf("invalid config: principal name cannot be empty")
@@ -176,7 +176,7 @@ func loadLocalConfig() (principal, agent componentConfig) {
 
 	err = validateConfig(localCfg)
 	if err != nil {
-		cmdutil.Warn("%v, defauling to using no config", err)
+		cmdutil.Warn("%v, defaulting to using no config", err)
 		localCfg = &localConfig{}
 	}
 

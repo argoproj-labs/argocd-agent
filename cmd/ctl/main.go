@@ -85,10 +85,10 @@ func NewVersionCommand() *cobra.Command {
 // Principal: (Highest Priority) Context and Namespace flags -> Principal flag (config lookup) -> Default principal in config -> Current context selected in kubeconfig(Lowest Priority)
 // Agent: (Highest Priority) Context and namespace flags -> Agent flag (config lookup) -> Current context selected in kubeconfig (Lowest Priority)
 type GlobalFlags struct {
-	principal          string // Symbolic name for principal in the config file
+	principal          string // Symbolic name for a principal in the config file
 	principalContext   string // Kube context for principal
 	principalNamespace string // Namespace where the principal component is installed on target cluster
-	agent              string // Symbolic name for principal in the config file
+	agent              string // Symbolic name for an agent in the config file
 	agentContext       string // Kube context for agent
 	agentNamespace     string // Namespace where the principal component is installed on target cluster
 	configPath         string // Path to the local config for the ctl
