@@ -139,6 +139,10 @@ type Agent struct {
 	// don't exist before creating applications. This is used in combination with
 	// destination-based mapping.
 	createNamespace bool
+
+	// appLabelSelector is an optional Kubernetes label selector that restricts
+	// which Applications the agent watches.
+	appLabelSelector string
 }
 
 const defaultQueueName = "default"
@@ -242,12 +246,17 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		appNamespace = ""
 	}
 
+	appListOpts := config.AppLabelSelector(a.appLabelSelector)
+	if a.appLabelSelector != "" {
+		log().Infof("Application informer using label selector: %s", appListOpts.LabelSelector)
+	}
+
 	// appListFunc and watchFunc are anonymous functions for the informer
 	appListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).List(ctx, config.DefaultLabelSelector())
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).List(ctx, appListOpts)
 	}
 	appWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).Watch(ctx, config.DefaultLabelSelector())
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).Watch(ctx, appListOpts)
 	}
 
 	appInformerOptions := []informer.InformerOption[*v1alpha1.Application]{
