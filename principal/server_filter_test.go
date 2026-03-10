@@ -258,6 +258,45 @@ func TestServer_DefaultAppFilterChain_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestServer_DefaultAppFilterChain_DestinationBasedMapping(t *testing.T) {
+	withDestName := &v1alpha1.Application{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-with-dest", Namespace: "argocd"},
+		Spec:       v1alpha1.ApplicationSpec{Destination: v1alpha1.ApplicationDestination{Name: "some-agent"}},
+	}
+	withoutDestName := &v1alpha1.Application{
+		ObjectMeta: metav1.ObjectMeta{Name: "in-cluster-app", Namespace: "argocd"},
+		Spec:       v1alpha1.ApplicationSpec{Destination: v1alpha1.ApplicationDestination{Server: "https://kubernetes.default.svc"}},
+	}
+
+	t.Run("destination-based mapping disabled: in-cluster app is admitted", func(t *testing.T) {
+		server := &Server{options: &ServerOptions{namespaces: []string{"argocd"}}}
+		fc := server.defaultAppFilterChain()
+		assert.True(t, fc.Admit(withoutDestName))
+	})
+
+	t.Run("destination-based mapping enabled: app with destination name is admitted", func(t *testing.T) {
+		server := &Server{options: &ServerOptions{namespaces: []string{"argocd"}, destinationBasedMapping: true}}
+		fc := server.defaultAppFilterChain()
+		assert.True(t, fc.Admit(withDestName))
+	})
+
+	t.Run("destination-based mapping enabled: in-cluster app without destination name is rejected", func(t *testing.T) {
+		server := &Server{options: &ServerOptions{namespaces: []string{"argocd"}, destinationBasedMapping: true}}
+		fc := server.defaultAppFilterChain()
+		assert.False(t, fc.Admit(withoutDestName))
+	})
+
+	t.Run("destination-based mapping enabled: app with destination name 'in-cluster' is rejected", func(t *testing.T) {
+		server := &Server{options: &ServerOptions{namespaces: []string{"argocd"}, destinationBasedMapping: true}}
+		fc := server.defaultAppFilterChain()
+		inClusterApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "in-cluster-named-app", Namespace: "argocd"},
+			Spec:       v1alpha1.ApplicationSpec{Destination: v1alpha1.ApplicationDestination{Name: "in-cluster"}},
+		}
+		assert.False(t, fc.Admit(inClusterApp))
+	})
+}
+
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
 }
