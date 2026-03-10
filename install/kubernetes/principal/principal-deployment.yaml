@@ -249,6 +249,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.destination-based-mapping
                 optional: true
+          - name: ARGOCD_PRINCIPAL_APP_LABEL_SELECTOR
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.app-label-selector
+                optional: true
           - name: ARGOCD_PRINCIPAL_INSECURE_PLAINTEXT
             valueFrom:
               configMapKeyRef:

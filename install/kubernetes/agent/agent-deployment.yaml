@@ -188,6 +188,12 @@ spec:
                 name: argocd-agent-params
                 key: agent.allowed-namespaces
                 optional: true
+          - name: ARGOCD_AGENT_APP_LABEL_SELECTOR
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.app-label-selector
+                optional: true
           - name: ARGOCD_AGENT_INSECURE_PLAINTEXT
             valueFrom:
               configMapKeyRef:

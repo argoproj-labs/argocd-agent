@@ -166,3 +166,13 @@ func WithIgnoreUnmanagedApps(enabled bool) AgentOption {
 		return nil
 	}
 }
+
+// WithAppLabelSelector sets an optional Kubernetes label selector that restricts
+// which Applications the agent watches. Only Applications matching this selector
+// will be listed, watched, and processed by the agent.
+func WithAppLabelSelector(selector string) AgentOption {
+	return func(o *Agent) error {
+		o.appLabelSelector = selector
+		return nil
+	}
+}

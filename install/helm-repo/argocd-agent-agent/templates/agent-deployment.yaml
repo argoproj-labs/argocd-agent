@@ -219,6 +219,15 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.allowed-namespaces
                 optional: true
+          - name: ARGOCD_AGENT_APP_LABEL_SELECTOR
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.app-label-selector
+                optional: true
+          name: argocd-agent-agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: metrics
               containerPort: {{ .Values.metricsPort }}
