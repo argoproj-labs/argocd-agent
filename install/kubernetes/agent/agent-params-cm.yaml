@@ -116,3 +116,8 @@ data:
   # the agent is allowed to manage applications in. Supports glob patterns.
   # Default: ""
   agent.allowed-namespaces: ""
+  # agent.app-label-selector: Kubernetes label selector to restrict which
+  # Applications the agent watches. Only matching Applications will be
+  # listed, watched, and processed.
+  # Default: ""
+  agent.app-label-selector: ""

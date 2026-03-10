@@ -155,6 +155,11 @@ destinationBasedMapping: false
 # Used with destination-based mapping.
 createNamespace: false
 
+## @section Application Filtering
+# -- Kubernetes label selector to restrict which Applications the agent watches.
+# Only matching Applications will be listed, watched, and processed.
+appLabelSelector: ""
+
 ## @section Services
 # -- Service configuration for metrics and healthz endpoints.
 service:

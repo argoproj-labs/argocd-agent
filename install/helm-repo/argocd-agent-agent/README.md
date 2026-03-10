@@ -27,6 +27,7 @@ Kubernetes: `>=1.24.0-0`
 | affinity | object | `{}` | Affinity rules for the agent Pod. |
 | agentMode | string | `"autonomous"` | Agent mode of operation. |
 | allowedNamespaces | string | `""` | Comma-separated list of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature). Supports glob patterns (e.g., "team-*,prod-*"). |
+| appLabelSelector | string | `""` | Kubernetes label selector to restrict which Applications the agent watches. Only matching Applications will be listed, watched, and processed. |
 | argoCdRedisPasswordKey | string | `"auth"` | ArgoCD Redis password key. |
 | argoCdRedisSecretName | string | `"argocd-redis"` | ArgoCD Redis password secret name. |
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
