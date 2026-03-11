@@ -157,10 +157,7 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 		stampLastUpdated(app)
 	}
 
-	if app.Annotations == nil {
-		app.Annotations = make(map[string]string)
-	}
-	app.Annotations[manager.SourceUIDAnnotation] = string(app.UID)
+	manager.SetSourceUID(app, string(app.UID))
 
 	created, err := m.applicationBackend.Create(ctx, app)
 	if err == nil {
@@ -207,12 +204,14 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	deletionTimestampChanged := false
 
 	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
+		manager.MigrateSourceUID(existing)
+		if v, ok := existing.Labels[manager.SourceUIDLabel]; ok {
+			if incoming.Labels == nil {
+				incoming.Labels = make(map[string]string)
 			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
+			incoming.Labels[manager.SourceUIDLabel] = v
 		}
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Finalizers = incoming.Finalizers
@@ -232,12 +231,14 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 			incoming.Annotations["argocd.argoproj.io/refresh"] = v
 		}
 
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
+		manager.MigrateSourceUID(existing)
+		if v, ok := existing.Labels[manager.SourceUIDLabel]; ok {
+			if incoming.Labels == nil {
+				incoming.Labels = make(map[string]string)
 			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
+			incoming.Labels[manager.SourceUIDLabel] = v
 		}
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
 
 		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
 			deletionTimestampChanged = true
@@ -281,7 +282,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		logCtx.Infof("deletionTimestamp of managed agent changed from nil to non-nil, so deleting Application")
 		// Mark this as a valid deletion so the callback does not treat it as a user-initiated deletion.
 		if m.deletions != nil {
-			if v, ok := updated.Annotations[manager.SourceUIDAnnotation]; ok {
+			if v, ok := manager.GetSourceUID(updated); ok {
 				m.deletions.MarkExpected(ty.UID(v))
 			}
 		}
@@ -309,9 +310,9 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 	}
 
 	// If there is an existing app with the same name/namespace, compare its source UID with the incoming app.
-	sourceUID, exists := existing.Annotations[manager.SourceUIDAnnotation]
+	sourceUID, exists := manager.GetSourceUID(existing)
 	if !exists {
-		return true, false, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
+		return true, false, fmt.Errorf("source UID is not found for app: %s", incoming.Name)
 	}
 
 	return true, string(incoming.UID) == sourceUID, nil
@@ -340,12 +341,14 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 	}
 
 	updated, err = m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
+		manager.MigrateSourceUID(existing)
+		if v, ok := existing.Labels[manager.SourceUIDLabel]; ok {
+			if incoming.Labels == nil {
+				incoming.Labels = make(map[string]string)
 			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
+			incoming.Labels[manager.SourceUIDLabel] = v
 		}
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
 
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
@@ -361,12 +364,14 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		existing.Operation = incoming.Operation.DeepCopy()
 		logCtx.Infof("Updating")
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
+		manager.MigrateSourceUID(existing)
+		if v, ok := existing.Labels[manager.SourceUIDLabel]; ok {
+			if incoming.Labels == nil {
+				incoming.Labels = make(map[string]string)
 			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
+			incoming.Labels[manager.SourceUIDLabel] = v
 		}
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
 
 		target := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
@@ -719,7 +724,7 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 		"resourceVersion": app.ResourceVersion,
 	})
 
-	sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
+	sourceUID, exists := manager.GetSourceUID(app)
 	if exists && m.mode == manager.ManagerModeManaged {
 		if cachedAppSpec, ok := appCache.Get(ty.UID(sourceUID)); ok {
 			logCtx.Debugf("Application %s is available in agent cache", app.Name)
@@ -749,7 +754,7 @@ func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app
 		"resourceVersion": app.ResourceVersion,
 	})
 
-	sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
+	sourceUID, exists := manager.GetSourceUID(app)
 	if !exists {
 		return false
 	}

@@ -474,14 +474,9 @@ func (a *Agent) handleRepositoryDeletion(repo *corev1.Secret) {
 }
 
 // isResourceFromPrincipal checks if a Kubernetes resource was created by the principal
-// by examining if it has the source UID annotation.
+// by examining if it has the source UID label (or legacy annotation).
 func isResourceFromPrincipal(resource metav1.Object) bool {
-	annotations := resource.GetAnnotations()
-	if annotations == nil {
-		return false
-	}
-	_, ok := annotations[manager.SourceUIDAnnotation]
-	return ok
+	return manager.HasSourceUID(resource)
 }
 
 // startSpan creates a trace span for agent callbacks with common attributes.

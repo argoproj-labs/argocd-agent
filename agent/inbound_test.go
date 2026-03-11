@@ -150,15 +150,15 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 	// createdApp is the app that is finally created on the cluster.
 	createdApp := incomingApp.DeepCopy()
 	createdApp.UID = ktypes.UID("random_uid")
-	createdApp.Annotations = map[string]string{
+	createdApp.Labels = map[string]string{
 		// the final version of the app should have the source UID from the incomingApp
-		manager.SourceUIDAnnotation: string(incomingApp.UID),
+		manager.SourceUIDLabel: string(incomingApp.UID),
 	}
 
 	configureManager := func(t *testing.T, mode manager.ManagerMode) {
 		t.Helper()
-		oldApp.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: "old_uid",
+		oldApp.Labels = map[string]string{
+			manager.SourceUIDLabel: "old_uid",
 		}
 		a.appManager.Manage(oldApp.QualifiedName())
 		defer a.appManager.ClearManaged()
@@ -212,11 +212,11 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new app has the updated source UID annotation.
+		// Check if the new app has the updated source UID label.
 		appInterface := be.Calls[3].ReturnArguments[0]
 		latestApp, ok := appInterface.(*v1alpha1.Application)
 		require.True(t, ok)
-		require.Equal(t, string(incomingApp.UID), latestApp.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingApp.UID), latestApp.Labels[manager.SourceUIDLabel])
 	})
 
 	t.Run("Create: Old app with the same UID must be updated", func(t *testing.T) {
@@ -270,12 +270,12 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new app has the updated source UID annotation.
+		// Check if the new app has the updated source UID label.
 		appInterface := be.Calls[3].ReturnArguments[0]
 
 		latestApp, ok := appInterface.(*v1alpha1.Application)
 		require.True(t, ok)
-		require.Equal(t, string(incomingApp.UID), latestApp.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingApp.UID), latestApp.Labels[manager.SourceUIDLabel])
 	})
 
 	t.Run("Update: incoming app must be created if it doesn't exist while handling update event", func(t *testing.T) {
@@ -393,8 +393,8 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 
 	// oldAppProject is the appProject that is already present on the agent
 	oldAppProject := incomingAppProject.DeepCopy()
-	oldAppProject.Annotations = map[string]string{
-		manager.SourceUIDAnnotation: "old_uid",
+	oldAppProject.Labels = map[string]string{
+		manager.SourceUIDLabel: "old_uid",
 	}
 
 	incomingAppProject.UID = ktypes.UID("new_uid")
@@ -402,8 +402,8 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 	// createdAppProject is the final version of appProject created on the cluster.
 	createdAppProject := incomingAppProject.DeepCopy()
 	createdAppProject.UID = ktypes.UID("random_uid")
-	createdAppProject.Annotations = map[string]string{
-		manager.SourceUIDAnnotation: string(incomingAppProject.UID),
+	createdAppProject.Labels = map[string]string{
+		manager.SourceUIDLabel: string(incomingAppProject.UID),
 	}
 
 	configureManager := func(t *testing.T) {
@@ -455,11 +455,11 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new app has the updated source UID annotation.
+		// Check if the new app has the updated source UID label.
 		appInterface := be.Calls[3].ReturnArguments[0]
 		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
 		require.True(t, ok)
-		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Labels[manager.SourceUIDLabel])
 	})
 
 	t.Run("Create: Old appProject with the same UID must be updated", func(t *testing.T) {
@@ -513,12 +513,12 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new appProject has the updated source UID annotation.
+		// Check if the new appProject has the updated source UID label.
 		appInterface := be.Calls[3].ReturnArguments[0]
 
 		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
 		require.True(t, ok)
-		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Labels[manager.SourceUIDLabel])
 	})
 
 	t.Run("Update: incoming appProject must be created if it doesn't exist while handling update event", func(t *testing.T) {
@@ -625,11 +625,11 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Verify the created AppProject has the correct source UID annotation
+		// Verify the created AppProject has the correct source UID label
 		appInterface := beMissing.Calls[3].ReturnArguments[0]
 		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
 		require.True(t, ok)
-		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Labels[manager.SourceUIDLabel])
 	})
 
 	t.Run("Update: Existing AppProject without source UID annotation should be deleted and recreated", func(t *testing.T) {
@@ -676,11 +676,11 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Verify the created AppProject has the correct source UID annotation
+		// Verify the created AppProject has the correct source UID label
 		appInterface := beMissing.Calls[3].ReturnArguments[0]
 		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
 		require.True(t, ok)
-		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Labels[manager.SourceUIDLabel])
 	})
 
 	t.Run("Delete: Existing AppProject without source UID annotation should be deleted", func(t *testing.T) {
@@ -1037,8 +1037,8 @@ func Test_UpdateAppProject(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test-project",
 				Namespace: "wrong-namespace", // This should be overridden
-				Annotations: map[string]string{
-					manager.SourceUIDAnnotation: "uid-1",
+				Labels: map[string]string{
+					manager.SourceUIDLabel: "uid-1",
 				},
 			},
 			Spec: v1alpha1.AppProjectSpec{
@@ -1081,8 +1081,8 @@ func Test_UpdateAppProject(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test-project",
 				Namespace: "principal-namespace", // Different from agent
-				Annotations: map[string]string{
-					manager.SourceUIDAnnotation: "uid-1",
+				Labels: map[string]string{
+					manager.SourceUIDLabel: "uid-1",
 				},
 			},
 			Spec: v1alpha1.AppProjectSpec{
@@ -1150,9 +1150,9 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 	// createdRepo is the repository that is finally created on the cluster.
 	createdRepo := incomingRepo.DeepCopy()
 	createdRepo.UID = ktypes.UID("random_uid")
-	createdRepo.Annotations = map[string]string{
+	createdRepo.Labels = map[string]string{
 		// the final version of the repo should have the source UID from the incomingRepo
-		manager.SourceUIDAnnotation: string(incomingRepo.UID),
+		manager.SourceUIDLabel: string(incomingRepo.UID),
 	}
 
 	createAgent := func(t *testing.T) (*Agent, *backend_mocks.Repository) {
@@ -1167,8 +1167,8 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 	t.Run("Create: Old repository with diff UID must be deleted before creating the incoming repository", func(t *testing.T) {
 		a, be := createAgent(t)
 
-		oldRepo.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: "old_uid",
+		oldRepo.Labels = map[string]string{
+			manager.SourceUIDLabel: "old_uid",
 		}
 		a.repoManager.Manage(oldRepo.Name)
 		defer a.repoManager.ClearManaged()
@@ -1194,18 +1194,18 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new repo has the updated source UID annotation.
+		// Check if the new repo has the updated source UID label.
 		repoInterface := be.Calls[3].ReturnArguments[0]
 		latestRepo, ok := repoInterface.(*corev1.Secret)
 		require.True(t, ok)
-		require.Equal(t, string(incomingRepo.UID), latestRepo.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingRepo.UID), latestRepo.Labels[manager.SourceUIDLabel])
 	})
 
 	t.Run("Create: Old repository with the same UID must be updated", func(t *testing.T) {
 		a, be := createAgent(t)
 
-		oldRepo.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: "old_uid",
+		oldRepo.Labels = map[string]string{
+			manager.SourceUIDLabel: "old_uid",
 		}
 		a.repoManager.Manage(oldRepo.Name)
 		defer a.repoManager.ClearManaged()
@@ -1224,8 +1224,8 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		defer supportsPatchMock.Unset()
 
 		updatedRepo := newRepo.DeepCopy()
-		updatedRepo.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: string(newRepo.UID),
+		updatedRepo.Labels = map[string]string{
+			manager.SourceUIDLabel: string(newRepo.UID),
 		}
 		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(updatedRepo, nil)
 		defer updateMock.Unset()
@@ -1247,14 +1247,14 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, newRepo.Labels, latestRepo.Labels)
 
-		require.Equal(t, string(newRepo.UID), latestRepo.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(newRepo.UID), latestRepo.Labels[manager.SourceUIDLabel])
 	})
 
 	t.Run("Update: Old repository with diff UID must be deleted and a new repository must be created", func(t *testing.T) {
 		a, be := createAgent(t)
 
-		oldRepo.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: "old_uid",
+		oldRepo.Labels = map[string]string{
+			manager.SourceUIDLabel: "old_uid",
 		}
 		a.repoManager.Manage(oldRepo.Name)
 		defer a.repoManager.ClearManaged()
@@ -1281,12 +1281,12 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new repository has the same source UID annotation as the incoming repository.
+		// Check if the new repository has the same source UID label as the incoming repository.
 		repoInterface := be.Calls[3].ReturnArguments[0]
 
 		latestRepo, ok := repoInterface.(*corev1.Secret)
 		require.True(t, ok)
-		require.Equal(t, string(incomingRepo.UID), latestRepo.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingRepo.UID), latestRepo.Labels[manager.SourceUIDLabel])
 	})
 
 	t.Run("Update: incoming repository must be created if it doesn't exist while handling update event", func(t *testing.T) {
@@ -1315,19 +1315,19 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new repository has the same source UID annotation as the incoming repository.
+		// Check if the new repository has the same source UID label as the incoming repository.
 		repoInterface := be.Calls[1].ReturnArguments[0]
 		latestRepo, ok := repoInterface.(*corev1.Secret)
 		require.True(t, ok)
 		require.Equal(t, createdRepo, latestRepo)
-		require.Equal(t, string(newRepo.UID), latestRepo.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(newRepo.UID), latestRepo.Labels[manager.SourceUIDLabel])
 	})
 
 	t.Run("Delete: Old repository with diff UID must be deleted", func(t *testing.T) {
 		a, be := createAgent(t)
 
-		oldRepo.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: "old_uid",
+		oldRepo.Labels = map[string]string{
+			manager.SourceUIDLabel: "old_uid",
 		}
 		a.repoManager.Manage(oldRepo.Name)
 		defer a.repoManager.ClearManaged()
@@ -1357,8 +1357,8 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 	t.Run("Unknown event type should not do anything", func(t *testing.T) {
 		a, be := createAgent(t)
 
-		oldRepo.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: "old_uid",
+		oldRepo.Labels = map[string]string{
+			manager.SourceUIDLabel: "old_uid",
 		}
 
 		// Even for unknown event types, CompareSourceUID is called in managed mode

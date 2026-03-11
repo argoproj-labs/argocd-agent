@@ -49,10 +49,9 @@ func (r *ResourceKey) String() string {
 }
 
 func NewResourceKeyFromApp(app *v1alpha1.Application) ResourceKey {
-	// sourceUID annotation indicates that the app was created from a source.
+	// Source UID indicates that the app was created from a source.
 	// So, consider the source UID instead of the resource UID.
-	sourceUID, ok := app.Annotations[manager.SourceUIDAnnotation]
-	if ok {
+	if sourceUID, ok := manager.GetSourceUID(app); ok {
 		return newResourceKey(applicationKind, app.Name, app.Namespace, sourceUID)
 	}
 
@@ -60,10 +59,9 @@ func NewResourceKeyFromApp(app *v1alpha1.Application) ResourceKey {
 }
 
 func NewResourceKeyFromAppProject(appProject *v1alpha1.AppProject) ResourceKey {
-	// sourceUID annotation indicates that the app was created from a source.
+	// Source UID indicates that the app project was created from a source.
 	// So, consider the source UID instead of the resource UID.
-	sourceUID, ok := appProject.Annotations[manager.SourceUIDAnnotation]
-	if ok {
+	if sourceUID, ok := manager.GetSourceUID(appProject); ok {
 		return newResourceKey(appProjectKind, appProject.Name, appProject.Namespace, sourceUID)
 	}
 
@@ -71,10 +69,9 @@ func NewResourceKeyFromAppProject(appProject *v1alpha1.AppProject) ResourceKey {
 }
 
 func NewResourceKeyFromRepository(repo *corev1.Secret) ResourceKey {
-	// sourceUID annotation indicates that the repository was created from a source.
+	// Source UID indicates that the repository was created from a source.
 	// So, consider the source UID instead of the resource UID.
-	sourceUID, ok := repo.Annotations[manager.SourceUIDAnnotation]
-	if ok {
+	if sourceUID, ok := manager.GetSourceUID(repo); ok {
 		return newResourceKey(repositoryKind, repo.Name, repo.Namespace, sourceUID)
 	}
 

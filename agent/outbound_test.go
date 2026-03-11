@@ -173,13 +173,13 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 		testAgent.emitter = event.NewEventSource("principal")
 		testAgent.mode = types.AgentModeManaged
 
-		// Create an app with source UID annotation (from principal)
+		// Create an app with source UID label (from principal)
 		app := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "guestbook",
 				Namespace: "agent",
-				Annotations: map[string]string{
-					manager.SourceUIDAnnotation: "uid-123",
+				Labels: map[string]string{
+					manager.SourceUIDLabel: "uid-123",
 				},
 			},
 		}
@@ -204,13 +204,13 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 		testAgent.emitter = event.NewEventSource("principal")
 		testAgent.mode = types.AgentModeManaged
 
-		// Create an app with source UID annotation (from principal)
+		// Create an app with source UID label (from principal)
 		app := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "guestbook",
 				Namespace: "agent",
-				Annotations: map[string]string{
-					manager.SourceUIDAnnotation: "uid-123",
+				Labels: map[string]string{
+					manager.SourceUIDLabel: "uid-123",
 				},
 			},
 		}

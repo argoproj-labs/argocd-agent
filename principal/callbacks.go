@@ -767,14 +767,9 @@ func (s *Server) syncRepositoriesForProject(ctx context.Context, projectName, ns
 }
 
 // isResourceFromAutonomousAgent checks if a Kubernetes resource was created by an autonomous agent
-// by examining if it has the source UID annotation.
+// by examining if it has the source UID label (or legacy annotation).
 func isResourceFromAutonomousAgent(resource metav1.Object) bool {
-	annotations := resource.GetAnnotations()
-	if annotations == nil {
-		return false
-	}
-	_, ok := annotations[manager.SourceUIDAnnotation]
-	return ok
+	return manager.HasSourceUID(resource)
 }
 
 func isTerminateOperation(old, new *v1alpha1.Application) bool {

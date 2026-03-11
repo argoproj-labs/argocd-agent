@@ -73,8 +73,8 @@ func Test_CompareSourceUIDForRepository(t *testing.T) {
 		require.False(t, uidMatch)
 	})
 
-	t.Run("should return an error if there is no UID annotation", func(t *testing.T) {
-		oldRepository.Annotations = map[string]string{}
+	t.Run("should return an error if there is no UID label", func(t *testing.T) {
+		oldRepository.Labels = map[string]string{}
 		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepository, nil)
 		m := &RepositoryManager{backend: mockedBackend}
 		ctx := context.Background()
@@ -85,7 +85,7 @@ func Test_CompareSourceUIDForRepository(t *testing.T) {
 		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
 		require.NotNil(t, err)
 		require.True(t, exists)
-		require.EqualError(t, err, "source UID Annotation is not found for repository: test-repo")
+		require.EqualError(t, err, "source UID is not found for repository: test-repo")
 		require.False(t, uidMatch)
 	})
 
@@ -153,15 +153,15 @@ func Test_RepositoryManagerCreate(t *testing.T) {
 
 		expectedRepo := repo.DeepCopy()
 		expectedRepo.ResourceVersion = "1"
-		expectedRepo.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: string(repo.UID),
+		expectedRepo.Labels = map[string]string{
+			manager.SourceUIDLabel: string(repo.UID),
 		}
 
 		mockedBackend := appmock.NewRepository(t)
 		mockedBackend.On("Create", mock.Anything, mock.MatchedBy(func(r *corev1.Secret) bool {
 			// Verify that ResourceVersion and Generation are cleared
 			return r.ResourceVersion == "" && r.Generation == 0 &&
-				r.Annotations[manager.SourceUIDAnnotation] == string(repo.UID)
+				r.Labels[manager.SourceUIDLabel] == string(repo.UID)
 		})).Return(expectedRepo, nil)
 
 		m := &RepositoryManager{
@@ -174,7 +174,7 @@ func Test_RepositoryManagerCreate(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, createdRepo)
 		require.Equal(t, "test-repo", createdRepo.Name)
-		require.Equal(t, string(repo.UID), createdRepo.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(repo.UID), createdRepo.Labels[manager.SourceUIDLabel])
 		require.Equal(t, "1", createdRepo.ResourceVersion)
 	})
 
@@ -196,8 +196,8 @@ func Test_RepositoryManagerCreate(t *testing.T) {
 		expectedRepo := repo.DeepCopy()
 		expectedRepo.ResourceVersion = "1"
 		expectedRepo.Generation = 1
-		expectedRepo.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: string(repo.UID),
+		expectedRepo.Labels = map[string]string{
+			manager.SourceUIDLabel: string(repo.UID),
 		}
 
 		mockedBackend := appmock.NewRepository(t)
@@ -216,6 +216,6 @@ func Test_RepositoryManagerCreate(t *testing.T) {
 		require.Equal(t, "", repo.ResourceVersion)         // Original should be modified
 		require.Equal(t, int64(0), repo.Generation)        // Original should be modified
 		require.Equal(t, "1", createdRepo.ResourceVersion) // Returned should have backend value
-		require.Equal(t, string(repo.UID), createdRepo.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(repo.UID), createdRepo.Labels[manager.SourceUIDLabel])
 	})
 }

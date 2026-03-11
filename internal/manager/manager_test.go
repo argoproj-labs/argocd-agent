@@ -80,12 +80,12 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		mgr := &fakeManager[*argoapp.Application]{}
 		deletions := NewDeletionTracker()
 		ok, err := RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
-		requires.EqualError(err, "source UID annotation not found for resource")
+		requires.EqualError(err, "source UID not found for resource")
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
 		// With annotation but valid deletion -> no recreate
-		app.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("u1"))}
+		app.Labels = map[string]string{SourceUIDLabel: string(types.UID("u1"))}
 		mgr = &fakeManager[*argoapp.Application]{}
 		deletions.MarkExpected(types.UID("u1"))
 		ok, err = RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
@@ -94,7 +94,7 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		requires.Nil(mgr.created)
 
 		// With annotation and invalid deletion -> recreate
-		app.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("u2"))}
+		app.Labels = map[string]string{SourceUIDLabel: string(types.UID("u2"))}
 		mgr = &fakeManager[*argoapp.Application]{}
 		ok, err = RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger())
 		requires.NoError(err)
@@ -117,11 +117,11 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		deletions := NewDeletionTracker()
 		mgr := &fakeManager[*argoapp.AppProject]{}
 		ok, err := RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
-		requires.EqualError(err, "source UID annotation not found for resource")
+		requires.EqualError(err, "source UID not found for resource")
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
-		proj.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("p1"))}
+		proj.Labels = map[string]string{SourceUIDLabel: string(types.UID("p1"))}
 		mgr = &fakeManager[*argoapp.AppProject]{}
 		deletions.MarkExpected(types.UID("p1"))
 		ok, err = RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
@@ -129,7 +129,7 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
-		proj.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("p2"))}
+		proj.Labels = map[string]string{SourceUIDLabel: string(types.UID("p2"))}
 		mgr = &fakeManager[*argoapp.AppProject]{}
 		ok, err = RevertUserInitiatedDeletion(context.Background(), proj, deletions, mgr, newLogger())
 		requires.NoError(err)
@@ -152,11 +152,11 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		deletions := NewDeletionTracker()
 		mgr := &fakeManager[*corev1.Secret]{}
 		ok, err := RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
-		requires.EqualError(err, "source UID annotation not found for resource")
+		requires.EqualError(err, "source UID not found for resource")
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
-		repo.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("r1"))}
+		repo.Labels = map[string]string{SourceUIDLabel: string(types.UID("r1"))}
 		mgr = &fakeManager[*corev1.Secret]{}
 		deletions.MarkExpected(types.UID("r1"))
 		ok, err = RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
@@ -164,7 +164,7 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		requires.False(ok)
 		requires.Nil(mgr.created)
 
-		repo.Annotations = map[string]string{SourceUIDAnnotation: string(types.UID("r2"))}
+		repo.Labels = map[string]string{SourceUIDLabel: string(types.UID("r2"))}
 		mgr = &fakeManager[*corev1.Secret]{}
 		ok, err = RevertUserInitiatedDeletion(context.Background(), repo, deletions, mgr, newLogger())
 		requires.NoError(err)

@@ -95,7 +95,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 	repository := corev1.Secret{}
 	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
 	requires.NoError(err)
-	requires.Equal(string(sourceRepo.UID), repository.Annotations[manager.SourceUIDAnnotation])
+	requires.Equal(string(sourceRepo.UID), repository.Labels[manager.SourceUIDLabel])
 	requires.Equal(repository.Data, sourceRepo.Data)
 
 	// Ensure the repository is not pushed to the autonomous agent

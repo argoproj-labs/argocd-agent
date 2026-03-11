@@ -136,10 +136,7 @@ func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppPro
 		stampLastUpdated(project)
 	}
 
-	if project.Annotations == nil {
-		project.Annotations = make(map[string]string)
-	}
-	project.Annotations[manager.SourceUIDAnnotation] = string(project.UID)
+	manager.SetSourceUID(project, string(project.UID))
 
 	// AppProject must be created in the agent's namespace, which should be the
 	// same as ArgoCD's namespace.
@@ -188,12 +185,14 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 	var err error
 
 	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.AppProject) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
+		manager.MigrateSourceUID(existing)
+		if v, ok := existing.Labels[manager.SourceUIDLabel]; ok {
+			if incoming.Labels == nil {
+				incoming.Labels = make(map[string]string)
 			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
+			incoming.Labels[manager.SourceUIDLabel] = v
 		}
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
 
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
@@ -201,12 +200,14 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Status = *incoming.Status.DeepCopy()
 	}, func(existing, incoming *v1alpha1.AppProject) (jsondiff.Patch, error) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
+		manager.MigrateSourceUID(existing)
+		if v, ok := existing.Labels[manager.SourceUIDLabel]; ok {
+			if incoming.Labels == nil {
+				incoming.Labels = make(map[string]string)
 			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
+			incoming.Labels[manager.SourceUIDLabel] = v
 		}
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
 
 		target := &v1alpha1.AppProject{
 			ObjectMeta: v1.ObjectMeta{
@@ -359,7 +360,7 @@ func (m *AppProjectManager) CompareSourceUID(ctx context.Context, incoming *v1al
 	}
 
 	// If there is an existing appProject with the same name/namespace, compare its source UID with the incoming appProject.
-	sourceUID, ok := existing.Annotations[manager.SourceUIDAnnotation]
+	sourceUID, ok := manager.GetSourceUID(existing)
 	if !ok {
 		return true, false, nil
 	}
@@ -377,9 +378,9 @@ func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project
 		"resourceVersion": project.ResourceVersion,
 	})
 
-	sourceUID, exists := project.Annotations[manager.SourceUIDAnnotation]
+	sourceUID, exists := manager.GetSourceUID(project)
 	if !exists {
-		return false, fmt.Errorf("source UID annotation not found for resource")
+		return false, fmt.Errorf("source UID not found for resource")
 	}
 
 	if cachedSpec, ok := projectCache.Get(types.UID(sourceUID)); ok {

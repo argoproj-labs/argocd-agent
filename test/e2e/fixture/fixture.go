@@ -211,12 +211,18 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 	// Deletion should always propagate from the source of truth to the managed cluster
 	// Skip deletion of resources that have been created from a source
-	isFromSource := func(annotations map[string]string) bool {
-		if annotations == nil {
-			return false
+	isFromSource := func(labels, annotations map[string]string) bool {
+		if labels != nil {
+			if _, ok := labels[manager.SourceUIDLabel]; ok {
+				return true
+			}
 		}
-		_, ok := annotations[manager.SourceUIDAnnotation]
-		return ok
+		if annotations != nil {
+			if _, ok := annotations[manager.SourceUIDAnnotation]; ok {
+				return true
+			}
+		}
+		return false
 	}
 
 	// Delete all applications from the autonomous agent
@@ -226,7 +232,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
-		if isFromSource(app.GetAnnotations()) {
+		if isFromSource(app.GetLabels(), app.GetAnnotations()) {
 			continue
 		}
 
@@ -250,7 +256,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		return err
 	}
 	for _, app := range list.Items {
-		if isFromSource(app.GetAnnotations()) {
+		if isFromSource(app.GetLabels(), app.GetAnnotations()) {
 			continue
 		}
 
@@ -304,7 +310,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 			continue
 		}
 
-		if isFromSource(appProject.GetAnnotations()) {
+		if isFromSource(appProject.GetLabels(), appProject.GetAnnotations()) {
 			continue
 		}
 
@@ -333,7 +339,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 			continue
 		}
 
-		if isFromSource(appProject.GetAnnotations()) {
+		if isFromSource(appProject.GetLabels(), appProject.GetAnnotations()) {
 			continue
 		}
 

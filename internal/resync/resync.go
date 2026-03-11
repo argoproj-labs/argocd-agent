@@ -468,9 +468,8 @@ func (r *RequestHandler) handleDeletedResource(logCtx *logrus.Entry, reqUpdate *
 }
 
 func newRequestUpdateFromObject(res *unstructured.Unstructured, kind string) (*event.RequestUpdate, error) {
-	// RequestUpdate is always sent by the peer. So, the object must have the source UID annotation
-	annotations := res.GetAnnotations()
-	sourceUID, ok := annotations[manager.SourceUIDAnnotation]
+	// RequestUpdate is always sent by the peer. So, the object must have the source UID label (or legacy annotation).
+	sourceUID, ok := manager.GetSourceUID(res)
 	if !ok {
 		return nil, ErrSourceUIDNotFound
 	}

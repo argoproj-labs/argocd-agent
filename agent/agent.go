@@ -582,8 +582,7 @@ func (a *Agent) populateSourceCache(ctx context.Context) error {
 	}
 
 	for _, app := range appList {
-		sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
-		if exists {
+		if sourceUID, exists := manager.GetSourceUID(&app); exists {
 			a.sourceCache.Application.Set(ty.UID(sourceUID), app.Spec)
 		}
 	}
@@ -595,8 +594,7 @@ func (a *Agent) populateSourceCache(ctx context.Context) error {
 	}
 
 	for _, appProject := range appProjectList {
-		sourceUID, exists := appProject.Annotations[manager.SourceUIDAnnotation]
-		if exists {
+		if sourceUID, exists := manager.GetSourceUID(&appProject); exists {
 			a.sourceCache.AppProject.Set(ty.UID(sourceUID), appProject.Spec)
 		}
 	}
@@ -608,8 +606,7 @@ func (a *Agent) populateSourceCache(ctx context.Context) error {
 	}
 
 	for _, repo := range repoList {
-		sourceUID, exists := repo.Annotations[manager.SourceUIDAnnotation]
-		if exists {
+		if sourceUID, exists := manager.GetSourceUID(&repo); exists {
 			a.sourceCache.Repository.Set(ty.UID(sourceUID), repo.Data)
 		}
 	}

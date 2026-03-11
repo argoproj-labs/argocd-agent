@@ -133,7 +133,7 @@ func Test_ManagerCreate(t *testing.T) {
 		rapp, err := m.Create(context.TODO(), app)
 		assert.NoError(t, err)
 		assert.Equal(t, "test", rapp.Name)
-		assert.Equal(t, string(app.UID), rapp.Annotations[manager.SourceUIDAnnotation])
+		assert.Equal(t, string(app.UID), rapp.Labels[manager.SourceUIDLabel])
 	})
 }
 
@@ -153,10 +153,10 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 				Namespace: "cluster-1",
 				Labels: map[string]string{
 					"foo": "bar",
+					manager.SourceUIDLabel: "random_uid",
 				},
 				Annotations: map[string]string{
-					"bar":                       "foo",
-					manager.SourceUIDAnnotation: "random_uid",
+					"bar": "foo",
 				},
 				Finalizers: []string{"test-finalizer"},
 			},
@@ -187,11 +187,11 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 				Labels: map[string]string{
 					"bar":  "foo",
 					"some": "other",
+					manager.SourceUIDLabel: "old_uid",
 				},
 				Annotations: map[string]string{
 					"bar":                        "bar",
 					"argocd.argoproj.io/refresh": "normal",
-					manager.SourceUIDAnnotation:  "old_uid",
 				},
 			},
 			Spec: v1alpha1.ApplicationSpec{
@@ -235,8 +235,8 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		// by the incoming app
 		require.Contains(t, updated.Annotations, "argocd.argoproj.io/refresh")
 
-		// Source UID annotation should not be overwritten by the incoming app
-		require.Equal(t, existing.Annotations[manager.SourceUIDAnnotation], updated.Annotations[manager.SourceUIDAnnotation])
+		// Source UID label should not be overwritten by the incoming app
+		require.Equal(t, existing.Labels[manager.SourceUIDLabel], updated.Labels[manager.SourceUIDLabel])
 
 		// Labels and annotations must be in sync with incoming
 		require.Equal(t, incoming.Labels, updated.Labels)
@@ -727,8 +727,8 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 		ObjectMeta: v1.ObjectMeta{
 			Name:      "test",
 			Namespace: "argocd",
-			Annotations: map[string]string{
-				manager.SourceUIDAnnotation: "old_uid",
+			Labels: map[string]string{
+				manager.SourceUIDLabel: "old_uid",
 			},
 		},
 	}
@@ -763,8 +763,8 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 		require.False(t, uidMatch)
 	})
 
-	t.Run("should return an error if there is no UID annotation", func(t *testing.T) {
-		oldApp.Annotations = map[string]string{}
+	t.Run("should return an error if there is no UID label", func(t *testing.T) {
+		oldApp.Labels = map[string]string{}
 		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
 		m, err := NewApplicationManager(mockedBackend, "")
 		require.Nil(t, err)
@@ -776,7 +776,7 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
 		require.True(t, exists)
 		require.NotNil(t, err)
-		require.EqualError(t, err, "source UID Annotation is not found for app: test")
+		require.EqualError(t, err, "source UID is not found for app: test")
 		require.False(t, uidMatch)
 	})
 
@@ -802,7 +802,7 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 	})
 
 	t.Run("should override incoming namespace", func(t *testing.T) {
-		oldApp.Annotations = map[string]string{manager.SourceUIDAnnotation: "old_uid"}
+		oldApp.Labels = map[string]string{manager.SourceUIDLabel: "old_uid"}
 		getMock.Unset()
 		getMock = mockedBackend.On("Get", mock.Anything, mock.Anything, "argocd").Return(oldApp, nil)
 		m, err := NewApplicationManager(mockedBackend, oldApp.Namespace)
@@ -830,8 +830,8 @@ func Test_RevertManagedAppChanges(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "foobar",
 				Namespace: "argocd",
-				Annotations: map[string]string{
-					manager.SourceUIDAnnotation: "some_uid",
+				Labels: map[string]string{
+					manager.SourceUIDLabel: "some_uid",
 				},
 			},
 			Spec: v1alpha1.ApplicationSpec{

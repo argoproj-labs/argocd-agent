@@ -131,8 +131,8 @@ func Test_ProcessIncomingSyncedResource(t *testing.T) {
 
 	t.Run("create request update with checksum if resource exists", func(t *testing.T) {
 		resource := fakeUnresApp()
-		resource.SetAnnotations(map[string]string{
-			manager.SourceUIDAnnotation: "source-uid",
+		resource.SetLabels(map[string]string{
+			manager.SourceUIDLabel: "source-uid",
 		})
 
 		gvr, err := getGroupVersionResource("Application")
@@ -180,7 +180,7 @@ func Test_ProcessIncomingSyncedResource_MissingSourceUID(t *testing.T) {
 		t.Helper()
 		resource := fakeUnresApp()
 		if withAnnotation {
-			resource.SetAnnotations(map[string]string{manager.SourceUIDAnnotation: "source-uid"})
+			resource.SetLabels(map[string]string{manager.SourceUIDLabel: "source-uid"})
 		}
 		_, err := h.dynClient.Resource(gvr).Namespace("default").Create(context.Background(), resource, v1.CreateOptions{})
 		require.Nil(t, err)
@@ -226,8 +226,8 @@ func Test_ProcessIncomingResourceResyncRequest(t *testing.T) {
 
 	t.Run("send request updates for all resources", func(t *testing.T) {
 		resource := fakeUnresApp()
-		resource.SetAnnotations(map[string]string{
-			manager.SourceUIDAnnotation: "source-uid",
+		resource.SetLabels(map[string]string{
+			manager.SourceUIDLabel: "source-uid",
 		})
 
 		gvr, err := getGroupVersionResource("Application")
@@ -318,8 +318,8 @@ func Test_newRequestUpdateFromObject(t *testing.T) {
 
 	t.Run("return request update when annotation present", func(t *testing.T) {
 		resource := fakeUnresApp()
-		resource.SetAnnotations(map[string]string{
-			manager.SourceUIDAnnotation: "source-uid-123",
+		resource.SetLabels(map[string]string{
+			manager.SourceUIDLabel: "source-uid-123",
 		})
 
 		reqUpdate, err := newRequestUpdateFromObject(resource, "Application")
@@ -386,8 +386,8 @@ func Test_sendRequestUpdate(t *testing.T) {
 		handler := createFakeHandler(t)
 
 		resource := fakeUnresApp()
-		resource.SetAnnotations(map[string]string{
-			manager.SourceUIDAnnotation: "source-uid",
+		resource.SetLabels(map[string]string{
+			manager.SourceUIDLabel: "source-uid",
 		})
 
 		gvr, err := getGroupVersionResource("Application")
@@ -438,8 +438,8 @@ func Test_SendRequestUpdates(t *testing.T) {
 
 		resourceWithAnnotation := fakeUnresApp()
 		resourceWithAnnotation.SetName("app-with-annotation")
-		resourceWithAnnotation.SetAnnotations(map[string]string{
-			manager.SourceUIDAnnotation: "source-uid",
+		resourceWithAnnotation.SetLabels(map[string]string{
+			manager.SourceUIDLabel: "source-uid",
 		})
 		_, err = handler.dynClient.Resource(gvr).Namespace("default").
 			Create(ctx, resourceWithAnnotation, v1.CreateOptions{})

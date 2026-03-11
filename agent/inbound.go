@@ -646,7 +646,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 		return err
 	}
 
-	sourceUID := app.Annotations[manager.SourceUIDAnnotation]
+	sourceUID, _ := manager.GetSourceUID(app)
 	a.deletions.MarkExpected(ktypes.UID(sourceUID))
 
 	deletionPropagation := backend.DeletePropagationBackground
@@ -770,7 +770,7 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 		return err
 	}
 
-	sourceUID := project.Annotations[manager.SourceUIDAnnotation]
+	sourceUID, _ := manager.GetSourceUID(project)
 	a.deletions.MarkExpected(ktypes.UID(sourceUID))
 
 	deletionPropagation := backend.DeletePropagationBackground
@@ -887,7 +887,7 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 		return err
 	}
 
-	sourceUID := repo.Annotations[manager.SourceUIDAnnotation]
+	sourceUID, _ := manager.GetSourceUID(repo)
 	a.deletions.MarkExpected(ktypes.UID(sourceUID))
 
 	deletionPropagation := backend.DeletePropagationBackground

@@ -267,8 +267,8 @@ func TestDefaultAppFilterChain_IgnoreUnmanagedApps(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "managed-app",
 			Namespace: "argocd",
-			Annotations: map[string]string{
-				manager.SourceUIDAnnotation: "some-uid",
+			Labels: map[string]string{
+				manager.SourceUIDLabel: "some-uid",
 			},
 		},
 	}
@@ -295,11 +295,11 @@ func TestDefaultAppFilterChain_IgnoreUnmanagedApps(t *testing.T) {
 		assert.False(t, fc.Admit(withoutSourceUID))
 	})
 
-	t.Run("flag enabled: app with empty source-uid annotation is admitted", func(t *testing.T) {
+	t.Run("flag enabled: app with empty source-uid label is admitted", func(t *testing.T) {
 		fc := newAgent(t, true).DefaultAppFilterChain()
 		app := withoutSourceUID.DeepCopy()
-		app.Annotations = map[string]string{manager.SourceUIDAnnotation: ""}
-		// empty string is still a present annotation — should be admitted
+		app.Labels = map[string]string{manager.SourceUIDLabel: ""}
+		// empty string is still a present label — should be admitted
 		assert.True(t, fc.Admit(app))
 	})
 

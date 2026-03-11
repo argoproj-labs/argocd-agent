@@ -783,10 +783,8 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 
 	projectMap := map[string]v1alpha1.AppProject{}
 	for _, appProject := range appProjects {
-		if appProject.Annotations != nil {
-			if _, ok := appProject.Annotations[manager.SourceUIDAnnotation]; ok {
-				continue
-			}
+		if manager.HasSourceUID(&appProject) {
+			continue
 		}
 
 		if !appproject.DoesAgentMatchWithProject(agent, appProject) {
@@ -1021,8 +1019,7 @@ func (s *Server) populateSourceCache(ctx context.Context) error {
 	}
 
 	for _, app := range appList {
-		sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
-		if exists {
+		if sourceUID, exists := manager.GetSourceUID(&app); exists {
 			s.sourceCache.Application.Set(k8stypes.UID(sourceUID), app.Spec)
 		}
 	}
@@ -1034,8 +1031,7 @@ func (s *Server) populateSourceCache(ctx context.Context) error {
 	}
 
 	for _, appProject := range appProjectList {
-		sourceUID, exists := appProject.Annotations[manager.SourceUIDAnnotation]
-		if exists {
+		if sourceUID, exists := manager.GetSourceUID(&appProject); exists {
 			s.sourceCache.AppProject.Set(k8stypes.UID(sourceUID), appProject.Spec)
 		}
 	}
@@ -1047,8 +1043,7 @@ func (s *Server) populateSourceCache(ctx context.Context) error {
 	}
 
 	for _, repo := range repoList {
-		sourceUID, exists := repo.Annotations[manager.SourceUIDAnnotation]
-		if exists {
+		if sourceUID, exists := manager.GetSourceUID(&repo); exists {
 			s.sourceCache.Repository.Set(k8stypes.UID(sourceUID), repo.Data)
 		}
 	}

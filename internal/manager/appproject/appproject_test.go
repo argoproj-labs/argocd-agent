@@ -262,7 +262,7 @@ func TestCreateAppProject(t *testing.T) {
 		rapp, err := m.Create(context.TODO(), app)
 		assert.NoError(t, err)
 		assert.Equal(t, "test", rapp.Name)
-		assert.Equal(t, string(app.UID), rapp.Annotations[manager.SourceUIDAnnotation])
+		assert.Equal(t, string(app.UID), rapp.Labels[manager.SourceUIDLabel])
 	})
 }
 
@@ -271,8 +271,8 @@ func Test_CompareSourceUIDForAppProject(t *testing.T) {
 		ObjectMeta: v1.ObjectMeta{
 			Name:      "test",
 			Namespace: "argocd",
-			Annotations: map[string]string{
-				manager.SourceUIDAnnotation: "old_uid",
+			Labels: map[string]string{
+				manager.SourceUIDLabel: "old_uid",
 			},
 		},
 	}

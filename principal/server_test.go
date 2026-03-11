@@ -379,9 +379,9 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		assert.Equal(t, 0, sendQ.Len())
 	})
 
-	t.Run("skips project with SourceUIDAnnotation", func(t *testing.T) {
+	t.Run("skips project with SourceUIDLabel", func(t *testing.T) {
 		proj := generateAppProject("proj1")
-		proj.Annotations = map[string]string{manager.SourceUIDAnnotation: "some-uid"}
+		proj.Labels = map[string]string{manager.SourceUIDLabel: "some-uid"}
 
 		mockProjBackend := &mocks.AppProject{}
 		mockRepoBackend := &mocks.Repository{}

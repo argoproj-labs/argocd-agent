@@ -50,13 +50,12 @@ func (a *Agent) DefaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 	})
 
 	// When ignoreUnmanagedApps is set, filter out apps that were not created
-	// via argocd-agent (i.e. no source-uid annotation). Without this, the agent
-	// marks them as managed and sends status events to the principal, which
-	// errors because the app doesn't exist there.
+	// via argocd-agent (i.e. no source-uid label or legacy annotation). Without
+	// this, the agent marks them as managed and sends status events to the
+	// principal, which errors because the app doesn't exist there.
 	if a.ignoreUnmanagedApps {
 		fc.AppendAdmitFilter(func(app *v1alpha1.Application) bool {
-			_, ok := app.Annotations[manager.SourceUIDAnnotation]
-			return ok
+			return manager.HasSourceUID(app)
 		})
 	}
 

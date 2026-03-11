@@ -41,8 +41,12 @@ const (
 )
 
 const (
-	// SourceUIDAnnotation is an annotation that represents the UID of the source resource.
+	// SourceUIDLabel is a label that represents the UID of the source resource.
 	// It is added to the resources managed on the target.
+	SourceUIDLabel = "argocd-agent.argoproj-labs.io/source-uid"
+
+	// Deprecated: SourceUIDAnnotation is the old annotation key for the source UID.
+	// Kept for backward-compatible migration; new resources use SourceUIDLabel instead.
 	SourceUIDAnnotation = "argocd.argoproj.io/source-uid"
 )
 
@@ -194,6 +198,68 @@ func (o *ObservedResources) Len() int {
 	return len(o.observed)
 }
 
+// GetSourceUID returns the source UID from an object, checking the label first
+// then falling back to the deprecated annotation for backward compatibility.
+func GetSourceUID(obj metav1.Object) (string, bool) {
+	if labels := obj.GetLabels(); labels != nil {
+		if v, ok := labels[SourceUIDLabel]; ok {
+			return v, true
+		}
+	}
+	if annotations := obj.GetAnnotations(); annotations != nil {
+		if v, ok := annotations[SourceUIDAnnotation]; ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// SetSourceUID sets the source UID as a label on the object.
+func SetSourceUID(obj metav1.Object, uid string) {
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels[SourceUIDLabel] = uid
+	obj.SetLabels(labels)
+}
+
+// HasSourceUID returns true if the object has a source UID label or annotation.
+func HasSourceUID(obj metav1.Object) bool {
+	_, ok := GetSourceUID(obj)
+	return ok
+}
+
+// MigrateSourceUID migrates the source UID from the deprecated annotation to
+// the label. If the label already exists, just removes the annotation. If only
+// the annotation exists, copies its value to the label and removes the annotation.
+func MigrateSourceUID(obj metav1.Object) {
+	labels := obj.GetLabels()
+	annotations := obj.GetAnnotations()
+
+	if labels != nil {
+		if _, ok := labels[SourceUIDLabel]; ok {
+			if annotations != nil {
+				delete(annotations, SourceUIDAnnotation)
+				obj.SetAnnotations(annotations)
+			}
+			return
+		}
+	}
+
+	if annotations != nil {
+		if v, ok := annotations[SourceUIDAnnotation]; ok {
+			if labels == nil {
+				labels = make(map[string]string)
+			}
+			labels[SourceUIDLabel] = v
+			obj.SetLabels(labels)
+			delete(annotations, SourceUIDAnnotation)
+			obj.SetAnnotations(annotations)
+		}
+	}
+}
+
 type kubeResource interface {
 	runtime.Object
 	metav1.Object
@@ -217,9 +283,9 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 		"kind":     outbound.GetObjectKind().GroupVersionKind().Kind,
 	})
 
-	sourceUID, exists := outbound.GetAnnotations()[SourceUIDAnnotation]
+	sourceUID, exists := GetSourceUID(outbound)
 	if !exists {
-		return false, fmt.Errorf("source UID annotation not found for resource")
+		return false, fmt.Errorf("source UID not found for resource")
 	}
 
 	// Check if this deletion is coming from the source

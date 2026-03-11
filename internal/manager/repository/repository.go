@@ -77,9 +77,9 @@ func (m *RepositoryManager) CompareSourceUID(ctx context.Context, incoming *core
 	}
 
 	// If there is an existing repository with the same name/namespace, compare its source UID with the incoming repository.
-	sourceUID, exists := existing.Annotations[manager.SourceUIDAnnotation]
+	sourceUID, exists := manager.GetSourceUID(existing)
 	if !exists {
-		return true, false, fmt.Errorf("source UID Annotation is not found for repository: %s", incoming.Name)
+		return true, false, fmt.Errorf("source UID is not found for repository: %s", incoming.Name)
 	}
 
 	return true, string(incoming.UID) == sourceUID, nil
@@ -92,10 +92,7 @@ func (m *RepositoryManager) Create(ctx context.Context, repo *corev1.Secret) (*c
 	repo.ResourceVersion = ""
 	repo.Generation = 0
 
-	if repo.Annotations == nil {
-		repo.Annotations = make(map[string]string)
-	}
-	repo.Annotations[manager.SourceUIDAnnotation] = string(repo.UID)
+	manager.SetSourceUID(repo, string(repo.UID))
 
 	created, err := m.backend.Create(ctx, repo)
 	if err == nil {
@@ -137,23 +134,27 @@ func (m *RepositoryManager) UpdateManagedRepository(ctx context.Context, incomin
 	var err error
 
 	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *corev1.Secret) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
+		manager.MigrateSourceUID(existing)
+		if v, ok := existing.Labels[manager.SourceUIDLabel]; ok {
+			if incoming.Labels == nil {
+				incoming.Labels = make(map[string]string)
 			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
+			incoming.Labels[manager.SourceUIDLabel] = v
 		}
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Finalizers = incoming.Finalizers
 		existing.Data = incoming.Data
 	}, func(existing, incoming *corev1.Secret) (jsondiff.Patch, error) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
+		manager.MigrateSourceUID(existing)
+		if v, ok := existing.Labels[manager.SourceUIDLabel]; ok {
+			if incoming.Labels == nil {
+				incoming.Labels = make(map[string]string)
 			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
+			incoming.Labels[manager.SourceUIDLabel] = v
 		}
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
 
 		target := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -245,7 +246,7 @@ func (m *RepositoryManager) RevertRepositoryChanges(ctx context.Context, repo *c
 		"resourceVersion": repo.ResourceVersion,
 	})
 
-	sourceUID, exists := repo.Annotations[manager.SourceUIDAnnotation]
+	sourceUID, exists := manager.GetSourceUID(repo)
 	if !exists {
 		return false
 	}

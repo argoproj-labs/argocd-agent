@@ -377,12 +377,12 @@ func TestIsResourceFromAutonomousAgent(t *testing.T) {
 		want    bool
 	}{
 		{
-			name: "project with SourceUID annotation is autonomous",
+			name: "project with SourceUID label is autonomous",
 			project: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-project",
-					Annotations: map[string]string{
-						manager.SourceUIDAnnotation: "some-uid",
+					Labels: map[string]string{
+						manager.SourceUIDLabel: "some-uid",
 					},
 				},
 			},
@@ -1012,8 +1012,8 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 					Name:      "test-app",
 					Namespace: "autonomous-agent",
 					UID:       "app-uid-123",
-					Annotations: map[string]string{
-						manager.SourceUIDAnnotation: "source-uid-456",
+					Labels: map[string]string{
+						manager.SourceUIDLabel: "source-uid-456",
 					},
 				},
 				Spec: v1alpha1.ApplicationSpec{
@@ -1033,8 +1033,8 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 					Name:      "test-app",
 					Namespace: "autonomous-agent",
 					UID:       "app-uid-123",
-					Annotations: map[string]string{
-						manager.SourceUIDAnnotation: "source-uid-456",
+					Labels: map[string]string{
+						manager.SourceUIDLabel: "source-uid-456",
 					},
 				},
 				Spec: v1alpha1.ApplicationSpec{
@@ -1066,8 +1066,8 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 					Name:      "test-app",
 					Namespace: "autonomous-agent",
 					UID:       "app-uid-123",
-					Annotations: map[string]string{
-						manager.SourceUIDAnnotation: "source-uid-456",
+					Labels: map[string]string{
+						manager.SourceUIDLabel: "source-uid-456",
 					},
 				},
 				Spec: v1alpha1.ApplicationSpec{
@@ -1088,7 +1088,7 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 					Name:      "test-app",
 					Namespace: "managed-agent",
 					UID:       "app-uid-123",
-					// No SourceUIDAnnotation - not from autonomous agent
+					// No SourceUIDLabel - not from autonomous agent
 				},
 				Spec: v1alpha1.ApplicationSpec{
 					Project: "default",
@@ -1127,7 +1127,7 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 			err = s.queues.Create(tt.app.Namespace)
 			require.NoError(t, err)
 
-			sourceUID := tt.app.Annotations[manager.SourceUIDAnnotation]
+			sourceUID := tt.app.Labels[manager.SourceUIDLabel]
 			if tt.shouldRecreate {
 				s.deletions.Unmark(k8stypes.UID(sourceUID))
 			} else {
@@ -1495,13 +1495,13 @@ func TestServer_updateAppCallback(t *testing.T) {
 		oldApp := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
-				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+				Labels: map[string]string{manager.SourceUIDLabel: "uid-123"},
 			},
 		}
 		newApp := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
-				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+				Labels: map[string]string{manager.SourceUIDLabel: "uid-123"},
 			},
 		}
 
@@ -1532,7 +1532,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 		oldApp := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
-				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+				Labels: map[string]string{manager.SourceUIDLabel: "uid-123"},
 			},
 			Spec: v1alpha1.ApplicationSpec{
 				Project: "default",
@@ -1541,14 +1541,14 @@ func TestServer_updateAppCallback(t *testing.T) {
 		newApp := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
-				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+				Labels: map[string]string{manager.SourceUIDLabel: "uid-123"},
 			},
 			Spec: v1alpha1.ApplicationSpec{
 				Project: "random-project",
 			},
 		}
 
-		sourceUID := k8stypes.UID(oldApp.Annotations[manager.SourceUIDAnnotation])
+		sourceUID := k8stypes.UID(oldApp.Labels[manager.SourceUIDLabel])
 		s.sourceCache.Application.Set(sourceUID, oldApp.Spec)
 		defer s.sourceCache.Application.Delete(sourceUID)
 
@@ -1583,16 +1583,16 @@ func TestServer_updateAppCallback(t *testing.T) {
 		deletionTime := metav1.Now()
 		oldApp := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
-				Annotations:       map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+				Name:              "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
+				Labels:            map[string]string{manager.SourceUIDLabel: "uid-123"},
 				DeletionTimestamp: &deletionTime,
 				Finalizers:        []string{"resources-finalizer.argocd.argoproj.io"},
 			},
 		}
 		newApp := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
-				Annotations:       map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+				Name:              "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
+				Labels:            map[string]string{manager.SourceUIDLabel: "uid-123"},
 				DeletionTimestamp: &deletionTime,
 				Finalizers:        []string{"resources-finalizer.argocd.argoproj.io"},
 			},
@@ -2153,8 +2153,8 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-app",
 					Namespace: "default",
-					Annotations: map[string]string{
-						manager.SourceUIDAnnotation: "uid-123",
+					Labels: map[string]string{
+						manager.SourceUIDLabel: "uid-123",
 					},
 				},
 				Spec: v1alpha1.ApplicationSpec{

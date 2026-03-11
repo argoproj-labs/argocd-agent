@@ -56,11 +56,11 @@ func Test_NewResourceKey(t *testing.T) {
 	})
 
 	t.Run("resource key for an app resource with sourceUID annotation", func(t *testing.T) {
-		app.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: "source-uid-123",
+		app.Labels = map[string]string{
+			manager.SourceUIDLabel: "source-uid-123",
 		}
 
-		expected.UID = app.Annotations[manager.SourceUIDAnnotation]
+		expected.UID = app.Labels[manager.SourceUIDLabel]
 
 		got := NewResourceKeyFromApp(app)
 		assert.Equal(t, expected, got)
@@ -79,8 +79,8 @@ func Test_NewResourceKey(t *testing.T) {
 	})
 
 	t.Run("resource key for an appProject resource with sourceUID annotation", func(t *testing.T) {
-		appProject.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: "source-uid-456",
+		appProject.Labels = map[string]string{
+			manager.SourceUIDLabel: "source-uid-456",
 		}
 
 		expected := ResourceKey{
