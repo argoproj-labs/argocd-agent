@@ -956,6 +956,15 @@ func (s *Server) defaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 		}
 		return true
 	})
+	// In destination-based mapping mode, apps without a destination name
+	// (e.g. in-cluster apps using destination.server) cannot be routed to
+	// any agent, so filter them out.
+	if s.options.destinationBasedMapping {
+		c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
+			name := res.Spec.Destination.Name
+			return name != "" && name != "in-cluster"
+		})
+	}
 	return c
 }
 
