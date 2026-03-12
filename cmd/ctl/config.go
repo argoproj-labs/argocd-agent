@@ -694,7 +694,7 @@ func determineConfigs(opts *GlobalFlags, cfg *localConfig) (principal, agent com
 	} else if opts.agent != "" {
 		config, exists := cfg.Contexts.Agents[opts.agent]
 		if !exists {
-			cmdutil.Fatal("agent %s does not exist in config", opts.agent)
+			cmdutil.Fatal("Agent %s does not exist in config", opts.agent)
 		}
 		agent = config
 	}
@@ -777,6 +777,13 @@ func readLocalConfig(path string) (*localConfig, error) {
 	err = yaml.Unmarshal(bytes, &cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	if cfg.Contexts.Principals == nil {
+		cfg.Contexts.Principals = make(map[string]componentConfig)
+	}
+	if cfg.Contexts.Agents == nil {
+		cfg.Contexts.Agents = make(map[string]componentConfig)
 	}
 
 	return &cfg, nil

@@ -23,7 +23,7 @@ The tool supports the following global flags for specifying which principal or a
 They are as follows:
 
 ```
---config string                The path to the local config file to use (default "/Users/ccoco/.config/argocd-agent/ctl.conf")
+--config string                The path to the local config file to use (default "$HOME/.config/argocd-agent/ctl.conf")
 
 --agent string                 The symbolic name of an agent in the config file
 --agent-context string         The Kubernetes context of the agent
