@@ -170,7 +170,7 @@ This configuration includes:
 - ✅ **argocd-redis** (state storage)
 - ✅ **argocd-repo-server** (Git repository access)
 - ❌ **argocd-application-controller** (runs on workload clusters only)
-- ❌ **argocd-applicationset-controller** (not yet supported)
+- **argocd-applicationset-controller** (optional, see [ApplicationSets](../../../user-guide/applicationsets.md))
 
 !!! warning "Critical Component Placement"
     The **argocd-application-controller** must **never** be deployed on the control plane cluster. It can only run on workload clusters where it has direct access to manage Kubernetes resources. Running it on the control plane is not supported and is out of scope for this project.
@@ -405,7 +405,7 @@ This configuration includes:
 - ✅ **argocd-redis** (local state for the application controller)
 - ❌ **argocd-server** (runs on control plane only)
 - ❌ **argocd-dex-server** (runs on control plane only)
-- ❌ **argocd-applicationset-controller** (not included by default)
+- ❌ **argocd-applicationset-controller** (not included by default, see [ApplicationSets](../../../user-guide/applicationsets.md))
 
 !!! info "Why Application Controller Runs Here"
     The **argocd-application-controller** runs on workload clusters because it needs direct access to the Kubernetes API to create, update, and delete resources. The argocd-agent facilitates communication between the control plane and these controllers, enabling centralized management while maintaining local execution.
