@@ -131,19 +131,23 @@ func validateConfig(cfg *localConfig) error {
 // helper function that writes the yaml for the local config to specified path and creates all directories
 // needed for it
 func writeLocalConfig(cfg *localConfig, path string) error {
-	bytes, err := yaml.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-
 	// create subdirectories that need to exist for file to exist
 	dirPath := filepath.Dir(path)
-	err = os.MkdirAll(dirPath, 0o744)
+	err := os.MkdirAll(dirPath, 0o744)
 	if err != nil {
 		return err
 	}
 
-	err = os.WriteFile(path, bytes, 0o600)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := yaml.NewEncoder(file)
+	encoder.SetIndent(2)
+
+	err = encoder.Encode(cfg)
 	return err
 }
 

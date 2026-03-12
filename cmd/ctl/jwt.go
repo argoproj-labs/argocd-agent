@@ -195,7 +195,9 @@ func NewJWTInspectKeyCommand() *cobra.Command {
 }
 
 func NewJWTDeleteKeyCommand() *cobra.Command {
-	var force bool
+	var (
+		force bool
+	)
 	command := &cobra.Command{
 		Short: "Delete the JWT signing key secret",
 		Use:   "delete-key",

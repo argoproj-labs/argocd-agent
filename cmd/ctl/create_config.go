@@ -67,21 +67,30 @@ func CreateLocalConfig(kubeConfigPath, outputPath string) {
 		var namespace string
 		var name string
 
-		fmt.Printf("Found context %s, is this a principal or agent, if it is neither type skip? ", context)
+		fmt.Printf("Found context %s, is this a principal or agent, if it is neither type leave blank to skip? ", context)
 		_, err := fmt.Scanln(&contextType)
 		if err != nil {
-			cmdutil.Fatal("Error reading input: %v", err)
-		}
-
-		for contextType != "principal" && contextType != "agent" && contextType != "skip" {
-			fmt.Print("Invalid input, please enter principal, agent, or skip: ")
-			_, err = fmt.Scanln(&contextType)
-			if err != nil {
+			if err.Error() == "unexpected newline" {
+				contextType = ""
+			} else {
 				cmdutil.Fatal("Error reading input: %v", err)
 			}
 		}
+		contextType = strings.TrimSpace(contextType)
 
-		if contextType == "skip" {
+		for contextType != "principal" && contextType != "agent" && contextType != "" {
+			fmt.Print("Invalid input, please enter principal, agent, or leave blank to skip: ")
+			_, err = fmt.Scanln(&contextType)
+			if err != nil {
+				if err.Error() == "unexpected newline" {
+					contextType = ""
+				} else {
+					cmdutil.Fatal("Error reading input: %v", err)
+				}
+			}
+		}
+
+		if contextType == "" {
 			fmt.Println()
 			continue
 		}

@@ -67,7 +67,9 @@ func NewRootCommand() *cobra.Command {
 }
 
 func NewVersionCommand() *cobra.Command {
-	var indent bool
+	var (
+		indent bool
+	)
 	command := &cobra.Command{
 		Use:   "version",
 		Short: "Display the version of argocd-agent-ctl",
