@@ -11,7 +11,7 @@ for each command.
 
 `check-config` - Validate principal and agent configurations by running a series of tests
 
-`create-config` - Creates and populates a local user config file for Argo CD Agent
+`config` - Operations related to config file for argocd-agentctl
 
 `jwt` - Inspect and manage JWT signing keys
 
@@ -112,9 +112,19 @@ Validate principal and agent configurations
 
 `principal` - Validate principal configuration
 
-## `create-config` Command
+## `config` Command
 
-Creates and populates a local user config file for Argo CD Agent by parsing the kubernetes config file
+Operations related to config file for argocd-agentctl
+
+`add` - Add new entries to the local config file
+
+`create` - Creates and populates a local user config file for Argo CD Agent by parsing the kubernetes config file
+
+`delete` - Delete entries from the local config file
+
+`edit` - Edit entries in the local config file
+
+`list` - List components in the config
 
 ## `jwt` Command
 

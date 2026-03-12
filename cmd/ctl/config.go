@@ -18,9 +18,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"text/tabwriter"
 
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // struct to hold mappings of names to principal/agent configurations
@@ -45,6 +49,617 @@ var (
 	principalCfg componentConfig
 	agentCfg     componentConfig
 )
+
+func NewConfigCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Operations related to config file for argocd-agentctl",
+		Run: func(cmd *cobra.Command, args []string) {
+			_ = cmd.Help()
+		},
+		GroupID: "config",
+	}
+	cmd.AddCommand(NewConfigCreateCommand())
+	cmd.AddCommand(NewConfigAddCommand())
+	cmd.AddCommand(NewConfigEditCommand())
+	cmd.AddCommand(NewConfigDeleteCommand())
+	cmd.AddCommand(NewConfigListCommand())
+	return cmd
+}
+
+func NewConfigCreateCommand() *cobra.Command {
+	var (
+		kubeConfigPath string
+		outputPath     string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Creates and populates a local user config file for Argo CD Agent by parsing the kubernetes config file",
+		Run: func(cmd *cobra.Command, args []string) {
+			CreateLocalConfig(kubeConfigPath, outputPath)
+		},
+	}
+
+	cmd.Flags().StringVar(&kubeConfigPath, "kubeconfig-path", getDefaultKubeConfig(), "Path to where kubeconfig file lives")
+	cmd.Flags().StringVar(&outputPath, "output-path", getDefaultCfgPath(), "Path to write output to")
+	return cmd
+}
+
+func NewConfigAddCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add",
+		Short: "Add new entries to the local config file",
+		Run: func(cmd *cobra.Command, args []string) {
+			_ = cmd.Help()
+		},
+	}
+	cmd.AddCommand(NewConfigAddPrincipalCommand())
+	cmd.AddCommand(NewConfigAddAgentCommand())
+	return cmd
+}
+
+func NewConfigAddPrincipalCommand() *cobra.Command {
+	var (
+		name       string
+		context    string
+		namespace  string
+		setDefault bool
+	)
+	cmd := &cobra.Command{
+		Use:   "principal",
+		Short: "Add new principal to the local config file",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg, err := readLocalConfig(globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to read config: %v", err)
+			}
+
+			if _, exists := cfg.Contexts.Principals[name]; exists {
+				cmdutil.Fatal("A principal with the name %s already exists", name)
+			}
+
+			cfg.Contexts.Principals[name] = componentConfig{
+				KubeContext: context,
+				Namespace:   namespace,
+			}
+
+			if setDefault {
+				cfg.DefaultPrincipal = name
+			}
+
+			err = validateConfig(cfg)
+			if err != nil {
+				cmdutil.Fatal("%v", err)
+			}
+
+			err = writeLocalConfig(cfg, globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to write config: %v", err)
+			}
+			fmt.Printf("New principal %s added successfully\n", name)
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "The symbolic name to use for the new principal")
+	cmd.Flags().StringVar(&context, "context", "", "The context of the new principal")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "The namespace of the new principal")
+	cmd.Flags().BoolVar(&setDefault, "set-default", false, "Set the new principal to default")
+
+	err := cmd.MarkFlagRequired("name")
+	if err != nil {
+		cmdutil.Fatal("Failed to mark flag required: %v", err)
+	}
+	err = cmd.MarkFlagRequired("context")
+	if err != nil {
+		cmdutil.Fatal("Failed to mark flag required: %v", err)
+	}
+	err = cmd.MarkFlagRequired("namespace")
+	if err != nil {
+		cmdutil.Fatal("Failed to mark flag required: %v", err)
+	}
+	return cmd
+}
+
+func NewConfigAddAgentCommand() *cobra.Command {
+	var (
+		name      string
+		context   string
+		namespace string
+	)
+	cmd := &cobra.Command{
+		Use:   "agent",
+		Short: "Add new agent to the local config file",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg, err := readLocalConfig(globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to read config: %v", err)
+			}
+
+			if _, exists := cfg.Contexts.Agents[name]; exists {
+				cmdutil.Fatal("An agent with the name %s already exists", name)
+			}
+
+			cfg.Contexts.Agents[name] = componentConfig{
+				KubeContext: context,
+				Namespace:   namespace,
+			}
+
+			err = validateConfig(cfg)
+			if err != nil {
+				cmdutil.Fatal("%v", err)
+			}
+
+			err = writeLocalConfig(cfg, globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to write config: %v", err)
+			}
+			fmt.Printf("New agent %s added successfully\n", name)
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "The symbolic name to use for the new agent")
+	cmd.Flags().StringVar(&context, "context", "", "The context of the new agent")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "The namespace of the new agent")
+
+	err := cmd.MarkFlagRequired("name")
+	if err != nil {
+		cmdutil.Fatal("Failed to mark flag required: %v", err)
+	}
+	err = cmd.MarkFlagRequired("context")
+	if err != nil {
+		cmdutil.Fatal("Failed to mark flag required: %v", err)
+	}
+	err = cmd.MarkFlagRequired("namespace")
+	if err != nil {
+		cmdutil.Fatal("Failed to mark flag required: %v", err)
+	}
+	return cmd
+}
+
+func NewConfigEditCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "edit",
+		Short: "Edit entries in the local config file",
+		Run: func(cmd *cobra.Command, args []string) {
+			_ = cmd.Help()
+		},
+	}
+	cmd.AddCommand(NewConfigEditPrincipalCommand())
+	cmd.AddCommand(NewConfigEditAgentCommand())
+	return cmd
+}
+
+func NewConfigEditPrincipalCommand() *cobra.Command {
+	var (
+		name       string
+		context    string
+		namespace  string
+		setDefault bool
+	)
+	cmd := &cobra.Command{
+		Use:   "principal",
+		Short: "Edit a principal in the local config file",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg, err := readLocalConfig(globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to read config: %v", err)
+			}
+
+			principalCfg, exists := cfg.Contexts.Principals[name]
+			if !exists {
+				cmdutil.Fatal("The principal %s does not exist in the config", name)
+			}
+
+			if context != "" {
+				principalCfg.KubeContext = context
+			}
+			if namespace != "" {
+				principalCfg.Namespace = namespace
+			}
+			cfg.Contexts.Principals[name] = principalCfg
+
+			if setDefault {
+				cfg.DefaultPrincipal = name
+			}
+
+			err = validateConfig(cfg)
+			if err != nil {
+				cmdutil.Fatal("%v", err)
+			}
+
+			err = writeLocalConfig(cfg, globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to write config: %v", err)
+			}
+			fmt.Printf("Principal %s updated successfully\n", name)
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "The symbolic name of the principal to edit")
+	cmd.Flags().StringVar(&context, "context", "", "The new context of the principal")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "The new namespace of the principal")
+	cmd.Flags().BoolVar(&setDefault, "set-default", false, "Set the principal to the default")
+
+	err := cmd.MarkFlagRequired("name")
+	if err != nil {
+		cmdutil.Fatal("Failed to mark flag required: %v", err)
+	}
+	return cmd
+}
+
+func NewConfigEditAgentCommand() *cobra.Command {
+	var (
+		name      string
+		context   string
+		namespace string
+	)
+	cmd := &cobra.Command{
+		Use:   "agent",
+		Short: "Edit an agent in the local config file",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg, err := readLocalConfig(globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to read config: %v", err)
+			}
+
+			agentCfg, exists := cfg.Contexts.Agents[name]
+			if !exists {
+				cmdutil.Fatal("The agent %s does not exist in the config", name)
+			}
+
+			if context != "" {
+				agentCfg.KubeContext = context
+			}
+			if namespace != "" {
+				agentCfg.Namespace = namespace
+			}
+			cfg.Contexts.Agents[name] = agentCfg
+
+			err = validateConfig(cfg)
+			if err != nil {
+				cmdutil.Fatal("%v", err)
+			}
+
+			err = writeLocalConfig(cfg, globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to write config: %v", err)
+			}
+			fmt.Printf("Agent %s updated successfully\n", name)
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "The symbolic name of the agent to edit")
+	cmd.Flags().StringVar(&context, "context", "", "The new context of the agent")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "The new namespace of the agent")
+
+	err := cmd.MarkFlagRequired("name")
+	if err != nil {
+		cmdutil.Fatal("Failed to mark flag required: %v", err)
+	}
+
+	return cmd
+}
+
+func NewConfigDeleteCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete entries from the local config file",
+		Run: func(cmd *cobra.Command, args []string) {
+			_ = cmd.Help()
+		},
+	}
+	cmd.AddCommand(NewConfigDeletePrincipalCommand())
+	cmd.AddCommand(NewConfigDeleteAgentCommand())
+	return cmd
+}
+
+func NewConfigDeletePrincipalCommand() *cobra.Command {
+	var name string
+	cmd := &cobra.Command{
+		Use:   "principal",
+		Short: "Remove a principal from the local config file",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg, err := readLocalConfig(globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to read config: %v", err)
+			}
+
+			_, exists := cfg.Contexts.Principals[name]
+			if !exists {
+				cmdutil.Fatal("The principal %s does not exist in the config", name)
+			}
+
+			if cfg.DefaultPrincipal == name {
+				cmdutil.Fatal("Cannot delete the default principal")
+			}
+
+			delete(cfg.Contexts.Principals, name)
+			err = validateConfig(cfg)
+			if err != nil {
+				cmdutil.Fatal("%v", err)
+			}
+
+			err = writeLocalConfig(cfg, globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to write config: %v", err)
+			}
+			fmt.Printf("Principal %s deleted successfully\n", name)
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "The symbolic name of the principal to delete")
+
+	err := cmd.MarkFlagRequired("name")
+	if err != nil {
+		cmdutil.Fatal("Failed to mark flag required: %v", err)
+	}
+
+	return cmd
+}
+
+func NewConfigDeleteAgentCommand() *cobra.Command {
+	var name string
+	cmd := &cobra.Command{
+		Use:   "agent",
+		Short: "Remove an agent from the local config file",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg, err := readLocalConfig(globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to read config: %v", err)
+			}
+
+			_, exists := cfg.Contexts.Agents[name]
+			if !exists {
+				cmdutil.Fatal("The agent %s does not exist in the config", name)
+			}
+
+			delete(cfg.Contexts.Agents, name)
+			err = validateConfig(cfg)
+			if err != nil {
+				cmdutil.Fatal("%v", err)
+			}
+
+			err = writeLocalConfig(cfg, globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to write config: %v", err)
+			}
+			fmt.Printf("Agent %s deleted successfully\n", name)
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "The symbolic name of the agent to delete")
+
+	err := cmd.MarkFlagRequired("name")
+	if err != nil {
+		cmdutil.Fatal("Failed to mark flag required: %v", err)
+	}
+
+	return cmd
+}
+
+func NewConfigListCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List components in the config",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg, err := readLocalConfig(globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to read config: %v", err)
+			}
+
+			w := new(tabwriter.Writer)
+			w.Init(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "COMPONENT\tNAME\tCONTEXT\tNAMESPACE")
+
+			for name, principalCfg := range cfg.Contexts.Principals {
+				fmt.Fprintf(w, "principal\t%s\t%s\t%s\n", name, principalCfg.KubeContext, principalCfg.Namespace)
+			}
+
+			for name, agentCfg := range cfg.Contexts.Agents {
+				fmt.Fprintf(w, "agent\t%s\t%s\t%s\n", name, agentCfg.KubeContext, agentCfg.Namespace)
+			}
+
+			w.Flush()
+		},
+	}
+	cmd.AddCommand(NewConfigListPrincipalCommand())
+	cmd.AddCommand(NewConfigListAgentCommand())
+	return cmd
+}
+
+func NewConfigListPrincipalCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "principal",
+		Short: "List principals in the config",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg, err := readLocalConfig(globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to read config: %v", err)
+			}
+
+			w := new(tabwriter.Writer)
+			w.Init(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "NAME\tCONTEXT\tNAMESPACE\tDEFAULT")
+
+			for name, principalCfg := range cfg.Contexts.Principals {
+				isDefault := ""
+				if name == cfg.DefaultPrincipal {
+					isDefault = "X"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, principalCfg.KubeContext, principalCfg.Namespace, isDefault)
+			}
+
+			w.Flush()
+		},
+	}
+	return cmd
+}
+
+func NewConfigListAgentCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "agent",
+		Short: "List agents in the config",
+		Run: func(cmd *cobra.Command, args []string) {
+			cfg, err := readLocalConfig(globalOpts.configPath)
+			if err != nil {
+				cmdutil.Fatal("Failed to read config: %v", err)
+			}
+
+			w := new(tabwriter.Writer)
+			w.Init(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "NAME\tCONTEXT\tNAMESPACE")
+
+			for name, agentCfg := range cfg.Contexts.Agents {
+				fmt.Fprintf(w, "%s\t%s\t%s\n", name, agentCfg.KubeContext, agentCfg.Namespace)
+			}
+
+			w.Flush()
+		},
+	}
+	return cmd
+}
+
+// CreateLocalConfig parses the user's kubeconfig and sets up the config file based on that
+func CreateLocalConfig(kubeConfigPath, outputPath string) {
+	kubeConfig, err := clientcmd.LoadFromFile(kubeConfigPath)
+	if err != nil {
+		cmdutil.Fatal("Failed to load kubeconfig: %v", err)
+	}
+
+	var cfg localConfig
+	cfg.Contexts.Principals = make(map[string]componentConfig)
+	cfg.Contexts.Agents = make(map[string]componentConfig)
+	for context := range kubeConfig.Contexts {
+		var contextType string
+		var namespace string
+		var name string
+
+		fmt.Printf("Found context %s, is this a principal or agent, if it is neither type leave blank to skip? ", context)
+		_, err := fmt.Scanln(&contextType)
+		if err != nil {
+			if err.Error() == "unexpected newline" {
+				contextType = ""
+			} else {
+				cmdutil.Fatal("Error reading input: %v", err)
+			}
+		}
+		contextType = strings.TrimSpace(contextType)
+
+		for contextType != "principal" && contextType != "agent" && contextType != "" {
+			fmt.Print("Invalid input, please enter principal, agent, or leave blank to skip: ")
+			_, err = fmt.Scanln(&contextType)
+			if err != nil {
+				if err.Error() == "unexpected newline" {
+					contextType = ""
+				} else {
+					cmdutil.Fatal("Error reading input: %v", err)
+				}
+			}
+		}
+
+		if contextType == "" {
+			fmt.Println()
+			continue
+		}
+
+		fmt.Printf("Which namespace is the %s installed in? ", contextType)
+		_, err = fmt.Scanln(&namespace)
+		if err != nil {
+			cmdutil.Fatal("Error reading input: %v", err)
+		}
+		namespace = strings.TrimSpace(namespace)
+
+		for namespace == "" {
+			fmt.Print("Invalid input, namespace cannot be blank: ")
+			_, err = fmt.Scanln(&namespace)
+			if err != nil {
+				cmdutil.Fatal("Error reading input: %v", err)
+			}
+			namespace = strings.TrimSpace(namespace)
+		}
+
+		fmt.Printf("What name would you like to use for this %s? ", contextType)
+		_, err = fmt.Scanln(&name)
+		if err != nil {
+			cmdutil.Fatal("Error reading input: %v", err)
+		}
+		name = strings.TrimSpace(name)
+
+		for name == "" {
+			fmt.Print("Invalid input, name cannot be blank: ")
+			_, err = fmt.Scanln(&name)
+			if err != nil {
+				cmdutil.Fatal("Error reading input: %v", err)
+			}
+			name = strings.TrimSpace(name)
+		}
+
+		componentCfg := componentConfig{KubeContext: context, Namespace: namespace}
+		switch contextType {
+		case "principal":
+			_, exists := cfg.Contexts.Principals[name]
+			for exists {
+				fmt.Printf("Name for principal, %s, already exists. Enter a new name: ", name)
+				_, err = fmt.Scanln(&name)
+				if err != nil {
+					cmdutil.Fatal("Error reading input: %v", err)
+				}
+				name = strings.TrimSpace(name)
+				_, exists = cfg.Contexts.Principals[name]
+			}
+			cfg.Contexts.Principals[name] = componentCfg
+		case "agent":
+			_, exists := cfg.Contexts.Agents[name]
+			for exists {
+				fmt.Printf("Name for agent, %s, already exists. Enter a new name: ", name)
+				_, err = fmt.Scanln(&name)
+				if err != nil {
+					cmdutil.Fatal("Error reading input: %v", err)
+				}
+				name = strings.TrimSpace(name)
+				_, exists = cfg.Contexts.Agents[name]
+			}
+			cfg.Contexts.Agents[name] = componentCfg
+		}
+
+		fmt.Println()
+	}
+
+	if len(cfg.Contexts.Principals) > 0 {
+		for name := range cfg.Contexts.Principals {
+			fmt.Printf("> %s\n", name)
+		}
+
+		var defaultPrincipal string
+		fmt.Printf("Which of the above principals do you want to use as the default? ")
+		_, err = fmt.Scanln(&defaultPrincipal)
+		if err != nil {
+			cmdutil.Fatal("Error reading input: %v", err)
+		}
+
+		_, exists := cfg.Contexts.Principals[defaultPrincipal]
+		for !exists {
+			fmt.Printf("Invalid input, selected principal %s is not a valid principal: ", defaultPrincipal)
+			_, err = fmt.Scanln(&defaultPrincipal)
+			if err != nil {
+				cmdutil.Fatal("Error reading input: %v", err)
+			}
+			_, exists = cfg.Contexts.Principals[defaultPrincipal]
+		}
+		cfg.DefaultPrincipal = defaultPrincipal
+		fmt.Println()
+	}
+
+	err = writeLocalConfig(&cfg, outputPath)
+	if err != nil {
+		cmdutil.Fatal("Error writing config: %v", err)
+	}
+	fmt.Printf("Successfully wrote config to %s\n", outputPath)
+}
+
+// helper function that gets the default kube config path
+func getDefaultKubeConfig() string {
+	homedir, err := os.UserHomeDir()
+	if err != nil {
+		cmdutil.Fatal("error getting home directory: %v", err)
+	}
+	return filepath.Join(homedir, ".kube", "config")
+}
 
 // helper function that returns the default path for the config
 func getDefaultCfgPath() string {
@@ -138,7 +753,7 @@ func writeLocalConfig(cfg *localConfig, path string) error {
 		return err
 	}
 
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o600)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}

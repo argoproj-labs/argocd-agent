@@ -48,7 +48,7 @@ func NewRootCommand() *cobra.Command {
 	configGroup := &cobra.Group{ID: "config", Title: "Configuration"}
 	command.AddGroup(configGroup)
 	command.AddCommand(NewAgentCommand())
-	command.AddCommand(NewCreateConfigCommand())
+	command.AddCommand(NewConfigCommand())
 	command.AddCommand(NewCheckConfigCommand())
 	command.AddCommand(NewPKICommand())
 	command.AddCommand(NewJWTCommand())
@@ -56,7 +56,7 @@ func NewRootCommand() *cobra.Command {
 	addGlobalFlags(command, globalOpts)
 
 	command.PersistentPreRun = func(cmd *cobra.Command, args []string) {
-		skip := map[string]bool{"version": true, "create-config": true}
+		skip := map[string]bool{"version": true, "create": true}
 		if skip[cmd.Name()] {
 			return
 		}
