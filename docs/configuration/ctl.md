@@ -4,8 +4,7 @@ This document will explain how to use argocd-agentctl to assist in management of
 
 ## Available Commands
 
-These are the available commands for argocd-agentctl. Some of subcommands which are listed in the below sections
-for each command.
++These are the available commands for argocd-agentctl. Some commands have subcommands, which are detailed in the sections below.
 
 `agent` - Inspect and manage agent configuration
 
@@ -64,7 +63,7 @@ This file lets you refer to principals/agents by a symbolic name when calling th
 stopping you from needing to provide the `--principal/agent-context` and `--principal/agent-namespace` flags.
 
 The format for the config is below. You can either copy and paste this to the default path at `$HOME/.config/argocd-agent/ctl.conf`
-or use the `create-config` command to generate a config file from your kubeconfig.
+or use the `config create` command to generate a config file from your kubeconfig.
 
 It also supports setting a default principal that will be selected when you do not provide any flags.
 

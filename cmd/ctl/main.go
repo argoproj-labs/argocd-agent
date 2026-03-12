@@ -56,8 +56,8 @@ func NewRootCommand() *cobra.Command {
 	addGlobalFlags(command, globalOpts)
 
 	command.PersistentPreRun = func(cmd *cobra.Command, args []string) {
-		skip := map[string]bool{"version": true, "create": true}
-		if skip[cmd.Name()] {
+		skip := map[string]bool{"argocd-agentctl version": true, "argocd-agentctl config create": true}
+		if skip[cmd.CommandPath()] {
 			return
 		}
 		principalCfg, agentCfg = loadLocalConfig()
