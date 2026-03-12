@@ -30,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
+	kubegpgkey "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/gpgkey"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
@@ -43,6 +44,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
@@ -101,7 +103,8 @@ type Server struct {
 	// key: project name, value: set of repositories using the project
 	projectToRepos *MapToSet
 
-	repoManager *repository.RepositoryManager
+	repoManager   *repository.RepositoryManager
+	gpgKeyManager *gpgkey.GPGKeyManager
 	// At present, 'watchLock' is only acquired on calls to 'updateAppCallback'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
 	watchLock sync.RWMutex
 	// clientMap is not currently used
@@ -383,6 +386,28 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	repoBackened := kuberepository.NewKubernetesBackend(kubeClient.Clientset, namespace, repoInformer, false)
 	s.repoManager = repository.NewManager(repoBackened, namespace, false)
 
+	gpgKeyInformerOpts := []informer.InformerOption[*corev1.ConfigMap]{
+		informer.WithListHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return kubeClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, v1.ListOptions{})
+		}),
+		informer.WithWatchHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return kubeClient.Clientset.CoreV1().ConfigMaps(namespace).Watch(ctx, v1.ListOptions{})
+		}),
+		informer.WithAddHandler[*corev1.ConfigMap](s.newGPGKeyCallback),
+		informer.WithUpdateHandler[*corev1.ConfigMap](s.updateGPGKeyCallback),
+		informer.WithDeleteHandler[*corev1.ConfigMap](s.deleteGPGKeyCallback),
+		informer.WithFilters(kubegpgkey.DefaultFilterChain(namespace)),
+		informer.WithGroupResource[*corev1.ConfigMap]("", "configmaps"),
+	}
+
+	gpgKeyInformer, err := informer.NewInformer(ctx, gpgKeyInformerOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	gpgKeyBackend := kubegpgkey.NewKubernetesBackend(kubeClient.Clientset, namespace, gpgKeyInformer)
+	s.gpgKeyManager = gpgkey.NewManager(gpgKeyBackend, namespace)
+
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
 	}
@@ -577,6 +602,15 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}()
 
+	// The GPG key informer lives in its own go routine
+	go func() {
+		if err := s.gpgKeyManager.StartBackend(s.ctx); err != nil {
+			log().WithError(err).Error("GPG key informer has exited non-successfully")
+		} else {
+			log().Info("GPG key informer has exited")
+		}
+	}()
+
 	s.events = event.NewEventSource(s.options.serverName)
 
 	syncTimeout := s.options.informerSyncTimeout
@@ -598,6 +632,11 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		return fmt.Errorf("unable to sync Repository informer: %w", err)
 	}
 	log().Infof("Repository informer synced and ready")
+
+	if err := s.gpgKeyManager.EnsureSynced(syncTimeout); err != nil {
+		return fmt.Errorf("unable to sync GPG key informer: %w", err)
+	}
+	log().Infof("GPG key informer synced and ready")
 
 	// Start resource proxy if it is enabled
 	if s.resourceProxy != nil {
@@ -846,6 +885,15 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 
 		ev := s.events.RepositoryEvent(event.SpecUpdate, &repository)
 		tracing.PopulateSpanFromObject(span, &repository)
+		tracing.InjectTraceContext(ctx, ev)
+		sendQ.Add(ev)
+	}
+
+	// Send GPG keys ConfigMap to the agent (for managed agents only)
+	gpgKeyCM, err := s.gpgKeyManager.Get(s.ctx, common.ArgoCDGPGKeysConfigMapName, s.namespace)
+	if err == nil {
+		ev := s.events.GPGKeyEvent(event.SpecUpdate, gpgKeyCM)
+		tracing.PopulateSpanFromObject(span, gpgKeyCM)
 		tracing.InjectTraceContext(ctx, ev)
 		sendQ.Add(ev)
 	}

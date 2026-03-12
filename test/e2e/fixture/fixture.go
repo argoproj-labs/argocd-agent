@@ -421,6 +421,15 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		}
 	}
 
+	// Delete GPG keys ConfigMap from all clusters
+	for _, client := range []KubeClient{principalClient, managedAgentClient, autonomousAgentClient} {
+		gpgKeysCM := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}}
+		err = client.Delete(ctx, gpgKeysCM, metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
 	// Remove known finalizer-containing resources from guestbook ns (before we delete the NS in the next step)
 	deploymentList := appsv1.DeploymentList{}
 	err = managedAgentClient.List(ctx, "guestbook", &deploymentList, metav1.ListOptions{})

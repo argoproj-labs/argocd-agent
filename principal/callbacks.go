@@ -566,6 +566,88 @@ func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
 	}
 }
 
+func (s *Server) newGPGKeyCallback(outbound *corev1.ConfigMap) {
+	ctx, span := s.startSpan(operationcreate, "GPGKey", outbound)
+	defer span.End()
+
+	logCtx := log().WithFields(logrus.Fields{
+		"component": "EventCallback",
+		"event":     "gpgkey_create",
+	})
+
+	logCtx.Info("New GPG key ConfigMap event")
+
+	s.syncGPGKeyToManagedAgents(ctx, outbound, event.Create, logCtx)
+
+	if s.metrics != nil {
+		s.metrics.GPGKeyCreated.Inc()
+	}
+}
+
+func (s *Server) updateGPGKeyCallback(old, new *corev1.ConfigMap) {
+	ctx, span := s.startSpan(operationupdate, "GPGKey", old)
+	defer span.End()
+
+	logCtx := log().WithFields(logrus.Fields{
+		"component": "EventCallback",
+		"event":     "gpgkey_update",
+	})
+
+	logCtx.Info("Update GPG key ConfigMap event")
+
+	s.syncGPGKeyToManagedAgents(ctx, new, event.SpecUpdate, logCtx)
+
+	if s.metrics != nil {
+		s.metrics.GPGKeyUpdated.Inc()
+	}
+}
+
+func (s *Server) deleteGPGKeyCallback(outbound *corev1.ConfigMap) {
+	ctx, span := s.startSpan(operationdelete, "GPGKey", outbound)
+	defer span.End()
+
+	logCtx := log().WithFields(logrus.Fields{
+		"component": "EventCallback",
+		"event":     "gpgkey_delete",
+	})
+
+	logCtx.Info("Delete GPG key ConfigMap event")
+
+	s.syncGPGKeyToManagedAgents(ctx, outbound, event.Delete, logCtx)
+
+	if s.metrics != nil {
+		s.metrics.GPGKeyDeleted.Inc()
+	}
+}
+
+func (s *Server) syncGPGKeyToManagedAgents(ctx context.Context, cm *corev1.ConfigMap, evType event.EventType, logCtx *logrus.Entry) {
+	s.clientLock.RLock()
+	defer s.clientLock.RUnlock()
+
+	for agentName, mode := range s.namespaceMap {
+		if mode != types.AgentModeManaged {
+			continue
+		}
+
+		q := s.queues.SendQ(agentName)
+		if q == nil {
+			logCtx.Errorf("Queue pair not found for agent %s", agentName)
+			continue
+		}
+
+		ev := s.events.GPGKeyEvent(evType, cm)
+		tracing.InjectTraceContext(ctx, ev)
+		q.Add(ev)
+
+		if evType == event.Delete {
+			s.resources.Remove(agentName, resources.NewResourceKeyFromGPGKey(cm))
+		} else {
+			s.resources.Add(agentName, resources.NewResourceKeyFromGPGKey(cm))
+		}
+		logCtx.WithField("agent", agentName).Tracef("Added GPG key event to send queue")
+	}
+}
+
 // deleteNamespaceCallback is called when the user deletes the agent namespace.
 // Since there is no namespace we can remove the queue associated with this agent.
 func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {

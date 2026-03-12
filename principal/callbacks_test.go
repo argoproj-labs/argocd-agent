@@ -2236,6 +2236,257 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 	}
 }
 
+func TestServer_newGPGKeyCallback(t *testing.T) {
+	tests := []struct {
+		name           string
+		cm             *corev1.ConfigMap
+		namespaceMap   map[string]types.AgentMode
+		expectEvents   bool
+		expectedAgents []string
+	}{
+		{
+			name: "successful GPG key creation with single managed agent",
+			cm: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "argocd-gpg-keys-cm",
+					Namespace: "argocd",
+					UID:       "gpg-uid-123",
+				},
+				Data: map[string]string{
+					"my-key": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n...",
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeAutonomous,
+			},
+			expectEvents:   true,
+			expectedAgents: []string{"agent1"},
+		},
+		{
+			name: "GPG key creation with multiple managed agents",
+			cm: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "argocd-gpg-keys-cm",
+					Namespace: "argocd",
+					UID:       "gpg-uid-456",
+				},
+				Data: map[string]string{
+					"key1": "-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey1...",
+					"key2": "-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey2...",
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeManaged,
+				"agent3": types.AgentModeAutonomous,
+			},
+			expectEvents:   true,
+			expectedAgents: []string{"agent1", "agent2"},
+		},
+		{
+			name: "GPG key creation with no managed agents",
+			cm: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "argocd-gpg-keys-cm",
+					Namespace: "argocd",
+					UID:       "gpg-uid-789",
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeAutonomous,
+			},
+			expectEvents:   false,
+			expectedAgents: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				ctx:          context.Background(),
+				queues:       queue.NewSendRecvQueues(),
+				events:       event.NewEventSource("test"),
+				namespaceMap: tt.namespaceMap,
+				resources:    resources.NewAgentResources(),
+			}
+
+			for agentName := range tt.namespaceMap {
+				err := s.queues.Create(agentName)
+				require.NoError(t, err)
+			}
+
+			s.newGPGKeyCallback(tt.cm)
+
+			if tt.expectEvents {
+				var eventsReceived []string
+				for _, agentName := range tt.expectedAgents {
+					q := s.queues.SendQ(agentName)
+					require.NotNil(t, q)
+
+					if q.Len() > 0 {
+						ev, shutdown := q.Get()
+						require.False(t, shutdown)
+						require.NotNil(t, ev)
+
+						assert.Equal(t, event.Create.String(), ev.Type())
+
+						eventsReceived = append(eventsReceived, agentName)
+						q.Done(ev)
+					}
+				}
+				assert.ElementsMatch(t, tt.expectedAgents, eventsReceived)
+			} else {
+				for agentName := range tt.namespaceMap {
+					q := s.queues.SendQ(agentName)
+					require.NotNil(t, q)
+					assert.Equal(t, 0, q.Len())
+				}
+			}
+		})
+	}
+}
+
+func TestServer_syncGPGKeyToManagedAgents(t *testing.T) {
+	t.Run("sends create event to all managed agents", func(t *testing.T) {
+		s := &Server{
+			ctx:    context.Background(),
+			queues: queue.NewSendRecvQueues(),
+			events: event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeManaged,
+				"agent3": types.AgentModeAutonomous,
+			},
+			resources: resources.NewAgentResources(),
+		}
+
+		s.queues.Create("agent1")
+		s.queues.Create("agent2")
+		s.queues.Create("agent3")
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		logCtx := logrus.WithField("test", "syncGPGKeyToManagedAgents")
+		s.syncGPGKeyToManagedAgents(context.Background(), cm, event.Create, logCtx)
+
+		assert.Equal(t, 1, s.queues.SendQ("agent1").Len())
+		assert.Equal(t, 1, s.queues.SendQ("agent2").Len())
+		assert.Equal(t, 0, s.queues.SendQ("agent3").Len())
+	})
+
+	t.Run("sends delete event and removes resources", func(t *testing.T) {
+		s := &Server{
+			ctx:    context.Background(),
+			queues: queue.NewSendRecvQueues(),
+			events: event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+			},
+			resources: resources.NewAgentResources(),
+		}
+
+		s.queues.Create("agent1")
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		s.resources.Add("agent1", resources.NewResourceKeyFromGPGKey(cm))
+		assert.Equal(t, 1, len(s.resources.GetAllResources("agent1")))
+
+		logCtx := logrus.WithField("test", "syncGPGKeyToManagedAgents")
+		s.syncGPGKeyToManagedAgents(context.Background(), cm, event.Delete, logCtx)
+
+		assert.Equal(t, 1, s.queues.SendQ("agent1").Len())
+
+		ev, shutdown := s.queues.SendQ("agent1").Get()
+		require.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type())
+		s.queues.SendQ("agent1").Done(ev)
+
+		assert.Equal(t, 0, len(s.resources.GetAllResources("agent1")))
+	})
+
+	t.Run("sends update event and adds resources", func(t *testing.T) {
+		s := &Server{
+			ctx:    context.Background(),
+			queues: queue.NewSendRecvQueues(),
+			events: event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+			},
+			resources: resources.NewAgentResources(),
+		}
+
+		s.queues.Create("agent1")
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		logCtx := logrus.WithField("test", "syncGPGKeyToManagedAgents")
+		s.syncGPGKeyToManagedAgents(context.Background(), cm, event.SpecUpdate, logCtx)
+
+		assert.Equal(t, 1, s.queues.SendQ("agent1").Len())
+
+		ev, shutdown := s.queues.SendQ("agent1").Get()
+		require.False(t, shutdown)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+		s.queues.SendQ("agent1").Done(ev)
+
+		assert.Equal(t, 1, len(s.resources.GetAllResources("agent1")))
+	})
+}
+
+func TestServer_deleteGPGKeyCallback(t *testing.T) {
+	t.Run("sends delete event to managed agents", func(t *testing.T) {
+		s := &Server{
+			ctx:    context.Background(),
+			queues: queue.NewSendRecvQueues(),
+			events: event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeAutonomous,
+			},
+			resources: resources.NewAgentResources(),
+		}
+
+		s.queues.Create("agent1")
+		s.queues.Create("agent2")
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		s.resources.Add("agent1", resources.NewResourceKeyFromGPGKey(cm))
+
+		s.deleteGPGKeyCallback(cm)
+
+		assert.Equal(t, 1, s.queues.SendQ("agent1").Len())
+		assert.Equal(t, 0, s.queues.SendQ("agent2").Len())
+
+		ev, shutdown := s.queues.SendQ("agent1").Get()
+		require.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type())
+		s.queues.SendQ("agent1").Done(ev)
+	})
+}
+
 func drainQueue(t *testing.T, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) {
 	for q.Len() > 0 {
 		ev, shutdown := q.Get()

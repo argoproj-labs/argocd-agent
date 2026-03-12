@@ -88,6 +88,8 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 		err = a.processIncomingAppProject(ev)
 	case event.TargetRepository:
 		err = a.processIncomingRepository(ev)
+	case event.TargetGPGKey:
+		err = a.processIncomingGPGKey(ev)
 	case event.TargetResource:
 		err = a.processIncomingResourceRequest(ev)
 	case event.TargetResourceResync:
@@ -912,6 +914,189 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 	err = a.repoManager.Unmanage(repo.Name)
 	if err != nil {
 		a.logGrpcEvent().Warnf("Could not unmanage repository %s: %v", repo.Name, err)
+	}
+
+	return nil
+}
+
+// processIncomingGPGKey processes an incoming GPG key event.
+func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"method": "processIncomingGPGKey",
+	})
+
+	incomingCM, err := ev.GPGKey()
+	if err != nil {
+		return err
+	}
+
+	if a.mode != types.AgentModeManaged {
+		return event.NewEventDiscardedErr("cannot process GPG key, agent is not in managed mode")
+	}
+
+	incomingCM.SetNamespace(a.namespace)
+
+	var exists, sourceUIDMatch bool
+	exists, sourceUIDMatch, err = a.gpgKeyManager.CompareSourceUID(a.context, incomingCM)
+	if err != nil {
+		return fmt.Errorf("failed to compare source UID of GPG key ConfigMap: %w", err)
+	}
+
+	switch ev.Type() {
+	case event.Create:
+		if exists {
+			if sourceUIDMatch {
+				logCtx.Debug("Received a Create event for an existing GPG key. Updating the existing GPG key")
+				_, err := a.updateGPGKey(incomingCM)
+				if err != nil {
+					return fmt.Errorf("could not update the existing GPG key: %w", err)
+				}
+				return nil
+			} else {
+				logCtx.Debug("GPG key already exists with a different source UID. Deleting the existing GPG key")
+				if err := a.deleteGPGKey(incomingCM); err != nil {
+					return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
+				}
+			}
+		}
+
+		_, err = a.createGPGKey(incomingCM)
+		if err != nil {
+			logCtx.Errorf("Error creating GPG key: %v", err)
+		}
+
+	case event.SpecUpdate:
+		if !exists {
+			logCtx.Debug("Received an Update event for a GPG key that doesn't exist. Creating the incoming GPG key")
+			if _, err := a.createGPGKey(incomingCM); err != nil {
+				return fmt.Errorf("could not create incoming GPG key: %w", err)
+			}
+			return nil
+		}
+
+		if !sourceUIDMatch {
+			logCtx.Debug("Source UID mismatch between the incoming GPG key and existing GPG key. Deleting the existing GPG key")
+			if err := a.deleteGPGKey(incomingCM); err != nil {
+				return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
+			}
+
+			logCtx.Debug("Creating the incoming GPG key after deleting the existing GPG key")
+			if _, err := a.createGPGKey(incomingCM); err != nil {
+				return fmt.Errorf("could not create incoming GPG key after deleting existing GPG key: %w", err)
+			}
+			return nil
+		}
+
+		_, err = a.updateGPGKey(incomingCM)
+		if err != nil {
+			logCtx.Errorf("Error updating GPG key: %v", err)
+		}
+
+	case event.Delete:
+		err = a.deleteGPGKey(incomingCM)
+		if err != nil {
+			logCtx.Errorf("Error deleting GPG key: %v", err)
+		}
+	default:
+		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
+	}
+
+	return err
+}
+
+func (a *Agent) createGPGKey(incoming *corev1.ConfigMap) (*corev1.ConfigMap, error) {
+	incoming.SetNamespace(a.namespace)
+
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"method": "CreateGPGKey",
+		"gpgKey": incoming.Name,
+	})
+
+	if a.gpgKeyManager.IsManaged(incoming.Name) {
+		logCtx.Trace("GPG key is already managed on this agent. Updating the existing GPG key")
+		return a.updateGPGKey(incoming)
+	}
+
+	logCtx.Infof("Creating a new GPG key on behalf of an incoming event")
+
+	if incoming.Annotations == nil {
+		incoming.Annotations = make(map[string]string)
+	}
+	a.sourceCache.GPGKey.Set(incoming.UID, incoming.Data)
+
+	created, err := a.gpgKeyManager.Create(a.context, incoming)
+	if apierrors.IsAlreadyExists(err) {
+		logCtx.Debug("GPG key already exists")
+		return created, nil
+	}
+	return created, err
+}
+
+func (a *Agent) updateGPGKey(incoming *corev1.ConfigMap) (*corev1.ConfigMap, error) {
+	incoming.SetNamespace(a.namespace)
+
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"method":          "UpdateGPGKey",
+		"gpgKey":          incoming.Name,
+		"resourceVersion": incoming.ResourceVersion,
+	})
+
+	if !a.gpgKeyManager.IsManaged(incoming.Name) {
+		logCtx.Trace("GPG key is not managed on this agent. Creating the new GPG key")
+		return a.createGPGKey(incoming)
+	}
+
+	if a.gpgKeyManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
+		logCtx.Tracef("Discarding this event, because agent has seen this version %s already", incoming.ResourceVersion)
+		return nil, event.NewEventDiscardedErr("the version %s has already been seen by this agent", incoming.ResourceVersion)
+	} else {
+		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
+	}
+
+	logCtx.Infof("Updating GPG key")
+
+	a.sourceCache.GPGKey.Set(incoming.UID, incoming.Data)
+	return a.gpgKeyManager.UpdateManagedGPGKey(a.context, incoming)
+}
+
+func (a *Agent) deleteGPGKey(cm *corev1.ConfigMap) error {
+	cm.SetNamespace(a.namespace)
+
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"method": "DeleteGPGKey",
+		"gpgKey": cm.Name,
+	})
+
+	if !a.gpgKeyManager.IsManaged(cm.Name) {
+		return fmt.Errorf("GPG key ConfigMap %s is not managed", cm.Name)
+	}
+
+	logCtx.Infof("Deleting GPG key ConfigMap")
+
+	existing, err := a.gpgKeyManager.Get(a.context, cm.Name, cm.Namespace)
+	if err != nil {
+		return err
+	}
+
+	sourceUID := existing.Annotations[manager.SourceUIDAnnotation]
+	a.deletions.MarkExpected(ktypes.UID(sourceUID))
+
+	deletionPropagation := backend.DeletePropagationBackground
+	err = a.gpgKeyManager.Delete(a.context, cm.Name, cm.Namespace, &deletionPropagation)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logCtx.Debug("GPG key ConfigMap is not found, perhaps it is already deleted")
+			a.sourceCache.GPGKey.Delete(existing.UID)
+			return nil
+		}
+		return err
+	}
+
+	a.sourceCache.GPGKey.Delete(existing.UID)
+
+	err = a.gpgKeyManager.Unmanage(cm.Name)
+	if err != nil {
+		a.logGrpcEvent().Warnf("Could not unmanage GPG key ConfigMap %s: %v", cm.Name, err)
 	}
 
 	return nil
