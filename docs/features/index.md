@@ -38,7 +38,7 @@ argocd-agent transforms traditional multi-cluster Argo CD deployments by inverti
 
 **Custom Resource Actions**: Full support for executing Argo CD resource actions on workload clusters, allowing custom operations and workflows to be triggered from the central control plane.
 
-**ApplicationSet Support**: ApplicationSets can run on either the control plane or the agent, with generated Applications synced through the normal agent protocol. In Managed mode, destination-based agent mapping enables ApplicationSets to generate Applications that are routed to the appropriate agents according to their target cluster destinations. ApplicationSet resources themselves are not synced between principal and agent, as the architecture operates at the Application level.
+**[ApplicationSet Support](../user-guide/applicationsets.md)**: ApplicationSets can run on either the control plane or the agent, with generated Applications synced through the normal agent protocol. In Managed mode, destination-based agent mapping enables ApplicationSets to generate Applications that are routed to the appropriate agents according to their target cluster destinations. ApplicationSet resources themselves are not synced between principal and agent, as the architecture operates at the Application level.
 
 **Terminal Access**: Web-based terminal access to pods running on remote clusters, accessible directly from the Argo CD UI. The principal bridges WebSocket connections from the browser to agents via gRPC, and agents execute into pods using the Kubernetes exec API.
 
