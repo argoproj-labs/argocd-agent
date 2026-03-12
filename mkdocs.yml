@@ -46,6 +46,7 @@ nav:
     - Managing Applications: user-guide/applications.md
     - Managing AppProjects: user-guide/appprojects.md
     - ApplicationSets: user-guide/applicationsets.md
+    - GPG Key Synchronization: user-guide/gpg-keys.md
     - Adding an agent: user-guide/adding-agents.md
     - Accessing live resources on workload clusters: user-guide/live-resources.md
     - Migration from classical multi-cluster Argo CD: user-guide/migration.md
