@@ -67,6 +67,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -891,7 +892,11 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 
 	// Send GPG keys ConfigMap to the agent (for managed agents only)
 	gpgKeyCM, err := s.gpgKeyManager.Get(s.ctx, common.ArgoCDGPGKeysConfigMapName, s.namespace)
-	if err == nil {
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to get GPG key ConfigMap: %w", err)
+		}
+	} else {
 		ev := s.events.GPGKeyEvent(event.SpecUpdate, gpgKeyCM)
 		tracing.PopulateSpanFromObject(span, gpgKeyCM)
 		tracing.InjectTraceContext(ctx, ev)
