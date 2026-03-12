@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -85,7 +86,26 @@ const (
 const (
 	resourceID string = "resourceid"
 	eventID    string = "eventid"
+	sentAt     string = "sentat"
 )
+
+// SetSentAt stamps the current time on an event as the send time.
+func SetSentAt(ev *cloudevents.Event) {
+	ev.SetExtension(sentAt, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+// SentAt returns the send timestamp from an event, or nil if not set.
+func SentAt(ev *cloudevents.Event) *time.Time {
+	val, ok := ev.Extensions()[sentAt].(string)
+	if !ok {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, val)
+	if err != nil {
+		return nil
+	}
+	return &t
+}
 
 var (
 	ErrEventDiscarded    error = errors.New("event discarded")

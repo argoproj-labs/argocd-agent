@@ -386,6 +386,10 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		"event_type":   eventMsg.event.Type(),
 	})
 
+	if !isFireAndForget {
+		SetSentAt(eventMsg.event)
+	}
+
 	pev, err := format.ToProto(eventMsg.event)
 	eventMsg.mu.Unlock()
 
