@@ -51,6 +51,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -698,6 +699,9 @@ func (a *Agent) populateSourceCache(ctx context.Context) error {
 
 	log().Infof("Recreating GPG key spec cache from existing resources on cluster")
 	gpgKeyCM, err := a.gpgKeyManager.Get(ctx, common.ArgoCDGPGKeysConfigMapName, a.namespace)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
 	if err == nil {
 		sourceUID, exists := gpgKeyCM.Annotations[manager.SourceUIDAnnotation]
 		if exists {

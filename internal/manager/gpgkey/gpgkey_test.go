@@ -73,8 +73,9 @@ func Test_CompareSourceUIDForGPGKey(t *testing.T) {
 	})
 
 	t.Run("should return exists true and uidMatch false if there is no UID annotation", func(t *testing.T) {
+		getMock.Unset()
 		oldCM.Annotations = map[string]string{}
-		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		getMock = mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
 		m := &GPGKeyManager{backend: mockedBackend}
 		ctx := context.Background()
 
