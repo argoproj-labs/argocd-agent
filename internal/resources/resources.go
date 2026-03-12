@@ -31,6 +31,7 @@ const (
 	appProjectKind     = "AppProject"
 	repositoryKind     = "Repository"
 	applicationSetKind = "ApplicationSet"
+	gpgKeyKind         = "GPGKey"
 )
 
 // ResourceKey uniquely identifies a resource in the cluster
@@ -88,6 +89,14 @@ func NewResourceKeyFromRepository(repo *corev1.Secret) ResourceKey {
 	}
 
 	return newResourceKey(repositoryKind, repo.Name, repo.Namespace, string(repo.UID))
+}
+
+func NewResourceKeyFromGPGKey(cm *corev1.ConfigMap) ResourceKey {
+	sourceUID, ok := cm.Annotations[manager.SourceUIDAnnotation]
+	if ok {
+		return newResourceKey(gpgKeyKind, cm.Name, cm.Namespace, sourceUID)
+	}
+	return newResourceKey(gpgKeyKind, cm.Name, cm.Namespace, string(cm.UID))
 }
 
 func newResourceKey(kind, name, namespace, uid string) ResourceKey {

@@ -28,6 +28,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
 	kubeappproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
+	kubegpgkey "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/gpgkey"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
@@ -39,6 +40,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
@@ -53,6 +55,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 
+	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	appstatecache "github.com/argoproj/argo-cd/v3/util/cache/appstate"
@@ -79,6 +82,7 @@ type Agent struct {
 	appManager       *application.ApplicationManager
 	projectManager   *appproject.AppProjectManager
 	repoManager      *repository.RepositoryManager
+	gpgKeyManager    *gpgkey.GPGKeyManager
 	namespaceManager *kubenamespace.KubernetesBackend
 	mode             types.AgentMode
 	// queues is a queue of create/update/delete events to send to the principal
@@ -367,6 +371,28 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	repoBackened := kuberepository.NewKubernetesBackend(client.Clientset, a.namespace, repoInformer, true)
 	a.repoManager = repository.NewManager(repoBackened, a.namespace, true)
 
+	gpgKeyInformerOptions := []informer.InformerOption[*corev1.ConfigMap]{
+		informer.WithListHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+			return client.Clientset.CoreV1().ConfigMaps(a.namespace).List(ctx, v1.ListOptions{})
+		}),
+		informer.WithWatchHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+			return client.Clientset.CoreV1().ConfigMaps(a.namespace).Watch(ctx, v1.ListOptions{})
+		}),
+		informer.WithAddHandler[*corev1.ConfigMap](a.handleGPGKeyCreation),
+		informer.WithUpdateHandler[*corev1.ConfigMap](a.handleGPGKeyUpdate),
+		informer.WithDeleteHandler[*corev1.ConfigMap](a.handleGPGKeyDeletion),
+		informer.WithFilters(kubegpgkey.DefaultFilterChain(a.namespace)),
+		informer.WithGroupResource[*corev1.ConfigMap]("", "configmaps"),
+	}
+
+	gpgKeyInformer, err := informer.NewInformer(ctx, gpgKeyInformerOptions...)
+	if err != nil {
+		return nil, fmt.Errorf("could not instantiate GPG key informer: %w", err)
+	}
+
+	gpgKeyBackend := kubegpgkey.NewKubernetesBackend(client.Clientset, a.namespace, gpgKeyInformer)
+	a.gpgKeyManager = gpgkey.NewManager(gpgKeyBackend, a.namespace)
+
 	nsInformerOpts := []informer.InformerOption[*corev1.Namespace]{
 		informer.WithListHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 			return client.Clientset.CoreV1().Namespaces().List(ctx, opts)
@@ -510,10 +536,24 @@ func (a *Agent) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Start the GPG key backend in the background
+	go func() {
+		if err := a.gpgKeyManager.StartBackend(a.context); err != nil {
+			log().WithError(err).Error("GPG key backend has exited non-successfully")
+		} else {
+			log().Info("GPG key backend has exited")
+		}
+	}()
+
 	if err = a.repoManager.EnsureSynced(waitForSyncedDuration); err != nil {
 		return fmt.Errorf("unable to sync Repository informer: %w", err)
 	}
 	log().Infof("Repository informer synced and ready")
+
+	if err = a.gpgKeyManager.EnsureSynced(waitForSyncedDuration); err != nil {
+		return fmt.Errorf("unable to sync GPG key informer: %w", err)
+	}
+	log().Infof("GPG key informer synced and ready")
 
 	if a.options.healthzPort > 0 {
 		// Endpoint to check if the agent is up and running
@@ -653,6 +693,15 @@ func (a *Agent) populateSourceCache(ctx context.Context) error {
 		sourceUID, exists := repo.Annotations[manager.SourceUIDAnnotation]
 		if exists {
 			a.sourceCache.Repository.Set(ty.UID(sourceUID), repo.Data)
+		}
+	}
+
+	log().Infof("Recreating GPG key spec cache from existing resources on cluster")
+	gpgKeyCM, err := a.gpgKeyManager.Get(ctx, common.ArgoCDGPGKeysConfigMapName, a.namespace)
+	if err == nil {
+		sourceUID, exists := gpgKeyCM.Annotations[manager.SourceUIDAnnotation]
+		if exists {
+			a.sourceCache.GPGKey.Set(ty.UID(sourceUID), gpgKeyCM.Data)
 		}
 	}
 

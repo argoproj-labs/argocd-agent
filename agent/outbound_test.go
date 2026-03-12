@@ -691,3 +691,188 @@ func Test_handleRepositoryDeletion(t *testing.T) {
 		assert.False(t, a.repoManager.IsManaged("test-repo"))
 	})
 }
+
+func Test_handleGPGKeyCreation(t *testing.T) {
+	a, _ := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	t.Run("Skip GPG key event in autonomous mode", func(t *testing.T) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		a.mode = types.AgentModeAutonomous
+		defer func() {
+			a.mode = types.AgentModeManaged
+		}()
+
+		initialResourceCount := a.resources.Len()
+		a.handleGPGKeyCreation(cm)
+
+		assert.Equal(t, initialResourceCount, a.resources.Len())
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Skip already managed GPG key in managed mode", func(t *testing.T) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		a.mode = types.AgentModeManaged
+
+		err := a.gpgKeyManager.Manage("argocd-gpg-keys-cm")
+		require.NoError(t, err)
+		defer a.gpgKeyManager.ClearManaged()
+
+		initialResourceCount := a.resources.Len()
+		a.handleGPGKeyCreation(cm)
+
+		assert.Equal(t, initialResourceCount+1, a.resources.Len())
+		assert.True(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Successfully handle new GPG key in managed mode", func(t *testing.T) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "new-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		a.mode = types.AgentModeManaged
+		defer a.gpgKeyManager.ClearManaged()
+
+		initialResourceCount := a.resources.Len()
+		a.handleGPGKeyCreation(cm)
+
+		assert.Equal(t, initialResourceCount+1, a.resources.Len())
+		assert.True(t, a.gpgKeyManager.IsManaged("new-gpg-keys-cm"))
+	})
+}
+
+func Test_handleGPGKeyUpdate(t *testing.T) {
+	a, _ := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	oldCM := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "argocd-gpg-keys-cm",
+			Namespace:       "argocd",
+			ResourceVersion: "1",
+		},
+	}
+
+	newCM := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "argocd-gpg-keys-cm",
+			Namespace:       "argocd",
+			ResourceVersion: "2",
+		},
+	}
+
+	t.Run("Skip GPG key update in autonomous mode", func(t *testing.T) {
+		a.mode = types.AgentModeAutonomous
+		defer func() {
+			a.mode = types.AgentModeManaged
+		}()
+
+		// Should not panic or cause issues
+		a.handleGPGKeyUpdate(oldCM, newCM)
+
+		// Should not be managed
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Skip ignored change in managed mode", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		// Pre-manage the GPG key and ignore the change
+		err := a.gpgKeyManager.Manage("argocd-gpg-keys-cm")
+		require.NoError(t, err)
+		err = a.gpgKeyManager.IgnoreChange("argocd-gpg-keys-cm", "2")
+		require.NoError(t, err)
+		defer a.gpgKeyManager.ClearManaged()
+
+		// Should skip because the change is ignored
+		a.handleGPGKeyUpdate(oldCM, newCM)
+
+		// Should still be managed but no further action taken
+		assert.True(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Skip update for unmanaged GPG key", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+
+		// Should skip because the GPG key is not managed
+		a.handleGPGKeyUpdate(oldCM, newCM)
+
+		// Should still not be managed
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Process valid GPG key update", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		err := a.gpgKeyManager.Manage("argocd-gpg-keys-cm")
+		require.NoError(t, err)
+		defer a.gpgKeyManager.ClearManaged()
+
+		// Should process the update successfully
+		a.handleGPGKeyUpdate(oldCM, newCM)
+
+		// Should still be managed
+		assert.True(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+}
+
+func Test_handleGPGKeyDeletion(t *testing.T) {
+	a, _ := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+		},
+	}
+
+	t.Run("Skip GPG key deletion in autonomous mode", func(t *testing.T) {
+		a.mode = types.AgentModeAutonomous
+		defer func() {
+			a.mode = types.AgentModeManaged
+		}()
+
+		a.resources.Add(resources.NewResourceKeyFromGPGKey(cm))
+		initialResourceCount := a.resources.Len()
+
+		a.handleGPGKeyDeletion(cm)
+
+		assert.Equal(t, initialResourceCount, a.resources.Len())
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Skip deletion for unmanaged GPG key", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		a.resources.Add(resources.NewResourceKeyFromGPGKey(cm))
+		initialResourceCount := a.resources.Len()
+
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+
+		a.handleGPGKeyDeletion(cm)
+
+		assert.Equal(t, initialResourceCount-1, a.resources.Len())
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+}

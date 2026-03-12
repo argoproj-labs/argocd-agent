@@ -473,6 +473,95 @@ func (a *Agent) handleRepositoryDeletion(repo *corev1.Secret) {
 	}
 }
 
+func (a *Agent) handleGPGKeyCreation(cm *corev1.ConfigMap) {
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"event": "NewGPGKey",
+		"name":  cm.Name,
+	})
+
+	logCtx.Debugf("Processing new GPG key event")
+
+	if a.mode.IsAutonomous() {
+		logCtx.Debug("Skipping GPG key event because the agent is not in managed mode")
+		return
+	}
+
+	a.resources.Add(resources.NewResourceKeyFromGPGKey(cm))
+
+	if a.gpgKeyManager.IsManaged(cm.Name) {
+		logCtx.Debug("Skipping GPG key event because it is already managed")
+		return
+	}
+
+	if err := a.gpgKeyManager.Manage(cm.Name); err != nil {
+		logCtx.Errorf("Could not manage GPG key ConfigMap: %v", err)
+	}
+}
+
+func (a *Agent) handleGPGKeyUpdate(old, new *corev1.ConfigMap) {
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"event": "UpdateGPGKey",
+		"name":  new.Name,
+	})
+
+	logCtx.Debug("Processing update GPG key event")
+
+	a.watchLock.Lock()
+	defer a.watchLock.Unlock()
+
+	if a.gpgKeyManager.RevertGPGKeyChanges(a.context, new, a.sourceCache.GPGKey) {
+		logCtx.Debug("Modifications done to GPG keys ConfigMap are reverted")
+		return
+	}
+
+	if a.mode.IsAutonomous() {
+		logCtx.Debug("Skipping GPG key event because the agent is not in managed mode")
+		return
+	}
+
+	if !a.gpgKeyManager.IsManaged(new.Name) {
+		logCtx.Debug("Skipping GPG key event because the GPG key is not managed")
+		return
+	}
+}
+
+func (a *Agent) handleGPGKeyDeletion(cm *corev1.ConfigMap) {
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"event": "DeleteGPGKey",
+		"name":  cm.Name,
+	})
+
+	logCtx.Debug("Processing delete GPG key event")
+
+	if isResourceFromPrincipal(cm) {
+		reverted, err := manager.RevertUserInitiatedDeletion(a.context, cm, a.deletions, a.gpgKeyManager, logCtx)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert invalid deletion of GPG keys ConfigMap")
+			return
+		}
+		if reverted {
+			logCtx.Trace("Deleted GPG keys ConfigMap is recreated")
+			return
+		}
+	}
+
+	if a.mode.IsAutonomous() {
+		logCtx.Debug("Skipping GPG key event because the agent is not in managed mode")
+		return
+	}
+
+	a.resources.Remove(resources.NewResourceKeyFromGPGKey(cm))
+
+	if !a.gpgKeyManager.IsManaged(cm.Name) {
+		logCtx.Debug("Skipping GPG key event because the GPG key is not managed")
+		return
+	}
+
+	if err := a.gpgKeyManager.Unmanage(cm.Name); err != nil {
+		logCtx.Errorf("Could not unmanage GPG key ConfigMap: %v", err)
+	}
+}
+
 // isResourceFromPrincipal checks if a Kubernetes resource was created by the principal
 // by examining if it has the source UID annotation.
 func isResourceFromPrincipal(resource metav1.Object) bool {

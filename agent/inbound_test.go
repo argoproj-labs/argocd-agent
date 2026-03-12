@@ -34,6 +34,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -1607,5 +1608,321 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		expected := "agent can only handle ResourceResync request in the managed mode"
 		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
 		assert.Equal(t, expected, err.Error())
+	})
+}
+
+func Test_ProcessIncomingGPGKey(t *testing.T) {
+	evs := event.NewEventSource("test")
+
+	incomingCM := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+		},
+		Data: map[string]string{
+			"my-key": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n...",
+		},
+	}
+
+	oldCM := incomingCM.DeepCopy()
+
+	incomingCM.UID = ktypes.UID("new_uid")
+
+	createdCM := incomingCM.DeepCopy()
+	createdCM.UID = ktypes.UID("random_uid")
+	createdCM.Annotations = map[string]string{
+		manager.SourceUIDAnnotation: string(incomingCM.UID),
+	}
+
+	createAgent := func(t *testing.T) (*Agent, *backend_mocks.GPGKey) {
+		t.Helper()
+		a, _ := newAgent(t)
+		a.mode = types.AgentModeManaged
+		be := backend_mocks.NewGPGKey(t)
+		a.gpgKeyManager = gpgkey.NewManager(be, "argocd")
+		return a, be
+	}
+
+	t.Run("Create: Old GPG key with different UID must be deleted before creating the incoming GPG key", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdCM, nil)
+		defer createMock.Unset()
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		defer deleteMock.Unset()
+
+		ev := event.New(evs.GPGKeyEvent(event.Create, incomingCM), event.TargetGPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID, delete old GPG key, and create a new GPG key.
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new GPG key has the updated source UID annotation.
+		cmInterface := be.Calls[3].ReturnArguments[0]
+		latestCM, ok := cmInterface.(*corev1.ConfigMap)
+		require.True(t, ok)
+		require.Equal(t, string(incomingCM.UID), latestCM.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Create: Old GPG key with the same UID must be updated", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		// The incoming GPG key's UID matches with the UID in the annotation
+		newCM := incomingCM.DeepCopy()
+		newCM.UID = ktypes.UID("old_uid")
+		newCM.Labels = map[string]string{
+			"name": "test",
+		}
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+
+		updatedCM := newCM.DeepCopy()
+		updatedCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: string(newCM.UID),
+		}
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(updatedCM, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.GPGKeyEvent(event.Create, newCM), event.TargetGPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		expectedCalls := []string{"Get", "Get", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		cmInterface := be.Calls[2].ReturnArguments[0]
+		latestCM, ok := cmInterface.(*corev1.ConfigMap)
+		require.True(t, ok)
+		require.Equal(t, newCM.Labels, latestCM.Labels)
+		require.Equal(t, string(newCM.UID), latestCM.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Update: Old GPG key with different UID must be deleted and a new GPG key must be created", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdCM, nil)
+		defer createMock.Unset()
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		defer deleteMock.Unset()
+
+		// Create an Update event for the incoming GPG key
+		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, incomingCM), event.TargetGPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new GPG key has the updated source UID annotation.
+		cmInterface := be.Calls[3].ReturnArguments[0]
+		latestCM, ok := cmInterface.(*corev1.ConfigMap)
+		require.True(t, ok)
+		require.Equal(t, string(incomingCM.UID), latestCM.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Update: incoming GPG key must be created if it doesn't exist while handling update event", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		newCM := incomingCM.DeepCopy()
+
+		notFoundError := kerrors.NewNotFound(schema.GroupResource{
+			Group: "", Resource: "configmap"}, newCM.Name)
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
+		defer getMock.Unset()
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdCM, nil)
+		defer createMock.Unset()
+
+		// Create an Update event for the incoming GPG key
+		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, newCM), event.TargetGPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new GPG key has the updated source UID annotation.
+		cmInterface := be.Calls[1].ReturnArguments[0]
+		latestCM, ok := cmInterface.(*corev1.ConfigMap)
+		require.True(t, ok)
+		require.Equal(t, createdCM, latestCM)
+		require.Equal(t, string(newCM.UID), latestCM.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Delete: Old GPG key must be deleted", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		defer deleteMock.Unset()
+
+		// Create a delete event for the incoming GPG key
+		ev := event.New(evs.GPGKeyEvent(event.Delete, incomingCM), event.TargetGPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "Delete"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+		require.False(t, a.gpgKeyManager.IsManaged(incomingCM.Name))
+	})
+
+	t.Run("Unknown event type should not do anything", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+
+		// Create an unknown event type
+		ev := event.New(evs.GPGKeyEvent(event.EventType("Unknown"), incomingCM), event.TargetGPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		// Only the Get call for CompareSourceUID should be made, no other backend operations
+		expectedCalls := []string{"Get"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+}
+
+func Test_CreateGPGKey(t *testing.T) {
+	a, _ := newAgent(t)
+	be := backend_mocks.NewGPGKey(t)
+	gpgMgr := gpgkey.NewManager(be, "argocd")
+	a.gpgKeyManager = gpgMgr
+	a.mode = types.AgentModeManaged
+	require.NotNil(t, a)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+		},
+		Data: map[string]string{
+			"my-key": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n...",
+		},
+	}
+
+	t.Run("GPG key already managed calls updateGPGKey", func(t *testing.T) {
+		defer a.gpgKeyManager.Unmanage(cm.Name)
+		a.gpgKeyManager.Manage(cm.Name)
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&corev1.ConfigMap{}, nil)
+		defer getMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(&corev1.ConfigMap{}, nil)
+		defer updateMock.Unset()
+
+		ncm, err := a.createGPGKey(cm)
+		require.NoError(t, err)
+		require.NotNil(t, ncm)
+	})
+
+	t.Run("Create GPG key", func(t *testing.T) {
+		defer a.gpgKeyManager.Unmanage(cm.Name)
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(&corev1.ConfigMap{}, nil)
+		defer createMock.Unset()
+		ncm, err := a.createGPGKey(cm)
+		require.NoError(t, err)
+		require.NotNil(t, ncm)
+	})
+}
+
+func Test_UpdateGPGKey(t *testing.T) {
+	a, _ := newAgent(t)
+	be := backend_mocks.NewGPGKey(t)
+	gpgMgr := gpgkey.NewManager(be, "argocd")
+	a.gpgKeyManager = gpgMgr
+	a.mode = types.AgentModeManaged
+	require.NotNil(t, a)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "argocd-gpg-keys-cm",
+			Namespace:       "argocd",
+			ResourceVersion: "12345",
+		},
+		Data: map[string]string{
+			"my-key": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n...",
+		},
+	}
+
+	t.Run("Discard event because version has been seen already", func(t *testing.T) {
+		a.gpgKeyManager.Manage(cm.Name)
+		defer a.gpgKeyManager.Unmanage(cm.Name)
+		defer a.gpgKeyManager.ClearIgnored()
+		a.gpgKeyManager.IgnoreChange(cm.Name, "12345")
+		ncm, err := a.updateGPGKey(cm)
+		require.Nil(t, ncm)
+		require.ErrorContains(t, err, "has already been seen")
+	})
+
+	t.Run("Update GPG key in managed mode", func(t *testing.T) {
+		a.gpgKeyManager.Manage(cm.Name)
+		defer a.gpgKeyManager.Unmanage(cm.Name)
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&corev1.ConfigMap{}, nil)
+		defer getMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(&corev1.ConfigMap{}, nil)
+		defer updateMock.Unset()
+		ncm, err := a.updateGPGKey(cm)
+		require.NoError(t, err)
+		require.NotNil(t, ncm)
 	})
 }

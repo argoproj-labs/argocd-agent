@@ -17,6 +17,7 @@ package principal
 import (
 	"context"
 	"crypto/x509"
+	"fmt"
 	"math/big"
 	"os"
 	"path"
@@ -28,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -291,6 +293,9 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		projMgr, err := appproject.NewAppProjectManager(mockProjBackend, ns)
 		require.NoError(t, err)
 		repoMgr := repository.NewManager(mockRepoBackend, ns, false)
+		mockGPGKeyBackend := mocks.NewGPGKey(t)
+		mockGPGKeyBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("not found")).Maybe()
+		gpgMgr := gpgkey.NewManager(mockGPGKeyBackend, ns)
 		s := &Server{
 			ctx:            context.Background(),
 			namespace:      ns,
@@ -298,6 +303,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 			events:         event.NewEventSource("test"),
 			projectManager: projMgr,
 			repoManager:    repoMgr,
+			gpgKeyManager:  gpgMgr,
 			repoToAgents:   NewMapToSet(),
 			projectToRepos: NewMapToSet(),
 		}
