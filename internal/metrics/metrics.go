@@ -69,6 +69,7 @@ type AgentMetrics struct {
 	EventReceived       prometheus.Counter
 	EventSent           prometheus.Counter
 	EventProcessingTime *prometheus.HistogramVec
+	PropagationLatency  *prometheus.HistogramVec
 	AgentErrors         *prometheus.CounterVec
 }
 
@@ -172,6 +173,12 @@ func NewAgentMetrics() *AgentMetrics {
 			Name: "agent_event_processing_time",
 			Help: "Histogram of time taken to process events (in seconds)",
 		}, []string{"status", "agent_mode", "resource_type"}),
+
+		PropagationLatency: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "agent_event_propagation_latency_seconds",
+			Help:    "Histogram of time from principal send to agent processing (in seconds)",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"resource_type"}),
 
 		AgentErrors: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "agent_errors",

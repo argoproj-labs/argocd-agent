@@ -16,8 +16,10 @@ package event
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -496,6 +498,31 @@ func TestTargetTerminal(t *testing.T) {
 
 	t.Run("TerminalRequest event type string representation", func(t *testing.T) {
 		require.Equal(t, "io.argoproj.argocd-agent.event.terminal-request", TerminalRequest.String())
+	})
+}
+
+func TestSentAt(t *testing.T) {
+	t.Run("SentAt returns nil when extension not set", func(t *testing.T) {
+		ev := cloudevents.NewEvent()
+		require.Nil(t, SentAt(&ev))
+	})
+
+	t.Run("SetSentAt and SentAt round-trip", func(t *testing.T) {
+		before := time.Now().UTC().Truncate(time.Nanosecond)
+		ev := cloudevents.NewEvent()
+		SetSentAt(&ev)
+		after := time.Now().UTC()
+
+		ts := SentAt(&ev)
+		require.NotNil(t, ts)
+		require.False(t, ts.Before(before), "sentat should not be before SetSentAt was called")
+		require.False(t, ts.After(after), "sentat should not be after SetSentAt returned")
+	})
+
+	t.Run("SentAt returns nil for malformed extension", func(t *testing.T) {
+		ev := cloudevents.NewEvent()
+		ev.SetExtension(sentAt, "not-a-timestamp")
+		require.Nil(t, SentAt(&ev))
 	})
 }
 

@@ -69,6 +69,12 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	// Start measuring time for event processing
 	cp := checkpoint.NewCheckpoint("process_recv_queue")
 
+	if a.metrics != nil {
+		if sentAt := event.SentAt(ev.CloudEvent()); sentAt != nil {
+			a.metrics.PropagationLatency.WithLabelValues(ev.Target().String()).Observe(time.Since(*sentAt).Seconds())
+		}
+	}
+
 	status := metrics.EventProcessingSuccess
 
 	// Start checkpoint step
