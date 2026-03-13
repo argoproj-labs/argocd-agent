@@ -120,6 +120,16 @@ type Repository interface {
 	EnsureSynced(duration time.Duration) error
 }
 
+// GPGKey defines a generic interface to store/track the Argo CD GPG keys ConfigMap.
+type GPGKey interface {
+	Get(ctx context.Context, name string, namespace string) (*corev1.ConfigMap, error)
+	Create(ctx context.Context, cm *corev1.ConfigMap) (*corev1.ConfigMap, error)
+	Update(ctx context.Context, cm *corev1.ConfigMap) (*corev1.ConfigMap, error)
+	Delete(ctx context.Context, name string, namespace string, deletionPropagation *DeletionPropagation) error
+	StartInformer(ctx context.Context) error
+	EnsureSynced(duration time.Duration) error
+}
+
 // Namespace defines a generic interface to track agent namespaces.
 type Namespace interface {
 	StartInformer(ctx context.Context) error

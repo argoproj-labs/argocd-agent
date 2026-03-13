@@ -56,6 +56,10 @@ type PrincipalMetrics struct {
 	RepositoryUpdated prometheus.Counter
 	RepositoryDeleted prometheus.Counter
 
+	GPGKeyCreated prometheus.Counter
+	GPGKeyUpdated prometheus.Counter
+	GPGKeyDeleted prometheus.Counter
+
 	EventReceived prometheus.Counter
 	EventSent     prometheus.Counter
 
@@ -135,6 +139,19 @@ func NewPrincipalMetrics() *PrincipalMetrics {
 		RepositoryDeleted: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "principal_repositories_deleted",
 			Help: "The total number of repositories deleted on the control plane",
+		}),
+
+		GPGKeyCreated: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_gpg_keys_created",
+			Help: "The total number of GPG keys created on the control plane",
+		}),
+		GPGKeyUpdated: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_gpg_keys_updated",
+			Help: "The total number of GPG keys updated on the control plane",
+		}),
+		GPGKeyDeleted: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "principal_gpg_keys_deleted",
+			Help: "The total number of GPG keys deleted on the control plane",
 		}),
 
 		EventReceived: promauto.NewCounter(prometheus.CounterOpts{

@@ -22,6 +22,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -91,6 +92,41 @@ func Test_NewResourceKey(t *testing.T) {
 		}
 
 		got := NewResourceKeyFromAppProject(appProject)
+		assert.Equal(t, expected, got)
+	})
+}
+
+func Test_NewResourceKeyFromGPGKey(t *testing.T) {
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			UID:       "gpg-uid-123",
+		},
+	}
+
+	t.Run("resource key for a GPG key ConfigMap without sourceUID annotation", func(t *testing.T) {
+		expected := ResourceKey{
+			Kind:      gpgKeyKind,
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			UID:       "gpg-uid-123",
+		}
+		got := NewResourceKeyFromGPGKey(cm)
+		assert.Equal(t, expected, got)
+	})
+
+	t.Run("resource key for a GPG key ConfigMap with sourceUID annotation", func(t *testing.T) {
+		cm.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "source-uid-gpg-789",
+		}
+		expected := ResourceKey{
+			Kind:      gpgKeyKind,
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			UID:       "source-uid-gpg-789",
+		}
+		got := NewResourceKeyFromGPGKey(cm)
 		assert.Equal(t, expected, got)
 	})
 }
