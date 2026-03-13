@@ -953,9 +953,13 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 				}
 				return nil
 			} else {
-				logCtx.Debug("GPG key already exists with a different source UID. Deleting the existing GPG key")
-				if err := a.deleteGPGKey(incomingCM); err != nil {
-					return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
+				if a.gpgKeyManager.IsManaged(incomingCM.Name) {
+					logCtx.Debug("GPG key already exists with a different source UID. Deleting the existing GPG key")
+					if err := a.deleteGPGKey(incomingCM); err != nil {
+						return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
+					}
+				} else {
+					logCtx.Debug("Existing GPG key is not managed, skipping delete and attempting updating the existing GPG key")
 				}
 			}
 		}
@@ -975,12 +979,16 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 		}
 
 		if !sourceUIDMatch {
-			logCtx.Debug("Source UID mismatch between the incoming GPG key and existing GPG key. Deleting the existing GPG key")
-			if err := a.deleteGPGKey(incomingCM); err != nil {
-				return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
+			if a.gpgKeyManager.IsManaged(incomingCM.Name) {
+				logCtx.Debug("Source UID mismatch between the incoming GPG key and existing GPG key. Deleting the existing GPG key")
+				if err := a.deleteGPGKey(incomingCM); err != nil {
+					return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
+				}
+			} else {
+				logCtx.Debug("Existing GPG key is not managed, skipping delete and attempting updating the existing GPG key")
 			}
 
-			logCtx.Debug("Creating the incoming GPG key after deleting the existing GPG key")
+			logCtx.Debug("Creating or updating the incoming GPG key")
 			if _, err := a.createGPGKey(incomingCM); err != nil {
 				return fmt.Errorf("could not create incoming GPG key after deleting existing GPG key: %w", err)
 			}
@@ -1026,8 +1034,11 @@ func (a *Agent) createGPGKey(incoming *corev1.ConfigMap) (*corev1.ConfigMap, err
 
 	created, err := a.gpgKeyManager.Create(a.context, incoming)
 	if apierrors.IsAlreadyExists(err) {
-		logCtx.Debug("GPG key already exists")
-		return created, nil
+		logCtx.Debug("GPG key already exists, updating the existing GPG key")
+		if manageErr := a.gpgKeyManager.Manage(incoming.Name); manageErr != nil {
+			logCtx.Debugf("Could not manage GPG key: %v", manageErr)
+		}
+		return a.gpgKeyManager.UpdateManagedGPGKey(a.context, incoming)
 	}
 	return created, err
 }
