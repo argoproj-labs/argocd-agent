@@ -284,6 +284,71 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalDeletion() {
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be recreated on managed-agent after local deletion")
 }
 
+// This test verifies:
+// - An orphan argocd-gpg-keys-cm on the managed agent, without source-uid annotation is used and updated.
+func (suite *GPGKeyTestSuite) Test_GPGKey_UseAndUpdatePreExistingConfigMap() {
+	requires := suite.Require()
+
+	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}
+
+	// Create an orphan GPG keys ConfigMap on the managed agent which has no source-uid annotation
+	orphanCM := corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      common.ArgoCDGPGKeysConfigMapName,
+			Namespace: "argocd",
+			Labels: map[string]string{
+				"app.kubernetes.io/name":    common.ArgoCDGPGKeysConfigMapName,
+				"app.kubernetes.io/part-of": "argocd",
+			},
+		},
+		Data: map[string]string{
+			"old-key": "old-value",
+		},
+	}
+
+	err := suite.ManagedAgentClient.Create(suite.Ctx, &orphanCM, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	// Verify the orphan ConfigMap has no source-uid annotation
+	agentCM := corev1.ConfigMap{}
+	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &agentCM, metav1.GetOptions{})
+	requires.NoError(err)
+	requires.Empty(agentCM.Annotations[manager.SourceUIDAnnotation])
+
+	// Create the GPG keys ConfigMap on the principal with actual key data
+	principalKeyData := "-----BEGIN PGP PUBLIC KEY BLOCK-----\nprincipal-key\n-----END PGP PUBLIC KEY BLOCK-----\n"
+	sourceGPGKeys := corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      common.ArgoCDGPGKeysConfigMapName,
+			Namespace: "argocd",
+			Labels: map[string]string{
+				"app.kubernetes.io/name":    common.ArgoCDGPGKeysConfigMapName,
+				"app.kubernetes.io/part-of": "argocd",
+			},
+		},
+		Data: map[string]string{
+			"4AEE18F83AFDEB23": principalKeyData,
+		},
+	}
+
+	err = suite.PrincipalClient.Create(suite.Ctx, &sourceGPGKeys, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	// Verify the agent's ConfigMap is adopted: data replaced with the principal's version
+	// and source-uid annotation is set
+	requires.Eventually(func() bool {
+		cm := corev1.ConfigMap{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &cm, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		hasSourceUID := cm.Annotations[manager.SourceUIDAnnotation] != ""
+		hasCorrectData := cm.Data["4AEE18F83AFDEB23"] == principalKeyData
+		_, hasOldKey := cm.Data["old-key"]
+		return hasSourceUID && hasCorrectData && !hasOldKey
+	}, 60*time.Second, 1*time.Second, "Orphan GPG keys ConfigMap should be used and updated with principal's data and source-uid annotation")
+}
+
 func TestGPGKeyTestSuite(t *testing.T) {
 	suite.Run(t, new(GPGKeyTestSuite))
 }
