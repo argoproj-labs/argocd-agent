@@ -550,6 +550,7 @@ func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
+		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Add(outbound.Name, agent)
 		logCtx.Tracef("Added repository %s to send queue, total length now %d", outbound.Name, q.Len())
@@ -633,6 +634,7 @@ func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
+		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Delete(outbound.Name, agent)
 		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added repository delete event to send queue")
@@ -802,6 +804,7 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
+		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Delete(new.Name, agent)
 
@@ -821,6 +824,7 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 		// Inject trace context into the event for propagation to agent
 		tracing.InjectTraceContext(ctx, ev)
 		q.Add(ev)
+		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Add(new.Name, agent)
 

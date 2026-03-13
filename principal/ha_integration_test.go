@@ -16,20 +16,29 @@ package principal
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 // createTestServer creates a minimal Server for testing HA integration
@@ -537,4 +546,246 @@ func TestRemapAppSetOwnerRefs(t *testing.T) {
 		assert.Len(t, app.OwnerReferences, 1)
 		assert.Equal(t, "uid-other", string(app.OwnerReferences[0].UID))
 	})
+}
+
+func newRepoTestServer(mockRepoBackend *mocks.Repository) *Server {
+	s := createTestServer()
+	s.ctx = context.Background()
+	s.repoManager = repository.NewManager(mockRepoBackend, "argocd", false)
+	return s
+}
+
+func makeRepoSecret(name, namespace string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			UID:       k8stypes.UID("uid-" + name),
+		},
+		Data: map[string][]byte{
+			"url":     []byte("https://github.com/example/repo.git"),
+			"project": []byte("default"),
+		},
+	}
+}
+
+func makeRepoEvent(evType event.EventType, repo *corev1.Secret) *replication.ReplicatedEvent {
+	evSource := event.NewEventSource("test")
+	ce := evSource.RepositoryEvent(evType, repo)
+	ev := event.New(ce, event.TargetRepository)
+	return &replication.ReplicatedEvent{
+		Event:     ev,
+		AgentName: "agent1",
+		Direction: replication.DirectionOutbound,
+	}
+}
+
+func TestHandleReplicatedEvent_Repository(t *testing.T) {
+	t.Run("create event calls repoManager.Create", func(t *testing.T) {
+		repo := makeRepoSecret("my-repo", "argocd")
+		mockBackend := &mocks.Repository{}
+		mockBackend.On("Create", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(repo, nil)
+
+		server := newRepoTestServer(mockBackend)
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		err = components.handleReplicatedEvent(makeRepoEvent(event.Create, repo))
+		require.NoError(t, err)
+
+		mockBackend.AssertCalled(t, "Create", mock.Anything, mock.AnythingOfType("*v1.Secret"))
+
+		key := resources.NewResourceKeyFromRepository(repo)
+		agentRes := server.resources.Get("agent1")
+		require.NotNil(t, agentRes)
+		assert.Contains(t, agentRes.GetAll(), key)
+	})
+
+	t.Run("create event with conflict calls UpdateManagedRepository", func(t *testing.T) {
+		repo := makeRepoSecret("my-repo", "argocd")
+		alreadyExists := k8serrors.NewAlreadyExists(schema.GroupResource{Resource: "secrets"}, repo.Name)
+
+		mockBackend := &mocks.Repository{}
+		mockBackend.On("Create", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(nil, alreadyExists)
+		mockBackend.On("Get", mock.Anything, repo.Name, repo.Namespace).Return(repo, nil)
+		mockBackend.On("SupportsPatch").Return(false)
+		mockBackend.On("Update", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(repo, nil)
+
+		server := newRepoTestServer(mockBackend)
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		err = components.handleReplicatedEvent(makeRepoEvent(event.Create, repo))
+		require.NoError(t, err)
+
+		mockBackend.AssertCalled(t, "Update", mock.Anything, mock.AnythingOfType("*v1.Secret"))
+	})
+
+	t.Run("specupdate event calls Create then UpdateManagedRepository on conflict", func(t *testing.T) {
+		repo := makeRepoSecret("update-repo", "argocd")
+		alreadyExists := k8serrors.NewAlreadyExists(schema.GroupResource{Resource: "secrets"}, repo.Name)
+
+		mockBackend := &mocks.Repository{}
+		mockBackend.On("Create", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(nil, alreadyExists)
+		mockBackend.On("Get", mock.Anything, repo.Name, repo.Namespace).Return(repo, nil)
+		mockBackend.On("SupportsPatch").Return(false)
+		mockBackend.On("Update", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(repo, nil)
+
+		server := newRepoTestServer(mockBackend)
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		err = components.handleReplicatedEvent(makeRepoEvent(event.SpecUpdate, repo))
+		require.NoError(t, err)
+
+		mockBackend.AssertCalled(t, "Update", mock.Anything, mock.AnythingOfType("*v1.Secret"))
+	})
+
+	t.Run("delete event calls repoManager.Delete", func(t *testing.T) {
+		repo := makeRepoSecret("del-repo", "argocd")
+		mockBackend := &mocks.Repository{}
+		mockBackend.On("Delete", mock.Anything, repo.Name, repo.Namespace, mock.Anything).Return(nil)
+
+		server := newRepoTestServer(mockBackend)
+		key := resources.NewResourceKeyFromRepository(repo)
+		server.resources.Add("agent1", key)
+
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		err = components.handleReplicatedEvent(makeRepoEvent(event.Delete, repo))
+		require.NoError(t, err)
+
+		mockBackend.AssertCalled(t, "Delete", mock.Anything, repo.Name, repo.Namespace, mock.Anything)
+
+		agentRes := server.resources.Get("agent1")
+		assert.Nil(t, agentRes)
+	})
+
+	t.Run("delete event not found is ignored", func(t *testing.T) {
+		repo := makeRepoSecret("gone-repo", "argocd")
+		notFound := k8serrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, repo.Name)
+
+		mockBackend := &mocks.Repository{}
+		mockBackend.On("Delete", mock.Anything, repo.Name, repo.Namespace, mock.Anything).Return(notFound)
+
+		server := newRepoTestServer(mockBackend)
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		err = components.handleReplicatedEvent(makeRepoEvent(event.Delete, repo))
+		assert.NoError(t, err)
+	})
+
+	t.Run("repository event can be decoded", func(t *testing.T) {
+		repo := makeRepoSecret("decode-repo", "argocd")
+		evSource := event.NewEventSource("test")
+		ce := evSource.RepositoryEvent(event.Create, repo)
+		ev := event.New(ce, event.TargetRepository)
+
+		assert.Equal(t, event.TargetRepository, event.Target(ev.CloudEvent()))
+		assert.Equal(t, event.Create, event.EventType(ev.CloudEvent().Type()))
+
+		decoded, err := ev.Repository()
+		require.NoError(t, err)
+		assert.Equal(t, "decode-repo", decoded.Name)
+		assert.Equal(t, "argocd", decoded.Namespace)
+	})
+}
+
+func TestUpsertResourceFromSnapshot_Repository(t *testing.T) {
+	t.Run("creates new repository from snapshot data", func(t *testing.T) {
+		repo := makeRepoSecret("snap-repo", "argocd")
+		data, err := json.Marshal(repo)
+		require.NoError(t, err)
+
+		mockBackend := &mocks.Repository{}
+		mockBackend.On("Create", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(repo, nil)
+
+		server := newRepoTestServer(mockBackend)
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		res := &replicationapi.Resource{
+			Kind: "Repository",
+			Name: repo.Name,
+			Data: data,
+		}
+		err = components.upsertResourceFromSnapshot(context.Background(), server, res)
+		require.NoError(t, err)
+
+		mockBackend.AssertCalled(t, "Create", mock.Anything, mock.AnythingOfType("*v1.Secret"))
+	})
+
+	t.Run("updates existing repository when already exists", func(t *testing.T) {
+		repo := makeRepoSecret("existing-repo", "argocd")
+		data, err := json.Marshal(repo)
+		require.NoError(t, err)
+		alreadyExists := k8serrors.NewAlreadyExists(schema.GroupResource{Resource: "secrets"}, repo.Name)
+
+		mockBackend := &mocks.Repository{}
+		mockBackend.On("Create", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(nil, alreadyExists)
+		mockBackend.On("Get", mock.Anything, repo.Name, repo.Namespace).Return(repo, nil)
+		mockBackend.On("SupportsPatch").Return(false)
+		mockBackend.On("Update", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(repo, nil)
+
+		server := newRepoTestServer(mockBackend)
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		res := &replicationapi.Resource{
+			Kind: "Repository",
+			Name: repo.Name,
+			Data: data,
+		}
+		err = components.upsertResourceFromSnapshot(context.Background(), server, res)
+		require.NoError(t, err)
+
+		mockBackend.AssertCalled(t, "Update", mock.Anything, mock.AnythingOfType("*v1.Secret"))
+	})
+}
+
+func TestDeleteStaleResource_Repository(t *testing.T) {
+	repo := makeRepoSecret("stale-repo", "argocd")
+	mockBackend := &mocks.Repository{}
+	mockBackend.On("Delete", mock.Anything, repo.Name, repo.Namespace, mock.Anything).Return(nil)
+
+	server := newRepoTestServer(mockBackend)
+	components, err := NewHAComponents(context.Background(), server)
+	require.NoError(t, err)
+
+	key := resources.ResourceKey{
+		Name:      repo.Name,
+		Namespace: repo.Namespace,
+		Kind:      "Repository",
+		UID:       string(repo.UID),
+	}
+	components.deleteStaleResource(context.Background(), server, key)
+
+	mockBackend.AssertCalled(t, "Delete", mock.Anything, repo.Name, repo.Namespace, mock.Anything)
+}
+
+func TestSerializeResource_Repository(t *testing.T) {
+	repo := makeRepoSecret("ser-repo", "argocd")
+	mockBackend := &mocks.Repository{}
+	mockBackend.On("Get", mock.Anything, repo.Name, repo.Namespace).Return(repo, nil)
+
+	server := newRepoTestServer(mockBackend)
+
+	provider := &serverStateProvider{server: server}
+	key := resources.ResourceKey{
+		Name:      repo.Name,
+		Namespace: repo.Namespace,
+		Kind:      "Repository",
+		UID:       string(repo.UID),
+	}
+	data, err := provider.serializeResource(key)
+	require.NoError(t, err)
+	assert.NotNil(t, data)
+
+	var decoded corev1.Secret
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, repo.Name, decoded.Name)
+
+	mockBackend.AssertCalled(t, "Get", mock.Anything, repo.Name, repo.Namespace)
 }

@@ -36,6 +36,7 @@ import (
 	replicationserver "github.com/argoproj-labs/argocd-agent/principal/apis/replication"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"google.golang.org/grpc"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -200,6 +201,15 @@ func (p *serverStateProvider) serializeResource(key resources.ResourceKey) ([]by
 			return nil, err
 		}
 		return json.Marshal(proj)
+	case "Repository":
+		if p.server.repoManager == nil {
+			return nil, nil
+		}
+		repo, err := p.server.repoManager.Get(ctx, key.Name, key.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(repo)
 	default:
 		return nil, nil
 	}
@@ -574,6 +584,31 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 				log().WithField("applicationset", appSet.Name).WithError(err).Warn("HA: failed to delete applicationset from replicated event")
 			}
 		}
+
+	case event.TargetRepository:
+		repo, err := ev.Event.Repository()
+		if err != nil {
+			return fmt.Errorf("failed to decode repository from replicated event: %w", err)
+		}
+		key := resources.NewResourceKeyFromRepository(repo)
+		switch evType {
+		case event.Create, event.SpecUpdate:
+			if _, err := server.repoManager.Create(ctx, repo); err != nil {
+				if k8serrors.IsAlreadyExists(err) {
+					if _, err := server.repoManager.UpdateManagedRepository(ctx, repo); err != nil {
+						log().WithField("repository", repo.Name).WithError(err).Warn("HA: failed to update repository from replicated event")
+					}
+				} else {
+					log().WithField("repository", repo.Name).WithError(err).Warn("HA: failed to create repository from replicated event")
+				}
+			}
+			server.resources.Add(ev.AgentName, key)
+		case event.Delete:
+			if err := server.repoManager.Delete(ctx, repo.Name, repo.Namespace, nil); err != nil && !k8serrors.IsNotFound(err) {
+				log().WithField("repository", repo.Name).WithError(err).Warn("HA: failed to delete repository from replicated event")
+			}
+			server.resources.Remove(ev.AgentName, key)
+		}
 	}
 
 	return nil
@@ -685,6 +720,19 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 		if _, err := server.appSetManager.Upsert(ctx, &appSet); err != nil {
 			return fmt.Errorf("upsert applicationset: %w", err)
 		}
+	case "Repository":
+		var repo corev1.Secret
+		if err := json.Unmarshal(res.Data, &repo); err != nil {
+			return fmt.Errorf("unmarshal repository: %w", err)
+		}
+		if _, err := server.repoManager.Create(ctx, &repo); err != nil {
+			if !k8serrors.IsAlreadyExists(err) {
+				return fmt.Errorf("upsert repository: %w", err)
+			}
+			if _, err := server.repoManager.UpdateManagedRepository(ctx, &repo); err != nil {
+				return fmt.Errorf("update repository: %w", err)
+			}
+		}
 	}
 	return nil
 }
@@ -713,6 +761,12 @@ func (h *HAComponents) deleteStaleResource(ctx context.Context, server *Server, 
 				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
 			}, nil); err != nil && !k8serrors.IsNotFound(err) {
 				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale applicationset")
+			}
+		}
+	case "Repository":
+		if server.repoManager != nil {
+			if err := server.repoManager.Delete(ctx, key.Name, key.Namespace, nil); err != nil && !k8serrors.IsNotFound(err) {
+				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale repository")
 			}
 		}
 	}
