@@ -1090,7 +1090,8 @@ func (a *Agent) deleteGPGKey(cm *corev1.ConfigMap) error {
 	}
 
 	sourceUID := existing.Annotations[manager.SourceUIDAnnotation]
-	a.deletions.MarkExpected(ktypes.UID(sourceUID))
+	expectedUID := ktypes.UID(sourceUID)
+	a.deletions.MarkExpected(expectedUID)
 
 	deletionPropagation := backend.DeletePropagationBackground
 	err = a.gpgKeyManager.Delete(a.context, cm.Name, cm.Namespace, &deletionPropagation)
@@ -1098,6 +1099,10 @@ func (a *Agent) deleteGPGKey(cm *corev1.ConfigMap) error {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("GPG key ConfigMap is not found, perhaps it is already deleted")
 			a.sourceCache.GPGKey.Delete(existing.UID)
+			a.deletions.Unmark(expectedUID)
+			if unmanageErr := a.gpgKeyManager.Unmanage(cm.Name); unmanageErr != nil {
+				logCtx.Debugf("Could not unmanage GPG key ConfigMap %s: %v", cm.Name, unmanageErr)
+			}
 			return nil
 		}
 		return err
