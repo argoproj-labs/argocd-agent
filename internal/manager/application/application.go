@@ -175,6 +175,45 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 	return created, err
 }
 
+// Upsert creates the application or updates it if it already exists.
+// Used by HA replication to write resources to the replica cluster.
+func (m *ApplicationManager) Upsert(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
+	created, err := m.Create(ctx, app)
+	if err == nil {
+		return created, nil
+	}
+	if !errors.IsAlreadyExists(err) {
+		return nil, err
+	}
+	var updated *v1alpha1.Application
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		existing, ierr := m.applicationBackend.Get(ctx, app.Name, app.Namespace)
+		if ierr != nil {
+			return fmt.Errorf("get existing application for upsert: %w", ierr)
+		}
+		app.ResourceVersion = existing.ResourceVersion
+		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
+			if app.Annotations == nil {
+				app.Annotations = make(map[string]string)
+			}
+			app.Annotations[manager.SourceUIDAnnotation] = v
+		}
+		if m.role == manager.ManagerRolePrincipal {
+			app.Operation = nil
+			stampLastUpdated(app)
+		}
+		updated, ierr = m.applicationBackend.Update(ctx, app)
+		return ierr
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
+		log().Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+	}
+	return updated, nil
+}
+
 func (m *ApplicationManager) Get(ctx context.Context, name, namespace string) (*v1alpha1.Application, error) {
 	return m.applicationBackend.Get(ctx, name, namespace)
 }
@@ -314,7 +353,13 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 		return true, false, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
 	}
 
-	return true, string(incoming.UID) == sourceUID, nil
+	// On failover, apps replicated to the replica carry source-uid = primary's UID.
+	// Use that as the incoming UID if present so we match and update rather than delete.
+	incomingUID := string(incoming.UID)
+	if srcUID, ok := incoming.Annotations[manager.SourceUIDAnnotation]; ok && srcUID != "" {
+		incomingUID = srcUID
+	}
+	return true, incomingUID == sourceUID, nil
 }
 
 // UpdateAutonomousApp updates the Application resource on the control plane side

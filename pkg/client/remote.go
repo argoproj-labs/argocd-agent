@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
@@ -81,6 +82,7 @@ type Remote struct {
 	authMethod        string
 	creds             auth.Credentials
 	backoff           wait.Backoff
+	connMu            sync.Mutex
 	conn              *grpc.ClientConn
 	clientID          string
 	clientMode        types.AgentMode
@@ -424,6 +426,16 @@ func connectBackoff() wait.Backoff {
 	}
 }
 
+// Disconnect closes the underlying gRPC connection and nils it out.
+func (r *Remote) Disconnect() {
+	r.connMu.Lock()
+	defer r.connMu.Unlock()
+	if r.conn != nil {
+		r.conn.Close()
+		r.conn = nil
+	}
+}
+
 // Connect connects this Remote to the remote host and performs authentication.
 // If the remote is configured with a retry, Connect will keep trying to
 // establish a connection to the remote host until either the number of maximum
@@ -432,6 +444,14 @@ func connectBackoff() wait.Backoff {
 // When Connect returns nil, the connection was successfully established and an
 // authentication token has been received.
 func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
+	r.connMu.Lock()
+	if r.conn != nil {
+		log().Warn("Connect called with existing connection; closing stale conn")
+		r.conn.Close()
+		r.conn = nil
+	}
+	r.connMu.Unlock()
+
 	cparams := grpc.ConnectParams{
 		MinConnectTimeout: 365 * 24 * time.Hour,
 	}
@@ -564,13 +584,17 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		return err
 	}
 	log().Infof("Connected to %s", vr.Version)
+	r.connMu.Lock()
 	r.conn = conn
+	r.connMu.Unlock()
 	return nil
 }
 
 // Conn returns this remote's underlying gRPC connection object. It should
 // be treated as read-only.
 func (r *Remote) Conn() *grpc.ClientConn {
+	r.connMu.Lock()
+	defer r.connMu.Unlock()
 	return r.conn
 }
 

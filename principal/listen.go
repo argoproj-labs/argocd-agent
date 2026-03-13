@@ -36,6 +36,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/terminalstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/auth"
@@ -242,11 +243,23 @@ func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
 	opts := []eventstream.ServerOption{}
 	opts = append(opts, eventstream.WithNotifyOnConnect(s.notifyOnConnect))
 	opts = append(opts, eventstream.WithLogger(s.options.grpcEventLogger))
+	if s.ha != nil {
+		opts = append(opts, eventstream.WithAcceptCheck(func(agentName string) error {
+			return s.ha.Controller.OnAgentConnect(agentName)
+		}))
+	}
 
-	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues, s.eventWriters, metrics, s.clusterMgr, opts...))
+	s.eventStreamSrv = eventstream.NewServer(s.queues, s.eventWriters, metrics, s.clusterMgr, opts...)
+	eventstreamapi.RegisterEventStreamServer(s.grpcServer, s.eventStreamSrv)
 	// Proposal: register LogStream gRPC service for data-plane (use singleton instance)
 	logstreamapi.RegisterLogStreamServiceServer(s.grpcServer, s.logStream)
 	// Register TerminalStream gRPC service for web terminal sessions
 	terminalstreamapi.RegisterTerminalStreamServiceServer(s.grpcServer, s.terminalStreamServer)
+
+	// Register replication service when HA is enabled
+	if s.ha != nil && s.ha.ReplicationServer != nil {
+		replicationapi.RegisterReplicationServer(s.grpcServer, s.ha.ReplicationServer)
+	}
+
 	return nil
 }
