@@ -26,8 +26,10 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
@@ -2338,4 +2340,200 @@ func drainQueue(t *testing.T, q workqueue.TypedRateLimitingInterface[*cloudevent
 		}
 		q.Done(ev)
 	}
+}
+
+func newServerWithHA(t *testing.T) (*Server, *HAComponents) {
+	t.Helper()
+	ctx := context.Background()
+
+	mockRepoBackend := &mocks.Repository{}
+	mockRepoBackend.On("Create", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(&corev1.Secret{}, nil).Maybe()
+
+	mockProjectBackend := &mocks.AppProject{}
+	projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+	require.NoError(t, err)
+
+	repoManager := repository.NewManager(mockRepoBackend, "argocd", false)
+
+	s := &Server{
+		ctx:            ctx,
+		queues:         queue.NewSendRecvQueues(),
+		events:         event.NewEventSource("test"),
+		namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+		projectManager: projectManager,
+		repoManager:    repoManager,
+		resources:      resources.NewAgentResources(),
+		repoToAgents:   NewMapToSet(),
+		projectToRepos: NewMapToSet(),
+	}
+	require.NoError(t, s.queues.Create("agent1"))
+
+	components, err := NewHAComponents(ctx, s)
+	require.NoError(t, err)
+	require.NoError(t, components.Controller.Start())
+
+	s.ha = components
+
+	return s, components
+}
+
+func TestServer_newRepositoryCallback_ForwardsToHA(t *testing.T) {
+	mockProjectBackend := &mocks.AppProject{}
+	project := &v1alpha1.AppProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "argocd"},
+		Spec: v1alpha1.AppProjectSpec{
+			Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+			SourceNamespaces: []string{"agent1"},
+		},
+	}
+	mockProjectBackend.On("Get", mock.Anything, "default", "argocd").Return(project, nil)
+
+	mockRepoBackend := &mocks.Repository{}
+	mockRepoBackend.On("Create", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(&corev1.Secret{}, nil).Maybe()
+
+	projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+	require.NoError(t, err)
+
+	repoManager := repository.NewManager(mockRepoBackend, "argocd", false)
+
+	ctx := context.Background()
+	s := &Server{
+		ctx:            ctx,
+		queues:         queue.NewSendRecvQueues(),
+		events:         event.NewEventSource("test"),
+		namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+		projectManager: projectManager,
+		repoManager:    repoManager,
+		resources:      resources.NewAgentResources(),
+		repoToAgents:   NewMapToSet(),
+		projectToRepos: NewMapToSet(),
+	}
+	require.NoError(t, s.queues.Create("agent1"))
+
+	components, err := NewHAComponents(ctx, s)
+	require.NoError(t, err)
+	require.NoError(t, components.Controller.Start())
+	s.ha = components
+
+	before := components.ReplicationForwarder.CurrentSequenceNum()
+
+	repo := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "fwd-repo", Namespace: "argocd", UID: "uid-fwd"},
+		Data:       map[string][]byte{"project": []byte("default"), "url": []byte("https://github.com/example/repo.git")},
+	}
+	s.newRepositoryCallback(repo)
+
+	after := components.ReplicationForwarder.CurrentSequenceNum()
+	assert.Greater(t, after, before, "forwarding should increment sequence number")
+}
+
+func TestServer_deleteRepositoryCallback_ForwardsToHA(t *testing.T) {
+	mockProjectBackend := &mocks.AppProject{}
+	project := &v1alpha1.AppProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "argocd"},
+		Spec: v1alpha1.AppProjectSpec{
+			Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+			SourceNamespaces: []string{"agent1"},
+		},
+	}
+	mockProjectBackend.On("Get", mock.Anything, "default", "argocd").Return(project, nil)
+
+	mockRepoBackend := &mocks.Repository{}
+
+	projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+	require.NoError(t, err)
+
+	repoManager := repository.NewManager(mockRepoBackend, "argocd", false)
+
+	ctx := context.Background()
+	s := &Server{
+		ctx:            ctx,
+		queues:         queue.NewSendRecvQueues(),
+		events:         event.NewEventSource("test"),
+		namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+		projectManager: projectManager,
+		repoManager:    repoManager,
+		resources:      resources.NewAgentResources(),
+		repoToAgents:   NewMapToSet(),
+		projectToRepos: NewMapToSet(),
+	}
+	require.NoError(t, s.queues.Create("agent1"))
+
+	components, err := NewHAComponents(ctx, s)
+	require.NoError(t, err)
+	require.NoError(t, components.Controller.Start())
+	s.ha = components
+
+	repo := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "del-fwd-repo", Namespace: "argocd", UID: "uid-del"},
+		Data:       map[string][]byte{"project": []byte("default"), "url": []byte("https://github.com/example/repo.git")},
+	}
+	s.repoToAgents.Add(repo.Name, "agent1")
+	s.projectToRepos.Add("default", repo.Name)
+
+	before := components.ReplicationForwarder.CurrentSequenceNum()
+
+	s.deleteRepositoryCallback(repo)
+
+	after := components.ReplicationForwarder.CurrentSequenceNum()
+	assert.Greater(t, after, before, "forwarding should increment sequence number")
+}
+
+func TestServer_syncRepositoryUpdatesToAgents_ForwardsToHA(t *testing.T) {
+	mockProjectBackend := &mocks.AppProject{}
+	project := &v1alpha1.AppProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "argocd"},
+		Spec: v1alpha1.AppProjectSpec{
+			Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+			SourceNamespaces: []string{"agent1"},
+		},
+	}
+	mockProjectBackend.On("Get", mock.Anything, "default", "argocd").Return(project, nil).Maybe()
+
+	mockRepoBackend := &mocks.Repository{}
+
+	projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+	require.NoError(t, err)
+
+	repoManager := repository.NewManager(mockRepoBackend, "argocd", false)
+
+	ctx := context.Background()
+	s := &Server{
+		ctx:            ctx,
+		queues:         queue.NewSendRecvQueues(),
+		events:         event.NewEventSource("test"),
+		namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+		projectManager: projectManager,
+		repoManager:    repoManager,
+		resources:      resources.NewAgentResources(),
+		repoToAgents:   NewMapToSet(),
+		projectToRepos: NewMapToSet(),
+	}
+	require.NoError(t, s.queues.Create("agent1"))
+
+	components, err := NewHAComponents(ctx, s)
+	require.NoError(t, err)
+	require.NoError(t, components.Controller.Start())
+	s.ha = components
+
+	s.repoToAgents.Add("sync-repo", "agent1")
+
+	oldSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "sync-repo", Namespace: "argocd"},
+		Data:       map[string][]byte{"project": []byte("default"), "url": []byte("https://github.com/example/old.git")},
+	}
+	newSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "sync-repo", Namespace: "argocd"},
+		Data:       map[string][]byte{"project": []byte("default"), "url": []byte("https://github.com/example/new.git")},
+	}
+
+	before := components.ReplicationForwarder.CurrentSequenceNum()
+
+	logCtx := logrus.WithField("test", "syncRepositoryUpdatesToAgents_ForwardsToHA")
+	s.syncRepositoryUpdatesToAgents(ctx, oldSecret, newSecret, logCtx)
+
+	after := components.ReplicationForwarder.CurrentSequenceNum()
+	assert.Greater(t, after, before, "forwarding should increment sequence number")
+
+	_ = replication.DirectionOutbound
 }
