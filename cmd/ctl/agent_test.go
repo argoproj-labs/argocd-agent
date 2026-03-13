@@ -300,12 +300,12 @@ func Test_readTLSFromExistingSecrets(t *testing.T) {
 	certPem := testutil.MustReadFile("testdata/001_test_cert.pem")
 	keyPem := testutil.MustReadFile("testdata/001_test_key.pem")
 
-	// Save original globalOpts and restore after test
-	originalNamespace := globalOpts.principalNamespace
+	// Save original principalCfg and restore after test
+	originalNamespace := principalCfg.Namespace
 	defer func() {
-		globalOpts.principalNamespace = originalNamespace
+		principalCfg.Namespace = originalNamespace
 	}()
-	globalOpts.principalNamespace = "argocd"
+	principalCfg.Namespace = "argocd"
 
 	t.Run("Valid TLS and CA secrets in default namespace", func(t *testing.T) {
 		tlsSecret := &v1.Secret{

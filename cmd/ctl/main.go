@@ -28,7 +28,6 @@ var globalOpts *GlobalFlags = &GlobalFlags{}
 
 var cliDescription string = `
 A CLI to manage configuration for the principal component of argocd-agent.
-
 It lets you create, modify and inspect various aspects of the configuration,
 such as credentials, cryptographic tokens, resource proxy settings and more.
 
@@ -49,11 +48,21 @@ func NewRootCommand() *cobra.Command {
 	configGroup := &cobra.Group{ID: "config", Title: "Configuration"}
 	command.AddGroup(configGroup)
 	command.AddCommand(NewAgentCommand())
+	command.AddCommand(NewConfigCommand())
 	command.AddCommand(NewCheckConfigCommand())
 	command.AddCommand(NewPKICommand())
 	command.AddCommand(NewJWTCommand())
 	command.AddCommand(NewVersionCommand())
 	addGlobalFlags(command, globalOpts)
+
+	command.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		skip := map[string]bool{"argocd-agentctl version": true, "argocd-agentctl config create": true}
+		if skip[cmd.CommandPath()] {
+			return
+		}
+		principalCfg, agentCfg = loadLocalConfig()
+	}
+
 	return command
 }
 
@@ -73,11 +82,18 @@ func NewVersionCommand() *cobra.Command {
 	return command
 }
 
+// Global Flags related to what clusters to target
+// The order of which are used for the commands should be as followed
+// Principal: (Highest Priority) Context and Namespace flags -> Principal flag (config lookup) -> Default principal in config -> Current context selected in kubeconfig(Lowest Priority)
+// Agent: (Highest Priority) Context and namespace flags -> Agent flag (config lookup) -> Current context selected in kubeconfig (Lowest Priority)
 type GlobalFlags struct {
-	principalContext   string
-	principalNamespace string
-	agentContext       string
-	agentNamespace     string
+	principal          string // Symbolic name for a principal in the config file
+	principalContext   string // Kube context for principal
+	principalNamespace string // Namespace where the principal component is installed on target cluster
+	agent              string // Symbolic name for an agent in the config file
+	agentContext       string // Kube context for agent
+	agentNamespace     string // Namespace where the agent component is installed on target cluster
+	configPath         string // Path to the local config for the ctl
 }
 
 func addGlobalFlags(command *cobra.Command, opts *GlobalFlags) {
@@ -85,6 +101,9 @@ func addGlobalFlags(command *cobra.Command, opts *GlobalFlags) {
 	command.PersistentFlags().StringVar(&opts.principalNamespace, "principal-namespace", env.StringWithDefault("ARGOCD_AGENT_PRINCIPAL_NAMESPACE", nil, "argocd"), "The Kubernetes namespace the principal is installed in")
 	command.PersistentFlags().StringVar(&opts.agentContext, "agent-context", env.StringWithDefault("ARGOCD_AGENT_AGENT_CONTEXT", nil, ""), "The Kubernetes context of the agent")
 	command.PersistentFlags().StringVar(&opts.agentNamespace, "agent-namespace", env.StringWithDefault("ARGOCD_AGENT_AGENT_NAMESPACE", nil, "argocd"), "The Kubernetes namespace the agent is installed in")
+	command.PersistentFlags().StringVar(&opts.principal, "principal", "", "The symbolic name of a principal in the config file")
+	command.PersistentFlags().StringVar(&opts.agent, "agent", "", "The symbolic name of an agent in the config file")
+	command.PersistentFlags().StringVar(&opts.configPath, "config", getDefaultCfgPath(), "The path to the local config file to use")
 }
 
 func main() {

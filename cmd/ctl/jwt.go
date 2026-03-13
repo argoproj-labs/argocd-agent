@@ -53,9 +53,7 @@ authentication tokens for agents.`,
 }
 
 func NewJWTCreateKeyCommand() *cobra.Command {
-	var (
-		upsert bool
-	)
+	var upsert bool
 	command := &cobra.Command{
 		Short: "Create a JWT signing key and store it in a Kubernetes secret",
 		Use:   "create-key",
@@ -66,13 +64,13 @@ secret specified by the JWT_SECRET_NAME constant.
 The secret will be created in the principal's namespace on the principal's context.`,
 		Run: func(c *cobra.Command, args []string) {
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
 
 			exists := false
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNameJWT, v1.GetOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Get(ctx, config.SecretNameJWT, v1.GetOptions{})
 			if !errors.IsNotFound(err) {
 				if err != nil {
 					cmdutil.Fatal("Error getting JWT secret: %v", err)
@@ -105,7 +103,7 @@ The secret will be created in the principal's namespace on the principal's conte
 			secret := &corev1.Secret{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      config.SecretNameJWT,
-					Namespace: globalOpts.principalNamespace,
+					Namespace: principalCfg.Namespace,
 				},
 				Type: corev1.SecretTypeOpaque,
 				Data: map[string][]byte{
@@ -114,17 +112,17 @@ The secret will be created in the principal's namespace on the principal's conte
 			}
 
 			if !exists {
-				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Create(ctx, secret, v1.CreateOptions{})
+				_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Create(ctx, secret, v1.CreateOptions{})
 				if err != nil {
 					cmdutil.Fatal("Could not create JWT secret: %v", err)
 				}
-				fmt.Printf("Success. JWT signing key created and stored in secret %s/%s\n", globalOpts.principalNamespace, config.SecretNameJWT)
+				fmt.Printf("Success. JWT signing key created and stored in secret %s/%s\n", principalCfg.Namespace, config.SecretNameJWT)
 			} else {
-				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Update(ctx, secret, v1.UpdateOptions{})
+				_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Update(ctx, secret, v1.UpdateOptions{})
 				if err != nil {
 					cmdutil.Fatal("Could not update JWT secret: %v", err)
 				}
-				fmt.Printf("Success. JWT signing key updated in secret %s/%s\n", globalOpts.principalNamespace, config.SecretNameJWT)
+				fmt.Printf("Success. JWT signing key updated in secret %s/%s\n", principalCfg.Namespace, config.SecretNameJWT)
 			}
 		},
 	}
@@ -134,9 +132,7 @@ The secret will be created in the principal's namespace on the principal's conte
 }
 
 func NewJWTInspectKeyCommand() *cobra.Command {
-	var (
-		outFormat string
-	)
+	var outFormat string
 
 	type summary struct {
 		KeyType   string `json:"keyType" yaml:"keyType" text:"Key type"`
@@ -151,12 +147,12 @@ func NewJWTInspectKeyCommand() *cobra.Command {
 		Long:  `Displays information about the JWT signing key stored in the Kubernetes secret.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
 
-			key, err := tlsutil.JWTSigningKeyFromSecret(ctx, clt.Clientset, globalOpts.principalNamespace, config.SecretNameJWT)
+			key, err := tlsutil.JWTSigningKeyFromSecret(ctx, clt.Clientset, principalCfg.Namespace, config.SecretNameJWT)
 			if err != nil {
 				cmdutil.Fatal("Could not read JWT signing key from secret: %v", err)
 			}
@@ -167,7 +163,7 @@ func NewJWTInspectKeyCommand() *cobra.Command {
 			}
 
 			// Get secret metadata for creation time
-			secret, err := clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNameJWT, v1.GetOptions{})
+			secret, err := clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Get(ctx, config.SecretNameJWT, v1.GetOptions{})
 			if err != nil {
 				cmdutil.Fatal("Could not read JWT secret metadata: %v", err)
 			}
@@ -208,7 +204,7 @@ func NewJWTDeleteKeyCommand() *cobra.Command {
 		Long:  `Deletes the Kubernetes secret containing the JWT signing key.`,
 		Run: func(c *cobra.Command, args []string) {
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
@@ -223,15 +219,15 @@ func NewJWTDeleteKeyCommand() *cobra.Command {
 				}
 			}
 
-			err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Delete(ctx, config.SecretNameJWT, v1.DeleteOptions{})
+			err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Delete(ctx, config.SecretNameJWT, v1.DeleteOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) {
-					fmt.Printf("JWT secret %s/%s does not exist.\n", globalOpts.principalNamespace, config.SecretNameJWT)
+					fmt.Printf("JWT secret %s/%s does not exist.\n", principalCfg.Namespace, config.SecretNameJWT)
 				} else {
 					cmdutil.Fatal("Could not delete JWT secret: %v", err)
 				}
 			} else {
-				fmt.Printf("JWT signing key secret %s/%s deleted successfully.\n", globalOpts.principalNamespace, config.SecretNameJWT)
+				fmt.Printf("JWT signing key secret %s/%s deleted successfully.\n", principalCfg.Namespace, config.SecretNameJWT)
 			}
 		},
 	}
