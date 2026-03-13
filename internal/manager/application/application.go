@@ -185,22 +185,26 @@ func (m *ApplicationManager) Upsert(ctx context.Context, app *v1alpha1.Applicati
 	if !errors.IsAlreadyExists(err) {
 		return nil, err
 	}
-	existing, err := m.applicationBackend.Get(ctx, app.Name, app.Namespace)
-	if err != nil {
-		return nil, fmt.Errorf("get existing application for upsert: %w", err)
-	}
-	app.ResourceVersion = existing.ResourceVersion
-	if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-		if app.Annotations == nil {
-			app.Annotations = make(map[string]string)
+	var updated *v1alpha1.Application
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		existing, ierr := m.applicationBackend.Get(ctx, app.Name, app.Namespace)
+		if ierr != nil {
+			return fmt.Errorf("get existing application for upsert: %w", ierr)
 		}
-		app.Annotations[manager.SourceUIDAnnotation] = v
-	}
-	if m.role == manager.ManagerRolePrincipal {
-		app.Operation = nil
-		stampLastUpdated(app)
-	}
-	updated, err := m.applicationBackend.Update(ctx, app)
+		app.ResourceVersion = existing.ResourceVersion
+		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
+			if app.Annotations == nil {
+				app.Annotations = make(map[string]string)
+			}
+			app.Annotations[manager.SourceUIDAnnotation] = v
+		}
+		if m.role == manager.ManagerRolePrincipal {
+			app.Operation = nil
+			stampLastUpdated(app)
+		}
+		updated, ierr = m.applicationBackend.Update(ctx, app)
+		return ierr
+	})
 	if err != nil {
 		return nil, err
 	}

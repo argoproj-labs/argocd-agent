@@ -1,4 +1,4 @@
-// Copyright 2024 The argocd-agent Authors
+// Copyright 2026 The argocd-agent Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/retry"
 )
 
 // ApplicationSetManager manages Argo CD ApplicationSet resources on a given backend.
@@ -71,21 +72,22 @@ func (m *ApplicationSetManager) Upsert(ctx context.Context, appSet *v1alpha1.App
 		return nil, err
 	}
 
-	existing, err := m.appSetBackend.Get(ctx, appSet.Name, appSet.Namespace)
-	if err != nil {
-		return nil, fmt.Errorf("get existing applicationset for upsert: %w", err)
-	}
-
-	appSet.ResourceVersion = existing.ResourceVersion
-
-	if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-		if appSet.Annotations == nil {
-			appSet.Annotations = make(map[string]string)
+	var updated *v1alpha1.ApplicationSet
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		existing, ierr := m.appSetBackend.Get(ctx, appSet.Name, appSet.Namespace)
+		if ierr != nil {
+			return fmt.Errorf("get existing applicationset for upsert: %w", ierr)
 		}
-		appSet.Annotations[manager.SourceUIDAnnotation] = v
-	}
-
-	updated, err := m.appSetBackend.Update(ctx, appSet)
+		appSet.ResourceVersion = existing.ResourceVersion
+		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
+			if appSet.Annotations == nil {
+				appSet.Annotations = make(map[string]string)
+			}
+			appSet.Annotations[manager.SourceUIDAnnotation] = v
+		}
+		updated, ierr = m.appSetBackend.Update(ctx, appSet)
+		return ierr
+	})
 	if err != nil {
 		return nil, err
 	}
