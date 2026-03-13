@@ -1,4 +1,4 @@
-// Copyright 2024 The argocd-agent Authors
+// Copyright 2026 The argocd-agent Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -103,15 +103,6 @@ func NewHAPromoteCommand() *cobra.Command {
 Refuses if the peer is also ACTIVE (split-brain safety).
 Use --force to override the safety check.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			defer cancel()
-
-			client, cleanup, err := getHAAdminClient(ctx, address)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-
 			if !force {
 				fmt.Println("WARNING: This will promote the principal to ACTIVE.")
 				fmt.Println("Connected agents may need to reconnect.")
@@ -124,6 +115,15 @@ Use --force to override the safety check.`,
 					return nil
 				}
 			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+
+			client, cleanup, err := getHAAdminClient(ctx, address)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
 
 			resp, err := client.Promote(ctx, &haadminapi.PromoteRequest{Force: force})
 			if err != nil {
@@ -157,15 +157,6 @@ func NewHADemoteCommand() *cobra.Command {
 The principal will stop accepting agents and begin replicating
 from the peer.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			defer cancel()
-
-			client, cleanup, err := getHAAdminClient(ctx, address)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-
 			if !force {
 				fmt.Println("WARNING: This will demote the principal to REPLICA.")
 				fmt.Println("All connected agents will be disconnected.")
@@ -178,6 +169,15 @@ from the peer.`,
 					return nil
 				}
 			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+
+			client, cleanup, err := getHAAdminClient(ctx, address)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
 
 			resp, err := client.Demote(ctx, &haadminapi.DemoteRequest{})
 			if err != nil {
