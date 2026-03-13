@@ -336,6 +336,35 @@ Secret name of the resource proxy's CA certificate.
 
 Path to file containing the resource proxy's TLS CA data.
 
+## Self-Registration Configuration (Experimental)
+
+!!! warning "Experimental Feature"
+    Agent self-registration is an experimental feature and may change or be removed in future releases.
+
+### Enable Self Cluster Registration
+
+| | |
+|---|---|
+| **CLI Flag** | `--enable-self-cluster-registration` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Experimental: Whether to allow agents with valid credentials to automatically create their own cluster secrets on first connection. Requires `--enable-resource-proxy` and `--self-registration-client-cert-secret` to be set. See the [self-registration user guide](../../user-guide/self-registration.md) for details.
+
+### Self-Registration Client Cert Secret
+
+| | |
+|---|---|
+| **CLI Flag** | `--self-registration-client-cert-secret` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+Experimental: Name of a Kubernetes secret containing the shared TLS client certificate used in self-registered cluster secrets. The secret must contain `tls.crt`, `tls.key`, and `ca.crt` keys. Required when `--enable-self-cluster-registration` is `true`.
+
 ## JWT Configuration
 
 ### JWT Secret Name
