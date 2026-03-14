@@ -165,6 +165,24 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.redis.username
                 optional: true
+          - name: ARGOCD_AGENT_REDIS_TLS_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.redis.tls.enabled
+                optional: true
+          - name: ARGOCD_AGENT_REDIS_TLS_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.redis.tls.ca-path
+                optional: true
+          - name: ARGOCD_AGENT_REDIS_TLS_INSECURE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.redis.tls.insecure
+                optional: true
           - name: ARGOCD_PRINCIPAL_LOG_FORMAT
             valueFrom:
               configMapKeyRef:
