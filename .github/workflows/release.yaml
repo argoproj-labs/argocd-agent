@@ -1,0 +1,137 @@
+name: Publish argocd-agent release
+on:
+  push:
+    tags:
+      - "v*"
+
+# NEED TO ADD THE RELEASE ON FORK OPTIONS GOING TO HARD CODE FOR NOW
+jobs:
+  setup-variables:
+    name: Setup variables for release
+    if: github.repository == 'argoproj-labs/argocd-agent' || (github.repository_owner != 'argoproj-labs' && vars.ENABLE_FORK_RELEASES == 'true' && vars.IMAGE_NAMESPACE && vars.IMAGE_NAMESPACE != 'argoproj-labs')
+    runs-on: ubuntu-24.04
+    outputs:
+      allow_fork_releases: ${{ steps.var.outputs.allow_fork_releases }}
+      is_latest_release: ${{ steps.var.outputs.is_latest_release }}
+      image_repository: ${{ steps.var.outputs.image_repository }}
+      image_namespace: ${{ steps.var.outputs.image_namespace }}
+      image_name: ${{ steps.var.outputs.image_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup variables
+        id: var
+        run: |
+          set -xue
+          git fetch --prune --tags --force
+
+          LATEST_RELEASE_TAG=$(git tag --list --sort=version:refname | tail -n 1)
+          IS_LATEST_RELEASE=false
+          if [[ "$LATEST_RELEASE_TAG" == "${{ github.ref_name }}" ]]; then
+            IS_LATEST_RELEASE=true
+          fi
+          echo "is_latest_release=$IS_LATEST_RELEASE" >> $GITHUB_OUTPUT
+
+          IMAGE_REPOSITORY="${{ vars.IMAGE_REPOSITORY || 'quay.io' }}"
+          IMAGE_NAMESPACE="${{ vars.IMAGE_NAMESPACE || 'argoproj-labs' }}"
+          IMAGE_NAME="${{ vars.IMAGE_NAME || 'argocd-agent' }}"
+
+          echo "image_repository=$IMAGE_REPOSITORY" >> $GITHUB_OUTPUT
+          echo "image_namespace=$IMAGE_NAMESPACE" >> $GITHUB_OUTPUT
+          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+
+          ENABLE_FORK_RELEASES="${{ vars.ENABLE_FORK_RELEASES || 'false' }}"
+
+          ALLOW_FORK_RELEASE=false
+          if [[ "${{ github.repository_owner }}" != "argoproj-labs" && "$ENABLE_FORK_RELEASES" == "true" && "$IMAGE_NAMESPACE" != "argoproj" ]]; then
+            ALLOW_FORK_RELEASE=true
+          fi
+
+          echo "allow_fork_releases=$ALLOW_FORK_RELEASE" >> $GITHUB_OUTPUT
+          git branch --show-current
+
+  build-container:
+    name: Build and push principal/agent container image
+    needs:
+      - setup-variables
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-22.04
+    if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    env:
+      DOCKER_BIN: podman
+      IMAGE_REPOSITORY: ${{ needs.setup-variables.outputs.image_namespace }}
+      IMAGE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        if: ${{ github.ref_type != 'tag' }}
+
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        if: ${{ github.ref_type == 'tag' }}
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build Image URI
+        run: |
+          echo "IMAGE_URI=${{ needs.setup-variables.outputs.image_namespace }}/argocd-agent" >> $GITHUB_ENV
+
+      - name: Build argocd-agent container image
+        run: |
+          make image-multiarch
+
+      - name: Push image to registry
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          registry: ${{ needs.setup-variables.outputs.image_repository }}
+          image: ${{ env.IMAGE_URI }}
+          tags: ${{ github.ref_name }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+  release-ctl:
+    name: "Release CTL binaries with goreleaser"
+    needs:
+      - setup-variables
+      - build-container
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    env:
+      GORELEASER_MAKE_LATEST: ${{ needs.setup-variables.outputs.is_latest_release }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all tags
+        run: git fetch --force --tags
+
+      - name: Install git-cliff
+        uses: taiki-e/install-action@git-cliff
+
+      - name: Generate release notes
+        run: |
+          ./hack/generate-release-notes.sh ${{ github.ref_name }}
+
+      - name: Install goreleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          install-only: true
+
+      - name: Run goreleaser
+        run: |
+          set -xue
+
+          export CHANGELOG_CONTENT=$(cat CHANGELOG.md)
+          rm CHANGELOG.md
+
+          GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} goreleaser --clean --timeout 30m

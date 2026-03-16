@@ -1,59 +1,41 @@
-version: 1
+version: 2
 
 project_name: argocd-agent
 
 before:
   hooks:
     - go mod tidy
-    - ./hack/test.sh
 
 builds:
-  - id: agent
+  - id: argocd-agentctl
+    main: ./cmd/ctl
+    binary: argocd-agentctl-{{ .Os }}-{{ .Arch }}
     env:
       - CGO_ENABLED=0
+    flags:
+      - -v
+    ldflags:
+      - -extldflags="-static"
+      - -X github.com/argoproj-labs/argocd-agent/internal/version.version={{ .Version }}
+      - -X github.com/argoproj-labs/argocd-agent/internal/version.gitRevision={{ .FullCommit }}
     goos:
       - linux
-    binary: argocd-agent-agent
-    ldflags: "-extldflags=-static -X github.com/argoproj-labs/argocd-agent/internal/version.version={{.Version}}"
+      - darwin
     goarch:
       - amd64
       - arm64
-      - ppc64le
-      - s390x
-    main: './cmd/agent/main.go'
-  - id: principal
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-    binary: argocd-agent-principal
-    ldflags: "-extldflags=-static -X github.com/argoproj-labs/argocd-agent/internal/version.version={{.Version}}"
-    goarch:
-      - amd64
-      - arm64
-      - ppc64le
-      - s390x
-    main: './cmd/principal/main.go'
-
 
 archives:
-  - format: tar.gz
-    # this name template makes the OS and Arch compatible with the results of `uname`.
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-    # use zip for windows archives
-    format_overrides:
-      - goos: windows
-        format: zip
+  - formats: [binary]
+    ids:
+      - argocd-agentctl
+    name_template: |-
+      {{ .ProjectName }}ctl-{{ .Os }}-{{ .Arch }}
+
+release:
+  make_latest: "{{ .Env.GORELEASER_MAKE_LATEST }}"
+  header: |
+    {{ .Env.CHANGELOG_CONTENT }}
 
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
+  disable: true

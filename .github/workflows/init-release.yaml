@@ -1,0 +1,77 @@
+name: Init argocd-agent release
+on:
+  workflow_dispatch:
+    inputs:
+      TARGET_BRANCH:
+        description: "The branch the release is to be on (it must exist before running)"
+        required: true
+        type: string
+
+      TARGET_VERSION:
+        description: "The version to be release formatted as X.Y.Z without the v prefix"
+        required: true
+        type: string
+
+jobs:
+  init-release:
+    name: Automatically generate version and manifests on ${{ inputs.TARGET_BRANCH }} for v${{ inputs.TARGET_VERSION }}
+    runs-on: ubuntu-24.04
+    # The job needs write permissions for contents and pull-requests to be able to open one with peter-evans/create-pull-request
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.TARGET_BRANCH }}
+
+      - name: Export current version
+        run: echo "CURRENT_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+
+      - name: Validate provided version
+        run: |
+          set -xue
+
+          echo "Validating if ${{ inputs.TARGET_VERSION }} is in the format of X.Y.Z without the v prefix."
+
+          if echo "${{ inputs.TARGET_VERSION }}" | grep -vE "^[0-9]+\.[0-9]+\.[0-9]"; then
+            valid=false
+            echo "Error: ${{ inputs.TARGET_VERSION }} is not well formed. Must be X.Y.Z without the v prefix."
+            exit 1
+          fi
+
+          echo "Targeted version is valid"
+
+      - name: Update VERSION file
+        run: |
+          echo "Setting version from ${{ env.CURRENT_VERSION }} to ${{ inputs.TARGET_VERSION }}."
+          echo "${{ inputs.TARGET_VERSION }}" > VERSION
+
+      - name: Install Kustomize
+        uses: syntaqx/setup-kustomize@v1
+
+      - name: Generate new manifests
+        run: |
+          echo "Generating new manifests for version ${{ inputs.TARGET_VERSION }}"
+
+          cd install/kubernetes/principal
+          kustomize edit set image argocd-agent=quay.io/argoprojlabs/argocd-agent:v${{ inputs.TARGET_VERSION }}
+
+          cd ../agent
+          kustomize edit set image argocd-agent=quay.io/argoprojlabs/argocd-agent:v${{ inputs.TARGET_VERSION }}
+
+      - name: Print changes to be pushed
+        run: git --no-pager diff HEAD
+
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: "release: Publish release ${{ inputs.TARGET_VERSION }}"
+          title: "release: init ${{ inputs.TARGET_VERSION }} release on branch ${{ inputs.TARGET_BRANCH }}"
+          body: "Updating VERSION and manifests to use ${{ inputs.TARGET_VERSION }}"
+          branch: init-release
+          branch-suffix: random
+          signoff: true
+          # labels: release
