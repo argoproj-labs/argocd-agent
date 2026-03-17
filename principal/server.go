@@ -659,14 +659,16 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}()
 
-	// The applicationset informer lives in its own go routine
-	go func() {
-		if err := s.appSetManager.StartBackend(s.ctx); err != nil {
-			log().WithError(err).Error("ApplicationSet backend has exited non-successfully")
-		} else {
-			log().Info("ApplicationSet backend has exited")
-		}
-	}()
+	// ApplicationSet watches are only required when replication is enabled
+	if s.ha != nil {
+		go func() {
+			if err := s.appSetManager.StartBackend(s.ctx); err != nil {
+				log().WithError(err).Error("ApplicationSet backend has exited non-successfully")
+			} else {
+				log().Info("ApplicationSet backend has exited")
+			}
+		}()
+	}
 
 	// The namespace informer lives in its own go routine
 	go func() {
@@ -709,10 +711,12 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 	log().Infof("AppProject informer synced and ready")
 
-	if err := s.appSetManager.EnsureSynced(syncTimeout); err != nil {
-		return fmt.Errorf("unable to sync ApplicationSet informer: %w", err)
+	if s.ha != nil {
+		if err := s.appSetManager.EnsureSynced(syncTimeout); err != nil {
+			return fmt.Errorf("unable to sync ApplicationSet informer: %w", err)
+		}
+		log().Infof("ApplicationSet informer synced and ready")
 	}
-	log().Infof("ApplicationSet informer synced and ready")
 
 	if err := s.repoManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Repository informer: %w", err)

@@ -167,11 +167,14 @@ func (s *Server) Subscribe(stream replicationapi.Replication_SubscribeServer) er
 	select {
 	case res := <-ackCh:
 		if res.err != nil {
-			return fmt.Errorf("waiting for initial ACK: %w", res.err)
+			return status.Errorf(codes.Internal, "waiting for initial ACK: %v", res.err)
 		}
 		firstAck = res.ack
 	case <-ackCtx.Done():
-		return fmt.Errorf("waiting for initial ACK: timed out after %s", s.options.InitialAckTimeout)
+		return status.Errorf(codes.DeadlineExceeded, "waiting for initial ACK: timed out after %s", s.options.InitialAckTimeout)
+	}
+	if firstAck == nil {
+		return status.Errorf(codes.Internal, "received nil ACK from replica")
 	}
 	s.forwarder.UpdateReplicaAck(replicaID, firstAck.AckedSequenceNum)
 	client.logCtx.WithField("acked_seq", firstAck.AckedSequenceNum).Info("Replica snapshot applied, flushing buffered events")
