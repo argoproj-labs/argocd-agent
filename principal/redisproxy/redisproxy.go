@@ -963,6 +963,13 @@ func (rp *RedisProxy) extractAgentNameFromRedisCommandKey(redisKey string, logCt
 			return "", nil
 		}
 
+		if strings.HasPrefix(redisKey, "git-refs|") || strings.HasPrefix(redisKey, "gitdirs|") {
+			// 'git-refs' redis prefix: a cache of git references (branches, tags, etc) (used in a number of places, including exposed via '/api/v1/repositories/{repo}/refs' api)
+			// 'gitdirs' redis prefix: a cache of all directories contained within a git repo (e.g. a dir list, but excluding files. Seemingly only used by appset, presumably by git directory generator)
+			logCtx.Debug("redirecting git redis key to principal redis")
+			return "", nil
+		}
+
 		logCtx.Warningf("Unexpected redis key seen: '%s'. Redirecting to principal by default.", redisKey)
 
 		return "", nil
