@@ -307,6 +307,12 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 // needs to be converted to, e.g.
 // "app|resources-tree|my-app|1.8.3.gz
 func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error) {
+
+	// git-refs and gitdirs keys don't contain namespace information; return as-is
+	if strings.HasPrefix(key, "git-refs|") || strings.HasPrefix(key, "gitdirs|") {
+		return key, nil
+	}
+
 	var matchedPrefix string
 	expectedPrefixes := []string{
 		"app|resources-tree|",
