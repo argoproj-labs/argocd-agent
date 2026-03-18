@@ -63,9 +63,9 @@ func TestEventWriter(t *testing.T) {
 		require.Equal(t, latestEvent.event, ev)
 		require.Nil(t, latestEvent.retryAfter)
 
-		// Add an Update event for the same resource
+		// Add a SpecUpdate event for the same resource
 		app1.ResourceVersion = "2"
-		newEv := es.ApplicationEvent(Update, app1)
+		newEv := es.ApplicationEvent(SpecUpdate, app1)
 		evSender.Add(newEv)
 
 		latestEvent = evSender.Get(ResourceID(ev))
@@ -75,7 +75,7 @@ func TestEventWriter(t *testing.T) {
 
 		// Try removing an event with the same resourceID but different eventID.
 		app1.ResourceVersion = "3"
-		newEv = es.ApplicationEvent(Update, app1)
+		newEv = es.ApplicationEvent(SpecUpdate, app1)
 		evSender.Remove(newEv)
 
 		// The old event should not removed from the queue.
@@ -96,8 +96,8 @@ func TestEventWriter(t *testing.T) {
 		fs := &fakeStream{}
 		evSender := NewEventWriter(fs)
 
-		app1Events := []EventType{Create, Update, Delete}
-		app2Events := []EventType{Create, Update, Update, Delete}
+		app1Events := []EventType{Create, SpecUpdate, Delete}
+		app2Events := []EventType{Create, SpecUpdate, SpecUpdate, Delete}
 
 		for v, e := range app2Events {
 			app2.ResourceVersion = fmt.Sprintf("%d", v)
@@ -152,12 +152,12 @@ func TestEventWriter(t *testing.T) {
 		fs := &fakeStream{}
 		evSender := NewEventWriter(fs)
 
-		// Add Create and Update events
+		// Add Create and SpecUpdate events
 		ev1 := es.ApplicationEvent(Create, app1)
 		evSender.Add(ev1)
 
 		app1.ResourceVersion = "2"
-		ev2 := es.ApplicationEvent(Update, app1)
+		ev2 := es.ApplicationEvent(SpecUpdate, app1)
 		evSender.Add(ev2)
 
 		resID := createResourceID(app1.ObjectMeta)
@@ -201,7 +201,7 @@ func TestEventWriter(t *testing.T) {
 							UID:             types.UID(fmt.Sprintf("%d", id)),
 						},
 					}
-					ev := es.ApplicationEvent(Update, app)
+					ev := es.ApplicationEvent(SpecUpdate, app)
 					evSender.Add(ev)
 				}
 			}(i)
@@ -222,7 +222,7 @@ func TestEventWriter(t *testing.T) {
 							UID:             types.UID(fmt.Sprintf("%d", id)),
 						},
 					}
-					ev := es.ApplicationEvent(Update, app)
+					ev := es.ApplicationEvent(SpecUpdate, app)
 					evSender.Remove(ev)
 				}
 			}(i)
@@ -414,7 +414,7 @@ func TestEventWriter(t *testing.T) {
 
 		// Add another event for the same resource with version 2
 		app1.ResourceVersion = "2"
-		ev2 := es.ApplicationEvent(Update, app1)
+		ev2 := es.ApplicationEvent(SpecUpdate, app1)
 		evSender.Add(ev2)
 
 		// Get should return the sent event (version 1), not the unsent one (version 2)
@@ -465,7 +465,7 @@ func TestEventWriter(t *testing.T) {
 		// Add multiple updates
 		for i := 1; i <= 5; i++ {
 			app1.ResourceVersion = fmt.Sprintf("%d", i)
-			ev := es.ApplicationEvent(Update, app1)
+			ev := es.ApplicationEvent(SpecUpdate, app1)
 			evSender.Add(ev)
 		}
 
