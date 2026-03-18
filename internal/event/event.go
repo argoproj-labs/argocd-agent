@@ -53,7 +53,6 @@ const (
 	Update                     EventType = TypePrefix + ".update"
 	SpecUpdate                 EventType = TypePrefix + ".spec-update"
 	StatusUpdate               EventType = TypePrefix + ".status-update"
-	OperationUpdate            EventType = TypePrefix + ".operation-update"
 	TerminateOperation         EventType = TypePrefix + ".terminate-operation"
 	EventProcessed             EventType = TypePrefix + ".processed"
 	GetRequest                 EventType = TypePrefix + ".get"

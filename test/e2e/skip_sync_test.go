@@ -148,7 +148,7 @@ func (suite *SkipSyncTestSuite) Test_AppProject_SkipSync() {
 		appProject := argoapp.AppProject{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
 		return err == nil
-	}, 5*time.Second, 1*time.Second, "AppProject with skip sync label should not be synced to agent")
+	}, 10*time.Second, 1*time.Second, "AppProject with skip sync label should not be synced to agent")
 
 	// Verify the AppProject still exists on the principal
 	principalProject := argoapp.AppProject{}

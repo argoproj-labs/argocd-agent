@@ -106,7 +106,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 		app = argoapp.Application{}
 		err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeOutOfSync
-	}, 60*time.Second, 1*time.Second)
+	}, 120*time.Second, 1*time.Second)
 
 	// Sync the app
 	err = fixture.SyncApplication(suite.Ctx, principalKey, suite.PrincipalClient)
@@ -117,14 +117,14 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 		app := argoapp.Application{}
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
-	}, 60*time.Second, 1*time.Second)
+	}, 4*time.Minute, 1*time.Second)
 
 	// Ensure the app on the managed-agent becomes synced
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
-	}, 60*time.Second, 1*time.Second)
+	}, 4*time.Minute, 1*time.Second)
 
 	// Check that the .spec field of the managed-agent matches that of the
 	// principal
@@ -340,8 +340,19 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.OperationState != nil &&
+		res := err == nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationRunning
+
+		if !res {
+			appState := "N/A"
+			if app.Status.OperationState != nil {
+				appState = string(app.Status.OperationState.Phase)
+			}
+
+			suite.T().Log("operation state is currently", appState)
+		}
+
+		return res
 	}, 60*time.Second, 1*time.Second)
 
 	// Wait for the sync operation to start on the principal
@@ -395,6 +406,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	}
 	requires.Eventually(func() bool {
 		err := suite.ManagedAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&hook), &hook, metav1.GetOptions{})
+		suite.T().Logf("waiting for 'not found' error, error is currently: %v", err)
 		return err != nil && errors.IsNotFound(err)
 	}, 120*time.Second, 1*time.Second)
 

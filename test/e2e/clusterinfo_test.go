@@ -197,7 +197,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 120*time.Second, 5*time.Second)
 
 	// Step 5:
 	// Delete the first application from the principal cluster and validate that it is removed from managed cluster

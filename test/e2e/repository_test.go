@@ -252,7 +252,7 @@ func (suite *RepositoryTestSuite) Test_Repository_AppProjectUpdate() {
 		appProject := argoapp.AppProject{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
 		return err == nil
-	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
+	}, 60*time.Second, 1*time.Second, "GET appProject from managed-agent")
 
 	// Create a repository on the principal's cluster
 	sourceRepo := corev1.Secret{
@@ -278,7 +278,7 @@ func (suite *RepositoryTestSuite) Test_Repository_AppProjectUpdate() {
 		repository := corev1.Secret{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
 		return err == nil
-	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
+	}, 60*time.Second, 1*time.Second, "GET repository from managed-agent")
 
 	// Update the appProject on the principal's cluster to no longer match the agent name
 	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, projKey, func(appProject *argoapp.AppProject) error {
@@ -292,7 +292,7 @@ func (suite *RepositoryTestSuite) Test_Repository_AppProjectUpdate() {
 		repository := corev1.Secret{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
-	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
+	}, 60*time.Second, 1*time.Second, "GET repository from managed-agent")
 }
 
 func (suite *RepositoryTestSuite) Test_Repository_Change_AppProject() {

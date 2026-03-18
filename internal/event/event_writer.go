@@ -17,7 +17,7 @@ import (
 
 const (
 	// maxEventRetries is the maximum number of times an event will be retried before giving up.
-	maxEventRetries = 5
+	maxEventRetries = 12
 )
 
 type streamWriter interface {
@@ -103,8 +103,8 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 
 	defaultBackoff := wait.Backoff{
 		Steps:    maxEventRetries,
-		Duration: 5 * time.Second,
-		Factor:   2.0,
+		Duration: 1 * time.Second,
+		Factor:   1.5,
 		Jitter:   0.1,
 	}
 

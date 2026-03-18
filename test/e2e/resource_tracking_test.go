@@ -187,7 +187,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 				Namespace: "argocd",
 			},
 		}
-		if err := fixture.WaitForDeletion(suite.Ctx, suite.ManagedAgentClient, agentApp); err != nil {
+		if err := fixture.WaitForDeletion(suite.Ctx, suite.ManagedAgentClient, agentApp, "managed agent"); err != nil {
 			suite.T().Logf("Failed to wait for application deletion from managed-agent: %v", err)
 		}
 	})
@@ -252,7 +252,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 
 	// Verify that the resource proxy can fetch the tracked resource
 	resource, err := argoClient.GetResource(&principalApp,
-		"apps", "v1", "Deployment", suite.getTestNamespace(), "guestbook-ui")
+		"apps", "v1", "Deployment", suite.getTestNamespace(), "guestbook-ui", suite.T())
 	requires.NoError(err, "Resource proxy should be able to fetch resource with %s tracking", trackingMethod)
 
 	// Verify the fetched resource is correct
