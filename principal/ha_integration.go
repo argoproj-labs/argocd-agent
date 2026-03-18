@@ -538,10 +538,19 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 		}
 		key := resources.NewResourceKeyFromApp(app)
 		switch evType {
-		case event.Create, event.SpecUpdate, event.StatusUpdate, event.TerminateOperation:
+		case event.Create, event.SpecUpdate, event.TerminateOperation:
 			h.remapAppSetOwnerRefs(ctx, app)
 			if _, err := server.appManager.Upsert(ctx, app); err != nil {
 				log().WithField("app", app.QualifiedName()).WithError(err).Warn("HA: failed to upsert application from replicated event")
+			}
+			server.resources.Add(ev.AgentName, key)
+		case event.StatusUpdate:
+			// Use UpdateStatus (status-only patch) rather than Upsert (full replace).
+			// Upsert overwrites .spec, which causes ArgoCD to see spurious spec changes
+			// and oscillate between Synced and OutOfSync on the replica cluster.
+			h.remapAppSetOwnerRefs(ctx, app)
+			if _, err := server.appManager.UpdateStatus(ctx, ev.AgentName, app); err != nil {
+				log().WithField("app", app.QualifiedName()).WithError(err).Warn("HA: failed to update application status from replicated event")
 			}
 			server.resources.Add(ev.AgentName, key)
 		case event.Delete:
