@@ -238,6 +238,7 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 	components.ReplicationServer = replicationserver.NewServer(
 		components.ReplicationForwarder,
 		components.stateProvider,
+		replicationserver.WithInitialAckTimeout(haOptions.ReplicationInitialAckTimeout),
 	)
 
 	components.HAAdminServer = haadmin.NewServer(controller, &haStatusProvider{components: components, server: server})

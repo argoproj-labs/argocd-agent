@@ -85,6 +85,14 @@ func WithMaxReplicaConnections(max int) ServerOption {
 	}
 }
 
+// WithInitialAckTimeout sets how long the primary waits for the replica's
+// initial ACK after snapshot fetch.
+func WithInitialAckTimeout(timeout time.Duration) ServerOption {
+	return func(o *ServerOptions) {
+		o.InitialAckTimeout = timeout
+	}
+}
+
 // replicaClient tracks a connected replica
 type replicaClient struct {
 	id       string

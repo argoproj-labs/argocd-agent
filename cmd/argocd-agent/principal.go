@@ -124,8 +124,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 		haPreferredRole      string
 		haPeerAddress        string
 		haFailoverTimeout    time.Duration
-		haAdminPort          int
-		haAllowedReplClients []string
+		haAdminPort                       int
+		haAllowedReplClients              []string
+		haReplicationInitialAckTimeout    time.Duration
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -446,6 +447,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if len(haAllowedReplClients) > 0 {
 					haOpts = append(haOpts, ha.WithAllowedReplicationClients(haAllowedReplClients))
 				}
+				if haReplicationInitialAckTimeout > 0 {
+					haOpts = append(haOpts, ha.WithReplicationInitialAckTimeout(haReplicationInitialAckTimeout))
+				}
 				opts = append(opts, principal.WithHA(haOpts...))
 				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
 			}
@@ -672,6 +676,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&haAllowedReplClients, "ha-allowed-replication-clients",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS", nil, []string{}),
 		"Comma-separated list of peer identities allowed to connect for replication")
+	command.Flags().DurationVar(&haReplicationInitialAckTimeout, "ha-replication-initial-ack-timeout",
+		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_INITIAL_ACK_TIMEOUT", nil, 0),
+		"How long the primary waits for the replica's initial ACK after snapshot fetch (default: 5m)")
 
 	return command
 }

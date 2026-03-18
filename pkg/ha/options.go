@@ -36,6 +36,12 @@ type Options struct {
 	ReconnectBackoffInitial time.Duration
 	ReconnectBackoffMax     time.Duration
 	ReconnectBackoffFactor  float64
+
+	// ReplicationInitialAckTimeout is how long the primary waits for the
+	// replica to send its initial ACK after fetching the snapshot. Large
+	// deployments may need a higher value if snapshot processing exceeds
+	// the default.
+	ReplicationInitialAckTimeout time.Duration
 }
 
 // DefaultOptions returns the default HA options
@@ -45,9 +51,10 @@ func DefaultOptions() *Options {
 		PreferredRole:           RoleReplica,
 		FailoverTimeout:         30 * time.Second,
 		AdminPort:               8405,
-		ReconnectBackoffInitial: 1 * time.Second,
-		ReconnectBackoffMax:     30 * time.Second,
-		ReconnectBackoffFactor:  1.5,
+		ReconnectBackoffInitial:      1 * time.Second,
+		ReconnectBackoffMax:          30 * time.Second,
+		ReconnectBackoffFactor:       1.5,
+		ReplicationInitialAckTimeout: 5 * time.Minute,
 	}
 }
 
@@ -111,6 +118,18 @@ func WithAdminPort(port int) Option {
 func WithAllowedReplicationClients(clients []string) Option {
 	return func(o *Options) error {
 		o.AllowedReplicationClients = clients
+		return nil
+	}
+}
+
+// WithReplicationInitialAckTimeout sets how long the primary waits for the
+// replica's initial ACK after snapshot fetch. Increase for large deployments.
+func WithReplicationInitialAckTimeout(timeout time.Duration) Option {
+	return func(o *Options) error {
+		if timeout <= 0 {
+			return fmt.Errorf("replication initial ACK timeout must be positive")
+		}
+		o.ReplicationInitialAckTimeout = timeout
 		return nil
 	}
 }
