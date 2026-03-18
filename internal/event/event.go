@@ -50,7 +50,6 @@ const (
 	Pong                       EventType = TypePrefix + ".pong"
 	Create                     EventType = TypePrefix + ".create"
 	Delete                     EventType = TypePrefix + ".delete"
-	Update                     EventType = TypePrefix + ".update"
 	SpecUpdate                 EventType = TypePrefix + ".spec-update"
 	StatusUpdate               EventType = TypePrefix + ".status-update"
 	OperationUpdate            EventType = TypePrefix + ".operation-update"

@@ -145,7 +145,7 @@ func Test_Subscribe(t *testing.T) {
 			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
 		))
 		qs.SendQ("default").Add(emitter.ApplicationEvent(
-			event.Update,
+			event.SpecUpdate,
 			&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foo", Namespace: "test"}},
 		))
 		qs.SendQ("default").Add(emitter.ApplicationEvent(
