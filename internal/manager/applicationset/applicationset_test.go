@@ -154,3 +154,27 @@ func Test_Upsert_PreservesSourceUID(t *testing.T) {
 	require.Equal(t, "primary-uid", result.Annotations[manager.SourceUIDAnnotation])
 	be.AssertExpectations(t)
 }
+
+func Test_Upsert_CopiesExistingUID(t *testing.T) {
+	be := new(mockBackend)
+	m := NewApplicationSetManager(be, "argocd")
+	ctx := context.Background()
+
+	existing := newTestAppSet("test", "argocd", "existing-uid")
+	existing.UID = ktypes.UID("replica-uid")
+	existing.ResourceVersion = "rv-1"
+
+	incoming := newTestAppSet("test", "argocd", "some-uid")
+	incoming.UID = ktypes.UID("primary-uid")
+
+	alreadyExists := k8serrors.NewAlreadyExists(schema.GroupResource{}, "test")
+	be.On("Create", ctx, mock.Anything).Return(nil, alreadyExists)
+	be.On("Get", ctx, "test", "argocd").Return(existing, nil)
+	be.On("Update", ctx, mock.MatchedBy(func(a *v1alpha1.ApplicationSet) bool {
+		return a.UID == "replica-uid" && a.ResourceVersion == "rv-1"
+	})).Return(existing, nil)
+
+	_, err := m.Upsert(ctx, incoming)
+	require.NoError(t, err)
+	be.AssertExpectations(t)
+}

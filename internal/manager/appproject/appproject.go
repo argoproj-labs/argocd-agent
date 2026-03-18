@@ -179,9 +179,11 @@ func (m *AppProjectManager) Upsert(ctx context.Context, project *v1alpha1.AppPro
 	if err != nil {
 		return nil, fmt.Errorf("get existing appproject for upsert: %w", err)
 	}
+	// UID must match the replica's existing object — the primary and replica
+	// assign different UIDs to the same-named resource. Without this, etcd
+	// rejects the update with a storage precondition error (Code 4).
 	project.UID = existing.UID
 	project.ResourceVersion = existing.ResourceVersion
-	project.Generation = existing.Generation
 	project.Namespace = m.namespace
 	if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
 		if project.Annotations == nil {

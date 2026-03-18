@@ -191,7 +191,11 @@ func (m *ApplicationManager) Upsert(ctx context.Context, app *v1alpha1.Applicati
 		if ierr != nil {
 			return fmt.Errorf("get existing application for upsert: %w", ierr)
 		}
+		// UID must match the replica's existing object — the primary and replica
+		// assign different UIDs to the same-named resource. Without this, etcd
+		// rejects the update with a storage precondition error (Code 4).
 		app.ResourceVersion = existing.ResourceVersion
+		app.UID = existing.UID
 		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
 			if app.Annotations == nil {
 				app.Annotations = make(map[string]string)

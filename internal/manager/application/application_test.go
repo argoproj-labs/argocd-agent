@@ -872,3 +872,35 @@ func Test_RevertManagedAppChanges(t *testing.T) {
 		require.True(t, reverted)
 	})
 }
+
+func Test_Upsert_CopiesExistingUID(t *testing.T) {
+	existing := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "test-app",
+			Namespace:       "default",
+			UID:             ktypes.UID("replica-uid"),
+			ResourceVersion: "rv-1",
+		},
+	}
+	incoming := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-app",
+			Namespace: "default",
+			UID:       ktypes.UID("primary-uid"),
+		},
+	}
+
+	mockedBackend := appmock.NewApplication(t)
+	mockedBackend.On("Create", mock.Anything, mock.Anything).Return(nil, appExistsError)
+	mockedBackend.On("Get", mock.Anything, "test-app", "default").Return(existing, nil)
+	mockedBackend.On("Update", mock.Anything, mock.MatchedBy(func(app *v1alpha1.Application) bool {
+		return app.UID == "replica-uid" && app.ResourceVersion == "rv-1"
+	})).Return(incoming, nil)
+	mockedBackend.On("UpdateIgnoreChange", mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	m, err := NewApplicationManager(mockedBackend, "", WithAllowUpsert(true))
+	require.NoError(t, err)
+	_, err = m.Upsert(context.Background(), incoming)
+	require.NoError(t, err)
+	mockedBackend.AssertExpectations(t)
+}
