@@ -29,6 +29,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -164,4 +165,45 @@ func (m *Manager) Stop() error {
 
 func log() *logrus.Entry {
 	return logging.GetDefaultLogger().ComponentLogger("ClusterManager")
+}
+
+// GetClusterSecrets lists all agent-managed cluster secrets from K8s.
+func (m *Manager) GetClusterSecrets(ctx context.Context) ([]*v1.Secret, error) {
+	selector := fmt.Sprintf("%s=%s,%s=true",
+		common.LabelKeySecretType, common.LabelValueSecretTypeCluster,
+		LabelKeySelfRegisteredCluster)
+	list, err := m.kubeclient.CoreV1().Secrets(m.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: selector,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*v1.Secret, len(list.Items))
+	for i := range list.Items {
+		result[i] = &list.Items[i]
+	}
+	return result, nil
+}
+
+// CreateOrUpdateClusterSecret writes a cluster secret to K8s, creating or updating as needed.
+func (m *Manager) CreateOrUpdateClusterSecret(ctx context.Context, secret *v1.Secret) error {
+	toCreate := secret.DeepCopy()
+	toCreate.ResourceVersion = ""
+	toCreate.UID = ""
+	toCreate.Namespace = m.namespace
+	_, err := m.kubeclient.CoreV1().Secrets(m.namespace).Create(ctx, toCreate, metav1.CreateOptions{})
+	if err == nil {
+		return nil
+	}
+	if !errors.IsAlreadyExists(err) {
+		return err
+	}
+	existing, err := m.kubeclient.CoreV1().Secrets(m.namespace).Get(ctx, secret.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	toCreate.ResourceVersion = existing.ResourceVersion
+	toCreate.UID = existing.UID
+	_, err = m.kubeclient.CoreV1().Secrets(m.namespace).Update(ctx, toCreate, metav1.UpdateOptions{})
+	return err
 }

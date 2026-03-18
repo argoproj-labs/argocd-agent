@@ -77,6 +77,9 @@ The replica runs a **Replication Client** that connects to the primary's gRPC se
 |------|--------|
 | Applications | Full snapshot + incremental CloudEvents, written to replica's K8s cluster |
 | AppProjects | Full snapshot + incremental CloudEvents, written to replica's K8s cluster |
+| ApplicationSets | Full snapshot, written to replica's K8s cluster |
+| Repositories | Full snapshot + incremental CloudEvents, written to replica's K8s cluster |
+| Cluster secrets | Full snapshot — agent-managed cluster secrets (`self-registered-cluster=true`) written to replica's K8s so ArgoCD can resolve destination clusters |
 | Agent connection metadata | Snapshot (agent name, mode, connected state) |
 | Resource keys | Snapshot + event-driven |
 | Queue state | Queue pairs created on snapshot; events flow as queued |

@@ -148,34 +148,54 @@ func (p *serverStateProvider) GetAgentResources(agentName string) []replications
 	return resources
 }
 
-// GetPrincipalResources returns principal-scoped resources (ApplicationSets) for snapshot.
+// GetPrincipalResources returns principal-scoped resources (ApplicationSets, cluster secrets) for snapshot.
 func (p *serverStateProvider) GetPrincipalResources() []replicationserver.ResourceInfo {
-	if p.server.appSetManager == nil {
-		return nil
-	}
 	ctx := p.server.ctx
-	appSets, err := p.server.appSetManager.List(ctx, backend.ApplicationSetSelector{
-		Namespaces: []string{p.server.namespace},
-	})
-	if err != nil {
-		log().WithError(err).Warn("HA: failed to list ApplicationSets for snapshot")
-		return nil
-	}
-	result := make([]replicationserver.ResourceInfo, 0, len(appSets))
-	for i := range appSets {
-		as := &appSets[i]
-		data, err := json.Marshal(as)
-		if err != nil {
-			log().WithField("applicationset", as.Name).WithError(err).Warn("HA: skipping ApplicationSet serialization")
-			continue
-		}
-		result = append(result, replicationserver.ResourceInfo{
-			Name:      as.Name,
-			Namespace: as.Namespace,
-			Kind:      "ApplicationSet",
-			UID:       string(as.UID),
-			Data:      data,
+	result := make([]replicationserver.ResourceInfo, 0)
+	if p.server.appSetManager != nil {
+		appSets, err := p.server.appSetManager.List(ctx, backend.ApplicationSetSelector{
+			Namespaces: []string{p.server.namespace},
 		})
+		if err != nil {
+			log().WithError(err).Warn("HA: failed to list ApplicationSets for snapshot")
+		} else {
+			for i := range appSets {
+				as := &appSets[i]
+				data, err := json.Marshal(as)
+				if err != nil {
+					log().WithField("applicationset", as.Name).WithError(err).Warn("HA: skipping ApplicationSet serialization")
+					continue
+				}
+				result = append(result, replicationserver.ResourceInfo{
+					Name:      as.Name,
+					Namespace: as.Namespace,
+					Kind:      "ApplicationSet",
+					UID:       string(as.UID),
+					Data:      data,
+				})
+			}
+		}
+	}
+	if p.server.clusterMgr != nil {
+		clusterSecrets, err := p.server.clusterMgr.GetClusterSecrets(ctx)
+		if err != nil {
+			log().WithError(err).Warn("HA: failed to list cluster secrets for snapshot")
+		} else {
+			for _, secret := range clusterSecrets {
+				data, err := json.Marshal(secret)
+				if err != nil {
+					log().WithField("secret", secret.Name).WithError(err).Warn("HA: skipping cluster secret serialization")
+					continue
+				}
+				result = append(result, replicationserver.ResourceInfo{
+					Name:      secret.Name,
+					Namespace: secret.Namespace,
+					Kind:      "ClusterSecret",
+					UID:       string(secret.UID),
+					Data:      data,
+				})
+			}
+		}
 	}
 	return result
 }
@@ -742,6 +762,17 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 			if _, err := server.repoManager.UpdateManagedRepository(ctx, &repo); err != nil {
 				return fmt.Errorf("update repository: %w", err)
 			}
+		}
+	case "ClusterSecret":
+		if server.clusterMgr == nil {
+			return nil
+		}
+		var secret corev1.Secret
+		if err := json.Unmarshal(res.Data, &secret); err != nil {
+			return fmt.Errorf("unmarshal cluster secret: %w", err)
+		}
+		if err := server.clusterMgr.CreateOrUpdateClusterSecret(ctx, &secret); err != nil {
+			return fmt.Errorf("upsert cluster secret: %w", err)
 		}
 	}
 	return nil

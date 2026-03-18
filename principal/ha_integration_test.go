@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
@@ -30,13 +31,18 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	replicationserver "github.com/argoproj-labs/argocd-agent/principal/apis/replication"
+	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
+	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
@@ -788,4 +794,192 @@ func TestSerializeResource_Repository(t *testing.T) {
 	assert.Equal(t, repo.Name, decoded.Name)
 
 	mockBackend.AssertCalled(t, "Get", mock.Anything, repo.Name, repo.Namespace)
+}
+
+func newTestClusterSecret(name string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "argocd",
+			UID:       k8stypes.UID("uid-" + name),
+			Labels: map[string]string{
+				common.LabelKeySecretType:                                "cluster",
+				"argocd-agent.argoproj-labs.io/self-registered-cluster": "true",
+			},
+		},
+		Data: map[string][]byte{"server": []byte("https://example.com")},
+	}
+}
+
+func makeClusterMgr(t *testing.T, secrets ...*corev1.Secret) *cluster.Manager {
+	t.Helper()
+	objects := make([]runtime.Object, len(secrets))
+	for i, s := range secrets {
+		objects[i] = s
+	}
+	clt := fakekube.NewFakeClientsetWithResources(objects...)
+	mgr, err := cluster.NewManager(context.Background(), "argocd", "", "", cacheutil.RedisCompressionGZip, clt, nil)
+	require.NoError(t, err)
+	return mgr
+}
+
+func TestGetPrincipalResources_ClusterSecrets(t *testing.T) {
+	t.Run("no cluster secrets when clusterMgr is nil", func(t *testing.T) {
+		server := createTestServer()
+		server.ctx = context.Background()
+		provider := &serverStateProvider{server: server}
+
+		result := provider.GetPrincipalResources()
+		for _, r := range result {
+			assert.NotEqual(t, "ClusterSecret", r.Kind)
+		}
+	})
+
+	t.Run("cluster secret included in principal resources", func(t *testing.T) {
+		secret := newTestClusterSecret("cluster-agent-1")
+		mgr := makeClusterMgr(t, secret)
+
+		server := createTestServer()
+		server.ctx = context.Background()
+		server.clusterMgr = mgr
+		provider := &serverStateProvider{server: server}
+
+		result := provider.GetPrincipalResources()
+		var found []replicationserver.ResourceInfo
+		for _, r := range result {
+			if r.Kind == "ClusterSecret" {
+				found = append(found, r)
+			}
+		}
+		require.Len(t, found, 1)
+		assert.Equal(t, "cluster-agent-1", found[0].Name)
+		assert.Equal(t, "argocd", found[0].Namespace)
+		assert.NotEmpty(t, found[0].Data)
+
+		var decoded corev1.Secret
+		require.NoError(t, json.Unmarshal(found[0].Data, &decoded))
+		assert.Equal(t, "cluster-agent-1", decoded.Name)
+	})
+
+	t.Run("multiple cluster secrets are all included", func(t *testing.T) {
+		mgr := makeClusterMgr(t,
+			newTestClusterSecret("cluster-a"),
+			newTestClusterSecret("cluster-b"),
+		)
+
+		server := createTestServer()
+		server.ctx = context.Background()
+		server.clusterMgr = mgr
+		provider := &serverStateProvider{server: server}
+
+		result := provider.GetPrincipalResources()
+		count := 0
+		for _, r := range result {
+			if r.Kind == "ClusterSecret" {
+				count++
+			}
+		}
+		assert.Equal(t, 2, count)
+	})
+}
+
+func TestUpsertResourceFromSnapshot_ClusterSecret(t *testing.T) {
+	t.Run("creates cluster secret from snapshot", func(t *testing.T) {
+		secret := newTestClusterSecret("cluster-snap")
+		data, err := json.Marshal(secret)
+		require.NoError(t, err)
+
+		clt := fakekube.NewFakeClientsetWithResources()
+		mgr, err := cluster.NewManager(context.Background(), "argocd", "", "", cacheutil.RedisCompressionGZip, clt, nil)
+		require.NoError(t, err)
+
+		server := createTestServer()
+		server.ctx = context.Background()
+		server.clusterMgr = mgr
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		res := &replicationapi.Resource{
+			Kind: "ClusterSecret",
+			Name: secret.Name,
+			Data: data,
+		}
+		err = components.upsertResourceFromSnapshot(context.Background(), server, res)
+		require.NoError(t, err)
+
+		got, err := clt.CoreV1().Secrets("argocd").Get(context.Background(), "cluster-snap", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, "cluster-snap", got.Name)
+	})
+
+	t.Run("no-op when clusterMgr is nil", func(t *testing.T) {
+		secret := newTestClusterSecret("cluster-noop")
+		data, err := json.Marshal(secret)
+		require.NoError(t, err)
+
+		server := createTestServer()
+		server.ctx = context.Background()
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		res := &replicationapi.Resource{
+			Kind: "ClusterSecret",
+			Name: secret.Name,
+			Data: data,
+		}
+		err = components.upsertResourceFromSnapshot(context.Background(), server, res)
+		assert.NoError(t, err)
+	})
+
+	t.Run("returns error on invalid JSON", func(t *testing.T) {
+		clt := fakekube.NewFakeClientsetWithResources()
+		mgr, err := cluster.NewManager(context.Background(), "argocd", "", "", cacheutil.RedisCompressionGZip, clt, nil)
+		require.NoError(t, err)
+
+		server := createTestServer()
+		server.ctx = context.Background()
+		server.clusterMgr = mgr
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		res := &replicationapi.Resource{
+			Kind: "ClusterSecret",
+			Name: "bad",
+			Data: []byte("not-json"),
+		}
+		err = components.upsertResourceFromSnapshot(context.Background(), server, res)
+		assert.ErrorContains(t, err, "unmarshal cluster secret")
+	})
+
+	t.Run("updates existing cluster secret", func(t *testing.T) {
+		existing := newTestClusterSecret("cluster-update")
+		existing.Data = map[string][]byte{"server": []byte("https://old.example.com")}
+
+		clt := fakekube.NewFakeClientsetWithResources(existing)
+		mgr, err := cluster.NewManager(context.Background(), "argocd", "", "", cacheutil.RedisCompressionGZip, clt, nil)
+		require.NoError(t, err)
+
+		updated := newTestClusterSecret("cluster-update")
+		updated.Data = map[string][]byte{"server": []byte("https://new.example.com")}
+		data, err := json.Marshal(updated)
+		require.NoError(t, err)
+
+		server := createTestServer()
+		server.ctx = context.Background()
+		server.clusterMgr = mgr
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		res := &replicationapi.Resource{
+			Kind: "ClusterSecret",
+			Name: updated.Name,
+			Data: data,
+		}
+		err = components.upsertResourceFromSnapshot(context.Background(), server, res)
+		require.NoError(t, err)
+
+		got, err := clt.CoreV1().Secrets("argocd").Get(context.Background(), "cluster-update", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, []byte("https://new.example.com"), got.Data["server"])
+	})
 }
