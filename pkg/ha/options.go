@@ -47,10 +47,10 @@ type Options struct {
 // DefaultOptions returns the default HA options
 func DefaultOptions() *Options {
 	return &Options{
-		Enabled:                 false,
-		PreferredRole:           RoleReplica,
-		FailoverTimeout:         30 * time.Second,
-		AdminPort:               8405,
+		Enabled:                      false,
+		PreferredRole:                RoleReplica,
+		FailoverTimeout:              30 * time.Second,
+		AdminPort:                    8405,
 		ReconnectBackoffInitial:      1 * time.Second,
 		ReconnectBackoffMax:          30 * time.Second,
 		ReconnectBackoffFactor:       1.5,

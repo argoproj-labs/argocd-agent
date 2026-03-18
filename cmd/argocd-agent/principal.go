@@ -120,13 +120,13 @@ func NewPrincipalRunCommand() *cobra.Command {
 		redisTLSInsecure              bool
 
 		// HA configuration
-		haEnabled            bool
-		haPreferredRole      string
-		haPeerAddress        string
-		haFailoverTimeout    time.Duration
-		haAdminPort                       int
-		haAllowedReplClients              []string
-		haReplicationInitialAckTimeout    time.Duration
+		haEnabled                      bool
+		haPreferredRole                string
+		haPeerAddress                  string
+		haFailoverTimeout              time.Duration
+		haAdminPort                    int
+		haAllowedReplClients           []string
+		haReplicationInitialAckTimeout time.Duration
 	)
 	command := &cobra.Command{
 		Use:   "principal",
