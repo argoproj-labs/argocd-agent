@@ -51,6 +51,9 @@ type Metrics struct {
 
 	// AgentConnectionsRejected counts agent connections rejected due to HA state
 	AgentConnectionsRejected *prometheus.CounterVec
+
+	// ResourceOperationErrors counts errors writing replicated resources, by kind and operation
+	ResourceOperationErrors *prometheus.CounterVec
 }
 
 // NewMetrics creates new HA metrics. It returns a singleton instance to avoid
@@ -90,6 +93,10 @@ func NewMetrics() *Metrics {
 				Name: "argocd_agent_ha_connections_rejected_total",
 				Help: "Total number of agent connections rejected due to HA state",
 			}, []string{"state", "reason"}),
+			ResourceOperationErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "argocd_agent_ha_resource_operation_errors_total",
+				Help: "Total number of errors writing replicated resources, by resource kind and operation",
+			}, []string{"kind", "operation"}),
 		}
 	})
 	return metricsInstance
@@ -138,4 +145,9 @@ func (m *Metrics) RecordFailback() {
 // RecordRejectedConnection records a rejected agent connection
 func (m *Metrics) RecordRejectedConnection(state State, reason string) {
 	m.AgentConnectionsRejected.WithLabelValues(state.String(), reason).Inc()
+}
+
+// RecordResourceOperationError records a failure writing a replicated resource
+func (m *Metrics) RecordResourceOperationError(kind, operation string) {
+	m.ResourceOperationErrors.WithLabelValues(kind, operation).Inc()
 }

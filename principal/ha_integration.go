@@ -561,6 +561,7 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 		case event.Create, event.SpecUpdate, event.TerminateOperation:
 			h.remapAppSetOwnerRefs(ctx, app)
 			if _, err := server.appManager.Upsert(ctx, app); err != nil {
+				h.recordResourceError("Application", "upsert")
 				log().WithField("app", app.QualifiedName()).WithError(err).Warn("HA: failed to upsert application from replicated event")
 			}
 			server.resources.Add(ev.AgentName, key)
@@ -570,11 +571,13 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 			// and oscillate between Synced and OutOfSync on the replica cluster.
 			h.remapAppSetOwnerRefs(ctx, app)
 			if _, err := server.appManager.UpdateStatus(ctx, ev.AgentName, app); err != nil {
+				h.recordResourceError("Application", "status_update")
 				log().WithField("app", app.QualifiedName()).WithError(err).Warn("HA: failed to update application status from replicated event")
 			}
 			server.resources.Add(ev.AgentName, key)
 		case event.Delete:
 			if err := server.appManager.Delete(ctx, app.Namespace, app, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("Application", "delete")
 				log().WithField("app", app.QualifiedName()).WithError(err).Warn("HA: failed to delete application from replicated event")
 			}
 			server.resources.Remove(ev.AgentName, key)
@@ -589,11 +592,13 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 		switch evType {
 		case event.Create, event.SpecUpdate, event.StatusUpdate:
 			if _, err := server.projectManager.Upsert(ctx, proj); err != nil {
+				h.recordResourceError("AppProject", "upsert")
 				log().WithField("project", proj.Name).WithError(err).Warn("HA: failed to upsert appproject from replicated event")
 			}
 			server.resources.Add(ev.AgentName, key)
 		case event.Delete:
 			if err := server.projectManager.Delete(ctx, proj, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("AppProject", "delete")
 				log().WithField("project", proj.Name).WithError(err).Warn("HA: failed to delete appproject from replicated event")
 			}
 			server.resources.Remove(ev.AgentName, key)
@@ -607,10 +612,12 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 		switch evType {
 		case event.Create, event.SpecUpdate:
 			if _, err := server.appSetManager.Upsert(ctx, appSet); err != nil {
+				h.recordResourceError("ApplicationSet", "upsert")
 				log().WithField("applicationset", appSet.Name).WithError(err).Warn("HA: failed to upsert applicationset from replicated event")
 			}
 		case event.Delete:
 			if err := server.appSetManager.Delete(ctx, appSet.Namespace, appSet, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("ApplicationSet", "delete")
 				log().WithField("applicationset", appSet.Name).WithError(err).Warn("HA: failed to delete applicationset from replicated event")
 			}
 		}
@@ -626,15 +633,18 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 			if _, err := server.repoManager.Create(ctx, repo); err != nil {
 				if k8serrors.IsAlreadyExists(err) {
 					if _, err := server.repoManager.UpdateManagedRepository(ctx, repo); err != nil {
+						h.recordResourceError("Repository", "update")
 						log().WithField("repository", repo.Name).WithError(err).Warn("HA: failed to update repository from replicated event")
 					}
 				} else {
+					h.recordResourceError("Repository", "create")
 					log().WithField("repository", repo.Name).WithError(err).Warn("HA: failed to create repository from replicated event")
 				}
 			}
 			server.resources.Add(ev.AgentName, key)
 		case event.Delete:
 			if err := server.repoManager.Delete(ctx, repo.Name, repo.Namespace, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("Repository", "delete")
 				log().WithField("repository", repo.Name).WithError(err).Warn("HA: failed to delete repository from replicated event")
 			}
 			server.resources.Remove(ev.AgentName, key)
@@ -732,6 +742,7 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 		}
 		h.remapAppSetOwnerRefs(ctx, &app)
 		if _, err := server.appManager.Upsert(ctx, &app); err != nil {
+			h.recordResourceError("Application", "upsert")
 			return fmt.Errorf("upsert application: %w", err)
 		}
 	case "AppProject":
@@ -740,6 +751,7 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 			return fmt.Errorf("unmarshal appproject: %w", err)
 		}
 		if _, err := server.projectManager.Upsert(ctx, &proj); err != nil {
+			h.recordResourceError("AppProject", "upsert")
 			return fmt.Errorf("upsert appproject: %w", err)
 		}
 	case "ApplicationSet":
@@ -748,6 +760,7 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 			return fmt.Errorf("unmarshal applicationset: %w", err)
 		}
 		if _, err := server.appSetManager.Upsert(ctx, &appSet); err != nil {
+			h.recordResourceError("ApplicationSet", "upsert")
 			return fmt.Errorf("upsert applicationset: %w", err)
 		}
 	case "Repository":
@@ -757,9 +770,11 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 		}
 		if _, err := server.repoManager.Create(ctx, &repo); err != nil {
 			if !k8serrors.IsAlreadyExists(err) {
+				h.recordResourceError("Repository", "create")
 				return fmt.Errorf("upsert repository: %w", err)
 			}
 			if _, err := server.repoManager.UpdateManagedRepository(ctx, &repo); err != nil {
+				h.recordResourceError("Repository", "update")
 				return fmt.Errorf("update repository: %w", err)
 			}
 		}
@@ -772,6 +787,7 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 			return fmt.Errorf("unmarshal cluster secret: %w", err)
 		}
 		if err := server.clusterMgr.CreateOrUpdateClusterSecret(ctx, &secret); err != nil {
+			h.recordResourceError("ClusterSecret", "upsert")
 			return fmt.Errorf("upsert cluster secret: %w", err)
 		}
 	}
@@ -785,6 +801,7 @@ func (h *HAComponents) deleteStaleResource(ctx context.Context, server *Server, 
 			if err := server.appManager.Delete(ctx, key.Namespace, &v1alpha1.Application{
 				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
 			}, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("Application", "delete")
 				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale application")
 			}
 		}
@@ -793,6 +810,7 @@ func (h *HAComponents) deleteStaleResource(ctx context.Context, server *Server, 
 			if err := server.projectManager.Delete(ctx, &v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
 			}, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("AppProject", "delete")
 				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale appproject")
 			}
 		}
@@ -801,16 +819,26 @@ func (h *HAComponents) deleteStaleResource(ctx context.Context, server *Server, 
 			if err := server.appSetManager.Delete(ctx, key.Namespace, &v1alpha1.ApplicationSet{
 				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
 			}, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("ApplicationSet", "delete")
 				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale applicationset")
 			}
 		}
 	case "Repository":
 		if server.repoManager != nil {
 			if err := server.repoManager.Delete(ctx, key.Name, key.Namespace, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("Repository", "delete")
 				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale repository")
 			}
 		}
 	}
+}
+
+// recordResourceError records a resource operation error metric if HA metrics are available.
+func (h *HAComponents) recordResourceError(kind, operation string) {
+	if h == nil || h.Controller == nil {
+		return
+	}
+	h.Controller.Metrics().RecordResourceOperationError(kind, operation)
 }
 
 // remapAppSetOwnerRefs updates ownerReference UIDs for ApplicationSet owners

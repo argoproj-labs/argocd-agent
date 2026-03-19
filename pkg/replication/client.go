@@ -109,6 +109,8 @@ type ClientMetrics struct {
 	SyncSnapshotSize    prometheus.Gauge
 	ReconciliationCount prometheus.Counter
 	SequenceGaps        prometheus.Counter
+	SnapshotFetchErrors prometheus.Counter
+	SnapshotApplyErrors prometheus.Counter
 }
 
 var (
@@ -163,6 +165,14 @@ func NewClientMetrics() *ClientMetrics {
 			SequenceGaps: promauto.NewCounter(prometheus.CounterOpts{
 				Name: "argocd_agent_replication_client_sequence_gaps_total",
 				Help: "Total number of sequence gaps detected in event stream",
+			}),
+			SnapshotFetchErrors: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "argocd_agent_replication_client_snapshot_fetch_errors_total",
+				Help: "Total number of errors fetching the snapshot from the primary",
+			}),
+			SnapshotApplyErrors: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "argocd_agent_replication_client_snapshot_apply_errors_total",
+				Help: "Total number of errors applying a received snapshot",
 			}),
 		}
 	})
@@ -528,12 +538,14 @@ func (c *Client) syncSnapshot(ctx context.Context) error {
 
 	snapshot, err := c.GetSnapshot(ctx)
 	if err != nil {
+		c.metrics.SnapshotFetchErrors.Inc()
 		return err
 	}
 
 	// Apply snapshot via handler if configured
 	if c.snapshotHandler != nil {
 		if err := c.snapshotHandler(snapshot); err != nil {
+			c.metrics.SnapshotApplyErrors.Inc()
 			return fmt.Errorf("failed to apply snapshot: %w", err)
 		}
 	}
@@ -794,11 +806,13 @@ func (c *Client) reconcile(ctx context.Context) error {
 
 	snapshot, err := c.GetSnapshot(ctx)
 	if err != nil {
+		c.metrics.SnapshotFetchErrors.Inc()
 		return fmt.Errorf("snapshot fetch failed: %w", err)
 	}
 
 	if c.snapshotHandler != nil {
 		if err := c.snapshotHandler(snapshot); err != nil {
+			c.metrics.SnapshotApplyErrors.Inc()
 			return fmt.Errorf("snapshot apply failed: %w", err)
 		}
 	}
