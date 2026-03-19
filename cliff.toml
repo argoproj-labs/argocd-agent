@@ -110,7 +110,7 @@ commit_parsers = [
   { message = "^revert", group = "<!-- 9 -->◀️ Revert" },
 ]
 # Prevent commits that are breaking from being excluded by commit parsers.
-protect_breaking_commits = false
+protect_breaking_commits = true
 # Exclude commits that are not matched by any commit parser.
 filter_commits = false
 # Regex to select git tags that represent releases.
