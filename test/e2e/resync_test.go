@@ -1460,6 +1460,74 @@ func sampleRepository() *corev1.Secret {
 	}
 }
 
+// AppProject on the principal must persist after principal restart when the destination name is "in-cluster"
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestart_Autonomous_InClusterDestination() {
+	suite.assertAppProjectSurvivesPrincipalRestart("incluster-sample", "in-cluster")
+}
+
+// AppProject on the principal must persist after principal restart when the destination name is "production"
+func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestart_Autonomous_ArbitraryDestination() {
+	suite.assertAppProjectSurvivesPrincipalRestart("production-sample", "production")
+}
+
+func (suite *ResyncTestSuite) assertAppProjectSurvivesPrincipalRestart(projectName, destinationName string) {
+	requires := suite.Require()
+
+	agentAppProject := &argoapp.AppProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      projectName,
+			Namespace: "argocd",
+		},
+		Spec: argoapp.AppProjectSpec{
+			Destinations: []argoapp.ApplicationDestination{
+				{
+					Namespace: "*",
+					Name:      destinationName,
+					Server:    "https://kubernetes.default.svc",
+				},
+			},
+			SourceRepos: []string{"*"},
+		},
+	}
+
+	err := suite.AutonomousAgentClient.Create(suite.Ctx, agentAppProject, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	principalKey := types.NamespacedName{Name: "agent-autonomous-" + agentAppProject.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: agentAppProject.Name, Namespace: "argocd"}
+
+	// Wait for the AppProject to sync to the principal
+	requires.Eventually(func() bool {
+		proj := argoapp.AppProject{}
+		return suite.PrincipalClient.Get(suite.Ctx, principalKey, &proj, metav1.GetOptions{}) == nil
+	}, 30*time.Second, 1*time.Second, "AppProject should sync to principal")
+
+	// Restart the principal
+	err = fixture.StopProcess("principal")
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning("principal")
+	}, 30*time.Second, 1*time.Second)
+
+	err = fixture.StartProcess("principal")
+	requires.NoError(err)
+
+	fixture.CheckReadiness(suite.T(), "principal")
+
+	// The AppProject must still exist on the agent cluster
+	requires.Eventually(func() bool {
+		agentProj := argoapp.AppProject{}
+		return suite.AutonomousAgentClient.Get(suite.Ctx, agentKey, &agentProj, metav1.GetOptions{}) == nil
+	}, 30*time.Second, 1*time.Second, "AppProject should still exist on agent after principal restart")
+
+	// The AppProject must still exist on the principal
+	requires.Eventually(func() bool {
+		proj := argoapp.AppProject{}
+		return suite.PrincipalClient.Get(suite.Ctx, principalKey, &proj, metav1.GetOptions{}) == nil
+	}, 30*time.Second, 1*time.Second, "AppProject should still exist on principal after principal restart")
+}
+
 func TestResyncTestSuite(t *testing.T) {
 	suite.Run(t, new(ResyncTestSuite))
 }
