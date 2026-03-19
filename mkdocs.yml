@@ -56,6 +56,7 @@ nav:
     - Namespaces: configuration/namespaces.md
     - Networking: configuration/networking.md
     - Observability: configuration/observability.md
+    - CTL: configuration/ctl.md
     - Reference:
         - Overview: configuration/reference/index.md
         - Principal: configuration/reference/principal.md
