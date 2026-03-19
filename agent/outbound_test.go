@@ -833,6 +833,49 @@ func Test_handleGPGKeyUpdate(t *testing.T) {
 		// Should still be managed
 		assert.True(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
 	})
+
+	t.Run("Revert local modification to managed GPG key", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		originalData := map[string]string{
+			"4AEE18F83AFDEB23": "original-key-data",
+		}
+
+		sourceUID := k8stypes.UID("test-source-uid")
+		existingCM := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: string(sourceUID),
+				},
+			},
+			Data: originalData,
+		}
+		_, err := a.kubeClient.Clientset.CoreV1().ConfigMaps("argocd").Create(context.Background(), existingCM, v1.CreateOptions{})
+		require.NoError(t, err)
+		defer a.kubeClient.Clientset.CoreV1().ConfigMaps("argocd").Delete(context.Background(), "argocd-gpg-keys-cm", v1.DeleteOptions{})
+
+		err = a.gpgKeyManager.Manage("argocd-gpg-keys-cm")
+		require.NoError(t, err)
+		defer a.gpgKeyManager.ClearManaged()
+
+		a.sourceCache.GPGKey.Set(sourceUID, originalData)
+
+		// Make a local modification to the GPG key
+		tamperedCM := existingCM.DeepCopy()
+		tamperedCM.Data["7AEE18F83AFDEB23"] = "new-key-data"
+		tamperedCM.ResourceVersion = "3"
+
+		a.handleGPGKeyUpdate(existingCM, tamperedCM)
+
+		// Verify the ConfigMap was reverted to the original data
+		reverted, err := a.kubeClient.Clientset.CoreV1().ConfigMaps("argocd").Get(context.Background(), "argocd-gpg-keys-cm", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, originalData, reverted.Data)
+		_, ok := reverted.Data["7AEE18F83AFDEB23"]
+		assert.False(t, ok)
+	})
 }
 
 func Test_handleGPGKeyDeletion(t *testing.T) {

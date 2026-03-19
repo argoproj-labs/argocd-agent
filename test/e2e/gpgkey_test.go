@@ -29,6 +29,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+const (
+	gpgKeyIDPrimary   = "4AEE18F83AFDEB23"
+	gpgKeyIDSecondary = "9B2F7A3C1D4E5F60"
+	gpgKeyIDTampered  = "5B2F7A3C1D4E5F60"
+)
+
 type GPGKeyTestSuite struct {
 	fixture.BaseSuite
 }
@@ -52,7 +58,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_Managed() {
 			},
 		},
 		Data: map[string]string{
-			"4AEE18F83AFDEB23": "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest-key-data-1\n-----END PGP PUBLIC KEY BLOCK-----\n",
+			gpgKeyIDPrimary: "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest-key-data-1\n-----END PGP PUBLIC KEY BLOCK-----\n",
 		},
 	}
 
@@ -84,10 +90,9 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_Managed() {
 
 	// Update the GPG keys ConfigMap and verify changes propagate to the managed agent
 	updatedKeyData := "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest-key-data-updated\n-----END PGP PUBLIC KEY BLOCK-----\n"
-	err = suite.PrincipalClient.EnsureConfigMapUpdate(suite.Ctx, key, func(cm *corev1.ConfigMap) error {
-		cm.Data["4AEE18F83AFDEB23"] = updatedKeyData
-		return nil
-	}, metav1.UpdateOptions{})
+	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}}, func(obj fixture.KubeObject) {
+		obj.(*corev1.ConfigMap).Data[gpgKeyIDPrimary] = updatedKeyData
+	})
 	requires.NoError(err)
 
 	// Ensure the GPG keys ConfigMap is updated on the managed agent
@@ -98,8 +103,8 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_Managed() {
 			fmt.Println("error getting GPG keys ConfigMap", err)
 			return false
 		}
-		if cm.Data["4AEE18F83AFDEB23"] != updatedKeyData {
-			fmt.Println("GPG key data does not match", cm.Data["4AEE18F83AFDEB23"], updatedKeyData)
+		if cm.Data[gpgKeyIDPrimary] != updatedKeyData {
+			fmt.Println("GPG key data does not match", cm.Data[gpgKeyIDPrimary], updatedKeyData)
 			return false
 		}
 		return true
@@ -135,7 +140,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_AddMultipleKeys() {
 			},
 		},
 		Data: map[string]string{
-			"4AEE18F83AFDEB23": "-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey-one\n-----END PGP PUBLIC KEY BLOCK-----\n",
+			gpgKeyIDPrimary: "-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey-one\n-----END PGP PUBLIC KEY BLOCK-----\n",
 		},
 	}
 
@@ -152,10 +157,9 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_AddMultipleKeys() {
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be pushed to managed-agent")
 
 	// Add a second key to the ConfigMap on the principal
-	err = suite.PrincipalClient.EnsureConfigMapUpdate(suite.Ctx, key, func(cm *corev1.ConfigMap) error {
-		cm.Data["9B2F7A3C1D4E5F60"] = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey-two\n-----END PGP PUBLIC KEY BLOCK-----\n"
-		return nil
-	}, metav1.UpdateOptions{})
+	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}}, func(obj fixture.KubeObject) {
+		obj.(*corev1.ConfigMap).Data[gpgKeyIDSecondary] = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey-two\n-----END PGP PUBLIC KEY BLOCK-----\n"
+	})
 	requires.NoError(err)
 
 	// Ensure the second key appears on the managed agent
@@ -165,21 +169,20 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_AddMultipleKeys() {
 		if err != nil {
 			return false
 		}
-		return len(cm.Data) == 2 && cm.Data["9B2F7A3C1D4E5F60"] != ""
+		return len(cm.Data) == 2 && cm.Data[gpgKeyIDSecondary] != ""
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be updated on managed-agent with two keys")
 
 	// Delete one of the keys on the principal
-	err = suite.PrincipalClient.EnsureConfigMapUpdate(suite.Ctx, key, func(cm *corev1.ConfigMap) error {
-		delete(cm.Data, "4AEE18F83AFDEB23")
-		return nil
-	}, metav1.UpdateOptions{})
+	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}}, func(obj fixture.KubeObject) {
+		delete(obj.(*corev1.ConfigMap).Data, gpgKeyIDPrimary)
+	})
 	requires.NoError(err)
 
 	// Ensure the key is deleted from the managed agent
 	requires.Eventually(func() bool {
 		cm := corev1.ConfigMap{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &cm, metav1.GetOptions{})
-		return err == nil && len(cm.Data) == 1 && cm.Data["9B2F7A3C1D4E5F60"] != ""
+		return err == nil && len(cm.Data) == 1 && cm.Data[gpgKeyIDSecondary] != ""
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be updated on managed-agent with one key")
 }
 
@@ -200,7 +203,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalChange() {
 			},
 		},
 		Data: map[string]string{
-			"4AEE18F83AFDEB23": originalKeyData,
+			gpgKeyIDPrimary: originalKeyData,
 		},
 	}
 
@@ -213,14 +216,13 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalChange() {
 	requires.Eventually(func() bool {
 		cm := corev1.ConfigMap{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &cm, metav1.GetOptions{})
-		return err == nil && cm.Data["4AEE18F83AFDEB23"] == originalKeyData
+		return err == nil && cm.Data[gpgKeyIDPrimary] == originalKeyData
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be pushed to managed-agent")
 
 	// Tamper with the GPG keys ConfigMap on the managed agent
-	err = suite.ManagedAgentClient.EnsureConfigMapUpdate(suite.Ctx, key, func(cm *corev1.ConfigMap) error {
-		cm.Data["5B2F7A3C1D4E5F60"] = "-----BEGIN PGP PUBLIC KEY BLOCK-----\ninvalid-public-key\n-----END PGP PUBLIC KEY BLOCK-----\n"
-		return nil
-	}, metav1.UpdateOptions{})
+	err = fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}}, func(obj fixture.KubeObject) {
+		obj.(*corev1.ConfigMap).Data[gpgKeyIDTampered] = "-----BEGIN PGP PUBLIC KEY BLOCK-----\ninvalid-public-key\n-----END PGP PUBLIC KEY BLOCK-----\n"
+	})
 	requires.NoError(err)
 
 	// Ensure the local change is reverted
@@ -230,8 +232,8 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalChange() {
 		if err != nil {
 			return false
 		}
-		_, ok := cm.Data["5B2F7A3C1D4E5F60"]
-		return !ok && cm.Data["4AEE18F83AFDEB23"] == originalKeyData && len(cm.Data) == 1
+		_, ok := cm.Data[gpgKeyIDTampered]
+		return !ok && cm.Data[gpgKeyIDPrimary] == originalKeyData && len(cm.Data) == 1
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be reverted on managed-agent")
 }
 
@@ -252,7 +254,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalDeletion() {
 			},
 		},
 		Data: map[string]string{
-			"4AEE18F83AFDEB23": originalKeyData,
+			gpgKeyIDPrimary: originalKeyData,
 		},
 	}
 
@@ -265,7 +267,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalDeletion() {
 	requires.Eventually(func() bool {
 		cm := corev1.ConfigMap{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &cm, metav1.GetOptions{})
-		return err == nil && cm.Data["4AEE18F83AFDEB23"] == originalKeyData
+		return err == nil && cm.Data[gpgKeyIDPrimary] == originalKeyData
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be pushed to managed-agent")
 
 	// Delete the GPG keys ConfigMap on the managed agent
@@ -280,7 +282,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalDeletion() {
 		if err != nil {
 			return false
 		}
-		return cm.Data["4AEE18F83AFDEB23"] == originalKeyData
+		return cm.Data[gpgKeyIDPrimary] == originalKeyData
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be recreated on managed-agent after local deletion")
 }
 
@@ -334,7 +336,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_UseAndUpdatePreExistingConfigMap() {
 			},
 		},
 		Data: map[string]string{
-			"4AEE18F83AFDEB23": principalKeyData,
+			gpgKeyIDPrimary: principalKeyData,
 		},
 	}
 
@@ -350,7 +352,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_UseAndUpdatePreExistingConfigMap() {
 			return false
 		}
 		hasSourceUID := cm.Annotations[manager.SourceUIDAnnotation] != ""
-		hasCorrectData := cm.Data["4AEE18F83AFDEB23"] == principalKeyData
+		hasCorrectData := cm.Data[gpgKeyIDPrimary] == principalKeyData
 		_, hasOldKey := cm.Data["old-key"]
 		return hasSourceUID && hasCorrectData && !hasOldKey
 	}, 60*time.Second, 1*time.Second, "Orphan GPG keys ConfigMap should be used and updated with principal's data and source-uid annotation")

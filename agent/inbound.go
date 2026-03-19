@@ -953,13 +953,9 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 				}
 				return nil
 			} else {
-				if a.gpgKeyManager.IsManaged(incomingCM.Name) {
-					logCtx.Debug("GPG key already exists with a different source UID. Deleting the existing GPG key")
-					if err := a.deleteGPGKey(incomingCM); err != nil {
-						return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
-					}
-				} else {
-					logCtx.Debug("Existing GPG key is not managed, skipping delete and attempting updating the existing GPG key")
+				logCtx.Debug("GPG key already exists with a different source UID. Deleting the existing GPG key")
+				if err := a.deleteGPGKey(incomingCM); err != nil {
+					return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
 				}
 			}
 		}
@@ -979,16 +975,12 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 		}
 
 		if !sourceUIDMatch {
-			if a.gpgKeyManager.IsManaged(incomingCM.Name) {
-				logCtx.Debug("Source UID mismatch between the incoming GPG key and existing GPG key. Deleting the existing GPG key")
-				if err := a.deleteGPGKey(incomingCM); err != nil {
-					return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
-				}
-			} else {
-				logCtx.Debug("Existing GPG key is not managed, skipping delete and attempting updating the existing GPG key")
+			logCtx.Debug("Source UID mismatch between the incoming GPG key and existing GPG key. Deleting the existing GPG key")
+			if err := a.deleteGPGKey(incomingCM); err != nil {
+				return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
 			}
 
-			logCtx.Debug("Creating or updating the incoming GPG key")
+			logCtx.Debug("Creating the incoming GPG key after deleting the existing one")
 			if _, err := a.createGPGKey(incomingCM); err != nil {
 				return fmt.Errorf("could not create incoming GPG key after deleting existing GPG key: %w", err)
 			}

@@ -379,29 +379,6 @@ func (c KubeClient) EnsureRepositoryUpdate(ctx context.Context, key types.Namesp
 	}
 }
 
-// EnsureConfigMapUpdate ensures the kubernetes configmap with the given key is
-// updated by retrying if there is a conflicting change.
-func (c KubeClient) EnsureConfigMapUpdate(ctx context.Context, key types.NamespacedName, modify func(*corev1.ConfigMap) error, options metav1.UpdateOptions) error {
-	var err error
-	for {
-		var cm corev1.ConfigMap
-		err = c.Get(ctx, key, &cm, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-
-		err = modify(&cm)
-		if err != nil {
-			return err
-		}
-
-		err = c.Update(ctx, &cm, options)
-		if !errors.IsConflict(err) {
-			return err
-		}
-	}
-}
-
 // EnsureDeploymentUpdate ensures the kubernetes deployment with the given key is
 // updated by retrying if there is a conflicting change.
 func (c KubeClient) EnsureDeploymentUpdate(ctx context.Context, key types.NamespacedName, modify func(*apps.Deployment) error, options metav1.UpdateOptions) error {
