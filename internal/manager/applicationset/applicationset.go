@@ -83,12 +83,9 @@ func (m *ApplicationSetManager) Upsert(ctx context.Context, appSet *v1alpha1.App
 		// rejects the update with a storage precondition error (Code 4).
 		appSet.ResourceVersion = existing.ResourceVersion
 		appSet.UID = existing.UID
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if appSet.Annotations == nil {
-				appSet.Annotations = make(map[string]string)
-			}
-			appSet.Annotations[manager.SourceUIDAnnotation] = v
-		}
+		// Do NOT preserve the existing source-uid here. Create() already stamped
+		// source-uid = primary's UID; preserving the existing value would lock in
+		// a stale/wrong source-uid from a previous failover.
 		updated, ierr = m.appSetBackend.Update(ctx, appSet)
 		return ierr
 	})

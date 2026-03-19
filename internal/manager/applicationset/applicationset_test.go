@@ -128,30 +128,31 @@ func Test_Create_ClearsResourceVersion(t *testing.T) {
 	be.AssertExpectations(t)
 }
 
-func Test_Upsert_PreservesSourceUID(t *testing.T) {
+func Test_Upsert_IncomingSourceUIDWins(t *testing.T) {
 	be := new(mockBackend)
 	m := NewApplicationSetManager(be, "argocd")
 	ctx := context.Background()
 
-	existing := newTestAppSet("test", "argocd", "existing-uid")
+	// existing has a stale source-uid (e.g. set during a previous failover)
+	existing := newTestAppSet("test", "argocd", "replica-uid")
 	existing.ResourceVersion = "rv-1"
 	existing.Annotations = map[string]string{
-		manager.SourceUIDAnnotation: "primary-uid",
+		manager.SourceUIDAnnotation: "stale-uid",
 	}
 
-	incoming := newTestAppSet("test", "argocd", "some-uid")
+	// incoming carries the primary's UID; Create() will stamp source-uid = "primary-uid"
+	incoming := newTestAppSet("test", "argocd", "primary-uid")
 
-	// Create fails with AlreadyExists
 	alreadyExists := k8serrors.NewAlreadyExists(schema.GroupResource{}, "test")
 	be.On("Create", ctx, mock.Anything).Return(nil, alreadyExists)
 	be.On("Get", ctx, "test", "argocd").Return(existing, nil)
+	// Update must be called with source-uid = "primary-uid" (incoming wins, stale dropped)
 	be.On("Update", ctx, mock.MatchedBy(func(a *v1alpha1.ApplicationSet) bool {
 		return a.Annotations[manager.SourceUIDAnnotation] == "primary-uid"
 	})).Return(existing, nil)
 
-	result, err := m.Upsert(ctx, incoming)
+	_, err := m.Upsert(ctx, incoming)
 	require.NoError(t, err)
-	require.Equal(t, "primary-uid", result.Annotations[manager.SourceUIDAnnotation])
 	be.AssertExpectations(t)
 }
 

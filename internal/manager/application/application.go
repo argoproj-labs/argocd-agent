@@ -196,12 +196,11 @@ func (m *ApplicationManager) Upsert(ctx context.Context, app *v1alpha1.Applicati
 		// rejects the update with a storage precondition error (Code 4).
 		app.ResourceVersion = existing.ResourceVersion
 		app.UID = existing.UID
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if app.Annotations == nil {
-				app.Annotations = make(map[string]string)
-			}
-			app.Annotations[manager.SourceUIDAnnotation] = v
-		}
+		// Do NOT preserve the existing source-uid here. Create() already stamped
+		// source-uid = primary's UID before the AlreadyExists error. Preserving
+		// the existing value would allow a stale/wrong source-uid (e.g. from a
+		// previous failover where the AppSet created the app with a replica UID)
+		// to permanently override the correct primary UID from the snapshot.
 		if m.role == manager.ManagerRolePrincipal {
 			app.Operation = nil
 			stampLastUpdated(app)

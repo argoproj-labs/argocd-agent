@@ -185,12 +185,9 @@ func (m *AppProjectManager) Upsert(ctx context.Context, project *v1alpha1.AppPro
 	project.UID = existing.UID
 	project.ResourceVersion = existing.ResourceVersion
 	project.Namespace = m.namespace
-	if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-		if project.Annotations == nil {
-			project.Annotations = make(map[string]string)
-		}
-		project.Annotations[manager.SourceUIDAnnotation] = v
-	}
+	// Do NOT preserve the existing source-uid here. Create() already stamped
+	// source-uid = primary's UID; preserving the existing value would lock in
+	// a stale/wrong source-uid from a previous failover.
 	if m.role == manager.ManagerRolePrincipal {
 		stampLastUpdated(project)
 	}
