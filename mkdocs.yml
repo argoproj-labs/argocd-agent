@@ -35,6 +35,7 @@ nav:
       - Autonomous mode: concepts/agent-modes/autonomous.md
     - Agent mapping: concepts/agent-mapping.md
     - Sync protocol: concepts/sync-protocol.md
+    - High availability: concepts/ha.md
   - Getting started:
     - Overview: getting-started/index.md
     - Kubernetes: getting-started/kubernetes/index.md
@@ -56,6 +57,7 @@ nav:
     - Namespaces: configuration/namespaces.md
     - Networking: configuration/networking.md
     - Observability: configuration/observability.md
+    - High availability: configuration/ha.md
     - CTL: configuration/ctl.md
     - Reference:
         - Overview: configuration/reference/index.md
@@ -64,6 +66,7 @@ nav:
   - Operations:
     - Metrics: operations/metrics.md
     - Profiling: operations/profiling.md
+    - High availability: operations/ha-failover.md
   - Contributing:
     - Overview: contributing/index.md
     - Local development: contributing/local.md
