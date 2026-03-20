@@ -49,7 +49,7 @@ func NewRootCommand() *cobra.Command {
 	command.AddGroup(configGroup)
 	command.AddCommand(NewAgentCommand())
 	command.AddCommand(NewConfigCommand())
-	command.AddCommand(NewCheckConfigCommand())
+	command.AddCommand(NewValidateCommand())
 	command.AddCommand(NewPKICommand())
 	command.AddCommand(NewJWTCommand())
 	command.AddCommand(NewVersionCommand())
