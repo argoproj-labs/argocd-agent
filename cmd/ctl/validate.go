@@ -52,8 +52,9 @@ func (r checkResult) String() string {
 
 func NewValidateCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "validate",
-		Short: "Validate principal and agent installations",
+		Use:     "validate",
+		Aliases: []string{"check-config"},
+		Short:   "Validate principal and agent installations",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},
