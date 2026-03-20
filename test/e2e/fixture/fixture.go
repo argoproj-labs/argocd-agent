@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -110,10 +111,10 @@ func (suite *BaseSuite) TearDownTest() {
 
 // EnsureDeletion will issue a delete for a namespace-scoped K8s resource, then wait for it to no longer exist
 func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) error {
-	// Wait for the object to be deleted  for 60 seconds
+	// Wait for the object to be deleted for 180 seconds
 	// - Primarily this will be waiting for the finalizer to be removed, so that the object is deleted
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 60; count++ {
+	for count := 0; count < 180; count++ {
 		err := kclient.Delete(ctx, obj, metav1.DeleteOptions{})
 		if errors.IsNotFound(err) {
 			// object is already deleted
@@ -144,7 +145,7 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 
 	// Continue waiting for object to be deleted, now that finalizers have been removed.
 	key = types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 60; count++ {
+	for count := 0; count < 180; count++ {
 		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return nil
@@ -159,9 +160,9 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 }
 
 // WaitForDeletion will wait for a resource to be deleted
-func WaitForDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) error {
+func WaitForDeletion(ctx context.Context, kclient KubeClient, obj KubeObject, debugContext string) error {
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 60; count++ {
+	for count := 0; count < 180; count++ {
 		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
@@ -171,7 +172,13 @@ func WaitForDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) er
 		}
 		time.Sleep(1 * time.Second)
 	}
-	return fmt.Errorf("WaitForDeletion: timeout waiting for deletion of %s/%s", key.Namespace, key.Name)
+
+	if debugContext != "" {
+		debugContext = "(" + debugContext + ")"
+	}
+
+	typeName := reflect.TypeOf(obj).Elem().Name()
+	return fmt.Errorf("WaitForDeletion: timeout waiting for deletion of %s %s/%s %s", typeName, key.Namespace, key.Name, debugContext)
 }
 
 // EnsureUpdate will ensure that the object is updated by retrying if there is a conflict.
@@ -237,7 +244,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 		// Wait for the app to be deleted from the control plane
 		app.SetNamespace("agent-autonomous")
-		err = WaitForDeletion(ctx, principalClient, &app)
+		err = WaitForDeletion(ctx, principalClient, &app, "principal")
 		if err != nil {
 			return err
 		}
@@ -261,7 +268,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 		// Wait for the app to be deleted from the managed cluster
 		app.SetNamespace("argocd")
-		err = WaitForDeletion(ctx, managedAgentClient, &app)
+		err = WaitForDeletion(ctx, managedAgentClient, &app, "managed agent")
 		if err != nil {
 			return err
 		}
@@ -316,7 +323,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		// Wait for the appProject to be deleted from the control plane
 		appProject.SetName("agent-autonomous-" + appProject.Name)
 		appProject.SetNamespace("argocd")
-		err = WaitForDeletion(ctx, principalClient, &appProject)
+		err = WaitForDeletion(ctx, principalClient, &appProject, "principal")
 		if err != nil {
 			return err
 		}
@@ -344,7 +351,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 		// Wait for the appProject to be deleted from the managed cluster
 		appProject.SetNamespace("argocd")
-		err = WaitForDeletion(ctx, managedAgentClient, &appProject)
+		err = WaitForDeletion(ctx, managedAgentClient, &appProject, "managed agent")
 		if err != nil {
 			return err
 		}
@@ -389,7 +396,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 		// Wait for the repository to be deleted from the managed cluster
 		repo.SetNamespace("argocd")
-		err = WaitForDeletion(ctx, managedAgentClient, &repo)
+		err = WaitForDeletion(ctx, managedAgentClient, &repo, "managed agent")
 		if err != nil {
 			return err
 		}

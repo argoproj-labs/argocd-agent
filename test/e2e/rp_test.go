@@ -235,9 +235,9 @@ func (suite *ResourceProxyTestSuite) validateResourceProxyViaArgoAPI(appName str
 	// Getting an existing resource belonging to the synced app through Argo's
 	// API must result in success.
 	resource, err := argoClient.GetResource(&app,
-		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
+		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui", suite.T())
 	requires.NoError(err)
-	napp := &v1alpha1.Application{}
+	napp := &appsv1.Deployment{}
 	err = json.Unmarshal([]byte(resource), napp)
 	requires.NoError(err)
 	requires.Equal("Deployment", napp.Kind)
@@ -245,7 +245,7 @@ func (suite *ResourceProxyTestSuite) validateResourceProxyViaArgoAPI(appName str
 
 	// Getting a non-existing resource must result in failure
 	_, err = argoClient.GetResource(&app,
-		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-backend")
+		"apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-backend", suite.T())
 	requires.Error(err)
 }
 

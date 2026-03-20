@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -142,7 +143,7 @@ func (c *ArgoRestClient) Sync(app *v1alpha1.Application) error {
 }
 
 // GetResource requests a resource managed through an Application from Argo CD
-func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, kind, namespace, name string) (string, error) {
+func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, kind, namespace, name string, t *testing.T) (string, error) {
 	reqURL := c.url(
 		"appNamespace", app.Namespace,
 		"project", app.Spec.Project,
@@ -153,6 +154,9 @@ func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, 
 		"kind", kind,
 	)
 	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource", app.Name)
+
+	t.Logf("GetResource: GET request to URL: '%s'", reqURL)
+
 	resp, err := c.Do(&http.Request{Method: http.MethodGet, URL: reqURL, Header: make(http.Header)})
 	if err != nil {
 		return "", err
