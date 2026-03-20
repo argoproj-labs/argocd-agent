@@ -165,6 +165,42 @@ func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alph
 	return nil, err
 }
 
+// Upsert creates the AppProject or updates it if it already exists.
+// Used by HA replication to write resources to the replica cluster.
+func (m *AppProjectManager) Upsert(ctx context.Context, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+	created, err := m.Create(ctx, project)
+	if err == nil {
+		return created, nil
+	}
+	if !errors.IsAlreadyExists(err) {
+		return nil, err
+	}
+	existing, err := m.appprojectBackend.Get(ctx, project.Name, m.namespace)
+	if err != nil {
+		return nil, fmt.Errorf("get existing appproject for upsert: %w", err)
+	}
+	// UID must match the replica's existing object — the primary and replica
+	// assign different UIDs to the same-named resource. Without this, etcd
+	// rejects the update with a storage precondition error (Code 4).
+	project.UID = existing.UID
+	project.ResourceVersion = existing.ResourceVersion
+	project.Namespace = m.namespace
+	// Do NOT preserve the existing source-uid here. Create() already stamped
+	// source-uid = primary's UID; preserving the existing value would lock in
+	// a stale/wrong source-uid from a previous failover.
+	if m.role == manager.ManagerRolePrincipal {
+		stampLastUpdated(project)
+	}
+	updated, err := m.appprojectBackend.Update(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
+		log().Warnf("Could not ignore change %s for appproject %s: %v", updated.ResourceVersion, updated.Name, err)
+	}
+	return updated, nil
+}
+
 func (m *AppProjectManager) Get(ctx context.Context, name, namespace string) (*v1alpha1.AppProject, error) {
 	return m.appprojectBackend.Get(ctx, name, namespace)
 }

@@ -55,6 +55,11 @@ type AppProjectSelector struct {
 	Names []string
 }
 
+type ApplicationSetSelector struct {
+	// Namespaces restricts the list to specific namespaces. Empty means all namespaces.
+	Namespaces []string
+}
+
 type RepositorySelector struct {
 	// Namespace is used by the 'List' Repository interface function to restrict the list of Repositories returned to a specific Namespaces.
 	Namespace string
@@ -122,6 +127,17 @@ type Repository interface {
 
 // Namespace defines a generic interface to track agent namespaces.
 type Namespace interface {
+	StartInformer(ctx context.Context) error
+	EnsureSynced(duration time.Duration) error
+}
+
+// ApplicationSet defines a generic interface to store/track Argo CD ApplicationSet state.
+type ApplicationSet interface {
+	List(ctx context.Context, selector ApplicationSetSelector) ([]v1alpha1.ApplicationSet, error)
+	Create(ctx context.Context, appSet *v1alpha1.ApplicationSet) (*v1alpha1.ApplicationSet, error)
+	Get(ctx context.Context, name string, namespace string) (*v1alpha1.ApplicationSet, error)
+	Delete(ctx context.Context, name string, namespace string, deletionPropagation *DeletionPropagation) error
+	Update(ctx context.Context, appSet *v1alpha1.ApplicationSet) (*v1alpha1.ApplicationSet, error)
 	StartInformer(ctx context.Context) error
 	EnsureSynced(duration time.Duration) error
 }

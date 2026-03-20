@@ -35,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
@@ -105,6 +106,9 @@ type ServerOptions struct {
 	redisTLSCA                  *x509.CertPool
 	redisTLSCAPath              string
 	redisTLSInsecure            bool
+
+	// haOptions contains HA configuration options
+	haOptions []ha.Option
 }
 
 type ServerOption func(o *Server) error
@@ -683,6 +687,14 @@ func WithRedisTLSCAFromSecret(kube kubernetes.Interface, namespace, name, field 
 func WithRedisTLSInsecure(insecure bool) ServerOption {
 	return func(o *Server) error {
 		o.options.redisTLSInsecure = insecure
+		return nil
+	}
+}
+
+// WithHA configures High Availability options for the server.
+func WithHA(opts ...ha.Option) ServerOption {
+	return func(o *Server) error {
+		o.options.haOptions = append(o.options.haOptions, opts...)
 		return nil
 	}
 }

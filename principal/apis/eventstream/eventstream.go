@@ -57,11 +57,21 @@ type Server struct {
 
 	metrics    *metrics.PrincipalMetrics
 	clusterMgr *cluster.Manager
+
+	// activeClients tracks active client connections keyed by agent name.
+	// Used by DisconnectAll and to guard against stale cleanup races.
+	activeClients   map[string]*client
+	activeClientsMu sync.Mutex
 }
+
+// AcceptCheck is called at the start of Subscribe to decide whether to accept
+// the agent connection. Return a non-nil error to reject with that status.
+type AcceptCheck func(agentName string) error
 
 type ServerOptions struct {
 	MaxStreamDuration time.Duration
 	notifyOnConnect   chan types.Agent
+	acceptCheck       AcceptCheck
 
 	logger *logging.CentralizedLogger
 }
@@ -92,6 +102,12 @@ func WithNotifyOnConnect(notify chan types.Agent) ServerOption {
 	}
 }
 
+func WithAcceptCheck(fn AcceptCheck) ServerOption {
+	return func(o *ServerOptions) {
+		o.acceptCheck = fn
+	}
+}
+
 func WithLogger(logger *logging.CentralizedLogger) ServerOption {
 	return func(o *ServerOptions) {
 		o.logger = logger
@@ -110,11 +126,12 @@ func NewServer(queues queue.QueuePair, eventWriters *event.EventWritersMap, metr
 	}
 
 	return &Server{
-		queues:       queues,
-		options:      options,
-		eventWriters: eventWriters,
-		metrics:      metrics,
-		clusterMgr:   clusterMgr,
+		queues:        queues,
+		options:       options,
+		eventWriters:  eventWriters,
+		metrics:       metrics,
+		clusterMgr:    clusterMgr,
+		activeClients: make(map[string]*client),
 	}
 }
 
@@ -330,7 +347,18 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		return err
 	}
 
+	if s.options.acceptCheck != nil {
+		if err := s.options.acceptCheck(c.agentName); err != nil {
+			c.logCtx.WithError(err).Warn("Rejecting agent connection")
+			return status.Errorf(codes.Unavailable, "%s", err)
+		}
+	}
+
 	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
+
+	s.activeClientsMu.Lock()
+	s.activeClients[c.agentName] = c
+	s.activeClientsMu.Unlock()
 
 	if s.metrics != nil {
 		// increase counter when an agent is connected with principal
@@ -412,6 +440,12 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	c.wg.Wait()
 	c.logCtx.Info("Closing EventStream")
 
+	s.activeClientsMu.Lock()
+	if s.activeClients[c.agentName] == c {
+		delete(s.activeClients, c.agentName)
+	}
+	s.activeClientsMu.Unlock()
+
 	if s.metrics != nil {
 		// decrease counter when an agent is disconnected with principal
 		s.metrics.AgentConnected.Dec()
@@ -421,6 +455,26 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}
 
 	return nil
+}
+
+// ConnectedAgentCount returns the number of currently connected agents.
+func (s *Server) ConnectedAgentCount() int {
+	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
+	return len(s.activeClients)
+}
+
+// DisconnectAll cancels every active agent stream, forcing all agents to disconnect.
+func (s *Server) DisconnectAll() {
+	s.activeClientsMu.Lock()
+	clients := s.activeClients
+	s.activeClients = make(map[string]*client)
+	s.activeClientsMu.Unlock()
+
+	for name, c := range clients {
+		logrus.WithField("agent", name).Info("Disconnecting agent (HA demote)")
+		c.cancelFn()
+	}
 }
 
 // Push implements a client-side stream to receive updates for the client's
