@@ -84,9 +84,10 @@ const (
 )
 
 const (
-	resourceID string = "resourceid"
-	eventID    string = "eventid"
-	sentAt     string = "sentat"
+	resourceID   string = "resourceid"
+	eventID      string = "eventid"
+	sentAt       string = "sentat"
+	principalUID string = "principaluid"
 )
 
 // SetSentAt stamps the current time on an event as the send time.
@@ -105,6 +106,20 @@ func SentAt(ev *cloudevents.Event) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+// SetPrincipalUID stamps the principal's persistent identity on an event.
+func SetPrincipalUID(ev *cloudevents.Event, uid string) {
+	ev.SetExtension(principalUID, uid)
+}
+
+// PrincipalUID returns the principal identity from an event, or empty string if not set.
+func PrincipalUID(ev *cloudevents.Event) string {
+	val, ok := ev.Extensions()[principalUID].(string)
+	if !ok {
+		return ""
+	}
+	return val
 }
 
 var (
