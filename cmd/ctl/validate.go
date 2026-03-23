@@ -50,24 +50,25 @@ func (r checkResult) String() string {
 	return fmt.Sprintf("* %s: ❌\nERROR: %v", r.name, r.err)
 }
 
-func NewCheckConfigCommand() *cobra.Command {
+func NewValidateCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "check-config",
-		Short: "Validate principal and agent configuration",
+		Use:     "validate",
+		Aliases: []string{"check-config"},
+		Short:   "Validate principal and agent installations",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},
 		GroupID: "config",
 	}
-	cmd.AddCommand(NewCheckConfigPrincipalCommand())
-	cmd.AddCommand(NewCheckConfigAgentCommand())
+	cmd.AddCommand(NewValidatePrincipalCommand())
+	cmd.AddCommand(NewValidateAgentCommand())
 	return cmd
 }
 
-func NewCheckConfigPrincipalCommand() *cobra.Command {
+func NewValidatePrincipalCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "principal",
-		Short: "Validate principal configuration",
+		Short: "Validate principal installation",
 		Run: func(cmd *cobra.Command, args []string) {
 			if strings.TrimSpace(globalOpts.principalNamespace) == "" {
 				cmdutil.Fatal("--principal-namespace is required")
@@ -85,10 +86,10 @@ func NewCheckConfigPrincipalCommand() *cobra.Command {
 	return command
 }
 
-func NewCheckConfigAgentCommand() *cobra.Command {
+func NewValidateAgentCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "agent",
-		Short: "Validate agent configuration (and principal cross-checks)",
+		Short: "Validate agent installation (and principal cross-checks)",
 		Run: func(cmd *cobra.Command, args []string) {
 			if principalCfg.KubeContext == "" ||
 				principalCfg.Namespace == "" ||

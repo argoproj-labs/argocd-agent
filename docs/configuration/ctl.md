@@ -8,7 +8,7 @@ This document will explain how to use argocd-agentctl to assist in management of
 
 `agent` - Inspect and manage agent configuration
 
-`check-config` - Validate principal and agent configurations by running a series of tests
+`validate` - (formerly `check-config`): Validate principal and agent configurations by running a series of tests
 
 `config` - Operations related to config file for argocd-agentctl
 
