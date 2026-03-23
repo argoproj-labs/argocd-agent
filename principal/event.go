@@ -659,7 +659,8 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 	}
 
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx, manager.ManagerRolePrincipal, s.namespace).
-		WithDestinationBasedMapping(s.destinationBasedMapping)
+		WithDestinationBasedMapping(s.destinationBasedMapping).
+		WithPrincipalUID(s.principalUID)
 
 	switch ev.Type() {
 	case event.SyncedResourceList.String():

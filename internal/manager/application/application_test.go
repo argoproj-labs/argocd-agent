@@ -833,6 +833,150 @@ func Test_CompareSourceUIDForApp(t *testing.T) {
 	})
 }
 
+func Test_CompareIdentity(t *testing.T) {
+	existingApp := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "argocd",
+			Annotations: map[string]string{
+				manager.SourceUIDAnnotation:    "source-1",
+				manager.PrincipalUIDAnnotation: "principal-A",
+			},
+		},
+	}
+
+	t.Run("same principal, same source-uid → update", func(t *testing.T) {
+		be := appmock.NewApplication(t)
+		be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+		m, err := NewApplicationManager(be, "")
+		require.NoError(t, err)
+
+		incoming := existingApp.DeepCopy()
+		incoming.UID = ktypes.UID("source-1")
+
+		result, err := m.CompareIdentity(context.Background(), incoming, "principal-A")
+		require.NoError(t, err)
+		assert.True(t, result.Exists)
+		assert.True(t, result.SourceUIDMatch)
+		assert.True(t, result.PrincipalUIDMatch)
+		assert.False(t, result.PrincipalTransition)
+		assert.False(t, result.MissingSourceUID)
+	})
+
+	t.Run("same principal, different source-uid → delete/recreate", func(t *testing.T) {
+		be := appmock.NewApplication(t)
+		be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+		m, err := NewApplicationManager(be, "")
+		require.NoError(t, err)
+
+		incoming := existingApp.DeepCopy()
+		incoming.UID = ktypes.UID("source-NEW")
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
+
+		result, err := m.CompareIdentity(context.Background(), incoming, "principal-A")
+		require.NoError(t, err)
+		assert.True(t, result.Exists)
+		assert.False(t, result.SourceUIDMatch)
+		assert.True(t, result.PrincipalUIDMatch)
+		assert.False(t, result.PrincipalTransition)
+	})
+
+	t.Run("same principal, missing source-uid on incoming → stamp", func(t *testing.T) {
+		be := appmock.NewApplication(t)
+		be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+		m, err := NewApplicationManager(be, "")
+		require.NoError(t, err)
+
+		incoming := existingApp.DeepCopy()
+		incoming.UID = ""
+		incoming.Annotations = map[string]string{}
+
+		result, err := m.CompareIdentity(context.Background(), incoming, "principal-A")
+		require.NoError(t, err)
+		assert.True(t, result.Exists)
+		assert.True(t, result.MissingSourceUID)
+		assert.True(t, result.PrincipalUIDMatch)
+		assert.False(t, result.PrincipalTransition)
+	})
+
+	t.Run("different principal → transition", func(t *testing.T) {
+		be := appmock.NewApplication(t)
+		be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+		m, err := NewApplicationManager(be, "")
+		require.NoError(t, err)
+
+		incoming := existingApp.DeepCopy()
+		incoming.UID = ktypes.UID("source-NEW")
+		delete(incoming.Annotations, manager.SourceUIDAnnotation)
+
+		result, err := m.CompareIdentity(context.Background(), incoming, "principal-B")
+		require.NoError(t, err)
+		assert.True(t, result.Exists)
+		assert.False(t, result.PrincipalUIDMatch)
+		assert.True(t, result.PrincipalTransition)
+	})
+
+	t.Run("missing principal-uid in event (backward compat) → same principal", func(t *testing.T) {
+		be := appmock.NewApplication(t)
+		be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+		m, err := NewApplicationManager(be, "")
+		require.NoError(t, err)
+
+		incoming := existingApp.DeepCopy()
+		incoming.UID = ktypes.UID("source-1")
+
+		result, err := m.CompareIdentity(context.Background(), incoming, "")
+		require.NoError(t, err)
+		assert.True(t, result.Exists)
+		assert.True(t, result.SourceUIDMatch)
+		assert.True(t, result.PrincipalUIDMatch)
+		assert.False(t, result.PrincipalTransition)
+		assert.True(t, result.MissingPrincipalUID)
+	})
+
+	t.Run("first event with principal-uid on pre-upgrade resource → adoption", func(t *testing.T) {
+		preUpgradeApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "source-1",
+				},
+			},
+		}
+		be := appmock.NewApplication(t)
+		be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(preUpgradeApp, nil)
+		m, err := NewApplicationManager(be, "")
+		require.NoError(t, err)
+
+		incoming := preUpgradeApp.DeepCopy()
+		incoming.UID = ktypes.UID("source-1")
+
+		result, err := m.CompareIdentity(context.Background(), incoming, "principal-A")
+		require.NoError(t, err)
+		assert.True(t, result.Exists)
+		assert.True(t, result.SourceUIDMatch)
+		assert.True(t, result.PrincipalUIDMatch, "should adopt: existing has no principal-uid")
+		assert.False(t, result.PrincipalTransition)
+		assert.True(t, result.AdoptedPrincipalUID)
+	})
+
+	t.Run("app does not exist", func(t *testing.T) {
+		expectedErr := errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "test")
+		be := appmock.NewApplication(t)
+		be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, expectedErr)
+		m, err := NewApplicationManager(be, "")
+		require.NoError(t, err)
+
+		incoming := existingApp.DeepCopy()
+		incoming.UID = ktypes.UID("source-1")
+
+		result, err := m.CompareIdentity(context.Background(), incoming, "principal-A")
+		require.NoError(t, err)
+		assert.False(t, result.Exists)
+	})
+}
+
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
 }

@@ -63,7 +63,7 @@ func Test_CreateApplication(t *testing.T) {
 		},
 	}}
 	t.Run("Discard event in unmanaged mode", func(t *testing.T) {
-		napp, err := a.createApplication(app)
+		napp, err := a.createApplication(app, "")
 		require.Nil(t, napp)
 		require.ErrorContains(t, err, "not in managed mode")
 	})
@@ -72,7 +72,7 @@ func Test_CreateApplication(t *testing.T) {
 		defer a.appManager.Unmanage(app.QualifiedName())
 		a.mode = types.AgentModeManaged
 		a.appManager.Manage(app.QualifiedName())
-		napp, err := a.createApplication(app)
+		napp, err := a.createApplication(app, "")
 		require.ErrorContains(t, err, "is already managed")
 		require.Nil(t, napp)
 	})
@@ -82,7 +82,7 @@ func Test_CreateApplication(t *testing.T) {
 		a.mode = types.AgentModeManaged
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer createMock.Unset()
-		napp, err := a.createApplication(app)
+		napp, err := a.createApplication(app, "")
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
@@ -107,7 +107,7 @@ func Test_CreateApplication(t *testing.T) {
 
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(newApp, nil)
 		defer createMock.Unset()
-		napp, err := a.createApplication(newApp)
+		napp, err := a.createApplication(newApp, "")
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 
@@ -1925,4 +1925,105 @@ func Test_UpdateGPGKey(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, ncm)
 	})
+func Test_identityAction(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   *application.IdentityCompareResult
+		expected identityActionType
+	}{
+		{
+			name: "same principal, same source-uid → update",
+			result: &application.IdentityCompareResult{
+				Exists:            true,
+				SourceUIDMatch:    true,
+				PrincipalUIDMatch: true,
+			},
+			expected: identityActionUpdate,
+		},
+		{
+			name: "same principal, different source-uid → delete/recreate",
+			result: &application.IdentityCompareResult{
+				Exists:            true,
+				SourceUIDMatch:    false,
+				PrincipalUIDMatch: true,
+			},
+			expected: identityActionDeleteRecreate,
+		},
+		{
+			name: "same principal, missing source-uid → stamp",
+			result: &application.IdentityCompareResult{
+				Exists:            true,
+				MissingSourceUID:  true,
+				PrincipalUIDMatch: true,
+			},
+			expected: identityActionUpdateStampUID,
+		},
+		{
+			name: "different principal → transition",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      false,
+				PrincipalUIDMatch:   false,
+				PrincipalTransition: true,
+			},
+			expected: identityActionTransition,
+		},
+		{
+			name: "different principal, missing source-uid → transition takes priority",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				MissingSourceUID:    true,
+				PrincipalUIDMatch:   false,
+				PrincipalTransition: true,
+			},
+			expected: identityActionTransition,
+		},
+		{
+			name: "backward compat: no principal-uid, source-uid match → update",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      true,
+				PrincipalUIDMatch:   true,
+				MissingPrincipalUID: true,
+			},
+			expected: identityActionUpdate,
+		},
+		{
+			name: "backward compat: no principal-uid, source-uid mismatch → delete/recreate",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      false,
+				PrincipalUIDMatch:   true,
+				MissingPrincipalUID: true,
+			},
+			expected: identityActionDeleteRecreate,
+		},
+		{
+			name: "adopted principal-uid, source-uid mismatch → transition (pre-upgrade failover)",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      false,
+				PrincipalUIDMatch:   true,
+				AdoptedPrincipalUID: true,
+			},
+			expected: identityActionTransition,
+		},
+		{
+			name: "adopted principal-uid, source-uid match → update",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      true,
+				PrincipalUIDMatch:   true,
+				AdoptedPrincipalUID: true,
+			},
+			expected: identityActionUpdate,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			action := identityAction(tt.result)
+			assert.Equal(t, tt.expected, action)
+		})
+	}
 }

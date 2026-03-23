@@ -38,11 +38,18 @@ import (
 )
 
 const (
-	// Informer operation types
 	operationcreate = "create"
 	operationupdate = "update"
 	operationdelete = "delete"
 )
+
+// stampEvent stamps the principal identity on the event and injects trace context.
+func (s *Server) stampEvent(ctx context.Context, ev *cloudevents.Event) {
+	if s.principalUID != "" {
+		event.SetPrincipalUID(ev, s.principalUID)
+	}
+	tracing.InjectTraceContext(ctx, ev)
+}
 
 // newAppCallback is executed when a new application event was emitted from
 // the informer and needs to be sent out to an agent. If the receiving agent
@@ -86,7 +93,7 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 	}
 	ev := s.events.ApplicationEvent(event.Create, outbound)
 	// Inject trace context into the event for propagation to agent
-	tracing.InjectTraceContext(ctx, ev)
+	s.stampEvent(ctx, ev)
 	q.Add(ev)
 	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplication), agentName, replication.DirectionOutbound)
 	logCtx.Tracef("Added app %s to send queue, total length now %d", outbound.QualifiedName(), q.Len())
@@ -190,7 +197,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 	}
 
 	// Inject trace context into the event for propagation to agent
-	tracing.InjectTraceContext(ctx, ev)
+	s.stampEvent(ctx, ev)
 	q.Add(ev)
 	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplication), agentName, replication.DirectionOutbound)
 	logCtx.WithField("event_type", ev.Type()).Tracef("Added app to send queue, total length now %d", q.Len())
@@ -252,7 +259,7 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 	}
 	ev := s.events.ApplicationEvent(event.Delete, outbound)
 	// Inject trace context into the event for propagation to agent
-	tracing.InjectTraceContext(ctx, ev)
+	s.stampEvent(ctx, ev)
 	logCtx.WithField("event", "DeleteApp").WithField("sendq_len", q.Len()+1).Tracef("Added event to send queue")
 	q.Add(ev)
 	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplication), agentName, replication.DirectionOutbound)
@@ -318,7 +325,7 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.Create, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s to send queue, total length now %d", outbound.Name, q.Len())
 	}
@@ -467,7 +474,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added appProject delete event to send queue")
 	}
@@ -548,7 +555,7 @@ func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
 
 		ev := s.events.RepositoryEvent(event.Create, outbound)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
 
@@ -632,7 +639,7 @@ func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
 
 		ev := s.events.RepositoryEvent(event.Delete, outbound)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
 
@@ -796,7 +803,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		logCtx.Tracef("Sent a delete event for an AppProject for a removed cluster")
 		deletedAgents[agent] = true
@@ -817,7 +824,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s update event to send queue", new.Name)
 	}
@@ -884,7 +891,7 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 
 		ev := s.events.RepositoryEvent(event.Delete, new)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
 
@@ -904,7 +911,7 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 
 		ev := s.events.RepositoryEvent(event.SpecUpdate, new)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
 
@@ -1025,7 +1032,7 @@ func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Ap
 		}
 		if oldQ := s.queues.SendQ(oldAgentName); oldQ != nil {
 			deleteEv := s.events.ApplicationEvent(event.Delete, old)
-			tracing.InjectTraceContext(ctx, deleteEv)
+			s.stampEvent(ctx, deleteEv)
 			oldQ.Add(deleteEv)
 			logCtx.Debug("Sent delete event to old agent")
 		}

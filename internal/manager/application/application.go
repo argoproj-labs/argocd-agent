@@ -234,6 +234,20 @@ func (m *ApplicationManager) Get(ctx context.Context, name, namespace string) (*
 	return m.applicationBackend.Get(ctx, name, namespace)
 }
 
+// preserveOrAdoptPrincipalUID carries the principal-uid annotation from
+// existing to incoming. If existing has no principal-uid yet (pre-upgrade
+// resource), the incoming value is kept so the annotation gets adopted on the
+// first update from a principal-uid-aware principal.
+func preserveOrAdoptPrincipalUID(existing, incoming *v1alpha1.Application) {
+	if incoming.Annotations == nil {
+		incoming.Annotations = make(map[string]string)
+	}
+	if v, ok := existing.Annotations[manager.PrincipalUIDAnnotation]; ok {
+		incoming.Annotations[manager.PrincipalUIDAnnotation] = v
+	}
+	// else: keep whatever the caller already set on incoming (adoption case)
+}
+
 // UpdateManagedApp updates the Application resource on the agent when it is in
 // managed mode.
 //
@@ -268,9 +282,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
 			incoming.Annotations[manager.SourceUIDAnnotation] = v
 		}
-		if v, ok := existing.Annotations[manager.PrincipalUIDAnnotation]; ok {
-			incoming.Annotations[manager.PrincipalUIDAnnotation] = v
-		}
+		preserveOrAdoptPrincipalUID(existing, incoming)
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Finalizers = incoming.Finalizers
@@ -291,9 +303,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
 			incoming.Annotations[manager.SourceUIDAnnotation] = v
 		}
-		if v, ok := existing.Annotations[manager.PrincipalUIDAnnotation]; ok {
-			incoming.Annotations[manager.PrincipalUIDAnnotation] = v
-		}
+		preserveOrAdoptPrincipalUID(existing, incoming)
 
 		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
 			deletionTimestampChanged = true
@@ -369,6 +379,8 @@ func (m *ApplicationManager) UpdateManagedAppWithTransition(ctx context.Context,
 		return nil, fmt.Errorf("UpdateManagedAppWithTransition should be called on a managed agent only")
 	}
 
+	deletionTimestampChanged := false
+
 	updated, err := m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
 		if incoming.Annotations == nil {
 			incoming.Annotations = make(map[string]string)
@@ -386,6 +398,10 @@ func (m *ApplicationManager) UpdateManagedAppWithTransition(ctx context.Context,
 		existing.Finalizers = incoming.Finalizers
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Operation = operationToUse(existing, incoming)
+
+		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
+			deletionTimestampChanged = true
+		}
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		if incoming.Annotations == nil {
 			incoming.Annotations = make(map[string]string)
@@ -429,6 +445,18 @@ func (m *ApplicationManager) UpdateManagedAppWithTransition(ctx context.Context,
 		}
 	}
 
+	if deletionTimestampChanged {
+		logCtx.Infof("deletionTimestamp changed during transition, deleting Application")
+		if m.deletions != nil {
+			if v, ok := updated.Annotations[manager.SourceUIDAnnotation]; ok {
+				m.deletions.MarkExpected(ty.UID(v))
+			}
+		}
+		if err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, ptr.To(backend.DeletePropagationForeground)); err != nil {
+			return nil, err
+		}
+	}
+
 	return updated, err
 }
 
@@ -442,6 +470,7 @@ type IdentityCompareResult struct {
 	PrincipalTransition bool // principal-uid changed (failover detected)
 	MissingSourceUID    bool // incoming has no source-uid (AppSet wiped it)
 	MissingPrincipalUID bool // no principal-uid in event (pre-upgrade principal)
+	AdoptedPrincipalUID bool // existing had no principal-uid; incoming's was accepted as-is
 }
 
 // CompareIdentity checks an existing app against the incoming app and
@@ -468,7 +497,7 @@ func (m *ApplicationManager) CompareIdentity(ctx context.Context, incoming *v1al
 
 	existingSourceUID, hasSourceUID := existing.Annotations[manager.SourceUIDAnnotation]
 	if !hasSourceUID {
-		return nil, fmt.Errorf("source UID annotation not found for app: %s", incoming.Name)
+		return result, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
 	}
 
 	incomingUID := string(incoming.UID)
@@ -489,6 +518,7 @@ func (m *ApplicationManager) CompareIdentity(ctx context.Context, incoming *v1al
 		// First event with principal-uid on a resource that predates this feature.
 		// Treat as same principal (adoption).
 		result.PrincipalUIDMatch = true
+		result.AdoptedPrincipalUID = true
 	} else {
 		// No principal-uid in event → backward compat, treat as same principal.
 		result.PrincipalUIDMatch = true

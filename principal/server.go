@@ -56,6 +56,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
+	principalIdentity "github.com/argoproj-labs/argocd-agent/pkg/principal"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	logstream "github.com/argoproj-labs/argocd-agent/principal/apis/logstreamapi"
@@ -195,6 +196,12 @@ type Server struct {
 
 	// ha holds HA components for high availability support
 	ha *HAComponents
+
+	// principalUID is a persistent identity for this principal instance,
+	// stored in a ConfigMap. Sent as a CloudEvent extension so the agent can
+	// detect principal transitions without relying on annotations that AppSet
+	// may wipe.
+	principalUID string
 }
 
 type handlersOnConnect func(agent types.Agent) error
@@ -632,6 +639,18 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Info("Destination-based mapping is enabled on the principal")
 	}
 
+	ns := s.namespace
+	if ns == "" {
+		ns = "argocd"
+	}
+	uid, err := principalIdentity.EnsurePrincipalUID(ctx, s.kubeClient.Clientset, ns)
+	if err != nil {
+		log().WithError(err).Error("failed to load/create principal identity")
+		return err
+	}
+	s.principalUID = uid
+	log().Infof("Principal identity: %s", uid)
+
 	// We need to maintain a cache to keep resources in sync with last known state of
 	// autonomous-agent in case it is disconnected with agent or resources on the control-plane are modified.
 	if err := s.populateSourceCache(ctx); err != nil {
@@ -668,8 +687,7 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	go s.RunHandlersOnConnect(s.ctx)
 
-	err := s.StartEventProcessor(s.ctx)
-	if err != nil {
+	if err = s.StartEventProcessor(s.ctx); err != nil {
 		return nil
 	}
 
@@ -905,7 +923,8 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 		}
 
 		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx, manager.ManagerRolePrincipal, s.namespace).
-			WithDestinationBasedMapping(s.destinationBasedMapping)
+			WithDestinationBasedMapping(s.destinationBasedMapping).
+			WithPrincipalUID(s.principalUID)
 		go resyncHandler.SendRequestUpdates(s.ctx)
 
 		// Principal should request SyncedResourceList to revert any deletions on the Principal side.

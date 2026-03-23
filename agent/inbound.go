@@ -162,6 +162,16 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 
 	principalUID := event.PrincipalUID(ev.CloudEvent())
 
+	// Carry the principal identity from the CloudEvent extension into the
+	// Application annotations so that downstream update paths (including the
+	// normal UpdateManagedApp) can adopt it on pre-upgrade resources.
+	if principalUID != "" {
+		if incomingApp.Annotations == nil {
+			incomingApp.Annotations = make(map[string]string)
+		}
+		incomingApp.Annotations[manager.PrincipalUIDAnnotation] = principalUID
+	}
+
 	var identity *application.IdentityCompareResult
 
 	if a.mode == types.AgentModeManaged {
@@ -197,6 +207,14 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 	return err
 }
 
+// rewriteDestinationForManagedAgent sets the destination to in-cluster, matching
+// the normal managed-agent create/update path. Without this, transition updates
+// would leave the principal-side destination on the agent's Application.
+func (a *Agent) rewriteDestinationForManagedAgent(app *v1alpha1.Application) {
+	app.Spec.Destination.Server = ""
+	app.Spec.Destination.Name = "in-cluster"
+}
+
 // handleCreateApp applies the identity decision matrix for Create events.
 func (a *Agent) handleCreateApp(logCtx *logrus.Entry, incomingApp *v1alpha1.Application, identity *application.IdentityCompareResult, principalUID string) error {
 	if identity != nil && identity.Exists {
@@ -211,6 +229,7 @@ func (a *Agent) handleCreateApp(logCtx *logrus.Entry, incomingApp *v1alpha1.Appl
 			return nil
 		case identityActionTransition:
 			logCtx.Info("Received Create during principal transition. Transitioning in-place")
+			a.rewriteDestinationForManagedAgent(incomingApp)
 			_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(incomingApp.UID))
 			if err != nil {
 				return fmt.Errorf("could not transition existing app: %w", err)
@@ -224,6 +243,7 @@ func (a *Agent) handleCreateApp(logCtx *logrus.Entry, incomingApp *v1alpha1.Appl
 			}
 		case identityActionUpdateStampUID:
 			logCtx.Info("Received Create with missing source-uid (AppSet wipe). Updating + stamping")
+			a.rewriteDestinationForManagedAgent(incomingApp)
 			_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(incomingApp.UID))
 			if err != nil {
 				return fmt.Errorf("could not update app after source-uid wipe: %w", err)
@@ -263,6 +283,7 @@ func (a *Agent) handleSpecUpdateApp(logCtx *logrus.Entry, incomingApp *v1alpha1.
 	switch action {
 	case identityActionTransition:
 		logCtx.Info("Principal transition detected on SpecUpdate. Transitioning in-place")
+		a.rewriteDestinationForManagedAgent(incomingApp)
 		_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(incomingApp.UID))
 		if err != nil {
 			return fmt.Errorf("could not transition app: %w", err)
@@ -271,6 +292,7 @@ func (a *Agent) handleSpecUpdateApp(logCtx *logrus.Entry, incomingApp *v1alpha1.
 		return nil
 	case identityActionUpdateStampUID:
 		logCtx.Info("Source-uid missing (AppSet wipe) on SpecUpdate. Updating + stamping")
+		a.rewriteDestinationForManagedAgent(incomingApp)
 		_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(incomingApp.UID))
 		if err != nil {
 			return fmt.Errorf("could not update app after source-uid wipe: %w", err)
@@ -299,13 +321,28 @@ func (a *Agent) handleSpecUpdateApp(logCtx *logrus.Entry, incomingApp *v1alpha1.
 type identityActionType int
 
 const (
-	identityActionUpdate         identityActionType = iota // normal update
-	identityActionDeleteRecreate                           // source-uid mismatch, same principal
-	identityActionTransition                               // different principal → adopt in-place
-	identityActionUpdateStampUID                           // same principal, source-uid wiped
+	// identityActionUpdate: source-uid matches, same principal. Normal update path.
+	identityActionUpdate identityActionType = iota
+
+	// identityActionDeleteRecreate: source-uid changed on the same principal,
+	// meaning the resource was deleted and recreated on the principal side.
+	identityActionDeleteRecreate
+
+	// identityActionTransition: principal-uid changed (HA failover detected).
+	// The new principal has different resource UIDs, but the resource is
+	// logically the same. Adopt the new identity in-place without disruption.
+	identityActionTransition
+
+	// identityActionUpdateStampUID: same principal, but source-uid is missing
+	// on the incoming resource (e.g. AppSet controller reconciled and wiped
+	// annotations). Safe to update in-place and re-stamp the source-uid.
+	identityActionUpdateStampUID
 )
 
-// identityAction implements the decision matrix from the design doc.
+// identityAction determines how the agent should handle an incoming resource
+// based on principal and source identity comparison.
+//
+// Priority: principal transition > missing source-uid > source-uid match > mismatch
 func identityAction(r *application.IdentityCompareResult) identityActionType {
 	if r.PrincipalTransition {
 		return identityActionTransition
@@ -315,6 +352,14 @@ func identityAction(r *application.IdentityCompareResult) identityActionType {
 	}
 	if r.SourceUIDMatch {
 		return identityActionUpdate
+	}
+	// Pre-upgrade resource (no principal-uid) with a source-uid mismatch:
+	// we can't distinguish "same principal recreated the app" from "different
+	// principal after failover" because the resource was never stamped.
+	// Transition in-place to avoid disruption — the annotation will be
+	// adopted on this update so future failovers are detected correctly.
+	if r.AdoptedPrincipalUID && !r.SourceUIDMatch {
+		return identityActionTransition
 	}
 	return identityActionDeleteRecreate
 }
