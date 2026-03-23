@@ -80,7 +80,7 @@ postprocessors = [
 # See https://www.conventionalcommits.org
 conventional_commits = true
 # Exclude commits that do not match the conventional commits specification.
-filter_unconventional = true
+filter_unconventional = false
 # Split commits on newlines, treating each line as an individual commit.
 split_commits = false
 # An array of regex based parsers to modify commit messages prior to further processing.
@@ -92,22 +92,17 @@ commit_preprocessors = [
 # Assigns commits to groups.
 # Optionally sets the commit's scope and can decide to exclude commits from further processing.
 commit_parsers = [
-  { message = "^feat", group = "<!-- 0 -->⛰️  Features" },
+  { message = "^feat", group = "<!-- 0 -->⛰️ Features" },
   { message = "^fix", group = "<!-- 1 -->🐛 Bug Fixes" },
+  { message = "^refactor", group = "<!-- 2 -->🚜 Refactor" },
   { message = "^doc", group = "<!-- 3 -->📚 Documentation" },
   { message = "^perf", group = "<!-- 4 -->⚡ Performance" },
-  { message = "^refactor\\(clippy\\)", skip = true },
-  { message = "^refactor", group = "<!-- 2 -->🚜 Refactor" },
-  { message = "^style", group = "<!-- 5 -->🎨 Styling" },
   { message = "^test", group = "<!-- 6 -->🧪 Testing" },
-  { message = "^chore\\(release\\): prepare for", skip = true },
-  { message = "^chore\\(deps.*\\)", skip = true },
-  { message = "^chore\\(pr\\)", skip = true },
-  { message = "^chore\\(pull\\)", skip = true },
-  { message = "^chore\\(npm\\).*yarn\\.lock", skip = true },
-  { message = "^chore|^ci", group = "<!-- 7 -->⚙️ Miscellaneous Tasks" },
+  { message = "^chore\\(deps\\)|^build\\(deps\\)", group = "<!-- 10 -->📦 Dependency updates" },
+  { message = "^chore|^ci", group = "<!-- 7 -->⚙️  Miscellaneous Tasks" },
   { body = ".*security", group = "<!-- 8 -->🛡️ Security" },
-  { message = "^revert", group = "<!-- 9 -->◀️ Revert" },
+  { message = "^revert", group = "<!-- 9 -->◀️  Revert" },
+  { message = "^release: Publish", skip = true },
 ]
 # Prevent commits that are breaking from being excluded by commit parsers.
 protect_breaking_commits = true
