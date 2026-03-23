@@ -288,8 +288,8 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 		return r.handleDeletedResource(logCtx, reqUpdate)
 	}
 
-	// If the resource is AppProject/Repository, we need to ensure that it is still relevant with the current AppProject rules
-	if reqUpdate.Kind == "AppProject" || reqUpdate.Kind == "Repository" {
+	// If the resource is AppProject/Repository, we need to ensure that it is still relevant with the current AppProject rules.
+	if r.role == manager.ManagerRolePrincipal && (reqUpdate.Kind == "AppProject" || reqUpdate.Kind == "Repository") {
 		err, isRelevant := r.isAppProjectRelevant(ctx, logCtx, agentName, reqUpdate, res)
 		if err != nil {
 			return err
