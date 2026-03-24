@@ -21,7 +21,7 @@ body = """
     - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
         {% if commit.breaking %}[**breaking**] {% endif %}\
         {{ commit.message | upper_first }} - \
-        ([{{ commit.id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ commit.id }})) by {{ commit.remote.username | default(value=commit.author.name) }}\
+        ([{{ commit.id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ commit.id }})) by @{{ commit.remote.username | default(value=commit.author.name) }}\
 {% endmacro -%}
 
 {% if version %}\

@@ -1,6 +1,6 @@
 version: 2
 
-project_name: argocd-agent
+project_name: argocd-agentctl
 
 before:
   hooks:
@@ -30,7 +30,7 @@ archives:
     ids:
       - argocd-agentctl
     name_template: |-
-      {{ .ProjectName }}ctl-{{ .Os }}-{{ .Arch }}
+      {{ .ProjectName }}-{{ .Os }}-{{ .Arch }}
 
 release:
   make_latest: "{{ .Env.GORELEASER_MAKE_LATEST }}"
