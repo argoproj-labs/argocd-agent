@@ -215,6 +215,15 @@ func (a *Agent) rewriteDestinationForManagedAgent(app *v1alpha1.Application) {
 	app.Spec.Destination.Name = "in-cluster"
 }
 
+func sourceUIDForApp(app *v1alpha1.Application) ktypes.UID {
+	if app.Annotations != nil {
+		if sourceUID := app.Annotations[manager.SourceUIDAnnotation]; sourceUID != "" {
+			return ktypes.UID(sourceUID)
+		}
+	}
+	return app.UID
+}
+
 // handleCreateApp applies the identity decision matrix for Create events.
 func (a *Agent) handleCreateApp(logCtx *logrus.Entry, incomingApp *v1alpha1.Application, identity *application.IdentityCompareResult, principalUID string) error {
 	if identity != nil && identity.Exists {
@@ -230,11 +239,11 @@ func (a *Agent) handleCreateApp(logCtx *logrus.Entry, incomingApp *v1alpha1.Appl
 		case identityActionTransition:
 			logCtx.Info("Received Create during principal transition. Transitioning in-place")
 			a.rewriteDestinationForManagedAgent(incomingApp)
-			_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(incomingApp.UID))
+			_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(sourceUIDForApp(incomingApp)))
 			if err != nil {
 				return fmt.Errorf("could not transition existing app: %w", err)
 			}
-			a.sourceCache.Application.Set(incomingApp.UID, incomingApp.Spec)
+			a.sourceCache.Application.Set(sourceUIDForApp(incomingApp), incomingApp.Spec)
 			return nil
 		case identityActionDeleteRecreate:
 			logCtx.Debug("App exists with different source UID. Deleting before recreate")
@@ -244,11 +253,11 @@ func (a *Agent) handleCreateApp(logCtx *logrus.Entry, incomingApp *v1alpha1.Appl
 		case identityActionUpdateStampUID:
 			logCtx.Info("Received Create with missing source-uid (AppSet wipe). Updating + stamping")
 			a.rewriteDestinationForManagedAgent(incomingApp)
-			_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(incomingApp.UID))
+			_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(sourceUIDForApp(incomingApp)))
 			if err != nil {
 				return fmt.Errorf("could not update app after source-uid wipe: %w", err)
 			}
-			a.sourceCache.Application.Set(incomingApp.UID, incomingApp.Spec)
+			a.sourceCache.Application.Set(sourceUIDForApp(incomingApp), incomingApp.Spec)
 			return nil
 		}
 	}
@@ -284,20 +293,20 @@ func (a *Agent) handleSpecUpdateApp(logCtx *logrus.Entry, incomingApp *v1alpha1.
 	case identityActionTransition:
 		logCtx.Info("Principal transition detected on SpecUpdate. Transitioning in-place")
 		a.rewriteDestinationForManagedAgent(incomingApp)
-		_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(incomingApp.UID))
+		_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(sourceUIDForApp(incomingApp)))
 		if err != nil {
 			return fmt.Errorf("could not transition app: %w", err)
 		}
-		a.sourceCache.Application.Set(incomingApp.UID, incomingApp.Spec)
+		a.sourceCache.Application.Set(sourceUIDForApp(incomingApp), incomingApp.Spec)
 		return nil
 	case identityActionUpdateStampUID:
 		logCtx.Info("Source-uid missing (AppSet wipe) on SpecUpdate. Updating + stamping")
 		a.rewriteDestinationForManagedAgent(incomingApp)
-		_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(incomingApp.UID))
+		_, err := a.appManager.UpdateManagedAppWithTransition(a.context, incomingApp, principalUID, string(sourceUIDForApp(incomingApp)))
 		if err != nil {
 			return fmt.Errorf("could not update app after source-uid wipe: %w", err)
 		}
-		a.sourceCache.Application.Set(incomingApp.UID, incomingApp.Spec)
+		a.sourceCache.Application.Set(sourceUIDForApp(incomingApp), incomingApp.Spec)
 		return nil
 	case identityActionDeleteRecreate:
 		logCtx.Debug("Source UID mismatch. Deleting existing app")
@@ -675,7 +684,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application, principalUID s
 
 	if a.mode == types.AgentModeManaged {
 		// Store app spec in cache
-		a.sourceCache.Application.Set(incoming.UID, incoming.Spec)
+		a.sourceCache.Application.Set(sourceUIDForApp(incoming), incoming.Spec)
 	}
 
 	created, err := a.appManager.CreateWithPrincipalUID(a.context, incoming, principalUID)
@@ -779,7 +788,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
 			if a.mode == types.AgentModeManaged {
-				a.sourceCache.Application.Delete(app.UID)
+				a.sourceCache.Application.Delete(sourceUIDForApp(app))
 			}
 			return nil
 		}
@@ -787,7 +796,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	}
 
 	if a.mode == types.AgentModeManaged {
-		a.sourceCache.Application.Delete(app.UID)
+		a.sourceCache.Application.Delete(sourceUIDForApp(app))
 	}
 
 	err = a.appManager.Unmanage(app.QualifiedName())

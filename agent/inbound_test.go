@@ -2027,3 +2027,50 @@ func Test_identityAction(t *testing.T) {
 		})
 	}
 }
+
+func Test_processIncomingApplication_TransitionUsesResolvedSourceUID(t *testing.T) {
+	a, _ := newAgent(t)
+	a.mode = types.AgentModeManaged
+
+	be := backend_mocks.NewApplication(t)
+	var err error
+	a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true),
+		application.WithRole(manager.ManagerRoleAgent), application.WithMode(manager.ManagerModeManaged))
+	require.NoError(t, err)
+
+	existingApp := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "argocd",
+			Annotations: map[string]string{
+				manager.SourceUIDAnnotation:    "old-source-uid",
+				manager.PrincipalUIDAnnotation: "principal-A",
+			},
+		},
+	}
+	incomingApp := existingApp.DeepCopy()
+	incomingApp.UID = ktypes.UID("new-principal-uid")
+	incomingApp.Annotations[manager.SourceUIDAnnotation] = "old-source-uid"
+
+	getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+	defer getMock.Unset()
+	supportsPatchMock := be.On("SupportsPatch").Return(false)
+	defer supportsPatchMock.Unset()
+
+	var updatedArg *v1alpha1.Application
+	updateMock := be.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		updatedArg = args.Get(1).(*v1alpha1.Application).DeepCopy()
+	}).Return(existingApp.DeepCopy(), nil)
+	defer updateMock.Unset()
+
+	evs := event.NewEventSource("test")
+	ce := evs.ApplicationEvent(event.SpecUpdate, incomingApp)
+	event.SetPrincipalUID(ce, "principal-B")
+
+	err = a.processIncomingApplication(event.New(ce, event.TargetApplication))
+	require.NoError(t, err)
+	require.NotNil(t, updatedArg)
+	assert.Equal(t, "old-source-uid", updatedArg.Annotations[manager.SourceUIDAnnotation])
+	assert.True(t, a.sourceCache.Application.Contains(ktypes.UID("old-source-uid")))
+	assert.False(t, a.sourceCache.Application.Contains(ktypes.UID("new-principal-uid")))
+}
