@@ -141,7 +141,7 @@ func stampLastUpdated(app *v1alpha1.Application) {
 	if app.Annotations == nil {
 		app.Annotations = make(map[string]string)
 	}
-	app.Annotations[LastUpdatedAnnotation] = time.Now().Format(time.RFC3339)
+	app.Annotations[LastUpdatedAnnotation] = time.Now().Format(time.RFC3339Nano)
 }
 
 // Create creates the application app using the Manager's application backend.
