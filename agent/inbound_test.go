@@ -540,6 +540,49 @@ func Test_ProcessIncomingApplicationSetOperation(t *testing.T) {
 		require.NotNil(t, updateArg.Operation)
 		require.Equal(t, "def456", updateArg.Operation.Sync.Revision)
 	})
+
+	t.Run("SetOperation rejected when source UID does not match in managed mode", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.mode = types.AgentModeManaged
+		a.context = context.Background()
+
+		be := backend_mocks.NewApplication(t)
+		var err error
+		a.appManager, err = application.NewApplicationManager(be, "argocd",
+			application.WithAllowUpsert(true),
+			application.WithRole(manager.ManagerRoleAgent),
+			application.WithMode(manager.ManagerModeManaged),
+		)
+		require.NoError(t, err)
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "old-principal-uid",
+				},
+			},
+		}
+
+		incomingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				UID:       "different-principal-uid",
+			},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{Revision: "abc123"},
+			},
+		}
+
+		be.On("Get", mock.Anything, "test", "argocd").Return(existingApp, nil)
+
+		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), event.TargetApplication)
+		err = a.processIncomingApplication(ev)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "source UID mismatch")
+	})
 }
 
 func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
