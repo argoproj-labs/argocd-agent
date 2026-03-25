@@ -741,7 +741,7 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 		// Update app spec in cache
 		logCtx.Tracef("Calling update spec for this event")
-		a.sourceCache.Application.Set(incoming.UID, incoming.Spec)
+		a.sourceCache.Application.Set(sourceUIDForApp(incoming), incoming.Spec)
 
 		napp, err = a.appManager.UpdateManagedApp(a.context, incoming)
 	case types.AgentModeAutonomous:

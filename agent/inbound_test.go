@@ -787,6 +787,39 @@ func Test_UpdateApplication(t *testing.T) {
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
 	})
 
+	t.Run("Managed mode caches spec by resolved source uid", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+		a.sourceCache.Application.Clear()
+		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true), application.WithMode(manager.ManagerModeManaged), application.WithRole(manager.ManagerRoleAgent))
+
+		appWithInheritedSourceUID := app.DeepCopy()
+		appWithInheritedSourceUID.UID = ktypes.UID("new-principal-uid")
+		appWithInheritedSourceUID.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old-source-uid",
+		}
+		appWithInheritedSourceUID.Spec = v1alpha1.ApplicationSpec{
+			Project: "default",
+		}
+
+		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
+		defer getEvent.Unset()
+		supportsPatchEvent := be.On("SupportsPatch").Return(false)
+		defer supportsPatchEvent.Unset()
+		updateEvent := be.On("Update", mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
+		defer updateEvent.Unset()
+
+		napp, err := a.updateApplication(appWithInheritedSourceUID)
+		require.NoError(t, err)
+		require.NotNil(t, napp)
+
+		cachedSpec, ok := a.sourceCache.Application.Get(ktypes.UID("old-source-uid"))
+		require.True(t, ok)
+		assert.Equal(t, appWithInheritedSourceUID.Spec, cachedSpec)
+
+		_, ok = a.sourceCache.Application.Get(ktypes.UID("new-principal-uid"))
+		require.False(t, ok)
+	})
+
 	t.Run("Update application using patch in autonomous mode", func(t *testing.T) {
 		a.mode = types.AgentModeAutonomous
 		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true), application.WithMode(manager.ManagerModeAutonomous), application.WithRole(manager.ManagerRoleAgent))
