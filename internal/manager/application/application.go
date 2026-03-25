@@ -676,17 +676,16 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 	return updated, err
 }
 
-// SetManagedOperation sets the .operation field on a managed-agent
-// Application without touching spec or status. It is used to deliver
-// principal-initiated sync operations to the agent as an independent event.
-func (m *ApplicationManager) SetManagedOperation(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+// SetOperation sets the .operation field on an agent's Application without touching spec or status.
+// It is used to deliver principal-initiated sync operations to the agent as an independent event.
+func (m *ApplicationManager) SetOperation(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
-		"component":   "SetManagedOperation",
+		"component":   "SetOperation",
 		"application": incoming.QualifiedName(),
 	})
 
-	if !m.role.IsAgent() || !m.mode.IsManaged() {
-		return nil, fmt.Errorf("SetManagedOperation should only be called by a managed agent: %v %v", m.role, m.mode)
+	if !m.role.IsAgent() {
+		return nil, fmt.Errorf("SetOperation should only be called by an agent: %v", m.role)
 	}
 
 	if !m.destinationBasedMapping {

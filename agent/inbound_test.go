@@ -489,7 +489,7 @@ func Test_ProcessIncomingApplicationSetOperation(t *testing.T) {
 		require.Equal(t, "abc123", updateArg.Operation.Sync.Revision)
 	})
 
-	t.Run("SetOperation on autonomous agent calls UpdateOperation", func(t *testing.T) {
+	t.Run("SetOperation on autonomous agent updates the operation field", func(t *testing.T) {
 		a, _ := newAgent(t)
 		a.mode = types.AgentModeAutonomous
 		a.context = context.Background()
