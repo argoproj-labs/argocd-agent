@@ -160,7 +160,9 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 	if app.Annotations == nil {
 		app.Annotations = make(map[string]string)
 	}
-	app.Annotations[manager.SourceUIDAnnotation] = string(app.UID)
+	if app.Annotations[manager.SourceUIDAnnotation] == "" {
+		app.Annotations[manager.SourceUIDAnnotation] = string(app.UID)
+	}
 
 	created, err := m.applicationBackend.Create(ctx, app)
 	if err == nil {

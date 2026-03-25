@@ -135,6 +135,27 @@ func Test_ManagerCreate(t *testing.T) {
 		assert.Equal(t, "test", rapp.Name)
 		assert.Equal(t, string(app.UID), rapp.Annotations[manager.SourceUIDAnnotation])
 	})
+
+	t.Run("Create preserves incoming source uid when already resolved", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "default",
+				UID:       ktypes.UID("replica-uid"),
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "primary-uid",
+				},
+			},
+		}
+		mockedBackend := appmock.NewApplication(t)
+		m, err := NewApplicationManager(mockedBackend, "")
+		require.NoError(t, err)
+		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
+
+		rapp, err := m.Create(context.TODO(), app)
+		assert.NoError(t, err)
+		assert.Equal(t, "primary-uid", rapp.Annotations[manager.SourceUIDAnnotation])
+	})
 }
 
 func prettyPrint(app *v1alpha1.Application) {
