@@ -204,6 +204,19 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 				logCtx.Errorf("Error updating application: %v", err)
 			}
 		}
+	case event.SetOperation:
+		logCtx.Trace("Received a SetOperation event")
+		switch a.mode {
+		case types.AgentModeManaged:
+			_, err = a.appManager.SetManagedOperation(a.context, incomingApp)
+		case types.AgentModeAutonomous:
+			_, err = a.appManager.UpdateOperation(a.context, incomingApp)
+		default:
+			return event.NewEventNotAllowedErr("SetOperation is not supported in %s mode", a.mode)
+		}
+		if err != nil {
+			logCtx.Errorf("Error setting operation: %v", err)
+		}
 	case event.TerminateOperation:
 		logCtx.Trace("Received a TerminateOperation event")
 		_, err = a.appManager.TerminateOperation(a.context, incomingApp)

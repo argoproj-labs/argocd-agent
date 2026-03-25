@@ -1706,7 +1706,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 		assert.True(t, deletions.RemoveExpected(k8stypes.UID("uid-xyz")), "expected deletion to be marked as expected after finalizer removal")
 	})
 
-	t.Run("include operation in event if it is initiated for the first time", func(t *testing.T) {
+	t.Run("operation sent as separate SetOperation event on nil to non-nil transition", func(t *testing.T) {
 		mockBackend := &mocks.Application{}
 
 		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
@@ -1739,19 +1739,29 @@ func TestServer_updateAppCallback(t *testing.T) {
 		s.updateAppCallback(oldApp, newApp)
 
 		sendQ := s.queues.SendQ("managed-agent")
-		assert.Equal(t, 1, sendQ.Len())
+		// Two events: SpecUpdate (no operation) + SetOperation (with operation)
+		assert.Equal(t, 2, sendQ.Len())
 
+		// First event: SpecUpdate with operation stripped
 		ev, _ := sendQ.Get()
 		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
 		app := &v1alpha1.Application{}
-		b := ev.Data()
-		err = json.Unmarshal(b, app)
+		err = json.Unmarshal(ev.Data(), app)
+		require.NoError(t, err)
+		require.Nil(t, app.Operation, "SpecUpdate must not carry the operation")
+		sendQ.Done(ev)
+
+		// Second event: SetOperation carrying the operation
+		ev, _ = sendQ.Get()
+		assert.Equal(t, event.SetOperation.String(), ev.Type())
+		app = &v1alpha1.Application{}
+		err = json.Unmarshal(ev.Data(), app)
 		require.NoError(t, err)
 		require.NotNil(t, app.Operation)
 		assert.Equal(t, newApp.Operation, app.Operation)
 		sendQ.Done(ev)
 
-		// Operation should be set to nil for subsequent events
+		// Subsequent non-nil → non-nil update: only SpecUpdate, no SetOperation
 		oldApp = newApp.DeepCopy()
 		s.updateAppCallback(oldApp, newApp)
 
@@ -1759,11 +1769,66 @@ func TestServer_updateAppCallback(t *testing.T) {
 		ev, _ = sendQ.Get()
 		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
 		app = &v1alpha1.Application{}
-		b = ev.Data()
-		err = json.Unmarshal(b, app)
+		err = json.Unmarshal(ev.Data(), app)
 		require.NoError(t, err)
-		fmt.Println(app.Operation.String())
-		require.Nil(t, app.Operation)
+		require.Nil(t, app.Operation, "SpecUpdate must not carry the operation even when non-nil on both old and new")
+		sendQ.Done(ev)
+	})
+
+	t.Run("autonomous agent also receives SetOperation on nil to non-nil transition", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
+			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
+			sourceCache:  cache.NewSourceCache(),
+		}
+
+		err = s.queues.Create("autonomous-agent")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
+				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+			},
+		}
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
+				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+			},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{Revision: "HEAD"},
+			},
+		}
+
+		s.updateAppCallback(oldApp, newApp)
+
+		sendQ := s.queues.SendQ("autonomous-agent")
+		assert.Equal(t, 2, sendQ.Len())
+
+		ev, _ := sendQ.Get()
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+		app := &v1alpha1.Application{}
+		err = json.Unmarshal(ev.Data(), app)
+		require.NoError(t, err)
+		require.Nil(t, app.Operation, "SpecUpdate must not carry the operation for autonomous agents either")
+		sendQ.Done(ev)
+
+		ev, _ = sendQ.Get()
+		assert.Equal(t, event.SetOperation.String(), ev.Type())
+		app = &v1alpha1.Application{}
+		err = json.Unmarshal(ev.Data(), app)
+		require.NoError(t, err)
+		require.NotNil(t, app.Operation)
 		sendQ.Done(ev)
 	})
 

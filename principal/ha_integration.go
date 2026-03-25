@@ -557,7 +557,7 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 		}
 		key := resources.NewResourceKeyFromApp(app)
 		switch evType {
-		case event.Create, event.SpecUpdate, event.TerminateOperation:
+		case event.Create, event.SpecUpdate, event.SetOperation, event.TerminateOperation:
 			h.remapAppSetOwnerRefs(ctx, app)
 			if _, err := server.appManager.Upsert(ctx, app); err != nil {
 				h.recordResourceError("Application", "upsert")
