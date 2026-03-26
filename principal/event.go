@@ -733,20 +733,20 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 func (s *Server) eventProcessor(ctx context.Context) error {
 	sem := semaphore.NewWeighted(s.options.eventProcessors)
 	queueLock := namedlock.NewNamedLock()
-	logCtx := s.logGrpcEvent().WithField("module", "EventProcessor")
+	baseLogCtx := s.logGrpcEvent().WithField("module", "EventProcessor")
 	for {
 		queuesProcessed := 0
 		for _, queueName := range s.queues.Names() {
 			select {
 			case <-ctx.Done():
-				logCtx.Infof("Shutting down event processor")
+				baseLogCtx.Infof("Shutting down event processor")
 				return nil
 			default:
 				// Though unlikely, the agent might have disconnected, and
 				// the queue will be gone. In this case, we'll just skip.
 				q := s.queues.RecvQ(queueName)
 				if q == nil {
-					logCtx.Debugf("Queue disappeared -- client probably has disconnected")
+					baseLogCtx.WithField("queueName", queueName).Debugf("Queue disappeared -- client probably has disconnected")
 					break
 				}
 
@@ -767,22 +767,22 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					break
 				}
 
-				logCtx = logCtx.WithField("queueName", queueName)
+				queueLogCtx := baseLogCtx.WithField("queueName", queueName)
 
 				queuesProcessed += 1
 
-				logCtx.Trace("Acquired queue lock")
+				queueLogCtx.Trace("Acquired queue lock")
 
 				err := sem.Acquire(ctx, 1)
 				if err != nil {
-					logCtx.Tracef("Error acquiring semaphore: %v", err)
+					queueLogCtx.Tracef("Error acquiring semaphore: %v", err)
 					queueLock.Unlock(queueName)
 					break
 				}
 
-				logCtx.Trace("Acquired semaphore")
+				queueLogCtx.Trace("Acquired semaphore")
 
-				go func(agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) {
+				go func(agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event], logCtx *logrus.Entry) {
 					defer func() {
 						sem.Release(1)
 						queueLock.Unlock(agentName)
@@ -799,7 +799,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					}
 
 					// Send an ACK if the event is processed successfully.
-					sendQ := s.queues.SendQ(queueName)
+					sendQ := s.queues.SendQ(agentName)
 					if sendQ == nil {
 						logCtx.Debugf("Queue disappeared -- client probably has disconnected")
 						return
@@ -812,7 +812,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 
 					logCtx.Trace("sending an ACK for an event")
 					sendQ.Add(s.events.ProcessedEvent(event.EventProcessed, event.New(ev, event.TargetEventAck)))
-				}(queueName, q)
+				}(queueName, q, queueLogCtx)
 			}
 		}
 		// Give the CPU a little rest when no agents are connected
