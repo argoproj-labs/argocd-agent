@@ -41,7 +41,7 @@ fi
 ORIGINAL_BRANCH=""
 if [[ "$BRANCH" != "" ]]; then
   ORIGINAL_BRANCH=$(git branch --show-current)
-  git checkout $BRANCH
+  git checkout "$BRANCH"
 fi
 
 CURRENT_BRANCH=$(git branch --show-current)
@@ -109,6 +109,6 @@ git push "$GIT_REMOTE" "$NEW_TAG"
 
 echo "> Tag created and pushed! Release workflow should be running."
 
-if [[ "ORIGINAL_BRANCH" != "" ]]; then
-  git checkout $ORIGINAL_BRANCH
+if [[ "$ORIGINAL_BRANCH" != "" ]]; then
+  git checkout "$ORIGINAL_BRANCH"
 fi
