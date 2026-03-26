@@ -126,7 +126,7 @@ jobs:
       id-token: write
       packages: write
     if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a # v2.1.0
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
     with:
       image: ${{ needs.setup-variables.outputs.image_uri }}
       digest: ${{ needs.container-image.outputs.digest }}
@@ -199,7 +199,7 @@ jobs:
       id-token: write
       contents: write
     if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a # v2.1.0
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.cli-binaries.outputs.hashes }}"
       provenance-name: "argocd-agentctl_${{ needs.setup-variables.outputs.trimmed_tag }}.intoto.jsonl"
@@ -243,7 +243,7 @@ jobs:
         run: |
           set -xue
 
-          HASH=$(sha256sum /tmp/argocd-agent-${{ needs.setup-variables.outputs.trimmed_tag }}_sbom.tar.gz | base64 -w0)
+          HASH=$(sha256sum /tmp/argocd-agent_${{ needs.setup-variables.outputs.trimmed_tag }}_sbom.tar.gz | base64 -w0)
           echo "hash=$HASH" >> $GITHUB_OUTPUT
 
       - name: Upload sbom

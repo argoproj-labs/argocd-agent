@@ -33,7 +33,7 @@ if [[ "$TAG" == "" ]]; then
 fi
 
 if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "Error: $NEW_TAG is not in the format vX.Y.Z"
+  echo "Error: $TAG is not in the format vX.Y.Z"
   exit 1
 fi
 

@@ -17,7 +17,7 @@
 # This script is intended to run in the root of the project
 # Usage:
 #   ./trigger-release.sh [NEW_TAG] [GIT_REMOTE] [BRANCH]
-#     NEW_TAG - must be in the format of v.X.Y.Z and X.Y must match with the release branch (REQUIRED)
+#     NEW_TAG - must be in the format of vX.Y.Z and X.Y must match with the release branch (REQUIRED)
 #     GIT_REMOTE - the git remote to push the tag to (REQUIRED)
 #     BRANCH - optional argument to specify the branch to push to, if specified will switch to that branch
 #              then switch back to the original branch after pushing
@@ -70,6 +70,7 @@ if [[ "$REMOTE_URL" =~ argoproj-labs/argocd-agent ]]; then
   read -r confirmation
   if [[ "$confirmation" != "y" ]]; then
     echo "Cancelled."
+    exit 1
   fi
 fi
 
@@ -97,7 +98,7 @@ if [[ ! "${AGENT_KUSTOMIZATION}" =~ "${NEW_TAG#v}" ]]; then
 fi
 
 echo "> Verifying that tag does not exist on remote"
-if [[ "$(git ls-remote --tags origin "$NEW_TAG")" =~ "${NEW_TAG}$" ]]; then
+if [[ "$(git ls-remote --tags $GIT_REMOTE "$NEW_TAG")" =~ "${NEW_TAG}$" ]]; then
   echo "Error: $NEW_TAG exists on the remote"
   exit 1
 fi
