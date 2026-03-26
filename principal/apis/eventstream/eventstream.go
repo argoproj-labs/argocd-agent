@@ -560,6 +560,20 @@ func (s *Server) IsAgentConnected(agentName string) bool {
 	return found
 }
 
+// MarkConnected registers agentName as an active client.
+func (s *Server) MarkConnected(agentName string) {
+	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
+	s.activeClients[agentName] = &client{agentName: agentName}
+}
+
+// MarkDisconnected removes agentName from active clients.
+func (s *Server) MarkDisconnected(agentName string) {
+	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
+	delete(s.activeClients, agentName)
+}
+
 func (s *Server) log() *logrus.Entry {
 	return logging.SelectLogger(s.options.logger).ModuleLogger("grpc.AppStream")
 }
