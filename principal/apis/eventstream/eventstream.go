@@ -552,6 +552,14 @@ recvloop:
 	return nil
 }
 
+// IsAgentConnected returns true if the agent is connected to the server via the event stream.
+func (s *Server) IsAgentConnected(agentName string) bool {
+	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
+	_, found := s.activeClients[agentName]
+	return found
+}
+
 func (s *Server) log() *logrus.Entry {
 	return logging.SelectLogger(s.options.logger).ModuleLogger("grpc.AppStream")
 }

@@ -237,6 +237,55 @@ func TestAcceptCheck(t *testing.T) {
 	})
 }
 
+func TestIsAgentConnected(t *testing.T) {
+	clusterMgr := &cluster.Manager{}
+
+	t.Run("returns false for unknown agent", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr)
+
+		assert.False(t, s.IsAgentConnected("unknown"))
+	})
+
+	t.Run("returns false for agent with queue but no stream", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("agent-a")
+		s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr)
+
+		assert.False(t, s.IsAgentConnected("agent-a"))
+	})
+
+	t.Run("returns true while agent has active stream", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("agent-a")
+		s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr)
+
+		gate := make(chan struct{})
+		st := &mock.MockEventServer{AgentName: "agent-a"}
+		st.AddRecvHook(func(_ *mock.MockEventServer) error {
+			<-gate
+			return io.EOF
+		})
+		go func() {
+			_ = s.Subscribe(st)
+		}()
+
+		require.Eventually(t, func() bool {
+			return s.ConnectedAgentCount() == 1
+		}, 5*time.Second, 10*time.Millisecond)
+
+		assert.True(t, s.IsAgentConnected("agent-a"))
+		assert.False(t, s.IsAgentConnected("agent-b"))
+
+		close(gate)
+		require.Eventually(t, func() bool {
+			return s.ConnectedAgentCount() == 0
+		}, 5*time.Second, 10*time.Millisecond)
+
+		assert.False(t, s.IsAgentConnected("agent-a"))
+	})
+}
+
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
 }

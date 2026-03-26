@@ -77,7 +77,7 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// If the agent is not connected, return early
-	if !s.queues.HasQueuePair(agentName) {
+	if !s.isAgentConnected(agentName) {
 		logCtx.Debugf("Agent is not connected, stop proxying")
 		w.WriteHeader(http.StatusBadGateway)
 		return
@@ -294,7 +294,7 @@ func (s *Server) sendSynchronousRedisMessageToAgent(agentName string, connection
 	logCtx := log().WithField("function", "sendSynchronousRedisMessageToAgent").WithField("connectionUUID", connectionUUID).WithField("agentName", agentName)
 
 	// If the agent is not connected, return early
-	if !s.queues.HasQueuePair(agentName) {
+	if !s.isAgentConnected(agentName) {
 		logCtx.Debugf("Agent is not connected, stop proxying")
 		return nil
 	}
