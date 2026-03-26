@@ -42,7 +42,7 @@ Z_VERSION=${TAG#v[0-9]*\.[0-9]*\.}
 STARTING_COMMIT_HASH=""
 if [[ "$Z_VERSION" == "0" ]]; then
   LAST_RELEASE_BRANCH=$(git branch -a | grep -E 'remotes/origin/release-[0-9]+\.[0-9]+' | tail -n 2 | head -n 1 | xargs)
-  STARTING_COMMIT_HASH=$(git merge-base "$LAST_RELEASE_BRANCH" remotes/origin/release-0.7)
+  STARTING_COMMIT_HASH=$(git merge-base "$LAST_RELEASE_BRANCH" HEAD)
 else
   PREVIOUS_VERSION_TAG=$(git tag | grep -E "${TAG%\.[0-9]*}" | tail -n 2 | head -n 1)
   STARTING_COMMIT_HASH=$(git rev-parse "${PREVIOUS_VERSION_TAG}"^{})

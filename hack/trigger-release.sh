@@ -108,3 +108,7 @@ git tag "$NEW_TAG"
 git push "$GIT_REMOTE" "$NEW_TAG"
 
 echo "> Tag created and pushed! Release workflow should be running."
+
+if [[ "ORIGINAL_BRANCH" != "" ]]; then
+  git checkout $ORIGINAL_BRANCH
+fi
