@@ -484,13 +484,16 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Status = *incoming.Status.DeepCopy()
-		existing.Operation = incoming.Operation
+		// Managed-agent status updates frequently arrive without .operation.
+		// Preserve any principal-initiated sync operation until the agent
+		// explicitly reports an updated operation payload.
+		existing.Operation = operationToUse(existing, incoming)
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		refresh, incomingRefresh := incoming.Annotations["argocd.argoproj.io/refresh"]
 		_, existingRefresh := existing.Annotations["argocd.argoproj.io/refresh"]
 		target := &v1alpha1.Application{
 			Status:    incoming.Status,
-			Operation: incoming.Operation,
+			Operation: operationToUse(existing, incoming),
 		}
 		source := &v1alpha1.Application{
 			Status:    existing.Status,
