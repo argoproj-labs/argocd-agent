@@ -150,7 +150,8 @@ func Test_resourceRequester(t *testing.T) {
 
 	t.Run("Agent not connected", func(t *testing.T) {
 		s := newResourceTestServer(t)
-		s.queues.Delete("agent", false)
+		assert.NotNil(t, s.queues.SendQ("agent"))
+		assert.False(t, s.eventStreamSrv.IsAgentConnected("agent"))
 		// Create a certificate with agent name in CN
 		cert := &x509.Certificate{
 			Subject: pkix.Name{
