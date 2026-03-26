@@ -65,6 +65,14 @@ type PrincipalMetrics struct {
 
 	EventProcessingTime *prometheus.HistogramVec
 
+	// Hop-by-hop latency for outbound events (principal → agent).
+	// SendQueueDwell measures time from SendQ.Add to EventWriter.Add.
+	// EventWriterDwell measures time from EventWriter.Add to wire send.
+	// AckRoundtrip measures time from wire send to ACK received back.
+	SendQueueDwell   *prometheus.HistogramVec
+	EventWriterDwell *prometheus.HistogramVec
+	AckRoundtrip     *prometheus.HistogramVec
+
 	PrincipalErrors *prometheus.CounterVec
 }
 
@@ -167,6 +175,24 @@ func NewPrincipalMetrics() *PrincipalMetrics {
 			Name: "principal_event_processing_time",
 			Help: "Histogram of time taken to process events (in seconds)",
 		}, []string{"status", "agent_name", "resource_type"}),
+
+		SendQueueDwell: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "principal_send_queue_dwell_seconds",
+			Help:    "Time an outbound event spends in the principal send queue before the event writer picks it up",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+		}, []string{"resource_type"}),
+
+		EventWriterDwell: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "principal_event_writer_dwell_seconds",
+			Help:    "Time an outbound event spends in the event writer between being queued and actually sent on the wire",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+		}, []string{"resource_type"}),
+
+		AckRoundtrip: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "principal_ack_roundtrip_seconds",
+			Help:    "Time from when an outbound event is sent on the wire to when the ACK is received back from the agent",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+		}, []string{"resource_type"}),
 
 		PrincipalErrors: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "principal_errors",

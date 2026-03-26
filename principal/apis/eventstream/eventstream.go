@@ -278,6 +278,11 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		if eventWriter == nil {
 			return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
 		}
+		if s.metrics != nil {
+			if sentAt := event.SentAt(incomingEvent); sentAt != nil {
+				s.metrics.AckRoundtrip.WithLabelValues(incomingEvent.DataSchema()).Observe(time.Since(*sentAt).Seconds())
+			}
+		}
 		eventWriter.Remove(incomingEvent)
 		logCtx.Trace("Removed the ACK from the event writer")
 		return nil
@@ -318,6 +323,15 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: nil item in queue")
 	}
 	logCtx.WithField("event_target", ev.DataSchema()).WithField("event_type", ev.Type()).Trace("Grabbed an item")
+
+	if s.metrics != nil {
+		target := event.Target(ev)
+		if target != event.TargetEventAck && target != event.TargetHeartbeat {
+			if enqueuedAt := event.EnqueuedAt(ev); enqueuedAt != nil {
+				s.metrics.SendQueueDwell.WithLabelValues(ev.DataSchema()).Observe(time.Since(*enqueuedAt).Seconds())
+			}
+		}
+	}
 
 	mode, err := session.ClientModeFromContext(c.ctx)
 	if err != nil {
@@ -388,6 +402,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		eventWriter.UpdateTarget(subs)
 	} else {
 		eventWriter = event.NewEventWriter(subs)
+		eventWriter.SetMetrics(s.metrics)
 		s.eventWriters.Add(c.agentName, eventWriter)
 	}
 

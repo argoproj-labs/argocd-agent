@@ -8,6 +8,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -43,8 +44,20 @@ type EventWriter struct {
 	// target refers to the specified gRPC stream.
 	target streamWriter
 
+	// principalMetrics is optional; when set, hop-by-hop latency histograms are observed.
+	principalMetrics *metrics.PrincipalMetrics
+
 	log *logrus.Entry
 }
+
+// SetMetrics attaches principal metrics to this EventWriter so it can observe
+// EventWriterDwell latency. Safe to call at any time.
+func (ew *EventWriter) SetMetrics(m *metrics.PrincipalMetrics) {
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+	ew.principalMetrics = m
+}
+
 
 type eventMessage struct {
 	// when this lock is owned, never attempt to THEN acquire `eventWriter.mu`, as this will lead to a deadlock.
@@ -63,6 +76,9 @@ type eventMessage struct {
 
 	// track number of retries attempted
 	retryCount int
+
+	// time when the event was added to the EventWriter (immutable once set)
+	writerAddedAt time.Time
 }
 
 func NewEventWriter(target streamWriter) *EventWriter {
@@ -113,14 +129,17 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 		return
 	}
 
+	now := time.Now()
+
 	// Once an app is being deleted, no other updates matter
 	if ev.Type() == Delete.String() {
 		delete(ew.sentEvents, resID)
 		// Clear any existing unsent events and add only the DELETE event
 		eq := newEventQueue()
 		eq.add(&eventMessage{
-			event:   ev,
-			backoff: &defaultBackoff,
+			event:         ev,
+			backoff:       &defaultBackoff,
+			writerAddedAt: now,
 		})
 		ew.unsentEvents[resID] = eq
 		logCtx.Trace("cleared all events and added DELETE event")
@@ -132,8 +151,9 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	if !exists {
 		eq = newEventQueue()
 		eq.add(&eventMessage{
-			event:   ev,
-			backoff: &defaultBackoff,
+			event:         ev,
+			backoff:       &defaultBackoff,
+			writerAddedAt: now,
 		})
 		ew.unsentEvents[resID] = eq
 		logCtx.Trace("added a new event to the event writer")
@@ -142,9 +162,10 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 
 	// The queue's add() coalesces events of the same type.
 	eq.add(&eventMessage{
-		event:      ev,
-		backoff:    &defaultBackoff,
-		retryAfter: nil,
+		event:         ev,
+		backoff:       &defaultBackoff,
+		retryAfter:    nil,
+		writerAddedAt: now,
 	})
 
 	logCtx.Trace("updated an existing event in the event writer")
@@ -396,6 +417,15 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	if err != nil {
 		logCtx.Errorf("Could not wire event: %v\n", err)
 		return
+	}
+
+	if !isFireAndForget {
+		ew.mu.RLock()
+		m := ew.principalMetrics
+		ew.mu.RUnlock()
+		if m != nil && !eventMsg.writerAddedAt.IsZero() {
+			m.EventWriterDwell.WithLabelValues(eventMsg.event.DataSchema()).Observe(time.Since(eventMsg.writerAddedAt).Seconds())
+		}
 	}
 
 	// A Send() on the stream is actually not blocking.

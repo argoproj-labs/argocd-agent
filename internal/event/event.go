@@ -87,6 +87,7 @@ const (
 	resourceID   string = "resourceid"
 	eventID      string = "eventid"
 	sentAt       string = "sentat"
+	enqueuedAt   string = "enqueuedat"
 	principalUID string = "principaluid"
 )
 
@@ -98,6 +99,24 @@ func SetSentAt(ev *cloudevents.Event) {
 // SentAt returns the send timestamp from an event, or nil if not set.
 func SentAt(ev *cloudevents.Event) *time.Time {
 	val, ok := ev.Extensions()[sentAt].(string)
+	if !ok {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, val)
+	if err != nil {
+		return nil
+	}
+	return &t
+}
+
+// SetEnqueuedAt stamps the current time on an event as the principal send-queue enqueue time.
+func SetEnqueuedAt(ev *cloudevents.Event) {
+	ev.SetExtension(enqueuedAt, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+// EnqueuedAt returns the principal send-queue enqueue timestamp from an event, or nil if not set.
+func EnqueuedAt(ev *cloudevents.Event) *time.Time {
+	val, ok := ev.Extensions()[enqueuedAt].(string)
 	if !ok {
 		return nil
 	}
