@@ -292,6 +292,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 
 	if a.options.metricsPort > 0 {
 		a.metrics = metrics.NewAgentMetrics()
+		metrics.RegisterK8sClientMetrics()
 	}
 
 	appInformer, err := informer.NewInformer(ctx, appInformerOptions...)
