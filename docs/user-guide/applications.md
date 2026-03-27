@@ -53,7 +53,6 @@ When this Application is created in namespace `production-cluster` on the princi
 When an Application is sent to a managed agent, it undergoes transformation to make it agent-specific:
 
 1. **Destination Server**: Transformed to point to the local cluster:
-
 ```yaml
    destination:
      server: ""
@@ -62,7 +61,6 @@ When an Application is sent to a managed agent, it undergoes transformation to m
 ```
 
 2. **Namespace**: Changed to the agent's local namespace:
-
 ```yaml
    metadata:
      namespace: argocd  # Agent's local namespace
@@ -151,37 +149,11 @@ The principal serves as a centralized view of all Applications across autonomous
 - **Deletion**: Delete Applications on the agent; they're automatically removed from the principal
 - **Local Control**: The agent maintains full control over its Applications
 
-## Application Caching and Resilience
-
-### Managed Agent Caching
-
-Managed agents maintain a local cache of Application specifications to handle network disruptions:
-
-- **Cache Purpose**: Ensures Applications remain in sync even when disconnected from the principal
-- **Cache Storage**: Stores the last known good specification for each Application
-- **Conflict Detection**: Uses source UID annotations to detect and resolve conflicts
-- **Automatic Recovery**: When connectivity is restored, the cache helps detect and resolve any drift
-
-### Resync Mechanisms
-
-Both principal and agents implement resync mechanisms to handle restarts and connectivity issues:
-
-#### On Agent Connection/Reconnection:
-
-- **Managed Mode**: Principal sends a resource resync request to ensure agent has latest Applications
-- **Autonomous Mode**: Principal requests updates from agent to refresh its view
-
-#### On Principal Restart:
-
-- **Managed Mode**: Principal re-sends all Applications to connected agents
-- **Autonomous Mode**: Principal requests a full sync from each autonomous agent
-
 ## Best Practices
 
 ### For Managed Agents
 
 1. **Namespace Organization**: Use clear, descriptive namespace names that match your agent names:
-
 ```
    production-east
    production-west
@@ -190,7 +162,6 @@ Both principal and agents implement resync mechanisms to handle restarts and con
 ```
 
 2. **Application Naming**: Use consistent naming conventions within each namespace:
-
 ```yaml
    metadata:
      name: frontend-prod
@@ -204,7 +175,6 @@ Both principal and agents implement resync mechanisms to handle restarts and con
 ### For Autonomous Agents
 
 1. **Project Management**: Be mindful of project names as they may be prefixed on the principal:
-
 ```yaml
    spec:
      project: microservices  # Becomes "agent-name-microservices" on principal
@@ -239,20 +209,15 @@ Both principal and agents implement resync mechanisms to handle restarts and con
 
 ### Sync Conflicts
 
-1. **Source UID Mismatch**: 
-
-   - Usually resolved automatically by recreating the Application
-   - Check logs for conflict resolution messages
-
-2. **Cache Issues** (Managed Mode):
-
-   - Agent may revert unexpected changes
-   - Review Application cache logs on the agent
-
-3. **Manual Intervention Required**:
-
-   - Delete and recreate the Application if automatic resolution fails
-   - Ensure the principal has the desired specification
+- **Source UID Mismatch**: 
+    - Usually resolved automatically by recreating the Application
+    - Check logs for conflict resolution messages
+- **Cache Issues** (Managed Mode):
+    - Agent may revert unexpected changes
+    - Review Application cache logs on the agent
+- **Manual Intervention Required**:
+    - Delete and recreate the Application if automatic resolution fails
+    - Ensure the principal has the desired specification
 
 ## Monitoring and Observability
 
@@ -266,15 +231,15 @@ Both principal and agents implement resync mechanisms to handle restarts and con
 ### Log Events to Watch
 
 - **Principal Logs**:
-  - Application distribution events
-  - Status update processing
-  - Resync operations
+    - Application distribution events
+    - Status update processing
+    - Resync operations
 
 - **Agent Logs**:
-  - Application creation/update events
-  - Status reporting activities
-  - Cache operations (managed mode)
-  - Conflict resolution actions
+    - Application creation/update events
+    - Status reporting activities
+    - Cache operations (managed mode)
+    - Conflict resolution actions
 
 ### Health Checks
 

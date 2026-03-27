@@ -56,7 +56,6 @@ When this AppProject is created on the principal, it will be automatically distr
 When an AppProject is sent to an agent, it undergoes transformation to make it agent-specific:
 
 1. **Destinations**: Only destinations matching the agent are kept (using glob pattern matching), and they're transformed to point to the local cluster:
-
 ```yaml
    destinations:
    - name: "in-cluster"
@@ -65,8 +64,7 @@ When an AppProject is sent to an agent, it undergoes transformation to make it a
 ```
 
 2. **Source Namespaces**: Removed completely since they're only used on the control plane for routing
-
-   The `sourceNamespaces` field is used on the control plane to determine which agents should receive the AppProject. Once the AppProject arrives at the agent cluster, this field is removed as it's no longer needed.
+    - The `sourceNamespaces` field is used on the control plane to determine which agents should receive the AppProject. Once the AppProject arrives at the agent cluster, this field is removed as it's no longer needed.
 
 3. **Roles**: Removed since they're not relevant on the workload cluster
 
@@ -139,21 +137,18 @@ When an AppProject is received from an autonomous agent, the principal applies t
     AppProjects that are synced from autonomous agents should not be used by other Applications outside of that agent, as they may change unpredictably when the autonomous agent modifies its local AppProject configuration.
 
 1. **Name Prefixing**: The project name is prefixed with the agent name to avoid conflicts:
-
 ```
    Original: my-project
    On Principal: agent-production-my-project
 ```
 
 2. **Source Namespaces**: Transformed to allow Applications from the agent's namespace on the principal:
-
 ```yaml
    sourceNamespaces:
    - agent-production  # The agent's namespace on the principal
 ```
 
 3. **Destinations**: All destinations are transformed to point to the agent cluster:
-
 ```yaml
    destinations:
    - name: agent-production  # The agent name
@@ -193,7 +188,6 @@ The transformation logic differs significantly between managed and autonomous ag
 ### For Managed Agents
 
 1. **Use Descriptive Patterns**: Use clear glob patterns in `sourceNamespaces` and `destinations` to target the right agents:
-
 ```yaml
    sourceNamespaces:
    - "production-*"
