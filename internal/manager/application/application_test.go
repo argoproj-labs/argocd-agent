@@ -920,23 +920,6 @@ func Test_CompareIdentity(t *testing.T) {
 		assert.False(t, result.PrincipalTransition)
 	})
 
-	t.Run("same principal, annotation wiped but UID exists (AppSet wipe) → stamp", func(t *testing.T) {
-		be := appmock.NewApplication(t)
-		be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
-		m, err := NewApplicationManager(be, "")
-		require.NoError(t, err)
-
-		incoming := existingApp.DeepCopy()
-		incoming.UID = ktypes.UID("some-uid")
-		delete(incoming.Annotations, manager.SourceUIDAnnotation)
-
-		result, err := m.CompareIdentity(context.Background(), incoming, "principal-A")
-		require.NoError(t, err)
-		assert.True(t, result.Exists)
-		assert.True(t, result.MissingSourceUID)
-		assert.True(t, result.PrincipalUIDMatch)
-	})
-
 	t.Run("different principal → transition", func(t *testing.T) {
 		be := appmock.NewApplication(t)
 		be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)

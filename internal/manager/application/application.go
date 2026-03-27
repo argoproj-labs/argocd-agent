@@ -381,6 +381,16 @@ func (m *ApplicationManager) UpdateManagedAppWithTransition(ctx context.Context,
 		return nil, fmt.Errorf("UpdateManagedAppWithTransition should be called on a managed agent only")
 	}
 
+	if incoming.Annotations == nil {
+		incoming.Annotations = make(map[string]string)
+	}
+	if sourceUID != "" {
+		incoming.Annotations[manager.SourceUIDAnnotation] = sourceUID
+	}
+	if principalUID != "" {
+		incoming.Annotations[manager.PrincipalUIDAnnotation] = principalUID
+	}
+
 	deletionTimestampChanged := false
 
 	updated, err := m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
@@ -506,16 +516,13 @@ func (m *ApplicationManager) CompareIdentity(ctx context.Context, incoming *v1al
 		return result, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
 	}
 
-	srcUID, hasSrcAnnotation := incoming.Annotations[manager.SourceUIDAnnotation]
-	if !hasSrcAnnotation || srcUID == "" {
-		result.MissingSourceUID = true
+	incomingUID := string(incoming.UID)
+	if srcUID, ok := incoming.Annotations[manager.SourceUIDAnnotation]; ok && srcUID != "" {
+		incomingUID = srcUID
 	}
-
-	incomingUID := srcUID
 	if incomingUID == "" {
-		incomingUID = string(incoming.UID)
-	}
-	if incomingUID != "" {
+		result.MissingSourceUID = true
+	} else {
 		result.SourceUIDMatch = incomingUID == existingSourceUID
 	}
 
