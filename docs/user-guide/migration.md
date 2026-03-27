@@ -252,11 +252,13 @@ AppProjects in argocd-agent work differently from traditional Argo CD due to the
 #### Understanding AppProject Distribution
 
 **Traditional Argo CD:**
+
 - AppProjects are created once on the control plane
 - All clusters share the same AppProject definitions
 - Projects can reference multiple clusters directly
 
 **argocd-agent:**
+
 - **Managed Mode**: AppProjects created on control plane, distributed to matching agents
 - **Autonomous Mode**: AppProjects created on agents, synchronized back to control plane
 - Projects are transformed for each agent's local context

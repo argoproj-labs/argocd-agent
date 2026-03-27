@@ -27,7 +27,7 @@ The protocol uses a **hub-and-spoke** architecture where:
 │   Agent 1       │──────────────────►│   Principal     │
 │  (Workload)     │                   │ (Control Plane) │
 └─────────────────┘                   └─────────────────┘
-                                              ▲
+                                             ▲
 ┌─────────────────┐                          │
 │   Agent 2       │──────────────────────────┘
 │  (Workload)     │
@@ -142,14 +142,14 @@ Principal                           Agent
     │                                │
     │  ◄─── create/update/delete ────│  (Configuration changes)
     │                                │
-    │─── status-update ─────────────► │  (Status sync)
+    │─── status-update ────────────► │  (Status sync)
     │                                │
     │─── request-synced-resource ──► │  (On principal restart)
     │     -list                      │
     │                                │
     │  ◄─── response-synced-resource │  (For each resource)
     │                                │
-    │─── request-update ────────────► │  (Request specific updates)
+    │─── request-update ───────────► │  (Request specific updates)
 ```
 
 ## Synchronization Modes

@@ -232,6 +232,7 @@ func TestMyFunction(t *testing.T) {
 ## Getting Help
 
 If you're unsure about:
+
 - Which field constant to use
 - Whether to create a new field constant
 - Which specialized logger is appropriate
@@ -242,6 +243,7 @@ Please ask in your PR or create an issue for discussion.
 ## Summary
 
 Remember the key principles:
+
 1. **Use field constants** - never string literals for field names
 2. **Use centralized logging** - no package-level log() functions
 3. **Add missing constants** - don't work around missing field constants

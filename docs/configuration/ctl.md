@@ -4,7 +4,7 @@ This document will explain how to use argocd-agentctl to assist in management of
 
 ## Available Commands
 
-+These are the available commands for argocd-agentctl. Some commands have subcommands, which are detailed in the sections below.
+These are the available commands for argocd-agentctl. Some commands have subcommands, which are detailed in the sections below.
 
 `agent` - Inspect and manage agent configuration
 
