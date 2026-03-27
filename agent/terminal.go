@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -28,8 +29,17 @@ import (
 	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 )
+
+var newWebSocketExecutor = func(config *rest.Config, method, rawURL string) (remotecommand.Executor, error) {
+	return remotecommand.NewWebSocketExecutor(config, method, rawURL)
+}
+
+var newSPDYExecutor = func(config *rest.Config, method string, u *url.URL) (remotecommand.Executor, error) {
+	return remotecommand.NewSPDYExecutor(config, method, u)
+}
 
 // processIncomingTerminalRequest handles incoming web terminal requests from the principal.
 // It establishes a Kubernetes exec session with a shell running inside the application pod
@@ -181,7 +191,7 @@ func (a *Agent) terminalInPod(ctx context.Context, stream terminalstreamapi.Term
 	// Try WebSocket executor first, fall back to SPDY if the cluster does not
 	// support WebSocket-based exec (e.g. TranslateStreamCloseWebsocketRequests
 	// feature gate is disabled).
-	exec, err := remotecommand.NewWebSocketExecutor(a.kubeClient.RestConfig, "GET", req.URL().String())
+	exec, err := newWebSocketExecutor(a.kubeClient.RestConfig, "GET", req.URL().String())
 	if err != nil {
 		return fmt.Errorf("failed to create WebSocket executor: %w", err)
 	}
@@ -191,7 +201,7 @@ func (a *Agent) terminalInPod(ctx context.Context, stream terminalstreamapi.Term
 	if err != nil && isWebSocketHandshakeError(err) {
 		logCtx.WithError(err).Warn("WebSocket exec failed, retrying with SPDY")
 
-		spdyExec, spdyErr := remotecommand.NewSPDYExecutor(a.kubeClient.RestConfig, "POST", req.URL())
+		spdyExec, spdyErr := newSPDYExecutor(a.kubeClient.RestConfig, "POST", req.URL())
 		if spdyErr != nil {
 			return fmt.Errorf("failed to create SPDY executor: %w", spdyErr)
 		}

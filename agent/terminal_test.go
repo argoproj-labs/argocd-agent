@@ -28,12 +28,14 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/terminalstreamapi"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/terminalstream/mock"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 )
@@ -48,6 +50,22 @@ func createTestTerminalAgent() *Agent {
 		inflightMu:       sync.Mutex{},
 	}
 	return agent
+}
+
+func createTestTerminalAgentWithKube(t *testing.T, ctx context.Context, cancel context.CancelFunc) *Agent {
+	t.Helper()
+	cfg := &rest.Config{Host: "https://fake-k8s:6443"}
+	clientset, err := kubernetes.NewForConfig(cfg)
+	require.NoError(t, err)
+	return &Agent{
+		context:  ctx,
+		cancelFn: cancel,
+		kubeClient: &kube.KubernetesClient{
+			RestConfig: cfg,
+			Clientset:  clientset,
+		},
+		inflightTerminal: make(map[string]struct{}),
+	}
 }
 
 func createTestTerminalRequest() *event.ContainerTerminalRequest {
@@ -668,5 +686,137 @@ func TestWebSocketToSPDYFallback(t *testing.T) {
 			assert.False(t, isWebSocketHandshakeError(err),
 				"SPDY fallback error should not re-trigger WebSocket fallback, got: %v", err)
 		}
+	})
+}
+
+type fakeExecutor struct{ err error }
+
+func (f *fakeExecutor) Stream(_ remotecommand.StreamOptions) error { return f.err }
+func (f *fakeExecutor) StreamWithContext(_ context.Context, _ remotecommand.StreamOptions) error {
+	return f.err
+}
+
+// patchExecutors swaps the package-level executor constructors for the
+// duration of a single test and restores the originals via t.Cleanup.
+func patchExecutors(
+	t *testing.T,
+	wsFunc func(*rest.Config, string, string) (remotecommand.Executor, error),
+	spdyFunc func(*rest.Config, string, *url.URL) (remotecommand.Executor, error),
+) {
+	t.Helper()
+	origWS, origSPDY := newWebSocketExecutor, newSPDYExecutor
+	newWebSocketExecutor = wsFunc
+	newSPDYExecutor = spdyFunc
+	t.Cleanup(func() {
+		newWebSocketExecutor = origWS
+		newSPDYExecutor = origSPDY
+	})
+}
+
+// TestTerminalInPodFallback drives the production terminalInPod control flow
+// by injecting fake executors through the package-level constructor vars.
+func TestTerminalInPodFallback(t *testing.T) {
+	t.Run("WebSocket bad-handshake triggers SPDY fallback and succeeds", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		agent := createTestTerminalAgentWithKube(t, ctx, cancel)
+		mockStream := mock.NewMockTerminalStreamClient(ctx)
+		mockStream.SetRecvFunc(func() (*terminalstreamapi.TerminalStreamData, error) {
+			return nil, io.EOF
+		})
+
+		spdyCalled := false
+		patchExecutors(t,
+			func(_ *rest.Config, _, _ string) (remotecommand.Executor, error) {
+				return &fakeExecutor{err: errors.New("websocket: bad handshake")}, nil
+			},
+			func(_ *rest.Config, _ string, _ *url.URL) (remotecommand.Executor, error) {
+				spdyCalled = true
+				return &fakeExecutor{err: nil}, nil
+			},
+		)
+
+		err := agent.terminalInPod(ctx, mockStream, createTestTerminalRequest(), logrus.NewEntry(logrus.New()))
+		require.NoError(t, err)
+		assert.True(t, spdyCalled, "SPDY executor must be invoked as fallback")
+	})
+
+	t.Run("SPDY fallback error is propagated to caller", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		agent := createTestTerminalAgentWithKube(t, ctx, cancel)
+		mockStream := mock.NewMockTerminalStreamClient(ctx)
+		mockStream.SetRecvFunc(func() (*terminalstreamapi.TerminalStreamData, error) {
+			return nil, io.EOF
+		})
+
+		spdyErr := errors.New("spdy: connection refused")
+		patchExecutors(t,
+			func(_ *rest.Config, _, _ string) (remotecommand.Executor, error) {
+				return &fakeExecutor{err: errors.New("websocket: bad handshake")}, nil
+			},
+			func(_ *rest.Config, _ string, _ *url.URL) (remotecommand.Executor, error) {
+				return &fakeExecutor{err: spdyErr}, nil
+			},
+		)
+
+		err := agent.terminalInPod(ctx, mockStream, createTestTerminalRequest(), logrus.NewEntry(logrus.New()))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, spdyErr)
+	})
+
+	t.Run("WebSocket success skips SPDY fallback entirely", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		agent := createTestTerminalAgentWithKube(t, ctx, cancel)
+		mockStream := mock.NewMockTerminalStreamClient(ctx)
+		mockStream.SetRecvFunc(func() (*terminalstreamapi.TerminalStreamData, error) {
+			return nil, io.EOF
+		})
+
+		spdyCalled := false
+		patchExecutors(t,
+			func(_ *rest.Config, _, _ string) (remotecommand.Executor, error) {
+				return &fakeExecutor{err: nil}, nil
+			},
+			func(_ *rest.Config, _ string, _ *url.URL) (remotecommand.Executor, error) {
+				spdyCalled = true
+				return &fakeExecutor{err: nil}, nil
+			},
+		)
+
+		err := agent.terminalInPod(ctx, mockStream, createTestTerminalRequest(), logrus.NewEntry(logrus.New()))
+		require.NoError(t, err)
+		assert.False(t, spdyCalled, "SPDY must not be called when WebSocket succeeds")
+	})
+
+	t.Run("WebSocket creation failure is returned immediately without SPDY", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		agent := createTestTerminalAgentWithKube(t, ctx, cancel)
+		mockStream := mock.NewMockTerminalStreamClient(ctx)
+		mockStream.SetRecvFunc(func() (*terminalstreamapi.TerminalStreamData, error) {
+			return nil, io.EOF
+		})
+
+		wsCreateErr := errors.New("failed to create ws executor")
+		spdyCalled := false
+		patchExecutors(t,
+			func(_ *rest.Config, _, _ string) (remotecommand.Executor, error) {
+				return nil, wsCreateErr
+			},
+			func(_ *rest.Config, _ string, _ *url.URL) (remotecommand.Executor, error) {
+				spdyCalled = true
+				return &fakeExecutor{}, nil
+			},
+		)
+
+		err := agent.terminalInPod(ctx, mockStream, createTestTerminalRequest(), logrus.NewEntry(logrus.New()))
+		require.Error(t, err)
+		assert.False(t, spdyCalled, "SPDY must not be called when WS executor creation fails")
 	})
 }
