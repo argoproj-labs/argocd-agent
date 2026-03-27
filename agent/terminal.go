@@ -167,6 +167,9 @@ func (a *Agent) terminalInPod(ctx context.Context, stream terminalstreamapi.Term
 	// Start goroutine to receive stdin from principal and forward to K8s
 	go streamHandler.receiveFromPrincipal()
 
+	// Close the stream to signal the end of the terminal session
+	defer streamHandler.close()
+
 	streamOpts := remotecommand.StreamOptions{
 		Stdin:             streamHandler,
 		Stdout:            streamHandler,
@@ -194,9 +197,6 @@ func (a *Agent) terminalInPod(ctx context.Context, stream terminalstreamapi.Term
 		}
 		err = spdyExec.StreamWithContext(execCtx, streamOpts)
 	}
-
-	// Close the stream to signal the end of the terminal session
-	streamHandler.close()
 
 	if err != nil {
 		if !isShellNotFoundError(err) {
