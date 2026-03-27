@@ -18,6 +18,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,6 +34,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 )
 
@@ -593,5 +598,75 @@ func TestConcurrentTerminalOperations(t *testing.T) {
 		count := len(agent.inflightTerminal)
 		agent.inflightMu.Unlock()
 		assert.Equal(t, numGoroutines, count)
+	})
+}
+
+// TestWebSocketToSPDYFallback exercises the real WebSocket and SPDY executors
+// against a test HTTP server that rejects WebSocket upgrades with 403 Forbidden,
+func TestWebSocketToSPDYFallback(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	config := &rest.Config{
+		Host: server.URL,
+		TLSClientConfig: rest.TLSClientConfig{
+			Insecure: true,
+		},
+	}
+
+	execPath := "/api/v1/namespaces/test/pods/test-pod/exec?command=sh&stdin=true&stdout=true&tty=true"
+	wsURL := server.URL + execPath
+	spdyURL, err := url.Parse(wsURL)
+	require.NoError(t, err)
+
+	streamOpts := remotecommand.StreamOptions{
+		Stdin:  strings.NewReader(""),
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+		Tty:    true,
+	}
+
+	t.Run("WebSocket executor returns handshake error on 403", func(t *testing.T) {
+		wsExec, err := remotecommand.NewWebSocketExecutor(config, "GET", wsURL)
+		require.NoError(t, err)
+
+		err = wsExec.StreamWithContext(context.Background(), streamOpts)
+		require.Error(t, err)
+		assert.True(t, isWebSocketHandshakeError(err),
+			"expected WebSocket handshake error, got: %v", err)
+	})
+
+	t.Run("SPDY executor error is not a WebSocket handshake error", func(t *testing.T) {
+		spdyExec, err := remotecommand.NewSPDYExecutor(config, "POST", spdyURL)
+		require.NoError(t, err)
+
+		err = spdyExec.StreamWithContext(context.Background(), streamOpts)
+		require.Error(t, err, "SPDY should also fail against the test server")
+		assert.False(t, isWebSocketHandshakeError(err),
+			"SPDY error must not be mistaken for a WebSocket handshake error, got: %v", err)
+	})
+
+	t.Run("full fallback flow: WebSocket 403 then SPDY retry", func(t *testing.T) {
+		wsExec, err := remotecommand.NewWebSocketExecutor(config, "GET", wsURL)
+		require.NoError(t, err)
+
+		err = wsExec.StreamWithContext(context.Background(), streamOpts)
+
+		// Verify the condition that triggers the fallback
+		require.Error(t, err)
+		require.True(t, isWebSocketHandshakeError(err),
+			"expected handshake error to trigger SPDY fallback, got: %v", err)
+
+		// Execute the fallback path
+		spdyExec, spdyErr := remotecommand.NewSPDYExecutor(config, "POST", spdyURL)
+		require.NoError(t, spdyErr, "SPDY executor creation must succeed during fallback")
+
+		err = spdyExec.StreamWithContext(context.Background(), streamOpts)
+		if err != nil {
+			assert.False(t, isWebSocketHandshakeError(err),
+				"SPDY fallback error should not re-trigger WebSocket fallback, got: %v", err)
+		}
 	})
 }

@@ -136,13 +136,6 @@ func (a *Agent) terminalInPod(ctx context.Context, stream terminalstreamapi.Term
 
 	logCtx.Infof("Executing command: %v", execOptions.Command)
 
-	// Create WebSocket executor,
-	// it connects agent to the shell running inside the application pod and streams data back and forth.
-	exec, err := remotecommand.NewWebSocketExecutor(a.kubeClient.RestConfig, "GET", req.URL().String())
-	if err != nil {
-		return fmt.Errorf("failed to create WebSocket executor: %w", err)
-	}
-
 	// Create cancellable context for the exec
 	// This allows us to terminate the exec when EOF is received from principal
 	execCtx, cancelExec := context.WithCancel(ctx)
@@ -174,14 +167,33 @@ func (a *Agent) terminalInPod(ctx context.Context, stream terminalstreamapi.Term
 	// Start goroutine to receive stdin from principal and forward to K8s
 	go streamHandler.receiveFromPrincipal()
 
-	// Execute the command in the pod using the stream handler
-	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
+	streamOpts := remotecommand.StreamOptions{
 		Stdin:             streamHandler,
 		Stdout:            streamHandler,
 		Stderr:            streamHandler,
 		Tty:               terminalReq.TTY,
 		TerminalSizeQueue: sizeQueue,
-	})
+	}
+
+	// Try WebSocket executor first, fall back to SPDY if the cluster does not
+	// support WebSocket-based exec (e.g. TranslateStreamCloseWebsocketRequests
+	// feature gate is disabled).
+	exec, err := remotecommand.NewWebSocketExecutor(a.kubeClient.RestConfig, "GET", req.URL().String())
+	if err != nil {
+		return fmt.Errorf("failed to create WebSocket executor: %w", err)
+	}
+
+	err = exec.StreamWithContext(execCtx, streamOpts)
+
+	if err != nil && isWebSocketHandshakeError(err) {
+		logCtx.WithError(err).Warn("WebSocket exec failed, retrying with SPDY")
+
+		spdyExec, spdyErr := remotecommand.NewSPDYExecutor(a.kubeClient.RestConfig, "POST", req.URL())
+		if spdyErr != nil {
+			return fmt.Errorf("failed to create SPDY executor: %w", spdyErr)
+		}
+		err = spdyExec.StreamWithContext(execCtx, streamOpts)
+	}
 
 	// Close the stream to signal the end of the terminal session
 	streamHandler.close()
@@ -349,6 +361,13 @@ func isContextCanceledError(err error) bool {
 		return true
 	}
 	return strings.Contains(err.Error(), "context canceled")
+}
+
+func isWebSocketHandshakeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "websocket: bad handshake")
 }
 
 // isShellNotFoundError checks if the error is due to a shell executable not being found in container.
