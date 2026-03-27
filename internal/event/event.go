@@ -76,6 +76,7 @@ const (
 	TargetResourceResync         EventTarget = "resourceResync"
 	TargetClusterCacheInfoUpdate EventTarget = "clusterCacheInfoUpdate"
 	TargetRepository             EventTarget = "repository"
+	TargetGPGKey                 EventTarget = "gpgkey"
 	TargetContainerLog           EventTarget = "containerlog"
 	TargetHeartbeat              EventTarget = "heartbeat"
 	TargetTerminal               EventTarget = "terminal"
@@ -240,6 +241,18 @@ func (evs EventSource) RepositoryEvent(evType EventType, repository *corev1.Secr
 	cev.SetDataSchema(TargetRepository.String())
 
 	_ = cev.SetData(cloudevents.ApplicationJSON, repository)
+	return &cev
+}
+
+func (evs EventSource) GPGKeyEvent(evType EventType, cm *corev1.ConfigMap) *cloudevents.Event {
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(evType.String())
+	cev.SetExtension(eventID, createEventID(cm.ObjectMeta))
+	cev.SetExtension(resourceID, createResourceID(cm.ObjectMeta))
+	cev.SetDataSchema(TargetGPGKey.String())
+	_ = cev.SetData(cloudevents.ApplicationJSON, cm)
 	return &cev
 }
 
@@ -630,6 +643,8 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetAppProject
 	case TargetRepository.String():
 		return TargetRepository
+	case TargetGPGKey.String():
+		return TargetGPGKey
 	case TargetResource.String():
 		return TargetResource
 	case TargetEventAck.String():
@@ -712,6 +727,12 @@ func (ev Event) Repository() (*corev1.Secret, error) {
 	repo := &corev1.Secret{}
 	err := ev.event.DataAs(repo)
 	return repo, err
+}
+
+func (ev Event) GPGKey() (*corev1.ConfigMap, error) {
+	cm := &corev1.ConfigMap{}
+	err := ev.event.DataAs(cm)
+	return cm, err
 }
 
 // ResourceRequest gets the resource request payload from an event

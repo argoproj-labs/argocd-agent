@@ -27,6 +27,7 @@ type SourceCache struct {
 	Application *ResourceCache[v1alpha1.ApplicationSpec]
 	AppProject  *ResourceCache[v1alpha1.AppProjectSpec]
 	Repository  *ResourceCache[map[string][]byte]
+	GPGKey      *ResourceCache[map[string]string]
 }
 
 func NewSourceCache() *SourceCache {
@@ -34,6 +35,7 @@ func NewSourceCache() *SourceCache {
 		Application: newResourceCache[v1alpha1.ApplicationSpec]("ApplicationSpec"),
 		AppProject:  newResourceCache[v1alpha1.AppProjectSpec]("AppProjectSpec"),
 		Repository:  newResourceCache[map[string][]byte]("RepositorySpec"),
+		GPGKey:      newResourceCache[map[string]string]("GPGKeyData"),
 	}
 }
 
