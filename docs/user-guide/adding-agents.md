@@ -125,8 +125,7 @@ kubectl create namespace <agent-name> --context <control-plane-context>
 
 ### Option A: Using Kubernetes Manifests
 
-1. **Create Authentication Secret** (for userpass - deprecated):
-
+- 1) **Create Authentication Secret** (for userpass - deprecated):
 !!! warning "Deprecation Notice"
     The userpass authentication method is deprecated and not suited for use outside development environments. Use mTLS authentication for production deployments.
 
@@ -137,16 +136,14 @@ kubectl create secret generic argocd-agent-agent-userpass \
   --context <workload-cluster-context>
 ```
 
-2. **Deploy Agent Components**:
-
+- 2) **Deploy Agent Components**:
 ```bash
 kubectl apply -n argocd \
   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/agent?ref=main' \
   --context <workload-cluster-context>
 ```
 
-3. **Configure Agent Parameters**:
-
+- 3) **Configure Agent Parameters**:
 ```bash
 kubectl patch configmap argocd-agent-params \
   --namespace argocd \
