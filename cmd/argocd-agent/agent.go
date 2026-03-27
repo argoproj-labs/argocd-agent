@@ -34,6 +34,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
+	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -113,6 +114,27 @@ func NewAgentRunCommand() *cobra.Command {
 			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
 
+			if formatter, err := cmdutil.LogFormatter(logFormat); err != nil {
+				cmdutil.Fatal("%s", err.Error())
+			} else {
+				logrus.SetFormatter(formatter)
+			}
+
+			subLoggers := cmdutil.SubSystemLoggers{
+				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
+				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
+				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
+			}
+
+			if len(logLevels) == 0 {
+				logLevels = append(logLevels, "info")
+			}
+			if len(logLevels) > 0 {
+				cmdutil.ParseLogLevels(logLevels, &subLoggers)
+			}
+
+			logrus.Infof("Initializing argocd-agent v%s (agent)", version.New("argocd-agent").Version())
+
 			// Initialize OpenTelemetry tracing if enabled
 			if otlpAddress != "" {
 				shutdownTracer, err := tracing.InitTracer(ctx, "agent-"+agentMode, otlpAddress, otlpInsecure)
@@ -140,25 +162,6 @@ func NewAgentRunCommand() *cobra.Command {
 
 			agentOpts := []agent.AgentOption{}
 			remoteOpts := []client.RemoteOption{}
-
-			if formatter, err := cmdutil.LogFormatter(logFormat); err != nil {
-				cmdutil.Fatal("%s", err.Error())
-			} else {
-				logrus.SetFormatter(formatter)
-			}
-
-			subLoggers := cmdutil.SubSystemLoggers{
-				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
-				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
-				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
-			}
-
-			if len(logLevels) == 0 {
-				logLevels = append(logLevels, "info")
-			}
-			if len(logLevels) > 0 {
-				cmdutil.ParseLogLevels(logLevels, &subLoggers)
-			}
 
 			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
 			if namespace == "" {
