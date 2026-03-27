@@ -1236,3 +1236,10 @@ func (s *Server) GetHAStatus() *HAStatus {
 	}
 	return s.ha.GetHAStatus()
 }
+
+func (s *Server) isAgentConnected(agentName string) bool {
+	if s.eventStreamSrv == nil {
+		return false
+	}
+	return s.eventStreamSrv.IsAgentConnected(agentName)
+}

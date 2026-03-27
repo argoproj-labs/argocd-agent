@@ -17,9 +17,11 @@ package principal
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
@@ -31,6 +33,8 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
+	eventstreamMock "github.com/argoproj-labs/argocd-agent/principal/apis/eventstream/mock"
 	replicationserver "github.com/argoproj-labs/argocd-agent/principal/apis/replication"
 	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/common"
@@ -115,14 +119,39 @@ func TestServerStateProvider(t *testing.T) {
 		assert.Equal(t, "unknown", provider.GetAgentMode("nonexistent"))
 	})
 
-	t.Run("IsAgentConnected checks queue existence", func(t *testing.T) {
+	t.Run("IsAgentConnected returns true for agent with active stream", func(t *testing.T) {
 		server := createTestServer()
 		server.queues.Create("connected-agent")
+		server.eventStreamSrv = eventstream.NewServer(
+			server.queues, event.NewEventWritersMap(), nil, &cluster.Manager{},
+		)
 
 		provider := &serverStateProvider{server: server}
+		assert.False(t, provider.IsAgentConnected("connected-agent"))
+
+		gate := make(chan struct{})
+		st := &eventstreamMock.MockEventServer{AgentName: "connected-agent"}
+		st.AddRecvHook(func(_ *eventstreamMock.MockEventServer) error {
+			<-gate
+			return io.EOF
+		})
+		go func() {
+			_ = server.eventStreamSrv.Subscribe(st)
+		}()
+
+		require.Eventually(t, func() bool {
+			return server.eventStreamSrv.ConnectedAgentCount() == 1
+		}, 5*time.Second, 10*time.Millisecond)
 
 		assert.True(t, provider.IsAgentConnected("connected-agent"))
 		assert.False(t, provider.IsAgentConnected("disconnected-agent"))
+
+		close(gate)
+		require.Eventually(t, func() bool {
+			return server.eventStreamSrv.ConnectedAgentCount() == 0
+		}, 5*time.Second, 10*time.Millisecond)
+
+		assert.False(t, provider.IsAgentConnected("connected-agent"))
 	})
 
 	t.Run("GetAgentResources returns resources", func(t *testing.T) {

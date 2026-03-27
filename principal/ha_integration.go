@@ -116,8 +116,7 @@ func (p *serverStateProvider) GetAgentMode(agentName string) string {
 
 // IsAgentConnected returns whether an agent is currently connected
 func (p *serverStateProvider) IsAgentConnected(agentName string) bool {
-	// An agent is considered connected if it has a send queue
-	return p.server.queues.SendQ(agentName) != nil
+	return p.server.isAgentConnected(agentName)
 }
 
 // GetAgentResources returns the resources managed by an agent
