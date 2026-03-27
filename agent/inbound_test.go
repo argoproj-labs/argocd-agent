@@ -1958,6 +1958,8 @@ func Test_UpdateGPGKey(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, ncm)
 	})
+}
+
 func Test_identityAction(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -420,6 +420,10 @@ func (m *ApplicationManager) UpdateManagedAppWithTransition(ctx context.Context,
 			incoming.Annotations[manager.PrincipalUIDAnnotation] = principalUID
 		}
 
+		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
+			deletionTimestampChanged = true
+		}
+
 		target := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Annotations: incoming.Annotations,
@@ -502,13 +506,16 @@ func (m *ApplicationManager) CompareIdentity(ctx context.Context, incoming *v1al
 		return result, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
 	}
 
-	incomingUID := string(incoming.UID)
-	if srcUID, ok := incoming.Annotations[manager.SourceUIDAnnotation]; ok && srcUID != "" {
-		incomingUID = srcUID
-	}
-	if incomingUID == "" {
+	srcUID, hasSrcAnnotation := incoming.Annotations[manager.SourceUIDAnnotation]
+	if !hasSrcAnnotation || srcUID == "" {
 		result.MissingSourceUID = true
-	} else {
+	}
+
+	incomingUID := srcUID
+	if incomingUID == "" {
+		incomingUID = string(incoming.UID)
+	}
+	if incomingUID != "" {
 		result.SourceUIDMatch = incomingUID == existingSourceUID
 	}
 
