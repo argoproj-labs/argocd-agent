@@ -202,9 +202,9 @@ type handlersOnConnect func(agent types.Agent) error
 // noAuthEndpoints is a list of endpoints that are available without the need
 // for the request to be authenticated.
 var noAuthEndpoints = map[string]bool{
-	"/versionapi.Version/Version":            true,
-	"/authapi.Authentication/Authenticate":   true,
-	"/authapi.Authentication/RefreshToken":   true,
+	"/versionapi.Version/Version":          true,
+	"/authapi.Authentication/Authenticate": true,
+	"/authapi.Authentication/RefreshToken": true,
 }
 
 const waitForSyncedDuration = 60 * time.Second

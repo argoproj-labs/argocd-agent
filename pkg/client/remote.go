@@ -473,7 +473,7 @@ func (r *Remote) getValidAccessToken(ctx context.Context) string {
 		return r.accessToken.RawToken
 	}
 
-	log().Info("Access token is about to expires, refreshing")
+	log().Info("Access token is about to expire, refreshing")
 
 	conn := r.Conn()
 	if conn == nil {
@@ -631,17 +631,21 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 				return ierr
 			}
 
+			r.tokenMu.Lock()
 			r.accessToken, ierr = NewToken(resp.AccessToken)
 			if ierr != nil {
+				r.tokenMu.Unlock()
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
 				return ierr
 			}
 			r.refreshToken, ierr = NewToken(resp.RefreshToken)
 			if ierr != nil {
+				r.tokenMu.Unlock()
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
 				return ierr
 			}
 			r.clientID, ierr = r.accessToken.Claims.GetSubject()
+			r.tokenMu.Unlock()
 			if ierr != nil {
 				return err
 			}
