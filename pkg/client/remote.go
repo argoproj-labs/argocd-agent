@@ -647,7 +647,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			r.clientID, ierr = r.accessToken.Claims.GetSubject()
 			r.tokenMu.Unlock()
 			if ierr != nil {
-				return err
+				return ierr
 			}
 			authenticated = true
 			return nil
