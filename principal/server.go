@@ -328,6 +328,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	if s.options.metricsPort > 0 {
 		s.metrics = metrics.NewPrincipalMetrics()
+		metrics.RegisterK8sClientMetrics()
 
 		appInformerOpts = append(appInformerOpts, informer.WithMetrics[*v1alpha1.Application](prometheus.NewRegistry(), metrics.NewInformerMetrics("applications")))
 		projInformerOpts = append(projInformerOpts, informer.WithMetrics[*v1alpha1.AppProject](prometheus.NewRegistry(), metrics.NewInformerMetrics("appprojects")))
