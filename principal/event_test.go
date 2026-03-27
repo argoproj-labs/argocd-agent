@@ -36,6 +36,62 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+func Test_EventProcessorRoutesACKToMatchingQueue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s, err := NewServer(ctx, kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
+	require.NoError(t, err)
+	s.events = event.NewEventSource("test")
+
+	require.NoError(t, s.queues.Create("mesh-a-ea1t-us"))
+	require.NoError(t, s.queues.Create("mesh-b-ea1t-us"))
+
+	evs := event.NewEventSource("test")
+
+	heartbeatA := evs.HeartbeatEvent("mesh-a-ea1t-us")
+	heartbeatA.SetExtension("eventid", "mesh-a-heartbeat")
+	heartbeatA.SetExtension("resourceid", "mesh-a-heartbeat")
+
+	heartbeatB := evs.HeartbeatEvent("mesh-b-ea1t-us")
+	heartbeatB.SetExtension("eventid", "mesh-b-heartbeat")
+	heartbeatB.SetExtension("resourceid", "mesh-b-heartbeat")
+
+	s.queues.RecvQ("mesh-a-ea1t-us").Add(heartbeatA)
+	s.queues.RecvQ("mesh-b-ea1t-us").Add(heartbeatB)
+
+	done := make(chan struct{})
+	go func() {
+		_ = s.eventProcessor(ctx)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		return s.queues.SendQ("mesh-a-ea1t-us").Len() == 1 && s.queues.SendQ("mesh-b-ea1t-us").Len() == 1
+	}, 2*time.Second, 10*time.Millisecond)
+
+	ackA, shutdown := s.queues.SendQ("mesh-a-ea1t-us").Get()
+	require.False(t, shutdown)
+	require.NotNil(t, ackA)
+	require.Equal(t, event.EventProcessed.String(), ackA.Type())
+	require.Equal(t, "mesh-a-heartbeat", event.EventID(ackA))
+	s.queues.SendQ("mesh-a-ea1t-us").Done(ackA)
+
+	ackB, shutdown := s.queues.SendQ("mesh-b-ea1t-us").Get()
+	require.False(t, shutdown)
+	require.NotNil(t, ackB)
+	require.Equal(t, event.EventProcessed.String(), ackB.Type())
+	require.Equal(t, "mesh-b-heartbeat", event.EventID(ackB))
+	s.queues.SendQ("mesh-b-ea1t-us").Done(ackB)
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("eventProcessor did not stop after context cancellation")
+	}
+}
+
 func Test_InvalidEvents(t *testing.T) {
 	t.Run("Unknown event schema", func(t *testing.T) {
 		ev := cloudevents.NewEvent()
