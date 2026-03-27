@@ -513,6 +513,14 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 			patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations/argocd.argoproj.io~1refresh", Value: refresh})
 		}
 
+		// Stamp the last-updated annotation. If the existing app has no
+		// annotations map yet we must create it; otherwise add/replace the key.
+		if existing.Annotations == nil {
+			patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations", Value: map[string]string{LastUpdatedAnnotation: incoming.Annotations[LastUpdatedAnnotation]}})
+		} else {
+			patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations/argocd-agent.argoproj.io~1last-updated", Value: incoming.Annotations[LastUpdatedAnnotation]})
+		}
+
 		// If there is no status yet on our application (this happens when the
 		// application was just created), we need to make sure to initialize
 		// it properly.
