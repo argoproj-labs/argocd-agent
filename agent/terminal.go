@@ -24,6 +24,8 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/terminalstreamapi"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
@@ -77,6 +79,11 @@ func (a *Agent) processIncomingTerminalRequest(ev *event.Event) error {
 	stream, err := terminalStreamClient.StreamTerminal(ctx)
 	if err != nil {
 		logCtx.WithError(err).Error("Failed to open terminal stream to principal")
+
+		// Trigger reconnection to principal, as refresh token may have expired
+		if status.Code(err) == codes.Unauthenticated || status.Code(err) == codes.PermissionDenied {
+			a.SetConnected(false)
+		}
 		return err
 	}
 
