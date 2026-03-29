@@ -564,6 +564,32 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+func TestWaitForCompletion_RaceWithFinalizeSession(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		server := NewServer()
+		reqID := "race-test"
+
+		w := mock.NewMockHTTPResponseWriter()
+		r := httptest.NewRequest("GET", "/logs", nil)
+		require.NoError(t, server.RegisterHTTP(reqID, w, r))
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			server.WaitForCompletion(reqID, 50*time.Millisecond)
+		}()
+
+		go func() {
+			defer wg.Done()
+			server.finalizeSession(reqID)
+		}()
+
+		wg.Wait()
+	}
+}
+
 func init() {
 	// Set log level to reduce noise during testing
 	logrus.SetLevel(logrus.ErrorLevel)
