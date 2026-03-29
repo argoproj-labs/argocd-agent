@@ -580,6 +580,148 @@ func Test_ProcessRequestUpdateEvent(t *testing.T) {
 	})
 }
 
+func Test_generateSpecChecksum_ConfigMap(t *testing.T) {
+	t.Run("generate checksum for ConfigMap using data field", func(t *testing.T) {
+		resource := fakeUnresGPGKey()
+
+		checksum, err := generateSpecChecksum(resource)
+		assert.Nil(t, err)
+		assert.NotNil(t, checksum)
+	})
+
+	t.Run("generate checksum for ConfigMap with no data field", func(t *testing.T) {
+		resource := fakeUnresGPGKey()
+		delete(resource.Object, "data")
+
+		checksum, err := generateSpecChecksum(resource)
+		assert.Nil(t, err)
+		assert.NotNil(t, checksum)
+	})
+
+	t.Run("return error if data field is missing for Secret", func(t *testing.T) {
+		resource := &unstructured.Unstructured{}
+		resource.SetGroupVersionKind(schema.GroupVersionKind{
+			Group: "", Version: "v1", Kind: "Secret",
+		})
+		resource.SetName("test-secret")
+		resource.SetNamespace("argocd")
+
+		_, err := generateSpecChecksum(resource)
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "data field not found")
+	})
+}
+
+func Test_sendRequestUpdate_GPGKey(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("send request update for GPGKey resource", func(t *testing.T) {
+		handler := createFakeHandler(t)
+
+		resource := fakeUnresGPGKey()
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+
+		gvr, err := getGroupVersionResource("GPGKey")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("argocd").
+			Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		err = handler.sendRequestUpdate(ctx, resources.ResourceKey{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			Kind:      "GPGKey",
+			UID:       "gpg-uid",
+		})
+
+		assert.Nil(t, err)
+		assert.Equal(t, 1, handler.sendQ.Len())
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestUpdate.String(), ev.Type())
+	})
+}
+
+func Test_ProcessRequestUpdateEvent_GPGKey(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("return nil if GPGKey exists and checksum matches", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd"
+
+		resource := fakeUnresGPGKey()
+
+		gvr, err := getGroupVersionResource("GPGKey")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("argocd").Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		checksum, err := generateSpecChecksum(resource)
+		assert.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			Kind:      "GPGKey",
+			Checksum:  checksum,
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len())
+	})
+
+	t.Run("send delete event if GPGKey does not exist", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd"
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "non-existent-gpg-keys",
+			Namespace: "argocd",
+			Kind:      "GPGKey",
+		}
+
+		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type())
+	})
+
+	t.Run("send spec update event if GPGKey checksum does not match", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd"
+
+		resource := fakeUnresGPGKey()
+
+		gvr, err := getGroupVersionResource("GPGKey")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("argocd").Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			Kind:      "GPGKey",
+			Checksum:  []byte("invalid-checksum"),
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+	})
+}
+
 func createFakeHandler(t *testing.T) *RequestHandler {
 	evs := event.NewEventSource("test")
 
@@ -606,6 +748,22 @@ func fakeUnresApp() *unstructured.Unstructured {
 	resource.SetUID("test-uid")
 	resource.Object["spec"] = map[string]interface{}{
 		"project": "default",
+	}
+	return resource
+}
+
+func fakeUnresGPGKey() *unstructured.Unstructured {
+	resource := &unstructured.Unstructured{}
+	resource.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "",
+		Version: "v1",
+		Kind:    "ConfigMap",
+	})
+	resource.SetName("argocd-gpg-keys-cm")
+	resource.SetNamespace("argocd")
+	resource.SetUID("gpg-uid")
+	resource.Object["data"] = map[string]interface{}{
+		"7AEE18F83AFDEB23": "test-gpg-key-data",
 	}
 	return resource
 }

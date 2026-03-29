@@ -252,8 +252,8 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 	// Depending on the role, the namespace of the resource may be different.
 	namespace := r.namespace
 	switch reqUpdate.Kind {
-	case "AppProject", "Repository":
-		// AppProjects and Repositories always live in the Argo CD namespace
+	case "AppProject", "Repository", "GPGKey":
+		// AppProjects, Repositories, and GPG keys always live in the Argo CD namespace
 		// regardless of whether this is principal or agent
 		namespace = r.namespace
 	case "Application":
@@ -344,6 +344,17 @@ func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *
 		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName, r.destinationBasedMapping)
 		ev := r.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		logCtx.Trace("Sending a request to update the appProject")
+		r.sendQ.Add(ev)
+
+	case "GPGKey":
+		cm := &corev1.ConfigMap{}
+		err := json.Unmarshal(resBytes, cm)
+		if err != nil {
+			return err
+		}
+
+		ev := r.events.GPGKeyEvent(event.SpecUpdate, cm)
+		logCtx.Trace("Sending a request to update the GPG key ConfigMap")
 		r.sendQ.Add(ev)
 	default:
 		return fmt.Errorf("unknown resource Kind: %s", reqUpdate.Kind)
@@ -460,6 +471,19 @@ func (r *RequestHandler) handleDeletedResource(logCtx *logrus.Entry, reqUpdate *
 		logCtx.Trace("Sending a request to delete the orphaned appProject")
 		r.sendQ.Add(ev)
 		return nil
+
+	case "GPGKey":
+		cm := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      reqUpdate.Name,
+				Namespace: reqUpdate.Namespace,
+				UID:       ktypes.UID(reqUpdate.UID),
+			},
+		}
+		ev := r.events.GPGKeyEvent(event.Delete, cm)
+		logCtx.Trace("Sending a request to delete the orphaned GPG key ConfigMap")
+		r.sendQ.Add(ev)
+		return nil
 	default:
 		return fmt.Errorf("unknown resource Kind: %s", reqUpdate.Kind)
 	}
@@ -502,6 +526,12 @@ func getGroupVersionResource(kind string) (schema.GroupVersionResource, error) {
 			Resource: "secrets",
 			Version:  "v1",
 		}, nil
+	case "GPGKey":
+		return schema.GroupVersionResource{
+			Group:    "",
+			Resource: "configmaps",
+			Version:  "v1",
+		}, nil
 	default:
 		return schema.GroupVersionResource{}, fmt.Errorf("unexpected Kind: %s", kind)
 	}
@@ -512,10 +542,15 @@ func generateSpecChecksum(resObj *unstructured.Unstructured) ([]byte, error) {
 
 	var resSpec interface{}
 	var ok bool
-	if res.GetKind() == "Secret" {
+	if res.GetKind() == "Secret" || res.GetKind() == "ConfigMap" {
 		resSpec, ok = res.Object["data"]
 		if !ok {
-			return nil, fmt.Errorf("data field not found for resource: %s", res.GetName())
+			if res.GetKind() == "ConfigMap" {
+				logrus.Debugf("ConfigMap %s has no data field, using empty map for checksum", res.GetName())
+				resSpec = map[string]interface{}{}
+			} else {
+				return nil, fmt.Errorf("data field not found for resource: %s", res.GetName())
+			}
 		}
 	} else {
 		resSpec, ok = res.Object["spec"]
