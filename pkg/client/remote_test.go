@@ -348,23 +348,19 @@ func Test_TokenRefresh(t *testing.T) {
 		originalAccessToken := r.accessToken.RawToken
 		originalRefreshToken := r.refreshToken.RawToken
 
-		// Create a near-expiry access token to trigger refresh on next call.
-		// Replace the access token with one that expires in 1 second,
-		// while keeping the valid refresh token.
+		// Create a new access token that will expire in 1 second
 		key, err := rsa.GenerateKey(rand.Reader, 2048)
 		require.NoError(t, err)
 		iss, err := issuer.NewIssuer("test", issuer.WithRSAPrivateKey(key))
 		require.NoError(t, err)
 		r.accessToken = issueTestToken(t, iss, `{"clientID":"default","mode":"managed"}`, 1*time.Second)
-
-		time.Sleep(2 * time.Second)
+		nearExpiry := r.accessToken.RawToken
 
 		tok := r.getValidAccessToken(ctx)
 
-		// Token should have been refreshed — it should differ from the near-expiry one
-		// and also differ from the original token
 		assert.NotEmpty(t, tok)
-		assert.NotEqual(t, r.accessToken.RawToken, originalAccessToken, "token should have been refreshed to a new value")
+		assert.NotEqual(t, tok, nearExpiry, "token should have been refreshed from the near-expiry token")
+		assert.NotEqual(t, tok, originalAccessToken, "refreshed token should differ from the original")
 
 		// Refresh token should remain unchanged
 		assert.Equal(t, originalRefreshToken, r.refreshToken.RawToken)
