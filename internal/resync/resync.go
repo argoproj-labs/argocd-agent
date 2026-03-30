@@ -188,7 +188,7 @@ func (r *RequestHandler) ProcessIncomingResourceResyncRequest(ctx context.Contex
 	for _, resource := range resources {
 		logCtx := logCtxForResourceKey(r.log, resource)
 		if err := r.sendRequestUpdate(ctx, resource); err != nil {
-			logCtx.Errorf("Failed to send request update")
+			logCtx.WithError(err).Error("Failed to send request update")
 			continue
 		}
 		logCtx.Trace("Sent a request update event")
@@ -202,7 +202,7 @@ func (r *RequestHandler) SendRequestUpdates(ctx context.Context) {
 	for _, resource := range resources {
 		logCtx := logCtxForResourceKey(r.log, resource)
 		if err := r.sendRequestUpdate(ctx, resource); err != nil {
-			logCtx.Errorf("Failed to send request update")
+			logCtx.WithError(err).Error("Failed to send request update")
 			continue
 		}
 	}
