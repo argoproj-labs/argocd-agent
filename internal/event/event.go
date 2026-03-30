@@ -140,7 +140,6 @@ func PrincipalUID(ev *cloudevents.Event) string {
 	}
 	return val
 }
-
 var (
 	ErrEventDiscarded    error = errors.New("event discarded")
 	ErrEventNotAllowed   error = errors.New("event not allowed in this agent mode")

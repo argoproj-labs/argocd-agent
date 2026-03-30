@@ -475,6 +475,23 @@ func TestEventWriter(t *testing.T) {
 		eventID := EventID(latestEvent.event)
 		require.Contains(t, eventID, "_5") // Should be version 5
 	})
+
+	t.Run("should observe event writer dwell when metrics are attached", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+		hopMetrics := &fakeOutboundHopMetrics{}
+		evSender.SetMetrics(hopMetrics)
+
+		ev := es.ApplicationEvent(Create, app1)
+		evSender.Add(ev)
+		time.Sleep(5 * time.Millisecond)
+
+		evSender.sendEvent(createResourceID(app1.ObjectMeta))
+
+		require.Len(t, hopMetrics.eventWriterDwell, 1)
+		require.Equal(t, TargetApplication.String(), hopMetrics.eventWriterDwell[0].resourceType)
+		require.GreaterOrEqual(t, hopMetrics.eventWriterDwell[0].seconds, 0.0)
+	})
 }
 
 type fakeStream struct {
@@ -501,3 +518,26 @@ func (fs *fakeStream) Send(event *eventstreamapi.Event) error {
 func (fs *fakeStream) Context() context.Context {
 	return context.Background()
 }
+
+type fakeOutboundHopMetrics struct {
+	mu               sync.Mutex
+	eventWriterDwell []metricObservation
+}
+
+type metricObservation struct {
+	resourceType string
+	seconds      float64
+}
+
+func (f *fakeOutboundHopMetrics) ObserveSendQueueDwell(string, float64) {}
+
+func (f *fakeOutboundHopMetrics) ObserveEventWriterDwell(resourceType string, seconds float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.eventWriterDwell = append(f.eventWriterDwell, metricObservation{
+		resourceType: resourceType,
+		seconds:      seconds,
+	})
+}
+
+func (f *fakeOutboundHopMetrics) ObserveAckRoundtrip(string, float64) {}

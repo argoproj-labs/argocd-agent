@@ -93,6 +93,16 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 		"resource_id":  event.ResourceID(ev),
 		"event_id":     event.EventID(ev),
 	})
+
+	if a.metrics != nil {
+		target := event.Target(ev)
+		if target != event.TargetEventAck && target != event.TargetHeartbeat {
+			if enqueuedAt := event.EnqueuedAt(ev); enqueuedAt != nil {
+				a.metrics.ObserveSendQueueDwell(ev.DataSchema(), time.Since(*enqueuedAt).Seconds())
+			}
+		}
+	}
+
 	logCtx.Trace("Adding an event to the event writer")
 	a.eventWriter.Add(ev)
 
@@ -135,6 +145,15 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 		rawEvent, err := format.FromProto(rcvd.Event)
 		if err != nil {
 			return err
+		}
+		if a.metrics != nil {
+			resourceType := a.eventWriter.SentResourceType(ev.ResourceID())
+			if resourceType == "" {
+				resourceType = rawEvent.DataSchema()
+			}
+			if sentAt := event.SentAt(rawEvent); sentAt != nil {
+				a.metrics.ObserveAckRoundtrip(resourceType, time.Since(*sentAt).Seconds())
+			}
 		}
 		a.eventWriter.Remove(rawEvent)
 		logCtx.Trace("Removed an event from the event writer")
@@ -180,6 +199,7 @@ func (a *Agent) handleStreamEvents() error {
 	} else {
 		a.eventWriter.UpdateTarget(stream)
 	}
+	a.eventWriter.SetMetrics(a.metrics)
 	go a.eventWriter.SendWaitingEvents(streamCtx)
 
 	logCtx := log().WithFields(logrus.Fields{

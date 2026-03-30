@@ -63,6 +63,9 @@ Standard `client-go` metrics exposed under the conventional `rest_client_*` name
 | `agent_events_sent` | counter | | Total events sent to the principal. |
 | `agent_event_processing_time` | histogramVec | `status`, `agent_mode`, `resource_type` | Time taken to process inbound events (seconds). |
 | `agent_event_propagation_latency_seconds` | histogramVec | `resource_type` | Time from when the principal sent an event on the wire to when the agent begins processing it. Complements `principal_ack_roundtrip_seconds` to break down the ACK roundtrip into network transit and agent processing. |
+| `agent_send_queue_dwell_seconds` | histogramVec | `resource_type` | Time an outbound event spends in the agent send queue from enqueue until the event writer picks it up. Elevated values indicate agent-side send-loop or queue pressure. Buckets: 1ms–60s. |
+| `agent_event_writer_dwell_seconds` | histogramVec | `resource_type` | Time an outbound event spends inside the agent event writer from when it is added until it is sent on the wire. The event writer polls every 100ms, so a baseline of 0–100ms is expected. Buckets: 1ms–60s. |
+| `agent_ack_roundtrip_seconds` | histogramVec | `resource_type` | Time from when an event is written by the agent to the wire until the corresponding ACK is received back from the principal. Measures network latency plus principal-side processing time. Buckets: 1ms–60s. |
 | `agent_errors` | counterVec | `resource_type` | Total errors occurred in the agent. |
 
 ### Labels

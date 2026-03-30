@@ -44,20 +44,19 @@ type EventWriter struct {
 	// target refers to the specified gRPC stream.
 	target streamWriter
 
-	// principalMetrics is optional; when set, hop-by-hop latency histograms are observed.
-	principalMetrics *metrics.PrincipalMetrics
+	// outboundMetrics is optional; when set, hop-by-hop writer dwell is observed.
+	outboundMetrics metrics.OutboundHopMetrics
 
 	log *logrus.Entry
 }
 
-// SetMetrics attaches principal metrics to this EventWriter so it can observe
+// SetMetrics attaches outbound hop metrics to this EventWriter so it can observe
 // EventWriterDwell latency. Safe to call at any time.
-func (ew *EventWriter) SetMetrics(m *metrics.PrincipalMetrics) {
+func (ew *EventWriter) SetMetrics(m metrics.OutboundHopMetrics) {
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
-	ew.principalMetrics = m
+	ew.outboundMetrics = m
 }
-
 
 type eventMessage struct {
 	// when this lock is owned, never attempt to THEN acquire `eventWriter.mu`, as this will lead to a deadlock.
@@ -185,6 +184,24 @@ func (ew *EventWriter) Get(resID string) *eventMessage {
 		return eq.get()
 	}
 	return nil
+}
+
+// SentResourceType returns the resource type for an in-flight sent event, or an
+// empty string if the event is not currently awaiting an ACK.
+func (ew *EventWriter) SentResourceType(resID string) string {
+	ew.mu.RLock()
+	msg, exists := ew.sentEvents[resID]
+	ew.mu.RUnlock()
+	if !exists || msg == nil {
+		return ""
+	}
+
+	msg.mu.RLock()
+	defer msg.mu.RUnlock()
+	if msg.event == nil {
+		return ""
+	}
+	return msg.event.DataSchema()
 }
 
 func (ew *EventWriter) Remove(ev *cloudevents.Event) {
@@ -421,10 +438,10 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 
 	if !isFireAndForget {
 		ew.mu.RLock()
-		m := ew.principalMetrics
+		m := ew.outboundMetrics
 		ew.mu.RUnlock()
 		if m != nil && !eventMsg.writerAddedAt.IsZero() {
-			m.EventWriterDwell.WithLabelValues(eventMsg.event.DataSchema()).Observe(time.Since(eventMsg.writerAddedAt).Seconds())
+			m.ObserveEventWriterDwell(eventMsg.event.DataSchema(), time.Since(eventMsg.writerAddedAt).Seconds())
 		}
 	}
 

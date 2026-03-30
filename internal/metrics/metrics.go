@@ -39,6 +39,15 @@ type InformerMetrics struct {
 	DeleteDuration  *prometheus.GaugeVec
 }
 
+var outboundHopLatencyBuckets = []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60}
+
+// OutboundHopMetrics records per-stage latency for outbound event delivery.
+type OutboundHopMetrics interface {
+	ObserveSendQueueDwell(resourceType string, seconds float64)
+	ObserveEventWriterDwell(resourceType string, seconds float64)
+	ObserveAckRoundtrip(resourceType string, seconds float64)
+}
+
 // PrincipalMetrics holds metrics of principal
 type PrincipalMetrics struct {
 	AgentConnected         prometheus.Gauge
@@ -82,6 +91,9 @@ type AgentMetrics struct {
 	EventSent           prometheus.Counter
 	EventProcessingTime *prometheus.HistogramVec
 	PropagationLatency  *prometheus.HistogramVec
+	SendQueueDwell      *prometheus.HistogramVec
+	EventWriterDwell    *prometheus.HistogramVec
+	AckRoundtrip        *prometheus.HistogramVec
 	AgentErrors         *prometheus.CounterVec
 }
 
@@ -179,19 +191,19 @@ func NewPrincipalMetrics() *PrincipalMetrics {
 		SendQueueDwell: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "principal_send_queue_dwell_seconds",
 			Help:    "Time an outbound event spends in the principal send queue before the event writer picks it up",
-			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+			Buckets: outboundHopLatencyBuckets,
 		}, []string{"resource_type"}),
 
 		EventWriterDwell: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "principal_event_writer_dwell_seconds",
 			Help:    "Time an outbound event spends in the event writer between being queued and actually sent on the wire",
-			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+			Buckets: outboundHopLatencyBuckets,
 		}, []string{"resource_type"}),
 
 		AckRoundtrip: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "principal_ack_roundtrip_seconds",
 			Help:    "Time from when an outbound event is sent on the wire to when the ACK is received back from the agent",
-			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+			Buckets: outboundHopLatencyBuckets,
 		}, []string{"resource_type"}),
 
 		PrincipalErrors: promauto.NewCounterVec(prometheus.CounterOpts{
@@ -223,11 +235,71 @@ func NewAgentMetrics() *AgentMetrics {
 			Buckets: prometheus.DefBuckets,
 		}, []string{"resource_type"}),
 
+		SendQueueDwell: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "agent_send_queue_dwell_seconds",
+			Help:    "Time an outbound event spends in the agent send queue before the event writer picks it up",
+			Buckets: outboundHopLatencyBuckets,
+		}, []string{"resource_type"}),
+
+		EventWriterDwell: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "agent_event_writer_dwell_seconds",
+			Help:    "Time an outbound event spends in the agent event writer between being queued and actually sent on the wire",
+			Buckets: outboundHopLatencyBuckets,
+		}, []string{"resource_type"}),
+
+		AckRoundtrip: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "agent_ack_roundtrip_seconds",
+			Help:    "Time from when an outbound event is sent on the wire to when the ACK is received back from the principal",
+			Buckets: outboundHopLatencyBuckets,
+		}, []string{"resource_type"}),
+
 		AgentErrors: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "agent_errors",
 			Help: "The total number of errors occurred in agent",
 		}, []string{"resource_type"}),
 	}
+}
+
+func (m *PrincipalMetrics) ObserveSendQueueDwell(resourceType string, seconds float64) {
+	if m == nil || m.SendQueueDwell == nil {
+		return
+	}
+	m.SendQueueDwell.WithLabelValues(resourceType).Observe(seconds)
+}
+
+func (m *PrincipalMetrics) ObserveEventWriterDwell(resourceType string, seconds float64) {
+	if m == nil || m.EventWriterDwell == nil {
+		return
+	}
+	m.EventWriterDwell.WithLabelValues(resourceType).Observe(seconds)
+}
+
+func (m *PrincipalMetrics) ObserveAckRoundtrip(resourceType string, seconds float64) {
+	if m == nil || m.AckRoundtrip == nil {
+		return
+	}
+	m.AckRoundtrip.WithLabelValues(resourceType).Observe(seconds)
+}
+
+func (m *AgentMetrics) ObserveSendQueueDwell(resourceType string, seconds float64) {
+	if m == nil || m.SendQueueDwell == nil {
+		return
+	}
+	m.SendQueueDwell.WithLabelValues(resourceType).Observe(seconds)
+}
+
+func (m *AgentMetrics) ObserveEventWriterDwell(resourceType string, seconds float64) {
+	if m == nil || m.EventWriterDwell == nil {
+		return
+	}
+	m.EventWriterDwell.WithLabelValues(resourceType).Observe(seconds)
+}
+
+func (m *AgentMetrics) ObserveAckRoundtrip(resourceType string, seconds float64) {
+	if m == nil || m.AckRoundtrip == nil {
+		return
+	}
+	m.AckRoundtrip.WithLabelValues(resourceType).Observe(seconds)
 }
 
 // AvgCalculationInterval is time interval for agent connection time calculation
