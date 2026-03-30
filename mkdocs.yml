@@ -57,6 +57,7 @@ nav:
     - TLS & Certificates: configuration/tls-certificates.md
     - Namespaces: configuration/namespaces.md
     - Networking: configuration/networking.md
+    - Service Mesh: configuration/service-mesh.md
     - Observability: configuration/observability.md
     - High availability: configuration/ha.md
     - CTL: configuration/ctl.md
