@@ -421,14 +421,7 @@ func (r *Remote) unaryAuthInterceptor(ctx context.Context, method string, req in
 
 func (r *Remote) streamAuthInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	log().Infof("Outgoing stream call to %s", method)
-
-	// Auth methods do not need token refresh, so we can call the streamer directly
-	if isAuthMethod(method) {
-		return streamer(ctx, desc, cc, method, opts...)
-	}
 	nCtx := ctx
-
-	// For other methods, we need to check if the token is valid or refresh it
 	if token := r.getValidAccessToken(ctx); token != "" {
 		nCtx = metadata.AppendToOutgoingContext(ctx, "authorization", token)
 	}
@@ -632,20 +625,18 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			}
 
 			r.tokenMu.Lock()
+			defer r.tokenMu.Unlock()
 			r.accessToken, ierr = NewToken(resp.AccessToken)
 			if ierr != nil {
-				r.tokenMu.Unlock()
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
 				return ierr
 			}
 			r.refreshToken, ierr = NewToken(resp.RefreshToken)
 			if ierr != nil {
-				r.tokenMu.Unlock()
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
 				return ierr
 			}
 			r.clientID, ierr = r.accessToken.Claims.GetSubject()
-			r.tokenMu.Unlock()
 			if ierr != nil {
 				return ierr
 			}
