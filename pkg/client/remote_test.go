@@ -16,6 +16,8 @@ package client
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"math/big"
@@ -25,6 +27,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
+	"github.com/argoproj-labs/argocd-agent/internal/issuer"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
@@ -229,5 +232,137 @@ func Test_validateTLSConfig(t *testing.T) {
 			assert.Nil(t, r)
 			assert.Contains(t, err.Error(), "is not supported by minimum TLS version")
 		}
+	})
+}
+
+// issueTestToken creates a signed JWT with the given subject and expiry using the provided issuer.
+func issueTestToken(t *testing.T, iss issuer.Issuer, subject string, expiry time.Duration) *token {
+	t.Helper()
+	raw, err := iss.IssueAccessToken(subject, expiry)
+	require.NoError(t, err)
+	tok, err := NewToken(raw)
+	require.NoError(t, err)
+	return tok
+}
+
+func issueTestRefreshToken(t *testing.T, iss issuer.Issuer, subject string, expiry time.Duration) *token {
+	t.Helper()
+	raw, err := iss.IssueRefreshToken(subject, expiry)
+	require.NoError(t, err)
+	tok, err := NewToken(raw)
+	require.NoError(t, err)
+	return tok
+}
+
+func Test_getValidAccessToken(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	iss, err := issuer.NewIssuer("test", issuer.WithRSAPrivateKey(key))
+	require.NoError(t, err)
+
+	subject := `{"clientID":"test-agent","mode":"managed"}`
+
+	t.Run("returns empty string when no tokens are set", func(t *testing.T) {
+		r := &Remote{}
+		tok := r.getValidAccessToken(context.Background())
+		assert.Equal(t, "", tok)
+	})
+
+	t.Run("returns access token when refresh token is nil", func(t *testing.T) {
+		r := &Remote{
+			accessToken: issueTestToken(t, iss, subject, 5*time.Minute),
+		}
+		tok := r.getValidAccessToken(context.Background())
+		assert.Equal(t, r.accessToken.RawToken, tok)
+	})
+
+	t.Run("returns current token when not near expiry", func(t *testing.T) {
+		r := &Remote{
+			accessToken:  issueTestToken(t, iss, subject, 5*time.Minute),
+			refreshToken: issueTestRefreshToken(t, iss, subject, 24*time.Hour),
+		}
+		originalToken := r.accessToken.RawToken
+		tok := r.getValidAccessToken(context.Background())
+		assert.Equal(t, originalToken, tok)
+	})
+
+	t.Run("attempts refresh when token is near expiry", func(t *testing.T) {
+		r := &Remote{
+			accessToken:  issueTestToken(t, iss, subject, 10*time.Second),
+			refreshToken: issueTestRefreshToken(t, iss, subject, 24*time.Hour),
+		}
+		originalToken := r.accessToken.RawToken
+		tok := r.getValidAccessToken(context.Background())
+		assert.Equal(t, originalToken, tok)
+	})
+
+	t.Run("attempts refresh when token is already expired", func(t *testing.T) {
+		r := &Remote{
+			accessToken:  issueTestToken(t, iss, subject, 1*time.Millisecond),
+			refreshToken: issueTestRefreshToken(t, iss, subject, 24*time.Hour),
+		}
+		time.Sleep(5 * time.Millisecond)
+		originalToken := r.accessToken.RawToken
+		tok := r.getValidAccessToken(context.Background())
+		assert.Equal(t, originalToken, tok)
+	})
+}
+
+func Test_TokenRefresh(t *testing.T) {
+	tempDir := t.TempDir()
+	basePath := path.Join(tempDir, "certs")
+	testcerts.WriteSelfSignedCert(t, "rsa", basePath, x509.Certificate{SerialNumber: big.NewInt(1)})
+
+	s, err := principal.NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps("default"), "default",
+		principal.WithGRPC(true),
+		principal.WithListenerPort(0),
+		principal.WithTLSKeyPairFromPath(basePath+".crt", basePath+".key"),
+		principal.WithGeneratedTokenSigningKey(),
+	)
+	require.NoError(t, err)
+
+	am := userpass.NewUserPassAuthentication("")
+	am.UpsertUser("default", "password")
+	s.AuthMethodsForE2EOnly().RegisterMethod("userpass", am)
+
+	errch := make(chan error)
+	err = s.Start(context.Background(), errch)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, s.Shutdown())
+	})
+
+	t.Run("token refresh succeeds with valid connection", func(t *testing.T) {
+		r, err := NewRemote("127.0.0.1", s.ListenerForE2EOnly().Port(),
+			WithInsecureSkipTLSVerify(),
+			WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "default", userpass.ClientSecretField: "password"}),
+			WithClientMode(types.AgentModeManaged),
+		)
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err = r.Connect(ctx, false)
+		require.NoError(t, err)
+
+		originalAccessToken := r.accessToken.RawToken
+		originalRefreshToken := r.refreshToken.RawToken
+
+		// Create a new access token that will expire in 1 second
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		iss, err := issuer.NewIssuer("test", issuer.WithRSAPrivateKey(key))
+		require.NoError(t, err)
+		r.accessToken = issueTestToken(t, iss, `{"clientID":"default","mode":"managed"}`, 1*time.Second)
+		nearExpiry := r.accessToken.RawToken
+
+		tok := r.getValidAccessToken(ctx)
+
+		assert.NotEmpty(t, tok)
+		assert.NotEqual(t, tok, nearExpiry, "token should have been refreshed from the near-expiry token")
+		assert.NotEqual(t, tok, originalAccessToken, "refreshed token should differ from the original")
+
+		// Refresh token should remain unchanged
+		assert.Equal(t, originalRefreshToken, r.refreshToken.RawToken)
 	})
 }

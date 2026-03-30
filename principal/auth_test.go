@@ -483,6 +483,17 @@ func Test_Server_unaryAuthInterceptor(t *testing.T) {
 			authShouldFail: false,
 		},
 		{
+			name: "RefreshToken in noauth list - skip authentication",
+			setupServer: func() *Server {
+				return &Server{
+					noauth: noAuthEndpoints,
+				}
+			},
+			fullMethod:     "/authapi.Authentication/RefreshToken",
+			shouldCallAuth: false,
+			authShouldFail: false,
+		},
+		{
 			name: "method not in noauth list - require authentication success",
 			setupServer: func() *Server {
 				agentInfo := auth.AuthSubject{
