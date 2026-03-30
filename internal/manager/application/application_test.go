@@ -245,7 +245,7 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent))
 		require.NoError(t, err)
 
-		updated, err := mgr.UpdateManagedApp(context.Background(), incoming)
+		updated, err := mgr.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{})
 
 		require.NoError(t, err)
 		require.NotNil(t, updated)
@@ -273,6 +273,52 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		require.Equal(t, existing.Status, updated.Status)
 		// Spec must be in sync with incoming
 		require.Equal(t, incoming.Spec, updated.Spec)
+	})
+
+	t.Run("Explicit managed identity overrides are stamped", func(t *testing.T) {
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				UID:       ktypes.UID("incoming-uid"),
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           "kustomize-guestbook",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation:    "old-source-uid",
+					manager.PrincipalUIDAnnotation: "principal-A",
+				},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent))
+		require.NoError(t, err)
+
+		updated, err := mgr.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{
+			SourceUID:    "resolved-source-uid",
+			PrincipalUID: "principal-B",
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		require.Equal(t, "resolved-source-uid", updated.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, "principal-B", updated.Annotations[manager.PrincipalUIDAnnotation])
 	})
 
 }

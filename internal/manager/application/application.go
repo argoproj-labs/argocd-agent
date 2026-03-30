@@ -236,18 +236,49 @@ func (m *ApplicationManager) Get(ctx context.Context, name, namespace string) (*
 	return m.applicationBackend.Get(ctx, name, namespace)
 }
 
-// preserveOrAdoptPrincipalUID carries the principal-uid annotation from
-// existing to incoming. If existing has no principal-uid yet (pre-upgrade
-// resource), the incoming value is kept so the annotation gets adopted on the
-// first update from a principal-uid-aware principal.
-func preserveOrAdoptPrincipalUID(existing, incoming *v1alpha1.Application) {
+// ManagedIdentity carries the resolved identity that should be stamped on a
+// managed application update. Zero values mean "preserve whatever is already
+// known from the existing or incoming object".
+type ManagedIdentity struct {
+	SourceUID    string
+	PrincipalUID string
+}
+
+func resolveManagedIdentity(existing, incoming *v1alpha1.Application, identity ManagedIdentity) ManagedIdentity {
+	resolved := identity
+
+	if resolved.SourceUID == "" {
+		resolved.SourceUID = existing.Annotations[manager.SourceUIDAnnotation]
+	}
+	if resolved.SourceUID == "" && incoming.Annotations != nil {
+		resolved.SourceUID = incoming.Annotations[manager.SourceUIDAnnotation]
+	}
+
+	if resolved.PrincipalUID == "" {
+		resolved.PrincipalUID = existing.Annotations[manager.PrincipalUIDAnnotation]
+	}
+	if resolved.PrincipalUID == "" && incoming.Annotations != nil {
+		resolved.PrincipalUID = incoming.Annotations[manager.PrincipalUIDAnnotation]
+	}
+
+	return resolved
+}
+
+func applyManagedIdentity(existing, incoming *v1alpha1.Application, identity ManagedIdentity) {
 	if incoming.Annotations == nil {
 		incoming.Annotations = make(map[string]string)
 	}
-	if v, ok := existing.Annotations[manager.PrincipalUIDAnnotation]; ok {
-		incoming.Annotations[manager.PrincipalUIDAnnotation] = v
+	if v, ok := existing.Annotations["argocd.argoproj.io/refresh"]; ok {
+		incoming.Annotations["argocd.argoproj.io/refresh"] = v
 	}
-	// else: keep whatever the caller already set on incoming (adoption case)
+
+	resolved := resolveManagedIdentity(existing, incoming, identity)
+	if resolved.SourceUID != "" {
+		incoming.Annotations[manager.SourceUIDAnnotation] = resolved.SourceUID
+	}
+	if resolved.PrincipalUID != "" {
+		incoming.Annotations[manager.PrincipalUIDAnnotation] = resolved.PrincipalUID
+	}
 }
 
 // UpdateManagedApp updates the Application resource on the agent when it is in
@@ -257,7 +288,7 @@ func preserveOrAdoptPrincipalUID(existing, incoming *v1alpha1.Application) {
 // and any operation field of the incoming application. A possibly existing
 // refresh annotation on the agent's app will be retained, because it will be
 // removed by the agent's application controller.
-func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Application, identity ManagedIdentity) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "UpdateManaged",
 		"application":     incoming.QualifiedName(),
@@ -278,13 +309,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	deletionTimestampChanged := false
 
 	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
-		if incoming.Annotations == nil {
-			incoming.Annotations = make(map[string]string)
-		}
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
-		}
-		preserveOrAdoptPrincipalUID(existing, incoming)
+		applyManagedIdentity(existing, incoming, identity)
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Finalizers = incoming.Finalizers
@@ -296,16 +321,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		}
 
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
-		if incoming.Annotations == nil {
-			incoming.Annotations = make(map[string]string)
-		}
-		if v, ok := existing.Annotations["argocd.argoproj.io/refresh"]; ok {
-			incoming.Annotations["argocd.argoproj.io/refresh"] = v
-		}
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
-		}
-		preserveOrAdoptPrincipalUID(existing, incoming)
+		applyManagedIdentity(existing, incoming, identity)
 
 		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
 			deletionTimestampChanged = true
@@ -354,120 +370,6 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 			}
 		}
 
-		if err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, ptr.To(backend.DeletePropagationForeground)); err != nil {
-			return nil, err
-		}
-	}
-
-	return updated, err
-}
-
-// UpdateManagedAppWithTransition updates the Application resource on the agent
-// and stamps new principal-uid and source-uid annotations, overriding any
-// existing values. Used during a principal failover or when the source-uid
-// was wiped by an AppSet reconcile.
-func (m *ApplicationManager) UpdateManagedAppWithTransition(ctx context.Context, incoming *v1alpha1.Application, principalUID, sourceUID string) (*v1alpha1.Application, error) {
-	logCtx := log().WithFields(logrus.Fields{
-		"component":       "UpdateManagedTransition",
-		"application":     incoming.QualifiedName(),
-		"resourceVersion": incoming.ResourceVersion,
-	})
-
-	if !m.destinationBasedMapping {
-		incoming.SetNamespace(m.namespace)
-	}
-
-	if m.role != manager.ManagerRoleAgent || m.mode != manager.ManagerModeManaged {
-		return nil, fmt.Errorf("UpdateManagedAppWithTransition should be called on a managed agent only")
-	}
-
-	if incoming.Annotations == nil {
-		incoming.Annotations = make(map[string]string)
-	}
-	if sourceUID != "" {
-		incoming.Annotations[manager.SourceUIDAnnotation] = sourceUID
-	}
-	if principalUID != "" {
-		incoming.Annotations[manager.PrincipalUIDAnnotation] = principalUID
-	}
-
-	deletionTimestampChanged := false
-
-	updated, err := m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
-		if incoming.Annotations == nil {
-			incoming.Annotations = make(map[string]string)
-		}
-		if sourceUID != "" {
-			incoming.Annotations[manager.SourceUIDAnnotation] = sourceUID
-		} else if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
-		}
-		if principalUID != "" {
-			incoming.Annotations[manager.PrincipalUIDAnnotation] = principalUID
-		}
-		existing.Annotations = incoming.Annotations
-		existing.Labels = incoming.Labels
-		existing.Finalizers = incoming.Finalizers
-		existing.Spec = *incoming.Spec.DeepCopy()
-		existing.Operation = operationToUse(existing, incoming)
-
-		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
-			deletionTimestampChanged = true
-		}
-	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
-		if incoming.Annotations == nil {
-			incoming.Annotations = make(map[string]string)
-		}
-		if v, ok := existing.Annotations["argocd.argoproj.io/refresh"]; ok {
-			incoming.Annotations["argocd.argoproj.io/refresh"] = v
-		}
-		if sourceUID != "" {
-			incoming.Annotations[manager.SourceUIDAnnotation] = sourceUID
-		} else if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
-		}
-		if principalUID != "" {
-			incoming.Annotations[manager.PrincipalUIDAnnotation] = principalUID
-		}
-
-		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
-			deletionTimestampChanged = true
-		}
-
-		target := &v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{
-				Annotations: incoming.Annotations,
-				Labels:      incoming.Labels,
-				Finalizers:  incoming.Finalizers,
-			},
-			Spec:      incoming.Spec,
-			Operation: operationToUse(existing, incoming),
-		}
-		source := &v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{
-				Annotations: existing.Annotations,
-				Labels:      existing.Labels,
-			},
-			Spec:      existing.Spec,
-			Operation: existing.Operation,
-		}
-		patch, err := jsondiff.Compare(source, target)
-		return patch, err
-	})
-	if err == nil {
-		logCtx.Infof("Transitioned application to new principal")
-		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
-			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
-		}
-	}
-
-	if deletionTimestampChanged {
-		logCtx.Infof("deletionTimestamp changed during transition, deleting Application")
-		if m.deletions != nil {
-			if v, ok := updated.Annotations[manager.SourceUIDAnnotation]; ok {
-				m.deletions.MarkExpected(ty.UID(v))
-			}
-		}
 		if err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, ptr.To(backend.DeletePropagationForeground)); err != nil {
 			return nil, err
 		}
@@ -963,7 +865,7 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 			if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
 				app.Spec = cachedAppSpec
 				logCtx.Infof("Reverting modifications done in application: %s", app.Name)
-				if _, err := m.UpdateManagedApp(ctx, app); err != nil {
+				if _, err := m.UpdateManagedApp(ctx, app, ManagedIdentity{}); err != nil {
 					logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", app.Name, err)
 					return false
 				}
