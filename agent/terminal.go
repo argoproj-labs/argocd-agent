@@ -33,6 +33,8 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
+// newWebSocketExecutor and newSPDYExecutor are package-level variables so that
+// tests can inject fake executors without starting a real Kubernetes cluster.
 var newWebSocketExecutor = func(config *rest.Config, method, rawURL string) (remotecommand.Executor, error) {
 	return remotecommand.NewWebSocketExecutor(config, method, rawURL)
 }
