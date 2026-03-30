@@ -23,6 +23,12 @@ Here is the list of available metrics:
 | `principal_app_projects_created` | counter | | Total AppProjects created by agents on the control plane. |
 | `principal_app_projects_updated` | counter | | Total AppProjects updated by agents on the control plane. |
 | `principal_app_projects_deleted` | counter | | Total AppProjects deleted by agents on the control plane. |
+| `principal_repositories_created` | counter | | Total repositories created by agents on the control plane. |
+| `principal_repositories_updated` | counter | | Total repositories updated by agents on the control plane. |
+| `principal_repositories_deleted` | counter | | Total repositories deleted by agents on the control plane. |
+| `principal_gpg_keys_created` | counter | | Total GPG keys created by agents on the control plane. |
+| `principal_gpg_keys_updated` | counter | | Total GPG keys updated by agents on the control plane. |
+| `principal_gpg_keys_deleted` | counter | | Total GPG keys deleted by agents on the control plane. |
 | `principal_events_received` | counter | | Total events received from agents. |
 | `principal_events_sent` | counter | | Total events sent to agents. |
 | `principal_event_processing_time` | histogramVec | `status`, `agent_name`, `resource_type` | Time taken to process inbound events (seconds). |
@@ -32,7 +38,7 @@ Here is the list of available metrics:
 
 These metrics instrument each stage of the principal → agent event delivery pipeline, making it possible to identify where latency accumulates when propagation is slow.
 
-```
+```text
 principal send queue  →  event writer  →  wire send  →  agent  →  ACK received
         ↑                     ↑                              ↑
   SendQueueDwell        EventWriterDwell               AckRoundtrip

@@ -349,6 +349,7 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 	sentMsg.retryAfter = &retryAfter
 
 	// Resend the event
+	SetSentAt(sentMsg.event)
 	pev, err := format.ToProto(sentMsg.event)
 	if err != nil {
 		logCtx.Errorf("Could not wire event: %v\n", err)
@@ -436,6 +437,13 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		return
 	}
 
+	// A Send() on the stream is actually not blocking.
+	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
+	if err != nil {
+		logCtx.Errorf("Error while sending: %v\n", err)
+		return
+	}
+
 	if !isFireAndForget {
 		ew.mu.RLock()
 		m := ew.outboundMetrics
@@ -443,13 +451,6 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		if m != nil && !eventMsg.writerAddedAt.IsZero() {
 			m.ObserveEventWriterDwell(eventMsg.event.DataSchema(), time.Since(eventMsg.writerAddedAt).Seconds())
 		}
-	}
-
-	// A Send() on the stream is actually not blocking.
-	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
-	if err != nil {
-		logCtx.Errorf("Error while sending: %v\n", err)
-		return
 	}
 
 	logCtx.Trace("event sent to target")
@@ -528,6 +529,7 @@ func (eq *eventQueue) add(ev *eventMessage) {
 			tail.event = ev.event
 			tail.backoff = ev.backoff
 			tail.retryAfter = ev.retryAfter
+			tail.writerAddedAt = ev.writerAddedAt
 			tail.mu.Unlock()
 			return
 		}
