@@ -17,6 +17,7 @@ package eventstream
 import (
 	"fmt"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,34 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type statusCall struct {
+	agentName string
+	status    v1alpha1.ConnectionStatus
+}
+
+type fakeStatusUpdater struct {
+	mu    sync.Mutex
+	calls []statusCall
+}
+
+func (f *fakeStatusUpdater) SetAgentConnectionStatus(agentName string, status v1alpha1.ConnectionStatus, _ time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, statusCall{agentName: agentName, status: status})
+}
+
+func (f *fakeStatusUpdater) statusesFor(name string) []v1alpha1.ConnectionStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []v1alpha1.ConnectionStatus
+	for _, c := range f.calls {
+		if c.agentName == name {
+			out = append(out, c.status)
+		}
+	}
+	return out
+}
 
 func Test_Subscribe(t *testing.T) {
 	metric := metrics.NewPrincipalMetrics()
@@ -287,12 +316,11 @@ func TestIsAgentConnected(t *testing.T) {
 }
 
 func TestOnDisconnectConnectionStatus(t *testing.T) {
-	clusterMgr := &cluster.Manager{}
-
 	t.Run("old connection disconnect does not overwrite new connection status", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("agent-a")
-		s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr)
+		fakeStatusUpdater := &fakeStatusUpdater{}
+		s := NewServer(qs, event.NewEventWritersMap(), nil, fakeStatusUpdater)
 
 		blockOldConn := make(chan struct{})
 		st1 := &mock.MockEventServer{AgentName: "agent-a"}
@@ -337,24 +365,36 @@ func TestOnDisconnectConnectionStatus(t *testing.T) {
 			return ok && c != oldClient
 		}, 5*time.Second, 10*time.Millisecond)
 
-		// Tear down the old connection. Its onDisconnect should not
-		// set the cluster status to Failed because the new connection is active.
+		// Tear down the old connection. Its onDisconnect must not emit a Failed
+		// call because the new connection is still active.
 		close(blockOldConn)
 		<-oldConnDone
 
 		assert.True(t, s.IsAgentConnected("agent-a"))
+		for _, status := range fakeStatusUpdater.statusesFor("agent-a") {
+			assert.NotEqual(t, v1alpha1.ConnectionStatusFailed, status,
+				"stale onDisconnect must not set status to Failed while new connection is active")
+		}
 
 		// Tear down the new connection
 		close(blockNewConn)
 		<-newConnDone
 
 		assert.False(t, s.IsAgentConnected("agent-a"))
+		var hasFailed bool
+		for _, status := range fakeStatusUpdater.statusesFor("agent-a") {
+			if status == v1alpha1.ConnectionStatusFailed {
+				hasFailed = true
+			}
+		}
+		assert.True(t, hasFailed, "new connection teardown must emit a Failed status")
 	})
 
 	t.Run("onDisconnect fires only once per connection", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("agent-b")
-		s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr)
+		fakeStatusUpdater := &fakeStatusUpdater{}
+		s := NewServer(qs, event.NewEventWritersMap(), nil, fakeStatusUpdater)
 
 		gate := make(chan struct{})
 		st := &mock.MockEventServer{AgentName: "agent-b"}
@@ -378,6 +418,14 @@ func TestOnDisconnectConnectionStatus(t *testing.T) {
 
 		assert.Equal(t, 0, s.ConnectedAgentCount())
 		assert.False(t, s.IsAgentConnected("agent-b"))
+
+		var failedCount int
+		for _, status := range fakeStatusUpdater.statusesFor("agent-b") {
+			if status == v1alpha1.ConnectionStatusFailed {
+				failedCount++
+			}
+		}
+		assert.Equal(t, 1, failedCount, "onDisconnect must fire exactly once")
 	})
 }
 
