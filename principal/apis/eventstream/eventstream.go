@@ -86,8 +86,9 @@ type client struct {
 	wg        *sync.WaitGroup
 	start     time.Time
 	// lock must be owned before read/writing to 'end' var
-	end  time.Time
-	lock sync.RWMutex
+	end            time.Time
+	lock           sync.RWMutex
+	disconnectOnce sync.Once
 }
 
 func WithMaxStreamDuration(d time.Duration) ServerOption {
@@ -168,11 +169,22 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 
 // onDisconnect must be called whenever client c disconnects from the stream
 func (s *Server) onDisconnect(c *client) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	c.end = time.Now()
+	c.disconnectOnce.Do(func() {
+		c.lock.Lock()
+		c.end = time.Now()
+		c.lock.Unlock()
 
-	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
+		// Only mark the agent as disconnected if no newer connection has already replaced this client in the active set.
+		// this is to avoid a race condition where a stale goroutine's late cleanup overwrites a newer connection's
+		// "Successful" status with "Failed".
+		s.activeClientsMu.Lock()
+		current := s.activeClients[c.agentName]
+		s.activeClientsMu.Unlock()
+
+		if current == c {
+			s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
+		}
+	})
 
 	c.wg.Done()
 }

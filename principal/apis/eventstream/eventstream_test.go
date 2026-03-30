@@ -286,6 +286,101 @@ func TestIsAgentConnected(t *testing.T) {
 	})
 }
 
+func TestOnDisconnectConnectionStatus(t *testing.T) {
+	clusterMgr := &cluster.Manager{}
+
+	t.Run("old connection disconnect does not overwrite new connection status", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("agent-a")
+		s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr)
+
+		blockOldConn := make(chan struct{})
+		st1 := &mock.MockEventServer{AgentName: "agent-a"}
+		st1.AddRecvHook(func(_ *mock.MockEventServer) error {
+			<-blockOldConn
+			return io.EOF
+		})
+
+		oldConnDone := make(chan struct{})
+		go func() {
+			_ = s.Subscribe(st1)
+			close(oldConnDone)
+		}()
+
+		require.Eventually(t, func() bool {
+			return s.ConnectedAgentCount() == 1
+		}, 5*time.Second, 10*time.Millisecond)
+
+		s.activeClientsMu.Lock()
+		oldClient := s.activeClients["agent-a"]
+		s.activeClientsMu.Unlock()
+		require.NotNil(t, oldClient)
+
+		blockNewConn := make(chan struct{})
+		st2 := &mock.MockEventServer{AgentName: "agent-a"}
+		st2.AddRecvHook(func(_ *mock.MockEventServer) error {
+			<-blockNewConn
+			return io.EOF
+		})
+
+		newConnDone := make(chan struct{})
+		go func() {
+			_ = s.Subscribe(st2)
+			close(newConnDone)
+		}()
+
+		// Wait until the new connection has replaced the old one in activeClients
+		require.Eventually(t, func() bool {
+			s.activeClientsMu.Lock()
+			defer s.activeClientsMu.Unlock()
+			c, ok := s.activeClients["agent-a"]
+			return ok && c != oldClient
+		}, 5*time.Second, 10*time.Millisecond)
+
+		// Tear down the old connection. Its onDisconnect should not
+		// set the cluster status to Failed because the new connection is active.
+		close(blockOldConn)
+		<-oldConnDone
+
+		assert.True(t, s.IsAgentConnected("agent-a"))
+
+		// Tear down the new connection
+		close(blockNewConn)
+		<-newConnDone
+
+		assert.False(t, s.IsAgentConnected("agent-a"))
+	})
+
+	t.Run("onDisconnect fires only once per connection", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("agent-b")
+		s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr)
+
+		gate := make(chan struct{})
+		st := &mock.MockEventServer{AgentName: "agent-b"}
+		st.AddRecvHook(func(_ *mock.MockEventServer) error {
+			<-gate
+			return io.EOF
+		})
+
+		done := make(chan struct{})
+		go func() {
+			_ = s.Subscribe(st)
+			close(done)
+		}()
+
+		require.Eventually(t, func() bool {
+			return s.ConnectedAgentCount() == 1
+		}, 5*time.Second, 10*time.Millisecond)
+
+		close(gate)
+		<-done
+
+		assert.Equal(t, 0, s.ConnectedAgentCount())
+		assert.False(t, s.IsAgentConnected("agent-b"))
+	})
+}
+
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
 }

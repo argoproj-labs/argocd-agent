@@ -373,7 +373,7 @@ func (a *Agent) addClusterCacheInfoUpdateToQueue() {
 			"applicationsCount": clusterInfo.ApplicationsCount,
 			"apisCount":         clusterInfo.CacheInfo.APIsCount,
 			"resourcesCount":    clusterInfo.CacheInfo.ResourcesCount,
-		}).Infof("Added ClusterCacheInfoUpdate event to send queue")
+		}).Debug("Added ClusterCacheInfoUpdate event to send queue")
 	} else {
 		logCtx.Error("Default queue not found, unable to send ClusterCacheInfoUpdate event")
 	}

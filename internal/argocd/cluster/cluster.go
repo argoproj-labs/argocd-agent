@@ -155,7 +155,7 @@ func (m *Manager) SetClusterCacheStats(clusterInfo *event.ClusterCacheInfo, agen
 		"resourcesCount":    clusterInfo.ResourcesCount,
 		"cluster":           cluster.Name,
 		"agent":             agentName,
-	}).Infof("Updated cluster cache stats in cluster.")
+	}).Debug("Updated cluster cache stats in cluster.")
 
 	return nil
 }
