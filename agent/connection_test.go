@@ -138,15 +138,27 @@ func TestAgentHopMetricsObservations(t *testing.T) {
 		beforeAck := histogramSampleCount(t, a.metrics.AckRoundtrip, event.TargetEventAck.String())
 
 		original := a.emitter.ApplicationEvent(event.Create, app)
+		resourceID := event.ResourceID(original)
 		a.eventWriter.Add(original)
 
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go a.eventWriter.SendWaitingEvents(ctx)
+		done := make(chan struct{})
+		go func() {
+			a.eventWriter.SendWaitingEvents(ctx)
+			close(done)
+		}()
 		require.Eventually(t, func() bool {
-			return a.eventWriter.SentResourceType(event.ResourceID(original)) == event.TargetApplication.String()
+			return a.eventWriter.SentResourceType(resourceID) == event.TargetApplication.String()
 		}, time.Second, 10*time.Millisecond)
 		cancel()
+		require.Eventually(t, func() bool {
+			select {
+			case <-done:
+				return true
+			default:
+				return false
+			}
+		}, time.Second, 10*time.Millisecond)
 
 		ack := a.emitter.ProcessedEvent(event.EventProcessed, event.New(original, event.TargetApplication))
 		wireAck, err := format.ToProto(ack)
