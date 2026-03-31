@@ -186,11 +186,12 @@ func (r *RequestHandler) ProcessIncomingResourceResyncRequest(ctx context.Contex
 
 	resources := r.resources.GetAll()
 	for _, resource := range resources {
+		logCtx := logCtxForResourceKey(r.log, resource)
 		if err := r.sendRequestUpdate(ctx, resource); err != nil {
-			r.log.Errorf("failed to send request update for resource %s: %v", resource.Name, err)
+			logCtx.WithError(err).Error("Failed to send request update")
 			continue
 		}
-		r.log.WithField(logfields.Kind, resource.Kind).WithField(logfields.Name, resource.Name).Trace("Sent a request update event")
+		logCtx.Trace("Sent a request update event")
 	}
 
 	return nil
@@ -199,8 +200,9 @@ func (r *RequestHandler) ProcessIncomingResourceResyncRequest(ctx context.Contex
 func (r *RequestHandler) SendRequestUpdates(ctx context.Context) {
 	resources := r.resources.GetAll()
 	for _, resource := range resources {
+		logCtx := logCtxForResourceKey(r.log, resource)
 		if err := r.sendRequestUpdate(ctx, resource); err != nil {
-			r.log.Errorf("failed to send request update for resource %s: %v", resource.Name, err)
+			logCtx.WithError(err).Error("Failed to send request update")
 			continue
 		}
 	}
@@ -217,11 +219,11 @@ func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resourc
 	if err != nil {
 		return fmt.Errorf("failed to get resource: %v", err)
 	}
-
+	logCtx := logCtxForResourceKey(r.log, resource)
 	reqUpdate, err := newRequestUpdateFromObject(res, resource.Kind)
 	if err != nil {
 		if errors.Is(err, ErrSourceUIDNotFound) && r.ignoreUnmanagedApps {
-			r.log.WithField(logfields.Name, resource.Name).Debug("skipping resource without source UID annotation")
+			logCtx.Debug("skipping resource without source UID annotation")
 			return nil
 		}
 		return fmt.Errorf("failed to construct a request update from resource %s: %w", resource.Name, err)
@@ -233,16 +235,12 @@ func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resourc
 	}
 
 	r.sendQ.Add(ev)
-	r.log.WithField(logfields.Kind, resource.Kind).WithField(logfields.Name, resource.Name).Trace("Sent a request update event")
+	logCtx.Trace("Sent a request update event")
 	return nil
 }
 
 func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentName string, reqUpdate *event.RequestUpdate) error {
-	logCtx := r.log.WithFields(logrus.Fields{
-		logfields.Name:      reqUpdate.Name,
-		logfields.Kind:      reqUpdate.Kind,
-		logfields.Namespace: reqUpdate.Namespace,
-	})
+	logCtx := logCtxForRequestUpdate(r.log, reqUpdate)
 
 	logCtx.Trace("Received a request for the resource update event")
 
@@ -543,4 +541,22 @@ func generateSpecChecksum(resObj *unstructured.Unstructured) ([]byte, error) {
 	checksum := sha256.Sum256(specBytes)
 
 	return checksum[:], nil
+}
+
+func logCtxForResourceKey(logCtx *logrus.Entry, resource resources.ResourceKey) *logrus.Entry {
+	return logCtx.WithFields(logrus.Fields{
+		logfields.UID:       resource.UID,
+		logfields.Name:      resource.Name,
+		logfields.Kind:      resource.Kind,
+		logfields.Namespace: resource.Namespace,
+	})
+}
+
+func logCtxForRequestUpdate(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate) *logrus.Entry {
+	return logCtx.WithFields(logrus.Fields{
+		logfields.UID:       reqUpdate.UID,
+		logfields.Name:      reqUpdate.Name,
+		logfields.Kind:      reqUpdate.Kind,
+		logfields.Namespace: reqUpdate.Namespace,
+	})
 }
