@@ -219,6 +219,16 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		incoming.Spec.Destination.Server = ""
 	}
 
+	// When destination-based mapping is active, the agent may send apps under
+	// its own installation namespace. Remap to the principal's namespace so
+	// the principal can correlate them with locally stored Applications.
+	if s.destinationBasedMapping && agentMode.IsManaged() {
+		agentNs := s.agentNamespace(agentName)
+		if agentNs != "" && agentNs != s.namespace && incoming.Namespace == agentNs {
+			incoming.SetNamespace(s.namespace)
+		}
+	}
+
 	switch ev.Type() {
 
 	// App creation event will only be processed in autonomous mode

@@ -139,6 +139,10 @@ type Agent struct {
 	// - The agent watches for applications in all namespaces
 	destinationBasedMapping bool
 
+	// principalNamespace is the namespace where the principal is running.
+	// This is learned from the auth response during the initial handshake.
+	principalNamespace string
+
 	// ignoreUnmanagedApps when true, resources without the source UID annotation
 	// will be silently skipped during resync instead of causing errors.
 	ignoreUnmanagedApps bool
@@ -590,6 +594,13 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
+		a.remote.SetOnAuthenticated(func(principalNs string) error {
+			if principalNs != "" {
+				a.principalNamespace = principalNs
+				log().Infof("Principal namespace learned from auth response: %s", principalNs)
+			}
+			return nil
+		})
 		// TODO: Right now, maintainConnection always returns nil. Revisit
 		// this.
 		_ = a.maintainConnection()

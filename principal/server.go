@@ -120,7 +120,10 @@ type Server struct {
 	// The key of namespaceMap is the client id which the agent used to authenticate with principal, via AuthSubject.ClientID (which, it is also assumed here, corresponds to a control plane namespace of the same name)
 	// NOTE: clientLock should be owned before accessing namespaceMap
 	namespaceMap map[string]types.AgentMode
-	// clientLock should be owned before accessing namespaceMap
+	// agentNamespaces maps agent clientID to the Kubernetes namespace reported
+	// by the agent during authentication.
+	agentNamespaces map[string]string
+	// clientLock should be owned before accessing namespaceMap or agentNamespaces
 	clientLock sync.RWMutex
 	// events is used to construct events to pass on the wire to connected agents.
 	events     *event.EventSource
@@ -456,6 +459,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	s.namespaceMap = map[string]types.AgentMode{
 		"argocd": types.AgentModeAutonomous,
 	}
+	s.agentNamespaces = make(map[string]string)
 
 	if s.resourceProxyListenAddr == "" {
 		s.resourceProxyListenAddr = defaultResourceProxyListenerAddr
@@ -1247,6 +1251,18 @@ func (s *Server) setAgentMode(namespace string, mode types.AgentMode) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 	s.namespaceMap[namespace] = mode
+}
+
+func (s *Server) agentInstallNamespace(agentName string) string {
+	s.clientLock.RLock()
+	defer s.clientLock.RUnlock()
+	return s.agentNamespaces[agentName]
+}
+
+func (s *Server) setAgentInstallNamespace(agentName, namespace string) {
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+	s.agentNamespaces[agentName] = namespace
 }
 
 func (s *Server) healthzHandler(w http.ResponseWriter, r *http.Request) {

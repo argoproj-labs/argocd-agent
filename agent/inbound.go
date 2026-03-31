@@ -156,7 +156,10 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		return err
 	}
 
-	// Determine the target namespace for the application
+	// Determine the target namespace for the application.
+	// When destination-based mapping is enabled and the agent is in a different
+	// namespace than the principal, getTargetNamespaceForApp falls back to the
+	// agent's own namespace.
 	targetNamespace := a.getTargetNamespaceForApp(incomingApp)
 	incomingApp.SetNamespace(targetNamespace)
 
@@ -1213,10 +1216,16 @@ func (a *Agent) deleteGPGKey(cm *corev1.ConfigMap) error {
 }
 
 // getTargetNamespaceForApp returns the namespace where the application should
-// be created on the agent. If destinationBasedMapping is enabled AND the agent
-// is in managed mode, it returns the original namespace from the principal.
+// be created on the agent. In destination-based mapping + managed mode, apps
+// whose namespace matches the principal's namespace are remapped to the agent's
+// own namespace (because the principal and agent may be installed in different
+// namespaces). All other apps keep their original namespace so that
+// explicitly-permitted namespaces (e.g. tenant namespaces) are preserved.
 func (a *Agent) getTargetNamespaceForApp(app *v1alpha1.Application) string {
 	if a.destinationBasedMapping && a.mode == types.AgentModeManaged {
+		if a.principalNamespace != "" && app.Namespace == a.principalNamespace && a.principalNamespace != a.namespace {
+			return a.namespace
+		}
 		return app.Namespace
 	}
 	return a.namespace

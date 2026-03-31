@@ -105,6 +105,11 @@ type Remote struct {
 
 	// agentVersion is the version of the agent, used for handshake validation
 	agentVersion string
+
+	// agentNamespace is the namespace where the agent is running.
+	agentNamespace string
+
+	onAuthenticated onAuthenticatedFunc
 }
 
 type RemoteOption func(r *Remote) error
@@ -555,8 +560,9 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 	}
 
 	var (
-		conn *grpc.ClientConn
-		err  error
+		conn               *grpc.ClientConn
+		err                error
+		principalNamespace string
 	)
 	if r.enableWebSocket {
 		grpcHTTP1Opts := []grpchttp1client.ConnectOption{
@@ -607,7 +613,14 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		case <-ctx.Done():
 			return status.Error(codes.Canceled, "context canceled")
 		default:
-			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String(), Version: r.agentVersion})
+			authReq := &authapi.AuthRequest{
+				Method:      r.authMethod,
+				Credentials: r.creds,
+				Mode:        r.clientMode.String(),
+				Version:     r.agentVersion,
+				Namespace:   r.agentNamespace,
+			}
+			resp, ierr := authC.Authenticate(ctx, authReq)
 			if ierr != nil {
 				st, ok := status.FromError(ierr)
 				if ok {
@@ -640,6 +653,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			if ierr != nil {
 				return ierr
 			}
+			principalNamespace = resp.Namespace
 			authenticated = true
 			return nil
 		}
@@ -663,6 +677,11 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		return err
 	}
 	log().Infof("Connected to %s", vr.Version)
+	if r.onAuthenticated != nil {
+		if err := r.onAuthenticated(principalNamespace); err != nil {
+			return err
+		}
+	}
 	r.connMu.Lock()
 	r.conn = conn
 	r.connMu.Unlock()
@@ -676,6 +695,10 @@ func (r *Remote) Conn() *grpc.ClientConn {
 	defer r.connMu.Unlock()
 	return r.conn
 }
+
+// onAuthenticatedFunc is called after a successful authentication handshake.
+// principalNamespace is the namespace the principal reported in its auth response.
+type onAuthenticatedFunc func(principalNamespace string) error
 
 // ClientID returns the client ID used by this remote
 func (r *Remote) ClientID() string {
@@ -696,6 +719,12 @@ func (r *Remote) SetClientMode(mode types.AgentMode) {
 // The only use case for this is to be used in unit testing.
 func (r *Remote) SetClientID(id string) {
 	r.clientID = id
+}
+
+// SetOnAuthenticated registers a callback invoked after a successful auth
+// handshake, receiving the principal's namespace from the AuthResponse.
+func (r *Remote) SetOnAuthenticated(fn onAuthenticatedFunc) {
+	r.onAuthenticated = fn
 }
 
 func log() *logrus.Entry {
