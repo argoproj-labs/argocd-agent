@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v3/common"
@@ -88,6 +89,15 @@ func (be *KubernetesBackend) EnsureSynced(timeout time.Duration) error {
 
 func DefaultFilterChain(namespace string) *filter.Chain[*corev1.ConfigMap] {
 	c := filter.NewFilterChain[*corev1.ConfigMap]()
+
+	// Ignore the GPG key ConfigMap if it has the skip sync label
+	c.AppendAdmitFilter(func(res *corev1.ConfigMap) bool {
+		if v, ok := res.Labels[config.SkipSyncLabel]; ok && v == "true" {
+			return false
+		}
+		return true
+	})
+
 	c.AppendAdmitFilter(func(res *corev1.ConfigMap) bool {
 		return isValidGPGKeysConfigMap(res, namespace)
 	})

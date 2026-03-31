@@ -17,6 +17,7 @@ package gpgkey
 import (
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -167,6 +168,17 @@ func TestDefaultFilterChain_GPGKeyFiltering(t *testing.T) {
 			},
 			expected: true,
 			reason:   "GPG keys ConfigMap with nil data should still be admitted based on name/namespace",
+		},
+		{
+			name: "ConfigMap with skip sync label should be rejected",
+			cm: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      common.ArgoCDGPGKeysConfigMapName,
+					Namespace: namespace,
+					Labels:    map[string]string{config.SkipSyncLabel: "true"},
+				},
+			},
+			expected: false,
 		},
 	}
 

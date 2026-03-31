@@ -54,7 +54,7 @@ func TestDefaultFilterChain_RepositoryFiltering(t *testing.T) {
 			reason:   "Valid repository secret with all required fields",
 		},
 		{
-			name: "Repository secret with skip sync label=true should be filtered by informer (not this filter)",
+			name: "Repository secret with skip sync label=true should be rejected",
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-repo",
@@ -69,8 +69,8 @@ func TestDefaultFilterChain_RepositoryFiltering(t *testing.T) {
 					"url":     []byte("https://github.com/example/repo.git"),
 				},
 			},
-			expected: true,
-			reason:   "DefaultFilterChain only validates repository format, skip sync filtering happens at informer level",
+			expected: false,
+			reason:   "Repository secret with skip sync label should be rejected",
 		},
 		{
 			name: "Repository secret in wrong namespace should be rejected",
