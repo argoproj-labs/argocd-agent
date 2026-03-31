@@ -483,7 +483,7 @@ func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloude
 		"event":       ev.Type(),
 		"resource_id": event.ResourceID(ev),
 		"event_id":    event.EventID(ev),
-	}).Infof("Processing clusterCacheInfoUpdate event")
+	}).Debug("Processing clusterCacheInfoUpdate event")
 
 	return s.clusterMgr.SetClusterCacheStats(clusterInfo, agentName)
 }

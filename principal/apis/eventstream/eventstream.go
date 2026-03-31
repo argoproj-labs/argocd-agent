@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
@@ -40,6 +39,11 @@ import (
 
 var _ eventstreamapi.EventStreamServer = &Server{}
 
+// clusterStatusUpdater is the subset of cluster.Manager used by the Server.
+type clusterStatusUpdater interface {
+	SetAgentConnectionStatus(agentName string, status v1alpha1.ConnectionStatus, modifiedAt time.Time)
+}
+
 // Server:
 // - Reads Application CR events from GRPC stream and writes them to the relevant agent receive queue (the 'inbox') in 'queues' for processing (see recvFunc)
 // - Reads Application CR events from agent send queue in 'queues' (the 'outbox'), and writes to GRPC stream (see sendFunc)
@@ -56,7 +60,7 @@ type Server struct {
 	eventWriters *event.EventWritersMap
 
 	metrics    *metrics.PrincipalMetrics
-	clusterMgr *cluster.Manager
+	clusterMgr clusterStatusUpdater
 
 	// activeClients tracks active client connections keyed by agent name.
 	// Used by DisconnectAll and to guard against stale cleanup races.
@@ -86,8 +90,9 @@ type client struct {
 	wg        *sync.WaitGroup
 	start     time.Time
 	// lock must be owned before read/writing to 'end' var
-	end  time.Time
-	lock sync.RWMutex
+	end            time.Time
+	lock           sync.RWMutex
+	disconnectOnce sync.Once
 }
 
 func WithMaxStreamDuration(d time.Duration) ServerOption {
@@ -115,7 +120,7 @@ func WithLogger(logger *logging.CentralizedLogger) ServerOption {
 }
 
 // NewServer returns a new AppStream server instance with the given options
-func NewServer(queues queue.QueuePair, eventWriters *event.EventWritersMap, metrics *metrics.PrincipalMetrics, clusterMgr *cluster.Manager, opts ...ServerOption) *Server {
+func NewServer(queues queue.QueuePair, eventWriters *event.EventWritersMap, metrics *metrics.PrincipalMetrics, clusterMgr clusterStatusUpdater, opts ...ServerOption) *Server {
 	options := &ServerOptions{}
 	for _, o := range opts {
 		o(options)
@@ -168,11 +173,21 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 
 // onDisconnect must be called whenever client c disconnects from the stream
 func (s *Server) onDisconnect(c *client) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	c.end = time.Now()
+	c.disconnectOnce.Do(func() {
+		c.lock.Lock()
+		c.end = time.Now()
+		c.lock.Unlock()
 
-	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
+		// Only mark the agent as disconnected if no newer connection has already replaced this client in the active set.
+		// this is to avoid a race condition where a stale goroutine's late cleanup overwrites a newer connection's
+		// "Successful" status with "Failed".
+		s.activeClientsMu.Lock()
+		current := s.activeClients[c.agentName]
+		if current == c {
+			s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
+		}
+		s.activeClientsMu.Unlock()
+	})
 
 	c.wg.Done()
 }
@@ -354,11 +369,11 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		}
 	}
 
-	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
-
 	s.activeClientsMu.Lock()
 	s.activeClients[c.agentName] = c
 	s.activeClientsMu.Unlock()
+
+	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
 
 	if s.metrics != nil {
 		// increase counter when an agent is connected with principal
@@ -473,6 +488,7 @@ func (s *Server) DisconnectAll() {
 
 	for name, c := range clients {
 		logrus.WithField("agent", name).Info("Disconnecting agent (HA demote)")
+		s.clusterMgr.SetAgentConnectionStatus(name, v1alpha1.ConnectionStatusFailed, time.Now())
 		c.cancelFn()
 	}
 }
