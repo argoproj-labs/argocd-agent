@@ -470,6 +470,10 @@ func (a *Agent) Start(ctx context.Context) error {
 	a.context = infCtx
 	a.cancelFn = cancelFn
 
+	if a.destinationBasedMapping {
+		log().Info("Destination-based mapping is enabled")
+	}
+
 	// For managed-agent we need to maintain a cache to keep resources in sync with last known state of
 	// principal in case agent is disconnected with principal or resources in managed-cluster are modified.
 	if a.mode == types.AgentModeManaged {

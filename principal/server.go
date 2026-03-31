@@ -628,6 +628,10 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("Starting %s (server) v%s (allowed_namespaces=%v)", s.version.Name(), s.version.Version(), s.options.namespaces)
 	}
 
+	if s.destinationBasedMapping {
+		log().Info("Destination-based mapping is enabled on the principal")
+	}
+
 	// We need to maintain a cache to keep resources in sync with last known state of
 	// autonomous-agent in case it is disconnected with agent or resources on the control-plane are modified.
 	if err := s.populateSourceCache(ctx); err != nil {
