@@ -69,6 +69,7 @@ nav:
     - Metrics: operations/metrics.md
     - Profiling: operations/profiling.md
     - High availability: operations/ha-failover.md
+    - Verifying artifacts: operations/provenance.md
   - Contributing:
     - Overview: contributing/index.md
     - Local development: contributing/local.md

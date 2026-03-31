@@ -1,0 +1,271 @@
+name: Publish argocd-agent release
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  setup-variables:
+    name: Setup variables for release
+    if: github.repository == 'argoproj-labs/argocd-agent' || (github.repository_owner != 'argoproj-labs' && vars.ENABLE_FORK_RELEASES == 'true' && vars.IMAGE_NAMESPACE && vars.IMAGE_NAMESPACE != 'argoproj-labs')
+    runs-on: ubuntu-24.04
+    outputs:
+      allow_fork_releases: ${{ steps.var.outputs.allow_fork_releases }}
+      is_latest_release: ${{ steps.var.outputs.is_latest_release }}
+      image_repository: ${{ steps.var.outputs.image_repository }}
+      image_namespace: ${{ steps.var.outputs.image_namespace }}
+      image_name: ${{ steps.var.outputs.image_name }}
+      image_uri: ${{ steps.var.outputs.image_uri }}
+      trimmed_tag: ${{ steps.var.outputs.trimmed_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup variables
+        id: var
+        run: |
+          set -xue
+          git fetch --prune --tags --force
+
+          LATEST_RELEASE_TAG=$(git tag --list --sort=version:refname | tail -n 1)
+          IS_LATEST_RELEASE=false
+          if [[ "$LATEST_RELEASE_TAG" == "${{ github.ref_name }}" ]]; then
+            IS_LATEST_RELEASE=true
+          fi
+          echo "is_latest_release=$IS_LATEST_RELEASE" >> $GITHUB_OUTPUT
+
+          TAG="${{ github.ref_name }}"
+          echo "trimmed_tag=${TAG#v}" >> $GITHUB_OUTPUT
+
+          IMAGE_REPOSITORY="${{ vars.IMAGE_REPOSITORY || 'quay.io' }}"
+          IMAGE_NAMESPACE="${{ vars.IMAGE_NAMESPACE || 'argoproj-labs' }}"
+          IMAGE_NAME="${{ vars.IMAGE_NAME || 'argocd-agent' }}"
+
+          echo "image_repository=$IMAGE_REPOSITORY" >> $GITHUB_OUTPUT
+          echo "image_namespace=$IMAGE_NAMESPACE" >> $GITHUB_OUTPUT
+          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "image_uri=$IMAGE_REPOSITORY/$IMAGE_NAMESPACE/$IMAGE_NAME" >> $GITHUB_OUTPUT
+
+          ENABLE_FORK_RELEASES="${{ vars.ENABLE_FORK_RELEASES || 'false' }}"
+
+          ALLOW_FORK_RELEASE=false
+          if [[ "${{ github.repository_owner }}" != "argoproj-labs" && "$ENABLE_FORK_RELEASES" == "true" && "$IMAGE_NAMESPACE" != "argoproj" ]]; then
+            ALLOW_FORK_RELEASE=true
+          fi
+
+          echo "allow_fork_releases=$ALLOW_FORK_RELEASE" >> $GITHUB_OUTPUT
+          git branch --show-current
+
+  container-image:
+    name: Build, push, and sign argocd-agent container image
+    needs:
+      - setup-variables
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    runs-on: ubuntu-22.04
+    if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    env:
+      DOCKER_BIN: podman
+      IMAGE_REPOSITORY: ${{ needs.setup-variables.outputs.image_namespace }}
+      IMAGE_TAG: ${{ github.ref_name }}
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      - name: Sign into registry
+        uses: redhat-actions/podman-login@4934294ad0449894bcd1e9f191899d7292469603 # v1.7.0
+        with:
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+          registry: ${{ needs.setup-variables.outputs.image_repository }}
+
+      - name: Build argocd-agent container image
+        run: |
+          make image-multiarch
+
+      - name: Push image to registry
+        id: push
+        uses: redhat-actions/push-to-registry@5ed88d269cf581ea9ef6dd6806d01562096bee9c # v2.8.0
+        with:
+          registry: ${{ needs.setup-variables.outputs.image_repository }}
+          image: ${{ needs.setup-variables.outputs.image_namespace }}/${{ needs.setup-variables.outputs.image_name }}
+          tags: ${{ github.ref_name }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Sign container image
+        run: |
+          cosign sign \
+          -a "repo=${{ github.repository }}" \
+          -a "workflow=${{ github.workflow }}" \
+          -a "sha=${{ github.sha }}" \
+          -y \
+          ${{ needs.setup-variables.outputs.image_uri }}@${{ steps.push.outputs.digest }}
+
+  container-provenance:
+    name: Generate and push container attestations
+    needs:
+      - setup-variables
+      - container-image
+    permissions:
+      actions: read
+      id-token: write
+      packages: write
+    if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
+    with:
+      image: ${{ needs.setup-variables.outputs.image_uri }}
+      digest: ${{ needs.container-image.outputs.digest }}
+    secrets:
+      registry-username: ${{ secrets.REGISTRY_USERNAME }}
+      registry-password: ${{ secrets.REGISTRY_PASSWORD }}
+
+  cli-binaries:
+    name: "Release argocd-agentctl binaries with goreleaser"
+    needs:
+      - setup-variables
+      - container-image
+      - container-provenance
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    env:
+      GORELEASER_MAKE_LATEST: ${{ needs.setup-variables.outputs.is_latest_release }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all tags
+        run: git fetch --force --tags
+
+      - name: Install git-cliff
+        uses: taiki-e/install-action@7627fb428e65e78e2ec9a24ae5c5bd5f8553f182 # v2.69.10
+        with:
+          tool: git-cliff@2.12.0
+
+      - name: Generate release notes
+        run: |
+          ./hack/generate-release-notes.sh ${{ github.ref_name }}
+
+      - name: Install goreleaser
+        uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7.0.0
+        with:
+          install-only: true
+
+      - name: Run goreleaser
+        run: |
+          set -xue
+
+          export CHANGELOG_CONTENT=$(cat CHANGELOG.md)
+          rm CHANGELOG.md
+
+          GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} goreleaser --clean --timeout 30m
+
+      - name: Generate hash for provenance
+        id: hash
+        run: |
+          set -euo pipefail
+
+          CHECKSUM_FILE=$(find dist -name "*checksums.txt")
+          HASHES=$(cat "$CHECKSUM_FILE" | base64 -w0)
+          echo "hashes=$HASHES" >> $GITHUB_OUTPUT
+
+  cli-provenance:
+    name: Generate and push cli attestations
+    needs:
+      - setup-variables
+      - cli-binaries
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.cli-binaries.outputs.hashes }}"
+      provenance-name: "argocd-agentctl_${{ needs.setup-variables.outputs.trimmed_tag }}.intoto.jsonl"
+      upload-assets: true
+
+  sbom:
+    name: Create and upload SBOM for release
+    needs:
+      - setup-variables
+      - container-image
+      - cli-binaries
+    permissions:
+      actions: read
+      contents: write
+    runs-on: ubuntu-24.04
+    outputs:
+      hash: ${{ steps.hash.outputs.hash }}
+    if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      - name: Generate go mod sbom
+        run: syft dir:. -o spdx > /tmp/bom-go-mod.spdx
+
+      - name: Generate container sbom
+        run: syft ${{ needs.setup-variables.outputs.image_uri }}@${{ needs.container-image.outputs.digest }} -o spdx > /tmp/bom-container-image.spdx
+
+      - name: Create sbom archive
+        run: |
+          cd /tmp && tar -czvf "argocd-agent_${{ needs.setup-variables.outputs.trimmed_tag }}_sbom.tar.gz" *.spdx
+          rm *.spdx
+
+      - name: Generate hash for provenance
+        id: hash
+        run: |
+          set -xue
+
+          HASH=$(sha256sum /tmp/argocd-agent_${{ needs.setup-variables.outputs.trimmed_tag }}_sbom.tar.gz | base64 -w0)
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+
+      - name: Upload sbom
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            /tmp/argocd-agent-${{ needs.setup-variables.outputs.trimmed_tag }}_sbom.tar.gz
+
+  sbom-provenance:
+    name: Generate and push sbom attestations
+    needs:
+      - setup-variables
+      - sbom
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.sbom.outputs.hash }}"
+      provenance-name: "argocd-agent_${{ needs.setup-variables.outputs.trimmed_tag }}_sbom.intoto.jsonl"
+      upload-assets: true
