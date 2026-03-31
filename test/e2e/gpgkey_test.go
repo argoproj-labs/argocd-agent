@@ -67,18 +67,21 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_Managed() {
 
 	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}
 
-	// Ensure the GPG keys ConfigMap has been pushed to the managed agent
+	// Ensure the GPG keys ConfigMap has been pushed to the managed agent with correct source UID and data
+	var gpgKeysCM corev1.ConfigMap
 	requires.Eventually(func() bool {
-		cm := corev1.ConfigMap{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &cm, metav1.GetOptions{})
-		return err == nil
-	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be pushed to managed-agent")
+		tempCM := corev1.ConfigMap{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &tempCM, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		if tempCM.Annotations[manager.SourceUIDAnnotation] != string(sourceGPGKeys.UID) {
+			return false
+		}
+		gpgKeysCM = tempCM
+		return true
+	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be pushed to managed-agent with correct source UID")
 
-	// Ensure the GPG keys ConfigMap on the managed agent has the source UID annotation and matching data
-	gpgKeysCM := corev1.ConfigMap{}
-	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &gpgKeysCM, metav1.GetOptions{})
-	requires.NoError(err)
-	requires.Equal(string(sourceGPGKeys.UID), gpgKeysCM.Annotations[manager.SourceUIDAnnotation])
 	requires.Equal(sourceGPGKeys.Data, gpgKeysCM.Data)
 
 	// Ensure the GPG keys ConfigMap is not pushed to the autonomous agent
