@@ -1,7 +1,7 @@
 # Verifying Release Artifacts
 
 This page explains argocd-agent's release artifacts and how you can verify them
-to prove that they are from the source. Please note, artifacts from v0.7.3 and earlier cannot
+to prove that they are from the source. Please note, artifacts prior to v0.8.0 cannot
 be verified.
 
 ### Tools Required
