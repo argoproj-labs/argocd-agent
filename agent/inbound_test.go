@@ -379,6 +379,50 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 	})
 }
 
+func Test_processIncomingApplication_AutonomousUpdateDoesNotStampPrincipalUID(t *testing.T) {
+	a, _ := newAgent(t)
+	a.mode = types.AgentModeAutonomous
+
+	be := backend_mocks.NewApplication(t)
+	var err error
+	a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true),
+		application.WithRole(manager.ManagerRoleAgent), application.WithMode(manager.ManagerModeAutonomous))
+	require.NoError(t, err)
+
+	existingApp := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "argocd",
+		},
+	}
+	incomingApp := existingApp.DeepCopy()
+	incomingApp.Operation = &v1alpha1.Operation{
+		Sync: &v1alpha1.SyncOperation{
+			Revision: "1.0.0",
+		},
+	}
+
+	getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+	defer getMock.Unset()
+	supportsPatchMock := be.On("SupportsPatch").Return(false)
+	defer supportsPatchMock.Unset()
+
+	var updatedArg *v1alpha1.Application
+	updateMock := be.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		updatedArg = args.Get(1).(*v1alpha1.Application).DeepCopy()
+	}).Return(existingApp.DeepCopy(), nil)
+	defer updateMock.Unset()
+
+	evs := event.NewEventSource("test")
+	ce := evs.ApplicationEvent(event.SpecUpdate, incomingApp)
+	event.SetPrincipalUID(ce, "principal-B")
+
+	err = a.processIncomingApplication(event.New(ce, event.TargetApplication))
+	require.NoError(t, err)
+	require.NotNil(t, updatedArg)
+	assert.NotContains(t, updatedArg.Annotations, manager.PrincipalUIDAnnotation)
+}
+
 func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 	a, _ := newAgent(t)
 	a.mode = types.AgentModeManaged

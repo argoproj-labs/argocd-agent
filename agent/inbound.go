@@ -162,19 +162,20 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 
 	principalUID := event.PrincipalUID(ev.CloudEvent())
 
-	// Carry the principal identity from the CloudEvent extension into the
-	// Application annotations so that downstream update paths (including the
-	// normal UpdateManagedApp) can adopt it on pre-upgrade resources.
-	if principalUID != "" {
-		if incomingApp.Annotations == nil {
-			incomingApp.Annotations = make(map[string]string)
-		}
-		incomingApp.Annotations[manager.PrincipalUIDAnnotation] = principalUID
-	}
-
 	var identity *application.IdentityCompareResult
 
 	if a.mode == types.AgentModeManaged {
+		// Carry the principal identity from the CloudEvent extension into the
+		// Application annotations so that downstream managed update paths
+		// (including the normal UpdateManagedApp) can adopt it on pre-upgrade
+		// resources.
+		if principalUID != "" {
+			if incomingApp.Annotations == nil {
+				incomingApp.Annotations = make(map[string]string)
+			}
+			incomingApp.Annotations[manager.PrincipalUIDAnnotation] = principalUID
+		}
+
 		identity, err = a.appManager.CompareIdentity(a.context, incomingApp, principalUID)
 		if err != nil {
 			return fmt.Errorf("failed to compare identity of app: %w", err)
@@ -355,6 +356,9 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 	// AppProjects must exist in the same namespace as the agent
 	incomingAppProject.SetNamespace(a.namespace)
 
+	// TODO: Extend principal-aware identity comparison to AppProjects so a
+	// principal failover does not look like a source-uid mismatch and force an
+	// unnecessary delete/recreate on the managed agent.
 	exists, sourceUIDMatch, err := a.projectManager.CompareSourceUID(a.context, incomingAppProject)
 	if err != nil {
 		return fmt.Errorf("failed to validate source UID of appProject: %w", err)
@@ -443,6 +447,9 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 
 	// Source UID annotation is not present for repos on the autonomous agent since it is the source of truth.
 	if a.mode == types.AgentModeManaged {
+		// TODO: Extend principal-aware identity comparison to repositories so a
+		// principal failover does not look like a source-uid mismatch and force an
+		// unnecessary delete/recreate on the managed agent.
 		exists, sourceUIDMatch, err = a.repoManager.CompareSourceUID(a.context, incomingRepo)
 		if err != nil {
 			return fmt.Errorf("failed to compare the source UID of app: %w", err)
