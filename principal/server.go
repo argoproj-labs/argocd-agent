@@ -974,10 +974,8 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 		}
 
 		// Don't send AppProjects that have SkipSyncLabel=true
-		if appProject.Labels != nil {
-			if val, ok := appProject.Labels[config.SkipSyncLabel]; ok && val == "true" {
-				continue
-			}
+		if hasSkipSyncLabel(appProject.Labels) {
+			continue
 		}
 
 		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent, s.destinationBasedMapping)
@@ -1012,6 +1010,10 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			continue
 		}
 
+		if hasSkipSyncLabel(repository.Labels) || hasSkipSyncLabel(project.Labels) {
+			continue
+		}
+
 		if !appproject.DoesAgentMatchWithProject(agent, project) {
 			continue
 		}
@@ -1031,7 +1033,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to get GPG key ConfigMap: %w", err)
 		}
-	} else {
+	} else if !hasSkipSyncLabel(gpgKeyCM.Labels) {
 		ev := s.events.GPGKeyEvent(event.SpecUpdate, gpgKeyCM)
 		tracing.PopulateSpanFromObject(span, gpgKeyCM)
 		tracing.InjectTraceContext(ctx, ev)
@@ -1039,6 +1041,17 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 	}
 
 	return nil
+}
+
+func hasSkipSyncLabel(labels map[string]string) bool {
+	if labels == nil {
+		return false
+	}
+
+	if v, found := labels[config.SkipSyncLabel]; found && v == "true" {
+		return true
+	}
+	return false
 }
 
 // Shutdown shuts down the server s. If no server is running, or shutting down
