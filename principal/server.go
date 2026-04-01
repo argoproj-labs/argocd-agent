@@ -673,6 +673,8 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		return nil
 	}
 
+	s.events = event.NewEventSource(s.options.serverName)
+
 	// The application informer lives in its own go routine
 	go func() {
 		if err := s.appManager.StartBackend(s.ctx); err != nil {
@@ -734,8 +736,6 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 			log().Info("GPG key informer has exited")
 		}
 	}()
-
-	s.events = event.NewEventSource(s.options.serverName)
 
 	syncTimeout := s.options.informerSyncTimeout
 	if syncTimeout == 0 {
