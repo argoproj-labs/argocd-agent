@@ -198,3 +198,6 @@ data:
   # principal.redis.tls.insecure: INSECURE: Do not verify Redis TLS certificate.
   # Default: false
   principal.redis.tls.insecure: "false"
+  # principal.event-processors: Number of concurrent event processors.
+  # Default: 10
+  principal.event-processors: "10"

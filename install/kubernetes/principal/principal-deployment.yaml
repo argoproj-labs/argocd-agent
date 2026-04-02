@@ -261,6 +261,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.tls.insecure-plaintext
                 optional: true
+          - name: ARGOCD_PRINCIPAL_EVENT_PROCESSORS
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.event-processors
+                optional: true
           - name: REDIS_PASSWORD
             valueFrom:
               secretKeyRef:

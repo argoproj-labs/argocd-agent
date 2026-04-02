@@ -132,6 +132,9 @@ func defaultOptions() *ServerOptions {
 // concurrently.
 func WithEventProcessors(numProcessors int64) ServerOption {
 	return func(o *Server) error {
+		if numProcessors <= 0 {
+			return fmt.Errorf("event processors must be greater than 0")
+		}
 		o.options.eventProcessors = numProcessors
 		return nil
 	}
