@@ -116,6 +116,24 @@ func Test_mapToSet_Get(t *testing.T) {
 		assert.True(t, values["agent2"])
 		assert.Equal(t, 1, len(values))
 	})
+
+	t.Run("Get returns a copy of values for thread safety", func(t *testing.T) {
+		ms := NewMapToSet()
+		ms.Add("project1", "agent1")
+		ms.Add("project1", "agent2")
+
+		values := ms.Get("project1")
+		values["agent1"] = false
+
+		ms.Add("project1", "agent3")
+
+		_, exists := values["agent3"]
+		require.NotNil(t, values)
+		require.True(t, ms.m["project1"]["agent1"])
+		require.False(t, exists)
+		assert.Equal(t, 2, len(values))
+		assert.Equal(t, 3, len(ms.m["project1"]))
+	})
 }
 
 func Test_mapToSet_Delete(t *testing.T) {

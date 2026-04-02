@@ -31,7 +31,15 @@ func NewMapToSet() *MapToSet {
 func (m *MapToSet) Get(key string) map[string]bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.m[key]
+	s, exists := m.m[key]
+	if !exists {
+		return nil
+	}
+	cp := make(map[string]bool)
+	for k, v := range s {
+		cp[k] = v
+	}
+	return cp
 }
 
 func (m *MapToSet) Add(key string, value string) {
