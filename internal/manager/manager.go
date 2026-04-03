@@ -44,6 +44,13 @@ const (
 	// SourceUIDAnnotation is an annotation that represents the UID of the source resource.
 	// It is added to the resources managed on the target.
 	SourceUIDAnnotation = "argocd.argoproj.io/source-uid"
+
+	// PrincipalUIDAnnotation is an annotation stamped by the agent on managed resources
+	// to track which principal identity last wrote the resource. This survives
+	// principal failovers and allows the agent to distinguish a true source-uid
+	// mismatch (same principal recreated the resource) from an AppSet annotation
+	// wipe on a new principal (different principal-uid → transition in-place).
+	PrincipalUIDAnnotation = "argocd.argoproj.io/principal-uid"
 )
 
 type Manager interface {

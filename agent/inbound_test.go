@@ -63,7 +63,7 @@ func Test_CreateApplication(t *testing.T) {
 		},
 	}}
 	t.Run("Discard event in unmanaged mode", func(t *testing.T) {
-		napp, err := a.createApplication(app)
+		napp, err := a.createApplication(app, "")
 		require.Nil(t, napp)
 		require.ErrorContains(t, err, "not in managed mode")
 	})
@@ -72,7 +72,7 @@ func Test_CreateApplication(t *testing.T) {
 		defer a.appManager.Unmanage(app.QualifiedName())
 		a.mode = types.AgentModeManaged
 		a.appManager.Manage(app.QualifiedName())
-		napp, err := a.createApplication(app)
+		napp, err := a.createApplication(app, "")
 		require.ErrorContains(t, err, "is already managed")
 		require.Nil(t, napp)
 	})
@@ -82,7 +82,7 @@ func Test_CreateApplication(t *testing.T) {
 		a.mode = types.AgentModeManaged
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer createMock.Unset()
-		napp, err := a.createApplication(app)
+		napp, err := a.createApplication(app, "")
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
@@ -107,7 +107,7 @@ func Test_CreateApplication(t *testing.T) {
 
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(newApp, nil)
 		defer createMock.Unset()
-		napp, err := a.createApplication(newApp)
+		napp, err := a.createApplication(newApp, "")
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 
@@ -377,6 +377,50 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 		require.False(t, a.appManager.IsManaged(incomingApp.QualifiedName()))
 	})
+}
+
+func Test_processIncomingApplication_AutonomousUpdateDoesNotStampPrincipalUID(t *testing.T) {
+	a, _ := newAgent(t)
+	a.mode = types.AgentModeAutonomous
+
+	be := backend_mocks.NewApplication(t)
+	var err error
+	a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true),
+		application.WithRole(manager.ManagerRoleAgent), application.WithMode(manager.ManagerModeAutonomous))
+	require.NoError(t, err)
+
+	existingApp := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "argocd",
+		},
+	}
+	incomingApp := existingApp.DeepCopy()
+	incomingApp.Operation = &v1alpha1.Operation{
+		Sync: &v1alpha1.SyncOperation{
+			Revision: "1.0.0",
+		},
+	}
+
+	getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+	defer getMock.Unset()
+	supportsPatchMock := be.On("SupportsPatch").Return(false)
+	defer supportsPatchMock.Unset()
+
+	var updatedArg *v1alpha1.Application
+	updateMock := be.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		updatedArg = args.Get(1).(*v1alpha1.Application).DeepCopy()
+	}).Return(existingApp.DeepCopy(), nil)
+	defer updateMock.Unset()
+
+	evs := event.NewEventSource("test")
+	ce := evs.ApplicationEvent(event.SpecUpdate, incomingApp)
+	event.SetPrincipalUID(ce, "principal-B")
+
+	err = a.processIncomingApplication(event.New(ce, event.TargetApplication))
+	require.NoError(t, err)
+	require.NotNil(t, updatedArg)
+	assert.NotContains(t, updatedArg.Annotations, manager.PrincipalUIDAnnotation)
 }
 
 func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
@@ -785,6 +829,39 @@ func Test_UpdateApplication(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
+	})
+
+	t.Run("Managed mode caches spec by resolved source uid", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+		a.sourceCache.Application.Clear()
+		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true), application.WithMode(manager.ManagerModeManaged), application.WithRole(manager.ManagerRoleAgent))
+
+		appWithInheritedSourceUID := app.DeepCopy()
+		appWithInheritedSourceUID.UID = ktypes.UID("new-principal-uid")
+		appWithInheritedSourceUID.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old-source-uid",
+		}
+		appWithInheritedSourceUID.Spec = v1alpha1.ApplicationSpec{
+			Project: "default",
+		}
+
+		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
+		defer getEvent.Unset()
+		supportsPatchEvent := be.On("SupportsPatch").Return(false)
+		defer supportsPatchEvent.Unset()
+		updateEvent := be.On("Update", mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
+		defer updateEvent.Unset()
+
+		napp, err := a.updateApplication(appWithInheritedSourceUID)
+		require.NoError(t, err)
+		require.NotNil(t, napp)
+
+		cachedSpec, ok := a.sourceCache.Application.Get(ktypes.UID("old-source-uid"))
+		require.True(t, ok)
+		assert.Equal(t, appWithInheritedSourceUID.Spec, cachedSpec)
+
+		_, ok = a.sourceCache.Application.Get(ktypes.UID("new-principal-uid"))
+		require.False(t, ok)
 	})
 
 	t.Run("Update application using patch in autonomous mode", func(t *testing.T) {
@@ -1925,4 +2002,154 @@ func Test_UpdateGPGKey(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, ncm)
 	})
+}
+
+func Test_identityAction(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   *application.IdentityCompareResult
+		expected identityActionType
+	}{
+		{
+			name: "same principal, same source-uid → update",
+			result: &application.IdentityCompareResult{
+				Exists:            true,
+				SourceUIDMatch:    true,
+				PrincipalUIDMatch: true,
+			},
+			expected: identityActionUpdate,
+		},
+		{
+			name: "same principal, different source-uid → delete/recreate",
+			result: &application.IdentityCompareResult{
+				Exists:            true,
+				SourceUIDMatch:    false,
+				PrincipalUIDMatch: true,
+			},
+			expected: identityActionDeleteRecreate,
+		},
+		{
+			name: "same principal, missing source-uid → stamp",
+			result: &application.IdentityCompareResult{
+				Exists:            true,
+				MissingSourceUID:  true,
+				PrincipalUIDMatch: true,
+			},
+			expected: identityActionUpdateStampUID,
+		},
+		{
+			name: "different principal → transition",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      false,
+				PrincipalUIDMatch:   false,
+				PrincipalTransition: true,
+			},
+			expected: identityActionTransition,
+		},
+		{
+			name: "different principal, missing source-uid → transition takes priority",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				MissingSourceUID:    true,
+				PrincipalUIDMatch:   false,
+				PrincipalTransition: true,
+			},
+			expected: identityActionTransition,
+		},
+		{
+			name: "backward compat: no principal-uid, source-uid match → update",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      true,
+				PrincipalUIDMatch:   true,
+				MissingPrincipalUID: true,
+			},
+			expected: identityActionUpdate,
+		},
+		{
+			name: "backward compat: no principal-uid, source-uid mismatch → delete/recreate",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      false,
+				PrincipalUIDMatch:   true,
+				MissingPrincipalUID: true,
+			},
+			expected: identityActionDeleteRecreate,
+		},
+		{
+			name: "adopted principal-uid, source-uid mismatch → transition (pre-upgrade failover)",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      false,
+				PrincipalUIDMatch:   true,
+				AdoptedPrincipalUID: true,
+			},
+			expected: identityActionTransition,
+		},
+		{
+			name: "adopted principal-uid, source-uid match → update",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      true,
+				PrincipalUIDMatch:   true,
+				AdoptedPrincipalUID: true,
+			},
+			expected: identityActionUpdate,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			action := identityAction(tt.result)
+			assert.Equal(t, tt.expected, action)
+		})
+	}
+}
+
+func Test_processIncomingApplication_TransitionUsesResolvedSourceUID(t *testing.T) {
+	a, _ := newAgent(t)
+	a.mode = types.AgentModeManaged
+
+	be := backend_mocks.NewApplication(t)
+	var err error
+	a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true),
+		application.WithRole(manager.ManagerRoleAgent), application.WithMode(manager.ManagerModeManaged))
+	require.NoError(t, err)
+
+	existingApp := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "argocd",
+			Annotations: map[string]string{
+				manager.SourceUIDAnnotation:    "old-source-uid",
+				manager.PrincipalUIDAnnotation: "principal-A",
+			},
+		},
+	}
+	incomingApp := existingApp.DeepCopy()
+	incomingApp.UID = ktypes.UID("new-principal-uid")
+	incomingApp.Annotations[manager.SourceUIDAnnotation] = "old-source-uid"
+
+	getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+	defer getMock.Unset()
+	supportsPatchMock := be.On("SupportsPatch").Return(false)
+	defer supportsPatchMock.Unset()
+
+	var updatedArg *v1alpha1.Application
+	updateMock := be.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		updatedArg = args.Get(1).(*v1alpha1.Application).DeepCopy()
+	}).Return(existingApp.DeepCopy(), nil)
+	defer updateMock.Unset()
+
+	evs := event.NewEventSource("test")
+	ce := evs.ApplicationEvent(event.SpecUpdate, incomingApp)
+	event.SetPrincipalUID(ce, "principal-B")
+
+	err = a.processIncomingApplication(event.New(ce, event.TargetApplication))
+	require.NoError(t, err)
+	require.NotNil(t, updatedArg)
+	assert.Equal(t, "old-source-uid", updatedArg.Annotations[manager.SourceUIDAnnotation])
+	assert.True(t, a.sourceCache.Application.Contains(ktypes.UID("old-source-uid")))
+	assert.False(t, a.sourceCache.Application.Contains(ktypes.UID("new-principal-uid")))
 }

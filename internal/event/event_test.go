@@ -594,3 +594,24 @@ func TestContainerTerminalRequestFields(t *testing.T) {
 		require.True(t, req.Stderr)
 	})
 }
+
+func TestSetPrincipalUID(t *testing.T) {
+	ev := cloudevents.NewEvent()
+	SetPrincipalUID(&ev, "test-uid-123")
+	val, ok := ev.Extensions()[principalUID].(string)
+	require.True(t, ok)
+	require.Equal(t, "test-uid-123", val)
+}
+
+func TestPrincipalUID(t *testing.T) {
+	t.Run("returns uid that was set", func(t *testing.T) {
+		ev := cloudevents.NewEvent()
+		SetPrincipalUID(&ev, "abc-def")
+		require.Equal(t, "abc-def", PrincipalUID(&ev))
+	})
+
+	t.Run("returns empty when not set", func(t *testing.T) {
+		ev := cloudevents.NewEvent()
+		require.Equal(t, "", PrincipalUID(&ev))
+	})
+}

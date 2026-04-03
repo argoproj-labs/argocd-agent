@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
@@ -159,13 +160,25 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 	targetNamespace := a.getTargetNamespaceForApp(incomingApp)
 	incomingApp.SetNamespace(targetNamespace)
 
-	var exists, sourceUIDMatch bool
+	principalUID := event.PrincipalUID(ev.CloudEvent())
+
+	var identity *application.IdentityCompareResult
 
 	if a.mode == types.AgentModeManaged {
-		// Source UID annotation is not present for apps on the autonomous agent since it is the source of truth.
-		exists, sourceUIDMatch, err = a.appManager.CompareSourceUID(a.context, incomingApp)
+		// Carry the principal identity from the CloudEvent extension into the
+		// Application annotations so that downstream managed update paths
+		// (including the normal UpdateManagedApp) can adopt it on pre-upgrade
+		// resources.
+		if principalUID != "" {
+			if incomingApp.Annotations == nil {
+				incomingApp.Annotations = make(map[string]string)
+			}
+			incomingApp.Annotations[manager.PrincipalUIDAnnotation] = principalUID
+		}
+
+		identity, err = a.appManager.CompareIdentity(a.context, incomingApp, principalUID)
 		if err != nil {
-			return fmt.Errorf("failed to compare the source UID of app: %w", err)
+			return fmt.Errorf("failed to compare identity of app: %w", err)
 		}
 		// In managed mode, Drop ownerReferences from the incoming resource
 		// This can lead to garbage-collection of the resource on the agent cluster, if referenced owner is missing. For example, AppSet
@@ -174,64 +187,25 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 
 	switch ev.Type() {
 	case event.Create:
-		if exists {
-			if sourceUIDMatch {
-				logCtx.Debug("Received a Create event for an existing app. Updating the existing app")
-				_, err := a.updateApplication(incomingApp)
-				if err != nil {
-					return fmt.Errorf("could not update the existing app: %w", err)
-				}
-				return nil
-			} else {
-				logCtx.Debug("An app already exists with a different source UID. Deleting the existing app")
-				if err := a.deleteApplication(incomingApp); err != nil {
-					return fmt.Errorf("could not delete existing app prior to creation: %w", err)
-				}
+		if a.mode == types.AgentModeManaged {
+			err = a.syncManagedApplication(logCtx, incomingApp, identity, principalUID)
+		} else {
+			_, err = a.createApplication(incomingApp, principalUID)
+			if err != nil {
+				logCtx.Errorf("Error creating application: %v", err)
 			}
 		}
-
-		_, err = a.createApplication(incomingApp)
-		if err != nil {
-			logCtx.Errorf("Error creating application: %v", err)
-		}
 	case event.SpecUpdate:
-		// Principal may send update events to refresh/sync the apps on the autonomous agent.
-		if a.mode == types.AgentModeAutonomous {
+		if a.mode == types.AgentModeManaged {
+			err = a.syncManagedApplication(logCtx, incomingApp, identity, principalUID)
+		} else {
 			_, err = a.updateApplication(incomingApp)
 			if err != nil {
 				logCtx.Errorf("Error updating application: %v", err)
 			}
-			return nil
-		}
-
-		if !exists {
-			logCtx.Debug("Received an Update event for an app that doesn't exist. Creating the incoming app")
-			if _, err := a.createApplication(incomingApp); err != nil {
-				return fmt.Errorf("could not create incoming app: %w", err)
-			}
-			return nil
-		}
-
-		if !sourceUIDMatch {
-			logCtx.Debug("Source UID mismatch between the incoming app and existing app. Deleting the existing app")
-			if err := a.deleteApplication(incomingApp); err != nil {
-				return fmt.Errorf("could not delete existing app prior to creation: %w", err)
-			}
-
-			logCtx.Debug("Creating the incoming app after deleting the existing app")
-			if _, err := a.createApplication(incomingApp); err != nil {
-				return fmt.Errorf("could not create incoming app after deleting existing app: %w", err)
-			}
-			return nil
-		}
-
-		_, err = a.updateApplication(incomingApp)
-		if err != nil {
-			logCtx.Errorf("Error updating application: %v", err)
 		}
 	case event.TerminateOperation:
 		logCtx.Trace("Received a TerminateOperation event")
-		// Terminate a running sync operation on the agent cluster
 		_, err = a.appManager.TerminateOperation(a.context, incomingApp)
 		if err != nil {
 			logCtx.Errorf("Error terminating application operation: %v", err)
@@ -248,6 +222,128 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 	return err
 }
 
+// rewriteDestinationForManagedAgent sets the destination to in-cluster, matching
+// the normal managed-agent create/update path. Without this, transition updates
+// would leave the principal-side destination on the agent's Application.
+func (a *Agent) rewriteDestinationForManagedAgent(app *v1alpha1.Application) {
+	app.Spec.Destination.Server = ""
+	app.Spec.Destination.Name = "in-cluster"
+}
+
+func sourceUIDForApp(app *v1alpha1.Application) ktypes.UID {
+	if app.Annotations != nil {
+		if sourceUID := app.Annotations[manager.SourceUIDAnnotation]; sourceUID != "" {
+			return ktypes.UID(sourceUID)
+		}
+	}
+	return app.UID
+}
+
+func (a *Agent) updateManagedApplicationIdentity(incomingApp *v1alpha1.Application, principalUID string) error {
+	resolvedSourceUID := sourceUIDForApp(incomingApp)
+	a.rewriteDestinationForManagedAgent(incomingApp)
+	_, err := a.appManager.UpdateManagedApp(a.context, incomingApp, application.ManagedIdentity{
+		SourceUID:    string(resolvedSourceUID),
+		PrincipalUID: principalUID,
+	})
+	if err != nil {
+		return err
+	}
+	a.sourceCache.Application.Set(resolvedSourceUID, incomingApp.Spec)
+	return nil
+}
+
+func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alpha1.Application, identity *application.IdentityCompareResult, principalUID string) error {
+	if identity == nil || !identity.Exists {
+		logCtx.Debug("Application does not exist locally. Creating")
+		if _, err := a.createApplication(incomingApp, principalUID); err != nil {
+			return fmt.Errorf("could not create incoming app: %w", err)
+		}
+		return nil
+	}
+
+	action := identityAction(identity)
+	switch action {
+	case identityActionUpdate:
+		logCtx.Debug("Application identity matches. Updating")
+		_, err := a.updateApplication(incomingApp)
+		if err != nil {
+			return fmt.Errorf("could not update existing app: %w", err)
+		}
+		return nil
+	case identityActionTransition:
+		logCtx.Info("Principal transition detected. Transitioning in-place")
+		if err := a.updateManagedApplicationIdentity(incomingApp, principalUID); err != nil {
+			return fmt.Errorf("could not transition app: %w", err)
+		}
+		return nil
+	case identityActionUpdateStampUID:
+		logCtx.Info("Source-uid missing (AppSet wipe). Updating + stamping")
+		if err := a.updateManagedApplicationIdentity(incomingApp, principalUID); err != nil {
+			return fmt.Errorf("could not update app after source-uid wipe: %w", err)
+		}
+		return nil
+	case identityActionDeleteRecreate:
+		logCtx.Debug("Source UID mismatch. Deleting existing app")
+		if err := a.deleteApplication(incomingApp); err != nil {
+			return fmt.Errorf("could not delete existing app: %w", err)
+		}
+		logCtx.Debug("Creating incoming app after deleting existing app")
+		if _, err := a.createApplication(incomingApp, principalUID); err != nil {
+			return fmt.Errorf("could not create incoming app: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown identity action for app %s", incomingApp.QualifiedName())
+	}
+}
+
+type identityActionType int
+
+const (
+	// identityActionUpdate: source-uid matches, same principal. Normal update path.
+	identityActionUpdate identityActionType = iota
+
+	// identityActionDeleteRecreate: source-uid changed on the same principal,
+	// meaning the resource was deleted and recreated on the principal side.
+	identityActionDeleteRecreate
+
+	// identityActionTransition: principal-uid changed (HA failover detected).
+	// The new principal has different resource UIDs, but the resource is
+	// logically the same. Adopt the new identity in-place without disruption.
+	identityActionTransition
+
+	// identityActionUpdateStampUID: same principal, but source-uid is missing
+	// on the incoming resource (e.g. AppSet controller reconciled and wiped
+	// annotations). Safe to update in-place and re-stamp the source-uid.
+	identityActionUpdateStampUID
+)
+
+// identityAction determines how the agent should handle an incoming resource
+// based on principal and source identity comparison.
+//
+// Priority: principal transition > missing source-uid > source-uid match > mismatch
+func identityAction(r *application.IdentityCompareResult) identityActionType {
+	if r.PrincipalTransition {
+		return identityActionTransition
+	}
+	if r.MissingSourceUID && r.PrincipalUIDMatch {
+		return identityActionUpdateStampUID
+	}
+	if r.SourceUIDMatch {
+		return identityActionUpdate
+	}
+	// Pre-upgrade resource (no principal-uid) with a source-uid mismatch:
+	// we can't distinguish "same principal recreated the app" from "different
+	// principal after failover" because the resource was never stamped.
+	// Transition in-place to avoid disruption — the annotation will be
+	// adopted on this update so future failovers are detected correctly.
+	if r.AdoptedPrincipalUID && !r.SourceUIDMatch {
+		return identityActionTransition
+	}
+	return identityActionDeleteRecreate
+}
+
 func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
 		"method": "processIncomingEvents",
@@ -260,6 +356,9 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 	// AppProjects must exist in the same namespace as the agent
 	incomingAppProject.SetNamespace(a.namespace)
 
+	// TODO: Extend principal-aware identity comparison to AppProjects so a
+	// principal failover does not look like a source-uid mismatch and force an
+	// unnecessary delete/recreate on the managed agent.
 	exists, sourceUIDMatch, err := a.projectManager.CompareSourceUID(a.context, incomingAppProject)
 	if err != nil {
 		return fmt.Errorf("failed to validate source UID of appProject: %w", err)
@@ -348,6 +447,9 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 
 	// Source UID annotation is not present for repos on the autonomous agent since it is the source of truth.
 	if a.mode == types.AgentModeManaged {
+		// TODO: Extend principal-aware identity comparison to repositories so a
+		// principal failover does not look like a source-uid mismatch and force an
+		// unnecessary delete/recreate on the managed agent.
 		exists, sourceUIDMatch, err = a.repoManager.CompareSourceUID(a.context, incomingRepo)
 		if err != nil {
 			return fmt.Errorf("failed to compare the source UID of app: %w", err)
@@ -504,8 +606,8 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 }
 
 // createApplication creates an Application upon an event in the agent's work
-// queue.
-func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+// queue. principalUID is stamped on the resource if non-empty.
+func (a *Agent) createApplication(incoming *v1alpha1.Application, principalUID string) (*v1alpha1.Application, error) {
 	// Determine the target namespace for the application
 	targetNamespace := a.getTargetNamespaceForApp(incoming)
 	incoming.SetNamespace(targetNamespace)
@@ -559,10 +661,10 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 	if a.mode == types.AgentModeManaged {
 		// Store app spec in cache
-		a.sourceCache.Application.Set(incoming.UID, incoming.Spec)
+		a.sourceCache.Application.Set(sourceUIDForApp(incoming), incoming.Spec)
 	}
 
-	created, err := a.appManager.Create(a.context, incoming)
+	created, err := a.appManager.CreateWithPrincipalUID(a.context, incoming, principalUID)
 	if apierrors.IsAlreadyExists(err) {
 		logCtx.Debug("application already exists")
 		return created, nil
@@ -616,9 +718,9 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 		// Update app spec in cache
 		logCtx.Tracef("Calling update spec for this event")
-		a.sourceCache.Application.Set(incoming.UID, incoming.Spec)
+		a.sourceCache.Application.Set(sourceUIDForApp(incoming), incoming.Spec)
 
-		napp, err = a.appManager.UpdateManagedApp(a.context, incoming)
+		napp, err = a.appManager.UpdateManagedApp(a.context, incoming, application.ManagedIdentity{})
 	case types.AgentModeAutonomous:
 		logCtx.Tracef("Calling update operation for this event")
 		napp, err = a.appManager.UpdateOperation(a.context, incoming)
@@ -663,7 +765,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 		if apierrors.IsNotFound(err) {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
 			if a.mode == types.AgentModeManaged {
-				a.sourceCache.Application.Delete(app.UID)
+				a.sourceCache.Application.Delete(sourceUIDForApp(app))
 			}
 			return nil
 		}
@@ -671,7 +773,7 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	}
 
 	if a.mode == types.AgentModeManaged {
-		a.sourceCache.Application.Delete(app.UID)
+		a.sourceCache.Application.Delete(sourceUIDForApp(app))
 	}
 
 	err = a.appManager.Unmanage(app.QualifiedName())

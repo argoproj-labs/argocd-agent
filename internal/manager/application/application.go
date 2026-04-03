@@ -141,7 +141,7 @@ func stampLastUpdated(app *v1alpha1.Application) {
 	if app.Annotations == nil {
 		app.Annotations = make(map[string]string)
 	}
-	app.Annotations[LastUpdatedAnnotation] = time.Now().Format(time.RFC3339)
+	app.Annotations[LastUpdatedAnnotation] = time.Now().Format(time.RFC3339Nano)
 }
 
 // Create creates the application app using the Manager's application backend.
@@ -160,7 +160,9 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 	if app.Annotations == nil {
 		app.Annotations = make(map[string]string)
 	}
-	app.Annotations[manager.SourceUIDAnnotation] = string(app.UID)
+	if app.Annotations[manager.SourceUIDAnnotation] == "" {
+		app.Annotations[manager.SourceUIDAnnotation] = string(app.UID)
+	}
 
 	created, err := m.applicationBackend.Create(ctx, app)
 	if err == nil {
@@ -173,6 +175,19 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 	}
 
 	return created, err
+}
+
+// CreateWithPrincipalUID creates the application and stamps the principal-uid
+// annotation alongside the source-uid. Used by the managed agent when the
+// principal's identity is known from the CloudEvent.
+func (m *ApplicationManager) CreateWithPrincipalUID(ctx context.Context, app *v1alpha1.Application, principalUID string) (*v1alpha1.Application, error) {
+	if principalUID != "" {
+		if app.Annotations == nil {
+			app.Annotations = make(map[string]string)
+		}
+		app.Annotations[manager.PrincipalUIDAnnotation] = principalUID
+	}
+	return m.Create(ctx, app)
 }
 
 // Upsert creates the application or updates it if it already exists.
@@ -221,6 +236,51 @@ func (m *ApplicationManager) Get(ctx context.Context, name, namespace string) (*
 	return m.applicationBackend.Get(ctx, name, namespace)
 }
 
+// ManagedIdentity carries the resolved identity that should be stamped on a
+// managed application update. Zero values mean "preserve whatever is already
+// known from the existing or incoming object".
+type ManagedIdentity struct {
+	SourceUID    string
+	PrincipalUID string
+}
+
+func resolveManagedIdentity(existing, incoming *v1alpha1.Application, identity ManagedIdentity) ManagedIdentity {
+	resolved := identity
+
+	if resolved.SourceUID == "" {
+		resolved.SourceUID = existing.Annotations[manager.SourceUIDAnnotation]
+	}
+	if resolved.SourceUID == "" && incoming.Annotations != nil {
+		resolved.SourceUID = incoming.Annotations[manager.SourceUIDAnnotation]
+	}
+
+	if resolved.PrincipalUID == "" {
+		resolved.PrincipalUID = existing.Annotations[manager.PrincipalUIDAnnotation]
+	}
+	if resolved.PrincipalUID == "" && incoming.Annotations != nil {
+		resolved.PrincipalUID = incoming.Annotations[manager.PrincipalUIDAnnotation]
+	}
+
+	return resolved
+}
+
+func applyManagedIdentity(existing, incoming *v1alpha1.Application, identity ManagedIdentity) {
+	if incoming.Annotations == nil {
+		incoming.Annotations = make(map[string]string)
+	}
+	if v, ok := existing.Annotations["argocd.argoproj.io/refresh"]; ok {
+		incoming.Annotations["argocd.argoproj.io/refresh"] = v
+	}
+
+	resolved := resolveManagedIdentity(existing, incoming, identity)
+	if resolved.SourceUID != "" {
+		incoming.Annotations[manager.SourceUIDAnnotation] = resolved.SourceUID
+	}
+	if resolved.PrincipalUID != "" {
+		incoming.Annotations[manager.PrincipalUIDAnnotation] = resolved.PrincipalUID
+	}
+}
+
 // UpdateManagedApp updates the Application resource on the agent when it is in
 // managed mode.
 //
@@ -228,7 +288,7 @@ func (m *ApplicationManager) Get(ctx context.Context, name, namespace string) (*
 // and any operation field of the incoming application. A possibly existing
 // refresh annotation on the agent's app will be retained, because it will be
 // removed by the agent's application controller.
-func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1alpha1.Application, identity ManagedIdentity) (*v1alpha1.Application, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "UpdateManaged",
 		"application":     incoming.QualifiedName(),
@@ -249,12 +309,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	deletionTimestampChanged := false
 
 	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
-			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
-		}
+		applyManagedIdentity(existing, incoming, identity)
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Finalizers = incoming.Finalizers
@@ -266,20 +321,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		}
 
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
-		// We need to keep the refresh label if it is set on the existing app
-		if v, ok := existing.Annotations["argocd.argoproj.io/refresh"]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
-			}
-			incoming.Annotations["argocd.argoproj.io/refresh"] = v
-		}
-
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
-			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
-		}
+		applyManagedIdentity(existing, incoming, identity)
 
 		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
 			deletionTimestampChanged = true
@@ -336,33 +378,81 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	return updated, err
 }
 
-// CompareSourceUID checks for an existing app with the same name/namespace and compare its source UID with the incoming app.
-func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1alpha1.Application) (bool, bool, error) {
+// IdentityCompareResult captures the full comparison between an incoming
+// resource and the existing resource on the agent. The agent uses this to
+// decide whether to update, delete/recreate, or transition in-place.
+type IdentityCompareResult struct {
+	Exists              bool
+	SourceUIDMatch      bool
+	PrincipalUIDMatch   bool
+	PrincipalTransition bool // principal-uid changed (failover detected)
+	MissingSourceUID    bool // incoming has no source-uid (AppSet wiped it)
+	MissingPrincipalUID bool // no principal-uid in event (pre-upgrade principal)
+	AdoptedPrincipalUID bool // existing had no principal-uid; incoming's was accepted as-is
+}
+
+// CompareIdentity checks an existing app against the incoming app and
+// principal identity. It returns a structured result the agent uses to
+// implement the principal-transition decision matrix.
+func (m *ApplicationManager) CompareIdentity(ctx context.Context, incoming *v1alpha1.Application, principalUID string) (*IdentityCompareResult, error) {
 	if !m.destinationBasedMapping {
 		incoming.SetNamespace(m.namespace)
+	}
+
+	result := &IdentityCompareResult{
+		MissingPrincipalUID: principalUID == "",
 	}
 
 	existing, err := m.applicationBackend.Get(ctx, incoming.Name, incoming.Namespace)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return false, false, nil
+			return result, nil
 		}
-		return false, false, err
+		return nil, err
 	}
 
-	// If there is an existing app with the same name/namespace, compare its source UID with the incoming app.
-	sourceUID, exists := existing.Annotations[manager.SourceUIDAnnotation]
-	if !exists {
-		return true, false, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
+	result.Exists = true
+
+	existingSourceUID, hasSourceUID := existing.Annotations[manager.SourceUIDAnnotation]
+	if !hasSourceUID {
+		return result, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
 	}
 
-	// On failover, apps replicated to the replica carry source-uid = primary's UID.
-	// Use that as the incoming UID if present so we match and update rather than delete.
 	incomingUID := string(incoming.UID)
 	if srcUID, ok := incoming.Annotations[manager.SourceUIDAnnotation]; ok && srcUID != "" {
 		incomingUID = srcUID
 	}
-	return true, incomingUID == sourceUID, nil
+	if incomingUID == "" {
+		result.MissingSourceUID = true
+	} else {
+		result.SourceUIDMatch = incomingUID == existingSourceUID
+	}
+
+	existingPrincipalUID := existing.Annotations[manager.PrincipalUIDAnnotation]
+	if principalUID != "" && existingPrincipalUID != "" {
+		result.PrincipalUIDMatch = principalUID == existingPrincipalUID
+		result.PrincipalTransition = principalUID != existingPrincipalUID
+	} else if principalUID != "" && existingPrincipalUID == "" {
+		// First event with principal-uid on a resource that predates this feature.
+		// Treat as same principal (adoption).
+		result.PrincipalUIDMatch = true
+		result.AdoptedPrincipalUID = true
+	} else {
+		// No principal-uid in event → backward compat, treat as same principal.
+		result.PrincipalUIDMatch = true
+	}
+
+	return result, nil
+}
+
+// CompareSourceUID checks for an existing app with the same name/namespace and compare its source UID with the incoming app.
+// Deprecated: Use CompareIdentity for principal-transition-aware comparisons.
+func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1alpha1.Application) (bool, bool, error) {
+	result, err := m.CompareIdentity(ctx, incoming, "")
+	if err != nil {
+		return result != nil && result.Exists, false, err
+	}
+	return result.Exists, result.SourceUIDMatch, nil
 }
 
 // UpdateAutonomousApp updates the Application resource on the control plane side
@@ -775,7 +865,7 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 			if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
 				app.Spec = cachedAppSpec
 				logCtx.Infof("Reverting modifications done in application: %s", app.Name)
-				if _, err := m.UpdateManagedApp(ctx, app); err != nil {
+				if _, err := m.UpdateManagedApp(ctx, app, ManagedIdentity{}); err != nil {
 					logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", app.Name, err)
 					return false
 				}
