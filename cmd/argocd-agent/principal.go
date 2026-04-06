@@ -101,6 +101,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 		maxGRPCMessageSize int
 
+		numEventProcessors int
+
 		// OpenTelemetry configuration
 		otlpAddress  string
 		otlpInsecure bool
@@ -370,6 +372,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithDestinationBasedMapping(destinationBasedMapping))
 			opts = append(opts, principal.WithAppLabelSelector(appLabelSelector))
 			opts = append(opts, principal.WithMaxGRPCMessageSize(maxGRPCMessageSize))
+			opts = append(opts, principal.WithEventProcessors(int64(numEventProcessors)))
 
 			// Self agent registration validation and options
 			if enableSelfClusterRegistration {
@@ -610,6 +613,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().IntVar(&maxGRPCMessageSize, "grpc-max-message-size",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_GRPC_MAX_MESSAGE_SIZE", nil, grpcutil.DefaultGRPCMaxMessageSize),
 		"Maximum gRPC message size in bytes for send and receive (default: 200MB)")
+	command.Flags().IntVar(&numEventProcessors, "event-processors",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_EVENT_PROCESSORS", nil, 10),
+		"Number of concurrent event processors")
 
 	command.Flags().StringVar(&otlpAddress, "otlp-address",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_OTLP_ADDRESS", nil, ""),

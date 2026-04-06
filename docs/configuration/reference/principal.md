@@ -515,6 +515,19 @@ Drop agent connections that send keepalive pings more often than specified inter
 
 **Example:** `30s`
 
+### Event Processors
+
+| | |
+|---|---|
+| **CLI Flag** | `--event-processors` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_EVENT_PROCESSORS` |
+| **ConfigMap Entry** | `principal.event-processors` |
+| **Type** | Integer |
+| **Default** | `10` |
+| **Range** | > 0 |
+
+Number of concurrent event processors. Increasing this value allows the principal to handle more agent events in parallel at the cost of higher resource usage.
+
 ## Redis Configuration
 
 ### Redis Server Address
