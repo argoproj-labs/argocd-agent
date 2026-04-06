@@ -35,7 +35,7 @@ func (m *MapToSet) Get(key string) map[string]bool {
 	if !exists {
 		return nil
 	}
-	cp := make(map[string]bool)
+	cp := make(map[string]bool, len(s))
 	for k, v := range s {
 		cp[k] = v
 	}
