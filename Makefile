@@ -61,7 +61,7 @@ GIT_COMMIT=$(shell git rev-parse HEAD)
 VERSION=$(shell cat VERSION)
 
 VERSION_PACKAGE=github.com/argoproj-labs/argocd-agent/internal/version
-override LDFLAGS += -extldflags "-static"
+LDFLAGS += -extldflags "-static"
 override LDFLAGS += \
         -X ${VERSION_PACKAGE}.version=${VERSION} \
         -X ${VERSION_PACKAGE}.gitRevision=${GIT_COMMIT}
