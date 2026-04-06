@@ -484,16 +484,13 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Status = *incoming.Status.DeepCopy()
-		// Managed-agent status updates frequently arrive without .operation.
-		// Preserve any principal-initiated sync operation until the agent
-		// explicitly reports an updated operation payload.
-		existing.Operation = operationToUse(existing, incoming)
+		existing.Operation = statusOperationToUse(existing, incoming)
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		refresh, incomingRefresh := incoming.Annotations["argocd.argoproj.io/refresh"]
 		_, existingRefresh := existing.Annotations["argocd.argoproj.io/refresh"]
 		target := &v1alpha1.Application{
 			Status:    incoming.Status,
-			Operation: operationToUse(existing, incoming),
+			Operation: statusOperationToUse(existing, incoming),
 		}
 		source := &v1alpha1.Application{
 			Status:    existing.Status,
@@ -611,6 +608,22 @@ func operationToUse(existing, incoming *v1alpha1.Application) *v1alpha1.Operatio
 	}
 
 	return incoming.Operation.DeepCopy()
+}
+
+func statusOperationToUse(existing, incoming *v1alpha1.Application) *v1alpha1.Operation {
+	if incoming.Operation != nil {
+		return operationToUse(existing, incoming)
+	}
+
+	if incoming.Status.OperationState == nil {
+		return existing.Operation
+	}
+
+	if incoming.Status.OperationState.Phase.Completed() {
+		return nil
+	}
+
+	return existing.Operation
 }
 
 // TerminateOperation aborts a running sync operation by setting .status.operationState.phase to Terminating.
