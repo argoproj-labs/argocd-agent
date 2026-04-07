@@ -13,10 +13,10 @@ func DefaultLabelSelector() v1.ListOptions {
 	}
 }
 
-// AppLabelSelector returns a ListOptions combining the default label selector
+// LabelSelector returns a ListOptions combining the default label selector
 // with an additional user-provided selector. The two selectors are AND-ed
 // together (comma-separated in Kubernetes label selector syntax).
-func AppLabelSelector(extra string) v1.ListOptions {
+func LabelSelector(extra string) v1.ListOptions {
 	base := fmt.Sprintf("%s!=%s", SkipSyncLabel, "true")
 	if extra != "" {
 		base = base + "," + extra

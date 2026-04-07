@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned"
@@ -46,20 +47,36 @@ type KubernetesBackend struct {
 	// namespace to contain the source of Argo CD AppProject CRs in all cases, mainly used by agents
 	namespace string
 	usePatch  bool
+
+	labelSelector string
 }
 
-func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appProjectInformer informer.InformerInterface, usePatch bool) *KubernetesBackend {
-	return &KubernetesBackend{
+func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appProjectInformer informer.InformerInterface, usePatch bool, opts ...KubernetesBackendOption) *KubernetesBackend {
+	be := &KubernetesBackend{
 		appClient:          appClient,
 		appProjectInformer: appProjectInformer,
 		namespace:          namespace,
 		usePatch:           usePatch,
 	}
+
+	for _, opt := range opts {
+		opt(be)
+	}
+	return be
+}
+
+type KubernetesBackendOption func(*KubernetesBackend)
+
+func WithLabelSelector(labelSelector string) KubernetesBackendOption {
+	return func(be *KubernetesBackend) {
+		be.labelSelector = labelSelector
+	}
 }
 
 func (be *KubernetesBackend) List(ctx context.Context, selector backend.AppProjectSelector) ([]v1alpha1.AppProject, error) {
 
-	l, err := be.appClient.ArgoprojV1alpha1().AppProjects(be.namespace).List(ctx, v1.ListOptions{})
+	listOptions := config.LabelSelector(be.labelSelector)
+	l, err := be.appClient.ArgoprojV1alpha1().AppProjects(be.namespace).List(ctx, listOptions)
 	if err != nil {
 		return nil, err
 	}

@@ -27,10 +27,10 @@
       "title": "argoCdRedisPasswordKey",
       "type": "string"
     },
-    "appLabelSelector": {
+    "labelSelector": {
       "default": "",
-      "description": "Kubernetes label selector to restrict which Applications the agent watches. Only matching Applications will be listed, watched, and processed.",
-      "title": "appLabelSelector",
+      "description": "Kubernetes label selector to restrict which resources the agent watches. Only matching resources will be listed, watched, and processed.",
+      "title": "labelSelector",
       "type": "string"
     },
     "argoCdRedisSecretName": {

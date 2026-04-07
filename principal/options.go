@@ -88,11 +88,10 @@ type ServerOptions struct {
 	// spec.destination.name instead of the application's namespace
 	destinationBasedMapping bool
 
-	// appLabelSelector is an optional Kubernetes label selector that restricts
-	// which Applications the principal watches. When set, only Applications
-	// matching this selector are processed. This enables hybrid architectures
-	// where a traditional app-controller and the principal coexist.
-	appLabelSelector string
+	// labelSelector is an optional Kubernetes label selector that restricts
+	// which resources the principal watches. Only resources matching this selector
+	// will be listed, watched, and processed by the principal.
+	labelSelector string
 
 	selfAgentRegistrationEnabled bool
 	resourceProxyAddress         string
@@ -595,14 +594,14 @@ func WithDestinationBasedMapping(enabled bool) ServerOption {
 	}
 }
 
-// WithAppLabelSelector sets an optional Kubernetes label selector that restricts
-// which Applications the principal watches. Only Applications matching this
+// WithLabelSelector sets an optional Kubernetes label selector that restricts
+// which resources the principal watches. Only resources matching this selector
 // selector will be listed, watched, and processed by the principal. This is
 // used in hybrid architectures where a traditional app-controller coexists
 // with the principal on the same control plane.
-func WithAppLabelSelector(selector string) ServerOption {
+func WithLabelSelector(selector string) ServerOption {
 	return func(o *Server) error {
-		o.options.appLabelSelector = selector
+		o.options.labelSelector = selector
 		return nil
 	}
 }

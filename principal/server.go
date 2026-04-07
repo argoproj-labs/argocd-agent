@@ -289,18 +289,12 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	appFilters := s.defaultAppFilterChain()
-
-	appListOpts := config.AppLabelSelector(s.options.appLabelSelector)
-	if s.options.appLabelSelector != "" {
-		log().Infof("Application informer using label selector: %s", appListOpts.LabelSelector)
-	}
-
 	appInformerOpts := []informer.InformerOption[*v1alpha1.Application]{
 		informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, appListOpts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, config.LabelSelector(s.options.labelSelector))
 		}),
 		informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, appListOpts)
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, config.LabelSelector(s.options.labelSelector))
 		}),
 		informer.WithAddHandler[*v1alpha1.Application](s.newAppCallback),
 		informer.WithUpdateHandler[*v1alpha1.Application](s.updateAppCallback),
@@ -317,10 +311,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
 		informer.WithListHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, config.DefaultLabelSelector())
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).List(ctx, config.LabelSelector(s.options.labelSelector))
 		}),
 		informer.WithWatchHandler[*v1alpha1.AppProject](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, config.DefaultLabelSelector())
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(namespace).Watch(ctx, config.LabelSelector(s.options.labelSelector))
 		}),
 		informer.WithAddHandler[*v1alpha1.AppProject](s.newAppProjectCallback),
 		informer.WithUpdateHandler[*v1alpha1.AppProject](s.updateAppProjectCallback),
@@ -354,24 +348,34 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
-	s.appManager, err = application.NewApplicationManager(kubeapp.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appInformer, true), s.namespace,
+	appBackendOpts := []kubeapp.KubernetesBackendOption{
+		kubeapp.WithLabelSelector(s.options.labelSelector),
+	}
+	appBackend := kubeapp.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appInformer, true, appBackendOpts...)
+
+	s.appManager, err = application.NewApplicationManager(appBackend, s.namespace,
 		appManagerOpts...,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	s.projectManager, err = appproject.NewAppProjectManager(kubeappproject.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, projectInformer, true), s.namespace, projManagerOpts...)
+	projectBackendOpts := []kubeappproject.KubernetesBackendOption{
+		kubeappproject.WithLabelSelector(s.options.labelSelector),
+	}
+	projectBackend := kubeappproject.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, projectInformer, true, projectBackendOpts...)
+
+	s.projectManager, err = appproject.NewAppProjectManager(projectBackend, s.namespace, projManagerOpts...)
 	if err != nil {
 		return nil, err
 	}
 
 	appSetInformerOpts := []informer.InformerOption[*v1alpha1.ApplicationSet]{
 		informer.WithListHandler[*v1alpha1.ApplicationSet](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets("").List(ctx, v1.ListOptions{})
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets("").List(ctx, config.LabelSelector(s.options.labelSelector))
 		}),
 		informer.WithWatchHandler[*v1alpha1.ApplicationSet](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets("").Watch(ctx, v1.ListOptions{})
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().ApplicationSets("").Watch(ctx, config.LabelSelector(s.options.labelSelector))
 		}),
 		informer.WithAddHandler[*v1alpha1.ApplicationSet](s.newAppSetCallback),
 		informer.WithUpdateHandler[*v1alpha1.ApplicationSet](s.updateAppSetCallback),
@@ -384,10 +388,11 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
-	s.appSetManager = applicationset.NewApplicationSetManager(
-		kubeappset.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appSetInformer),
-		s.namespace,
-	)
+	appSetBackendOpts := []kubeappset.KubernetesBackendOption{
+		kubeappset.WithLabelSelector(s.options.labelSelector),
+	}
+	appSetBackend := kubeappset.NewKubernetesBackend(kubeClient.ApplicationsClientset, s.namespace, appSetInformer, appSetBackendOpts...)
+	s.appSetManager = applicationset.NewApplicationSetManager(appSetBackend, s.namespace)
 
 	nsInformerOpts := []informer.InformerOption[*corev1.Namespace]{
 		informer.WithListHandler[*corev1.Namespace](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
@@ -408,10 +413,10 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 
 	repoInformerOpts := []informer.InformerOption[*corev1.Secret]{
 		informer.WithListHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.Clientset.CoreV1().Secrets(namespace).List(ctx, config.DefaultLabelSelector())
+			return kubeClient.Clientset.CoreV1().Secrets(namespace).List(ctx, config.LabelSelector(s.options.labelSelector))
 		}),
 		informer.WithWatchHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.Clientset.CoreV1().Secrets(namespace).Watch(ctx, config.DefaultLabelSelector())
+			return kubeClient.Clientset.CoreV1().Secrets(namespace).Watch(ctx, config.LabelSelector(s.options.labelSelector))
 		}),
 		informer.WithAddHandler[*corev1.Secret](s.newRepositoryCallback),
 		informer.WithUpdateHandler[*corev1.Secret](s.updateRepositoryCallback),
@@ -425,15 +430,19 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
-	repoBackened := kuberepository.NewKubernetesBackend(kubeClient.Clientset, namespace, repoInformer, false)
+	repoBackendOpts := []kuberepository.KubernetesBackendOption{
+		kuberepository.WithLabelSelector(s.options.labelSelector),
+	}
+
+	repoBackened := kuberepository.NewKubernetesBackend(kubeClient.Clientset, namespace, repoInformer, false, repoBackendOpts...)
 	s.repoManager = repository.NewManager(repoBackened, namespace, false)
 
 	gpgKeyInformerOpts := []informer.InformerOption[*corev1.ConfigMap]{
 		informer.WithListHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, v1.ListOptions{})
+			return kubeClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, config.LabelSelector(s.options.labelSelector))
 		}),
 		informer.WithWatchHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.Clientset.CoreV1().ConfigMaps(namespace).Watch(ctx, v1.ListOptions{})
+			return kubeClient.Clientset.CoreV1().ConfigMaps(namespace).Watch(ctx, config.LabelSelector(s.options.labelSelector))
 		}),
 		informer.WithAddHandler[*corev1.ConfigMap](s.newGPGKeyCallback),
 		informer.WithUpdateHandler[*corev1.ConfigMap](s.updateGPGKeyCallback),
@@ -691,6 +700,10 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 
 	s.events = event.NewEventSource(s.options.serverName)
+
+	if s.options.labelSelector != "" {
+		log().Infof("Principal informers are using the label selector: %s", s.options.labelSelector)
+	}
 
 	// The application informer lives in its own go routine
 	go func() {

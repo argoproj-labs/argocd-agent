@@ -148,9 +148,9 @@ type Agent struct {
 	// destination-based mapping.
 	createNamespace bool
 
-	// appLabelSelector is an optional Kubernetes label selector that restricts
-	// which Applications the agent watches.
-	appLabelSelector string
+	// labelSelector is an optional Kubernetes label selector that restricts
+	// which resources the agent can process.
+	labelSelector string
 }
 
 const defaultQueueName = "default"
@@ -258,17 +258,12 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		appNamespace = ""
 	}
 
-	appListOpts := config.AppLabelSelector(a.appLabelSelector)
-	if a.appLabelSelector != "" {
-		log().Infof("Application informer using label selector: %s", appListOpts.LabelSelector)
-	}
-
 	// appListFunc and watchFunc are anonymous functions for the informer
 	appListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).List(ctx, appListOpts)
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).List(ctx, config.LabelSelector(a.labelSelector))
 	}
 	appWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).Watch(ctx, appListOpts)
+		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).Watch(ctx, config.LabelSelector(a.labelSelector))
 	}
 
 	appInformerOptions := []informer.InformerOption[*v1alpha1.Application]{
@@ -311,11 +306,11 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	appManagerOpts = append(appManagerOpts, application.WithAllowUpsert(allowUpsert))
 
 	projListFunc := func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).List(ctx, config.DefaultLabelSelector())
+		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).List(ctx, config.LabelSelector(a.labelSelector))
 	}
 
 	projWatchFunc := func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).Watch(ctx, config.DefaultLabelSelector())
+		return client.ApplicationsClientset.ArgoprojV1alpha1().AppProjects(a.namespace).Watch(ctx, config.LabelSelector(a.labelSelector))
 	}
 
 	projInformerOptions := []informer.InformerOption[*v1alpha1.AppProject]{
@@ -333,30 +328,33 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, fmt.Errorf("could not instantiate project informer: %w", err)
 	}
 
+	appBackendOpts := []kubeapp.KubernetesBackendOption{
+		kubeapp.WithLabelSelector(a.labelSelector),
+	}
+	appBackend := kubeapp.NewKubernetesBackend(client.ApplicationsClientset, a.namespace, appInformer, true, appBackendOpts...)
+
 	// The agent only supports Kubernetes as application backend
-	a.appManager, err = application.NewApplicationManager(
-		kubeapp.NewKubernetesBackend(client.ApplicationsClientset, a.namespace, appInformer, true),
-		a.namespace,
-		appManagerOpts...,
-	)
+	a.appManager, err = application.NewApplicationManager(appBackend, a.namespace, appManagerOpts...)
 	if err != nil {
 		return nil, err
 	}
 
-	a.projectManager, err = appproject.NewAppProjectManager(
-		kubeappproject.NewKubernetesBackend(client.ApplicationsClientset, a.namespace, projInformer, true),
-		a.namespace,
-		appProjectManagerOption...)
+	projectBackendOpts := []kubeappproject.KubernetesBackendOption{
+		kubeappproject.WithLabelSelector(a.labelSelector),
+	}
+	projectBackend := kubeappproject.NewKubernetesBackend(client.ApplicationsClientset, a.namespace, projInformer, true, projectBackendOpts...)
+
+	a.projectManager, err = appproject.NewAppProjectManager(projectBackend, a.namespace, appProjectManagerOption...)
 	if err != nil {
 		return nil, err
 	}
 
 	repoInformerOptions := []informer.InformerOption[*corev1.Secret]{
 		informer.WithListHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return client.Clientset.CoreV1().Secrets(a.namespace).List(ctx, config.DefaultLabelSelector())
+			return client.Clientset.CoreV1().Secrets(a.namespace).List(ctx, config.LabelSelector(a.labelSelector))
 		}),
 		informer.WithWatchHandler[*corev1.Secret](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return client.Clientset.CoreV1().Secrets(a.namespace).Watch(ctx, config.DefaultLabelSelector())
+			return client.Clientset.CoreV1().Secrets(a.namespace).Watch(ctx, config.LabelSelector(a.labelSelector))
 		}),
 		informer.WithAddHandler[*corev1.Secret](a.handleRepositoryCreation),
 		informer.WithUpdateHandler[*corev1.Secret](a.handleRepositoryUpdate),
@@ -370,15 +368,19 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return nil, fmt.Errorf("could not instantiate repository informer: %w", err)
 	}
 
-	repoBackened := kuberepository.NewKubernetesBackend(client.Clientset, a.namespace, repoInformer, true)
+	repoBackendOpts := []kuberepository.KubernetesBackendOption{
+		kuberepository.WithLabelSelector(a.labelSelector),
+	}
+
+	repoBackened := kuberepository.NewKubernetesBackend(client.Clientset, a.namespace, repoInformer, true, repoBackendOpts...)
 	a.repoManager = repository.NewManager(repoBackened, a.namespace, true)
 
 	gpgKeyInformerOptions := []informer.InformerOption[*corev1.ConfigMap]{
 		informer.WithListHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return client.Clientset.CoreV1().ConfigMaps(a.namespace).List(ctx, v1.ListOptions{})
+			return client.Clientset.CoreV1().ConfigMaps(a.namespace).List(ctx, config.LabelSelector(a.labelSelector))
 		}),
 		informer.WithWatchHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return client.Clientset.CoreV1().ConfigMaps(a.namespace).Watch(ctx, v1.ListOptions{})
+			return client.Clientset.CoreV1().ConfigMaps(a.namespace).Watch(ctx, config.LabelSelector(a.labelSelector))
 		}),
 		informer.WithAddHandler[*corev1.ConfigMap](a.handleGPGKeyCreation),
 		informer.WithUpdateHandler[*corev1.ConfigMap](a.handleGPGKeyUpdate),
@@ -488,6 +490,10 @@ func (a *Agent) Start(ctx context.Context) error {
 	}
 
 	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"))
+
+	if a.labelSelector != "" {
+		log().Infof("Agent informers are using the label selector: %s", a.labelSelector)
+	}
 
 	// Start the Application backend in the background
 	go func() {
