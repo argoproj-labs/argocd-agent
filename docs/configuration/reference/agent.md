@@ -401,9 +401,9 @@ Enable the resource proxy to allow access to live resources on this agent cluste
 - Performance optimization when live resource viewing is not needed
 - Troubleshooting resource proxy related issues
 
-## Application Filtering
+## Resource Filtering
 
-### Application Label Selector
+### Label Selector
 
 | | |
 |---|---|

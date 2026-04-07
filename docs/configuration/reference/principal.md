@@ -97,9 +97,9 @@ Labels to apply to auto-created namespaces.
 
 **Example:** `managed-by=argocd-agent,environment=production`
 
-## Application Filtering
+## Resource Filtering
 
-### Application Label Selector
+### Label Selector
 
 | | |
 |---|---|
