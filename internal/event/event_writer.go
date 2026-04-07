@@ -76,8 +76,13 @@ type eventMessage struct {
 	// track number of retries attempted
 	retryCount int
 
-	// time when the event was added to the EventWriter (immutable once set)
+	// time when the current queued event was added to the EventWriter; this is
+	// refreshed when tail coalescing replaces the queued event with a newer one.
 	writerAddedAt time.Time
+
+	// writerDwellObserved ensures dwell is only emitted once, including messages
+	// that succeed on a retry after an initial send failure.
+	writerDwellObserved bool
 }
 
 func NewEventWriter(target streamWriter) *EventWriter {
@@ -365,6 +370,7 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 		return
 	}
 
+	ew.observeEventWriterDwell(sentMsg)
 	logCtx.Trace("event sent to target")
 }
 
@@ -374,6 +380,28 @@ func (ew *EventWriter) scheduleRetry(eventMsg *eventMessage) {
 	defer eventMsg.mu.Unlock()
 	retryAfter := time.Now().Add(eventMsg.backoff.Step())
 	eventMsg.retryAfter = &retryAfter
+}
+
+func (ew *EventWriter) observeEventWriterDwell(eventMsg *eventMessage) {
+	ew.mu.RLock()
+	m := ew.outboundMetrics
+	ew.mu.RUnlock()
+	if m == nil {
+		return
+	}
+
+	eventMsg.mu.Lock()
+	if eventMsg.writerDwellObserved || eventMsg.writerAddedAt.IsZero() || eventMsg.event == nil {
+		eventMsg.mu.Unlock()
+		return
+	}
+
+	eventMsg.writerDwellObserved = true
+	resourceType := eventMsg.event.DataSchema()
+	addedAt := eventMsg.writerAddedAt
+	eventMsg.mu.Unlock()
+
+	m.ObserveEventWriterDwell(resourceType, time.Since(addedAt).Seconds())
 }
 
 // sendUnsentEvent pops an event from the unsent queue and sends it for the first time
@@ -445,12 +473,7 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	}
 
 	if !isFireAndForget {
-		ew.mu.RLock()
-		m := ew.outboundMetrics
-		ew.mu.RUnlock()
-		if m != nil && !eventMsg.writerAddedAt.IsZero() {
-			m.ObserveEventWriterDwell(eventMsg.event.DataSchema(), time.Since(eventMsg.writerAddedAt).Seconds())
-		}
+		ew.observeEventWriterDwell(eventMsg)
 	}
 
 	logCtx.Trace("event sent to target")

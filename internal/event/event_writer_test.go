@@ -574,21 +574,86 @@ func TestEventWriter(t *testing.T) {
 
 		require.Empty(t, hopMetrics.eventWriterDwell)
 	})
+
+	t.Run("should observe event writer dwell on first successful retry", func(t *testing.T) {
+		fs := &fakeStream{sendErrs: []error{errors.New("boom")}}
+		evSender := NewEventWriter(fs)
+		hopMetrics := &fakeOutboundHopMetrics{}
+		evSender.SetMetrics(hopMetrics)
+
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+		time.Sleep(5 * time.Millisecond)
+
+		evSender.sendEvent(resID)
+		require.Empty(t, hopMetrics.eventWriterDwell)
+
+		sentMsg := evSender.sentEvents[resID]
+		require.NotNil(t, sentMsg)
+
+		pastTime := time.Now().Add(-1 * time.Second)
+		sentMsg.mu.Lock()
+		sentMsg.retryAfter = &pastTime
+		sentMsg.mu.Unlock()
+
+		evSender.retrySentEvent(resID, sentMsg)
+
+		require.Len(t, hopMetrics.eventWriterDwell, 1)
+		require.Equal(t, TargetApplication.String(), hopMetrics.eventWriterDwell[0].resourceType)
+	})
+
+	t.Run("should observe event writer dwell only once across retries", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+		hopMetrics := &fakeOutboundHopMetrics{}
+		evSender.SetMetrics(hopMetrics)
+
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+		time.Sleep(5 * time.Millisecond)
+
+		evSender.sendEvent(resID)
+		require.Len(t, hopMetrics.eventWriterDwell, 1)
+
+		sentMsg := evSender.sentEvents[resID]
+		require.NotNil(t, sentMsg)
+
+		pastTime := time.Now().Add(-1 * time.Second)
+		sentMsg.mu.Lock()
+		sentMsg.retryAfter = &pastTime
+		sentMsg.mu.Unlock()
+
+		evSender.retrySentEvent(resID, sentMsg)
+
+		require.Len(t, hopMetrics.eventWriterDwell, 1)
+	})
 }
 
 type fakeStream struct {
-	mu      sync.RWMutex
-	events  map[string][]string
-	sendErr error
+	mu       sync.RWMutex
+	events   map[string][]string
+	sendErr  error
+	sendErrs []error
 }
 
 func (fs *fakeStream) Send(event *eventstreamapi.Event) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if len(fs.sendErrs) > 0 {
+		err := fs.sendErrs[0]
+		fs.sendErrs = fs.sendErrs[1:]
+		if err != nil {
+			return err
+		}
+	}
+
 	if fs.sendErr != nil {
 		return fs.sendErr
 	}
 
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
 	ev, err := FromWire(event.Event)
 	if err != nil {
 		return err
