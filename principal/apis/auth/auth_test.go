@@ -101,16 +101,18 @@ func Test_Authenticate(t *testing.T) {
 		auths, err := NewServer(queues, "argocd", ams, iss)
 		require.NoError(t, err)
 		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
-			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
-			Mode:        "managed",
-			Version:     testVersion,
+			Method:         "userpass",
+			Credentials:    map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
+			Mode:           "managed",
+			Version:        testVersion,
+			AgentNamespace: "argocd-agent",
 		})
 		require.NoError(t, err)
 		require.NotNil(t, r)
 		assert.Equal(t, "access", r.AccessToken)
 		assert.Equal(t, "refresh", r.RefreshToken)
 		assert.Equal(t, testVersion, r.Version)
+		assert.Equal(t, "argocd", r.PrincipalNamespace)
 	})
 
 	t.Run("Wrong credentials", func(t *testing.T) {

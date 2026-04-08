@@ -61,7 +61,7 @@ var errAuthenticationFailed = status.Error(codes.Unauthenticated, authFailedMess
 
 type ServerOptions struct {
 	agentRegistrationManager *registration.AgentRegistrationManager
-	onAuthenticated          func(clientID, namespace string)
+	onAuthenticated          func(agentName, agentNamespace string)
 }
 
 type ServerOption func(o *ServerOptions) error
@@ -175,14 +175,14 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 	}
 
 	if s.options.onAuthenticated != nil {
-		s.options.onAuthenticated(clientID, ar.Namespace)
+		s.options.onAuthenticated(clientID, ar.AgentNamespace)
 	}
 
 	return &authapi.AuthResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		Version:      s.principalVersion,
-		Namespace:    s.namespace,
+		AccessToken:        accessToken,
+		RefreshToken:       refreshToken,
+		Version:            s.principalVersion,
+		PrincipalNamespace: s.namespace,
 	}, nil
 }
 
