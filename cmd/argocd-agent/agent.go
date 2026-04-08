@@ -233,6 +233,7 @@ func NewAgentRunCommand() *cobra.Command {
 			remoteOpts = append(remoteOpts, client.WithKeepAlivePingInterval(keepAlivePingInterval))
 			remoteOpts = append(remoteOpts, client.WithCompression(enableCompression))
 			remoteOpts = append(remoteOpts, client.WithMaxGRPCMessageSize(maxGRPCMessageSize))
+			remoteOpts = append(remoteOpts, client.WithAgentNamespace(namespace))
 
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
 				remote, err = client.NewRemote(serverAddress, serverPort, remoteOpts...)

@@ -29,7 +29,7 @@ message AuthRequest {
     // Agent's version number for handshake validation
     string version = 4;
     // Agent's namespace on the workload cluster
-    string namespace = 5;
+    string agentNamespace = 5;
 }
 
 message AuthResponse {
@@ -38,7 +38,7 @@ message AuthResponse {
     // Principal's version number for handshake validation
     string version = 3;
     // Principal's namespace on the control-plane cluster
-    string namespace = 4;
+    string principalNamespace = 4;
 }
 
 message RefreshTokenRequest {

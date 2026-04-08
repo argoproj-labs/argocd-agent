@@ -594,12 +594,8 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
-		a.remote.SetOnAuthenticated(func(principalNs string) error {
-			if principalNs != "" {
-				a.principalNamespace = principalNs
-				log().Infof("Principal namespace learned from auth response: %s", principalNs)
-			}
-			return nil
+		a.remote.SetOnAuthenticated(func(principalNs string) {
+			a.principalNamespace = principalNs
 		})
 		// TODO: Right now, maintainConnection always returns nil. Revisit
 		// this.

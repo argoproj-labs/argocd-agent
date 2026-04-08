@@ -1223,7 +1223,7 @@ func (a *Agent) deleteGPGKey(cm *corev1.ConfigMap) error {
 // explicitly-permitted namespaces (e.g. tenant namespaces) are preserved.
 func (a *Agent) getTargetNamespaceForApp(app *v1alpha1.Application) string {
 	if a.destinationBasedMapping && a.mode == types.AgentModeManaged {
-		if a.principalNamespace != "" && app.Namespace == a.principalNamespace && a.principalNamespace != a.namespace {
+		if a.principalNamespace != "" && app.Namespace == a.principalNamespace {
 			return a.namespace
 		}
 		return app.Namespace
