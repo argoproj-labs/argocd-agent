@@ -97,22 +97,22 @@ Labels to apply to auto-created namespaces.
 
 **Example:** `managed-by=argocd-agent,environment=production`
 
-## Application Filtering
+## Resource Filtering
 
-### Application Label Selector
+### Label Selector
 
 | | |
 |---|---|
-| **CLI Flag** | `--app-label-selector` |
-| **Environment Variable** | `ARGOCD_PRINCIPAL_APP_LABEL_SELECTOR` |
-| **ConfigMap Entry** | `principal.app-label-selector` |
+| **CLI Flag** | `--label-selector` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_LABEL_SELECTOR` |
+| **ConfigMap Entry** | `principal.label-selector` |
 | **Type** | String |
 | **Default** | `""` (no additional filtering) |
 
-Kubernetes label selector that restricts which Applications the principal
-watches. Only Applications matching this selector will be listed, watched, and
+Kubernetes label selector that restricts which resources the principal
+watches. Only resources matching this selector will be listed, watched, and
 processed by the principal. This is combined with the default selector that
-already excludes applications with the ignore sync label.
+already excludes resources with the ignore sync label.
 
 ## TLS Configuration
 

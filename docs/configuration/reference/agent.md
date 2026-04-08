@@ -401,22 +401,22 @@ Enable the resource proxy to allow access to live resources on this agent cluste
 - Performance optimization when live resource viewing is not needed
 - Troubleshooting resource proxy related issues
 
-## Application Filtering
+## Resource Filtering
 
-### Application Label Selector
+### Label Selector
 
 | | |
 |---|---|
-| **CLI Flag** | `--app-label-selector` |
-| **Environment Variable** | `ARGOCD_AGENT_APP_LABEL_SELECTOR` |
-| **ConfigMap Entry** | `agent.app-label-selector` |
+| **CLI Flag** | `--label-selector` |
+| **Environment Variable** | `ARGOCD_AGENT_LABEL_SELECTOR` |
+| **ConfigMap Entry** | `agent.label-selector` |
 | **Type** | String |
 | **Default** | `""` (no additional filtering) |
 
-Kubernetes label selector that restricts which Applications the agent watches.
-Only Applications matching this selector will be listed, watched, and processed
+Kubernetes label selector that restricts which resources the agent watches.
+Only resources matching this selector will be listed, watched, and processed
 by the agent. This is combined with the default selector that already excludes
-applications with the ignore sync label.
+resources with the ignore sync label.
 
 ## Kubernetes Configuration
 

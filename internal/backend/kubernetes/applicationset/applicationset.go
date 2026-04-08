@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned"
@@ -30,16 +31,29 @@ var _ backend.ApplicationSet = &KubernetesBackend{}
 
 // KubernetesBackend implements backend.ApplicationSet using a Kubernetes client for Argo CD ApplicationSet CRDs.
 type KubernetesBackend struct {
-	appClient appclientset.Interface
-	informer  informer.InformerInterface
-	namespace string
+	appClient     appclientset.Interface
+	informer      informer.InformerInterface
+	namespace     string
+	labelSelector string
 }
 
-func NewKubernetesBackend(appClient appclientset.Interface, namespace string, inf informer.InformerInterface) *KubernetesBackend {
-	return &KubernetesBackend{
+func NewKubernetesBackend(appClient appclientset.Interface, namespace string, inf informer.InformerInterface, opts ...KubernetesBackendOption) *KubernetesBackend {
+	be := &KubernetesBackend{
 		appClient: appClient,
 		informer:  inf,
 		namespace: namespace,
+	}
+	for _, opt := range opts {
+		opt(be)
+	}
+	return be
+}
+
+type KubernetesBackendOption func(*KubernetesBackend)
+
+func WithLabelSelector(labelSelector string) KubernetesBackendOption {
+	return func(be *KubernetesBackend) {
+		be.labelSelector = labelSelector
 	}
 }
 
@@ -50,7 +64,8 @@ func (be *KubernetesBackend) List(ctx context.Context, selector backend.Applicat
 	}
 	var result []v1alpha1.ApplicationSet
 	for _, ns := range namespaces {
-		l, err := be.appClient.ArgoprojV1alpha1().ApplicationSets(ns).List(ctx, v1.ListOptions{})
+		listOptions := config.LabelSelector(be.labelSelector)
+		l, err := be.appClient.ArgoprojV1alpha1().ApplicationSets(ns).List(ctx, listOptions)
 		if err != nil {
 			return nil, err
 		}
