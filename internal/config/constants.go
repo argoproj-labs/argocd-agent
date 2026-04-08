@@ -36,3 +36,6 @@ const EnvKubeQPS = "ARGOCD_AGENT_KUBE_QPS"
 
 // EnvKubeBurst is the name of the environment variable for setting the Kubernetes API Burst.
 const EnvKubeBurst = "ARGOCD_AGENT_KUBE_BURST"
+
+// EnvQueueSize is the name of the environment variable for setting the size of the queue.
+const EnvQueueSize = "ARGOCD_AGENT_QUEUE_SIZE"
