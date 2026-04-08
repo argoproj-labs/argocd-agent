@@ -490,6 +490,9 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	ev := s.events.AppProjectEvent(event.Delete, outbound)
 	s.ha.ForwardEventForReplication(event.New(ev, event.TargetAppProject), outbound.Namespace, replication.DirectionOutbound)
 
+	// Project is deleted, remove all repositories and credentials that reference this project
+	s.syncRepositoriesForProject(ctx, outbound.Name, outbound.Namespace, logCtx)
+
 	if s.metrics != nil {
 		s.metrics.AppProjectDeleted.Inc()
 	}
