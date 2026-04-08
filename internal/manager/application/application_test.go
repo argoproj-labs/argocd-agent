@@ -409,6 +409,93 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		require.NotNil(t, updated.Operation)
 		require.Equal(t, incoming.Operation, updated.Operation)
 	})
+
+	t.Run("Preserve existing operation when incoming status update has no operation", func(t *testing.T) {
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					"bar": "foo",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Sync: v1alpha1.SyncStatus{
+					Status: v1alpha1.SyncStatusCodeOutOfSync,
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Annotations: map[string]string{
+					"bar": "foo",
+				},
+			},
+			Operation: &v1alpha1.Operation{
+				InitiatedBy: v1alpha1.OperationInitiator{Username: "principal-sync"},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.mode = manager.ManagerModeManaged
+		mgr.role = manager.ManagerRolePrincipal
+
+		updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		require.NotNil(t, updated.Operation)
+		require.Equal(t, "principal-sync", updated.Operation.InitiatedBy.Username)
+		require.Contains(t, updated.Annotations, LastUpdatedAnnotation)
+		require.NotEmpty(t, updated.Annotations[LastUpdatedAnnotation])
+	})
+
+	t.Run("Clear existing operation when incoming status update is terminal", func(t *testing.T) {
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					"bar": "foo",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: synccommon.OperationSucceeded,
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Annotations: map[string]string{
+					"bar": "foo",
+				},
+			},
+			Operation: &v1alpha1.Operation{
+				InitiatedBy: v1alpha1.OperationInitiator{Username: "principal-sync"},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.mode = manager.ManagerModeManaged
+		mgr.role = manager.ManagerRolePrincipal
+
+		updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		require.Nil(t, updated.Operation)
+		require.Contains(t, updated.Annotations, LastUpdatedAnnotation)
+		require.NotEmpty(t, updated.Annotations[LastUpdatedAnnotation])
+	})
 }
 
 func Test_ManagerUpdateAutonomous(t *testing.T) {
