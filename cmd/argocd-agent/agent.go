@@ -98,7 +98,7 @@ func NewAgentRunCommand() *cobra.Command {
 		// Allowed namespaces for filtering applications
 		allowedNamespaces []string
 
-		appLabelSelector string
+		labelSelector string
 
 		// Redis TLS configuration
 		redisTLSEnabled      bool
@@ -298,7 +298,7 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
 			agentOpts = append(agentOpts, agent.WithIgnoreUnmanagedApps(ignoreUnmanagedApps))
 			agentOpts = append(agentOpts, agent.WithAllowedNamespaces(allowedNamespaces...))
-			agentOpts = append(agentOpts, agent.WithAppLabelSelector(appLabelSelector))
+			agentOpts = append(agentOpts, agent.WithLabelSelector(labelSelector))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
@@ -450,9 +450,9 @@ func NewAgentRunCommand() *cobra.Command {
 		env.StringSliceWithDefault("ARGOCD_AGENT_ALLOWED_NAMESPACES", nil, []string{}),
 		"List of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature)")
 
-	command.Flags().StringVar(&appLabelSelector, "app-label-selector",
-		env.StringWithDefault("ARGOCD_AGENT_APP_LABEL_SELECTOR", nil, ""),
-		"Kubernetes label selector to restrict which Applications the agent watches")
+	command.Flags().StringVar(&labelSelector, "label-selector",
+		env.StringWithDefault("ARGOCD_AGENT_LABEL_SELECTOR", nil, ""),
+		"Kubernetes label selector to restrict which resources the agent watches")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

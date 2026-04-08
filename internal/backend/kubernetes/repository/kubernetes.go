@@ -28,7 +28,6 @@ import (
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
@@ -48,21 +47,40 @@ type KubernetesBackend struct {
 	namespace string
 	// usePatch is used to indicate whether the KubernetesBackend should use JSON Patch for updates
 	usePatch bool
+
+	labelSelector string
 }
 
-func NewKubernetesBackend(kubeclient kubernetes.Interface, namespace string, repoInformer informer.InformerInterface, usePatch bool) *KubernetesBackend {
-	return &KubernetesBackend{
+func NewKubernetesBackend(kubeclient kubernetes.Interface, namespace string, repoInformer informer.InformerInterface, usePatch bool, opts ...KubernetesBackendOption) *KubernetesBackend {
+	be := &KubernetesBackend{
 		kubeclient:         kubeclient,
 		repositoryInformer: repoInformer,
 		namespace:          namespace,
 		usePatch:           usePatch,
 	}
+	for _, opt := range opts {
+		opt(be)
+	}
+	return be
+}
+
+type KubernetesBackendOption func(*KubernetesBackend)
+
+func WithLabelSelector(labelSelector string) KubernetesBackendOption {
+	return func(be *KubernetesBackend) {
+		be.labelSelector = labelSelector
+	}
 }
 
 func (be *KubernetesBackend) List(ctx context.Context, selector backend.RepositorySelector) ([]corev1.Secret, error) {
-	l, err := be.kubeclient.CoreV1().Secrets(selector.Namespace).List(ctx, v1.ListOptions{
-		LabelSelector: labels.SelectorFromSet(selector.Labels).String(),
-	})
+	labelSelector := common.LabelKeySecretType + "=" + common.LabelValueSecretTypeRepository
+
+	if be.labelSelector != "" {
+		labelSelector = fmt.Sprintf("%s,%s", labelSelector, be.labelSelector)
+	}
+
+	listOptions := config.LabelSelector(labelSelector)
+	l, err := be.kubeclient.CoreV1().Secrets(selector.Namespace).List(ctx, listOptions)
 	if err != nil {
 		return nil, err
 	}

@@ -168,12 +168,12 @@ data:
   # for routing applications to agents based on spec.destination.name instead of namespace.
   # Default: false
   principal.destination-based-mapping: "false"
-  # principal.app-label-selector: Kubernetes label selector to restrict which
-  # Applications the principal watches. Only matching Applications will be
+  # principal.label-selector: Kubernetes label selector to restrict which
+  # resources the principal watches. Only matching resources will be
   # listed, watched, and processed. Used in hybrid architectures where a
   # traditional app-controller coexists with the principal.
   # Default: ""
-  principal.app-label-selector: ""
+  principal.label-selector: ""
   # principal.redis.tls.enabled: Whether to enable TLS for Redis connections.
   # Default: false
   principal.redis.tls.enabled: "false"

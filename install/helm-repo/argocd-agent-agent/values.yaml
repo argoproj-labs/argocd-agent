@@ -155,10 +155,10 @@ destinationBasedMapping: false
 # Used with destination-based mapping.
 createNamespace: false
 
-## @section Application Filtering
-# -- Kubernetes label selector to restrict which Applications the agent watches.
-# Only matching Applications will be listed, watched, and processed.
-appLabelSelector: ""
+## @section Resource Filtering
+# -- Kubernetes label selector to restrict which resources the agent watches.
+# Only matching resources will be listed, watched, and processed.
+labelSelector: ""
 
 ## @section Redis TLS
 # -- Redis TLS configuration.
