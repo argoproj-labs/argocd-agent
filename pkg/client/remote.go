@@ -322,6 +322,13 @@ func WithMinimumTLSVersion(version string) RemoteOption {
 	}
 }
 
+func WithAgentNamespace(namespace string) RemoteOption {
+	return func(r *Remote) error {
+		r.agentNamespace = namespace
+		return nil
+	}
+}
+
 // WithMaximumTLSVersion configures the maximum TLS version the client will use.
 func WithMaximumTLSVersion(version string) RemoteOption {
 	return func(r *Remote) error {
@@ -593,9 +600,8 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 	}
 
 	var (
-		conn               *grpc.ClientConn
-		err                error
-		principalNamespace string
+		conn *grpc.ClientConn
+		err  error
 	)
 	authenticated := false
 	cBackoff := connectBackoff()
@@ -617,11 +623,11 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			authC := authapi.NewAuthenticationClient(conn)
 
 			authReq := &authapi.AuthRequest{
-				Method:      r.authMethod,
-				Credentials: r.creds,
-				Mode:        r.clientMode.String(),
-				Version:     r.agentVersion,
-				Namespace:   r.agentNamespace,
+				Method:         r.authMethod,
+				Credentials:    r.creds,
+				Mode:           r.clientMode.String(),
+				Version:        r.agentVersion,
+				AgentNamespace: r.agentNamespace,
 			}
 			resp, ierr := authC.Authenticate(ctx, authReq)
 			defer func() {
@@ -661,7 +667,11 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			if ierr != nil {
 				return ierr
 			}
-			principalNamespace = resp.Namespace
+
+			if r.onAuthenticated != nil {
+				r.onAuthenticated(resp.PrincipalNamespace)
+			}
+
 			authenticated = true
 			return nil
 		}
@@ -686,11 +696,6 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		return err
 	}
 	log().Infof("Connected to %s", vr.Version)
-	if r.onAuthenticated != nil {
-		if err := r.onAuthenticated(principalNamespace); err != nil {
-			return err
-		}
-	}
 	r.connMu.Lock()
 	r.conn = conn
 	r.connMu.Unlock()
@@ -707,7 +712,7 @@ func (r *Remote) Conn() *grpc.ClientConn {
 
 // onAuthenticatedFunc is called after a successful authentication handshake.
 // principalNamespace is the namespace the principal reported in its auth response.
-type onAuthenticatedFunc func(principalNamespace string) error
+type onAuthenticatedFunc func(principalNamespace string)
 
 // ClientID returns the client ID used by this remote
 func (r *Remote) ClientID() string {
