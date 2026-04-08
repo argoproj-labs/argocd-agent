@@ -292,6 +292,10 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 	// newServer returns a Server obj with appropriate mock harness
 	newServer := func(t *testing.T, mockProjBackend *mocks.AppProject, mockRepoBackend *mocks.Repository) *Server {
 		t.Helper()
+		t.Cleanup(func() {
+			mockProjBackend.AssertExpectations(t)
+			mockRepoBackend.AssertExpectations(t)
+		})
 		projMgr, err := appproject.NewAppProjectManager(mockProjBackend, ns)
 		require.NoError(t, err)
 		repoMgr := repository.NewManager(mockRepoBackend, ns, false)

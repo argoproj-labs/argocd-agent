@@ -868,7 +868,9 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 
 	newProject, err := s.projectManager.Get(s.ctx, string(newProjectName), new.Namespace)
 	if err != nil {
-		logCtx.WithError(err).Error("failed to get the project that is currently referenced by the repository secret")
+		if !errors.IsNotFound(err) {
+			logCtx.WithError(err).Error("failed to get the project that is currently referenced by the repository secret")
+		}
 	} else {
 		newAgents = s.mapAppProjectToAgents(*newProject)
 	}
