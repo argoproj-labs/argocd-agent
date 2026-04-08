@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -444,7 +445,14 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockProjBackend := &mocks.AppProject{}
 		mockRepoBackend := &mocks.Repository{}
 		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
-		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepository},
+		}).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds},
+		}).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
 		err := s.sendCurrentStateToAgent(agentName)
@@ -458,6 +466,45 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		assert.True(t, s.repoToAgents.Get("repo1")[agentName])
 	})
 
+	t.Run("sends repo-creds for matching project", func(t *testing.T) {
+		proj := generateAppProject("proj1")
+		repoCreds := corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "creds1",
+				Namespace: ns,
+				Labels: map[string]string{
+					common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds,
+				},
+			},
+			Data: map[string][]byte{
+				"project": []byte("proj1"),
+			},
+		}
+
+		mockProjBackend := &mocks.AppProject{}
+		mockRepoBackend := &mocks.Repository{}
+		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepository},
+		}).Return([]corev1.Secret{}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds},
+		}).Return([]corev1.Secret{repoCreds}, nil)
+
+		s := newServer(t, mockProjBackend, mockRepoBackend)
+		err := s.sendCurrentStateToAgent(agentName)
+		require.NoError(t, err)
+
+		// 1 project event + 1 repo-creds event
+		sendQ := s.queues.SendQ(agentName)
+		assert.Equal(t, 2, sendQ.Len())
+
+		assert.True(t, s.projectToRepos.Get("proj1")["creds1"])
+		assert.True(t, s.repoToAgents.Get("creds1")[agentName])
+	})
+
 	t.Run("skips repository whose project was not sent to agent", func(t *testing.T) {
 		proj := generateAppProject("proj1")
 		repo := generateRepoSecret("repo1", "unknown-project")
@@ -465,7 +512,14 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockProjBackend := &mocks.AppProject{}
 		mockRepoBackend := &mocks.Repository{}
 		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
-		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepository},
+		}).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds},
+		}).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
 		err := s.sendCurrentStateToAgent(agentName)
@@ -491,7 +545,14 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockProjBackend := &mocks.AppProject{}
 		mockRepoBackend := &mocks.Repository{}
 		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
-		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepository},
+		}).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds},
+		}).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
 		err := s.sendCurrentStateToAgent(agentName)
@@ -509,7 +570,14 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockProjBackend := &mocks.AppProject{}
 		mockRepoBackend := &mocks.Repository{}
 		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
-		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepository},
+		}).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds},
+		}).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
 		err := s.sendCurrentStateToAgent(agentName)
@@ -528,7 +596,14 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockProjBackend := &mocks.AppProject{}
 		mockRepoBackend := &mocks.Repository{}
 		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
-		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepository},
+		}).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds},
+		}).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
 		err := s.sendCurrentStateToAgent(agentName)
@@ -547,7 +622,14 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockProjBackend := &mocks.AppProject{}
 		mockRepoBackend := &mocks.Repository{}
 		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
-		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepository},
+		}).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds},
+		}).Return([]corev1.Secret{}, nil)
 
 		mockGPGBackend := mocks.NewGPGKey(t)
 		gpgCM := &corev1.ConfigMap{
@@ -576,7 +658,14 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockProjBackend := &mocks.AppProject{}
 		mockRepoBackend := &mocks.Repository{}
 		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{proj}, nil)
-		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepository},
+		}).Return([]corev1.Secret{repo}, nil)
+		mockRepoBackend.On("List", mock.Anything, backend.RepositorySelector{
+			Namespace: ns,
+			Labels:    map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds},
+		}).Return([]corev1.Secret{}, nil)
 
 		mockGPGBackend := mocks.NewGPGKey(t)
 		gpgCM := &corev1.ConfigMap{

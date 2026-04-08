@@ -155,8 +155,12 @@ func isValidRepositorySecret(res *corev1.Secret, namespace string) bool {
 		return false
 	}
 
-	// Watch only repository secrets
-	if res.Labels == nil || res.Labels[common.LabelKeySecretType] != common.LabelValueSecretTypeRepository {
+	// Watch only repository and repo-creds secrets
+	if res.Labels == nil {
+		return false
+	}
+	secretType := res.Labels[common.LabelKeySecretType]
+	if secretType != common.LabelValueSecretTypeRepository && secretType != common.LabelValueSecretTypeRepoCreds {
 		return false
 	}
 
