@@ -65,6 +65,25 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 	})
+	t.Run("Find manager by custom label key", func(t *testing.T) {
+		customLabelTrackingReader := newTestTrackingReaderWithLabelKey(v1alpha1.TrackingMethodLabel, "argocd.argoproj.io/instance")
+		pod1 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: "default",
+				Labels: map[string]string{
+					"argocd.argoproj.io/instance": "some-app",
+				},
+			},
+		}
+		kubeclient := kube.NewDynamicFakeClient(pod1)
+
+		un := objToUnstructured(pod1)
+
+		isOwned, err := isResourceManaged(kubeclient, un, 5, customLabelTrackingReader)
+		assert.True(t, isOwned)
+		assert.NoError(t, err)
+	})
 	t.Run("Find manager by owner reference recursively", func(t *testing.T) {
 		depl := &appsv1.Deployment{
 			ObjectMeta: v1.ObjectMeta{
@@ -308,7 +327,7 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 
-		// Should not be tracked, only has annotation
+		// Should not be tracked, only has annotation.
 		pod2 := &corev1.Pod{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "pod2",
@@ -383,7 +402,7 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 
-		// Should not be tracked, only has annotation
+		// Should be tracked, annotation+label uses the annotation for tracking.
 		pod2 := &corev1.Pod{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "pod2",
@@ -396,10 +415,10 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		kubeclient2 := kube.NewDynamicFakeClient(pod2)
 		un2 := objToUnstructured(pod2)
 		isOwned, err = isResourceManaged(kubeclient2, un2, 5, annotationAndLabelReader)
-		assert.False(t, isOwned)
+		assert.True(t, isOwned)
 		assert.NoError(t, err)
 
-		// Should not be tracked, only has label
+		// Should not be tracked, only has label.
 		pod3 := &corev1.Pod{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "pod3",
