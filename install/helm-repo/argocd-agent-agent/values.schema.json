@@ -708,10 +708,10 @@
       "type": "string"
     },
     "tlsInsecurePlaintext": {
-      "default": false,
+      "default": "false",
       "description": "Whether to connect to the principal without TLS",
       "title": "tlsInsecurePlaintext",
-      "type": "boolean"
+      "type": "string"
     },
     "tlsMaxVersion": {
       "default": "",
