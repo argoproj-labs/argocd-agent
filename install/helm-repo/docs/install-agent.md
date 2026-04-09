@@ -10,9 +10,15 @@ Before you begin, ensure you have the following:
 ## Helm Chart Installation
 Use the following command to install the argocd-agent-agent-helm chart.
 
-`helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0`
+`helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0`
 
 > **Resource naming:** every Kubernetes object that this chart creates is derived from your Helm release name. For example, installing with `helm install agent-prod ...` generates resource name `agent-prod-agent-helm`. Pick a release name that matches how you want the objects to appear in the cluster.
+
+### Optional bundled Argo CD
+
+The chart can install the upstream [argo-helm](https://github.com/argoproj/argo-helm) `argo-cd` chart in the same release by setting `argoCD.enabled=true`. Pass Helm values for that subchart under the `argocd` key (for example `--set argoCD.enabled=true --set argocd.server.insecure=true` for a lab setup). When `argoCD.enabled` is false (default), install Argo CD separately and keep the agent pointed at its Redis service.
+
+Maintainers: see [Helm dependencies and upgrading the Argo CD subchart](helm-dependencies-and-upgrades.md) for scripts, `make` targets, and the upgrade checklist tied to `go.mod`.
 
 ### Namespace Handling
 
@@ -24,13 +30,13 @@ Deploying to a Custom Namespace:
 The chart can be deployed into a specific Kubernetes namespace using `--namespace` flag, and `--create-namespace` to create a namespace if not present. Or, it can also be set using `--set namespaceOverride=agent-namespce`.
 
 ```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 --namespace=argocd --create-namespace
+helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0 --namespace=argocd --create-namespace
 ```
 
 OR,
 
 ```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 --set namespaceOverride=argocd
+helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0 --set namespaceOverride=argocd
 ```
 
 
@@ -182,7 +188,7 @@ You can override any of the default values in values.yaml during installation:
 
 Using --set for individual values:
 ```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 \
+helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0 \
   --set logLevel="debug" \
   --set agentMode="managed" \
   --set server="https://my-argocd-server.com"
@@ -199,7 +205,7 @@ server: "https://argocd.production.com"
 Then, install with:
 
 ```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 \
+helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0 \
   -f my-custom-values.yaml
 ```
 Values provided via -f take precedence over the chart's default values.yaml. You can use multiple -f flags, with the rightmost file taking highest precedence.

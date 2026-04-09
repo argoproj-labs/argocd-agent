@@ -224,6 +224,14 @@ build-docs:
 validate-values-schema:
 	@$(current_dir)/hack/validate-values-schema.sh
 
+.PHONY: validate-helm-chart
+validate-helm-chart:
+	@$(current_dir)/hack/validate-helm-chart.sh
+
+.PHONY: helm-dependency-update
+helm-dependency-update:
+	@$(current_dir)/hack/helm-dependency-update.sh
+
 .PHONY: generate-helm-docs
 generate-helm-docs:
 	helm-docs
