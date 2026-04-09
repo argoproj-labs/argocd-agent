@@ -2,6 +2,31 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+## @section Optional bundled Argo CD (subchart)
+# When enabled, installs the upstream argo-cd chart as part of this release (alias: argocd).
+# Use the `argocd` key for values passed to that chart. Disable if Argo CD is already installed.
+argoCD:
+  # -- Whether to install the argo-cd Helm chart (argo-helm) alongside the agent.
+  enabled: false
+
+# Values forwarded to the argo-cd subchart (argo-helm). Used only when `argoCD.enabled` is true.
+argocd:
+  global:
+    image:
+      # -- Argo CD image repository (change for a private or custom registry mirror).
+      repository: quay.io/argoproj/argocd
+      # -- Argo CD image tag; keep in sync with `github.com/argoproj/argo-cd/v3` in the repo go.mod.
+      tag: v3.3.6
+  server:
+    # -- argo-helm does not expose `server.enabled`; use 0 replicas to disable the Argo CD API/UI Deployment.
+    replicas: 0
+  # -- disable dex
+  dex:
+    enabled: false
+  # -- argo-helm does not expose `applicationSet.enabled`;use 0 replicas to disable the Argo CD applicationSet Deployment.
+  applicationSet:
+    replicas: 0
+
 ## @section Global
 # -- Override namespace to deploy the agent into. Leave empty to use the release namespace.
 namespaceOverride: ""

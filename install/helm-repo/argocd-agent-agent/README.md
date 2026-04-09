@@ -1,6 +1,6 @@
 # argocd-agent-agent
 
-![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
+![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.8.1](https://img.shields.io/badge/AppVersion-0.8.1-informational?style=flat-square)
 
 Argo CD Agent for connecting managed clusters to a Principal
 
@@ -20,6 +20,10 @@ Argo CD Agent for connecting managed clusters to a Principal
 
 Kubernetes: `>=1.24.0-0`
 
+| Repository | Name | Version |
+|------------|------|---------|
+| https://argoproj.github.io/argo-helm | argocd(argo-cd) | 9.5.0 |
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -27,8 +31,14 @@ Kubernetes: `>=1.24.0-0`
 | affinity | object | `{}` | Affinity rules for the agent Pod. |
 | agentMode | string | `"autonomous"` | Agent mode of operation. |
 | allowedNamespaces | string | `""` | Comma-separated list of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature). Supports glob patterns (e.g., "team-*,prod-*"). |
+| argoCD.enabled | bool | `false` | Whether to install the argo-cd Helm chart (argo-helm) alongside the agent. |
 | argoCdRedisPasswordKey | string | `"auth"` | ArgoCD Redis password key. |
 | argoCdRedisSecretName | string | `"argocd-redis"` | ArgoCD Redis password secret name. |
+| argocd.applicationSet | object | `{"replicas":0}` | argo-helm does not expose `applicationSet.enabled`;use 0 replicas to disable the Argo CD applicationSet Deployment. |
+| argocd.dex | object | `{"enabled":false}` | disable dex |
+| argocd.global.image.repository | string | `"quay.io/argoproj/argocd"` | Argo CD image repository (change for a private or custom registry mirror). |
+| argocd.global.image.tag | string | `"v3.3.6"` | Argo CD image tag; keep in sync with `github.com/argoproj/argo-cd/v3` in the repo go.mod. |
+| argocd.server.replicas | int | `0` | argo-helm does not expose `server.enabled`; use 0 replicas to disable the Argo CD API/UI Deployment. |
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
 | cacheRefreshInterval | string | `"10s"` | Cache refresh interval. |
 | createNamespace | bool | `false` | Whether to create target namespaces automatically when they don't exist. Used with destination-based mapping. |

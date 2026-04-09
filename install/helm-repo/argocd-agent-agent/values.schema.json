@@ -33,6 +33,30 @@
       "title": "labelSelector",
       "type": "string"
     },
+    "argoCD": {
+      "additionalProperties": false,
+      "description": "Optional bundled Argo CD (argo-helm subchart, alias argocd).",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Whether to install the argo-cd Helm chart alongside the agent.",
+          "title": "argoCD.enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "argoCD",
+      "type": "object"
+    },
+    "argocd": {
+      "additionalProperties": true,
+      "default": {},
+      "description": "Values passed to the bundled argo-cd chart when argoCD.enabled is true.",
+      "title": "argocd",
+      "type": "object"
+    },
     "argoCdRedisSecretName": {
       "default": "argocd-redis",
       "description": "ArgoCD Redis password secret name.",
@@ -801,6 +825,8 @@
     "tlsCipherSuites",
     "allowedNamespaces",
     "tlsInsecurePlaintext",
+    "argoCD",
+    "argocd",
     "destinationBasedMapping",
     "createNamespace",
     "labelSelector",
