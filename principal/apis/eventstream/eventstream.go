@@ -188,12 +188,13 @@ func (s *Server) onDisconnect(c *client) {
 		// "Successful" status with "Failed".
 		s.activeClientsMu.Lock()
 		current := s.activeClients[c.agentName]
-		c.logCtx.Infof("JGW onDisconnect 3 %v", current)
+		agentName := c.agentName
+		c.logCtx.Infof("JGW onDisconnect 3 %v", agentName)
 		if current == c {
-			c.logCtx.Infof("JGW onDisconnect 4 %v", current)
+			c.logCtx.Infof("JGW onDisconnect 4 %v", agentName)
 			s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
 		}
-		c.logCtx.Infof("JGW onDisconnect 5 %v", current)
+		c.logCtx.Infof("JGW onDisconnect 5 %v", agentName)
 		s.activeClientsMu.Unlock()
 	})
 
