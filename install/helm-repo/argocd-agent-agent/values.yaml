@@ -145,6 +145,8 @@ tlsCipherSuites: ""
 # -- Comma-separated list of additional namespaces the agent is allowed to
 # manage applications in (used with applications in any namespace feature). Supports glob patterns (e.g., "team-*,prod-*").
 allowedNamespaces: ""
+# -- Whether to connect to the principal without TLS
+tlsInsecurePlaintext: false
 
 ## @section Destination-Based Mapping
 # -- Whether to enable destination-based mapping. When enabled, the agent
