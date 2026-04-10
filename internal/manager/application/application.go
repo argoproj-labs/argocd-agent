@@ -676,6 +676,42 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 	return updated, err
 }
 
+// SetOperation sets the .operation field on an agent's Application without touching spec or status.
+// It is used to deliver principal-initiated sync operations to the agent as an independent event.
+func (m *ApplicationManager) SetOperation(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
+	logCtx := log().WithFields(logrus.Fields{
+		"component":   "SetOperation",
+		"application": incoming.QualifiedName(),
+	})
+
+	if !m.role.IsAgent() {
+		return nil, fmt.Errorf("SetOperation should only be called by an agent: %v", m.role)
+	}
+
+	if !m.destinationBasedMapping {
+		incoming.SetNamespace(m.namespace)
+	}
+
+	updated, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+		existing.Operation = operationToUse(existing, incoming)
+	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
+		target := &v1alpha1.Application{
+			Operation: operationToUse(existing, incoming),
+		}
+		source := &v1alpha1.Application{
+			Operation: existing.Operation,
+		}
+		return jsondiff.Compare(source, target, jsondiff.SkipCompact())
+	})
+	if err == nil {
+		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
+			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+		}
+		logCtx.Infof("Set operation on application")
+	}
+	return updated, err
+}
+
 func operationToUse(existing, incoming *v1alpha1.Application) *v1alpha1.Operation {
 	// Preserve existing operation if the incoming operation is nil
 	if incoming.Operation == nil {
