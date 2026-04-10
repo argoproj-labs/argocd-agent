@@ -195,6 +195,13 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubSub, rreq *event.RedisRequest, channelName string, logCtx *logrus.Entry) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
+	defer pubsub.Close()
+	defer func() {
+		connections := a.redisProxyMsgHandler.connections
+		connections.lock.Lock()
+		delete(connections.connMap, rreq.ConnectionUUID)
+		connections.lock.Unlock()
+	}()
 
 	ch := pubsub.Channel()
 
@@ -222,13 +229,6 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 
 			// If the connection has not been active for X minutes, close the connection
 			if time.Since(*lastPing) >= principalRedisConnectionTimeout {
-				pubsub.Close()
-
-				// Clean up the connection map entry to prevent memory accumulation
-				connLifecycle.lock.Lock()
-				delete(connLifecycle.connMap, rreq.ConnectionUUID)
-				connLifecycle.lock.Unlock()
-
 				logCtx.WithField(logfields.LastPing, lastPing).Trace("closing redis connection due to inactivity")
 				return
 			}
