@@ -51,6 +51,13 @@ const (
 	// mismatch (same principal recreated the resource) from an AppSet annotation
 	// wipe on a new principal (different principal-uid → transition in-place).
 	PrincipalUIDAnnotation = "argocd.argoproj.io/principal-uid"
+
+	// OriginalNamespaceAnnotation is stamped by the agent when it remaps an
+	// application from the principal's namespace to its own namespace (under
+	// destination-based mapping in managed mode). It records the namespace the
+	// app originated from so that the principal can unambiguously remap it back,
+	// even when a tenant namespace shares the same name as the agent's namespace.
+	OriginalNamespaceAnnotation = "argocd-agent.argoproj.io/original-namespace"
 )
 
 type Manager interface {
