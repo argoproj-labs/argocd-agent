@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
@@ -390,7 +391,67 @@ func Test_StatusUpdateEvents(t *testing.T) {
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, updated.Status.Sync.Status)
 	})
 
-	t.Run("Destination-based mapping remaps agent namespace to principal namespace", func(t *testing.T) {
+	t.Run("Destination-based mapping remaps via annotation to principal namespace", func(t *testing.T) {
+		principalNs := "argocd"
+		agentNs := "argocd-agent"
+		agentName := "my-cluster"
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: principalNs,
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "foo",
+					Path:           ".",
+					TargetRevision: "HEAD",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeOutOfSync},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps(principalNs, existingApp)
+
+		incomingApp := existingApp.DeepCopy()
+		incomingApp.SetNamespace(agentNs)
+		incomingApp.Annotations = map[string]string{
+			manager.OriginalNamespaceAnnotation: principalNs,
+		}
+		incomingApp.Status.Sync.Status = v1alpha1.SyncStatusCodeSynced
+
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("application")
+		ev.SetType(event.StatusUpdate.String())
+		ev.SetData(cloudevents.ApplicationJSON, incomingApp)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, err := NewServer(ctx, fac, principalNs,
+			WithGeneratedTokenSigningKey(),
+			WithDestinationBasedMapping(true),
+			WithRedisProxyDisabled(),
+		)
+		require.NoError(t, err)
+		defer func() { _ = s.Shutdown() }()
+		err = s.Start(ctx, make(chan error))
+		require.NoError(t, err)
+
+		s.setAgentMode(agentName, types.AgentModeManaged)
+		s.setAgentNamespace(agentName, agentNs)
+
+		err = s.processApplicationEvent(ctx, agentName, &ev)
+		assert.NoError(t, err)
+
+		updated, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(principalNs).Get(ctx, "test", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, updated.Status.Sync.Status)
+	})
+
+	t.Run("Destination-based mapping fallback remaps agent namespace without annotation", func(t *testing.T) {
 		principalNs := "argocd"
 		agentNs := "argocd-agent"
 		agentName := "my-cluster"
@@ -443,6 +504,63 @@ func Test_StatusUpdateEvents(t *testing.T) {
 		assert.NoError(t, err)
 
 		updated, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(principalNs).Get(ctx, "test", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, updated.Status.Sync.Status)
+	})
+
+	t.Run("Tenant namespace different from agent namespace not remapped", func(t *testing.T) {
+		principalNs := "argocd"
+		agentNs := "argocd-agent"
+		agentName := "my-cluster"
+		tenantNs := "team-a"
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "tenant-app",
+				Namespace: tenantNs,
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "foo",
+					Path:           ".",
+					TargetRevision: "HEAD",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeOutOfSync},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps(principalNs, existingApp)
+
+		incomingApp := existingApp.DeepCopy()
+		incomingApp.Status.Sync.Status = v1alpha1.SyncStatusCodeSynced
+
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("application")
+		ev.SetType(event.StatusUpdate.String())
+		ev.SetData(cloudevents.ApplicationJSON, incomingApp)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, err := NewServer(ctx, fac, principalNs,
+			WithGeneratedTokenSigningKey(),
+			WithDestinationBasedMapping(true),
+			WithRedisProxyDisabled(),
+		)
+		require.NoError(t, err)
+		defer func() { _ = s.Shutdown() }()
+		err = s.Start(ctx, make(chan error))
+		require.NoError(t, err)
+
+		s.setAgentMode(agentName, types.AgentModeManaged)
+		s.setAgentNamespace(agentName, agentNs)
+
+		err = s.processApplicationEvent(ctx, agentName, &ev)
+		assert.NoError(t, err)
+
+		updated, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(tenantNs).Get(ctx, "tenant-app", v1.GetOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, updated.Status.Sync.Status)
 	})
