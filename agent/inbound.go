@@ -207,10 +207,10 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 	case event.SetOperation:
 		logCtx.Trace("Received a SetOperation event")
 		if a.mode == types.AgentModeManaged {
-			if !exists {
+			if !identity.Exists {
 				return fmt.Errorf("refusing SetOperation: app %s does not exist", incomingApp.QualifiedName())
 			}
-			if !sourceUIDMatch {
+			if !identity.SourceUIDMatch {
 				return fmt.Errorf("refusing SetOperation: source UID mismatch for app %s", incomingApp.QualifiedName())
 			}
 		}
