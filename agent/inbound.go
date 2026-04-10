@@ -1224,7 +1224,7 @@ func (a *Agent) deleteGPGKey(cm *corev1.ConfigMap) error {
 func (a *Agent) getTargetNamespaceForApp(app *v1alpha1.Application) string {
 	if a.destinationBasedMapping && a.mode == types.AgentModeManaged {
 		principalNS := a.principalNS()
-		if principalNS != "" && app.Namespace == principalNS {
+		if principalNS != "" && app.Namespace == principalNS && a.namespace != principalNS {
 			if app.Annotations == nil {
 				app.Annotations = make(map[string]string)
 			}

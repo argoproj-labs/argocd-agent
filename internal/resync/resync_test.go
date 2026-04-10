@@ -889,7 +889,8 @@ func Test_ProcessIncomingSyncedResource_PeerNamespaceRemap(t *testing.T) {
 		resource := fakeUnresApp()
 		resource.SetNamespace("argocd-agent")
 		resource.SetAnnotations(map[string]string{
-			manager.SourceUIDAnnotation: "source-uid",
+			manager.SourceUIDAnnotation:         "source-uid",
+			manager.OriginalNamespaceAnnotation: "argocd",
 		})
 		_, err := handler.dynClient.Resource(gvr).Namespace("argocd-agent").Create(ctx, resource, v1.CreateOptions{})
 		require.Nil(t, err)
@@ -912,6 +913,7 @@ func Test_ProcessIncomingSyncedResource_PeerNamespaceRemap(t *testing.T) {
 		err = ev.DataAs(got)
 		assert.Nil(t, err)
 		assert.NotEmpty(t, got.Checksum, "should have checksum because app was found after remap")
+		assert.Equal(t, "argocd", got.Namespace, "emitted RequestUpdate must carry the principal namespace via the annotation")
 	})
 
 	t.Run("agent does not remap tenant namespace", func(t *testing.T) {

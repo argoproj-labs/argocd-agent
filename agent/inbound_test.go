@@ -2215,6 +2215,16 @@ func Test_getTargetNamespaceForApp(t *testing.T) {
 			expected:                "argocd-agent",
 			expectAnnotation:        false,
 		},
+		{
+			name:                    "Same namespace on agent and principal skips annotation",
+			agentNamespace:          "argocd",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd",
+			expected:                "argocd",
+			expectAnnotation:        false,
+		},
 	}
 
 	for _, tt := range tests {

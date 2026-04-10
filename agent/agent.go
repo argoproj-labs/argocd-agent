@@ -598,6 +598,9 @@ func (a *Agent) Start(ctx context.Context) error {
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
 		a.remote.SetOnAuthenticated(func(principalNs string) {
+			if principalNs == "" {
+				return
+			}
 			a.principalNSMu.Lock()
 			a.principalNamespace = principalNs
 			a.principalNSMu.Unlock()
