@@ -290,13 +290,10 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 		if r.role == manager.ManagerRolePrincipal {
 			if r.destinationBasedMapping {
 				// With destination-based mapping, applications can be in any namespace
-				// on the principal. newRequestUpdateFromObject already resolves the
-				// original namespace via the annotation, so use the namespace as-is.
-				if r.peerNamespace != "" && reqUpdate.Namespace == r.peerNamespace {
-					namespace = r.namespace
-				} else {
-					namespace = reqUpdate.Namespace
-				}
+				// on the principal. The agent's newRequestUpdateFromObject resolves
+				// the OriginalNamespaceAnnotation into reqUpdate.Namespace, so the
+				// value already points to the correct principal-side namespace.
+				namespace = reqUpdate.Namespace
 			} else {
 				// With namespace-based mapping, applications on the principal are in the agent's namespace
 				namespace = agentName
