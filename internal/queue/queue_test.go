@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/stretchr/testify/assert"
 )
@@ -73,10 +74,34 @@ func Test_Queue(t *testing.T) {
 
 		// Since the queue is full, check if the oldest item is popped before adding a new item.
 		ev := event.New()
-		ev.SetID("1001")
+		ev.SetID(strconv.Itoa(defaultMaxQueueSize + 1))
 		queue.Add(&ev)
 		assert.Equal(t, defaultMaxQueueSize, queue.Len())
 		front, _ := queue.Get()
 		assert.Equal(t, "2", front.ID())
 	})
+
+	t.Run("Ensure that the queue size can be configured via environment variable", func(t *testing.T) {
+		queueSize := 100
+		t.Setenv(config.EnvQueueSize, strconv.Itoa(queueSize))
+		q := NewSendRecvQueues()
+		err := q.Create("agent1")
+		assert.NoError(t, err)
+		queue := q.RecvQ("agent1")
+
+		for i := 1; i <= queueSize; i++ {
+			ev := event.New()
+			ev.SetID(strconv.Itoa(i))
+			queue.Add(&ev)
+		}
+
+		// Since the queue is full, check if the oldest item is popped before adding a new item.
+		ev := event.New()
+		ev.SetID(strconv.Itoa(queueSize + 1))
+		queue.Add(&ev)
+		assert.Equal(t, queueSize, queue.Len())
+		front, _ := queue.Get()
+		assert.Equal(t, "2", front.ID())
+	})
+
 }
