@@ -451,15 +451,17 @@ func Test_StatusUpdateEvents(t *testing.T) {
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, updated.Status.Sync.Status)
 	})
 
-	t.Run("Destination-based mapping fallback remaps agent namespace without annotation", func(t *testing.T) {
+	t.Run("Destination-based mapping does not remap without annotation", func(t *testing.T) {
 		principalNs := "argocd"
 		agentNs := "argocd-agent"
 		agentName := "my-cluster"
 
+		// The app genuinely lives in the agent's namespace on both sides
+		// (no remapping occurred on the agent, so no annotation was stamped).
 		existingApp := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test",
-				Namespace: principalNs,
+				Namespace: agentNs,
 			},
 			Spec: v1alpha1.ApplicationSpec{
 				Source: &v1alpha1.ApplicationSource{
@@ -476,7 +478,6 @@ func Test_StatusUpdateEvents(t *testing.T) {
 		fac := kube.NewKubernetesFakeClientWithApps(principalNs, existingApp)
 
 		incomingApp := existingApp.DeepCopy()
-		incomingApp.SetNamespace(agentNs)
 		incomingApp.Status.Sync.Status = v1alpha1.SyncStatusCodeSynced
 
 		ev := cloudevents.NewEvent()
@@ -503,7 +504,9 @@ func Test_StatusUpdateEvents(t *testing.T) {
 		err = s.processApplicationEvent(ctx, agentName, &ev)
 		assert.NoError(t, err)
 
-		updated, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(principalNs).Get(ctx, "test", v1.GetOptions{})
+		// Without the annotation the namespace should NOT be remapped;
+		// the update must land in the agent's namespace.
+		updated, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(agentNs).Get(ctx, "test", v1.GetOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, updated.Status.Sync.Status)
 	})

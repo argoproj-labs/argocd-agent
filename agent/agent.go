@@ -141,7 +141,10 @@ type Agent struct {
 
 	// principalNamespace is the namespace where the principal is running.
 	// This is learned from the auth response during the initial handshake.
+	// Protected by principalNSMu because it is written during
+	// (re)authentication and read from event-processing goroutines.
 	principalNamespace string
+	principalNSMu      sync.RWMutex
 
 	// ignoreUnmanagedApps when true, resources without the source UID annotation
 	// will be silently skipped during resync instead of causing errors.
@@ -595,7 +598,9 @@ func (a *Agent) Start(ctx context.Context) error {
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
 		a.remote.SetOnAuthenticated(func(principalNs string) {
+			a.principalNSMu.Lock()
 			a.principalNamespace = principalNs
+			a.principalNSMu.Unlock()
 		})
 		// TODO: Right now, maintainConnection always returns nil. Revisit
 		// this.
@@ -603,6 +608,12 @@ func (a *Agent) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (a *Agent) principalNS() string {
+	a.principalNSMu.RLock()
+	defer a.principalNSMu.RUnlock()
+	return a.principalNamespace
 }
 
 func (a *Agent) Stop() error {

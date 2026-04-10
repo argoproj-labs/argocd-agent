@@ -794,9 +794,12 @@ func Test_ProcessRequestUpdateEvent_PeerNamespaceRemap(t *testing.T) {
 		handler.destinationBasedMapping = true
 		handler.peerNamespace = "argocd-agent"
 
+		// The agent's newRequestUpdateFromObject resolves the
+		// OriginalNamespaceAnnotation, so the RequestUpdate arrives with
+		// the principal-side namespace ("argocd"), not the agent's local one.
 		reqUpdate := &event.RequestUpdate{
 			Name:      "missing-app",
-			Namespace: "argocd-agent",
+			Namespace: "argocd",
 			Kind:      "Application",
 		}
 
@@ -836,6 +839,39 @@ func Test_ProcessRequestUpdateEvent_PeerNamespaceRemap(t *testing.T) {
 		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
 		assert.Nil(t, err)
 		assert.Zero(t, handler.sendQ.Len(), "checksum matches in tenant namespace, nothing to send")
+	})
+
+	t.Run("principal does not remap app in agent namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd-agent"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("argocd-agent").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		checksum, err := generateSpecChecksum(resource)
+		require.Nil(t, err)
+
+		// An app that genuinely lives in the agent's namespace on both
+		// sides (no remapping occurred, no annotation) must be looked up
+		// in the agent's namespace, not remapped to the principal's.
+		reqUpdate := &event.RequestUpdate{
+			Name:      "test-app",
+			Namespace: "argocd-agent",
+			Kind:      "Application",
+			Checksum:  checksum,
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len(), "checksum matches in agent namespace, nothing to send")
 	})
 }
 

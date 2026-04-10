@@ -545,7 +545,7 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent, a.namespace).
 		WithDestinationBasedMapping(a.destinationBasedMapping).
 		WithIgnoreUnmanagedApps(a.ignoreUnmanagedApps).
-		WithPeerNamespace(a.principalNamespace)
+		WithPeerNamespace(a.principalNS())
 	subject := &auth.AuthSubject{}
 	err = json.Unmarshal([]byte(a.remote.ClientID()), subject)
 	if err != nil {
@@ -1223,11 +1223,12 @@ func (a *Agent) deleteGPGKey(cm *corev1.ConfigMap) error {
 // annotation so that the principal can unambiguously remap it back later.
 func (a *Agent) getTargetNamespaceForApp(app *v1alpha1.Application) string {
 	if a.destinationBasedMapping && a.mode == types.AgentModeManaged {
-		if a.principalNamespace != "" && app.Namespace == a.principalNamespace {
+		principalNS := a.principalNS()
+		if principalNS != "" && app.Namespace == principalNS {
 			if app.Annotations == nil {
 				app.Annotations = make(map[string]string)
 			}
-			app.Annotations[manager.OriginalNamespaceAnnotation] = a.principalNamespace
+			app.Annotations[manager.OriginalNamespaceAnnotation] = principalNS
 			return a.namespace
 		}
 		return app.Namespace
