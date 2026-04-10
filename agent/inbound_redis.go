@@ -223,6 +223,12 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 			// If the connection has not been active for X minutes, close the connection
 			if time.Since(*lastPing) >= principalRedisConnectionTimeout {
 				pubsub.Close()
+
+				// Clean up the connection map entry to prevent memory accumulation
+				connLifecycle.lock.Lock()
+				delete(connLifecycle.connMap, rreq.ConnectionUUID)
+				connLifecycle.lock.Unlock()
+
 				logCtx.WithField(logfields.LastPing, lastPing).Trace("closing redis connection due to inactivity")
 				return
 			}

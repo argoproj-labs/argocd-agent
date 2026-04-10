@@ -85,8 +85,10 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 	logCtx.Trace("Grabbed an item")
 	if ev == nil {
 		// TODO: Is this really the right thing to do?
+		q.Done(ev)
 		return nil
 	}
+	defer q.Done(ev)
 	logCtx = logCtx.WithFields(logrus.Fields{
 		"event_target": ev.DataSchema(),
 		"event_type":   ev.Type(),
