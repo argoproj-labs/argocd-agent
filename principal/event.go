@@ -220,12 +220,19 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	}
 
 	// When destination-based mapping is active, the agent may send apps under
-	// its own installation namespace. Remap these apps to the principal's namespace.
-	// This is required when the principal and the agent are running in the same cluster.
+	// its own installation namespace. Use the original-namespace annotation
+	// (stamped by the agent when it remapped the app) to restore the correct
+	// namespace. Fall back to a peer-namespace comparison for agents that
+	// have not yet been upgraded to stamp the annotation.
 	if s.destinationBasedMapping && agentMode.IsManaged() {
-		agentNs := s.agentNamespace(agentName)
-		if agentNs != "" && incoming.Namespace == agentNs {
-			incoming.SetNamespace(s.namespace)
+		if originalNs, ok := incoming.Annotations[manager.OriginalNamespaceAnnotation]; ok {
+			incoming.SetNamespace(originalNs)
+			delete(incoming.Annotations, manager.OriginalNamespaceAnnotation)
+		} else {
+			agentNs := s.agentNamespace(agentName)
+			if agentNs != "" && incoming.Namespace == agentNs {
+				incoming.SetNamespace(s.namespace)
+			}
 		}
 	}
 
@@ -670,7 +677,8 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx, manager.ManagerRolePrincipal, s.namespace).
 		WithDestinationBasedMapping(s.destinationBasedMapping).
-		WithPrincipalUID(s.principalUID)
+		WithPrincipalUID(s.principalUID).
+		WithPeerNamespace(s.agentNamespace(agentName))
 
 	switch ev.Type() {
 	case event.SyncedResourceList.String():

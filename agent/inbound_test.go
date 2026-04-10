@@ -2163,24 +2163,37 @@ func Test_getTargetNamespaceForApp(t *testing.T) {
 		agentMode               types.AgentMode
 		appNamespace            string
 		expected                string
+		expectAnnotation        bool
 	}{
 		{
-			name:                    "Remaps principal namespace to agent namespace",
+			name:                    "Remaps principal namespace to agent namespace and stamps annotation",
 			agentNamespace:          "argocd-agent",
 			principalNamespace:      "argocd",
 			destinationBasedMapping: true,
 			agentMode:               types.AgentModeManaged,
 			appNamespace:            "argocd",
 			expected:                "argocd-agent",
+			expectAnnotation:        true,
 		},
 		{
-			name:                    "No remap when app namespace differs from principal",
+			name:                    "No remap and no annotation when app namespace differs from principal",
 			agentNamespace:          "argocd-agent",
 			principalNamespace:      "argocd",
 			destinationBasedMapping: true,
 			agentMode:               types.AgentModeManaged,
 			appNamespace:            "tenant-apps",
 			expected:                "tenant-apps",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Tenant namespace same as agent namespace gets no annotation",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd-agent",
+			expected:                "argocd-agent",
+			expectAnnotation:        false,
 		},
 		{
 			name:                    "Falls back to agent namespace without destination-based mapping",
@@ -2190,6 +2203,7 @@ func Test_getTargetNamespaceForApp(t *testing.T) {
 			agentMode:               types.AgentModeManaged,
 			appNamespace:            "argocd",
 			expected:                "argocd-agent",
+			expectAnnotation:        false,
 		},
 		{
 			name:                    "Falls back to agent namespace in autonomous mode",
@@ -2199,6 +2213,7 @@ func Test_getTargetNamespaceForApp(t *testing.T) {
 			agentMode:               types.AgentModeAutonomous,
 			appNamespace:            "argocd",
 			expected:                "argocd-agent",
+			expectAnnotation:        false,
 		},
 	}
 
@@ -2218,6 +2233,14 @@ func Test_getTargetNamespaceForApp(t *testing.T) {
 			}
 			result := a.getTargetNamespaceForApp(app)
 			assert.Equal(t, tt.expected, result)
+
+			annotation, hasAnnotation := app.Annotations[manager.OriginalNamespaceAnnotation]
+			if tt.expectAnnotation {
+				assert.True(t, hasAnnotation, "expected original-namespace annotation")
+				assert.Equal(t, tt.principalNamespace, annotation)
+			} else {
+				assert.False(t, hasAnnotation, "did not expect original-namespace annotation")
+			}
 		})
 	}
 }

@@ -927,7 +927,8 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 
 		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx, manager.ManagerRolePrincipal, s.namespace).
 			WithDestinationBasedMapping(s.destinationBasedMapping).
-			WithPrincipalUID(s.principalUID)
+			WithPrincipalUID(s.principalUID).
+			WithPeerNamespace(s.agentNamespace(agent.Name()))
 		go resyncHandler.SendRequestUpdates(s.ctx)
 
 		// Principal should request SyncedResourceList to revert any deletions on the Principal side.
