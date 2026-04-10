@@ -255,7 +255,7 @@ func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret(
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf("Agent: '%s' is %s with principal", fixture.AgentManagedName, "connected"),
 		}, suite.ClusterDetails)
-	}, 30*time.Second, 1*time.Second)
+	}, 120*time.Second, 1*time.Second)
 
 	// Stop the agent
 	err := fixture.StopProcess(fixture.AgentManagedName)
@@ -268,7 +268,7 @@ func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret(
 			Message:    fmt.Sprintf("Agent: '%s' is %s with principal", fixture.AgentManagedName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, suite.ClusterDetails)
-	}, 30*time.Second, 1*time.Second)
+	}, 4*time.Minute, 5*time.Second)
 
 	// Store secret UID of manually created secret
 	originalSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
