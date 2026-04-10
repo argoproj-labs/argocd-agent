@@ -16,6 +16,7 @@ package event
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -286,6 +287,40 @@ func TestEventWriter(t *testing.T) {
 		require.Equal(t, 1, sentMsg.retryCount)
 	})
 
+	t.Run("should refresh sent timestamp on retries", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+		evSender.sendEvent(resID)
+
+		sentMsg := evSender.sentEvents[resID]
+		require.NotNil(t, sentMsg)
+
+		sentMsg.mu.RLock()
+		firstSentAt := SentAt(sentMsg.event)
+		sentMsg.mu.RUnlock()
+		require.NotNil(t, firstSentAt)
+
+		time.Sleep(5 * time.Millisecond)
+
+		pastTime := time.Now().Add(-1 * time.Second)
+		sentMsg.mu.Lock()
+		sentMsg.retryAfter = &pastTime
+		sentMsg.mu.Unlock()
+
+		evSender.retrySentEvent(resID, sentMsg)
+		require.Len(t, fs.events[resID], 2)
+
+		sentMsg.mu.RLock()
+		retriedSentAt := SentAt(sentMsg.event)
+		sentMsg.mu.RUnlock()
+		require.NotNil(t, retriedSentAt)
+		require.True(t, retriedSentAt.After(*firstSentAt))
+	})
+
 	t.Run("should give up after max retries", func(t *testing.T) {
 		fs := &fakeStream{}
 		evSender := NewEventWriter(fs)
@@ -475,16 +510,150 @@ func TestEventWriter(t *testing.T) {
 		eventID := EventID(latestEvent.event)
 		require.Contains(t, eventID, "_5") // Should be version 5
 	})
+
+	t.Run("should refresh writer dwell timestamp when coalescing the queue tail", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+
+		app1.ResourceVersion = "1"
+		firstEvent := es.ApplicationEvent(SpecUpdate, app1)
+		evSender.Add(firstEvent)
+
+		firstMsg := evSender.Get(createResourceID(app1.ObjectMeta))
+		require.NotNil(t, firstMsg)
+		firstMsg.mu.RLock()
+		firstWriterAddedAt := firstMsg.writerAddedAt
+		firstMsg.mu.RUnlock()
+		require.False(t, firstWriterAddedAt.IsZero())
+
+		time.Sleep(5 * time.Millisecond)
+
+		app1.ResourceVersion = "2"
+		secondEvent := es.ApplicationEvent(SpecUpdate, app1)
+		evSender.Add(secondEvent)
+
+		coalescedMsg := evSender.Get(createResourceID(app1.ObjectMeta))
+		require.NotNil(t, coalescedMsg)
+		coalescedMsg.mu.RLock()
+		coalescedWriterAddedAt := coalescedMsg.writerAddedAt
+		eventID := EventID(coalescedMsg.event)
+		coalescedMsg.mu.RUnlock()
+
+		require.True(t, coalescedWriterAddedAt.After(firstWriterAddedAt))
+		require.Contains(t, eventID, "_2")
+	})
+
+	t.Run("should observe event writer dwell when metrics are attached", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+		hopMetrics := &fakeOutboundHopMetrics{}
+		evSender.SetMetrics(hopMetrics)
+
+		ev := es.ApplicationEvent(Create, app1)
+		evSender.Add(ev)
+		time.Sleep(5 * time.Millisecond)
+
+		evSender.sendEvent(createResourceID(app1.ObjectMeta))
+
+		require.Len(t, hopMetrics.eventWriterDwell, 1)
+		require.Equal(t, TargetApplication.String(), hopMetrics.eventWriterDwell[0].resourceType)
+		require.GreaterOrEqual(t, hopMetrics.eventWriterDwell[0].seconds, 0.0)
+	})
+
+	t.Run("should not observe event writer dwell when send fails", func(t *testing.T) {
+		fs := &fakeStream{sendErr: errors.New("boom")}
+		evSender := NewEventWriter(fs)
+		hopMetrics := &fakeOutboundHopMetrics{}
+		evSender.SetMetrics(hopMetrics)
+
+		ev := es.ApplicationEvent(Create, app1)
+		evSender.Add(ev)
+		time.Sleep(5 * time.Millisecond)
+
+		evSender.sendEvent(createResourceID(app1.ObjectMeta))
+
+		require.Empty(t, hopMetrics.eventWriterDwell)
+	})
+
+	t.Run("should observe event writer dwell on first successful retry", func(t *testing.T) {
+		fs := &fakeStream{sendErrs: []error{errors.New("boom")}}
+		evSender := NewEventWriter(fs)
+		hopMetrics := &fakeOutboundHopMetrics{}
+		evSender.SetMetrics(hopMetrics)
+
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+		time.Sleep(5 * time.Millisecond)
+
+		evSender.sendEvent(resID)
+		require.Empty(t, hopMetrics.eventWriterDwell)
+
+		sentMsg := evSender.sentEvents[resID]
+		require.NotNil(t, sentMsg)
+
+		pastTime := time.Now().Add(-1 * time.Second)
+		sentMsg.mu.Lock()
+		sentMsg.retryAfter = &pastTime
+		sentMsg.mu.Unlock()
+
+		evSender.retrySentEvent(resID, sentMsg)
+
+		require.Len(t, hopMetrics.eventWriterDwell, 1)
+		require.Equal(t, TargetApplication.String(), hopMetrics.eventWriterDwell[0].resourceType)
+	})
+
+	t.Run("should observe event writer dwell only once across retries", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+		hopMetrics := &fakeOutboundHopMetrics{}
+		evSender.SetMetrics(hopMetrics)
+
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+		time.Sleep(5 * time.Millisecond)
+
+		evSender.sendEvent(resID)
+		require.Len(t, hopMetrics.eventWriterDwell, 1)
+
+		sentMsg := evSender.sentEvents[resID]
+		require.NotNil(t, sentMsg)
+
+		pastTime := time.Now().Add(-1 * time.Second)
+		sentMsg.mu.Lock()
+		sentMsg.retryAfter = &pastTime
+		sentMsg.mu.Unlock()
+
+		evSender.retrySentEvent(resID, sentMsg)
+
+		require.Len(t, hopMetrics.eventWriterDwell, 1)
+	})
 }
 
 type fakeStream struct {
-	mu     sync.RWMutex
-	events map[string][]string
+	mu       sync.RWMutex
+	events   map[string][]string
+	sendErr  error
+	sendErrs []error
 }
 
 func (fs *fakeStream) Send(event *eventstreamapi.Event) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
+
+	if len(fs.sendErrs) > 0 {
+		err := fs.sendErrs[0]
+		fs.sendErrs = fs.sendErrs[1:]
+		if err != nil {
+			return err
+		}
+	}
+
+	if fs.sendErr != nil {
+		return fs.sendErr
+	}
+
 	ev, err := FromWire(event.Event)
 	if err != nil {
 		return err
@@ -501,3 +670,26 @@ func (fs *fakeStream) Send(event *eventstreamapi.Event) error {
 func (fs *fakeStream) Context() context.Context {
 	return context.Background()
 }
+
+type fakeOutboundHopMetrics struct {
+	mu               sync.Mutex
+	eventWriterDwell []metricObservation
+}
+
+type metricObservation struct {
+	resourceType string
+	seconds      float64
+}
+
+func (f *fakeOutboundHopMetrics) ObserveSendQueueDwell(string, float64) {}
+
+func (f *fakeOutboundHopMetrics) ObserveEventWriterDwell(resourceType string, seconds float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.eventWriterDwell = append(f.eventWriterDwell, metricObservation{
+		resourceType: resourceType,
+		seconds:      seconds,
+	})
+}
+
+func (f *fakeOutboundHopMetrics) ObserveAckRoundtrip(string, float64) {}

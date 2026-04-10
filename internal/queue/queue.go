@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sync"
 
+	aeevent "github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -69,6 +70,7 @@ func (bq *boundedQueue) Add(item *event.Event) {
 		bq.Done(old)
 	}
 
+	aeevent.SetEnqueuedAt(item)
 	bq.TypedRateLimitingInterface.Add(item)
 
 	// Notify any waiting goroutines that an item has been added to the queue.

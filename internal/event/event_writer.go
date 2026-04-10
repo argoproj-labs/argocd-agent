@@ -8,6 +8,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -43,7 +44,18 @@ type EventWriter struct {
 	// target refers to the specified gRPC stream.
 	target streamWriter
 
+	// outboundMetrics is optional; when set, hop-by-hop writer dwell is observed.
+	outboundMetrics metrics.OutboundHopMetrics
+
 	log *logrus.Entry
+}
+
+// SetMetrics attaches outbound hop metrics to this EventWriter so it can observe
+// EventWriterDwell latency. Safe to call at any time.
+func (ew *EventWriter) SetMetrics(m metrics.OutboundHopMetrics) {
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+	ew.outboundMetrics = m
 }
 
 type eventMessage struct {
@@ -63,6 +75,14 @@ type eventMessage struct {
 
 	// track number of retries attempted
 	retryCount int
+
+	// time when the current queued event was added to the EventWriter; this is
+	// refreshed when tail coalescing replaces the queued event with a newer one.
+	writerAddedAt time.Time
+
+	// writerDwellObserved ensures dwell is only emitted once, including messages
+	// that succeed on a retry after an initial send failure.
+	writerDwellObserved bool
 }
 
 func NewEventWriter(target streamWriter) *EventWriter {
@@ -113,14 +133,17 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 		return
 	}
 
+	now := time.Now()
+
 	// Once an app is being deleted, no other updates matter
 	if ev.Type() == Delete.String() {
 		delete(ew.sentEvents, resID)
 		// Clear any existing unsent events and add only the DELETE event
 		eq := newEventQueue()
 		eq.add(&eventMessage{
-			event:   ev,
-			backoff: &defaultBackoff,
+			event:         ev,
+			backoff:       &defaultBackoff,
+			writerAddedAt: now,
 		})
 		ew.unsentEvents[resID] = eq
 		logCtx.Trace("cleared all events and added DELETE event")
@@ -132,8 +155,9 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	if !exists {
 		eq = newEventQueue()
 		eq.add(&eventMessage{
-			event:   ev,
-			backoff: &defaultBackoff,
+			event:         ev,
+			backoff:       &defaultBackoff,
+			writerAddedAt: now,
 		})
 		ew.unsentEvents[resID] = eq
 		logCtx.Trace("added a new event to the event writer")
@@ -142,9 +166,10 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 
 	// The queue's add() coalesces events of the same type.
 	eq.add(&eventMessage{
-		event:      ev,
-		backoff:    &defaultBackoff,
-		retryAfter: nil,
+		event:         ev,
+		backoff:       &defaultBackoff,
+		retryAfter:    nil,
+		writerAddedAt: now,
 	})
 
 	logCtx.Trace("updated an existing event in the event writer")
@@ -164,6 +189,24 @@ func (ew *EventWriter) Get(resID string) *eventMessage {
 		return eq.get()
 	}
 	return nil
+}
+
+// SentResourceType returns the resource type for an in-flight sent event, or an
+// empty string if the event is not currently awaiting an ACK.
+func (ew *EventWriter) SentResourceType(resID string) string {
+	ew.mu.RLock()
+	msg, exists := ew.sentEvents[resID]
+	ew.mu.RUnlock()
+	if !exists || msg == nil {
+		return ""
+	}
+
+	msg.mu.RLock()
+	defer msg.mu.RUnlock()
+	if msg.event == nil {
+		return ""
+	}
+	return msg.event.DataSchema()
 }
 
 func (ew *EventWriter) Remove(ev *cloudevents.Event) {
@@ -311,6 +354,7 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 	sentMsg.retryAfter = &retryAfter
 
 	// Resend the event
+	SetSentAt(sentMsg.event)
 	pev, err := format.ToProto(sentMsg.event)
 	if err != nil {
 		logCtx.Errorf("Could not wire event: %v\n", err)
@@ -326,6 +370,7 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 		return
 	}
 
+	ew.observeEventWriterDwell(sentMsg)
 	logCtx.Trace("event sent to target")
 }
 
@@ -335,6 +380,28 @@ func (ew *EventWriter) scheduleRetry(eventMsg *eventMessage) {
 	defer eventMsg.mu.Unlock()
 	retryAfter := time.Now().Add(eventMsg.backoff.Step())
 	eventMsg.retryAfter = &retryAfter
+}
+
+func (ew *EventWriter) observeEventWriterDwell(eventMsg *eventMessage) {
+	ew.mu.RLock()
+	m := ew.outboundMetrics
+	ew.mu.RUnlock()
+	if m == nil {
+		return
+	}
+
+	eventMsg.mu.Lock()
+	if eventMsg.writerDwellObserved || eventMsg.writerAddedAt.IsZero() || eventMsg.event == nil {
+		eventMsg.mu.Unlock()
+		return
+	}
+
+	eventMsg.writerDwellObserved = true
+	resourceType := eventMsg.event.DataSchema()
+	addedAt := eventMsg.writerAddedAt
+	eventMsg.mu.Unlock()
+
+	m.ObserveEventWriterDwell(resourceType, time.Since(addedAt).Seconds())
 }
 
 // sendUnsentEvent pops an event from the unsent queue and sends it for the first time
@@ -403,6 +470,10 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	if err != nil {
 		logCtx.Errorf("Error while sending: %v\n", err)
 		return
+	}
+
+	if !isFireAndForget {
+		ew.observeEventWriterDwell(eventMsg)
 	}
 
 	logCtx.Trace("event sent to target")
@@ -481,6 +552,7 @@ func (eq *eventQueue) add(ev *eventMessage) {
 			tail.event = ev.event
 			tail.backoff = ev.backoff
 			tail.retryAfter = ev.retryAfter
+			tail.writerAddedAt = ev.writerAddedAt
 			tail.mu.Unlock()
 			return
 		}
