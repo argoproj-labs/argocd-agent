@@ -73,6 +73,11 @@ type RequestHandler struct {
 	// principalUID is stamped on outgoing events so that agents can detect
 	// principal transitions during resync after a failover.
 	principalUID string
+
+	// peerNamespace is the Kubernetes namespace where the peer (agent or principal)
+	// is installed. Used with destinationBasedMapping to remap namespaces
+	// during resync lookups when agent and principal are in different namespaces.
+	peerNamespace string
 }
 
 func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLimitingInterface[*cloudevent.Event], events *event.EventSource, resources *resources.Resources, log *logrus.Entry, role manager.ManagerRole, namespace string) *RequestHandler {
@@ -96,10 +101,14 @@ func (r *RequestHandler) WithPrincipalUID(uid string) *RequestHandler {
 }
 
 // WithDestinationBasedMapping sets whether destination-based mapping is enabled.
-// When enabled, the handler will use the namespace from requests instead of
-// assuming the agent name equals the namespace for Applications.
 func (r *RequestHandler) WithDestinationBasedMapping(enabled bool) *RequestHandler {
 	r.destinationBasedMapping = enabled
+	return r
+}
+
+// WithPeerNamespace sets the namespace of the peer (agent or principal).
+func (r *RequestHandler) WithPeerNamespace(ns string) *RequestHandler {
+	r.peerNamespace = ns
 	return r
 }
 
@@ -161,9 +170,18 @@ func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, inco
 		return err
 	}
 
+	// When destination-based mapping is active the peer may report its own
+	// namespace for apps that live in our namespace. Remap for the local lookup.
+	lookupNamespace := incoming.Namespace
+	if r.destinationBasedMapping && incoming.Kind == "Application" {
+		if r.peerNamespace != "" && incoming.Namespace == r.peerNamespace {
+			lookupNamespace = r.namespace
+		}
+	}
+
 	// Check if the given resource exists locally
 	resClient := r.dynClient.Resource(gvr)
-	res, err := resClient.Namespace(incoming.Namespace).Get(ctx, incoming.Name, v1.GetOptions{})
+	res, err := resClient.Namespace(lookupNamespace).Get(ctx, incoming.Name, v1.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return err
@@ -271,8 +289,10 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 	case "Application":
 		if r.role == manager.ManagerRolePrincipal {
 			if r.destinationBasedMapping {
-				// With destination-based mapping, applications can be in any namespace on the principal.
-				// Use the namespace from the request, which reflects where the app actually lives.
+				// With destination-based mapping, applications can be in any namespace
+				// on the principal. The agent's newRequestUpdateFromObject resolves
+				// the OriginalNamespaceAnnotation into reqUpdate.Namespace, so the
+				// value already points to the correct principal-side namespace.
 				namespace = reqUpdate.Namespace
 			} else {
 				// With namespace-based mapping, applications on the principal are in the agent's namespace
@@ -522,7 +542,15 @@ func newRequestUpdateFromObject(res *unstructured.Unstructured, kind string) (*e
 		return nil, fmt.Errorf("failed to generate checksum for resource %s/%s: %w", res.GetKind(), res.GetName(), err)
 	}
 
-	reqUpdate := event.NewRequestUpdate(res.GetName(), res.GetNamespace(), kind, sourceUID, checksum[:])
+	// If the agent remapped this app's namespace, the original-namespace
+	// annotation records where the app lives on the peer. Use that so the
+	// peer can look it up in the correct namespace without guessing.
+	namespace := res.GetNamespace()
+	if originalNs, found := annotations[manager.OriginalNamespaceAnnotation]; found && kind == "Application" {
+		namespace = originalNs
+	}
+
+	reqUpdate := event.NewRequestUpdate(res.GetName(), namespace, kind, sourceUID, checksum[:])
 	return reqUpdate, nil
 }
 

@@ -331,6 +331,34 @@ func Test_newRequestUpdateFromObject(t *testing.T) {
 		assert.Equal(t, "source-uid-123", reqUpdate.UID)
 		assert.NotEmpty(t, reqUpdate.Checksum)
 	})
+
+	t.Run("use original-namespace annotation for Application namespace", func(t *testing.T) {
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation:         "source-uid-123",
+			manager.OriginalNamespaceAnnotation: "argocd",
+		})
+
+		reqUpdate, err := newRequestUpdateFromObject(resource, "Application")
+		assert.Nil(t, err)
+		assert.NotNil(t, reqUpdate)
+		assert.Equal(t, "argocd", reqUpdate.Namespace, "should use original-namespace annotation")
+	})
+
+	t.Run("ignore original-namespace annotation for non-Application kinds", func(t *testing.T) {
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation:         "source-uid-123",
+			manager.OriginalNamespaceAnnotation: "argocd",
+		})
+
+		reqUpdate, err := newRequestUpdateFromObject(resource, "AppProject")
+		assert.Nil(t, err)
+		assert.NotNil(t, reqUpdate)
+		assert.Equal(t, "argocd-agent", reqUpdate.Namespace, "non-Application kinds should ignore the annotation")
+	})
 }
 
 func Test_sendRequestUpdate(t *testing.T) {
@@ -719,6 +747,206 @@ func Test_ProcessRequestUpdateEvent_GPGKey(t *testing.T) {
 		ev, shutdown := handler.sendQ.Get()
 		assert.False(t, shutdown)
 		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+	})
+}
+
+func Test_ProcessRequestUpdateEvent_PeerNamespaceRemap(t *testing.T) {
+	ctx := context.Background()
+	gvr, err := getGroupVersionResource("Application")
+	require.Nil(t, err)
+
+	t.Run("annotation-resolved namespace finds app on principal", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd-agent"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("argocd").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		checksum, err := generateSpecChecksum(resource)
+		require.Nil(t, err)
+
+		// newRequestUpdateFromObject resolves the original-namespace annotation,
+		// so the RequestUpdate already carries the correct principal namespace.
+		reqUpdate := &event.RequestUpdate{
+			Name:      "test-app",
+			Namespace: "argocd",
+			Kind:      "Application",
+			Checksum:  checksum,
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len(), "checksum matches, nothing to send")
+	})
+
+	t.Run("principal sends delete when app truly missing after remap", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd-agent"
+
+		// The agent's newRequestUpdateFromObject resolves the
+		// OriginalNamespaceAnnotation, so the RequestUpdate arrives with
+		// the principal-side namespace ("argocd"), not the agent's local one.
+		reqUpdate := &event.RequestUpdate{
+			Name:      "missing-app",
+			Namespace: "argocd",
+			Kind:      "Application",
+		}
+
+		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type())
+	})
+
+	t.Run("principal does not remap tenant namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd-agent"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("tenant-apps")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("tenant-apps").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		checksum, err := generateSpecChecksum(resource)
+		require.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "test-app",
+			Namespace: "tenant-apps",
+			Kind:      "Application",
+			Checksum:  checksum,
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len(), "checksum matches in tenant namespace, nothing to send")
+	})
+
+	t.Run("principal does not remap app in agent namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd-agent"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("argocd-agent").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		checksum, err := generateSpecChecksum(resource)
+		require.Nil(t, err)
+
+		// An app that genuinely lives in the agent's namespace on both
+		// sides (no remapping occurred, no annotation) must be looked up
+		// in the agent's namespace, not remapped to the principal's.
+		reqUpdate := &event.RequestUpdate{
+			Name:      "test-app",
+			Namespace: "argocd-agent",
+			Kind:      "Application",
+			Checksum:  checksum,
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len(), "checksum matches in agent namespace, nothing to send")
+	})
+}
+
+func Test_ProcessIncomingSyncedResource_PeerNamespaceRemap(t *testing.T) {
+	ctx := context.Background()
+	gvr, err := getGroupVersionResource("Application")
+	require.Nil(t, err)
+
+	t.Run("agent remaps principal namespace to its own namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd-agent"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation:         "source-uid",
+			manager.OriginalNamespaceAnnotation: "argocd",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("argocd-agent").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		incoming := &event.SyncedResource{
+			Name:      "test-app",
+			Namespace: "argocd",
+			Kind:      "Application",
+			UID:       "test-uid",
+		}
+
+		err = handler.ProcessIncomingSyncedResource(ctx, incoming, testAgentName)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestUpdate.String(), ev.Type())
+
+		got := &event.RequestUpdate{}
+		err = ev.DataAs(got)
+		assert.Nil(t, err)
+		assert.NotEmpty(t, got.Checksum, "should have checksum because app was found after remap")
+		assert.Equal(t, "argocd", got.Namespace, "emitted RequestUpdate must carry the principal namespace via the annotation")
+	})
+
+	t.Run("agent does not remap tenant namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd-agent"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("tenant-apps")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("tenant-apps").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		incoming := &event.SyncedResource{
+			Name:      "test-app",
+			Namespace: "tenant-apps",
+			Kind:      "Application",
+			UID:       "test-uid",
+		}
+
+		err = handler.ProcessIncomingSyncedResource(ctx, incoming, testAgentName)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+
+		got := &event.RequestUpdate{}
+		err = ev.DataAs(got)
+		assert.Nil(t, err)
+		assert.NotEmpty(t, got.Checksum, "should have checksum because app was found in tenant namespace")
 	})
 }
 
