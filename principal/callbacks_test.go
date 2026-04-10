@@ -23,6 +23,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
@@ -43,6 +44,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/util/workqueue"
 )
 
@@ -2729,6 +2731,339 @@ func TestServer_deleteRepositoryCallback_ForwardsToHA(t *testing.T) {
 
 	after := components.ReplicationForwarder.CurrentSequenceNum()
 	assert.Greater(t, after, before, "forwarding should increment sequence number")
+}
+
+func TestServer_deleteAppProjectCallback_SyncsRepositories(t *testing.T) {
+	t.Run("deleting project sends repo delete events to agents", func(t *testing.T) {
+		repoSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte("test-project"), "url": []byte("https://example.com/repo.git")},
+		}
+
+		mockProjectBackend := &mocks.AppProject{}
+		mockProjectBackend.On("Get", mock.Anything, "test-project", "argocd").
+			Return(nil, errors.NewNotFound(schema.GroupResource{}, "test-project"))
+
+		projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+			projectManager: projectManager,
+			resources:      resources.NewAgentResources(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset(repoSecret)},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+		s.repoToAgents.Add("test-repo", "agent1")
+		s.projectToRepos.Add("test-project", "test-repo")
+
+		appProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+				SourceNamespaces: []string{"agent1"},
+			},
+		}
+
+		s.deleteAppProjectCallback(appProject)
+
+		q := s.queues.SendQ("agent1")
+		require.NotNil(t, q)
+
+		var deleteCount, appProjectDeleteCount int
+		for q.Len() > 0 {
+			ev, shutdown := q.Get()
+			require.False(t, shutdown)
+			switch ev.DataSchema() {
+			case "repository":
+				assert.Equal(t, event.Delete.String(), ev.Type())
+				deleteCount++
+			case "appproject":
+				appProjectDeleteCount++
+			}
+			q.Done(ev)
+		}
+		assert.Equal(t, 1, deleteCount, "Should have 1 repo delete event from syncRepositoriesForProject")
+		assert.Equal(t, 1, appProjectDeleteCount, "Should have 1 appproject delete event")
+
+		assert.Empty(t, s.repoToAgents.Get("test-repo"), "Repo-to-agents mapping should be cleaned up")
+
+		mockProjectBackend.AssertExpectations(t)
+	})
+
+	t.Run("deleting project with multiple repos and agents", func(t *testing.T) {
+		repo1 := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "repo-1", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte("multi-project"), "url": []byte("https://example.com/repo1.git")},
+		}
+		repo2 := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "repo-2", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte("multi-project"), "url": []byte("https://example.com/repo2.git")},
+		}
+
+		mockProjectBackend := &mocks.AppProject{}
+		mockProjectBackend.On("Get", mock.Anything, "multi-project", "argocd").
+			Return(nil, errors.NewNotFound(schema.GroupResource{}, "multi-project"))
+
+		projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged, "agent2": types.AgentModeManaged},
+			projectManager: projectManager,
+			resources:      resources.NewAgentResources(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset(repo1, repo2)},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+		require.NoError(t, s.queues.Create("agent2"))
+
+		s.repoToAgents.Add("repo-1", "agent1")
+		s.repoToAgents.Add("repo-1", "agent2")
+		s.repoToAgents.Add("repo-2", "agent1")
+		s.projectToRepos.Add("multi-project", "repo-1")
+		s.projectToRepos.Add("multi-project", "repo-2")
+
+		appProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "multi-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent*"}},
+				SourceNamespaces: []string{"agent1", "agent2"},
+			},
+		}
+
+		s.deleteAppProjectCallback(appProject)
+
+		repoDeleteEvents := map[string]int{}
+		for _, agentName := range []string{"agent1", "agent2"} {
+			q := s.queues.SendQ(agentName)
+			for q.Len() > 0 {
+				ev, _ := q.Get()
+				if ev.DataSchema() == "repository" && ev.Type() == event.Delete.String() {
+					repoDeleteEvents[agentName]++
+				}
+				q.Done(ev)
+			}
+		}
+		assert.Equal(t, 2, repoDeleteEvents["agent1"], "agent1 should get delete events for both repos")
+		assert.Equal(t, 1, repoDeleteEvents["agent2"], "agent2 should get delete event for repo-1")
+
+		assert.Empty(t, s.repoToAgents.Get("repo-1"))
+		assert.Empty(t, s.repoToAgents.Get("repo-2"))
+	})
+
+	t.Run("deleting project with missing repo secret logs error and continues", func(t *testing.T) {
+		existingRepo := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "existing-repo", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte("test-project"), "url": []byte("https://example.com/repo.git")},
+		}
+
+		mockProjectBackend := &mocks.AppProject{}
+		mockProjectBackend.On("Get", mock.Anything, "test-project", "argocd").
+			Return(nil, errors.NewNotFound(schema.GroupResource{}, "test-project"))
+
+		projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+		require.NoError(t, err)
+
+		// Only "existing-repo" is in the fake client; "deleted-repo" is not
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+			projectManager: projectManager,
+			resources:      resources.NewAgentResources(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset(existingRepo)},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+
+		// Stale mapping entry: "deleted-repo" no longer exists in the cluster
+		s.repoToAgents.Add("deleted-repo", "agent1")
+		s.repoToAgents.Add("existing-repo", "agent1")
+		s.projectToRepos.Add("test-project", "deleted-repo")
+		s.projectToRepos.Add("test-project", "existing-repo")
+
+		appProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+				SourceNamespaces: []string{"agent1"},
+			},
+		}
+
+		s.deleteAppProjectCallback(appProject)
+
+		q := s.queues.SendQ("agent1")
+		var repoDeleteCount int
+		for q.Len() > 0 {
+			ev, _ := q.Get()
+			if ev.DataSchema() == "repository" && ev.Type() == event.Delete.String() {
+				repoDeleteCount++
+			}
+			q.Done(ev)
+		}
+		assert.Equal(t, 1, repoDeleteCount, "Should still process existing-repo even when deleted-repo is missing")
+		assert.Empty(t, s.repoToAgents.Get("existing-repo"), "Existing repo mapping should be cleaned up")
+		assert.Equal(t, map[string]bool{"agent1": true}, s.repoToAgents.Get("deleted-repo"),
+			"Stale mapping for missing repo should remain since it was never processed")
+	})
+
+	t.Run("deleting project with no repos in mapping is a no-op for repos", func(t *testing.T) {
+		mockProjectBackend := &mocks.AppProject{}
+		projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+			projectManager: projectManager,
+			resources:      resources.NewAgentResources(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset()},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+
+		appProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "empty-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+				SourceNamespaces: []string{"agent1"},
+			},
+		}
+
+		s.deleteAppProjectCallback(appProject)
+
+		q := s.queues.SendQ("agent1")
+		var repoDeleteCount int
+		for q.Len() > 0 {
+			ev, _ := q.Get()
+			if ev.DataSchema() == "repository" {
+				repoDeleteCount++
+			}
+			q.Done(ev)
+		}
+		assert.Equal(t, 0, repoDeleteCount, "No repo events when project has no repos")
+	})
+}
+
+func TestServer_updateAppProjectCallback_SyncsRepositories(t *testing.T) {
+	t.Run("updating project rules reconciles repos to agents", func(t *testing.T) {
+		repoSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte("test-project"), "url": []byte("https://example.com/repo.git")},
+		}
+
+		// After update, the project only includes agent1
+		updatedProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+				SourceNamespaces: []string{"agent1"},
+			},
+		}
+		mockProjectBackend := &mocks.AppProject{}
+		mockProjectBackend.On("Get", mock.Anything, "test-project", "argocd").Return(updatedProject, nil)
+
+		projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged, "agent2": types.AgentModeManaged},
+			projectManager: projectManager,
+			resources:      resources.NewAgentResources(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset(repoSecret)},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+		require.NoError(t, s.queues.Create("agent2"))
+
+		// Before update: repo was on both agents
+		s.repoToAgents.Add("test-repo", "agent1")
+		s.repoToAgents.Add("test-repo", "agent2")
+		s.projectToRepos.Add("test-project", "test-repo")
+
+		oldProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent*"}},
+				SourceNamespaces: []string{"agent1", "agent2"},
+			},
+		}
+
+		s.updateAppProjectCallback(oldProject, updatedProject)
+
+		// agent2 should receive a repo delete event from syncRepositoriesForProject
+		q2 := s.queues.SendQ("agent2")
+		var agent2RepoDeletes int
+		for q2.Len() > 0 {
+			ev, _ := q2.Get()
+			if ev.DataSchema() == "repository" && ev.Type() == event.Delete.String() {
+				agent2RepoDeletes++
+			}
+			q2.Done(ev)
+		}
+		assert.Equal(t, 1, agent2RepoDeletes, "agent2 should get a repo delete event after losing project access")
+
+		// agent1 should receive a repo update event from syncRepositoriesForProject
+		q1 := s.queues.SendQ("agent1")
+		var agent1RepoUpdates int
+		for q1.Len() > 0 {
+			ev, _ := q1.Get()
+			if ev.DataSchema() == "repository" && ev.Type() == event.SpecUpdate.String() {
+				agent1RepoUpdates++
+			}
+			q1.Done(ev)
+		}
+		assert.Equal(t, 1, agent1RepoUpdates, "agent1 should get a repo update event to stay in sync")
+
+		assert.False(t, s.repoToAgents.Get("test-repo")["agent2"], "agent2 should be removed from repo mapping")
+		assert.True(t, s.repoToAgents.Get("test-repo")["agent1"], "agent1 should remain in repo mapping")
+	})
+}
+
+func TestServer_syncRepositoriesForProject(t *testing.T) {
+	t.Run("non-existent project should not panic", func(t *testing.T) {
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset()},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+		logCtx := logrus.WithField("test", "syncRepositoriesForProject")
+
+		// Should not panic
+		s.syncRepositoriesForProject(context.Background(), "nonexistent-project", "argocd", logCtx)
+
+		q := s.queues.SendQ("agent1")
+		assert.Equal(t, 0, q.Len())
+	})
 }
 
 func TestServer_syncRepositoryUpdatesToAgents_ForwardsToHA(t *testing.T) {

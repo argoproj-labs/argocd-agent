@@ -54,6 +54,24 @@ func TestDefaultFilterChain_RepositoryFiltering(t *testing.T) {
 			reason:   "Valid repository secret with all required fields",
 		},
 		{
+			name: "Valid repo-creds secret should be admitted",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-repo-creds",
+					Namespace: namespace,
+					Labels: map[string]string{
+						common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds,
+					},
+				},
+				Data: map[string][]byte{
+					"project": []byte("default"),
+					"url":     []byte("https://github.com/example/"),
+				},
+			},
+			expected: true,
+			reason:   "Valid repo-creds secret with all required fields",
+		},
+		{
 			name: "Repository secret with skip sync label=true should be rejected",
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
@@ -208,6 +226,24 @@ func TestIsValidRepositorySecret(t *testing.T) {
 			},
 			expected: true,
 			reason:   "Should accept valid repository secret",
+		},
+		{
+			name: "Valid repo-creds secret",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-repo-creds",
+					Namespace: namespace,
+					Labels: map[string]string{
+						common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds,
+					},
+				},
+				Data: map[string][]byte{
+					"project": []byte("my-project"),
+					"url":     []byte("https://github.com/example/"),
+				},
+			},
+			expected: true,
+			reason:   "Should accept valid repo-creds secret",
 		},
 		{
 			name: "Repository secret with skip sync label (should still be valid at this level)",

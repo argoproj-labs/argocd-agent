@@ -373,58 +373,53 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		}
 	}
 
-	repoLabelSelector := metav1.LabelSelector{
-		MatchLabels: map[string]string{
-			common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
-		},
-	}
-	repoListOpts := metav1.ListOptions{
-		LabelSelector: labels.SelectorFromSet(repoLabelSelector.MatchLabels).String(),
-	}
+	// Delete all repository and repo-creds secrets from all clusters
+	for _, secretType := range []string{common.LabelValueSecretTypeRepository, common.LabelValueSecretTypeRepoCreds} {
+		repoListOpts := metav1.ListOptions{
+			LabelSelector: labels.SelectorFromSet(map[string]string{
+				common.LabelKeySecretType: secretType,
+			}).String(),
+		}
 
-	// Delete all repositories from the principal
-	repoList := corev1.SecretList{}
-	err = principalClient.List(ctx, "argocd", &repoList, repoListOpts)
-	if err != nil {
-		return err
-	}
-	for _, repo := range repoList.Items {
-		err = EnsureDeletion(ctx, principalClient, &repo)
+		repoList := corev1.SecretList{}
+		err = principalClient.List(ctx, "argocd", &repoList, repoListOpts)
 		if err != nil {
 			return err
 		}
+		for _, repo := range repoList.Items {
+			err = EnsureDeletion(ctx, principalClient, &repo)
+			if err != nil {
+				return err
+			}
 
-		// Wait for the repository to be deleted from the managed cluster
-		repo.SetNamespace("argocd")
-		err = WaitForDeletion(ctx, managedAgentClient, &repo, "managed agent")
+			repo.SetNamespace("argocd")
+			err = WaitForDeletion(ctx, managedAgentClient, &repo, "managed agent")
+			if err != nil {
+				return err
+			}
+		}
+
+		repoList = corev1.SecretList{}
+		err = autonomousAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
 		if err != nil {
 			return err
 		}
-	}
-
-	// Delete all repositories from the autonomous agent
-	repoList = corev1.SecretList{}
-	err = autonomousAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
-	if err != nil {
-		return err
-	}
-	for _, repo := range repoList.Items {
-		err = EnsureDeletion(ctx, autonomousAgentClient, &repo)
+		for _, repo := range repoList.Items {
+			err = EnsureDeletion(ctx, autonomousAgentClient, &repo)
+			if err != nil {
+				return err
+			}
+		}
+		repoList = corev1.SecretList{}
+		err = managedAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
 		if err != nil {
 			return err
 		}
-	}
-
-	// Delete all repositories from the managed agent
-	repoList = corev1.SecretList{}
-	err = managedAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
-	if err != nil {
-		return err
-	}
-	for _, repo := range repoList.Items {
-		err = EnsureDeletion(ctx, managedAgentClient, &repo)
-		if err != nil {
-			return err
+		for _, repo := range repoList.Items {
+			err = EnsureDeletion(ctx, managedAgentClient, &repo)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

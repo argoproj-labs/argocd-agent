@@ -482,6 +482,9 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	ev := s.events.AppProjectEvent(event.Delete, outbound)
 	s.ha.ForwardEventForReplication(event.New(ev, event.TargetAppProject), outbound.Namespace, replication.DirectionOutbound)
 
+	// Project is deleted, remove all repositories and credentials that reference this project
+	s.syncRepositoriesForProject(ctx, outbound.Name, outbound.Namespace, logCtx)
+
 	if s.metrics != nil {
 		s.metrics.AppProjectDeleted.Inc()
 	}
@@ -865,7 +868,9 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 
 	newProject, err := s.projectManager.Get(s.ctx, string(newProjectName), new.Namespace)
 	if err != nil {
-		logCtx.WithError(err).Error("failed to get the project that is currently referenced by the repository secret")
+		if !errors.IsNotFound(err) {
+			logCtx.WithError(err).Error("failed to get the project that is currently referenced by the repository secret")
+		}
 	} else {
 		newAgents = s.mapAppProjectToAgents(*newProject)
 	}
