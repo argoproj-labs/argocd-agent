@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/argoproj-labs/argocd-agent/internal/config"
+	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -154,9 +156,15 @@ func (q *SendRecvQueues) Create(name string) error {
 	if ok {
 		return fmt.Errorf("cannot initialize queue for %s: queue already exists", name)
 	}
+	queueSize := env.NumWithDefault(config.EnvQueueSize, func(size int) error {
+		if size <= 0 {
+			return fmt.Errorf("queue size must be greater than 0")
+		}
+		return nil
+	}, defaultMaxQueueSize)
 	qp := &queuepair{}
-	qp.sendq = newBoundedQueue(defaultMaxQueueSize)
-	qp.recvq = newBoundedQueue(defaultMaxQueueSize)
+	qp.sendq = newBoundedQueue(queueSize)
+	qp.recvq = newBoundedQueue(queueSize)
 	q.queues[name] = qp
 
 	return nil
