@@ -50,6 +50,7 @@ nav:
     - GPG Key Synchronization: user-guide/gpg-keys.md
     - Adding an agent: user-guide/adding-agents.md
     - Accessing live resources on workload clusters: user-guide/live-resources.md
+    - Web-based terminal: user-guide/web-terminal.md
     - Migration from classical multi-cluster Argo CD: user-guide/migration.md
   - Configuration:
     - Overview: configuration/index.md
