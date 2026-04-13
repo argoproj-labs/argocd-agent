@@ -10,10 +10,10 @@ namespaceOverride: ""
 image:
   # -- Container image repository for the agent.
   repository: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
-  # -- Container image tag for the agent.
-  tag: latest
+  # -- Overrides the image tag whose default is the chart appVersion.
+  tag: ""
   # -- Image pull policy for the agent container.
-  pullPolicy: "Always"
+  pullPolicy: "IfNotPresent"
 
 ## @section Deployment
 # -- Number of replicas for the agent Deployment.
