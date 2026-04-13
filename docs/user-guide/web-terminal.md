@@ -31,21 +31,7 @@ data:
   exec.enabled: "true"
 ```
 
-### Step 2: Grant `pods/exec` Permission to `argocd-server` (Control Plane)
-
-The `argocd-server` ServiceAccount needs `pods/exec` permission to allow argocd-server to `exec` into pods. Patch these permissions in the existing ClusterRole or create a custom ClusterRole with the following permissions.
-
-```yaml
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - pods/exec
-  verbs:
-  - create
-```
-
-### Step 3: Configure Argo CD RBAC for Users (Control Plane)
+### Step 2: Configure Argo CD RBAC for Users (Control Plane)
 
 Grant the `exec/create` permission to the appropriate roles in Argo CD's RBAC configuration. Add this to the `argocd-rbac-cm` ConfigMap or an `AppProject` manifest:
 
@@ -55,7 +41,7 @@ p, role:myrole, exec, create, */*, allow
 
 Users also need the `applications/get` permission on the target application.
 
-### Step 4: Grant `pods/exec` Permission to the Agent (Workload Cluster)
+### Step 3: Grant `pods/exec` Permission to the Agent (Workload Cluster)
 
 The agent's ServiceAccount needs permission to exec into pods. Add the following to the agent's ClusterRole:
 
