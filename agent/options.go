@@ -121,6 +121,22 @@ func WithHeartbeatInterval(interval time.Duration) AgentOption {
 	}
 }
 
+// WithOutboundEventRateLimit sets a token-bucket limit on outbound gRPC event sends toward the principal.
+// limit is events per second; 0 disables. burst is the bucket size; 0 or negative means max(1, ceil(limit)).
+func WithOutboundEventRateLimit(limit float64, burst int) AgentOption {
+	return func(o *Agent) error {
+		if limit < 0 {
+			return fmt.Errorf("outbound event rate limit must be >= 0")
+		}
+		if burst < 0 {
+			return fmt.Errorf("outbound event rate burst must be >= 0")
+		}
+		o.options.outboundEventRateLimit = limit
+		o.options.outboundEventRateBurst = burst
+		return nil
+	}
+}
+
 func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) AgentOption {
 	return func(o *Agent) error {
 		if resourceProxy != nil {

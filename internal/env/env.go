@@ -123,6 +123,36 @@ func Num(key string, validator func(num int) error) (int, error) {
 	return int(nv), nil
 }
 
+// Float64 parses the environment variable key as a float64.
+func Float64(key string, validator func(float64) error) (float64, error) {
+	ev, ok := os.LookupEnv(key)
+	if !ok {
+		return 0, os.ErrNotExist
+	}
+	fv, err := strconv.ParseFloat(ev, 64)
+	if err != nil {
+		return 0, fmt.Errorf("error parsing environment '%s': %v", key, err)
+	}
+	if validator != nil {
+		if err := validator(fv); err != nil {
+			return 0, fmt.Errorf("error validating environment '%s': %v", key, err)
+		}
+	}
+	return fv, nil
+}
+
+// Float64WithDefault parses key as float64, or returns def if unset or invalid.
+func Float64WithDefault(key string, validator func(float64) error, def float64) float64 {
+	f, err := Float64(key, validator)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Print(err)
+		}
+		return def
+	}
+	return f
+}
+
 func StringSlice(key string, validator func(string) error) ([]string, error) {
 	ev, ok := os.LookupEnv(key)
 	if !ok {

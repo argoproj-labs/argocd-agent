@@ -172,6 +172,11 @@ type AgentOptions struct {
 	// the connection alive through service meshes like Istio that have idle timeouts.
 	// A value of 0 disables heartbeats.
 	heartbeatInterval time.Duration
+
+	// outboundEventRateLimit is the max outbound application events per second to the principal (0 = unlimited).
+	outboundEventRateLimit float64
+	// outboundEventRateBurst is the token bucket burst size; 0 means derive from outboundEventRateLimit.
+	outboundEventRateBurst int
 }
 
 // AgentOption is a functional option type used to configure an Agent instance during initialization.

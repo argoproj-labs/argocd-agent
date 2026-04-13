@@ -119,6 +119,25 @@ func Test_Num(t *testing.T) {
 	})
 }
 
+func Test_Float64(t *testing.T) {
+	t.Run("float value from env", func(t *testing.T) {
+		t.Setenv("FOO", "1.5")
+		f, err := Float64("FOO", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, 1.5, f)
+		f = Float64WithDefault("BAR", nil, 2.25)
+		assert.Equal(t, 2.25, f)
+		t.Setenv("BAR", "3")
+		f = Float64WithDefault("BAR", nil, 0)
+		assert.Equal(t, 3.0, f)
+	})
+	t.Run("invalid float falls back to default", func(t *testing.T) {
+		t.Setenv("FOO", "nope")
+		f := Float64WithDefault("FOO", nil, 1.0)
+		assert.Equal(t, 1.0, f)
+	})
+}
+
 func Test_StringSlice(t *testing.T) {
 	t.Run("Test valid string slice from env", func(t *testing.T) {
 		t.Setenv("FOO", "foo")

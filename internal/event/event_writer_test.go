@@ -26,6 +26,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -128,7 +129,7 @@ func TestEventWriter(t *testing.T) {
 		evSender.Add(ev)
 
 		// shouldn't send an event that is not being tracked
-		evSender.sendEvent("random-id")
+		evSender.sendEvent(context.Background(), "random-id")
 		require.Len(t, fs.events, 0)
 
 		// shouldn't send an event that isn't past the retryAfter time.
@@ -137,13 +138,13 @@ func TestEventWriter(t *testing.T) {
 		retryAfter := time.Now().Add(1 * time.Hour)
 		latestEvent.retryAfter = &retryAfter
 
-		evSender.retrySentEvent(resID, latestEvent)
+		evSender.retrySentEvent(context.Background(), resID, latestEvent)
 		require.Len(t, fs.events, 0)
 
 		// should send a valid event to the stream
 		retryAfter = time.Now().Add(-10 * time.Second)
 		latestEvent.retryAfter = &retryAfter
-		evSender.sendEvent(resID)
+		evSender.sendEvent(context.Background(), resID)
 		require.Len(t, fs.events, 1)
 		require.Equal(t, []string{createEventID(app1.ObjectMeta)}, fs.events[resID])
 	})
@@ -247,7 +248,7 @@ func TestEventWriter(t *testing.T) {
 		require.NotContains(t, evSender.sentEvents, resID)
 
 		// Send the event
-		evSender.sendEvent(resID)
+		evSender.sendEvent(context.Background(), resID)
 
 		// Event should now be in sent map and removed from unsent
 		require.NotContains(t, evSender.unsentEvents, resID)
@@ -263,7 +264,7 @@ func TestEventWriter(t *testing.T) {
 		evSender.Add(ev)
 
 		// Send the event once
-		evSender.sendEvent(resID)
+		evSender.sendEvent(context.Background(), resID)
 		require.Len(t, fs.events[resID], 1)
 
 		// Get the sent event
@@ -273,7 +274,7 @@ func TestEventWriter(t *testing.T) {
 		require.Equal(t, 0, sentMsg.retryCount)
 
 		// Try to retry immediately - should not send
-		evSender.retrySentEvent(resID, sentMsg)
+		evSender.retrySentEvent(context.Background(), resID, sentMsg)
 		require.Len(t, fs.events[resID], 1)
 
 		// Set retryAfter to past time
@@ -281,7 +282,7 @@ func TestEventWriter(t *testing.T) {
 		sentMsg.retryAfter = &pastTime
 
 		// Now retry should work
-		evSender.retrySentEvent(resID, sentMsg)
+		evSender.retrySentEvent(context.Background(), resID, sentMsg)
 		require.Len(t, fs.events[resID], 2)
 		require.Equal(t, 1, sentMsg.retryCount)
 	})
@@ -295,7 +296,7 @@ func TestEventWriter(t *testing.T) {
 		evSender.Add(ev)
 
 		// Send the event
-		evSender.sendEvent(resID)
+		evSender.sendEvent(context.Background(), resID)
 		sentMsg := evSender.sentEvents[resID]
 		require.NotNil(t, sentMsg)
 
@@ -303,7 +304,7 @@ func TestEventWriter(t *testing.T) {
 		for i := 0; i <= maxEventRetries; i++ {
 			pastTime := time.Now().Add(-1 * time.Second)
 			sentMsg.retryAfter = &pastTime
-			evSender.retrySentEvent(resID, sentMsg)
+			evSender.retrySentEvent(context.Background(), resID, sentMsg)
 		}
 
 		// After max retries, event should be removed from sentEvents
@@ -326,7 +327,7 @@ func TestEventWriter(t *testing.T) {
 		resID := "test-resource"
 
 		// Send the ACK event
-		evSender.sendEvent(resID)
+		evSender.sendEvent(context.Background(), resID)
 
 		// ACK should not be in sentEvents (doesn't need ACK confirmation)
 		require.NotContains(t, evSender.sentEvents, resID)
@@ -344,7 +345,7 @@ func TestEventWriter(t *testing.T) {
 		evSender.Add(heartbeatEv)
 
 		// Send the heartbeat event
-		evSender.sendEvent(resID)
+		evSender.sendEvent(context.Background(), resID)
 
 		// Heartbeat should not be in sentEvents (fire-and-forget, no ACK tracking)
 		require.NotContains(t, evSender.sentEvents, resID)
@@ -361,7 +362,7 @@ func TestEventWriter(t *testing.T) {
 			heartbeatEv := es.HeartbeatEvent(Ping)
 			resID := ResourceID(heartbeatEv)
 			evSender.Add(heartbeatEv)
-			evSender.sendEvent(resID)
+			evSender.sendEvent(context.Background(), resID)
 		}
 
 		// sentEvents should be empty - no heartbeats should accumulate
@@ -406,7 +407,7 @@ func TestEventWriter(t *testing.T) {
 		evSender.Add(ev)
 
 		// Send the event (moves to sentEvents)
-		evSender.sendEvent(resID)
+		evSender.sendEvent(context.Background(), resID)
 
 		// Verify the sent event has version 1
 		sentEventID := EventID(ev)
@@ -474,6 +475,69 @@ func TestEventWriter(t *testing.T) {
 		require.NotNil(t, latestEvent)
 		eventID := EventID(latestEvent.event)
 		require.Contains(t, eventID, "_5") // Should be version 5
+	})
+
+	t.Run("outbound rate limit blocks additional sends until tokens available", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+		evSender.SetSendRateLimit(rate.NewLimiter(rate.Limit(1), 1))
+
+		ev1 := es.ApplicationEvent(Create, app1)
+		res1 := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev1)
+		evSender.sendEvent(context.Background(), res1)
+		require.Len(t, fs.events[res1], 1)
+
+		app2 := app1.DeepCopy()
+		app2.Name = "app-rate"
+		app2.UID = "rate-uid-2"
+		ev2 := es.ApplicationEvent(Create, app2)
+		res2 := createResourceID(app2.ObjectMeta)
+		evSender.Add(ev2)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+		defer cancel()
+		evSender.sendEvent(ctx, res2)
+		require.Empty(t, fs.events[res2], "second send should not complete while rate limited")
+		require.Contains(t, evSender.sentEvents, res2, "event moves to sentEvents; retry when limit allows")
+	})
+
+	t.Run("heartbeats bypass outbound rate limit", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+		evSender.SetSendRateLimit(rate.NewLimiter(rate.Limit(1), 1))
+
+		ev := es.ApplicationEvent(Create, app1)
+		resApp := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+		evSender.sendEvent(context.Background(), resApp)
+
+		hb := es.HeartbeatEvent(Ping)
+		resHB := ResourceID(hb)
+		evSender.Add(hb)
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+		defer cancel()
+		evSender.sendEvent(ctx, resHB)
+		require.Len(t, fs.events[resHB], 1)
+	})
+
+	t.Run("redis and other non-sync targets bypass outbound rate limit", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter(fs)
+		evSender.SetSendRateLimit(rate.NewLimiter(rate.Limit(1), 1))
+
+		r1 := es.NewRedisResponseEvent("req-a", "conn", RedisResponseBody{})
+		r2 := es.NewRedisResponseEvent("req-b", "conn", RedisResponseBody{})
+		res1, res2 := ResourceID(r1), ResourceID(r2)
+		evSender.Add(r1)
+		evSender.Add(r2)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+		defer cancel()
+		evSender.sendEvent(ctx, res1)
+		evSender.sendEvent(ctx, res2)
+		require.Len(t, fs.events[res1], 1)
+		require.Len(t, fs.events[res2], 1)
 	})
 }
 
