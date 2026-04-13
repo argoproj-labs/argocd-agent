@@ -271,7 +271,7 @@ jobs:
           make validate-values-schema
 
       - name: validate helm-docs generation
-        uses: losisin/helm-docs-github-action@v1.6.2 # v1.6.2 https://github.com/losisin/helm-docs-github-action
+        uses: losisin/helm-docs-github-action@2ccf3e77eb70dc80d62f8cc26f15d0a96b75fef4 # v1.8.0 https://github.com/losisin/helm-docs-github-action
         with:
           fail-on-diff: true
-          version: v1.13.1
+          version: v1.14.2
