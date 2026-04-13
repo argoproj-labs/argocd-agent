@@ -105,6 +105,7 @@ Kubernetes: `>=1.24.0-0`
 | tlsClientCertPath | string | `""` | Path to the TLS client certificate. |
 | tlsClientInSecure | string | `"false"` | Whether to skip TLS verification for client connections. |
 | tlsClientKeyPath | string | `""` | Path to the TLS client key. |
+| tlsInsecurePlaintext | string | `"false"` | Whether to connect to the principal without TLS |
 | tlsMaxVersion | string | `""` | Maximum TLS version to use (tls1.1, tls1.2, tls1.3). Empty uses highest available. |
 | tlsMinVersion | string | `""` | Minimum TLS version to use (tls1.1, tls1.2, tls1.3). Empty uses Go default. |
 | tlsRootCAPath | string | `""` | Path to the TLS root CA certificate. |

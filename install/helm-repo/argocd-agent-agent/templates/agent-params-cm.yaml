@@ -111,16 +111,21 @@ data:
   # agent.allowed-namespaces: Additional namespaces the agent can manage.
   # Default: ""
   agent.allowed-namespaces: {{ .Values.allowedNamespaces | quote }}
+  # agent.tls.insecure-plaintext: Connect to the principal without TLS. Only use
+  # when running behind a service mesh (e.g., Istio) that handles mTLS at
+  # the sidecar level.
+  # Default: false
+  agent.tls.insecure-plaintext: {{ .Values.tlsInsecurePlaintext | quote }}
   # agent.label-selector: Kubernetes label selector to restrict which
   # resources the agent watches.
   # Default: ""
   agent.label-selector: {{ .Values.labelSelector | quote }}
   # agent.redis.tls.enabled: Whether to enable TLS for Redis connections.
-  # Default: true
-  agent.redis.tls.enabled: {{ .Values.redisTLS.enabled }}
+  # Default: false
+  agent.redis.tls.enabled: {{ .Values.redisTLS.enabled | quote }}
   # agent.redis.tls.ca-path: Path to CA certificate for verifying Redis TLS certificate.
   # Default: ""
   agent.redis.tls.ca-path: {{ .Values.redisTLS.caPath | quote }}
   # agent.redis.tls.insecure: INSECURE: Do not verify Redis TLS certificate.
   # Default: false
-  agent.redis.tls.insecure: {{ .Values.redisTLS.insecure }}
+  agent.redis.tls.insecure: {{ .Values.redisTLS.insecure | quote }}
