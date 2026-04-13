@@ -34,7 +34,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: argocd-agent-agent
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ include "argocd-agent-agent.defaultTag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - agent
@@ -243,15 +243,6 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.label-selector
                 optional: true
-          - name: ARGOCD_AGENT_INSECURE_PLAINTEXT
-            valueFrom:
-              configMapKeyRef:
-                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
-                key: agent.tls.insecure-plaintext
-                optional: true
-          name: argocd-agent-agent
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: metrics
               containerPort: {{ .Values.metricsPort }}

@@ -1,6 +1,6 @@
 # argocd-agent-agent
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.4.1](https://img.shields.io/badge/AppVersion-0.4.1-informational?style=flat-square)
+![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
 
 Argo CD Agent for connecting managed clusters to a Principal
 
@@ -37,9 +37,9 @@ Kubernetes: `>=1.24.0-0`
 | enableResourceProxy | bool | `true` | Whether to enable resource proxy. |
 | enableWebSocket | bool | `false` | Whether to enable WebSocket connections. |
 | healthzPort | string | `"8002"` | Healthz server port exposed by the agent. |
-| image.pullPolicy | string | `"Always"` | Image pull policy for the agent container. |
+| image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the agent container. |
 | image.repository | string | `"ghcr.io/argoproj-labs/argocd-agent/argocd-agent"` | Container image repository for the agent. |
-| image.tag | string | `"latest"` | Container image tag for the agent. |
+| image.tag | string | `""` | Overrides the image tag whose default is the chart appVersion. |
 | keepAliveInterval | string | `"50s"` | Keep-alive interval for connections. |
 | labelSelector | string | `""` | Kubernetes label selector to restrict which resources the agent watches. Only matching resources will be listed, watched, and processed. |
 | logFormat | string | `"text"` | Log format for the agent (text or json). |

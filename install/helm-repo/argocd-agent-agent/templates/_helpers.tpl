@@ -95,6 +95,15 @@ Name for resources used exclusively by Helm tests.
 {{- end }}
 
 {{/*
+Create default image tag. Uses appVersion as the default, which can be
+overridden by setting image.tag in values.yaml. This follows the same
+pattern as the official argo-cd Helm chart (argo-cd.defaultTag).
+*/}}
+{{- define "argocd-agent-agent.defaultTag" -}}
+{{- default .Chart.AppVersion .Values.image.tag }}
+{{- end -}}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "argocd-agent-agent.chart" -}}
