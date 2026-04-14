@@ -17,6 +17,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -28,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 	"k8s.io/client-go/dynamic"
 
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
@@ -182,6 +184,7 @@ func (a *Agent) handleStreamEvents() error {
 	} else {
 		a.eventWriter.UpdateTarget(stream)
 	}
+	a.applyEventWriterOutboundRateLimit()
 	go a.eventWriter.SendWaitingEvents(streamCtx)
 
 	logCtx := log().WithFields(logrus.Fields{
@@ -335,4 +338,33 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 	}
 	a.resyncedOnStart = true
 	return nil
+}
+
+// applyEventWriterOutboundRateLimit configures the optional token bucket on
+// the event writer to limit the outbound event rate.
+func (a *Agent) applyEventWriterOutboundRateLimit() {
+	if a.eventWriter == nil {
+		return
+	}
+	lim := a.options.outboundEventRateLimit
+	if lim <= 0 {
+		a.eventWriter.SetSendRateLimit(nil)
+		a.eventWriter.SetOnSendRateWait(nil)
+		return
+	}
+	burst := a.options.outboundEventRateBurst
+	if burst < 1 {
+		burst = int(math.Ceil(lim))
+		if burst < 1 {
+			burst = 1
+		}
+	}
+	a.eventWriter.SetSendRateLimit(rate.NewLimiter(rate.Limit(lim), burst))
+	if a.metrics != nil {
+		a.eventWriter.SetOnSendRateWait(func(d time.Duration) {
+			a.metrics.OutboundEventRateLimiterWaitSeconds.Observe(d.Seconds())
+		})
+	} else {
+		a.eventWriter.SetOnSendRateWait(nil)
+	}
 }

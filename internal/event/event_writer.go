@@ -12,12 +12,14 @@ import (
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const (
 	// maxEventRetries is the maximum number of times an event will be retried before giving up.
-	maxEventRetries = 12
+	// TODO: Temp change, reset back to 12
+	maxEventRetries = 99
 )
 
 type streamWriter interface {
@@ -42,6 +44,13 @@ type EventWriter struct {
 
 	// target refers to the specified gRPC stream.
 	target streamWriter
+
+	// sendLimiter optionally rate-limits outbound gRPC Send calls (e.g. on the agent).
+	// nil means no limit. Heartbeats and fire-and-forget ACKs bypass the limiter.
+	sendLimiter *rate.Limiter
+
+	// onSendRateWait is called after each rate limiter Wait with the wait duration (optional, for metrics).
+	onSendRateWait func(wait time.Duration)
 
 	log *logrus.Entry
 }
@@ -72,6 +81,21 @@ func NewEventWriter(target streamWriter) *EventWriter {
 		target:       target,
 		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())),
 	}
+}
+
+// SetSendRateLimit configures an optional token bucket limiter for outbound sends.
+// Pass nil to disable. Safe to call while SendWaitingEvents is running.
+func (ew *EventWriter) SetSendRateLimit(limiter *rate.Limiter) {
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+	ew.sendLimiter = limiter
+}
+
+// SetOnSendRateWait sets an optional callback invoked after each rate-limiter wait with the elapsed wait time.
+func (ew *EventWriter) SetOnSendRateWait(fn func(wait time.Duration)) {
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+	ew.onSendRateWait = fn
 }
 
 func (ew *EventWriter) UpdateTarget(target streamWriter) {
@@ -237,7 +261,7 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 			ew.mu.RUnlock()
 
 			for _, resourceID := range resourceIDs {
-				ew.sendEvent(resourceID)
+				ew.sendEvent(ctx, resourceID)
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -245,21 +269,41 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 }
 
 // sendEvent determines whether to retry a sent event or send a new unsent event
-func (ew *EventWriter) sendEvent(resID string) {
+func (ew *EventWriter) sendEvent(ctx context.Context, resID string) {
 	// Check if there's a sent event awaiting retry
 	ew.mu.RLock()
 	sentMsg, hasSent := ew.sentEvents[resID]
 	ew.mu.RUnlock()
 
 	if hasSent {
-		ew.retrySentEvent(resID, sentMsg)
+		ew.retrySentEvent(ctx, resID, sentMsg)
 	} else {
-		ew.sendUnsentEvent(resID)
+		ew.sendUnsentEvent(ctx, resID)
 	}
 }
 
+func (ew *EventWriter) waitForOutboundSend(ctx context.Context, ev *cloudevents.Event) error {
+	ew.mu.RLock()
+	lim := ew.sendLimiter
+	cb := ew.onSendRateWait
+	ew.mu.RUnlock()
+
+	if lim == nil {
+		return nil
+	}
+	if !OutboundRateLimitApplies(ev) {
+		return nil
+	}
+	start := time.Now()
+	err := lim.Wait(ctx)
+	if cb != nil {
+		cb(time.Since(start))
+	}
+	return err
+}
+
 // retrySentEvent handles retrying an event that was already sent but not yet acknowledged
-func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
+func (ew *EventWriter) retrySentEvent(ctx context.Context, resID string, sentMsg *eventMessage) {
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"method":      "retrySentEvent",
 		"resource_id": resID,
@@ -304,6 +348,11 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 
 	logCtx.Trace("resending an event")
 
+	if err := ew.waitForOutboundSend(ctx, sentMsg.event); err != nil {
+		sentMsg.mu.Unlock()
+		return
+	}
+
 	// Increment retry count and schedule next retry BEFORE attempting send
 	// This ensures proper backoff even when the send fails
 	sentMsg.retryCount++
@@ -338,7 +387,7 @@ func (ew *EventWriter) scheduleRetry(eventMsg *eventMessage) {
 }
 
 // sendUnsentEvent pops an event from the unsent queue and sends it for the first time
-func (ew *EventWriter) sendUnsentEvent(resID string) {
+func (ew *EventWriter) sendUnsentEvent(ctx context.Context, resID string) {
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"method":      "sendUnsentEvent",
 		"resource_id": resID,
@@ -395,6 +444,10 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 
 	if err != nil {
 		logCtx.Errorf("Could not wire event: %v\n", err)
+		return
+	}
+
+	if err := ew.waitForOutboundSend(ctx, eventMsg.event); err != nil {
 		return
 	}
 

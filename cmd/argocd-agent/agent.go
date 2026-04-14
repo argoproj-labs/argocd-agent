@@ -84,6 +84,10 @@ func NewAgentRunCommand() *cobra.Command {
 		// This is used to keep the connection alive through service meshes like Istio.
 		heartbeatInterval time.Duration
 
+		// Outbound rate limit for events sent to the principal (agent-side).
+		outboundEventRateLimit float64
+		outboundEventRateBurst int
+
 		maxGRPCMessageSize int
 
 		// OpenTelemetry configuration
@@ -294,6 +298,7 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
+			agentOpts = append(agentOpts, agent.WithOutboundEventRateLimit(outboundEventRateLimit, outboundEventRateBurst))
 			agentOpts = append(agentOpts, agent.WithCreateNamespace(createNamespace))
 			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
 			agentOpts = append(agentOpts, agent.WithIgnoreUnmanagedApps(ignoreUnmanagedApps))
@@ -425,6 +430,13 @@ func NewAgentRunCommand() *cobra.Command {
 		env.DurationWithDefault("ARGOCD_AGENT_HEARTBEAT_INTERVAL", nil, 0),
 		"Interval for application-level heartbeats over the Subscribe stream (e.g., 30s). "+
 			"Set to 0 to disable. Useful to keep connections alive through service meshes like Istio.")
+	command.Flags().Float64Var(&outboundEventRateLimit, "outbound-event-rate-limit",
+		env.Float64WithDefault("ARGOCD_AGENT_OUTBOUND_EVENT_RATE_LIMIT", nil, 0),
+		"Maximum outbound Argo CD Kubernetes resource sync events per second to the principal (applications, app projects, repositories, GPG keys, application sets; 0 = unlimited). "+
+			"Does not apply to Redis, logs, terminal, or other operational traffic.")
+	command.Flags().IntVar(&outboundEventRateBurst, "outbound-event-rate-burst",
+		env.NumWithDefault("ARGOCD_AGENT_OUTBOUND_EVENT_RATE_BURST", nil, 0),
+		"Token bucket burst for --outbound-event-rate-limit; 0 means derive from the rate limit")
 
 	command.Flags().IntVar(&maxGRPCMessageSize, "grpc-max-message-size",
 		env.NumWithDefault("ARGOCD_AGENT_GRPC_MAX_MESSAGE_SIZE", nil, grpcutil.DefaultGRPCMaxMessageSize),

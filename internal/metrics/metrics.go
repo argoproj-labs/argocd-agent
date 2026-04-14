@@ -70,11 +70,13 @@ type PrincipalMetrics struct {
 
 // AgentMetrics holds metrics of agent
 type AgentMetrics struct {
-	EventReceived       prometheus.Counter
-	EventSent           prometheus.Counter
-	EventProcessingTime *prometheus.HistogramVec
-	PropagationLatency  *prometheus.HistogramVec
-	AgentErrors         *prometheus.CounterVec
+	EventReceived prometheus.Counter
+	EventSent     prometheus.Counter
+	// OutboundEventRateLimiterWaitSeconds records time spent waiting on the outbound send rate limiter (agent only).
+	OutboundEventRateLimiterWaitSeconds prometheus.Histogram
+	EventProcessingTime                 *prometheus.HistogramVec
+	PropagationLatency                  *prometheus.HistogramVec
+	AgentErrors                         *prometheus.CounterVec
 }
 
 func NewInformerMetrics(label string) *InformerMetrics {
@@ -184,6 +186,11 @@ func NewAgentMetrics() *AgentMetrics {
 		EventSent: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "agent_events_sent",
 			Help: "The total number of events sent by agent",
+		}),
+		OutboundEventRateLimiterWaitSeconds: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "agent_outbound_event_rate_limiter_wait_seconds",
+			Help:    "Time spent waiting on the outbound event rate limiter before gRPC send (seconds)",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 20),
 		}),
 
 		EventProcessingTime: promauto.NewHistogramVec(prometheus.HistogramOpts{

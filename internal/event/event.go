@@ -66,6 +66,9 @@ const (
 	TerminalRequest            EventType = TypePrefix + ".terminal-request"
 )
 
+// If you add a new target, consider whether it should be rate limited
+// by the agent outbound rate limit in function OutboundRateLimitApplies.
+
 const (
 	TargetUnknown                EventTarget = "unknown"
 	TargetApplication            EventTarget = "application"
@@ -680,6 +683,21 @@ func Target(raw *cloudevents.Event) EventTarget {
 		return TargetApplicationSet
 	}
 	return ""
+}
+
+// OutboundRateLimitApplies reports whether agent outbound rate limiting
+// (token bucket before gRPC send) should apply. Only Argo CD Kubernetes resource sync
+// traffic to the principal is limited; operational targets (redis, logs, terminal, etc.) are not.
+func OutboundRateLimitApplies(ev *cloudevents.Event) bool {
+	if ev == nil {
+		return false
+	}
+	switch Target(ev) {
+	case TargetApplication, TargetAppProject, TargetRepository, TargetGPGKey, TargetApplicationSet:
+		return true
+	default:
+		return false
+	}
 }
 
 func (ev Event) Target() EventTarget {
