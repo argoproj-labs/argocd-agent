@@ -689,6 +689,9 @@ func Target(raw *cloudevents.Event) EventTarget {
 // (token bucket before gRPC send) should apply. Only Argo CD Kubernetes resource sync
 // traffic to the principal is limited; operational targets (redis, logs, terminal, etc.) are not.
 func OutboundRateLimitApplies(ev *cloudevents.Event) bool {
+	if ev == nil {
+		return false
+	}
 	switch Target(ev) {
 	case TargetApplication, TargetAppProject, TargetRepository, TargetGPGKey, TargetApplicationSet:
 		return true

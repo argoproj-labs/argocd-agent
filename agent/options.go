@@ -17,6 +17,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
@@ -125,6 +126,9 @@ func WithHeartbeatInterval(interval time.Duration) AgentOption {
 // limit is events per second; 0 disables. burst is the bucket size; 0 or negative means max(1, ceil(limit)).
 func WithOutboundEventRateLimit(limit float64, burst int) AgentOption {
 	return func(o *Agent) error {
+		if math.IsNaN(limit) || math.IsInf(limit, 0) {
+			return fmt.Errorf("outbound event rate limit must be finite")
+		}
 		if limit < 0 {
 			return fmt.Errorf("outbound event rate limit must be >= 0")
 		}
