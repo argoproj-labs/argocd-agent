@@ -950,6 +950,47 @@ func Test_ProcessIncomingSyncedResource_PeerNamespaceRemap(t *testing.T) {
 	})
 }
 
+func Test_ProcessIncomingSyncedResource_NonAppKindUsesLocalNamespace(t *testing.T) {
+	ctx := context.Background()
+	gvr, err := getGroupVersionResource("GPGKey")
+	require.Nil(t, err)
+
+	t.Run("GPGKey lookup uses local namespace even when peer reports different namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd-agent"
+
+		resource := fakeUnresGPGKey()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("argocd-agent").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		// The principal reports the GPG key under its own namespace ("argocd"),
+		// but on the agent it lives in "argocd-agent". The lookup must use
+		// r.namespace, not the incoming namespace.
+		incoming := &event.SyncedResource{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			Kind:      "GPGKey",
+			UID:       "gpg-uid",
+		}
+
+		err = handler.ProcessIncomingSyncedResource(ctx, incoming, testAgentName)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestUpdate.String(), ev.Type())
+
+		got := &event.RequestUpdate{}
+		err = ev.DataAs(got)
+		assert.Nil(t, err)
+		assert.NotEmpty(t, got.Checksum, "should have checksum because GPG key was found in local namespace")
+	})
+}
+
 func createFakeHandler(t *testing.T) *RequestHandler {
 	evs := event.NewEventSource("test")
 
