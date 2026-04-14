@@ -170,12 +170,19 @@ func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, inco
 		return err
 	}
 
-	// When destination-based mapping is active the peer may report its own
-	// namespace for apps that live in our namespace. Remap for the local lookup.
+	// Determine the local namespace for the lookup. Non-Application kinds
+	// always live in the Argo CD namespace regardless of what the peer reports.
 	lookupNamespace := incoming.Namespace
-	if r.destinationBasedMapping && incoming.Kind == "Application" {
-		if r.peerNamespace != "" && incoming.Namespace == r.peerNamespace {
-			lookupNamespace = r.namespace
+	switch incoming.Kind {
+	case "AppProject", "Repository", "GPGKey":
+		lookupNamespace = r.namespace
+	case "Application":
+		// For Applications with destination-based mapping, remap the namespace
+		// if the app exists in the peer's namespace
+		if r.destinationBasedMapping {
+			if r.peerNamespace != "" && incoming.Namespace == r.peerNamespace {
+				lookupNamespace = r.namespace
+			}
 		}
 	}
 
