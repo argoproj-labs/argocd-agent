@@ -18,7 +18,8 @@ import (
 
 const (
 	// maxEventRetries is the maximum number of times an event will be retried before giving up.
-	maxEventRetries = 12
+	// TODO: Temp change, reset back to 12
+	maxEventRetries = 99
 )
 
 type streamWriter interface {
