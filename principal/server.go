@@ -1297,15 +1297,22 @@ func (s *Server) populateSourceCache(ctx context.Context) error {
 	}
 
 	log().Infof("Recreating repository spec cache from existing resources on cluster")
-	repoList, err := s.repoManager.List(ctx, backend.RepositorySelector{Namespace: s.namespace})
-	if err != nil {
-		return err
-	}
+	for _, secretType := range []string{common.LabelValueSecretTypeRepository, common.LabelValueSecretTypeRepoCreds} {
+		repoList, err := s.repoManager.List(ctx, backend.RepositorySelector{
+			Namespace: s.namespace,
+			Labels: map[string]string{
+				common.LabelKeySecretType: secretType,
+			},
+		})
+		if err != nil {
+			return err
+		}
 
-	for _, repo := range repoList {
-		sourceUID, exists := repo.Annotations[manager.SourceUIDAnnotation]
-		if exists {
-			s.sourceCache.Repository.Set(k8stypes.UID(sourceUID), repo.Data)
+		for _, repo := range repoList {
+			sourceUID, exists := repo.Annotations[manager.SourceUIDAnnotation]
+			if exists {
+				s.sourceCache.Repository.Set(k8stypes.UID(sourceUID), repo.Data)
+			}
 		}
 	}
 

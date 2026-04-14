@@ -308,4 +308,23 @@ func Test_List(t *testing.T) {
 		expected := config.LabelSelector(expectedBase)
 		assert.Equal(t, expected.LabelSelector, restrictions.Labels.String())
 	})
+	t.Run("List honors selector.Labels for secret type", func(t *testing.T) {
+		fakeClient := fake.NewSimpleClientset()
+		be := NewKubernetesBackend(fakeClient, "argocd", nil, true)
+		_, err := be.List(context.TODO(), backend.RepositorySelector{
+			Namespace: "argocd",
+			Labels: map[string]string{
+				common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds,
+			},
+		})
+		require.NoError(t, err)
+		actions := fakeClient.Actions()
+		require.NotEmpty(t, actions)
+		listAction, ok := actions[0].(k8stesting.ListAction)
+		require.True(t, ok)
+		restrictions := listAction.GetListRestrictions()
+		expectedBase := fmt.Sprintf("%s=%s", common.LabelKeySecretType, common.LabelValueSecretTypeRepoCreds)
+		expected := config.LabelSelector(expectedBase)
+		assert.Equal(t, expected.LabelSelector, restrictions.Labels.String())
+	})
 }
