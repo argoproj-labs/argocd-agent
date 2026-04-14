@@ -34,33 +34,39 @@ jobs:
         run: |
           set -xue
 
-          echo "Validating if ${{ inputs.TARGET_VERSION }} is in the format of X.Y.Z without the v prefix."
+          echo "Validating if ${INPUTS_TARGET_VERSION} is in the format of X.Y.Z without the v prefix."
 
-          if echo "${{ inputs.TARGET_VERSION }}" | grep -vE "^[0-9]+\.[0-9]+\.[0-9]"; then
+          if echo "${INPUTS_TARGET_VERSION}" | grep -vE "^[0-9]+\.[0-9]+\.[0-9]"; then
             valid=false
-            echo "Error: ${{ inputs.TARGET_VERSION }} is not well formed. Must be X.Y.Z without the v prefix."
+            echo "Error: ${INPUTS_TARGET_VERSION} is not well formed. Must be X.Y.Z without the v prefix."
             exit 1
           fi
 
           echo "Targeted version is valid"
+        env:
+          INPUTS_TARGET_VERSION: ${{ inputs.TARGET_VERSION }}
 
       - name: Update VERSION file
         run: |
-          echo "Setting version from ${{ env.CURRENT_VERSION }} to ${{ inputs.TARGET_VERSION }}."
-          echo "${{ inputs.TARGET_VERSION }}" > VERSION
+          echo "Setting version from ${CURRENT_VERSION} to ${INPUTS_TARGET_VERSION}."
+          echo "${INPUTS_TARGET_VERSION}" > VERSION
+        env:
+          INPUTS_TARGET_VERSION: ${{ inputs.TARGET_VERSION }}
 
       - name: Install Kustomize
         uses: syntaqx/setup-kustomize@4331ea02eec887906c9adbf7f431ca3db09908fd # v1.0.3
 
       - name: Generate new manifests
         run: |
-          echo "Generating new manifests for version ${{ inputs.TARGET_VERSION }}"
+          echo "Generating new manifests for version ${INPUTS_TARGET_VERSION}"
 
           cd install/kubernetes/principal
-          kustomize edit set image argocd-agent=quay.io/argoprojlabs/argocd-agent:v${{ inputs.TARGET_VERSION }}
+          kustomize edit set image argocd-agent=quay.io/argoprojlabs/argocd-agent:v${INPUTS_TARGET_VERSION}
 
           cd ../agent
-          kustomize edit set image argocd-agent=quay.io/argoprojlabs/argocd-agent:v${{ inputs.TARGET_VERSION }}
+          kustomize edit set image argocd-agent=quay.io/argoprojlabs/argocd-agent:v${INPUTS_TARGET_VERSION}
+        env:
+          INPUTS_TARGET_VERSION: ${{ inputs.TARGET_VERSION }}
 
       - name: Print changes to be pushed
         run: git --no-pager diff HEAD

@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -27,6 +26,8 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Set image tag for pushing to ghcr
         run: |
           if test "${{ github.event_name }}" = "pull_request"; then
@@ -39,6 +40,9 @@ jobs:
  
   build-and-push:
     name: Build and push image
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-22.04
     if: github.repository == 'argoproj-labs/argocd-agent'
     needs: [set-vars]
@@ -51,8 +55,10 @@ jobs:
     steps:
     - name: Checkout source code
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
     - name: Setup QEMU
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
     - name: Build argocd-agent container image
       run: |
           if [[ "$GITHUB_REPOSITORY" == "argoproj-labs/argocd-agent" ]] && ( [[ "$GITHUB_EVENT_NAME" == "push" ]] || jq -e '.pull_request.labels[].name == "ok-to-push"' "$GITHUB_EVENT_PATH" > /dev/null ); then
@@ -63,9 +69,9 @@ jobs:
     - name: Tag latest
       if: env.IMAGE_LATEST == 'yes'
       run: |
-          ${{ env.DOCKER_BIN }} tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.IMAGE_NAME }}:latest
+          ${DOCKER_BIN} tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
     - name: Push agent image to ghcr.io
-      uses: redhat-actions/push-to-registry@v2
+      uses: redhat-actions/push-to-registry@5ed88d269cf581ea9ef6dd6806d01562096bee9c # v2.8
       if: github.repository == 'argoproj-labs/argocd-agent' && ( github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ok-to-push') )
       with:
         username: ${{ github.actor }}
@@ -74,7 +80,7 @@ jobs:
         image: ${{ env.IMAGE_NAME }}
         tags: ${{ env.IMAGE_TAG }}
     - name: Push latest tag to ghcr.io
-      uses: redhat-actions/push-to-registry@v2
+      uses: redhat-actions/push-to-registry@5ed88d269cf581ea9ef6dd6806d01562096bee9c # v2.8
       if: github.repository == 'argoproj-labs/argocd-agent' && ( github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ok-to-push') && env.IMAGE_LATEST == 'yes' )
       with:
         username: ${{ github.actor }}

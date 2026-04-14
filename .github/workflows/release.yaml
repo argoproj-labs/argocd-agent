@@ -31,12 +31,12 @@ jobs:
 
           LATEST_RELEASE_TAG=$(git tag --list --sort=version:refname | tail -n 1)
           IS_LATEST_RELEASE=false
-          if [[ "$LATEST_RELEASE_TAG" == "${{ github.ref_name }}" ]]; then
+          if [[ "$LATEST_RELEASE_TAG" == "${GITHUB_REF_NAME}" ]]; then
             IS_LATEST_RELEASE=true
           fi
           echo "is_latest_release=$IS_LATEST_RELEASE" >> $GITHUB_OUTPUT
 
-          TAG="${{ github.ref_name }}"
+          TAG="${GITHUB_REF_NAME}"
           echo "trimmed_tag=${TAG#v}" >> $GITHUB_OUTPUT
 
           IMAGE_REPOSITORY="${{ vars.IMAGE_REPOSITORY || 'quay.io' }}"
@@ -79,6 +79,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
@@ -111,10 +112,13 @@ jobs:
         run: |
           cosign sign \
           -a "repo=${{ github.repository }}" \
-          -a "workflow=${{ github.workflow }}" \
+          -a "workflow=${GITHUB_WORKFLOW}" \
           -a "sha=${{ github.sha }}" \
           -y \
-          ${{ needs.setup-variables.outputs.image_uri }}@${{ steps.push.outputs.digest }}
+          ${NEEDS_SETUP_VARIABLES_OUTPUTS_IMAGE_URI}@${STEPS_PUSH_OUTPUTS_DIGEST}
+        env:
+          NEEDS_SETUP_VARIABLES_OUTPUTS_IMAGE_URI: ${{ needs.setup-variables.outputs.image_uri }}
+          STEPS_PUSH_OUTPUTS_DIGEST: ${{ steps.push.outputs.digest }}
 
   container-provenance:
     name: Generate and push container attestations
@@ -126,6 +130,7 @@ jobs:
       id-token: write
       packages: write
     if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    # Must be referenced by tag (https://github.com/slsa-framework/slsa-github-generator/blob/main/internal/builders/container/README.md#referencing-the-slsa-generator)
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
     with:
       image: ${{ needs.setup-variables.outputs.image_uri }}
@@ -164,7 +169,7 @@ jobs:
 
       - name: Generate release notes
         run: |
-          ./hack/generate-release-notes.sh ${{ github.ref_name }}
+          ./hack/generate-release-notes.sh ${GITHUB_REF_NAME}
 
       - name: Install goreleaser
         uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7.0.0
@@ -199,6 +204,7 @@ jobs:
       id-token: write
       contents: write
     if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    # Must be referenced by tag (https://github.com/slsa-framework/slsa-github-generator/blob/main/internal/builders/container/README.md#referencing-the-slsa-generator)
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.cli-binaries.outputs.hashes }}"
@@ -223,6 +229,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
@@ -231,20 +238,27 @@ jobs:
         run: syft dir:. -o spdx > /tmp/bom-go-mod.spdx
 
       - name: Generate container sbom
-        run: syft ${{ needs.setup-variables.outputs.image_uri }}@${{ needs.container-image.outputs.digest }} -o spdx > /tmp/bom-container-image.spdx
+        run: syft ${NEEDS_SETUP_VARIABLES_OUTPUTS_IMAGE_URI}@${NEEDS_CONTAINER_IMAGE_OUTPUTS_DIGEST} -o spdx > /tmp/bom-container-image.spdx
+        env:
+          NEEDS_SETUP_VARIABLES_OUTPUTS_IMAGE_URI: ${{ needs.setup-variables.outputs.image_uri }}
+          NEEDS_CONTAINER_IMAGE_OUTPUTS_DIGEST: ${{ needs.container-image.outputs.digest }}
 
       - name: Create sbom archive
         run: |
-          cd /tmp && tar -czvf "argocd-agent_${{ needs.setup-variables.outputs.trimmed_tag }}_sbom.tar.gz" *.spdx
+          cd /tmp && tar -czvf "argocd-agent_${NEEDS_SETUP_VARIABLES_OUTPUTS_TRIMMED_TAG}_sbom.tar.gz" *.spdx
           rm *.spdx
+        env:
+          NEEDS_SETUP_VARIABLES_OUTPUTS_TRIMMED_TAG: ${{ needs.setup-variables.outputs.trimmed_tag }}
 
       - name: Generate hash for provenance
         id: hash
         run: |
           set -xue
 
-          HASH=$(sha256sum /tmp/argocd-agent_${{ needs.setup-variables.outputs.trimmed_tag }}_sbom.tar.gz | base64 -w0)
+          HASH=$(sha256sum /tmp/argocd-agent_${NEEDS_SETUP_VARIABLES_OUTPUTS_TRIMMED_TAG}_sbom.tar.gz | base64 -w0)
           echo "hash=$HASH" >> $GITHUB_OUTPUT
+        env:
+          NEEDS_SETUP_VARIABLES_OUTPUTS_TRIMMED_TAG: ${{ needs.setup-variables.outputs.trimmed_tag }}
 
       - name: Upload sbom
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
@@ -264,6 +278,7 @@ jobs:
       id-token: write
       contents: write
     if: github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true'
+    # Must be referenced by tag (https://github.com/slsa-framework/slsa-github-generator/blob/main/internal/builders/container/README.md#referencing-the-slsa-generator)
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.sbom.outputs.hash }}"
