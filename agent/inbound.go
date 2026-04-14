@@ -1041,6 +1041,7 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 	}
 
 	incomingCM.SetNamespace(a.namespace)
+	incomingCM.OwnerReferences = nil
 
 	var exists, sourceUIDMatch bool
 	exists, sourceUIDMatch, err = a.gpgKeyManager.CompareSourceUID(a.context, incomingCM)
