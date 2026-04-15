@@ -43,6 +43,9 @@ type EventWriter struct {
 	// target refers to the specified gRPC stream.
 	target streamWriter
 
+	// agentName is the name of the agent for which this EventWriter is responsible.
+	agentName string
+
 	log *logrus.Entry
 }
 
@@ -73,6 +76,7 @@ func NewEventWriter(agentName string, target streamWriter) *EventWriter {
 		unsentEvents: map[string]*eventQueue{},
 		sentEvents:   map[string]*eventMessage{},
 		target:       target,
+		agentName:    agentName,
 		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).WithField(logfields.Agent, agentName),
 	}
 }
@@ -81,6 +85,9 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
 	ew.target = target
+	ew.log = logging.GetDefaultLogger().ModuleLogger("EventWriter").
+		WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).
+		WithField(logfields.Agent, ew.agentName)
 
 	// Reset retry timers so events in sentEvents are retried immediately on the new connection.
 	// This is important for reconnection scenarios where the old connection died
