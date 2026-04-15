@@ -423,6 +423,168 @@ func Test_processIncomingApplication_AutonomousUpdateDoesNotStampPrincipalUID(t 
 	assert.NotContains(t, updatedArg.Annotations, manager.PrincipalUIDAnnotation)
 }
 
+func Test_ProcessIncomingApplicationSetOperation(t *testing.T) {
+	evs := event.NewEventSource("test")
+
+	t.Run("SetOperation on managed agent updates the operation field", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.mode = types.AgentModeManaged
+		a.context = context.Background()
+
+		be := backend_mocks.NewApplication(t)
+		var err error
+		a.appManager, err = application.NewApplicationManager(be, "argocd",
+			application.WithAllowUpsert(true),
+			application.WithRole(manager.ManagerRoleAgent),
+			application.WithMode(manager.ManagerModeManaged),
+		)
+		require.NoError(t, err)
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "uid-from-principal",
+				},
+			},
+		}
+
+		incomingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				UID:       "uid-from-principal",
+			},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{
+					Revision: "abc123",
+				},
+			},
+		}
+
+		updatedApp := existingApp.DeepCopy()
+		updatedApp.Operation = incomingApp.Operation
+		updatedApp.ResourceVersion = "2"
+
+		be.On("SupportsPatch").Return(false)
+		be.On("Get", mock.Anything, "test", "argocd").Return(existingApp, nil)
+		be.On("Update", mock.Anything, mock.Anything).Return(updatedApp, nil)
+
+		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), event.TargetApplication)
+		err = a.processIncomingApplication(ev)
+		require.NoError(t, err)
+
+		// First Get is from CompareSourceUID, second Get is from SetManagedOperation's update()
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		var gotCalls []string
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Verify only the operation was set on the existing app (not spec or status)
+		updateArg := be.Calls[3].Arguments[1].(*v1alpha1.Application)
+		require.NotNil(t, updateArg.Operation)
+		require.Equal(t, "abc123", updateArg.Operation.Sync.Revision)
+	})
+
+	t.Run("SetOperation on autonomous agent updates the operation field", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.mode = types.AgentModeAutonomous
+		a.context = context.Background()
+
+		be := backend_mocks.NewApplication(t)
+		var err error
+		a.appManager, err = application.NewApplicationManager(be, "argocd",
+			application.WithAllowUpsert(true),
+			application.WithRole(manager.ManagerRoleAgent),
+			application.WithMode(manager.ManagerModeAutonomous),
+		)
+		require.NoError(t, err)
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+			},
+		}
+
+		incomingApp := existingApp.DeepCopy()
+		incomingApp.Operation = &v1alpha1.Operation{
+			Sync: &v1alpha1.SyncOperation{
+				Revision: "def456",
+			},
+		}
+
+		updatedApp := existingApp.DeepCopy()
+		updatedApp.Operation = incomingApp.Operation
+		updatedApp.ResourceVersion = "2"
+
+		be.On("SupportsPatch").Return(false)
+		be.On("Get", mock.Anything, "test", "argocd").Return(existingApp, nil)
+		be.On("Update", mock.Anything, mock.Anything).Return(updatedApp, nil)
+
+		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), event.TargetApplication)
+		err = a.processIncomingApplication(ev)
+		require.NoError(t, err)
+
+		expectedCalls := []string{"Get", "SupportsPatch", "Update"}
+		var gotCalls []string
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		updateArg := be.Calls[2].Arguments[1].(*v1alpha1.Application)
+		require.NotNil(t, updateArg.Operation)
+		require.Equal(t, "def456", updateArg.Operation.Sync.Revision)
+	})
+
+	t.Run("SetOperation rejected when source UID does not match in managed mode", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.mode = types.AgentModeManaged
+		a.context = context.Background()
+
+		be := backend_mocks.NewApplication(t)
+		var err error
+		a.appManager, err = application.NewApplicationManager(be, "argocd",
+			application.WithAllowUpsert(true),
+			application.WithRole(manager.ManagerRoleAgent),
+			application.WithMode(manager.ManagerModeManaged),
+		)
+		require.NoError(t, err)
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "old-principal-uid",
+				},
+			},
+		}
+
+		incomingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				UID:       "different-principal-uid",
+			},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{Revision: "abc123"},
+			},
+		}
+
+		be.On("Get", mock.Anything, "test", "argocd").Return(existingApp, nil)
+
+		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), event.TargetApplication)
+		err = a.processIncomingApplication(ev)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "source UID mismatch")
+	})
+}
+
 func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 	a, _ := newAgent(t)
 	a.mode = types.AgentModeManaged
