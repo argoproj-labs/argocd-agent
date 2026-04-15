@@ -43,6 +43,9 @@ type EventWriter struct {
 	// target refers to the specified gRPC stream.
 	target streamWriter
 
+	// agentName is the name of the agent for which this EventWriter is responsible.
+	agentName string
+
 	log *logrus.Entry
 }
 
@@ -65,12 +68,16 @@ type eventMessage struct {
 	retryCount int
 }
 
-func NewEventWriter(target streamWriter) *EventWriter {
+// NewEventWriter creates a new EventWriter for the given target stream.
+// If you create an EventWriter targeting the principal, an empty agentName
+// should be used.
+func NewEventWriter(agentName string, target streamWriter) *EventWriter {
 	return &EventWriter{
 		unsentEvents: map[string]*eventQueue{},
 		sentEvents:   map[string]*eventMessage{},
 		target:       target,
-		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())),
+		agentName:    agentName,
+		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).WithField(logfields.Agent, agentName),
 	}
 }
 
@@ -78,6 +85,9 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
 	ew.target = target
+	ew.log = logging.GetDefaultLogger().ModuleLogger("EventWriter").
+		WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).
+		WithField(logfields.Agent, ew.agentName)
 
 	// Reset retry timers so events in sentEvents are retried immediately on the new connection.
 	// This is important for reconnection scenarios where the old connection died
@@ -92,14 +102,14 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 
 func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	resID := ResourceID(ev)
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"resource_id": ResourceID(ev),
 		"event_id":    EventID(ev),
 		"type":        ev.Type(),
 	})
-
-	ew.mu.Lock()
-	defer ew.mu.Unlock()
 
 	defaultBackoff := wait.Backoff{
 		Steps:    maxEventRetries,
@@ -213,7 +223,9 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 // Note: This function will never return unless the context is done, and therefore
 // should be started in a separate goroutine.
 func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
+	ew.mu.RLock()
 	logCtx := ew.log
+	ew.mu.RUnlock()
 
 	logCtx.Info("Starting event writer")
 	for {
@@ -260,13 +272,13 @@ func (ew *EventWriter) sendEvent(resID string) {
 
 // retrySentEvent handles retrying an event that was already sent but not yet acknowledged
 func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
+	ew.mu.RLock()
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"method":      "retrySentEvent",
 		"resource_id": resID,
 	})
 
 	// Re-verify the event is still in sentEvents
-	ew.mu.RLock()
 	currentSent, stillExists := ew.sentEvents[resID]
 	ew.mu.RUnlock()
 
@@ -339,13 +351,13 @@ func (ew *EventWriter) scheduleRetry(eventMsg *eventMessage) {
 
 // sendUnsentEvent pops an event from the unsent queue and sends it for the first time
 func (ew *EventWriter) sendUnsentEvent(resID string) {
+	ew.mu.Lock()
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"method":      "sendUnsentEvent",
 		"resource_id": resID,
 	})
 
 	// Pop event from unsent queue and atomically move to sent tracker
-	ew.mu.Lock()
 	eq, exists := ew.unsentEvents[resID]
 	if !exists || eq.isEmpty() {
 		ew.mu.Unlock()

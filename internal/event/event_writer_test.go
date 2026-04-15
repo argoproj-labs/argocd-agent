@@ -53,7 +53,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should add/update/remove events from the queue", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		ev := es.ApplicationEvent(Create, app1)
 		evSender.Add(ev)
@@ -94,7 +94,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle events from multiple resources", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		app1Events := []EventType{Create, SpecUpdate, Delete}
 		app2Events := []EventType{Create, SpecUpdate, SpecUpdate, Delete}
@@ -121,7 +121,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should send waiting events to the stream", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
@@ -150,7 +150,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should prioritize DELETE events and clear queue", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		// Add Create and SpecUpdate events
 		ev1 := es.ApplicationEvent(Create, app1)
@@ -181,7 +181,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle concurrent adds and removes", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		var wg sync.WaitGroup
 		numGoroutines := 10
@@ -236,7 +236,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should move events from unsent to sent on first send", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
@@ -256,7 +256,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should retry sent events with exponential backoff", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
@@ -288,7 +288,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should give up after max retries", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
@@ -312,7 +312,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should not send ACK events to sentEvents", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		// Create an ACK event
 		cev := cloudevents.NewEvent()
@@ -335,7 +335,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should not send heartbeat events to sentEvents (fire-and-forget)", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		// Create a heartbeat event using EventSource helper
 		heartbeatEv := es.HeartbeatEvent(Ping)
@@ -354,7 +354,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("heartbeat events should not accumulate in sentEvents over time", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		// Simulate multiple heartbeats being sent (like a real heartbeat interval)
 		for i := 0; i < 10; i++ {
@@ -370,7 +370,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle empty resource ID gracefully", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		// Create an event manually with empty resourceID extension
 		cev := cloudevents.NewEvent()
@@ -389,7 +389,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle Get for non-existent resource", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		result := evSender.Get("non-existent-resource-id")
 		require.Nil(t, result)
@@ -397,7 +397,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should return sent event before checking unsent queue in Get", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		// Reset app1 to version 1
 		app1.ResourceVersion = "1"
@@ -427,7 +427,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle SendWaitingEvents with context cancellation", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		ev := es.ApplicationEvent(Create, app1)
 		evSender.Add(ev)
@@ -458,7 +458,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should coalesce multiple updates for same resource", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs)
 
 		resID := createResourceID(app1.ObjectMeta)
 
