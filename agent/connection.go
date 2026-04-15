@@ -178,7 +178,7 @@ func (a *Agent) handleStreamEvents() error {
 	defer streamCancel()
 
 	if a.eventWriter == nil {
-		a.eventWriter = event.NewEventWriter(stream)
+		a.eventWriter = event.NewEventWriter("", stream)
 	} else {
 		a.eventWriter.UpdateTarget(stream)
 	}

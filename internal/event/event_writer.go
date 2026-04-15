@@ -65,12 +65,15 @@ type eventMessage struct {
 	retryCount int
 }
 
-func NewEventWriter(target streamWriter) *EventWriter {
+// NewEventWriter creates a new EventWriter for the given target stream.
+// If you create an EventWriter targeting the principal, an empty agentName
+// should be used.
+func NewEventWriter(agentName string, target streamWriter) *EventWriter {
 	return &EventWriter{
 		unsentEvents: map[string]*eventQueue{},
 		sentEvents:   map[string]*eventMessage{},
 		target:       target,
-		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())),
+		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).WithField(logfields.Agent, agentName),
 	}
 }
 
