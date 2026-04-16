@@ -73,12 +73,11 @@ func WithLabelSelector(labelSelector string) KubernetesBackendOption {
 }
 
 func (be *KubernetesBackend) List(ctx context.Context, selector backend.RepositorySelector) ([]corev1.Secret, error) {
-	var labelSelector string
-	if secretType, ok := selector.Labels[common.LabelKeySecretType]; ok {
-		labelSelector = common.LabelKeySecretType + "=" + secretType
-	} else {
-		labelSelector = common.LabelKeySecretType + "=" + common.LabelValueSecretTypeRepository
+	secretType, ok := selector.Labels[common.LabelKeySecretType]
+	if !ok {
+		return nil, fmt.Errorf("selector.Labels must include %s", common.LabelKeySecretType)
 	}
+	labelSelector := common.LabelKeySecretType + "=" + secretType
 
 	if be.labelSelector != "" {
 		labelSelector = fmt.Sprintf("%s,%s", labelSelector, be.labelSelector)
