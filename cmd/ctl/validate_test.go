@@ -1668,3 +1668,75 @@ func TestCheckConfigCombined(t *testing.T) {
 		require.True(t, caughtMissing)
 	})
 }
+
+func TestX509FromTLSSecret(t *testing.T) {
+	ctx := context.TODO()
+
+	// Generate a root CA
+	rootCACertPEM, rootCAKeyPEM, err := tlsutil.GenerateCaCertificate("root-ca")
+	require.NoError(t, err)
+	cl := fake.NewSimpleClientset()
+	mustCreateTLSSecret(t, cl, "default", "root-ca", rootCACertPEM, rootCAKeyPEM)
+	rootCACert, err := tlsutil.TLSCertFromSecret(ctx, cl, "default", "root-ca")
+	require.NoError(t, err)
+	rootCASigner, err := x509.ParseCertificate(rootCACert.Certificate[0])
+	require.NoError(t, err)
+
+	// Generate an intermediate CA signed by root CA
+	intermCACertPEM, intermCAKeyPEM, err := tlsutil.GenerateCaCertificate("intermediate-ca")
+	require.NoError(t, err)
+	mustCreateTLSSecret(t, cl, "default", "interm-ca", intermCACertPEM, intermCAKeyPEM)
+	intermCACert, err := tlsutil.TLSCertFromSecret(ctx, cl, "default", "interm-ca")
+	require.NoError(t, err)
+	intermCASigner, err := x509.ParseCertificate(intermCACert.Certificate[0])
+	require.NoError(t, err)
+	_ = rootCASigner
+
+	// Generate a leaf certificate signed by the intermediate CA
+	leafCertPEM, leafKeyPEM, err := tlsutil.GenerateServerCertificate("leaf", intermCASigner, intermCACert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"})
+	require.NoError(t, err)
+
+	// Parse the expected leaf cert DER for strict identity checks
+	leafPEMBlock, _ := pem.Decode([]byte(leafCertPEM))
+	require.NotNil(t, leafPEMBlock)
+	expectedLeaf, err := x509.ParseCertificate(leafPEMBlock.Bytes)
+	require.NoError(t, err)
+
+	t.Run("Single certificate is accepted", func(t *testing.T) {
+		c := fake.NewSimpleClientset()
+		mustCreateTLSSecret(t, c, "default", "single", leafCertPEM, leafKeyPEM)
+		cert, err := x509FromTLSSecret(ctx, c, "default", "single")
+		require.NoError(t, err)
+		require.Equal(t, expectedLeaf.Raw, cert.Raw)
+	})
+
+	t.Run("Certificate chain (leaf + intermediate) returns leaf cert", func(t *testing.T) {
+		chainPEM := leafCertPEM + intermCACertPEM
+		c := fake.NewSimpleClientset()
+		mustCreateTLSSecret(t, c, "default", "chain", chainPEM, leafKeyPEM)
+		cert, err := x509FromTLSSecret(ctx, c, "default", "chain")
+		require.NoError(t, err)
+		require.Equal(t, expectedLeaf.Raw, cert.Raw)
+	})
+
+	t.Run("Certificate chain (leaf + intermediate + root) returns leaf cert", func(t *testing.T) {
+		chainPEM := leafCertPEM + intermCACertPEM + rootCACertPEM
+		c := fake.NewSimpleClientset()
+		mustCreateTLSSecret(t, c, "default", "full-chain", chainPEM, leafKeyPEM)
+		cert, err := x509FromTLSSecret(ctx, c, "default", "full-chain")
+		require.NoError(t, err)
+		require.Equal(t, expectedLeaf.Raw, cert.Raw)
+	})
+
+	t.Run("Empty secret returns error", func(t *testing.T) {
+		c := fake.NewSimpleClientset()
+		_, err := c.CoreV1().Secrets("default").Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
+			Type:       corev1.SecretTypeTLS,
+			Data:       map[string][]byte{"tls.crt": {}, "tls.key": {}},
+		}, metav1.CreateOptions{})
+		require.NoError(t, err)
+		_, err = x509FromTLSSecret(ctx, c, "default", "empty")
+		require.Error(t, err)
+	})
+}

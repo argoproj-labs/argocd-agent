@@ -864,8 +864,9 @@ func namespaceMatchesAgentSubject(ctx context.Context, agentKube kubernetes.Inte
 	return nil
 }
 
-// x509FromTLSSecret retrieves a Kubernetes TLS secret and parses the certificate
-// into an *x509.Certificate. The secret must contain exactly one certificate.
+// x509FromTLSSecret retrieves a Kubernetes TLS secret and parses the leaf certificate
+// into an *x509.Certificate. If the secret contains a certificate chain (e.g. leaf +
+// intermediate CA), only the first (leaf) certificate is returned.
 func x509FromTLSSecret(ctx context.Context, kubeClient kubernetes.Interface, ns, name string) (*x509.Certificate, error) {
 	cert, err := tlsutil.TLSCertFromSecret(ctx, kubeClient, ns, name)
 	if err != nil {
@@ -873,9 +874,6 @@ func x509FromTLSSecret(ctx context.Context, kubeClient kubernetes.Interface, ns,
 	}
 	if len(cert.Certificate) == 0 || cert.Certificate[0] == nil {
 		return nil, fmt.Errorf("%s/%s: secret does not contain certificate data", ns, name)
-	}
-	if len(cert.Certificate) > 1 {
-		return nil, fmt.Errorf("%s/%s: secret contains %d certificates, expected exactly one", ns, name, len(cert.Certificate))
 	}
 	parsed, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
