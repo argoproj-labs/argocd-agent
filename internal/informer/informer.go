@@ -275,7 +275,7 @@ func (i *Informer[T]) Stop() error {
 
 // HasSynced returns true if the informer is synced
 func (i *Informer[T]) HasSynced() bool {
-	return i.evHandler.HasSynced()
+	return i.informer.HasSynced()
 }
 
 // WaitForSync blocks until either the informer has synced, or the context ctx
