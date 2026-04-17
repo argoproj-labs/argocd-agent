@@ -674,12 +674,6 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}
 
-	if s.options.serveGRPC {
-		if err := s.serveGRPC(ctx, s.metrics, errch); err != nil {
-			return err
-		}
-	}
-
 	if s.options.metricsPort > 0 {
 		metrics.StartMetricsServer(metrics.WithListener("", s.options.metricsPort))
 
@@ -831,6 +825,13 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("Starting healthz server on %s", healthzAddr)
 		//nolint:errcheck
 		go http.ListenAndServe(healthzAddr, nil)
+	}
+
+	// Finally, start accepting connections from agents
+	if s.options.serveGRPC {
+		if err := s.serveGRPC(ctx, s.metrics, errch); err != nil {
+			return err
+		}
 	}
 
 	return nil
