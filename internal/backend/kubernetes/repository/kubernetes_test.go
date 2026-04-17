@@ -283,7 +283,12 @@ func Test_List(t *testing.T) {
 	t.Run("List uses repo type label and skip-sync in selector", func(t *testing.T) {
 		fakeClient := fake.NewSimpleClientset()
 		be := NewKubernetesBackend(fakeClient, "argocd", nil, true)
-		_, err := be.List(context.TODO(), backend.RepositorySelector{Namespace: "argocd"})
+		_, err := be.List(context.TODO(), backend.RepositorySelector{
+			Namespace: "argocd",
+			Labels: map[string]string{
+				common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
+			},
+		})
 		require.NoError(t, err)
 		actions := fakeClient.Actions()
 		require.NotEmpty(t, actions)
@@ -297,7 +302,12 @@ func Test_List(t *testing.T) {
 	t.Run("List appends custom label selector", func(t *testing.T) {
 		fakeClient := fake.NewSimpleClientset()
 		be := NewKubernetesBackend(fakeClient, "argocd", nil, true, WithLabelSelector("env=prod"))
-		_, err := be.List(context.TODO(), backend.RepositorySelector{Namespace: "argocd"})
+		_, err := be.List(context.TODO(), backend.RepositorySelector{
+			Namespace: "argocd",
+			Labels: map[string]string{
+				common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
+			},
+		})
 		require.NoError(t, err)
 		actions := fakeClient.Actions()
 		require.NotEmpty(t, actions)
@@ -305,6 +315,31 @@ func Test_List(t *testing.T) {
 		require.True(t, ok)
 		restrictions := listAction.GetListRestrictions()
 		expectedBase := fmt.Sprintf("%s=%s,%s", common.LabelKeySecretType, common.LabelValueSecretTypeRepository, "env=prod")
+		expected := config.LabelSelector(expectedBase)
+		assert.Equal(t, expected.LabelSelector, restrictions.Labels.String())
+	})
+	t.Run("List returns error when secret type label is missing", func(t *testing.T) {
+		fakeClient := fake.NewSimpleClientset()
+		be := NewKubernetesBackend(fakeClient, "argocd", nil, true)
+		_, err := be.List(context.TODO(), backend.RepositorySelector{Namespace: "argocd"})
+		require.Error(t, err)
+	})
+	t.Run("List honors selector.Labels for secret type", func(t *testing.T) {
+		fakeClient := fake.NewSimpleClientset()
+		be := NewKubernetesBackend(fakeClient, "argocd", nil, true)
+		_, err := be.List(context.TODO(), backend.RepositorySelector{
+			Namespace: "argocd",
+			Labels: map[string]string{
+				common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds,
+			},
+		})
+		require.NoError(t, err)
+		actions := fakeClient.Actions()
+		require.NotEmpty(t, actions)
+		listAction, ok := actions[0].(k8stesting.ListAction)
+		require.True(t, ok)
+		restrictions := listAction.GetListRestrictions()
+		expectedBase := fmt.Sprintf("%s=%s", common.LabelKeySecretType, common.LabelValueSecretTypeRepoCreds)
 		expected := config.LabelSelector(expectedBase)
 		assert.Equal(t, expected.LabelSelector, restrictions.Labels.String())
 	})

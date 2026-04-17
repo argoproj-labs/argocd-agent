@@ -73,7 +73,11 @@ func WithLabelSelector(labelSelector string) KubernetesBackendOption {
 }
 
 func (be *KubernetesBackend) List(ctx context.Context, selector backend.RepositorySelector) ([]corev1.Secret, error) {
-	labelSelector := common.LabelKeySecretType + "=" + common.LabelValueSecretTypeRepository
+	secretType, ok := selector.Labels[common.LabelKeySecretType]
+	if !ok {
+		return nil, fmt.Errorf("selector.Labels must include %s", common.LabelKeySecretType)
+	}
+	labelSelector := common.LabelKeySecretType + "=" + secretType
 
 	if be.labelSelector != "" {
 		labelSelector = fmt.Sprintf("%s,%s", labelSelector, be.labelSelector)
@@ -173,8 +177,12 @@ func isValidRepositorySecret(res *corev1.Secret, namespace string) bool {
 		return false
 	}
 
-	// Watch only repository secrets
-	if res.Labels == nil || res.Labels[common.LabelKeySecretType] != common.LabelValueSecretTypeRepository {
+	// Watch only repository and repo-creds secrets
+	if res.Labels == nil {
+		return false
+	}
+	secretType := res.Labels[common.LabelKeySecretType]
+	if secretType != common.LabelValueSecretTypeRepository && secretType != common.LabelValueSecretTypeRepoCreds {
 		return false
 	}
 
