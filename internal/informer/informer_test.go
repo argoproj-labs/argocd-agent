@@ -17,6 +17,7 @@ package informer
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -133,51 +134,51 @@ func Test_NewInformer(t *testing.T) {
 func Test_InformerScope(t *testing.T) {
 	t.Run("It adheres to namespace scope", func(t *testing.T) {
 		client := fake.NewSimpleClientset(apps[0], apps[1])
-		added := 0
-		listed := 0
+		var added atomic.Int32
+		var listed atomic.Int32
 		i, err := NewInformer[*v1alpha1.Application](context.TODO(),
 			WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 				objs, err := client.ArgoprojV1alpha1().Applications("argocd").List(ctx, opts)
-				listed = len(objs.Items)
+				listed.Store(int32(len(objs.Items)))
 				return objs, err
 			}),
 			WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 				return client.ArgoprojV1alpha1().Applications("argocd").Watch(ctx, opts)
 			}),
 			WithAddHandler[*v1alpha1.Application](func(obj *v1alpha1.Application) {
-				added += 1
+				added.Add(int32(1))
 			}),
 		)
 		require.NotNil(t, i)
 		require.NoError(t, err)
 		go i.Start(context.TODO())
 		i.WaitForSync(context.TODO())
-		assert.Equal(t, 1, listed)
-		assert.Equal(t, 1, added)
+		assert.Equal(t, int32(1), listed.Load())
+		assert.Equal(t, int32(1), added.Load())
 	})
 	t.Run("It adheres to cluster scope", func(t *testing.T) {
-		listed := 0
-		added := 0
+		var added atomic.Int32
+		var listed atomic.Int32
 		client := fake.NewSimpleClientset(apps[0], apps[1])
 		i, err := NewInformer[*v1alpha1.Application](context.TODO(),
 			WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 				objs, err := client.ArgoprojV1alpha1().Applications("").List(ctx, opts)
-				listed = len(objs.Items)
+				listed.Store(int32(len(objs.Items)))
 				return objs, err
 			}),
 			WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 				return client.ArgoprojV1alpha1().Applications("").Watch(ctx, opts)
 			}),
 			WithAddHandler[*v1alpha1.Application](func(obj *v1alpha1.Application) {
-				added += 1
+				added.Add(int32(1))
 			}),
 		)
 		require.NotNil(t, i)
 		require.NoError(t, err)
 		go i.Start(context.TODO())
 		i.WaitForSync(context.TODO())
-		assert.Equal(t, 2, listed)
-		assert.Equal(t, 2, added)
+		assert.Equal(t, int32(2), listed.Load())
+		assert.Equal(t, int32(2), added.Load())
 	})
 
 	t.Run("It adheres to filters on all callbacks", func(t *testing.T) {
