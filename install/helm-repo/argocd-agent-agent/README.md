@@ -50,7 +50,7 @@ Kubernetes: `>=1.24.0-0`
 | logFormat | string | `"text"` | Log format for the agent (text or json). |
 | logLevel | string | `"info"` | Log level for the agent. |
 | metricsPort | string | `"8181"` | Metrics server port exposed by the agent. |
-| nameOverride | string | `""` |  |
+| nameOverride | string | `""` | Override the chart name used in `app.kubernetes.io/name` Also changes `spec.selector.matchLabels`, which is immutable — do not set after initial install unless you are prepared to delete+reinstall. |
 | namespaceOverride | string | `""` | Override namespace to deploy the agent into. Leave empty to use the release namespace. |
 | nodeSelector | object | `{}` | Node selector for scheduling the agent Pod. |
 | podAnnotations | object | `{}` | Additional annotations to add to the agent Pod. |

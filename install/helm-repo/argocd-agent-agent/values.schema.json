@@ -446,7 +446,7 @@
         },
         "createClusterRole": {
           "default": true,
-          "description": "Create cluster-scoped ClusterRole and ClusterRoleBinding. Required for\ndestination-based mapping, create-namespace, and resource-proxy discovery\nacross multiple namespaces. Leave `false` to keep the agent strictly\nnamespace-scoped (default).",
+          "description": "Create cluster-scoped ClusterRole and ClusterRoleBinding. Required for\ndestination-based mapping, create-namespace, and resource-proxy discovery\nacross multiple namespaces. Leave `false` to keep the agent strictly\nnamespace-scoped.",
           "title": "createClusterRole",
           "type": "boolean"
         }
@@ -1015,8 +1015,7 @@
         }
       },
       "required": [
-        "type",
-        "rollingUpdate"
+        "type"
       ],
       "title": "updateStrategy",
       "type": "object"

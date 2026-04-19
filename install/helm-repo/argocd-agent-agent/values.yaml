@@ -5,7 +5,7 @@
 ## @section Global
 # -- Override namespace to deploy the agent into. Leave empty to use the release namespace.
 namespaceOverride: ""
-# Override the chart name used in `app.kubernetes.io/name`
+# -- Override the chart name used in `app.kubernetes.io/name`
 # Also changes `spec.selector.matchLabels`, which is immutable — do not set after initial
 # install unless you are prepared to delete+reinstall.
 nameOverride: ""
