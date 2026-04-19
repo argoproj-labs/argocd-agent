@@ -106,8 +106,35 @@
       "type": "boolean"
     },
     "global": {
-      "description": "Global values are values that can be accessed from any chart or subchart by exactly the same name.",
-      "required": [],
+      "additionalProperties": true,
+      "description": "Helm global values merged into subcharts. Set global.imagePullSecrets for registry credentials on the agent ServiceAccount and bundled argo-cd when argoCD.enabled is true. Omit imagePullSecrets when unused—an explicit empty list propagates into subcharts and overrides argocd.global.imagePullSecrets.",
+      "properties": {
+        "namespaceOverride": {
+          "default": "",
+          "description": "Override namespace for both the agent and the bundled argo-cd subchart. Recommended over the top-level namespaceOverride.",
+          "title": "global.namespaceOverride",
+          "type": "string"
+        },
+        "imagePullSecrets": {
+          "description": "List of image pull secret references (`name` only), same as Pod `imagePullSecrets`.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "description": "Name of the Secret in the release namespace.",
+                "title": "name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "title": "imagePullSecrets",
+          "type": "array"
+        }
+      },
       "title": "global",
       "type": "object"
     },
@@ -829,8 +856,7 @@
     "argocd",
     "destinationBasedMapping",
     "createNamespace",
-    "labelSelector",
-    "redisTLS",
+    "global",
     "service",
     "serviceMonitor",
     "tests"

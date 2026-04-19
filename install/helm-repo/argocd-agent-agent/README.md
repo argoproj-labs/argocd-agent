@@ -38,6 +38,7 @@ Kubernetes: `>=1.24.0-0`
 | argocd.dex | object | `{"enabled":false}` | disable dex |
 | argocd.global.image.repository | string | `"quay.io/argoproj/argocd"` | Argo CD image repository (change for a private or custom registry mirror). |
 | argocd.global.image.tag | string | `"v3.3.6"` | Argo CD image tag; keep in sync with `github.com/argoproj/argo-cd/v3` in the repo go.mod. |
+| argocd.notifications | object | `{"enabled":false}` | Disable the Argo CD notifications controller (`notifications.enabled` in argo-helm). |
 | argocd.server.replicas | int | `0` | argo-helm does not expose `server.enabled`; use 0 replicas to disable the Argo CD API/UI Deployment. |
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
 | cacheRefreshInterval | string | `"10s"` | Cache refresh interval. |
@@ -46,6 +47,7 @@ Kubernetes: `>=1.24.0-0`
 | enableCompression | bool | `false` | Whether to enable gRPC compression. |
 | enableResourceProxy | bool | `true` | Whether to enable resource proxy. |
 | enableWebSocket | bool | `false` | Whether to enable WebSocket connections. |
+| global | object | `{"imagePullSecrets":[]}` | Helm `global` values merged into subcharts. Set `global.imagePullSecrets` when you need registry credentials on the agent ServiceAccount and on the bundled argo-cd chart (`argoCD.enabled` is true). |
 | healthzPort | string | `"8002"` | Healthz server port exposed by the agent. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the agent container. |
 | image.repository | string | `"ghcr.io/argoproj-labs/argocd-agent/argocd-agent"` | Container image repository for the agent. |

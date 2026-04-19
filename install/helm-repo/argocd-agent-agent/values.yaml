@@ -10,6 +10,7 @@ argoCD:
   enabled: false
 
 # Values forwarded to the argo-cd subchart (argo-helm). Used only when `argoCD.enabled` is true.
+# The application controller is a StatefulSet by default (name like `<release>-argocd-application-controller`), not a Deployment. Upstream uses a Deployment only when `controller.dynamicClusterDistribution` is true.
 argocd:
   global:
     image:
@@ -26,10 +27,30 @@ argocd:
   # -- argo-helm does not expose `applicationSet.enabled`;use 0 replicas to disable the Argo CD applicationSet Deployment.
   applicationSet:
     replicas: 0
+  # -- Disable the Argo CD notifications controller (`notifications.enabled` in argo-helm).
+  notifications:
+    enabled: false
+  configs:
+    secret:
+      # -- Seed the Argo CD server secret key so the application controller can
+      # decrypt cluster credentials even when the Argo CD server is not running
+      # (server.replicas=0). Override with a stable random value in production;
+      # the default is intentionally non-empty so the chart works out of the box.
+      extra:
+        server.secretkey: "CHANGE-ME-generate-a-random-secret-key"
 
 ## @section Global
-# -- Override namespace to deploy the agent into. Leave empty to use the release namespace.
+# -- (Deprecated: use global.namespaceOverride) Override namespace for the agent chart only.
+# When set, takes precedence over global.namespaceOverride for agent resources,
+# but does NOT propagate to the bundled argo-cd subchart. Prefer global.namespaceOverride.
 namespaceOverride: ""
+
+# -- Helm `global` values merged into subcharts. Set `global.imagePullSecrets` when you need registry credentials on the agent ServiceAccount and on the bundled argo-cd chart (`argoCD.enabled` is true).
+global:
+  # -- Override namespace for the agent AND the bundled argo-cd subchart.
+  # This is the recommended way to deploy both charts into a non-release namespace.
+  namespaceOverride: ""
+  imagePullSecrets: []
 
 ## @section Image
 image:

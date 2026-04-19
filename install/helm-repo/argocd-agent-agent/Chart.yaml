@@ -10,7 +10,7 @@ dependencies:
   - name: argo-cd
     # Resolved from go.mod (github.com/argoproj/argo-cd/v3); run hack/sync-argo-cd-helm-chart-version.sh after bumping that module.
     # Prefer `make helm-dependency-update` (or hack/helm-dependency-update.sh) so argo-helm is registered before `helm dependency update`.
-    version: 9.5.0
+    version: 9.5.1
     repository: https://argoproj.github.io/argo-helm
     condition: argoCD.enabled
     alias: argocd
@@ -28,4 +28,4 @@ kubeVersion: ">=1.24.0-0"
 annotations:
   charts.openshift.io/name: "Argo CD Agent - Agent Component"
   argocd-agent.argoproj-labs.io/argo-cd-module-version: v3.3.6
-  argocd-agent.argoproj-labs.io/argo-cd-chart-version: 9.5.0
+  argocd-agent.argoproj-labs.io/argo-cd-chart-version: 9.5.1

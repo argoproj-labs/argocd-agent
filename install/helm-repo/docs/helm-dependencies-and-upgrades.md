@@ -8,6 +8,15 @@ This page is for **maintainers** who change the `argocd-agent-agent` chart or bu
 - The **Helm chart version** (for example `9.5.0`) is chosen to match the **Argo CD application version** in `go.mod` (`github.com/argoproj/argo-cd/v3`). That mapping comes from the public argo-helm index (same `app_version` as the Go module tag).
 - `Chart.yaml` annotations record both the module tag and the resolved chart version for quick review.
 
+## Private registries and `global.imagePullSecrets`
+
+Set **`global.imagePullSecrets`** in your values file (list of `{ name: <secret> }` objects, same as Kubernetes `imagePullSecrets`). Helm merges **global** values into subcharts:
+
+- The **agent** `ServiceAccount` references those secrets when the list is non-empty.
+- When **`argoCD.enabled`** is `true`, the bundled **argo-cd** chart receives the same `global.imagePullSecrets` and applies them to Argo CD workloads (via upstream `global.imagePullSecrets`).
+
+You can set **`argocd.global.imagePullSecrets`** for the bundled chart only. Avoid **`global.imagePullSecrets: []`** in that case: Helm propagates parent `global` into subcharts, and an explicit empty list overrides `argocd.global.imagePullSecrets`. Prefer a single **`global.imagePullSecrets`** when the agent and Argo CD should use the same credentials.
+
 ## Scripts and Makefile targets
 
 | Command | Purpose |
