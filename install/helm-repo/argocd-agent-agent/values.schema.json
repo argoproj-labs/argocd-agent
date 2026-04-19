@@ -261,14 +261,7 @@
           "type": "object"
         }
       },
-      "required": [
-        "fsGroup",
-        "fsGroupChangePolicy",
-        "runAsGroup",
-        "runAsNonRoot",
-        "runAsUser",
-        "seccompProfile"
-      ],
+      "required": [],
       "title": "podSecurityContext",
       "type": "object"
     },
@@ -638,16 +631,7 @@
           "type": "object"
         }
       },
-      "required": [
-        "allowPrivilegeEscalation",
-        "capabilities",
-        "privileged",
-        "readOnlyRootFilesystem",
-        "runAsGroup",
-        "runAsNonRoot",
-        "runAsUser",
-        "seccompProfile"
-      ],
+      "required": [],
       "title": "securityContext",
       "type": "object"
     },
@@ -1029,11 +1013,8 @@
   },
   "required": [
     "namespaceOverride",
-    "nameOverride",
-    "fullnameOverride",
     "image",
     "replicaCount",
-    "imagePullSecrets",
     "updateStrategy",
     "revisionHistoryLimit",
     "progressDeadlineSeconds",
@@ -1048,14 +1029,10 @@
     "nodeSelector",
     "affinity",
     "tolerations",
-    "topologySpreadConstraints",
     "podAnnotations",
     "podLabels",
     "priorityClassName",
     "terminationGracePeriodSeconds",
-    "hostAliases",
-    "dnsPolicy",
-    "dnsConfig",
     "probes",
     "agentMode",
     "auth",
