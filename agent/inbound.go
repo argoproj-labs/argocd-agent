@@ -23,6 +23,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -149,7 +150,9 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 
 func (a *Agent) processIncomingApplication(ev *event.Event) error {
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
-		"method": "processIncomingEvents",
+		"method":      "processIncomingEvents",
+		"event_id":    ev.EventID(),
+		"resource_id": ev.ResourceID(),
 	})
 	incomingApp, err := ev.Application()
 	if err != nil {
@@ -195,7 +198,7 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		} else {
 			_, err = a.createApplication(incomingApp, principalUID)
 			if err != nil {
-				logCtx.Errorf("Error creating application: %v", err)
+				logging.LogActionError(logCtx, "application", "create", incomingApp, err)
 			}
 		}
 	case event.SpecUpdate:
@@ -204,7 +207,7 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		} else {
 			_, err = a.updateApplication(incomingApp)
 			if err != nil {
-				logCtx.Errorf("Error updating application: %v", err)
+				logging.LogActionError(logCtx, "application", "update", incomingApp, err)
 			}
 		}
 	case event.SetOperation:
@@ -220,18 +223,18 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 
 		_, err = a.appManager.SetOperation(a.context, incomingApp)
 		if err != nil {
-			logCtx.Errorf("Error setting operation: %v", err)
+			logging.LogActionError(logCtx, "application", "set-operation", incomingApp, err)
 		}
 	case event.TerminateOperation:
 		logCtx.Trace("Received a TerminateOperation event")
 		_, err = a.appManager.TerminateOperation(a.context, incomingApp)
 		if err != nil {
-			logCtx.Errorf("Error terminating application operation: %v", err)
+			logging.LogActionError(logCtx, "application", "terminate-operation", incomingApp, err)
 		}
 	case event.Delete:
 		err = a.deleteApplication(incomingApp)
 		if err != nil {
-			logCtx.Errorf("Error deleting application: %v", err)
+			logging.LogActionError(logCtx, "application", "delete", incomingApp, err)
 		}
 	default:
 		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
@@ -397,7 +400,9 @@ func identityAction(r *application.IdentityCompareResult) identityActionType {
 
 func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
-		"method": "processIncomingEvents",
+		"method":      "processIncomingEvents",
+		"event_id":    ev.EventID(),
+		"resource_id": ev.ResourceID(),
 	})
 	incomingAppProject, err := ev.AppProject()
 	if err != nil {
@@ -447,7 +452,7 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 
 		_, err = a.createAppProject(incomingAppProject)
 		if err != nil {
-			logCtx.Errorf("Error creating appproject: %v", err)
+			logging.LogActionError(logCtx, "appproject", "create", incomingAppProject, err)
 		}
 	case event.SpecUpdate:
 		if !exists {
@@ -478,12 +483,12 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 
 		_, err = a.updateAppProject(incomingAppProject)
 		if err != nil {
-			logCtx.Errorf("Error updating appproject: %v", err)
+			logging.LogActionError(logCtx, "appproject", "update", incomingAppProject, err)
 		}
 	case event.Delete:
 		err = a.deleteAppProject(incomingAppProject)
 		if err != nil {
-			logCtx.Errorf("Error deleting appproject: %v", err)
+			logging.LogActionError(logCtx, "appproject", "delete", incomingAppProject, err)
 		}
 	default:
 		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
@@ -494,7 +499,9 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 
 func (a *Agent) processIncomingRepository(ev *event.Event) error {
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
-		"method": "processIncomingEvents",
+		"method":      "processIncomingEvents",
+		"event_id":    ev.EventID(),
+		"resource_id": ev.ResourceID(),
 	})
 
 	incomingRepo, err := ev.Repository()
@@ -544,7 +551,7 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 
 		_, err = a.createRepository(incomingRepo)
 		if err != nil {
-			logCtx.Errorf("Error creating repository: %v", err)
+			logging.LogActionError(logCtx, "repository", "create", incomingRepo, err)
 		}
 
 	case event.SpecUpdate:
@@ -576,13 +583,13 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 
 		_, err = a.updateRepository(incomingRepo)
 		if err != nil {
-			logCtx.Errorf("Error updating repository: %v", err)
+			logging.LogActionError(logCtx, "repository", "update", incomingRepo, err)
 		}
 
 	case event.Delete:
 		err = a.deleteRepository(incomingRepo)
 		if err != nil {
-			logCtx.Errorf("Error deleting repository: %v", err)
+			logging.LogActionError(logCtx, "repository", "delete", incomingRepo, err)
 		}
 	default:
 		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
@@ -720,8 +727,6 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application, principalUID s
 		}
 	}
 
-	logCtx.Infof("Creating a new application on behalf of an incoming event")
-
 	// Get rid of some fields that we do not want to have on the application
 	// as we start fresh.
 	if incoming.Annotations != nil {
@@ -783,8 +788,6 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	incoming.Spec.Destination.Server = ""
 	incoming.Spec.Destination.Name = "in-cluster"
 
-	logCtx.Infof("Updating application")
-
 	var err error
 	var napp *v1alpha1.Application
 	switch a.mode {
@@ -821,8 +824,6 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	if !a.appManager.IsManaged(app.QualifiedName()) {
 		return fmt.Errorf("application %s is not managed", app.QualifiedName())
 	}
-
-	logCtx.Infof("Deleting application")
 
 	// Fetch the source UID of the existing app to mark it as expected deletion.
 	app, err := a.appManager.Get(a.context, app.Name, app.Namespace)
@@ -921,8 +922,6 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
 	}
 
-	logCtx.Infof("Updating appProject")
-
 	a.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
 
 	logCtx.Tracef("Calling update spec for this event")
@@ -945,8 +944,6 @@ func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
 	if !a.projectManager.IsManaged(project.Name) {
 		return fmt.Errorf("appProject %s is not managed", project.Name)
 	}
-
-	logCtx.Infof("Deleting appProject")
 
 	// Fetch the source UID of the existing appProject to mark it as expected deletion.
 	project, err := a.projectManager.Get(a.context, project.Name, project.Namespace)
@@ -1001,8 +998,6 @@ func (a *Agent) createRepository(incoming *corev1.Secret) (*corev1.Secret, error
 		return a.updateRepository(incoming)
 	}
 
-	logCtx.Infof("Creating a new repository on behalf of an incoming event")
-
 	if incoming.Annotations == nil {
 		incoming.Annotations = make(map[string]string)
 	}
@@ -1043,8 +1038,6 @@ func (a *Agent) updateRepository(incoming *corev1.Secret) (*corev1.Secret, error
 		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
 	}
 
-	logCtx.Infof("Updating repository")
-
 	a.sourceCache.Repository.Set(incoming.UID, incoming.Data)
 
 	return a.repoManager.UpdateManagedRepository(a.context, incoming)
@@ -1062,8 +1055,6 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 	if !a.repoManager.IsManaged(repo.Name) {
 		return fmt.Errorf("repository %s is not managed", repo.Name)
 	}
-
-	logCtx.Infof("Deleting repository")
 
 	// Fetch the source UID of the existing repository to mark it as expected deletion.
 	repo, err := a.repoManager.Get(a.context, repo.Name, repo.Namespace)
@@ -1098,7 +1089,9 @@ func (a *Agent) deleteRepository(repo *corev1.Secret) error {
 // processIncomingGPGKey processes an incoming GPG key event.
 func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
-		"method": "processIncomingGPGKey",
+		"method":      "processIncomingGPGKey",
+		"event_id":    ev.EventID(),
+		"resource_id": ev.ResourceID(),
 	})
 
 	incomingCM, err := ev.GPGKey()
@@ -1145,7 +1138,7 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 
 		_, err = a.createGPGKey(incomingCM)
 		if err != nil {
-			logCtx.Errorf("Error creating GPG key: %v", err)
+			logging.LogActionError(logCtx, "gpgkey", "create", incomingCM, err)
 		}
 
 	case event.SpecUpdate:
@@ -1178,13 +1171,13 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 
 		_, err = a.updateGPGKey(incomingCM)
 		if err != nil {
-			logCtx.Errorf("Error updating GPG key: %v", err)
+			logging.LogActionError(logCtx, "gpgkey", "update", incomingCM, err)
 		}
 
 	case event.Delete:
 		err = a.deleteGPGKey(incomingCM)
 		if err != nil {
-			logCtx.Errorf("Error deleting GPG key: %v", err)
+			logging.LogActionError(logCtx, "gpgkey", "delete", incomingCM, err)
 		}
 	default:
 		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
@@ -1205,8 +1198,6 @@ func (a *Agent) createGPGKey(incoming *corev1.ConfigMap) (*corev1.ConfigMap, err
 		logCtx.Trace("GPG key is already managed on this agent. Updating the existing GPG key")
 		return a.updateGPGKey(incoming)
 	}
-
-	logCtx.Infof("Creating a new GPG key on behalf of an incoming event")
 
 	if incoming.Annotations == nil {
 		incoming.Annotations = make(map[string]string)
@@ -1245,8 +1236,6 @@ func (a *Agent) updateGPGKey(incoming *corev1.ConfigMap) (*corev1.ConfigMap, err
 		logCtx.Tracef("New resource version: %s", incoming.ResourceVersion)
 	}
 
-	logCtx.Infof("Updating GPG key")
-
 	a.sourceCache.GPGKey.Set(incoming.UID, incoming.Data)
 	return a.gpgKeyManager.UpdateManagedGPGKey(a.context, incoming)
 }
@@ -1262,8 +1251,6 @@ func (a *Agent) deleteGPGKey(cm *corev1.ConfigMap) error {
 	if !a.gpgKeyManager.IsManaged(cm.Name) {
 		return fmt.Errorf("GPG key ConfigMap %s is not managed", cm.Name)
 	}
-
-	logCtx.Infof("Deleting GPG key ConfigMap")
 
 	existing, err := a.gpgKeyManager.Get(a.context, cm.Name, cm.Namespace)
 	if err != nil {

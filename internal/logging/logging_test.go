@@ -17,11 +17,15 @@ package logging
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 )
@@ -450,4 +454,492 @@ func TestSeparateLoggerLevels(t *testing.T) {
 	assert.NotContains(t, warnOutput, "info message")
 	assert.Contains(t, warnOutput, "warn message")
 	assert.Contains(t, warnOutput, "error message")
+}
+
+func newTestEntry(buf *bytes.Buffer) *logrus.Entry {
+	logger := logrus.New()
+	logger.SetOutput(buf)
+	logger.SetFormatter(&logrus.JSONFormatter{})
+	logger.SetLevel(logrus.TraceLevel)
+	return logrus.NewEntry(logger)
+}
+
+func parseLogLine(t *testing.T, buf *bytes.Buffer) map[string]interface{} {
+	t.Helper()
+	var entry map[string]interface{}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &entry))
+	return entry
+}
+
+func newConfigMap(name, namespace string) *corev1.ConfigMap {
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+	}
+}
+
+func newSecret(name, namespace string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Data:       map[string][]byte{"password": []byte("s3cret")},
+	}
+}
+
+func newCloudEvent(evType, target, subject string, data []byte) *cloudevents.Event {
+	ev := cloudevents.NewEvent()
+	ev.SetType(evType)
+	ev.SetDataSchema(target)
+	ev.SetSubject(subject)
+	if data != nil {
+		ev.DataEncoded = data
+	}
+	return &ev
+}
+
+func TestMarshalResource(t *testing.T) {
+	t.Run("configmap produces JSON", func(t *testing.T) {
+		cm := newConfigMap("test-cm", "default")
+		result := marshalResource(cm)
+		assert.Contains(t, result, "test-cm")
+	})
+
+	t.Run("secret is redacted", func(t *testing.T) {
+		s := newSecret("my-secret", "default")
+		result := marshalResource(s)
+		assert.Equal(t, "<redacted: Secret>", result)
+		assert.NotContains(t, result, "s3cret")
+	})
+}
+
+func TestResourceMeta(t *testing.T) {
+	t.Run("valid k8s object", func(t *testing.T) {
+		cm := newConfigMap("my-cm", "my-ns")
+		name, ns := resourceMeta(cm)
+		assert.Equal(t, "my-cm", name)
+		assert.Equal(t, "my-ns", ns)
+	})
+
+	t.Run("non-k8s object returns unknown", func(t *testing.T) {
+		name, ns := resourceMeta("not-a-k8s-object")
+		assert.Equal(t, "<unknown>", name)
+		assert.Equal(t, "<unknown>", ns)
+	})
+}
+
+func TestHasEventData(t *testing.T) {
+	assert.False(t, hasEventData(nil))
+	assert.False(t, hasEventData([]byte("")))
+	assert.False(t, hasEventData([]byte("{}")))
+	assert.False(t, hasEventData([]byte("null")))
+	assert.False(t, hasEventData([]byte("  ")))
+	assert.True(t, hasEventData([]byte(`{"key":"value"}`)))
+}
+
+func TestShortType(t *testing.T) {
+	assert.Equal(t, "request-update", shortType("io.argoproj.argocd-agent.event.request-update"))
+	assert.Equal(t, "custom-type", shortType("custom-type"))
+}
+
+func TestIsMetaEvent(t *testing.T) {
+	assert.True(t, isMetaEvent(newCloudEvent("", "eventProcessed", "", nil)))
+	assert.True(t, isMetaEvent(newCloudEvent("", "heartbeat", "", nil)))
+	assert.True(t, isMetaEvent(newCloudEvent("", "clusterCacheInfoUpdate", "", nil)))
+	assert.False(t, isMetaEvent(newCloudEvent("", "application", "", nil)))
+}
+
+func TestParseEventSubject(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := newTestEntry(&buf)
+
+	t.Run("parses namespace/name from subject", func(t *testing.T) {
+		ev := newCloudEvent("", "", "my-ns/my-app", nil)
+		enriched := parseEventSubject(logCtx, ev)
+		enriched.Info("test")
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "my-app", entry[logfields.Name])
+		assert.Equal(t, "my-ns", entry[logfields.Namespace])
+	})
+
+	t.Run("empty subject leaves fields absent", func(t *testing.T) {
+		buf.Reset()
+		ev := newCloudEvent("", "", "", nil)
+		enriched := parseEventSubject(logCtx, ev)
+		enriched.Info("test")
+		entry := parseLogLine(t, &buf)
+		assert.Nil(t, entry[logfields.Name])
+		assert.Nil(t, entry[logfields.Namespace])
+	})
+}
+
+func TestLogActionCreate(t *testing.T) {
+	defer SetFullDetailConfig(FullDetailConfig{})
+
+	t.Run("basic fields", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		cm := newConfigMap("my-cm", "default")
+
+		LogActionCreate(logCtx, "configmap", cm)
+
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "actions", entry[logfields.LogCategory])
+		assert.Equal(t, "create", entry[logfields.Action])
+		assert.Equal(t, "configmap", entry[logfields.ResourceType])
+		assert.Equal(t, "my-cm", entry[logfields.Name])
+		assert.Equal(t, "default", entry[logfields.Namespace])
+		assert.Nil(t, entry[logfields.Detail])
+	})
+
+	t.Run("with full detail", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Actions: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		cm := newConfigMap("my-cm", "default")
+
+		LogActionCreate(logCtx, "configmap", cm)
+
+		entry := parseLogLine(t, &buf)
+		assert.NotNil(t, entry[logfields.Detail])
+		assert.Contains(t, entry[logfields.Detail], "my-cm")
+	})
+
+	t.Run("secret is redacted with full detail", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Actions: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		s := newSecret("my-secret", "default")
+
+		LogActionCreate(logCtx, "secret", s)
+
+		entry := parseLogLine(t, &buf)
+		detail := entry[logfields.Detail].(string)
+		assert.Equal(t, "<redacted: Secret>", detail)
+	})
+}
+
+func TestLogActionUpdate(t *testing.T) {
+	defer SetFullDetailConfig(FullDetailConfig{})
+
+	t.Run("basic fields without detail", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		oldCM := newConfigMap("my-cm", "default")
+		newCM := newConfigMap("my-cm", "default")
+		newCM.Data = map[string]string{"key": "value"}
+
+		LogActionUpdate(logCtx, "configmap", oldCM, newCM)
+
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "actions", entry[logfields.LogCategory])
+		assert.Equal(t, "update", entry[logfields.Action])
+		assert.Nil(t, entry[logfields.Detail])
+	})
+
+	t.Run("with full detail includes diff", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Actions: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		oldCM := newConfigMap("my-cm", "default")
+		newCM := newConfigMap("my-cm", "default")
+		newCM.Data = map[string]string{"key": "value"}
+
+		LogActionUpdate(logCtx, "configmap", oldCM, newCM)
+
+		entry := parseLogLine(t, &buf)
+		assert.NotNil(t, entry[logfields.Detail])
+	})
+
+	t.Run("secret update skips diff", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Actions: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		oldSec := newSecret("my-secret", "default")
+		newSec := newSecret("my-secret", "default")
+		newSec.Data = map[string][]byte{"password": []byte("new")}
+
+		LogActionUpdate(logCtx, "secret", oldSec, newSec)
+
+		entry := parseLogLine(t, &buf)
+		assert.Nil(t, entry[logfields.Detail])
+	})
+}
+
+func TestLogActionDelete(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := newTestEntry(&buf)
+
+	LogActionDelete(logCtx, "configmap", "default", "my-cm")
+
+	entry := parseLogLine(t, &buf)
+	assert.Equal(t, "actions", entry[logfields.LogCategory])
+	assert.Equal(t, "delete", entry[logfields.Action])
+	assert.Equal(t, "configmap", entry[logfields.ResourceType])
+	assert.Equal(t, "my-cm", entry[logfields.Name])
+	assert.Equal(t, "default", entry[logfields.Namespace])
+}
+
+func TestLogActionError(t *testing.T) {
+	defer SetFullDetailConfig(FullDetailConfig{})
+
+	t.Run("basic error fields", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		cm := newConfigMap("my-cm", "default")
+
+		LogActionError(logCtx, "configmap", "create", cm, errors.New("test error"))
+
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "actions", entry[logfields.LogCategory])
+		assert.Equal(t, "create", entry[logfields.Action])
+		assert.Equal(t, "my-cm", entry[logfields.Name])
+		assert.Equal(t, "error", entry["level"])
+		assert.Contains(t, entry["error"], "test error")
+		assert.Nil(t, entry[logfields.Detail])
+	})
+
+	t.Run("with full detail", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Actions: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		cm := newConfigMap("my-cm", "default")
+
+		LogActionError(logCtx, "configmap", "create", cm, errors.New("fail"))
+
+		entry := parseLogLine(t, &buf)
+		assert.NotNil(t, entry[logfields.Detail])
+		assert.Contains(t, entry[logfields.Detail], "my-cm")
+	})
+}
+
+func TestLogEventSent(t *testing.T) {
+	defer SetFullDetailConfig(FullDetailConfig{})
+
+	t.Run("skips meta events", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		ev := newCloudEvent("io.argoproj.argocd-agent.event.processed", "eventProcessed", "", nil)
+
+		LogEventSent(logCtx, ev)
+
+		assert.Empty(t, buf.String())
+	})
+
+	t.Run("logs non-meta event with fields", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		ev := newCloudEvent(
+			"io.argoproj.argocd-agent.event.request-update",
+			"application",
+			"default/my-app",
+			[]byte(`{"spec":{}}`),
+		)
+
+		LogEventSent(logCtx, ev)
+
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "events", entry[logfields.LogCategory])
+		assert.Equal(t, "send", entry[logfields.Direction])
+		assert.Equal(t, "application", entry[logfields.EventTarget])
+		assert.Equal(t, "my-app", entry[logfields.Name])
+		assert.Equal(t, "default", entry[logfields.Namespace])
+		assert.Nil(t, entry[logfields.Detail])
+	})
+
+	t.Run("with full detail includes data", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Events: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		ev := newCloudEvent(
+			"io.argoproj.argocd-agent.event.request-update",
+			"application",
+			"default/my-app",
+			[]byte(`{"spec":{}}`),
+		)
+
+		LogEventSent(logCtx, ev)
+
+		entry := parseLogLine(t, &buf)
+		assert.NotNil(t, entry[logfields.Detail])
+	})
+
+	t.Run("with full detail skips empty data", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Events: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		ev := newCloudEvent(
+			"io.argoproj.argocd-agent.event.request-update",
+			"application",
+			"default/my-app",
+			[]byte("{}"),
+		)
+
+		LogEventSent(logCtx, ev)
+
+		entry := parseLogLine(t, &buf)
+		assert.Nil(t, entry[logfields.Detail])
+	})
+}
+
+func TestLogEventReceived(t *testing.T) {
+	defer SetFullDetailConfig(FullDetailConfig{})
+
+	t.Run("skips meta events", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		ev := newCloudEvent("", "heartbeat", "", nil)
+
+		LogEventReceived(logCtx, ev)
+
+		assert.Empty(t, buf.String())
+	})
+
+	t.Run("logs non-meta event", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		ev := newCloudEvent(
+			"io.argoproj.argocd-agent.event.request-update",
+			"application",
+			"ns/app",
+			nil,
+		)
+
+		LogEventReceived(logCtx, ev)
+
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "events", entry[logfields.LogCategory])
+		assert.Equal(t, "recv", entry[logfields.Direction])
+	})
+}
+
+func TestLogEventError(t *testing.T) {
+	defer SetFullDetailConfig(FullDetailConfig{})
+
+	t.Run("basic error fields", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		ev := newCloudEvent(
+			"io.argoproj.argocd-agent.event.request-update",
+			"application",
+			"ns/app",
+			[]byte(`{"spec":{}}`),
+		)
+
+		LogEventError(logCtx, ev, errors.New("event failed"))
+
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "events", entry[logfields.LogCategory])
+		assert.Equal(t, "error", entry["level"])
+		assert.Contains(t, entry["error"], "event failed")
+		assert.Equal(t, "app", entry[logfields.Name])
+		assert.Nil(t, entry[logfields.Detail])
+	})
+
+	t.Run("with full detail includes data", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Events: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		ev := newCloudEvent(
+			"io.argoproj.argocd-agent.event.request-update",
+			"application",
+			"ns/app",
+			[]byte(`{"spec":{}}`),
+		)
+
+		LogEventError(logCtx, ev, errors.New("event failed"))
+
+		entry := parseLogLine(t, &buf)
+		assert.NotNil(t, entry[logfields.Detail])
+	})
+}
+
+func TestLogInformerAdd(t *testing.T) {
+	defer SetFullDetailConfig(FullDetailConfig{})
+
+	t.Run("basic fields", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		cm := newConfigMap("my-cm", "default")
+
+		LogInformerAdd(logCtx, cm)
+
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "informers", entry[logfields.LogCategory])
+		assert.Equal(t, "create", entry[logfields.Action])
+		assert.Equal(t, "configmap", entry[logfields.ResourceType])
+		assert.Equal(t, "my-cm", entry[logfields.Name])
+		assert.Equal(t, "default", entry[logfields.Namespace])
+		assert.Nil(t, entry[logfields.Detail])
+	})
+
+	t.Run("with full detail", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Informers: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		cm := newConfigMap("my-cm", "default")
+
+		LogInformerAdd(logCtx, cm)
+
+		entry := parseLogLine(t, &buf)
+		assert.NotNil(t, entry[logfields.Detail])
+	})
+}
+
+func TestLogInformerUpdate(t *testing.T) {
+	defer SetFullDetailConfig(FullDetailConfig{})
+
+	t.Run("basic fields", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		old := newConfigMap("my-cm", "default")
+		new := newConfigMap("my-cm", "default")
+
+		LogInformerUpdate(logCtx, old, new)
+
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "informers", entry[logfields.LogCategory])
+		assert.Equal(t, "update", entry[logfields.Action])
+		assert.Equal(t, "configmap", entry[logfields.ResourceType])
+	})
+
+	t.Run("with full detail includes diff", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Informers: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		old := newConfigMap("my-cm", "default")
+		upd := newConfigMap("my-cm", "default")
+		upd.Data = map[string]string{"key": "val"}
+
+		LogInformerUpdate(logCtx, old, upd)
+
+		entry := parseLogLine(t, &buf)
+		assert.NotNil(t, entry[logfields.Detail])
+	})
+
+	t.Run("secret update skips diff", func(t *testing.T) {
+		SetFullDetailConfig(FullDetailConfig{Informers: true})
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		old := newSecret("s", "ns")
+		upd := newSecret("s", "ns")
+		upd.Data = map[string][]byte{"password": []byte("new")}
+
+		LogInformerUpdate(logCtx, old, upd)
+
+		entry := parseLogLine(t, &buf)
+		assert.Nil(t, entry[logfields.Detail])
+	})
+}
+
+func TestLogInformerDelete(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := newTestEntry(&buf)
+	cm := newConfigMap("my-cm", "default")
+
+	LogInformerDelete(logCtx, cm)
+
+	entry := parseLogLine(t, &buf)
+	assert.Equal(t, "informers", entry[logfields.LogCategory])
+	assert.Equal(t, "delete", entry[logfields.Action])
+	assert.Equal(t, "configmap", entry[logfields.ResourceType])
+	assert.Equal(t, "my-cm", entry[logfields.Name])
+	assert.Equal(t, "default", entry[logfields.Namespace])
 }

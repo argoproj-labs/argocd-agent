@@ -54,6 +54,14 @@ const (
 	Repository    = "repository"
 	Namespace     = "namespace"
 
+	// Logging categories and actions
+	LogCategory  = "log_category"
+	Action       = "action"
+	ResourceType = "resource_type"
+	EventTarget  = "event_target"
+	EventType    = "event_type"
+	Detail       = "detail"
+
 	// Kubernetes resources
 	Kind               = "kind"
 	Name               = "name"
