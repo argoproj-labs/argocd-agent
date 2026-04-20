@@ -39,3 +39,6 @@ const EnvKubeBurst = "ARGOCD_AGENT_KUBE_BURST"
 
 // EnvQueueSize is the name of the environment variable for setting the size of the queue.
 const EnvQueueSize = "ARGOCD_AGENT_QUEUE_SIZE"
+
+// EnvRunPrincipalDebugRoutine is the name of the environment variable for setting whether to run the principal debug routine.
+const EnvRunPrincipalDebugRoutine = "ARGOCD_AGENT_RUN_PRINCIPAL_DEBUG_ROUTINE"

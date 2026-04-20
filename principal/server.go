@@ -37,6 +37,7 @@ import (
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
+	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
@@ -214,6 +215,7 @@ var noAuthEndpoints = map[string]bool{
 	"/authapi.Authentication/RefreshToken": true,
 }
 
+// waitForSyncedDuration is the default duration to wait for the informer to be synced
 const waitForSyncedDuration = 60 * time.Second
 
 // defaultResourceProxyListenerAddr is the default listener address for the
@@ -766,16 +768,19 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		syncTimeout = waitForSyncedDuration
 	}
 
+	log().Info("Waiting for Application informer to be synced")
 	if err := s.appManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Application informer: %w", err)
 	}
 	log().Infof("Application informer synced and ready")
 
+	log().Info("Waiting for AppProject informer to be synced")
 	if err := s.projectManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync AppProject informer: %w", err)
 	}
 	log().Infof("AppProject informer synced and ready")
 
+	log().Info("Waiting for ApplicationSet informer to be synced")
 	if s.ha != nil {
 		if err := s.appSetManager.EnsureSynced(syncTimeout); err != nil {
 			return fmt.Errorf("unable to sync ApplicationSet informer: %w", err)
@@ -783,11 +788,13 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("ApplicationSet informer synced and ready")
 	}
 
+	log().Info("Waiting for Repository informer to be synced")
 	if err := s.repoManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Repository informer: %w", err)
 	}
 	log().Infof("Repository informer synced and ready")
 
+	log().Info("Waiting for GPG key informer to be synced")
 	if err := s.gpgKeyManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync GPG key informer: %w", err)
 	}
@@ -825,6 +832,11 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("Starting healthz server on %s", healthzAddr)
 		//nolint:errcheck
 		go http.ListenAndServe(healthzAddr, nil)
+	}
+
+	// Enable debug routine if the environment variable is set
+	if env.BoolWithDefault(config.EnvRunPrincipalDebugRoutine, false) {
+		s.scheduleDebugRoutine()
 	}
 
 	// Finally, start accepting connections from agents
