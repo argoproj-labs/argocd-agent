@@ -30,14 +30,22 @@ argocd:
   # -- Disable the Argo CD notifications controller (`notifications.enabled` in argo-helm).
   notifications:
     enabled: false
+  redis:
+    image:
+      # -- Redis image repository (change for a private or custom registry mirror).
+      repository: ecr-public.aws.com/docker/library/redis
+      # -- Redis image tag.
+      tag: 8.2.3-alpine
+  repoServer:
+    copyutil:
+      # -- Clear default copyutil extra args to avoid issues when repo-server is bundled.
+      extraArgs: ""
   configs:
     secret:
-      # -- Seed the Argo CD server secret key so the application controller can
-      # decrypt cluster credentials even when the Argo CD server is not running
-      # (server.replicas=0). Override with a stable random value in production;
-      # the default is intentionally non-empty so the chart works out of the box.
-      extra:
-        server.secretkey: "CHANGE-ME-generate-a-random-secret-key"
+      # -- Disable subchart's argocd-secret creation; the parent chart manages
+      # it with an auto-generated server.secretkey (see templates/argocd-secret.yaml).
+      createSecret: false
+      extra: {}
 
 ## @section Global
 # -- (Deprecated: use global.namespaceOverride) Override namespace for the agent chart only.
