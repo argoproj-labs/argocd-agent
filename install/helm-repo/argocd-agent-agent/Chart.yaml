@@ -10,7 +10,7 @@ dependencies:
   - name: argo-cd
     # Resolved from go.mod (github.com/argoproj/argo-cd/v3); run hack/sync-argo-cd-helm-chart-version.sh after bumping that module.
     # Prefer `make helm-dependency-update` (or hack/helm-dependency-update.sh) so argo-helm is registered before `helm dependency update`.
-    version: 9.5.1
+    version: 9.5.2
     repository: https://argoproj.github.io/argo-helm
     condition: argoCD.enabled
     alias: argocd
