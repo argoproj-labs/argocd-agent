@@ -2,6 +2,11 @@
 
 This document explains how to add new agents to your argocd-agent deployment and connect them to the principal using the `argocd-agentctl` CLI tool.
 
+!!! tip "Looking for automated onboarding?"
+    If you want agents to register themselves automatically instead of creating
+    cluster secrets manually, see
+    [Agent self-registration (Experimental)](./self-registration.md).
+
 ## Overview
 
 Adding a new agent involves several steps:
