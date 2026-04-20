@@ -167,10 +167,10 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 	created, err := m.applicationBackend.Create(ctx, app)
 	if err == nil {
 		if err := m.Manage(created.QualifiedName()); err != nil {
-			log().Warnf("Could not manage app %s: %v", created.QualifiedName(), err)
+			log().Debugf("Could not manage app %s: %v", created.QualifiedName(), err)
 		}
 		if err := m.IgnoreChange(created.QualifiedName(), created.ResourceVersion); err != nil {
-			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.QualifiedName(), err)
+			log().Debugf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.QualifiedName(), err)
 		}
 	}
 
@@ -227,7 +227,7 @@ func (m *ApplicationManager) Upsert(ctx context.Context, app *v1alpha1.Applicati
 		return nil, err
 	}
 	if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
-		log().Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+		log().Debugf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 	}
 	return updated, nil
 }
@@ -352,17 +352,17 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	})
 	if err == nil {
 		if updated.Generation == 1 {
-			logCtx.Infof("Created application")
+			logCtx.Debugf("Created application")
 		} else {
-			logCtx.Infof("Updated application")
+			logCtx.Debugf("Updated application")
 		}
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
-			logCtx.Warnf("Couldn't unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+			logCtx.Debugf("Couldn't unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
 	}
 
 	if deletionTimestampChanged {
-		logCtx.Infof("deletionTimestamp of managed agent changed from nil to non-nil, so deleting Application")
+		logCtx.Debugf("deletionTimestamp of managed agent changed from nil to non-nil, so deleting Application")
 		// Mark this as a valid deletion so the callback does not treat it as a user-initiated deletion.
 		if m.deletions != nil {
 			if v, ok := updated.Annotations[manager.SourceUIDAnnotation]; ok {
@@ -497,7 +497,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		existing.Spec = incoming.Spec
 		existing.Status = *incoming.Status.DeepCopy()
 		existing.Operation = incoming.Operation.DeepCopy()
-		logCtx.Infof("Updating")
+		logCtx.Debugf("Updating")
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
 			if incoming.Annotations == nil {
@@ -538,9 +538,9 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 	})
 	if err == nil {
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
-			logCtx.Warnf("Could not unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+			logCtx.Debugf("Could not unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
+		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Debugf("Updated application status")
 	}
 	return updated, err
 }
@@ -611,9 +611,9 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 	})
 	if err == nil {
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
-			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+			logCtx.Debugf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
+		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Debugf("Updated application status")
 	}
 	return updated, err
 }
@@ -669,9 +669,9 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 	})
 	if err == nil {
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
-			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
+			logCtx.WithError(err).Debugf("Could not ignore change %s for app %s", updated.ResourceVersion, updated.QualifiedName())
 		}
-		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
+		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Debugf("Updated application status")
 	}
 	return updated, err
 }
@@ -771,7 +771,7 @@ func (m *ApplicationManager) TerminateOperation(ctx context.Context, incoming *v
 		return nil, fmt.Errorf("failed to terminate operation for %s: %w", incoming.QualifiedName(), err)
 	}
 
-	logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Set operation phase to Terminating")
+	logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Debug("Set operation phase to Terminating")
 	return updated, nil
 }
 
@@ -896,19 +896,19 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 	sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
 	if exists && m.mode == manager.ManagerModeManaged {
 		if cachedAppSpec, ok := appCache.Get(ty.UID(sourceUID)); ok {
-			logCtx.Debugf("Application %s is available in agent cache", app.Name)
+			logCtx.Debug("Application is available in agent cache")
 
 			if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
 				app.Spec = cachedAppSpec
-				logCtx.Infof("Reverting modifications done in application: %s", app.Name)
+				logCtx.Info("Reverting local modifications")
 				if _, err := m.UpdateManagedApp(ctx, app, ManagedIdentity{}); err != nil {
-					logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", app.Name, err)
+					logCtx.WithError(err).Error("Unable to revert modifications")
 					return false
 				}
 				return true
 			}
 		} else {
-			logCtx.Errorf("Application %s is not available in agent cache", app.Name)
+			logCtx.Debugf("Application not available in agent cache")
 		}
 	}
 	return false
@@ -929,19 +929,19 @@ func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app
 	}
 
 	if cachedAppSpec, ok := appCache.Get(ty.UID(sourceUID)); ok {
-		logCtx.Debugf("Application %s is available in agent cache", app.Name)
+		logCtx.Debug("Application is available in agent cache")
 
 		if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
 			app.Spec = cachedAppSpec
-			logCtx.Infof("Reverting modifications to the application: %s", app.Name)
+			logCtx.Info("Reverting local modifications")
 			if _, err := m.UpdateAutonomousApp(ctx, app.Namespace, app); err != nil {
-				logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", app.Name, err)
+				logCtx.WithError(err).Error("Unable to revert modifications")
 				return false
 			}
 			return true
 		}
 	} else {
-		logCtx.Errorf("Application %s is not available in agent cache", app.Name)
+		logCtx.Debug("Application is not available in agent cache")
 	}
 
 	return false
