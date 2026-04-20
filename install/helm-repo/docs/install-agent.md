@@ -26,10 +26,9 @@ To pull images from a private registry for **both** the agent and bundled Argo C
 
 If you run the helm install command without specifying a namespace flag, Helm will attempt to deploy resources into the `default` namespace.
 
-If the target namespace set using flag `--set global.namespaceOverride=argocd`, does not exist, the installation will fail. 
-
+If the namespace set via `--set global.namespaceOverride=argocd` does not exist, installation will fail (Helm `--create-namespace` only creates the release namespace from `--namespace`).
 Deploying to a Custom Namespace:
-The chart can be deployed into a specific Kubernetes namespace using `--namespace` flag, and `--create-namespace` to create a namespace if not present. Or, it can also be set using `--set global.namespaceOverride=agent-namespace`.
+The chart can be deployed into a specific Kubernetes namespace using `--namespace` (and optionally `--create-namespace`). You can also set `--set global.namespaceOverride=agent-namespace`, but that namespace must already exist unless it is also the release namespace.
 
 When the bundled Argo CD subchart is enabled (`argoCD.enabled=true`), use `global.namespaceOverride` instead of the top-level `namespaceOverride` so that both the agent and Argo CD resources deploy into the same namespace. Helm propagates `global` values to subcharts automatically.
 
