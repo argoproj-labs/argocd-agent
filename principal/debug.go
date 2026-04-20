@@ -18,23 +18,33 @@ import (
 	"time"
 )
 
+const debugInterval = 30 * time.Second
+
 // logDebugOutput prints some debugging information about the server to the logs
 func (s *Server) logDebugOutput() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	logCtx := log().WithField("module", "debugRoutine")
-	logCtx.Infof("HeapAlloc=%d HeapSys=%d HeapIdle=%d HeapInuse=%d HeapReleased=%d HeapObjects=%d", m.Alloc/1024/1024, m.Sys/1024/1024, m.HeapIdle/1024/1024, m.HeapInuse/1024/1024, m.HeapReleased/1024/1024, m.HeapObjects)
+	logCtx.Infof("HeapAlloc=%dMiB HeapSys=%dMiB TotalSys=%dMiB HeapIdle=%dMiB HeapInuse=%dMiB HeapReleased=%dMiB HeapObjects=%d", m.Alloc/1024/1024, m.HeapSys/1024/1024, m.Sys/1024/1024, m.HeapIdle/1024/1024, m.HeapInuse/1024/1024, m.HeapReleased/1024/1024, m.HeapObjects)
 	logCtx.Infof("GoRoutines=%d", runtime.NumGoroutine())
 	logCtx.Infof("QueuePairs=%d", s.queues.Len())
 	totalQueueDepth := 0
 	for _, queueName := range s.queues.Names() {
-		sendLen := s.queues.SendQ(queueName).Len()
-		recvLen := s.queues.RecvQ(queueName).Len()
+		sendq := s.queues.SendQ(queueName)
+		recvq := s.queues.RecvQ(queueName)
+		var sendLen int
+		var recvLen int
+		if sendq != nil {
+			sendLen = sendq.Len()
+		}
+		if recvq != nil {
+			recvLen = recvq.Len()
+		}
 		if recvLen > 0 {
-			logCtx.Infof("RecvQueueDepth(%s)=%d", queueName, s.queues.RecvQ(queueName).Len())
+			logCtx.Infof("RecvQueueDepth(%s)=%d", queueName, recvLen)
 		}
 		if sendLen > 0 {
-			logCtx.Infof("SendQueueDepth(%s)=%d", queueName, s.queues.SendQ(queueName).Len())
+			logCtx.Infof("SendQueueDepth(%s)=%d", queueName, sendLen)
 		}
 		totalQueueDepth += sendLen + recvLen
 	}
@@ -43,13 +53,13 @@ func (s *Server) logDebugOutput() {
 
 // scheduleDebugRoutine launches a goroutine that prints debug information about the server to the logs every 10 seconds
 func (s *Server) scheduleDebugRoutine() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(debugInterval)
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
 				s.logDebugOutput()
-				ticker.Reset(30 * time.Second)
+				ticker.Reset(debugInterval)
 			case <-s.ctx.Done():
 				ticker.Stop()
 				return
