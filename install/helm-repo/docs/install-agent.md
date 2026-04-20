@@ -16,7 +16,7 @@ Use the following command to install the argocd-agent-agent-helm chart.
 
 ### Optional bundled Argo CD
 
-The chart can install the upstream [argo-helm](https://github.com/argoproj/argo-helm) `argo-cd` chart in the same release by setting `argoCD.enabled=true`. Pass Helm values for that subchart under the `argocd` key (for example `--set argoCD.enabled=true --set argocd.server.insecure=true` for a lab setup). When `argoCD.enabled` is false (default), install Argo CD separately and keep the agent pointed at its Redis service.
+The chart can install the upstream [argo-helm](https://github.com/argoproj/argo-helm) `argo-cd` chart in the same release by setting `argoCD.enabled=true`. Pass Helm values for that subchart under the `argocd` key (for example `--set argoCD.enabled=true --set argocd.redis.image.repository=quay.io/..` for a lab setup). When `argoCD.enabled` is false (default), install Argo CD separately and keep the agent pointed at its Redis service.
 
 Maintainers: see [Helm dependencies and upgrading the Argo CD subchart](helm-dependencies-and-upgrades.md) for scripts, `make` targets, and the upgrade checklist tied to `go.mod`.
 
@@ -33,13 +33,13 @@ The chart can be deployed into a specific Kubernetes namespace using `--namespac
 
 When the bundled Argo CD subchart is enabled (`argoCD.enabled=true`), use `global.namespaceOverride` instead of the top-level `namespaceOverride` so that both the agent and Argo CD resources deploy into the same namespace. Helm propagates `global` values to subcharts automatically.
 
-```
+```sh
 helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0 --namespace=argocd --create-namespace
 ```
 
 OR,
 
-```
+```sh
 helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0 --set global.namespaceOverride=argocd
 ```
 

@@ -46,3 +46,4 @@ Configuration overview
 Bundled Argo CD
 ---------------
 This release includes the argo-cd subchart. Configure it under the `argocd` values key. Upgrades and rollbacks apply to the agent and Argo CD together.
+{{- end }}

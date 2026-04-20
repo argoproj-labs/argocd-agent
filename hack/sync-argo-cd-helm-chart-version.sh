@@ -83,7 +83,7 @@ if [[ -z "${ARGOCD_MODULE_VER}" ]]; then
 	exit 1
 fi
 
-helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
+helm repo add --force-update argo https://argoproj.github.io/argo-helm >/dev/null 2>&1
 helm repo update argo >/dev/null
 
 # Pick the newest chart whose app_version matches the go module tag (e.g. v3.3.6).
