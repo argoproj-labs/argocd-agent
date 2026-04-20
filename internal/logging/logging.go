@@ -21,11 +21,17 @@
 package logging
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/google/go-cmp/cmp"
 	"github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 )
@@ -58,6 +64,26 @@ const (
 
 // defaultLogger is a CentralizedLogger for the global logger instance
 var defaultLogger *CentralizedLogger
+
+// FullDetailConfig controls whether verbose resource content (.spec/.status/diffs)
+// is included in log messages, independently of log level.
+type FullDetailConfig struct {
+	Actions   bool
+	Events    bool
+	Informers bool
+}
+
+var fullDetailConfig FullDetailConfig
+
+// SetFullDetailConfig sets the global full detail logging configuration.
+func SetFullDetailConfig(cfg FullDetailConfig) {
+	fullDetailConfig = cfg
+}
+
+// GetFullDetailConfig returns the current global full detail logging configuration.
+func GetFullDetailConfig() FullDetailConfig {
+	return fullDetailConfig
+}
 
 func init() {
 	// Use the process-wide standard logger so that CLI flags and InitLogging() apply here too
@@ -343,4 +369,277 @@ func SelectLogger(l *CentralizedLogger) *CentralizedLogger {
 		return GetDefaultLogger()
 	}
 	return l
+}
+
+// LogActionCreate logs a resource creation
+func LogActionCreate(logCtx *logrus.Entry, resourceType string, obj any) {
+	name, namespace := resourceMeta(obj)
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		logfields.LogCategory:  "actions",
+		logfields.Action:       "create",
+		logfields.ResourceType: resourceType,
+		logfields.Name:         name,
+		logfields.Namespace:    namespace,
+	})
+
+	// Include the full resource in the log if full detail is enabled
+	if fullDetailConfig.Actions {
+		logCtx = logCtx.WithField(logfields.Detail, marshalResource(obj))
+	}
+
+	logCtx.Infof("Created %s %s/%s", resourceType, namespace, name)
+}
+
+// LogActionUpdate logs a resource update
+func LogActionUpdate(logCtx *logrus.Entry, resourceType string, oldObj, newObj any) {
+	name, namespace := resourceMeta(newObj)
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		logfields.LogCategory:  "actions",
+		logfields.Action:       "update",
+		logfields.ResourceType: resourceType,
+		logfields.Name:         name,
+		logfields.Namespace:    namespace,
+	})
+
+	// Include the diff in the log if full detail is enabled
+	if fullDetailConfig.Actions && oldObj != nil && newObj != nil && !isSecret(newObj) {
+		// Only include the diff if it is non-empty
+		if diff := cmp.Diff(oldObj, newObj); diff != "" {
+			logCtx = logCtx.WithField(logfields.Detail, diff)
+		}
+	}
+
+	logCtx.Infof("Updated %s %s/%s", resourceType, namespace, name)
+}
+
+// LogActionDelete logs a resource deletion.
+func LogActionDelete(logCtx *logrus.Entry, resourceType, namespace, name string) {
+	logCtx = logCtx.WithFields(logrus.Fields{
+		logfields.LogCategory:  "actions",
+		logfields.Action:       "delete",
+		logfields.ResourceType: resourceType,
+		logfields.Name:         name,
+		logfields.Namespace:    namespace,
+	})
+
+	logCtx.Infof("Deleted %s %s/%s", resourceType, namespace, name)
+}
+
+// LogActionError logs resource action error. When full detail is enabled,
+// the incoming resource payload is included in logs.
+func LogActionError(logCtx *logrus.Entry, resourceType, action string, obj any, err error) {
+	name, namespace := resourceMeta(obj)
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		logfields.LogCategory:  "actions",
+		logfields.Action:       action,
+		logfields.ResourceType: resourceType,
+		logfields.Name:         name,
+		logfields.Namespace:    namespace,
+	})
+
+	// Include the full resource in the log if full detail is enabled
+	if fullDetailConfig.Actions {
+		logCtx = logCtx.WithField(logfields.Detail, marshalResource(obj))
+	}
+	logCtx.WithError(err).Errorf("Error performing action %s on %s %s/%s", action, resourceType, namespace, name)
+}
+
+// LogEventSent logs an outbound event
+func LogEventSent(logCtx *logrus.Entry, ev *cloudevents.Event) {
+
+	// Skip meta events (ACKs, heartbeats, periodic cache updates), they do not need verbose logging
+	// and are handled by the agent and principal respectively
+	if isMetaEvent(ev) {
+		return
+	}
+
+	target := ev.DataSchema()
+	action := shortType(ev.Type())
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		logfields.LogCategory: "events",
+		logfields.Direction:   "send",
+		logfields.EventTarget: target,
+		logfields.EventType:   ev.Type(),
+	})
+
+	logCtx = parseEventSubject(logCtx, ev)
+
+	// Include the event data in the log if full detail is enabled and event data is not empty
+	if fullDetailConfig.Events && hasEventData(ev.Data()) {
+		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
+	}
+	logCtx.Infof("Event sent: %s %s", target, action)
+}
+
+// LogEventReceived logs an inbound event
+func LogEventReceived(logCtx *logrus.Entry, ev *cloudevents.Event) {
+	// Skip meta events
+	if isMetaEvent(ev) {
+		return
+	}
+
+	target := ev.DataSchema()
+	action := shortType(ev.Type())
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		logfields.LogCategory: "events",
+		logfields.Direction:   "recv",
+		logfields.EventTarget: target,
+		logfields.EventType:   ev.Type(),
+	})
+
+	logCtx = parseEventSubject(logCtx, ev)
+
+	// Include the event data in the log if full detail is enabled and event data is not empty
+	if fullDetailConfig.Events && hasEventData(ev.Data()) {
+		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
+	}
+	logCtx.Infof("Event received: %s %s", target, action)
+}
+
+// LogEventError logs event error
+func LogEventError(logCtx *logrus.Entry, ev *cloudevents.Event, err error) {
+	target := ev.DataSchema()
+	action := shortType(ev.Type())
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		logfields.LogCategory: "events",
+		logfields.EventTarget: target,
+		logfields.EventType:   ev.Type(),
+	})
+	logCtx = parseEventSubject(logCtx, ev)
+
+	// Include the event data in the log if full detail is enabled and event data is not empty
+	if fullDetailConfig.Events && hasEventData(ev.Data()) {
+		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
+	}
+	logCtx.WithError(err).Errorf("Error processing event: %s %s", target, action)
+}
+
+// LogInformerAdd logs a K8s informer add event
+func LogInformerAdd(logCtx *logrus.Entry, obj any) {
+	name, namespace := resourceMeta(obj)
+	resType := resourceType(obj)
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		logfields.LogCategory:  "informers",
+		logfields.Action:       "create",
+		logfields.ResourceType: resType,
+		logfields.Name:         name,
+		logfields.Namespace:    namespace,
+	})
+
+	if fullDetailConfig.Informers {
+		logCtx = logCtx.WithField(logfields.Detail, marshalResource(obj))
+	}
+	logCtx.Infof("Informer add: %s %s/%s", resType, namespace, name)
+}
+
+// LogInformerUpdate logs a K8s informer update event
+func LogInformerUpdate(logCtx *logrus.Entry, oldObj, newObj any) {
+	name, namespace := resourceMeta(newObj)
+	resType := resourceType(newObj)
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		logfields.LogCategory:  "informers",
+		logfields.Action:       "update",
+		logfields.ResourceType: resType,
+		logfields.Name:         name,
+		logfields.Namespace:    namespace,
+	})
+
+	// Include the diff in the log if full detail is enabled
+	// but not for secret as they are confidential
+	if fullDetailConfig.Informers && !isSecret(newObj) {
+		if diff := cmp.Diff(oldObj, newObj); diff != "" {
+			logCtx = logCtx.WithField(logfields.Detail, diff)
+		}
+	}
+	logCtx.Infof("Informer update: %s %s/%s", resType, namespace, name)
+}
+
+// LogInformerDelete logs a K8s informer delete event
+func LogInformerDelete(logCtx *logrus.Entry, obj any) {
+	name, namespace := resourceMeta(obj)
+	resType := resourceType(obj)
+
+	logCtx = logCtx.WithFields(logrus.Fields{
+		logfields.LogCategory:  "informers",
+		logfields.Action:       "delete",
+		logfields.ResourceType: resType,
+		logfields.Name:         name,
+		logfields.Namespace:    namespace,
+	})
+
+	logCtx.Infof("Informer delete: %s %s/%s", resType, namespace, name)
+}
+
+// parseEventSubject is to parse and add name and namespace fields from the CloudEvent Subject
+func parseEventSubject(logCtx *logrus.Entry, ev *cloudevents.Event) *logrus.Entry {
+	if ns, name, ok := strings.Cut(ev.Subject(), "/"); ok && name != "" {
+		return logCtx.WithFields(logrus.Fields{
+			logfields.Name:      name,
+			logfields.Namespace: ns,
+		})
+	}
+	return logCtx
+}
+
+// shortType strips the CloudEvent type prefix, returning just the action part
+func shortType(evType string) string {
+	const prefix = "io.argoproj.argocd-agent.event."
+	if strings.HasPrefix(evType, prefix) {
+		return evType[len(prefix):]
+	}
+	return evType
+}
+
+// isMetaEvent checks if the event is a meta event
+func isMetaEvent(ev *cloudevents.Event) bool {
+	target := ev.DataSchema()
+	return target == "eventProcessed" ||
+		target == "heartbeat" ||
+		target == "clusterCacheInfoUpdate"
+}
+
+// hasEventData checks if the event data is not empty
+func hasEventData(data []byte) bool {
+	s := strings.TrimSpace(string(data))
+	return len(s) > 0 && s != "{}" && s != "null"
+}
+
+// resourceMeta extracts name and namespace from a K8s runtime object.
+func resourceMeta(obj any) (name, namespace string) {
+	accessor, err := meta.Accessor(obj)
+	if err != nil {
+		return "<unknown>", "<unknown>"
+	}
+	return accessor.GetName(), accessor.GetNamespace()
+}
+
+// resourceType returns the lowercase type name of a K8s runtime object (e.g. "configmap", "application").
+func resourceType(obj any) string {
+	return strings.ToLower(reflect.TypeOf(obj).Elem().Name())
+}
+
+func isSecret(obj any) bool {
+	_, ok := obj.(*corev1.Secret)
+	return ok
+}
+
+// marshalResource marshals a resource to JSON string
+func marshalResource(obj any) string {
+	// Secrets are confidentials and should not log data
+	if isSecret(obj) {
+		return "<redacted: Secret>"
+	}
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return fmt.Sprintf("<error marshalling resource: %v>", err)
+	}
+	return string(data)
 }
