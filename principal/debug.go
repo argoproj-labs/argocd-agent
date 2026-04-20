@@ -51,7 +51,7 @@ func (s *Server) logDebugOutput() {
 	logCtx.Infof("TotalQueueDepth=%d", totalQueueDepth)
 }
 
-// scheduleDebugRoutine launches a goroutine that prints debug information about the server to the logs every 10 seconds
+// scheduleDebugRoutine launches a goroutine that prints debug information about the server to the logs at debugInterval
 func (s *Server) scheduleDebugRoutine() {
 	ticker := time.NewTicker(debugInterval)
 	go func() {
