@@ -574,13 +574,13 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Status = *incoming.Status.DeepCopy()
-		existing.Operation = incoming.Operation
+		existing.Operation = statusOperationToUse(existing, incoming)
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		refresh, incomingRefresh := incoming.Annotations["argocd.argoproj.io/refresh"]
 		_, existingRefresh := existing.Annotations["argocd.argoproj.io/refresh"]
 		target := &v1alpha1.Application{
 			Status:    incoming.Status,
-			Operation: incoming.Operation,
+			Operation: statusOperationToUse(existing, incoming),
 		}
 		source := &v1alpha1.Application{
 			Status:    existing.Status,
@@ -598,6 +598,14 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 			patch = append(patch, jsondiff.Operation{Type: "remove", Path: "/metadata/annotations/argocd.argoproj.io~1refresh"})
 		} else if !existingRefresh && incomingRefresh {
 			patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations/argocd.argoproj.io~1refresh", Value: refresh})
+		}
+
+		// Stamp the last-updated annotation. If the existing app has no
+		// annotations map yet we must create it; otherwise add/replace the key.
+		if existing.Annotations == nil {
+			patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations", Value: map[string]string{LastUpdatedAnnotation: incoming.Annotations[LastUpdatedAnnotation]}})
+		} else {
+			patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations/argocd-agent.argoproj.io~1last-updated", Value: incoming.Annotations[LastUpdatedAnnotation]})
 		}
 
 		// If there is no status yet on our application (this happens when the
@@ -726,6 +734,22 @@ func operationToUse(existing, incoming *v1alpha1.Application) *v1alpha1.Operatio
 	}
 
 	return incoming.Operation.DeepCopy()
+}
+
+func statusOperationToUse(existing, incoming *v1alpha1.Application) *v1alpha1.Operation {
+	if incoming.Operation != nil {
+		return operationToUse(existing, incoming)
+	}
+
+	if incoming.Status.OperationState == nil {
+		return existing.Operation
+	}
+
+	if incoming.Status.OperationState.Phase.Completed() {
+		return nil
+	}
+
+	return existing.Operation
 }
 
 // TerminateOperation aborts a running sync operation by setting .status.operationState.phase to Terminating.
