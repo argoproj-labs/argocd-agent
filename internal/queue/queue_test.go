@@ -81,26 +81,33 @@ func Test_Queue(t *testing.T) {
 		assert.Equal(t, "2", front.ID())
 	})
 
-	t.Run("Ensure that the queue size can be configured via environment variable", func(t *testing.T) {
+	t.Run("Ensure that the queue sizes can be configured via environment variable", func(t *testing.T) {
 		queueSize := 100
-		t.Setenv(config.EnvQueueSize, strconv.Itoa(queueSize))
+		t.Setenv(config.EnvRecvQueueSize, strconv.Itoa(queueSize))
+		t.Setenv(config.EnvSendQueueSize, strconv.Itoa(queueSize+20))
 		q := NewSendRecvQueues()
 		err := q.Create("agent1")
 		assert.NoError(t, err)
-		queue := q.RecvQ("agent1")
+		recvQueue := q.RecvQ("agent1")
+		sendQueue := q.SendQ("agent1")
 
-		for i := 1; i <= queueSize; i++ {
+		for i := 1; i <= queueSize+20; i++ {
 			ev := event.New()
 			ev.SetID(strconv.Itoa(i))
-			queue.Add(&ev)
+			recvQueue.Add(&ev)
+			sendQueue.Add(&ev)
 		}
 
 		// Since the queue is full, check if the oldest item is popped before adding a new item.
 		ev := event.New()
 		ev.SetID(strconv.Itoa(queueSize + 1))
-		queue.Add(&ev)
-		assert.Equal(t, queueSize, queue.Len())
-		front, _ := queue.Get()
+		recvQueue.Add(&ev)
+		sendQueue.Add(&ev)
+		assert.Equal(t, queueSize, recvQueue.Len())
+		assert.Equal(t, queueSize+20, sendQueue.Len())
+		front, _ := recvQueue.Get()
+		assert.Equal(t, "22", front.ID())
+		front, _ = sendQueue.Get()
 		assert.Equal(t, "2", front.ID())
 	})
 

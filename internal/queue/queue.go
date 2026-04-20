@@ -156,15 +156,22 @@ func (q *SendRecvQueues) Create(name string) error {
 	if ok {
 		return fmt.Errorf("cannot initialize queue for %s: queue already exists", name)
 	}
-	queueSize := env.NumWithDefault(config.EnvQueueSize, func(size int) error {
+	recvQueueSize := env.NumWithDefault(config.EnvRecvQueueSize, func(size int) error {
+		if size <= 0 {
+			return fmt.Errorf("queue size must be greater than 0")
+		}
+		return nil
+	}, defaultMaxQueueSize)
+	sendQueueSize := env.NumWithDefault(config.EnvSendQueueSize, func(size int) error {
 		if size <= 0 {
 			return fmt.Errorf("queue size must be greater than 0")
 		}
 		return nil
 	}, defaultMaxQueueSize)
 	qp := &queuepair{}
-	qp.sendq = newBoundedQueue(queueSize)
-	qp.recvq = newBoundedQueue(queueSize)
+	// Send queue is non-blocking, to keep up with the informer
+	qp.sendq = newBoundedQueue(sendQueueSize)
+	qp.recvq = newBoundedQueue(recvQueueSize)
 	q.queues[name] = qp
 
 	return nil
