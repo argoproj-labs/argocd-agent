@@ -46,8 +46,3 @@ Configuration overview
 Bundled Argo CD
 ---------------
 This release includes the argo-cd subchart. Configure it under the `argocd` values key. Upgrades and rollbacks apply to the agent and Argo CD together.
-
-The argocd-secret is managed by this chart with an auto-generated
-server.secretkey. The key is preserved across upgrades. To set your own:
-  --set argocd.configs.secret.extra.server\.secretkey=YOUR-KEY
-{{- end }}

@@ -121,6 +121,11 @@ if [[ "${CHECK}" == true ]]; then
 		echo "Error: annotation argocd-agent.argoproj-labs.io/argo-cd-module-version is \"${ANN}\", expected \"${ARGOCD_MODULE_VER}\"" >&2
 		exit 1
 	fi
+	CHART_ANN="$(yq eval '.annotations."argocd-agent.argoproj-labs.io/argo-cd-chart-version" // ""' "$CHART_YAML")"
+	if [[ "${CHART_ANN}" != "${RESOLVED_CHART_VER}" ]]; then
+		echo "Error: annotation argocd-agent.argoproj-labs.io/argo-cd-chart-version is \"${CHART_ANN}\", expected \"${RESOLVED_CHART_VER}\"" >&2
+		exit 1
+	fi
 	echo "✓ argo-cd Helm chart version matches go.mod (${RESOLVED_CHART_VER} for ${ARGOCD_MODULE_VER})"
 	exit 0
 fi
