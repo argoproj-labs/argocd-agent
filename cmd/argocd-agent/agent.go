@@ -43,35 +43,36 @@ import (
 // NewAgentRunCommand returns a new agent run command.
 func NewAgentRunCommand() *cobra.Command {
 	var (
-		serverAddress       string
-		serverPort          int
-		logLevels           []string
-		logFormat           string
-		insecure            bool
-		insecurePlaintext   bool
-		rootCASecretName    string
-		rootCAPath          string
-		kubeConfig          string
-		kubeContext         string
-		namespace           string
-		agentMode           string
-		creds               string
-		tlsSecretName       string
-		tlsClientCrt        string
-		tlsClientKey        string
-		tlsMinVersion       string
-		tlsMaxVersion       string
-		tlsCipherSuites     []string
-		enableWebSocket     bool
-		metricsPort         int
-		healthzPort         int
-		enableCompression   bool
-		pprofPort           int
-		redisAddr           string
-		redisUsername       string
-		redisPassword       string
-		redisCredsDirPath   string
-		enableResourceProxy bool
+		serverAddress        string
+		serverPort           int
+		logLevels            []string
+		logFormat            string
+		fullDetailCategories []string
+		insecure             bool
+		insecurePlaintext    bool
+		rootCASecretName     string
+		rootCAPath           string
+		kubeConfig           string
+		kubeContext          string
+		namespace            string
+		agentMode            string
+		creds                string
+		tlsSecretName        string
+		tlsClientCrt         string
+		tlsClientKey         string
+		tlsMinVersion        string
+		tlsMaxVersion        string
+		tlsCipherSuites      []string
+		enableWebSocket      bool
+		metricsPort          int
+		healthzPort          int
+		enableCompression    bool
+		pprofPort            int
+		redisAddr            string
+		redisUsername        string
+		redisPassword        string
+		redisCredsDirPath    string
+		enableResourceProxy  bool
 
 		// Time interval for agent to principal ping
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
@@ -161,6 +162,9 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 
 			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
+
+			cmdutil.ParseFullDetail(fullDetailCategories)
+
 			if namespace == "" {
 				cmdutil.Fatal("namespace value is empty and must be specified")
 			}
@@ -324,6 +328,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&logLevels, "log-level",
 		env.StringSliceWithDefault("ARGOCD_AGENT_LOG_LEVEL", nil, []string{"info"}),
 		"The log level to use. Comma-separated list of components in the format [<component>=]level")
+	command.Flags().StringSliceVar(&fullDetailCategories, "full-detail",
+		env.StringSliceWithDefault("ARGOCD_AGENT_FULL_DETAIL", nil, nil),
+		"Enable full detail logging for specified categories. Comma-separated list of: "+cmdutil.AvailableFullDetailCategories)
 
 	command.Flags().StringVar(&redisAddr, "redis-addr",
 		env.StringWithDefault("REDIS_ADDR", nil, "argocd-redis:6379"),

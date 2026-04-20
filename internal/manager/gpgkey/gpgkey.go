@@ -21,6 +21,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -85,6 +86,7 @@ func (m *GPGKeyManager) Create(ctx context.Context, cm *corev1.ConfigMap) (*core
 
 	created, err := m.backend.Create(ctx, cm)
 	if err == nil {
+		logging.LogActionCreate(log().WithField("gpgkey", cm.Name), "gpgkey", created)
 		if err := m.Manage(created.Name); err != nil {
 			log().Warnf("Could not manage GPG keys configmap %s: %v", created.Name, err)
 		}
@@ -97,6 +99,7 @@ func (m *GPGKeyManager) Create(ctx context.Context, cm *corev1.ConfigMap) (*core
 }
 
 func (m *GPGKeyManager) Delete(ctx context.Context, name, namespace string, deletionPropagation *backend.DeletionPropagation) error {
+	logging.LogActionDelete(log(), "gpgkey", namespace, name)
 	return m.backend.Delete(ctx, name, namespace, deletionPropagation)
 }
 
@@ -126,10 +129,8 @@ func (m *GPGKeyManager) UpdateManagedGPGKey(ctx context.Context, incoming *corev
 
 	updated, err := m.backend.Update(ctx, existing)
 	if err == nil {
-		if updated.Generation == 1 {
-			logCtx.Infof("Created GPG keys ConfigMap")
-		} else {
-			logCtx.Infof("Updated GPG keys ConfigMap")
+		if updated.Generation > 1 {
+			logging.LogActionUpdate(logCtx, "gpgkey", incoming, updated)
 		}
 		if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for GPG keys ConfigMap %s: %v", updated.ResourceVersion, updated.Name, err)

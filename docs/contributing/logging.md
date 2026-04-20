@@ -161,6 +161,70 @@ const (
 )
 ```
 
+## Full-Detail Logging Helpers
+
+The logging package provides helpers for structured logging of resource actions, events, and K8s informer activity. These emit consistent structured fields (`log_category`, `action`, `resource_type`, `name`, `namespace`) and conditionally include a `detail` field when full-detail logging is enabled.
+
+### Action Logging (resource create/update/delete)
+
+Use these in resource manager code when a K8s resource is created, updated, or deleted:
+
+```go
+import "github.com/argoproj-labs/argocd-agent/internal/logging"
+
+// On create - logs full JSON in detail when --full-detail=actions
+logging.LogActionCreate(logCtx, "application", app)
+
+// On update - logs diff in detail when --full-detail=actions (secrets skipped)
+logging.LogActionUpdate(logCtx, "application", oldApp, newApp)
+
+// On delete - no detail field (only name/namespace/type)
+logging.LogActionDelete(logCtx, "application", app.Namespace, app.Name)
+
+// On error - logs full JSON in detail when --full-detail=actions
+logging.LogActionError(logCtx, "application", "create", app, err)
+```
+
+### Event Logging (CloudEvent sent/received)
+
+Use these when sending or receiving CloudEvents between agent and principal:
+
+```go
+// On event sent
+logging.LogEventSent(logCtx, cloudEvent)
+
+// On event received
+logging.LogEventReceived(logCtx, cloudEvent)
+
+// On event processing error
+logging.LogEventError(logCtx, cloudEvent, err)
+```
+
+Meta-events (`eventProcessed`, `heartbeat`, `clusterCacheInfoUpdate`) are automatically skipped by `LogEventSent` and `LogEventReceived` to reduce noise.
+
+### Informer Logging (K8s informer add/update/delete)
+
+Use these in informer callbacks:
+
+```go
+// On informer add
+logging.LogInformerAdd(logCtx, obj)
+
+// On informer update - logs diff in detail (secrets skipped)
+logging.LogInformerUpdate(logCtx, oldObj, newObj)
+
+// On informer delete
+logging.LogInformerDelete(logCtx, obj)
+```
+
+### Security: Secret Redaction
+
+All helpers automatically redact Kubernetes Secrets:
+
+- `LogActionCreate` / `LogInformerAdd`: `detail` shows `<redacted: Secret>` instead of the payload
+- `LogActionUpdate` / `LogInformerUpdate`: diff is skipped entirely for Secrets
+- `LogActionError`: same redaction as create
+
 ## Code Review Checklist
 
 Before submitting your PR, verify:

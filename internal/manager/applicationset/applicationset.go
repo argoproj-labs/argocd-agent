@@ -57,7 +57,7 @@ func (m *ApplicationSetManager) Create(ctx context.Context, appSet *v1alpha1.App
 	if err != nil {
 		return nil, err
 	}
-	log().WithField("applicationset", appSet.Name).Debug("Created ApplicationSet")
+	logging.LogActionCreate(log().WithField("applicationset", appSet.Name), "applicationset", created)
 	return created, nil
 }
 
@@ -92,7 +92,7 @@ func (m *ApplicationSetManager) Upsert(ctx context.Context, appSet *v1alpha1.App
 	if err != nil {
 		return nil, err
 	}
-	log().WithField("applicationset", appSet.Name).Debug("Updated ApplicationSet")
+	logging.LogActionUpdate(log().WithField("applicationset", appSet.Name), "applicationset", appSet, updated)
 	return updated, nil
 }
 
@@ -103,6 +103,7 @@ func (m *ApplicationSetManager) Get(ctx context.Context, name, namespace string)
 
 // Delete deletes an ApplicationSet.
 func (m *ApplicationSetManager) Delete(ctx context.Context, namespace string, appSet *v1alpha1.ApplicationSet, opts *backend.DeletionPropagation) error {
+	logging.LogActionDelete(log().WithField("applicationset", appSet.Name), "applicationset", namespace, appSet.Name)
 	return m.appSetBackend.Delete(ctx, appSet.Name, namespace, opts)
 }
 

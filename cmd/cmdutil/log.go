@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/writer"
 )
@@ -191,4 +192,34 @@ func ParseLogLevels(input []string, ss *SubSystemLoggers) {
 			logrus.Warnf("an invalid subsystem %s was specified. subsystems are %s, skipping", split[0], AvailableSubSystems)
 		}
 	}
+}
+
+const AvailableFullDetailCategories = "all, actions, events, informers"
+
+// ParseFullDetail parses a comma-separated list of category names and sets
+// the global full detail logging configuration. The special value "all"
+// enables every category.
+func ParseFullDetail(input []string) {
+	cfg := logging.FullDetailConfig{}
+	for _, e := range input {
+		category := strings.TrimSpace(strings.ToLower(e))
+		if category == "" {
+			continue
+		}
+		switch category {
+		case "all":
+			cfg.Actions = true
+			cfg.Events = true
+			cfg.Informers = true
+		case "actions":
+			cfg.Actions = true
+		case "events":
+			cfg.Events = true
+		case "informers":
+			cfg.Informers = true
+		default:
+			logrus.Warnf("an invalid full-detail category %q was specified. Available categories are: %s, skipping", category, AvailableFullDetailCategories)
+		}
+	}
+	logging.SetFullDetailConfig(cfg)
 }
