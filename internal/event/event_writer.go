@@ -46,7 +46,22 @@ type EventWriter struct {
 	// agentName is the name of the agent for which this EventWriter is responsible.
 	agentName string
 
+	// onRetryExhausted is called once per resource when an event is dropped after
+	// exceeding maxEventRetries (optional; used for metrics).
+	onRetryExhausted func(resourceID string)
+
 	log *logrus.Entry
+}
+
+// EventWriterOption configures an EventWriter.
+type EventWriterOption func(*EventWriter)
+
+// WithOnRetryExhausted registers a callback invoked when a sent event is removed
+// after exhausting retries. resourceID is the map key (not used as a metric label).
+func WithOnRetryExhausted(fn func(resourceID string)) EventWriterOption {
+	return func(ew *EventWriter) {
+		ew.onRetryExhausted = fn
+	}
 }
 
 type eventMessage struct {
@@ -71,14 +86,18 @@ type eventMessage struct {
 // NewEventWriter creates a new EventWriter for the given target stream.
 // If you create an EventWriter targeting the principal, an empty agentName
 // should be used.
-func NewEventWriter(agentName string, target streamWriter) *EventWriter {
-	return &EventWriter{
+func NewEventWriter(agentName string, target streamWriter, opts ...EventWriterOption) *EventWriter {
+	ew := &EventWriter{
 		unsentEvents: map[string]*eventQueue{},
 		sentEvents:   map[string]*eventMessage{},
 		target:       target,
 		agentName:    agentName,
 		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).WithField(logfields.Agent, agentName),
 	}
+	for _, o := range opts {
+		o(ew)
+	}
+	return ew
 }
 
 func (ew *EventWriter) UpdateTarget(target streamWriter) {
@@ -174,6 +193,28 @@ func (ew *EventWriter) Get(resID string) *eventMessage {
 		return eq.get()
 	}
 	return nil
+}
+
+// ObserveSentResendState calls observer with counts derived from sentEvents:
+// sentPending is len(sentEvents); resendDue is entries whose retryAfter is nil
+// or not after now; resendBackoff is sentPending - resendDue.
+// Lock order: EventWriter.mu RLock, then each eventMessage.mu RLock.
+func (ew *EventWriter) ObserveSentResendState(observer func(sentPending, resendDue, resendBackoff int)) {
+	now := time.Now()
+	ew.mu.RLock()
+	pending := len(ew.sentEvents)
+	due := 0
+	for _, msg := range ew.sentEvents {
+		msg.mu.RLock()
+		ra := msg.retryAfter
+		msg.mu.RUnlock()
+		if ra == nil || !ra.After(now) {
+			due++
+		}
+	}
+	ew.mu.RUnlock()
+	backoff := pending - due
+	observer(pending, due, backoff)
 }
 
 func (ew *EventWriter) Remove(ev *cloudevents.Event) {
@@ -307,9 +348,13 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 		logCtx.Warnf("Event failed after %d retries, giving up to unblock queue", sentMsg.retryCount)
 		sentMsg.mu.Unlock()
 
-		// Remove from sentEvents to unblock the queue
 		ew.mu.Lock()
-		delete(ew.sentEvents, resID)
+		if cur, ok := ew.sentEvents[resID]; ok && cur == sentMsg {
+			if ew.onRetryExhausted != nil {
+				ew.onRetryExhausted(resID)
+			}
+			delete(ew.sentEvents, resID)
+		}
 		ew.mu.Unlock()
 		return
 	}
@@ -464,6 +509,15 @@ func (ewm *EventWritersMap) Remove(agentName string) {
 	defer ewm.mu.Unlock()
 
 	delete(ewm.eventWriters, agentName)
+}
+
+// ObserveWriters calls fn for each agent name and EventWriter while holding a read lock on the map.
+func (ewm *EventWritersMap) ObserveWriters(fn func(agentName string, ew *EventWriter)) {
+	ewm.mu.RLock()
+	defer ewm.mu.RUnlock()
+	for name, w := range ewm.eventWriters {
+		fn(name, w)
+	}
 }
 
 // eventQueue is a queue of eventMessages where the items are coalesced by type.

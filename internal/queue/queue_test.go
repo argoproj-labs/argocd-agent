@@ -111,4 +111,39 @@ func Test_Queue(t *testing.T) {
 		assert.Equal(t, "2", front.ID())
 	})
 
+	t.Run("ObserveDepths reflects send and recv lengths", func(t *testing.T) {
+		q := NewSendRecvQueues()
+		assert.NoError(t, q.Create("agent1"))
+		sendQ := q.SendQ("agent1")
+		recvQ := q.RecvQ("agent1")
+		ev1, ev2 := event.New(), event.New()
+		ev1.SetID("a")
+		ev2.SetID("b")
+		sendQ.Add(&ev1)
+		recvQ.Add(&ev2)
+		recvQ.Add(&ev1)
+
+		var gotName string
+		var gotSend, gotRecv int
+		q.ObserveDepths(func(name string, sendLen, recvLen int) {
+			gotName = name
+			gotSend = sendLen
+			gotRecv = recvLen
+		})
+		assert.Equal(t, "agent1", gotName)
+		assert.Equal(t, 1, gotSend)
+		assert.Equal(t, 2, gotRecv)
+
+		item, _ := sendQ.Get()
+		sendQ.Done(item)
+		q.ObserveDepths(func(name string, sendLen, recvLen int) {
+			if name == "agent1" {
+				gotSend = sendLen
+				gotRecv = recvLen
+			}
+		})
+		assert.Equal(t, 0, gotSend)
+		assert.Equal(t, 2, gotRecv)
+	})
+
 }
