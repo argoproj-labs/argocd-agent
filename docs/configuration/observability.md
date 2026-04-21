@@ -122,13 +122,13 @@ export ARGOCD_AGENT_FULL_DETAIL="actions,events"
 
 **Example output with `--full-detail=actions`:**
 
-```
+```text
 level=info msg="Created application default/my-app" action=create detail="{\"metadata\":{\"name\":\"my-app\",...}}" log_category=actions name=my-app namespace=default resource_type=application
 ```
 
 Without full detail, the same log omits the `detail` field:
 
-```
+```text
 level=info msg="Created application default/my-app" action=create log_category=actions name=my-app namespace=default resource_type=application
 ```
 
@@ -189,7 +189,7 @@ All action, event, and informer logs include structured fields for filtering and
    kubectl logs -n argocd deployment/argocd-agent-principal | grep "agent=my-cluster"
    ```
 
-5. **Trace a resource through all categories**:
+4. **Trace a resource through all categories**:
    ```bash
    kubectl logs -n argocd deployment/argocd-agent-agent | grep 'name=my-app' | grep -E 'log_category=(actions|events|informers)'
    ```

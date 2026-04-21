@@ -150,7 +150,7 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 
 func (a *Agent) processIncomingApplication(ev *event.Event) error {
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
-		"method":      "processIncomingEvents",
+		"method":      "processIncomingApplication",
 		"event_id":    ev.EventID(),
 		"resource_id": ev.ResourceID(),
 	})
@@ -400,7 +400,7 @@ func identityAction(r *application.IdentityCompareResult) identityActionType {
 
 func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
-		"method":      "processIncomingEvents",
+		"method":      "processIncomingAppProject",
 		"event_id":    ev.EventID(),
 		"resource_id": ev.ResourceID(),
 	})
@@ -499,7 +499,7 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 
 func (a *Agent) processIncomingRepository(ev *event.Event) error {
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
-		"method":      "processIncomingEvents",
+		"method":      "processIncomingRepository",
 		"event_id":    ev.EventID(),
 		"resource_id": ev.ResourceID(),
 	})
@@ -602,7 +602,7 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 // exchanged with the agent/principal restarts
 func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
-		"method":      "processIncomingEvents",
+		"method":      "processIncomingResourceResyncEvent",
 		"agent":       a.remote.ClientID(),
 		"mode":        a.mode,
 		"event":       ev.Type(),

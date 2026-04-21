@@ -103,8 +103,11 @@ func (m *ApplicationSetManager) Get(ctx context.Context, name, namespace string)
 
 // Delete deletes an ApplicationSet.
 func (m *ApplicationSetManager) Delete(ctx context.Context, namespace string, appSet *v1alpha1.ApplicationSet, opts *backend.DeletionPropagation) error {
-	logging.LogActionDelete(log().WithField("applicationset", appSet.Name), "applicationset", namespace, appSet.Name)
-	return m.appSetBackend.Delete(ctx, appSet.Name, namespace, opts)
+	err := m.appSetBackend.Delete(ctx, appSet.Name, namespace, opts)
+	if err == nil {
+		logging.LogActionDelete(log().WithField("applicationset", appSet.Name), "applicationset", namespace, appSet.Name)
+	}
+	return err
 }
 
 // List lists ApplicationSets matching the given selector.
