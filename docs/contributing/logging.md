@@ -163,7 +163,11 @@ const (
 
 ## Full-Detail Logging Helpers
 
-The logging package provides helpers for structured logging of resource actions, events, and K8s informer activity. These emit consistent structured fields (`log_category`, `action`, `resource_type`, `name`, `namespace`) and conditionally include a `detail` field when full-detail logging is enabled.
+The logging package provides helpers for structured logging of resource actions, events, and K8s informer activity. Each helper emits `log_category` and conditionally includes a `detail` field when full-detail logging is enabled. The remaining structured fields vary by category:
+
+- **Action helpers**: `action`, `resource_type`, `name`, `namespace`
+- **Event helpers**: `direction`, `event_target`, `event_type`, `name`, `namespace` (parsed from CloudEvent subject)
+- **Informer helpers**: `action`, `resource_type`, `name`, `namespace`
 
 ### Action Logging (resource create/update/delete)
 

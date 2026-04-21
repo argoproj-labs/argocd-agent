@@ -802,8 +802,11 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 		}
 	}
 
-	logging.LogActionDelete(logCtx, "application", incoming.Namespace, incoming.Name)
-	return m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	err = m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	if err == nil {
+		logging.LogActionDelete(logCtx, "application", incoming.Namespace, incoming.Name)
+	}
+	return err
 }
 
 // update updates an existing Application resource on the Manager m's backend

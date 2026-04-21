@@ -99,8 +99,11 @@ func (m *GPGKeyManager) Create(ctx context.Context, cm *corev1.ConfigMap) (*core
 }
 
 func (m *GPGKeyManager) Delete(ctx context.Context, name, namespace string, deletionPropagation *backend.DeletionPropagation) error {
-	logging.LogActionDelete(log(), "gpgkey", namespace, name)
-	return m.backend.Delete(ctx, name, namespace, deletionPropagation)
+	err := m.backend.Delete(ctx, name, namespace, deletionPropagation)
+	if err == nil {
+		logging.LogActionDelete(log(), "gpgkey", namespace, name)
+	}
+	return err
 }
 
 func (m *GPGKeyManager) UpdateManagedGPGKey(ctx context.Context, incoming *corev1.ConfigMap) (*corev1.ConfigMap, error) {

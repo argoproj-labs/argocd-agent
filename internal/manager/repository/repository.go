@@ -113,8 +113,11 @@ func (m *RepositoryManager) Create(ctx context.Context, repo *corev1.Secret) (*c
 }
 
 func (m *RepositoryManager) Delete(ctx context.Context, name, namespace string, deletionPropagation *backend.DeletionPropagation) error {
-	logging.LogActionDelete(log(), "repository", namespace, name)
-	return m.backend.Delete(ctx, name, namespace, deletionPropagation)
+	err := m.backend.Delete(ctx, name, namespace, deletionPropagation)
+	if err == nil {
+		logging.LogActionDelete(log(), "repository", namespace, name)
+	}
+	return err
 }
 
 func (m *RepositoryManager) List(ctx context.Context, selector backend.RepositorySelector) ([]corev1.Secret, error) {
