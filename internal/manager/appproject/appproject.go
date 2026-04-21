@@ -352,8 +352,11 @@ func (m *AppProjectManager) Delete(ctx context.Context, incoming *v1alpha1.AppPr
 		}
 	}
 
-	logging.LogActionDelete(logCtx, "appproject", incoming.Namespace, incoming.Name)
-	return m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	err = m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	if err == nil {
+		logging.LogActionDelete(logCtx, "appproject", incoming.Namespace, incoming.Name)
+	}
+	return err
 }
 
 // RemoveFinalizers will remove finalizers on an existing app project.
