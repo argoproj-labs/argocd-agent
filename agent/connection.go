@@ -280,6 +280,9 @@ func (a *Agent) handleStreamEvents() error {
 	}
 
 	log().WithField(logfields.Component, "EventHandler").Info("Stream closed")
+	// Update the event writer target to nil to prevent any further events from being sent
+	// while we are disconnected.
+	a.eventWriter.UpdateTarget(nil)
 	a.remote.Disconnect()
 
 	return nil
