@@ -263,9 +263,7 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("could not unserialize app data from wire: %w", err)
 	}
 
-	if app.Name != "" {
-		logCtx.Infof("Received update for application '%v'", app.QualifiedName())
-	}
+	logging.LogEventReceived(logCtx, incomingEvent)
 
 	q := s.queues.RecvQ(c.agentName)
 	if q == nil {
@@ -337,12 +335,13 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
 	}
 
-	logCtx.WithFields(logrus.Fields{
+	logCtx = logCtx.WithFields(logrus.Fields{
 		"resource_id": event.ResourceID(ev),
 		"event_id":    event.EventID(ev),
-		"type":        ev.Type(),
-	}).Trace("Adding an event to the event writer")
+	})
+	logCtx.Trace("Adding an event to the event writer")
 	eventWriter.Add(ev)
+	logging.LogEventSent(logCtx, ev)
 
 	q.Done(ev)
 

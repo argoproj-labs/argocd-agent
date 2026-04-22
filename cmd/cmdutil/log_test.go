@@ -7,6 +7,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 )
 
 func Test_parseLogLevels(t *testing.T) {
@@ -145,6 +147,86 @@ func Test_parseLogLevels(t *testing.T) {
 			if tt.expectedMessage != "" {
 				output := buf.String()
 				assert.Contains(t, output, tt.expectedMessage)
+			}
+		})
+	}
+}
+
+func Test_ParseFullDetail(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []string
+		expected  logging.FullDetailConfig
+		warnAbout string
+	}{
+		{
+			name:     "empty input",
+			input:    []string{},
+			expected: logging.FullDetailConfig{},
+		},
+		{
+			name:     "all enables everything",
+			input:    []string{"all"},
+			expected: logging.FullDetailConfig{Actions: true, Events: true, Informers: true},
+		},
+		{
+			name:     "actions only",
+			input:    []string{"actions"},
+			expected: logging.FullDetailConfig{Actions: true},
+		},
+		{
+			name:     "events only",
+			input:    []string{"events"},
+			expected: logging.FullDetailConfig{Events: true},
+		},
+		{
+			name:     "informers only",
+			input:    []string{"informers"},
+			expected: logging.FullDetailConfig{Informers: true},
+		},
+		{
+			name:     "multiple categories",
+			input:    []string{"actions", "events"},
+			expected: logging.FullDetailConfig{Actions: true, Events: true},
+		},
+		{
+			name:     "case insensitive",
+			input:    []string{"ACTIONS", "Events"},
+			expected: logging.FullDetailConfig{Actions: true, Events: true},
+		},
+		{
+			name:     "whitespace trimmed",
+			input:    []string{" actions ", " informers "},
+			expected: logging.FullDetailConfig{Actions: true, Informers: true},
+		},
+		{
+			name:      "invalid category warns",
+			input:     []string{"invalid"},
+			expected:  logging.FullDetailConfig{},
+			warnAbout: "invalid full-detail category",
+		},
+		{
+			name:     "empty strings are ignored",
+			input:    []string{"", "actions", ""},
+			expected: logging.FullDetailConfig{Actions: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer logging.SetFullDetailConfig(logging.FullDetailConfig{})
+
+			var buf bytes.Buffer
+			logrus.SetOutput(&buf)
+			defer logrus.SetOutput(os.Stdout)
+
+			ParseFullDetail(tt.input)
+
+			got := logging.GetFullDetailConfig()
+			assert.Equal(t, tt.expected, got)
+
+			if tt.warnAbout != "" {
+				assert.Contains(t, buf.String(), tt.warnAbout)
 			}
 		})
 	}

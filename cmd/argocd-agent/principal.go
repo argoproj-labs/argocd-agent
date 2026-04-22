@@ -52,6 +52,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		listenPort                int
 		logLevels                 []string
 		logFormat                 string
+		fullDetailCategories      []string
 		metricsPort               int
 		namespace                 string
 		allowedNamespaces         []string
@@ -183,6 +184,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			opts = append(opts, principal.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
+
+			cmdutil.ParseFullDetail(fullDetailCategories)
 
 			kubeConfig, err := cmdutil.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
 			if err != nil {
@@ -482,6 +485,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&logFormat, "log-format",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),
 		"The log format to use (one of: text, json)")
+	command.Flags().StringSliceVar(&fullDetailCategories, "full-detail",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_FULL_DETAIL", nil, nil),
+		"Enable full detail logging for specified categories. Comma-separated list of: "+cmdutil.AvailableFullDetailCategories)
 
 	command.Flags().IntVar(&metricsPort, "metrics-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_METRICS_PORT", cmdutil.ValidPort, 8000),

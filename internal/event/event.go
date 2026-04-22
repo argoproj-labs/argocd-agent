@@ -190,6 +190,7 @@ func (evs EventSource) ApplicationEvent(evType EventType, app *v1alpha1.Applicat
 	cev.SetExtension(eventID, createEventID(app.ObjectMeta))
 	cev.SetExtension(resourceID, createResourceID(app.ObjectMeta))
 	cev.SetDataSchema(TargetApplication.String())
+	cev.SetSubject(fmt.Sprintf("%s/%s", app.Namespace, app.Name))
 	// TODO: Handle this error situation?
 	_ = cev.SetData(cloudevents.ApplicationJSON, app)
 	return &cev
@@ -211,6 +212,7 @@ func (evs EventSource) AppProjectEvent(evType EventType, appProject *v1alpha1.Ap
 	cev.SetExtension(eventID, createEventID(appProject.ObjectMeta))
 	cev.SetExtension(resourceID, createResourceID(appProject.ObjectMeta))
 	cev.SetDataSchema(TargetAppProject.String())
+	cev.SetSubject(fmt.Sprintf("%s/%s", appProject.Namespace, appProject.Name))
 	// TODO: Handle this error situation?
 	_ = cev.SetData(cloudevents.ApplicationJSON, appProject)
 	return &cev
@@ -224,6 +226,7 @@ func (evs EventSource) ApplicationSetEvent(evType EventType, appSet *v1alpha1.Ap
 	cev.SetExtension(eventID, createEventID(appSet.ObjectMeta))
 	cev.SetExtension(resourceID, createResourceID(appSet.ObjectMeta))
 	cev.SetDataSchema(TargetApplicationSet.String())
+	cev.SetSubject(fmt.Sprintf("%s/%s", appSet.Namespace, appSet.Name))
 	_ = cev.SetData(cloudevents.ApplicationJSON, appSet)
 	return &cev
 }
@@ -255,7 +258,7 @@ func (evs EventSource) RepositoryEvent(evType EventType, repository *corev1.Secr
 	cev.SetExtension(eventID, createEventID(repository.ObjectMeta))
 	cev.SetExtension(resourceID, createResourceID(repository.ObjectMeta))
 	cev.SetDataSchema(TargetRepository.String())
-
+	cev.SetSubject(fmt.Sprintf("%s/%s", repository.Namespace, repository.Name))
 	_ = cev.SetData(cloudevents.ApplicationJSON, repository)
 	return &cev
 }
@@ -268,6 +271,7 @@ func (evs EventSource) GPGKeyEvent(evType EventType, cm *corev1.ConfigMap) *clou
 	cev.SetExtension(eventID, createEventID(cm.ObjectMeta))
 	cev.SetExtension(resourceID, createResourceID(cm.ObjectMeta))
 	cev.SetDataSchema(TargetGPGKey.String())
+	cev.SetSubject(fmt.Sprintf("%s/%s", cm.Namespace, cm.Name))
 	_ = cev.SetData(cloudevents.ApplicationJSON, cm)
 	return &cev
 }

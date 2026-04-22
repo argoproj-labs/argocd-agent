@@ -22,6 +22,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
@@ -97,6 +98,7 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 	})
 	logCtx.Trace("Adding an event to the event writer")
 	a.eventWriter.Add(ev)
+	logging.LogEventSent(logCtx, ev)
 
 	return nil
 }
@@ -130,7 +132,7 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 		"type":        ev.Type(),
 	})
 
-	logCtx.Debugf("Received a new event from stream")
+	logging.LogEventReceived(logCtx, ev.CloudEvent())
 
 	if ev.Target() == event.TargetEventAck {
 		logCtx.Trace("Received an ACK for an event")
@@ -145,7 +147,7 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 
 	err = a.processIncomingEvent(ev)
 	if err != nil {
-		logCtx.WithError(err).Errorf("Unable to process incoming event")
+		logging.LogEventError(logCtx, ev.CloudEvent(), err)
 		// Don't send an ACK if it is a retryable error.
 		if kube.IsRetryableError(err) {
 			logCtx.Trace("Skipping ACK for retryable errors")
