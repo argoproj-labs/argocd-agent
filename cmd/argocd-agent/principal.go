@@ -37,6 +37,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
+	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	"github.com/argoproj-labs/argocd-agent/principal"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
@@ -137,6 +138,27 @@ func NewPrincipalRunCommand() *cobra.Command {
 			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
 
+			if formatter, err := cmdutil.LogFormatter(logFormat); err != nil {
+				cmdutil.Fatal("%s", err.Error())
+			} else {
+				logrus.SetFormatter(formatter)
+			}
+
+			subLoggers := cmdutil.SubSystemLoggers{
+				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
+				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
+				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
+			}
+
+			if len(logLevels) == 0 {
+				logLevels = append(logLevels, "info")
+			}
+			if len(logLevels) > 0 {
+				cmdutil.ParseLogLevels(logLevels, &subLoggers)
+			}
+
+			logrus.Infof("Initializing argocd-agent v%s (principal)", version.New("argocd-agent").Version())
+
 			// Initialize OpenTelemetry tracing if enabled
 			if otlpAddress != "" {
 				shutdownTracer, err := tracing.InitTracer(ctx, "principal", otlpAddress, otlpInsecure)
@@ -163,25 +185,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			opts := []principal.ServerOption{}
-			if formatter, err := cmdutil.LogFormatter(logFormat); err != nil {
-				cmdutil.Fatal("%s", err.Error())
-			} else {
-				logrus.SetFormatter(formatter)
-			}
-
-			subLoggers := cmdutil.SubSystemLoggers{
-				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
-				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
-				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
-			}
-
-			if len(logLevels) == 0 {
-				logLevels = append(logLevels, "info")
-			}
-			if len(logLevels) > 0 {
-				cmdutil.ParseLogLevels(logLevels, &subLoggers)
-			}
-
 			opts = append(opts, principal.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
 
 			kubeConfig, err := cmdutil.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
