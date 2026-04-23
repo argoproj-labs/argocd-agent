@@ -120,7 +120,10 @@ type Server struct {
 	// The key of namespaceMap is the client id which the agent used to authenticate with principal, via AuthSubject.ClientID (which, it is also assumed here, corresponds to a control plane namespace of the same name)
 	// NOTE: clientLock should be owned before accessing namespaceMap
 	namespaceMap map[string]types.AgentMode
-	// clientLock should be owned before accessing namespaceMap
+	// agentNamespaces maps agent name to the Kubernetes namespace where the agent is
+	// running on the workload cluster.
+	agentNamespaces map[string]string
+	// clientLock should be owned before accessing namespaceMap or agentNamespaces
 	clientLock sync.RWMutex
 	// events is used to construct events to pass on the wire to connected agents.
 	events     *event.EventSource
@@ -239,6 +242,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		sourceCache:     cache.NewSourceCache(),
 		deletions:       manager.NewDeletionTracker(),
 		appToAgent:      newConcurrentStringMap(),
+		agentNamespaces: make(map[string]string),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)
@@ -937,7 +941,8 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 
 		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agent.Name()), logCtx, manager.ManagerRolePrincipal, s.namespace).
 			WithDestinationBasedMapping(s.destinationBasedMapping).
-			WithPrincipalUID(s.principalUID)
+			WithPrincipalUID(s.principalUID).
+			WithPeerNamespace(s.agentNamespace(agent.Name()))
 		go resyncHandler.SendRequestUpdates(s.ctx)
 
 		// Principal should request SyncedResourceList to revert any deletions on the Principal side.
@@ -1263,6 +1268,18 @@ func (s *Server) setAgentMode(namespace string, mode types.AgentMode) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 	s.namespaceMap[namespace] = mode
+}
+
+func (s *Server) agentNamespace(agentName string) string {
+	s.clientLock.RLock()
+	defer s.clientLock.RUnlock()
+	return s.agentNamespaces[agentName]
+}
+
+func (s *Server) setAgentNamespace(agentName, namespace string) {
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+	s.agentNamespaces[agentName] = namespace
 }
 
 func (s *Server) healthzHandler(w http.ResponseWriter, r *http.Request) {

@@ -2315,3 +2315,104 @@ func Test_processIncomingApplication_TransitionUsesResolvedSourceUID(t *testing.
 	assert.True(t, a.sourceCache.Application.Contains(ktypes.UID("old-source-uid")))
 	assert.False(t, a.sourceCache.Application.Contains(ktypes.UID("new-principal-uid")))
 }
+
+func Test_getTargetNamespaceForApp(t *testing.T) {
+	tests := []struct {
+		name                    string
+		agentNamespace          string
+		principalNamespace      string
+		destinationBasedMapping bool
+		agentMode               types.AgentMode
+		appNamespace            string
+		expected                string
+		expectAnnotation        bool
+	}{
+		{
+			name:                    "Remaps principal namespace to agent namespace and stamps annotation",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd",
+			expected:                "argocd-agent",
+			expectAnnotation:        true,
+		},
+		{
+			name:                    "No remap and no annotation when app namespace differs from principal",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "tenant-apps",
+			expected:                "tenant-apps",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Tenant namespace same as agent namespace gets no annotation",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd-agent",
+			expected:                "argocd-agent",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Falls back to agent namespace without destination-based mapping",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: false,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd",
+			expected:                "argocd-agent",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Falls back to agent namespace in autonomous mode",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeAutonomous,
+			appNamespace:            "argocd",
+			expected:                "argocd-agent",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Same namespace on agent and principal skips annotation",
+			agentNamespace:          "argocd",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd",
+			expected:                "argocd",
+			expectAnnotation:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &Agent{
+				namespace:               tt.agentNamespace,
+				principalNamespace:      tt.principalNamespace,
+				destinationBasedMapping: tt.destinationBasedMapping,
+				mode:                    tt.agentMode,
+			}
+			app := &v1alpha1.Application{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      "myapp",
+					Namespace: tt.appNamespace,
+				},
+			}
+			result := a.getTargetNamespaceForApp(app)
+			assert.Equal(t, tt.expected, result)
+
+			annotation, hasAnnotation := app.Annotations[manager.OriginalNamespaceAnnotation]
+			if tt.expectAnnotation {
+				assert.True(t, hasAnnotation, "expected original-namespace annotation")
+				assert.Equal(t, tt.principalNamespace, annotation)
+			} else {
+				assert.False(t, hasAnnotation, "did not expect original-namespace annotation")
+			}
+		})
+	}
+}

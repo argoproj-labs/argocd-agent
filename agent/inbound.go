@@ -156,7 +156,10 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		return err
 	}
 
-	// Determine the target namespace for the application
+	// Determine the target namespace for the application.
+	// When destination-based mapping is enabled and the agent is in a different
+	// namespace than the principal, getTargetNamespaceForApp falls back to the
+	// agent's own namespace.
 	targetNamespace := a.getTargetNamespaceForApp(incomingApp)
 	incomingApp.SetNamespace(targetNamespace)
 
@@ -556,7 +559,8 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent, a.namespace).
 		WithDestinationBasedMapping(a.destinationBasedMapping).
-		WithIgnoreUnmanagedApps(a.ignoreUnmanagedApps)
+		WithIgnoreUnmanagedApps(a.ignoreUnmanagedApps).
+		WithPeerNamespace(a.principalNS())
 	subject := &auth.AuthSubject{}
 	err = json.Unmarshal([]byte(a.remote.ClientID()), subject)
 	if err != nil {
@@ -1052,6 +1056,7 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 	}
 
 	incomingCM.SetNamespace(a.namespace)
+	incomingCM.OwnerReferences = nil
 
 	var exists, sourceUIDMatch bool
 	exists, sourceUIDMatch, err = a.gpgKeyManager.CompareSourceUID(a.context, incomingCM)
@@ -1228,10 +1233,20 @@ func (a *Agent) deleteGPGKey(cm *corev1.ConfigMap) error {
 }
 
 // getTargetNamespaceForApp returns the namespace where the application should
-// be created on the agent. If destinationBasedMapping is enabled AND the agent
-// is in managed mode, it returns the original namespace from the principal.
+// be created on the agent. In destination-based mapping + managed mode, apps
+// whose namespace matches the principal's namespace are remapped to the agent's
+// own namespace. When remapping occurs the original namespace is recorded in an
+// annotation so that the principal can unambiguously remap it back later.
 func (a *Agent) getTargetNamespaceForApp(app *v1alpha1.Application) string {
 	if a.destinationBasedMapping && a.mode == types.AgentModeManaged {
+		principalNS := a.principalNS()
+		if principalNS != "" && app.Namespace == principalNS && a.namespace != principalNS {
+			if app.Annotations == nil {
+				app.Annotations = make(map[string]string)
+			}
+			app.Annotations[manager.OriginalNamespaceAnnotation] = principalNS
+			return a.namespace
+		}
 		return app.Namespace
 	}
 	return a.namespace
