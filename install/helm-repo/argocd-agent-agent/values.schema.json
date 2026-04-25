@@ -63,6 +63,19 @@
       "title": "destinationBasedMapping",
       "type": "boolean"
     },
+    "dnsConfig": {
+      "additionalProperties": true,
+      "description": "DNS config for the Pod. Only honored when `dnsPolicy` is \"None\".",
+      "required": [],
+      "title": "dnsConfig",
+      "type": "object"
+    },
+    "dnsPolicy": {
+      "default": "",
+      "description": "DNS policy for the Pod (e.g. ClusterFirst, None). Empty leaves the default.",
+      "title": "dnsPolicy",
+      "type": "string"
+    },
     "enableCompression": {
       "default": false,
       "description": "Whether to enable gRPC compression.",
@@ -81,6 +94,12 @@
       "title": "enableWebSocket",
       "type": "boolean"
     },
+    "fullnameOverride": {
+      "default": "",
+      "description": "Override the fully-qualified resource name (defaults to `\u003crelease\u003e-agent-helm`).",
+      "title": "fullnameOverride",
+      "type": "string"
+    },
     "global": {
       "description": "Global values are values that can be accessed from any chart or subchart by exactly the same name.",
       "required": [],
@@ -92,6 +111,14 @@
       "description": "Healthz server port exposed by the agent.",
       "title": "healthzPort",
       "type": "string"
+    },
+    "hostAliases": {
+      "description": "Host aliases injected into /etc/hosts of the agent Pod.",
+      "items": {
+        "required": []
+      },
+      "title": "hostAliases",
+      "type": "array"
     },
     "image": {
       "additionalProperties": false,
@@ -124,6 +151,14 @@
       "title": "image",
       "type": "object"
     },
+    "imagePullSecrets": {
+      "description": "Image pull secrets for private registries.",
+      "items": {
+        "required": []
+      },
+      "title": "imagePullSecrets",
+      "type": "array"
+    },
     "keepAliveInterval": {
       "default": "50s",
       "description": "Keep-alive interval for connections.",
@@ -146,6 +181,12 @@
       "default": "8181",
       "description": "Metrics server port exposed by the agent.",
       "title": "metricsPort",
+      "type": "string"
+    },
+    "nameOverride": {
+      "default": "",
+      "description": "Override the chart name used in `app.kubernetes.io/name`\nAlso changes `spec.selector.matchLabels`, which is immutable — do not set after initial\ninstall unless you are prepared to delete+reinstall.",
+      "title": "nameOverride",
       "type": "string"
     },
     "namespaceOverride": {
@@ -173,6 +214,55 @@
       "description": "Additional labels to add to the agent Pod.",
       "required": [],
       "title": "podLabels",
+      "type": "object"
+    },
+    "podSecurityContext": {
+      "additionalProperties": true,
+      "description": "#\nPod-level securityContext. Applied to the Pod spec.",
+      "properties": {
+        "fsGroup": {
+          "default": 999,
+          "title": "fsGroup",
+          "type": "integer"
+        },
+        "fsGroupChangePolicy": {
+          "default": "OnRootMismatch",
+          "title": "fsGroupChangePolicy",
+          "type": "string"
+        },
+        "runAsGroup": {
+          "default": 999,
+          "title": "runAsGroup",
+          "type": "integer"
+        },
+        "runAsNonRoot": {
+          "default": true,
+          "title": "runAsNonRoot",
+          "type": "boolean"
+        },
+        "runAsUser": {
+          "default": 999,
+          "title": "runAsUser",
+          "type": "integer"
+        },
+        "seccompProfile": {
+          "additionalProperties": true,
+          "properties": {
+            "type": {
+              "default": "RuntimeDefault",
+              "title": "type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "seccompProfile",
+          "type": "object"
+        }
+      },
+      "required": [],
+      "title": "podSecurityContext",
       "type": "object"
     },
     "pprofPort": {
@@ -331,6 +421,36 @@
       "title": "probes",
       "type": "object"
     },
+    "progressDeadlineSeconds": {
+      "default": 600,
+      "description": "Time allowed for the Deployment to make progress before the controller reports failure.",
+      "title": "progressDeadlineSeconds",
+      "type": "integer"
+    },
+    "rbac": {
+      "additionalProperties": false,
+      "description": "#",
+      "properties": {
+        "create": {
+          "default": true,
+          "description": "Create namespace-scoped Role and RoleBinding for the agent.",
+          "title": "create",
+          "type": "boolean"
+        },
+        "createClusterRole": {
+          "default": true,
+          "description": "Create cluster-scoped ClusterRole and ClusterRoleBinding. Required for\ndestination-based mapping, create-namespace, and resource-proxy discovery\nacross multiple namespaces. Leave `false` to keep the agent strictly\nnamespace-scoped.",
+          "title": "createClusterRole",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "create",
+        "createClusterRole"
+      ],
+      "title": "rbac",
+      "type": "object"
+    },
     "redisAddress": {
       "default": "argocd-redis:6379",
       "description": "Redis address used by the agent.",
@@ -431,6 +551,88 @@
         "requests"
       ],
       "title": "resources",
+      "type": "object"
+    },
+    "revisionHistoryLimit": {
+      "default": 10,
+      "description": "Number of old ReplicaSets to retain for rollback.",
+      "title": "revisionHistoryLimit",
+      "type": "integer"
+    },
+    "securityContext": {
+      "additionalProperties": true,
+      "description": "#\nContainer-level securityContext. Applied to the agent container.",
+      "properties": {
+        "allowPrivilegeEscalation": {
+          "default": false,
+          "title": "allowPrivilegeEscalation",
+          "type": "boolean"
+        },
+        "capabilities": {
+          "additionalProperties": false,
+          "properties": {
+            "drop": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  }
+                ],
+                "required": []
+              },
+              "title": "drop",
+              "type": "array"
+            }
+          },
+          "required": [
+            "drop"
+          ],
+          "title": "capabilities",
+          "type": "object"
+        },
+        "privileged": {
+          "default": false,
+          "title": "privileged",
+          "type": "boolean"
+        },
+        "readOnlyRootFilesystem": {
+          "default": true,
+          "title": "readOnlyRootFilesystem",
+          "type": "boolean"
+        },
+        "runAsGroup": {
+          "default": 999,
+          "title": "runAsGroup",
+          "type": "integer"
+        },
+        "runAsNonRoot": {
+          "default": true,
+          "title": "runAsNonRoot",
+          "type": "boolean"
+        },
+        "runAsUser": {
+          "default": 999,
+          "title": "runAsUser",
+          "type": "integer"
+        },
+        "seccompProfile": {
+          "additionalProperties": true,
+          "properties": {
+            "type": {
+              "default": "RuntimeDefault",
+              "title": "type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "seccompProfile",
+          "type": "object"
+        }
+      },
+      "required": [],
+      "title": "securityContext",
       "type": "object"
     },
     "server": {
@@ -652,6 +854,12 @@
       "title": "serviceMonitor",
       "type": "object"
     },
+    "terminationGracePeriodSeconds": {
+      "default": 30,
+      "description": "Grace period for Pod termination (seconds).",
+      "title": "terminationGracePeriodSeconds",
+      "type": "integer"
+    },
     "tests": {
       "additionalProperties": false,
       "description": "#\nConfiguration for helm-chart tests.",
@@ -751,6 +959,51 @@
       "title": "tolerations",
       "type": "array"
     },
+    "topologySpreadConstraints": {
+      "description": "Topology spread constraints for the agent Pod.",
+      "items": {
+        "required": []
+      },
+      "title": "topologySpreadConstraints",
+      "type": "array"
+    },
+    "updateStrategy": {
+      "additionalProperties": true,
+      "description": "Deployment update strategy (passed through as `spec.strategy`).",
+      "properties": {
+        "rollingUpdate": {
+          "additionalProperties": true,
+          "properties": {
+            "maxSurge": {
+              "default": "25%",
+              "title": "maxSurge",
+              "type": "string"
+            },
+            "maxUnavailable": {
+              "default": "25%",
+              "title": "maxUnavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "maxSurge",
+            "maxUnavailable"
+          ],
+          "title": "rollingUpdate",
+          "type": "object"
+        },
+        "type": {
+          "default": "RollingUpdate",
+          "title": "type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "updateStrategy",
+      "type": "object"
+    },
     "userPasswordSecretName": {
       "default": "argocd-agent-agent-userpass",
       "description": "Name of the Secret containing agent username/password (if used).",
@@ -762,17 +1015,24 @@
     "namespaceOverride",
     "image",
     "replicaCount",
+    "updateStrategy",
+    "revisionHistoryLimit",
+    "progressDeadlineSeconds",
     "tlsSecretName",
     "tlsRootCASecretName",
     "userPasswordSecretName",
     "resources",
     "serviceAccount",
+    "podSecurityContext",
+    "securityContext",
+    "rbac",
     "nodeSelector",
     "affinity",
     "tolerations",
     "podAnnotations",
     "podLabels",
     "priorityClassName",
+    "terminationGracePeriodSeconds",
     "probes",
     "agentMode",
     "auth",
