@@ -173,7 +173,12 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 
 // onDisconnect must be called whenever client c disconnects from the stream
 func (s *Server) onDisconnect(c *client) {
+
+	c.logCtx.Infof("JGW onDisconnect 1 %s", c.agentName)
+
 	c.disconnectOnce.Do(func() {
+		c.logCtx.Infof("JGW onDisconnect 2 %s", c.agentName)
+
 		c.lock.Lock()
 		c.end = time.Now()
 		c.lock.Unlock()
@@ -183,9 +188,13 @@ func (s *Server) onDisconnect(c *client) {
 		// "Successful" status with "Failed".
 		s.activeClientsMu.Lock()
 		current := s.activeClients[c.agentName]
+		agentName := c.agentName
+		c.logCtx.Infof("JGW onDisconnect 3 %v", agentName)
 		if current == c {
+			c.logCtx.Infof("JGW onDisconnect 4 %v", agentName)
 			s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
 		}
+		c.logCtx.Infof("JGW onDisconnect 5 %v", agentName)
 		s.activeClientsMu.Unlock()
 	})
 
