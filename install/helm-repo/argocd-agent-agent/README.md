@@ -1,6 +1,6 @@
 # argocd-agent-agent
 
-![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
+![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.8.1](https://img.shields.io/badge/AppVersion-0.8.1-informational?style=flat-square)
 
 Argo CD Agent for connecting managed clusters to a Principal
 
@@ -20,6 +20,10 @@ Argo CD Agent for connecting managed clusters to a Principal
 
 Kubernetes: `>=1.24.0-0`
 
+| Repository | Name | Version |
+|------------|------|---------|
+| https://argoproj.github.io/argo-helm | argocd(argo-cd) | 9.5.2 |
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -27,8 +31,18 @@ Kubernetes: `>=1.24.0-0`
 | affinity | object | `{}` | Affinity rules for the agent Pod. |
 | agentMode | string | `"autonomous"` | Agent mode of operation. |
 | allowedNamespaces | string | `""` | Comma-separated list of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature). Supports glob patterns (e.g., "team-*,prod-*"). |
+| argoCD.enabled | bool | `false` | Whether to install the argo-cd Helm chart (argo-helm) alongside the agent. |
 | argoCdRedisPasswordKey | string | `"auth"` | ArgoCD Redis password key. |
 | argoCdRedisSecretName | string | `"argocd-redis"` | ArgoCD Redis password secret name. |
+| argocd.applicationSet | object | `{"replicas":0}` | argo-helm does not expose `applicationSet.enabled`;use 0 replicas to disable the Argo CD applicationSet Deployment. |
+| argocd.dex | object | `{"enabled":false}` | disable dex |
+| argocd.global.image.repository | string | `"quay.io/argoproj/argocd"` | Argo CD image repository (change for a private or custom registry mirror). |
+| argocd.global.image.tag | string | `"v3.3.7"` | Argo CD image tag; keep in sync with `github.com/argoproj/argo-cd/v3` in the repo go.mod. |
+| argocd.notifications | object | `{"enabled":false}` | Disable the Argo CD notifications controller (`notifications.enabled` in argo-helm). |
+| argocd.redis.image.repository | string | `"ecr-public.aws.com/docker/library/redis"` | Redis image repository (change for a private or custom registry mirror). |
+| argocd.redis.image.tag | string | `"8.2.3-alpine"` | Redis image tag. |
+| argocd.repoServer.copyutil.extraArgs | string | `""` | Clear default copyutil extra args to avoid issues when repo-server is bundled. |
+| argocd.server.replicas | int | `0` | argo-helm does not expose `server.enabled`; use 0 replicas to disable the Argo CD API/UI Deployment. |
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
 | cacheRefreshInterval | string | `"10s"` | Cache refresh interval. |
 | createNamespace | bool | `false` | Whether to create target namespaces automatically when they don't exist. Used with destination-based mapping. |
@@ -36,6 +50,9 @@ Kubernetes: `>=1.24.0-0`
 | enableCompression | bool | `false` | Whether to enable gRPC compression. |
 | enableResourceProxy | bool | `true` | Whether to enable resource proxy. |
 | enableWebSocket | bool | `false` | Whether to enable WebSocket connections. |
+| global | object | `{"imagePullSecrets":[],"namespaceOverride":""}` | Helm `global` values merged into subcharts. Set `global.imagePullSecrets` when you need registry credentials on the agent ServiceAccount and on the bundled argo-cd chart (`argoCD.enabled` is true). |
+| global.imagePullSecrets | list | `[]` | Image pull secrets applied to the agent AND the bundled argo-cd subchart. Helm propagates global values into subcharts, so this list overrides argocd.global.imagePullSecrets. Set credentials here when both charts need the same pull secret; use argocd.global.imagePullSecrets only if the subchart requires a different secret than the agent. |
+| global.namespaceOverride | string | `""` | Override namespace for the agent AND the bundled argo-cd subchart. This is the recommended way to deploy both charts into a non-release namespace. |
 | healthzPort | string | `"8002"` | Healthz server port exposed by the agent. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the agent container. |
 | image.repository | string | `"ghcr.io/argoproj-labs/argocd-agent/argocd-agent"` | Container image repository for the agent. |
@@ -45,7 +62,7 @@ Kubernetes: `>=1.24.0-0`
 | logFormat | string | `"text"` | Log format for the agent (text or json). |
 | logLevel | string | `"info"` | Log level for the agent. |
 | metricsPort | string | `"8181"` | Metrics server port exposed by the agent. |
-| namespaceOverride | string | `""` | Override namespace to deploy the agent into. Leave empty to use the release namespace. |
+| namespaceOverride | Deprecated: use global.namespaceOverride | `""` | Override namespace for the agent chart only. When set, takes precedence over global.namespaceOverride for agent resources, but does NOT propagate to the bundled argo-cd subchart. Prefer global.namespaceOverride. |
 | nodeSelector | object | `{}` | Node selector for scheduling the agent Pod. |
 | podAnnotations | object | `{}` | Additional annotations to add to the agent Pod. |
 | podLabels | object | `{}` | Additional labels to add to the agent Pod. |

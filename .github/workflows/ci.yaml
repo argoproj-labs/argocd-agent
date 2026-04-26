@@ -283,10 +283,19 @@ jobs:
           YQ_VERSION="v4.44.3"
           sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
           sudo chmod +x /usr/local/bin/yq
+      - name: Set up Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: v3.16.3
       - name: Validate schema
         working-directory: ${{ github.workspace }}
         run: |
           make validate-values-schema
+
+      - name: Validate Helm chart
+        working-directory: ${{ github.workspace }}
+        run: |
+          make validate-helm-chart
 
       - name: validate helm-docs generation
         uses: losisin/helm-docs-github-action@2ccf3e77eb70dc80d62f8cc26f15d0a96b75fef4 # v1.8.0 https://github.com/losisin/helm-docs-github-action

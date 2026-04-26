@@ -10,27 +10,36 @@ Before you begin, ensure you have the following:
 ## Helm Chart Installation
 Use the following command to install the argocd-agent-agent-helm chart.
 
-`helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0`
+`helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0`
 
 > **Resource naming:** every Kubernetes object that this chart creates is derived from your Helm release name. For example, installing with `helm install agent-prod ...` generates resource name `agent-prod-agent-helm`. Pick a release name that matches how you want the objects to appear in the cluster.
+
+### Optional bundled Argo CD
+
+The chart can install the upstream [argo-helm](https://github.com/argoproj/argo-helm) `argo-cd` chart in the same release by setting `argoCD.enabled=true`. Pass Helm values for that subchart under the `argocd` key (for example `--set argoCD.enabled=true --set argocd.redis.image.repository=quay.io/..` for a lab setup). When `argoCD.enabled` is false (default), install Argo CD separately and keep the agent pointed at its Redis service.
+
+Maintainers: see [Helm dependencies and upgrading the Argo CD subchart](helm-dependencies-and-upgrades.md) for scripts, `make` targets, and the upgrade checklist tied to `go.mod`.
+
+To pull images from a private registry for **both** the agent and bundled Argo CD, create the pull `Secret` in the install namespace and set `global.imagePullSecrets` (for example `-f` a values snippet with `global.imagePullSecrets: [{ name: my-registry-secret }]`). You can instead set `argocd.global.imagePullSecrets` for the bundled chart only; avoid defining `global.imagePullSecrets: []` in that case, because Helm propagates parent `global` values into subcharts and an empty list overrides subchart-only pull secret settings.
 
 ### Namespace Handling
 
 If you run the helm install command without specifying a namespace flag, Helm will attempt to deploy resources into the `default` namespace.
 
-If the target namespace set using flag `--set namespaceOverride=argocd`, does not exist, the installation will fail. 
-
+If the namespace set via `--set global.namespaceOverride=argocd` does not exist, installation will fail (Helm `--create-namespace` only creates the release namespace from `--namespace`).
 Deploying to a Custom Namespace:
-The chart can be deployed into a specific Kubernetes namespace using `--namespace` flag, and `--create-namespace` to create a namespace if not present. Or, it can also be set using `--set namespaceOverride=agent-namespce`.
+The chart can be deployed into a specific Kubernetes namespace using `--namespace` (and optionally `--create-namespace`). You can also set `--set global.namespaceOverride=agent-namespace`, but that namespace must already exist unless it is also the release namespace.
 
-```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 --namespace=argocd --create-namespace
+When the bundled Argo CD subchart is enabled (`argoCD.enabled=true`), use `global.namespaceOverride` instead of the top-level `namespaceOverride` so that both the agent and Argo CD resources deploy into the same namespace. Helm propagates `global` values to subcharts automatically.
+
+```sh
+helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0 --namespace=argocd --create-namespace
 ```
 
 OR,
 
-```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 --set namespaceOverride=argocd
+```sh
+helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0 --set global.namespaceOverride=argocd
 ```
 
 
@@ -45,7 +54,8 @@ __Declare variables to be passed into your templates.__
 
 #### Namespace to deploy your agent in
 ```
-namespaceOverride: ""
+global:
+  namespaceOverride: ""
 ```
 
 #### Secret names for argo-agent deployment
@@ -75,11 +85,11 @@ tlsRootCAPath: ""
 
 Parameter Descriptions:
 
-namespaceOverride:
+global.namespaceOverride:
 
 Default: ""
 
-The Kubernetes namespace where the agent's resources (Deployment, Service, ConfigMap, etc.) will be deployed. This can be overridden by the helm install --namespace flag.
+The Kubernetes namespace where the agent's resources (Deployment, Service, ConfigMap, etc.) and the bundled Argo CD subchart will be deployed. When set, this takes precedence over the `helm install --namespace` flag (`.Release.Namespace`), which is only used as a fallback when `global.namespaceOverride` is empty. Preferred over the top-level `namespaceOverride` which only affects the agent chart.
 
 tlsSecretName:
 
@@ -182,7 +192,7 @@ You can override any of the default values in values.yaml during installation:
 
 Using --set for individual values:
 ```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 \
+helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0 \
   --set logLevel="debug" \
   --set agentMode="managed" \
   --set server="https://my-argocd-server.com"
@@ -199,7 +209,7 @@ server: "https://argocd.production.com"
 Then, install with:
 
 ```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 \
+helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.2.0 \
   -f my-custom-values.yaml
 ```
 Values provided via -f take precedence over the chart's default values.yaml. You can use multiple -f flags, with the rightmost file taking highest precedence.

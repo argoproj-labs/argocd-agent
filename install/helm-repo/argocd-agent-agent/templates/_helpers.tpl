@@ -156,7 +156,17 @@ Name for the agent service monitor.
 
 {{/*
 Expand the namespace of the release.
+Checks (in order): .Values.namespaceOverride, .Values.global.namespaceOverride, .Release.Namespace.
 */}}
 {{- define "argocd-agent-agent.namespace" -}}
-{{- default .Release.Namespace .Values.namespaceOverride | trunc 63 | trimSuffix "-" -}}
+{{- default .Release.Namespace (default .Values.global.namespaceOverride .Values.namespaceOverride) | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{/*
+Override the argo-cd subchart namespace helper so that global.namespaceOverride
+(which Helm propagates to subcharts automatically) controls the namespace for
+both the parent chart and the bundled argo-cd chart from a single value.
+*/}}
+{{- define "argo-cd.namespace" -}}
+{{- default .Release.Namespace .Values.global.namespaceOverride | trunc 63 | trimSuffix "-" -}}
 {{- end }}
