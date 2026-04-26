@@ -291,10 +291,12 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	appFilters := s.defaultAppFilterChain()
 	appInformerOpts := []informer.InformerOption[*v1alpha1.Application]{
 		informer.WithListHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, config.LabelSelector(s.options.labelSelector))
+			opts.LabelSelector = config.LabelSelector(s.options.labelSelector).LabelSelector
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").List(ctx, opts)
 		}),
 		informer.WithWatchHandler[*v1alpha1.Application](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, config.LabelSelector(s.options.labelSelector))
+			opts.LabelSelector = config.LabelSelector(s.options.labelSelector).LabelSelector
+			return kubeClient.ApplicationsClientset.ArgoprojV1alpha1().Applications("").Watch(ctx, opts)
 		}),
 		informer.WithAddHandler[*v1alpha1.Application](s.newAppCallback),
 		informer.WithUpdateHandler[*v1alpha1.Application](s.updateAppCallback),
