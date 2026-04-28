@@ -225,6 +225,14 @@ build-docs:
 validate-values-schema:
 	@$(current_dir)/hack/validate-values-schema.sh
 
+.PHONY: validate-helm-chart
+validate-helm-chart:
+	@$(current_dir)/hack/validate-helm-chart.sh
+
+.PHONY: helm-dependency-update
+helm-dependency-update:
+	@$(current_dir)/hack/helm-dependency-update.sh
+
 .PHONY: generate-helm-docs
 generate-helm-docs:
 	$(DOCKER_BIN) run --rm --volume "$(current_dir)/install/helm-repo:/helm-docs" -u $(shell id -u) docker.io/jnorwood/helm-docs:v1.14.2
