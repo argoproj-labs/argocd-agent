@@ -34,7 +34,7 @@ if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
 fi
 
-go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
+"${SCRIPTPATH}/go-run-race-wrapper.sh" go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode autonomous \
     --creds mtls:any \
     --server-address 127.0.0.1 \

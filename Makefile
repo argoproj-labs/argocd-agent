@@ -93,6 +93,9 @@ teardown-e2e:
 	./hack/dev-env/setup-vcluster-env.sh delete
 
 .PHONY: start-e2e
+# Start e2e environment with Go data race detection enabled (default)
+# Go processes will run with -race flag and will be terminated if a data race is detected
+# To disable data race detection, run: ENABLE_DATA_RACE_DETECTOR=false make start-e2e
 start-e2e: cli install-goreman
 	./hack/dev-env/start-e2e.sh
 
