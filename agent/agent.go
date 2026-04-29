@@ -178,6 +178,8 @@ type AgentOptions struct {
 // It takes a pointer to an Agent and returns an error if the configuration fails.
 type AgentOption func(*Agent) error
 
+var metricsRegistered sync.Once
+
 // NewAgent creates a new agent instance, using the given client interfaces and
 // options.
 func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace string, opts ...AgentOption) (*Agent, error) {
@@ -200,6 +202,15 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	// Register metrics early
+	if a.options.metricsPort > 0 {
+		a.metrics = metrics.NewAgentMetrics()
+		metricsRegistered.Do(func() {
+			metrics.RegisterK8sClientMetrics()
+			metrics.RegisterQueueMetrics("argocd_agent")
+		})
 	}
 
 	if a.resourceProxyLogger == nil {
@@ -288,11 +299,6 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		application.WithMode(managerMode),
 		application.WithDeletionTracker(a.deletions),
 		application.WithDestinationBasedMapping(a.destinationBasedMapping),
-	}
-
-	if a.options.metricsPort > 0 {
-		a.metrics = metrics.NewAgentMetrics()
-		metrics.RegisterK8sClientMetrics()
 	}
 
 	appInformer, err := informer.NewInformer(ctx, appInformerOptions...)

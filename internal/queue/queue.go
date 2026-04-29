@@ -51,16 +51,18 @@ type queuepair struct {
 type boundedQueue struct {
 	workqueue.TypedRateLimitingInterface[*event.Event]
 	maxSize int
-
-	notify chan struct{}
+	notify  chan struct{}
+	name    string
 }
 
-func newBoundedQueue(maxSize int) *boundedQueue {
+func newBoundedQueue(maxSize int, name string) *boundedQueue {
 	rateLimiter := workqueue.DefaultTypedControllerRateLimiter[*event.Event]()
 	return &boundedQueue{
-		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueue(rateLimiter),
-		maxSize:                    maxSize,
-		notify:                     make(chan struct{}, 10),
+		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig(rateLimiter,
+			workqueue.TypedRateLimitingQueueConfig[*event.Event]{Name: name}),
+		maxSize: maxSize,
+		notify:  make(chan struct{}, 10),
+		name:    name,
 	}
 }
 
@@ -70,7 +72,6 @@ func (bq *boundedQueue) Add(item *event.Event) {
 		old, _ := bq.Get()
 		bq.Done(old)
 	}
-
 	bq.TypedRateLimitingInterface.Add(item)
 
 	// Notify any waiting goroutines that an item has been added to the queue.
@@ -169,9 +170,9 @@ func (q *SendRecvQueues) Create(name string) error {
 		return nil
 	}, defaultMaxQueueSize)
 	qp := &queuepair{}
-	// Send queue is non-blocking, to keep up with the informer
-	qp.sendq = newBoundedQueue(sendQueueSize)
-	qp.recvq = newBoundedQueue(recvQueueSize)
+
+	qp.sendq = newBoundedQueue(sendQueueSize, name+"-send")
+	qp.recvq = newBoundedQueue(recvQueueSize, name+"-recv")
 	q.queues[name] = qp
 
 	return nil
