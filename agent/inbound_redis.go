@@ -94,18 +94,30 @@ func (a *Agent) processIncomingRedisRequest(ev *event.Event) error {
 	var responseBody *event.RedisResponseBody
 
 	if rreq.Body.Get != nil {
+		if a.metrics != nil {
+			a.metrics.RedisProxyRequests.WithLabelValues("get").Inc()
+		}
 		var err error
 
 		responseBody, err = a.handleRedisGetMessage(logCtx, rreq)
 		if err != nil {
+			if a.metrics != nil {
+				a.metrics.RedisProxyErrors.WithLabelValues("get").Inc()
+			}
 			return err
 		}
 
 	} else if rreq.Body.Subscribe != nil {
+		if a.metrics != nil {
+			a.metrics.RedisProxyRequests.WithLabelValues("subscribe").Inc()
+		}
 
 		var err error
 		responseBody, err = a.handleRedisSubscribeMessage(logCtx, rreq)
 		if err != nil {
+			if a.metrics != nil {
+				a.metrics.RedisProxyErrors.WithLabelValues("subscribe").Inc()
+			}
 			return err
 		}
 

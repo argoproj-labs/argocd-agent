@@ -52,6 +52,11 @@ func (a *Agent) maintainConnection() error {
 						}
 					}
 					a.SetConnected(true)
+					if a.metrics != nil {
+						a.metrics.ConnectionStatus.Set(1)
+						a.metrics.ConnectionStartTimestamp.SetToCurrentTime()
+						a.metrics.ConnectionCount.Inc()
+					}
 				}
 			} else {
 				err = a.handleStreamEvents()
@@ -179,6 +184,12 @@ func (a *Agent) handleStreamEvents() error {
 	// goroutines (recv, send, heartbeat) exit and don't leak across reconnects.
 	streamCtx, streamCancel := context.WithCancel(a.context)
 	defer streamCancel()
+	defer func() {
+		if a.metrics != nil {
+			a.metrics.ConnectionStatus.Set(0)
+			a.metrics.ConnectionStartTimestamp.Set(0)
+		}
+	}()
 
 	if a.eventWriter == nil {
 		a.eventWriter = event.NewEventWriter("", stream)
