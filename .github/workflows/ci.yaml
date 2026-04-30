@@ -282,7 +282,7 @@ jobs:
           YQ_VERSION: v4.53.2
           # SHA-256 of yq_linux_amd64 from
           # https://github.com/mikefarah/yq/releases/download/v4.53.2/checksums
-          YQ_SHA256: d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b
+          YQ_SHA256: d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56с
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --location --retry 3 \
