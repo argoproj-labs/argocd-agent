@@ -371,11 +371,11 @@ spec:
             path: tls.crt
           - key: tls.key
             path: tls.key
-          optional: false
+          optional: true
       - name: redis-tls-ca
         secret:
           secretName: argocd-redis-tls
           items:
           - key: ca.crt
             path: ca.crt
-          optional: false
+          optional: true

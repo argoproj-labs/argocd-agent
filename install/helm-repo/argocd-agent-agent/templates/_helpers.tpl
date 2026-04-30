@@ -123,10 +123,13 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/*
-Selector labels
+Selector labels.
+NOTE: `spec.selector.matchLabels` is immutable on Deployments. Changing any
+value emitted here after the initial install (e.g. by setting
+`.Values.nameOverride`) requires deleting and reinstalling the release.
 */}}
 {{- define "argocd-agent-agent.selectorLabels" -}}
-app.kubernetes.io/name: argocd-agent-agent
+app.kubernetes.io/name: {{ include "argocd-agent-agent.name" . }}
 app.kubernetes.io/part-of: argocd-agent
 app.kubernetes.io/component: agent
 app.kubernetes.io/instance: {{ .Release.Name }}
