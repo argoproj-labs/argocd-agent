@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -140,10 +141,34 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 	return err
 }
 
-func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetrics, errch chan error) error {
+func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetrics, grpcMetrics *grpcprom.ServerMetrics, errch chan error) error {
 	err := s.Listen(ctx, listenerBackoff)
 	if err != nil {
 		return fmt.Errorf("could not start listener: %w", err)
+	}
+
+	streamInterceptors := []grpc.StreamServerInterceptor{
+		s.streamRequestLogger(), // logging
+		s.streamAuthInterceptor, // auth
+		grpcutil.StreamServerMsgSizeInterceptor(s.options.maxGRPCMessageSize), // message size warning
+	}
+	unaryInterceptors := []grpc.UnaryServerInterceptor{
+		s.unaryRequestLogger(), // logging
+		s.unaryAuthInterceptor, // auth
+		grpcutil.UnaryServerMsgSizeInterceptor(s.options.maxGRPCMessageSize), // message size warning
+	}
+
+	// Prepend gRPC Prometheus interceptors so they observe all RPCs
+	// including those rejected by auth.
+	if grpcMetrics != nil {
+		streamInterceptors = append(
+			[]grpc.StreamServerInterceptor{grpcMetrics.StreamServerInterceptor()},
+			streamInterceptors...,
+		)
+		unaryInterceptors = append(
+			[]grpc.UnaryServerInterceptor{grpcMetrics.UnaryServerInterceptor()},
+			unaryInterceptors...,
+		)
 	}
 
 	grpcOpts := []grpc.ServerOption{
@@ -152,17 +177,9 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 		// Global stats handler for tracing
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		// Global interceptors for gRPC streams
-		grpc.ChainStreamInterceptor(
-			s.streamRequestLogger(), // logging
-			s.streamAuthInterceptor, // auth
-			grpcutil.StreamServerMsgSizeInterceptor(s.options.maxGRPCMessageSize), // message size warning
-		),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
 		// Global interceptors for gRPC unary calls
-		grpc.ChainUnaryInterceptor(
-			s.unaryRequestLogger(), // logging
-			s.unaryAuthInterceptor, // auth
-			grpcutil.UnaryServerMsgSizeInterceptor(s.options.maxGRPCMessageSize), // message size warning
-		),
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 	}
 
 	tlsConfig := s.currentTLSConfig()
@@ -185,6 +202,10 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 	// Register all gRPC services with the server
 	if err := s.registerGrpcServices(metrics); err != nil {
 		return fmt.Errorf("could not register gRPC services: %w", err)
+	}
+
+	if grpcMetrics != nil {
+		grpcMetrics.InitializeMetrics(s.grpcServer)
 	}
 
 	// If the server is configured with HTTP/1 support enabled, configured and
