@@ -122,6 +122,18 @@ func (q *SendRecvQueues) Len() int {
 	return len(q.queues)
 }
 
+// ObserveDepths calls fn once per queue pair while holding a read lock on the
+// queue map. fn receives the pair name and the current send and receive queue
+// lengths from the underlying workqueues. The values are a consistent snapshot
+// for that instant.
+func (q *SendRecvQueues) ObserveDepths(fn func(name string, sendLen, recvLen int)) {
+	q.queuelock.RLock()
+	defer q.queuelock.RUnlock()
+	for name, qp := range q.queues {
+		fn(name, qp.sendq.Len(), qp.recvq.Len())
+	}
+}
+
 // SendQ will return the send queue from the queue pair named name. If no such
 // queue pair exists, returns nil
 func (q *SendRecvQueues) SendQ(name string) workqueue.TypedRateLimitingInterface[*event.Event] {

@@ -310,6 +310,76 @@ func TestEventWriter(t *testing.T) {
 		require.NotContains(t, evSender.sentEvents, resID)
 	})
 
+	t.Run("ObserveSentResendState counts pending due and backoff", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter("test", fs)
+		evSender.ObserveSentResendState(func(p, d, b int) {
+			require.Equal(t, 0, p)
+			require.Equal(t, 0, d)
+			require.Equal(t, 0, b)
+		})
+
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+		evSender.sendEvent(resID)
+		evSender.ObserveSentResendState(func(p, d, b int) {
+			require.Equal(t, 1, p)
+			require.Equal(t, 0, d)
+			require.Equal(t, 1, b)
+		})
+
+		sentMsg := evSender.sentEvents[resID]
+		past := time.Now().Add(-time.Second)
+		sentMsg.retryAfter = &past
+		evSender.ObserveSentResendState(func(p, d, b int) {
+			require.Equal(t, 1, p)
+			require.Equal(t, 1, d)
+			require.Equal(t, 0, b)
+		})
+	})
+
+	t.Run("onRetryExhausted called once when retries exhausted", func(t *testing.T) {
+		fs := &fakeStream{}
+		var hookResID string
+		var hookCalls int
+		evSender := NewEventWriter("test", fs, WithOnRetryExhausted(func(rid string) {
+			hookCalls++
+			hookResID = rid
+		}))
+
+		ev := es.ApplicationEvent(Create, app1)
+		resID := createResourceID(app1.ObjectMeta)
+		evSender.Add(ev)
+		evSender.sendEvent(resID)
+		sentMsg := evSender.sentEvents[resID]
+		require.NotNil(t, sentMsg)
+
+		for i := 0; i <= maxEventRetries; i++ {
+			pastTime := time.Now().Add(-1 * time.Second)
+			sentMsg.retryAfter = &pastTime
+			evSender.retrySentEvent(resID, sentMsg)
+		}
+
+		require.NotContains(t, evSender.sentEvents, resID)
+		require.Equal(t, 1, hookCalls)
+		require.Equal(t, resID, hookResID)
+	})
+
+	t.Run("EventWritersMap ObserveWriters visits each writer", func(t *testing.T) {
+		m := NewEventWritersMap()
+		fs1 := &fakeStream{}
+		fs2 := &fakeStream{}
+		m.Add("a1", NewEventWriter("a1", fs1))
+		m.Add("a2", NewEventWriter("a2", fs2))
+		var names []string
+		m.ObserveWriters(func(agent string, ew *EventWriter) {
+			names = append(names, agent)
+			require.NotNil(t, ew)
+		})
+		require.ElementsMatch(t, []string{"a1", "a2"}, names)
+	})
+
 	t.Run("should not send ACK events to sentEvents", func(t *testing.T) {
 		fs := &fakeStream{}
 		evSender := NewEventWriter("test", fs)

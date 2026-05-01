@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -178,7 +179,13 @@ func (a *Agent) handleStreamEvents() error {
 	defer streamCancel()
 
 	if a.eventWriter == nil {
-		a.eventWriter = event.NewEventWriter("", stream)
+		var ewOpts []event.EventWriterOption
+		if a.metrics != nil {
+			ewOpts = append(ewOpts, event.WithOnRetryExhausted(func(string) {
+				metrics.IncAgentEventWriterRetriesExhaustedDrop()
+			}))
+		}
+		a.eventWriter = event.NewEventWriter("", stream, ewOpts...)
 	} else {
 		a.eventWriter.UpdateTarget(stream)
 	}

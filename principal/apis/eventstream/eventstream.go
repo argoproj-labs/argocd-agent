@@ -387,7 +387,14 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	if eventWriter != nil {
 		eventWriter.UpdateTarget(subs)
 	} else {
-		eventWriter = event.NewEventWriter(c.agentName, subs)
+		var ewOpts []event.EventWriterOption
+		if s.metrics != nil {
+			agentName := c.agentName
+			ewOpts = append(ewOpts, event.WithOnRetryExhausted(func(string) {
+				metrics.IncPrincipalEventWriterRetriesExhaustedDrop(agentName)
+			}))
+		}
+		eventWriter = event.NewEventWriter(c.agentName, subs, ewOpts...)
 		s.eventWriters.Add(c.agentName, eventWriter)
 	}
 

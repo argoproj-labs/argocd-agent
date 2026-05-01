@@ -293,6 +293,8 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	if a.options.metricsPort > 0 {
 		a.metrics = metrics.NewAgentMetrics()
 		metrics.RegisterK8sClientMetrics()
+		metrics.RegisterAgentEventQueueDepthCollector(a.queues)
+		metrics.RegisterAgentEventWriterMetrics(a)
 	}
 
 	appInformer, err := informer.NewInformer(ctx, appInformerOptions...)
@@ -635,6 +637,12 @@ func (a *Agent) IsConnected() bool {
 // SetConnected sets the connection state of the agent
 func (a *Agent) SetConnected(connected bool) {
 	a.connected.Store(connected)
+}
+
+// CurrentEventWriter returns the outbound event writer when connected, or nil.
+// It implements metrics.EventWriterLookup for Prometheus scraping.
+func (a *Agent) CurrentEventWriter() *event.EventWriter {
+	return a.eventWriter
 }
 
 func log() *logrus.Entry {
