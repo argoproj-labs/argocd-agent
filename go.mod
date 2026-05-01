@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0
 	github.com/alicebob/miniredis/v2 v2.37.0
-	github.com/argoproj/argo-cd/v3 v3.3.8
+	github.com/argoproj/argo-cd/v3 v3.3.9
 	github.com/argoproj/gitops-engine v0.7.1-0.20250908182407-97ad5b59a627
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
@@ -78,7 +78,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chai2010/gettext-go v1.0.3 // indirect
 	github.com/chainguard-dev/git-urls v1.0.2 // indirect
-	github.com/cloudflare/circl v1.6.1 // indirect
+	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/coreos/go-oidc/v3 v3.14.1 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
@@ -133,7 +133,7 @@ require (
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
-	github.com/moby/spdystream v0.5.0 // indirect
+	github.com/moby/spdystream v0.5.1 // indirect
 	github.com/moby/term v0.5.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
