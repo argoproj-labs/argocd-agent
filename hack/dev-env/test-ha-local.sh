@@ -8,6 +8,7 @@ set -e
 
 SCRIPT_DIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 PROJECT_ROOT="$SCRIPT_DIR/../.."
+source ${SCRIPT_DIR}/namespaces.sh
 
 # Build the binary first
 echo "Building argocd-agent..."
@@ -60,8 +61,8 @@ fi
 
 # Get Redis address
 if test "${ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS}" = ""; then
-    ipaddr=$(kubectl --context vcluster-control-plane -n argocd get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
-    hostname=$(kubectl --context vcluster-control-plane -n argocd get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+    ipaddr=$(kubectl --context vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE} get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+    hostname=$(kubectl --context vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE} get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
     if test "$ipaddr" != ""; then
         export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS=$ipaddr:6379
     elif test "$hostname" != ""; then
@@ -73,7 +74,7 @@ if test "${ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS}" = ""; then
 fi
 
 if test "${REDIS_PASSWORD}" = ""; then
-    _rp=$(kubectl get secret argocd-redis --context=vcluster-control-plane -n argocd -o jsonpath='{.data.auth}' | base64 --decode) || {
+    _rp=$(kubectl get secret argocd-redis --context=vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE} -o jsonpath='{.data.auth}' | base64 --decode) || {
         echo "Failed to retrieve Redis password" >&2
         exit 1
     }
@@ -92,7 +93,7 @@ echo "Starting PRIMARY principal (preferred role: primary)..."
     --allowed-namespaces '*' \
     --kubecontext vcluster-control-plane \
     --log-level debug \
-    --namespace argocd \
+    --namespace ${ARGOCD_PRINCIPAL_NAMESPACE} \
     --auth "mtls:CN=([^,]+)" \
     --ha-enabled \
     --ha-preferred-role primary \
@@ -111,7 +112,7 @@ echo "Starting REPLICA principal (preferred role: replica)..."
     --allowed-namespaces '*' \
     --kubecontext vcluster-control-plane \
     --log-level debug \
-    --namespace argocd \
+    --namespace ${ARGOCD_PRINCIPAL_NAMESPACE} \
     --auth "mtls:CN=([^,]+)" \
     --ha-enabled \
     --ha-preferred-role replica \

@@ -37,7 +37,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Managed() {
 	appProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 		},
 		Spec: argoapp.AppProjectSpec{
 			Destinations: []argoapp.ApplicationDestination{
@@ -53,21 +53,22 @@ func (suite *AppProjectTestSuite) Test_AppProject_Managed() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := fixture.ToNamespacedName(&appProject)
+	principalKey := fixture.ToNamespacedName(&appProject)
+	managedKey := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the appProject has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, managedKey, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
 
 	// Ensure that the appProject is specific to the agent it is synced to
 	appProject = argoapp.AppProject{}
-	err = suite.PrincipalClient.Get(suite.Ctx, key, &appProject, metav1.GetOptions{})
+	err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
 	requires.NoError(err)
 	mappProject := argoapp.AppProject{}
-	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &mappProject, metav1.GetOptions{})
+	err = suite.ManagedAgentClient.Get(suite.Ctx, managedKey, &mappProject, metav1.GetOptions{})
 	requires.NoError(err)
 	requires.Len(mappProject.Spec.Destinations, 1)
 	requires.Equal("in-cluster", mappProject.Spec.Destinations[0].Name)
@@ -77,7 +78,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Managed() {
 
 	// Modify the appProject on the principal and ensure the change is propagated
 	// to the managed-agent
-	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, key, func(appProject *argoapp.AppProject) error {
+	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, principalKey, func(appProject *argoapp.AppProject) error {
 		appProject.Spec.Description = "sample description"
 		return nil
 	}, metav1.UpdateOptions{})
@@ -85,7 +86,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Managed() {
 
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, managedKey, &appProject, metav1.GetOptions{})
 		return err == nil &&
 			len(appProject.Spec.Destinations) == 1 &&
 			appProject.Spec.Destinations[0].Name == "in-cluster" &&
@@ -100,7 +101,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Managed() {
 	// Ensure the appProject has been deleted from the managed-agent
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, managedKey, &appProject, metav1.GetOptions{})
 		return errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second)
 }
@@ -112,7 +113,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Autonomous() {
 	appProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.AutonomousAgentNamespace,
 		},
 		Spec: argoapp.AppProjectSpec{
 			Destinations: []argoapp.ApplicationDestination{
@@ -130,11 +131,11 @@ func (suite *AppProjectTestSuite) Test_AppProject_Autonomous() {
 
 	principalKey := types.NamespacedName{
 		Name:      "agent-autonomous-sample",
-		Namespace: "argocd",
+		Namespace: fixture.PrincipalNamespace,
 	}
 	agentKey := types.NamespacedName{
 		Name:      appProject.Name,
-		Namespace: "argocd",
+		Namespace: fixture.AutonomousAgentNamespace,
 	}
 
 	// Ensure the appProject has been pushed to the principal
@@ -179,11 +180,11 @@ func (suite *AppProjectTestSuite) Test_AppProject_Default_Managed() {
 	appProject := argoapp.AppProject{}
 	principalKey := types.NamespacedName{
 		Name:      "default",
-		Namespace: "argocd",
+		Namespace: fixture.PrincipalNamespace,
 	}
 	agentKey := types.NamespacedName{
 		Name:      "default",
-		Namespace: "argocd",
+		Namespace: fixture.ManagedAgentNamespace,
 	}
 
 	err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
@@ -228,12 +229,12 @@ func (suite *AppProjectTestSuite) Test_AppProject_Default_Autonomous() {
 	appProject := argoapp.AppProject{}
 	key := types.NamespacedName{
 		Name:      "default",
-		Namespace: "argocd",
+		Namespace: fixture.AutonomousAgentNamespace,
 	}
 
 	principalKey := types.NamespacedName{
 		Name:      "agent-autonomous-default",
-		Namespace: "argocd",
+		Namespace: fixture.PrincipalNamespace,
 	}
 
 	err := suite.AutonomousAgentClient.Get(suite.Ctx, key, &appProject, metav1.GetOptions{})

@@ -109,7 +109,7 @@ func (suite *DeleteTestSuite) Test_CascadeDeleteOnManagedAgent() {
 		app := argoapp.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      appOnPrincipal.Name,
-				Namespace: "argocd",
+				Namespace: fixture.ManagedAgentNamespace,
 			},
 		}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&app), &app, metav1.GetOptions{})

@@ -73,7 +73,7 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterChanges() {
 	// Create a managed application in the principal-cluster and ensure it is deployed into managed-cluster
 	app := createApp(suite.Ctx, suite.PrincipalClient, requires)
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, principalKey, agentKey, requires)
 
 	// Case 1: Modify the application directly in the managed-cluster,
@@ -103,7 +103,7 @@ func (suite *CacheTestSuite) Test_RevertDisconnectedManagedClusterChanges() {
 	// Create a managed application in the principal-cluster and ensure it is deployed into managed-cluster
 	app := createApp(suite.Ctx, suite.PrincipalClient, requires)
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, principalKey, agentKey, requires)
 
 	// Case 1: Agent is disconnected with principal, now modify the application directly in the managed-cluster,
@@ -133,7 +133,7 @@ func (suite *CacheTestSuite) Test_CacheRecreatedOnRestart() {
 	// Create a managed application in the principal-cluster and ensure it is deployed into managed-cluster
 	app := createApp(suite.Ctx, suite.PrincipalClient, requires)
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, principalKey, agentKey, requires)
 
 	// Case 1: Agent is restarted, now make direct changes in the managed-cluster,
@@ -158,7 +158,7 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterOfflineChanges() {
 	// Create a managed application in the principal-cluster and ensure it is deployed into managed-cluster
 	app := createApp(suite.Ctx, suite.PrincipalClient, requires)
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, principalKey, agentKey, requires)
 
 	// Agent in not running, but still make changes in the managed-cluster application manifest.
@@ -268,14 +268,14 @@ func (suite *CacheTestSuite) Test_RevertManagedAppDeletion() {
 	// Create a managed application in the principal-cluster and ensure it is deployed into managed-cluster
 	app := createApp(suite.Ctx, suite.PrincipalClient, requires)
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 	app = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, principalKey, agentKey, requires)
 
 	t.Log("Delete application directly from managed agent")
 	requires.NoError(suite.ManagedAgentClient.Delete(suite.Ctx, &argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      app.Name,
-			Namespace: "argocd",
+			Namespace: fixture.ManagedAgentNamespace,
 		},
 	}, metav1.DeleteOptions{}))
 
@@ -294,12 +294,12 @@ func (suite *CacheTestSuite) Test_RevertAppProjectUpdatesManagedMode() {
 	requires := suite.Require()
 
 	// Create an appProject on the control-plane cluster and ensure it is synced to the workload cluster
-	appProject := sampleAppProject()
+	appProject := sampleAppProject(fixture.PrincipalNamespace)
 
 	err := suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := types.NamespacedName{Name: appProject.Name, Namespace: "argocd"}
+	projKey := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
@@ -339,13 +339,13 @@ func (suite *CacheTestSuite) Test_RevertAppProjectUpdatesAutonomousMode() {
 	requires := suite.Require()
 
 	// Create an appProject on the workload cluster and ensure it is synced to the control-plane
-	appProject := sampleAppProject()
+	appProject := sampleAppProject(fixture.AutonomousAgentNamespace)
 
 	err := suite.AutonomousAgentClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
 	autonomousProjName := "agent-autonomous-" + appProject.Name
-	principalKey := types.NamespacedName{Name: autonomousProjName, Namespace: "argocd"}
+	principalKey := types.NamespacedName{Name: autonomousProjName, Namespace: fixture.PrincipalNamespace}
 
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
@@ -374,7 +374,7 @@ func (suite *CacheTestSuite) Test_RevertAppProjectUpdatesAutonomousMode() {
 	principalAppProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      autonomousProjName,
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 		},
 		Spec: appProject.Spec,
 	}
@@ -392,12 +392,12 @@ func (suite *CacheTestSuite) Test_RevertRepositoryUpdatesManagedMode() {
 	requires := suite.Require()
 
 	// Create an appProject on the control-plane cluster and ensure it is synced to the workload cluster
-	appProject := sampleAppProject()
+	appProject := sampleAppProject(fixture.PrincipalNamespace)
 
 	err := suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := types.NamespacedName{Name: appProject.Name, Namespace: "argocd"}
+	projKey := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
@@ -413,7 +413,7 @@ func (suite *CacheTestSuite) Test_RevertRepositoryUpdatesManagedMode() {
 	repository := sampleRepository()
 	err = suite.PrincipalClient.Create(suite.Ctx, repository, metav1.CreateOptions{})
 	requires.NoError(err)
-	repoKey := types.NamespacedName{Name: repository.Name, Namespace: "argocd"}
+	repoKey := types.NamespacedName{Name: repository.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
@@ -485,7 +485,7 @@ func createAutonomousApp(ctx context.Context, client fixture.KubeClient, require
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "argocd",
+			Namespace: fixture.AutonomousAgentNamespace,
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",

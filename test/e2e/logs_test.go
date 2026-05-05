@@ -141,7 +141,7 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_autonomous() {
 	app := &v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appName,
-			Namespace: "argocd",
+			Namespace: fixture.AutonomousAgentNamespace,
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",

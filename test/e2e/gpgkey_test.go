@@ -51,7 +51,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_Managed() {
 	sourceGPGKeys := corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      common.ArgoCDGPGKeysConfigMapName,
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":    common.ArgoCDGPGKeysConfigMapName,
 				"app.kubernetes.io/part-of": "argocd",
@@ -65,7 +65,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_Managed() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &sourceGPGKeys, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}
+	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the GPG keys ConfigMap has been pushed to the managed agent with correct source UID and data
 	var gpgKeysCM corev1.ConfigMap
@@ -93,7 +93,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_Managed() {
 
 	// Update the GPG keys ConfigMap and verify changes propagate to the managed agent
 	updatedKeyData := "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest-key-data-updated\n-----END PGP PUBLIC KEY BLOCK-----\n"
-	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}}, func(obj fixture.KubeObject) {
+	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.PrincipalNamespace}}, func(obj fixture.KubeObject) {
 		obj.(*corev1.ConfigMap).Data[gpgKeyIDPrimary] = updatedKeyData
 	})
 	requires.NoError(err)
@@ -136,7 +136,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_AddMultipleKeys() {
 	sourceGPGKeys := corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      common.ArgoCDGPGKeysConfigMapName,
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":    common.ArgoCDGPGKeysConfigMapName,
 				"app.kubernetes.io/part-of": "argocd",
@@ -150,7 +150,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_AddMultipleKeys() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &sourceGPGKeys, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}
+	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the GPG keys ConfigMap has been pushed to the managed agent
 	requires.Eventually(func() bool {
@@ -160,7 +160,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_AddMultipleKeys() {
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be pushed to managed-agent")
 
 	// Add a second key to the ConfigMap on the principal
-	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}}, func(obj fixture.KubeObject) {
+	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.PrincipalNamespace}}, func(obj fixture.KubeObject) {
 		obj.(*corev1.ConfigMap).Data[gpgKeyIDSecondary] = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey-two\n-----END PGP PUBLIC KEY BLOCK-----\n"
 	})
 	requires.NoError(err)
@@ -176,7 +176,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_AddMultipleKeys() {
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be updated on managed-agent with two keys")
 
 	// Delete one of the keys on the principal
-	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}}, func(obj fixture.KubeObject) {
+	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.PrincipalNamespace}}, func(obj fixture.KubeObject) {
 		delete(obj.(*corev1.ConfigMap).Data, gpgKeyIDPrimary)
 	})
 	requires.NoError(err)
@@ -199,7 +199,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalChange() {
 	sourceGPGKeys := corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      common.ArgoCDGPGKeysConfigMapName,
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":    common.ArgoCDGPGKeysConfigMapName,
 				"app.kubernetes.io/part-of": "argocd",
@@ -213,7 +213,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalChange() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &sourceGPGKeys, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}
+	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the GPG keys ConfigMap has been pushed to the managed agent
 	requires.Eventually(func() bool {
@@ -223,7 +223,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalChange() {
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be pushed to managed-agent")
 
 	// Tamper with the GPG keys ConfigMap on the managed agent
-	err = fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}}, func(obj fixture.KubeObject) {
+	err = fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.ManagedAgentNamespace}}, func(obj fixture.KubeObject) {
 		obj.(*corev1.ConfigMap).Data[gpgKeyIDTampered] = "-----BEGIN PGP PUBLIC KEY BLOCK-----\ninvalid-public-key\n-----END PGP PUBLIC KEY BLOCK-----\n"
 	})
 	requires.NoError(err)
@@ -250,7 +250,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalDeletion() {
 	sourceGPGKeys := corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      common.ArgoCDGPGKeysConfigMapName,
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":    common.ArgoCDGPGKeysConfigMapName,
 				"app.kubernetes.io/part-of": "argocd",
@@ -264,7 +264,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalDeletion() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &sourceGPGKeys, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}
+	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the GPG keys ConfigMap has been pushed to the managed agent
 	requires.Eventually(func() bool {
@@ -274,7 +274,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalDeletion() {
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be pushed to managed-agent")
 
 	// Delete the GPG keys ConfigMap on the managed agent
-	managedCM := corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}}
+	managedCM := corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.ManagedAgentNamespace}}
 	err = suite.ManagedAgentClient.Delete(suite.Ctx, &managedCM, metav1.DeleteOptions{})
 	requires.NoError(err)
 
@@ -294,7 +294,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_RevertLocalDeletion() {
 func (suite *GPGKeyTestSuite) Test_GPGKey_UseAndUpdatePreExistingConfigMap() {
 	requires := suite.Require()
 
-	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}
+	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.ManagedAgentNamespace}
 
 	// Wait until the GPG keys ConfigMap is deleted from the managed agent by the previous cleanup process
 	requires.Eventually(func() bool {
@@ -307,7 +307,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_UseAndUpdatePreExistingConfigMap() {
 	orphanCM := corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      common.ArgoCDGPGKeysConfigMapName,
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":    common.ArgoCDGPGKeysConfigMapName,
 				"app.kubernetes.io/part-of": "argocd",
@@ -325,7 +325,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_UseAndUpdatePreExistingConfigMap() {
 	defer func() {
 		cm := &corev1.ConfigMap{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx,
-			types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: "argocd"}, cm, metav1.GetOptions{})
+			types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.ManagedAgentNamespace}, cm, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
 				return
@@ -352,7 +352,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_UseAndUpdatePreExistingConfigMap() {
 	sourceGPGKeys := corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      common.ArgoCDGPGKeysConfigMapName,
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":    common.ArgoCDGPGKeysConfigMapName,
 				"app.kubernetes.io/part-of": "argocd",

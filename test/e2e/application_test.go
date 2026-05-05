@@ -44,7 +44,7 @@ func (s *ApplicationTestSuite) Test_ApplicationManagementAPI() {
 	app := &v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appName,
-			Namespace: "argocd", // Argo CD API creates applications in the argocd namespace
+			Namespace: fixture.PrincipalNamespace, // Argo CD API creates applications in the principal namespace
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",

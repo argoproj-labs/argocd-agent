@@ -87,7 +87,7 @@ func (suite *ResourceTrackingTestSuite) TearDownTest() {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "argocd-cm",
-			Namespace: "argocd",
+			Namespace: fixture.ManagedAgentNamespace,
 		},
 	}
 	err = fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, cm, func(obj fixture.KubeObject) {
@@ -107,7 +107,7 @@ func (suite *ResourceTrackingTestSuite) TearDownTest() {
 			verifyConfig := &corev1.ConfigMap{}
 			err := suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
 				Name:      "argocd-cm",
-				Namespace: "argocd",
+				Namespace: fixture.ManagedAgentNamespace,
 			}, verifyConfig, metav1.GetOptions{})
 			if err != nil {
 				return false
@@ -133,7 +133,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "argocd-cm",
-			Namespace: "argocd",
+			Namespace: fixture.ManagedAgentNamespace,
 		},
 	}
 	err := fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, cm, func(obj fixture.KubeObject) {
@@ -184,7 +184,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 		agentApp := &argoapp.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      app.Name,
-				Namespace: "argocd",
+				Namespace: fixture.ManagedAgentNamespace,
 			},
 		}
 		if err := fixture.WaitForDeletion(suite.Ctx, suite.ManagedAgentClient, agentApp, "managed agent"); err != nil {
@@ -192,7 +192,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 		}
 	})
 
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the app has been pushed to the managed-agent
 	requires.Eventually(func() bool {
