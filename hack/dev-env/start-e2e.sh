@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+source ${SCRIPTPATH}/namespaces.sh
 
 # getExternalLoadBalancerIP will set EXTERNAL_IP with the load balancer hostname from the specified Service
 getExternalLoadBalancerIP() {
@@ -49,20 +51,20 @@ getExternalLoadBalancerIP() {
 
 # Get hostname of control-plane redis
 K8S_CONTEXT="--context=vcluster-control-plane"
-K8S_NAMESPACE="-n argocd"
+K8S_NAMESPACE="-n ${ARGOCD_PRINCIPAL_NAMESPACE}"
 getExternalLoadBalancerIP "argocd-redis"
 export ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS="$EXTERNAL_IP:6379"
 
 
 # Get hostname of agent-managed redis
 K8S_CONTEXT="--context=vcluster-agent-managed"
-K8S_NAMESPACE="-n argocd"
+K8S_NAMESPACE="-n ${ARGOCD_MANAGED_NAMESPACE}"
 getExternalLoadBalancerIP "argocd-redis"
 export MANAGED_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
 
 # Get hostname of agent-autonomous redis
 K8S_CONTEXT="--context=vcluster-agent-autonomous"
-K8S_NAMESPACE="-n argocd"
+K8S_NAMESPACE="-n ${ARGOCD_AUTONOMOUS_NAMESPACE}"
 getExternalLoadBalancerIP "argocd-redis"
 export AUTONOMOUS_AGENT_REDIS_ADDR="$EXTERNAL_IP:6379"
 

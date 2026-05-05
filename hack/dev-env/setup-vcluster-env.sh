@@ -24,8 +24,9 @@ set -o pipefail
 ARGOCD_VERSION=${ARGOCD_VERSION:-stable}
 
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
-VCLUSTERS="control-plane:argocd agent-managed:argocd agent-autonomous:argocd"
-VCLUSTERS_AGENTS="agent-managed:argocd agent-autonomous:argocd"
+source ${SCRIPTPATH}/namespaces.sh
+VCLUSTERS="control-plane:${ARGOCD_PRINCIPAL_NAMESPACE} agent-managed:${ARGOCD_MANAGED_NAMESPACE} agent-autonomous:${ARGOCD_AUTONOMOUS_NAMESPACE}"
+VCLUSTERS_AGENTS="agent-managed:${ARGOCD_MANAGED_NAMESPACE} agent-autonomous:${ARGOCD_AUTONOMOUS_NAMESPACE}"
 gen_admin_pwd="${ARGOCD_AGENT_GEN_ADMIN_PWD:-true}"
 action="$1"
 shift
@@ -71,21 +72,39 @@ check_for_openshift() {
 }
 
 
-# wait_for_pods looks all Pods running in k8s context $1, and keeps waiting until running count == $2. 
+# wait_for_pods looks all Pods running in k8s context $1, and keeps waiting until running count == $2.
 wait_for_pods() {
     context="$1"
     component="$2"
+
+    # Determine namespace based on context
+    case "$context" in
+        "vcluster-control-plane")
+            ns="${ARGOCD_PRINCIPAL_NAMESPACE}"
+            ;;
+        "vcluster-agent-managed")
+            ns="${ARGOCD_MANAGED_NAMESPACE}"
+            ;;
+        "vcluster-agent-autonomous")
+            ns="${ARGOCD_AUTONOMOUS_NAMESPACE}"
+            ;;
+        *)
+            echo "Unknown context: $context"
+            exit 1
+            ;;
+    esac
+
     case "$component" in
     "principal")
-        kubectl --context $context -n argocd rollout status --watch deployments argocd-server
-        kubectl --context $context -n argocd rollout status --watch deployments argocd-repo-server
-        kubectl --context $context -n argocd rollout status --watch deployments argocd-dex-server
-        kubectl --context $context -n argocd rollout status --watch deployments argocd-redis
+        kubectl --context $context -n $ns rollout status --watch deployments argocd-server
+        kubectl --context $context -n $ns rollout status --watch deployments argocd-repo-server
+        kubectl --context $context -n $ns rollout status --watch deployments argocd-dex-server
+        kubectl --context $context -n $ns rollout status --watch deployments argocd-redis
         ;;
     "agent")
-        kubectl --context $context -n argocd rollout status --watch statefulsets argocd-application-controller
-        kubectl --context $context -n argocd rollout status --watch deployments argocd-repo-server
-        kubectl --context $context -n argocd rollout status --watch deployments argocd-redis
+        kubectl --context $context -n $ns rollout status --watch statefulsets argocd-application-controller
+        kubectl --context $context -n $ns rollout status --watch deployments argocd-repo-server
+        kubectl --context $context -n $ns rollout status --watch deployments argocd-redis
         ;;
      *)
         echo "Unknown component: $component"
@@ -141,6 +160,10 @@ apply() {
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/control-plane/kustomization.yaml
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/agent-autonomous/kustomization.yaml
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/agent-managed/kustomization.yaml
+    sed -i.bak -e "s/NamespacePlaceholder/${ARGOCD_PRINCIPAL_NAMESPACE}/" $TMP_DIR/control-plane/kustomization.yaml
+    sed -i.bak -e "s/NamespacePlaceholder/${ARGOCD_MANAGED_NAMESPACE}/" $TMP_DIR/agent-managed/kustomization.yaml
+    sed -i.bak -e "s/NamespacePlaceholder/${ARGOCD_AUTONOMOUS_NAMESPACE}/" $TMP_DIR/agent-autonomous/kustomization.yaml
+    sed -i.bak -e "s/PrincipalNamespacePlaceholder/${ARGOCD_PRINCIPAL_NAMESPACE}/" $TMP_DIR/control-plane/clusterrolebinding-namespace-patch.yaml
 
     # Generate the server secret key for the argocd running on the managed and autonomous agent clusters
     echo "-> Generate server.secretkey for agent's argocd-secrets"
@@ -169,7 +192,7 @@ apply() {
     echo "-> Create Argo CD on control plane"
 
     cluster=control-plane
-    namespace=argocd
+    namespace=${ARGOCD_PRINCIPAL_NAMESPACE}
     echo "  --> Creating instance in vcluster $cluster"
     kubectl --context vcluster-$cluster create ns $namespace || true
 
@@ -207,7 +230,7 @@ apply() {
 
         while [ true ]
         do
-            REPO_SERVER_ADDR=`kubectl --context vcluster-control-plane -n argocd   get service/argocd-repo-server -o json | jq -r '.status.loadBalancer.ingress[0].hostname'`
+            REPO_SERVER_ADDR=`kubectl --context vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE}   get service/argocd-repo-server -o json | jq -r '.status.loadBalancer.ingress[0].hostname'`
 
             if [[ "$REPO_SERVER_ADDR" != "" ]] && [[ "$REPO_SERVER_ADDR" != "null" ]]; then
                 break
@@ -255,17 +278,17 @@ apply() {
 
     # Workaround for web-based terminal issue caused in 3.3.1 release.
     echo "-> Restarting argocd-server on control plane to pick up ConfigMap settings"
-    kubectl --context vcluster-control-plane -n argocd rollout restart deployment/argocd-server
-    kubectl --context vcluster-control-plane -n argocd rollout status deployment/argocd-server --timeout=180s
+    kubectl --context vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE} rollout restart deployment/argocd-server
+    kubectl --context vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE} rollout status deployment/argocd-server --timeout=180s
 
     echo "-> Service configuration on control plane"
-    kubectl --context vcluster-control-plane -n argocd get services
+    kubectl --context vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE} get services
 
     if [[ "$ADMIN_PASSWORD" != "" ]]; then
         echo
         echo "Argo CD Admin Password: $ADMIN_PASSWORD"
-        kubectl --context vcluster-control-plane delete --ignore-not-found -n argocd secret argocd-initial-admin-secret
-        kubectl --context vcluster-control-plane create -n argocd secret generic argocd-initial-admin-secret --from-literal="password=${ADMIN_PASSWORD}"
+        kubectl --context vcluster-control-plane delete --ignore-not-found -n ${ARGOCD_PRINCIPAL_NAMESPACE} secret argocd-initial-admin-secret
+        kubectl --context vcluster-control-plane create -n ${ARGOCD_PRINCIPAL_NAMESPACE} secret generic argocd-initial-admin-secret --from-literal="password=${ADMIN_PASSWORD}"
         echo
     fi
 }

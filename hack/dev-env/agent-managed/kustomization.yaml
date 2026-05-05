@@ -1,3 +1,5 @@
+namespace: NamespacePlaceholder
+
 resources:
 - ../argo-cd/manifests/crds
 - ../argo-cd/manifests/base/config

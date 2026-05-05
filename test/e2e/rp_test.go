@@ -88,9 +88,9 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	rpClient := suite.getRpClient("agent-managed")
 
 	depl := &appsv1.Deployment{}
-	err := suite.ManagedAgentClient.Get(context.TODO(), types.NamespacedName{Namespace: "argocd", Name: "argocd-repo-server"}, depl, v1.GetOptions{})
+	err := suite.ManagedAgentClient.Get(context.TODO(), types.NamespacedName{Namespace: fixture.ManagedAgentNamespace, Name: "argocd-repo-server"}, depl, v1.GetOptions{})
 	requires.NoError(err)
-	requires.Equal("argocd", depl.Namespace)
+	requires.Equal(fixture.ManagedAgentNamespace, depl.Namespace)
 	requires.Equal("argocd-repo-server", depl.Name)
 
 	err = suite.ManagedAgentClient.EnsureDeploymentUpdate(context.TODO(), fixture.ToNamespacedName(depl), func(d *appsv1.Deployment) error {
@@ -117,7 +117,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	err = json.Unmarshal(resource, depl)
 	requires.NoError(err)
 	requires.Equal("argocd-repo-server", depl.Name)
-	requires.Equal("argocd", depl.Namespace)
+	requires.Equal(fixture.ManagedAgentNamespace, depl.Namespace)
 
 	// Request an unmanaged resource
 	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-redis")
@@ -327,7 +327,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	updateResourceAction := func(updateFn func(argocdCM *corev1.ConfigMap)) {
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 			argocdCM := &corev1.ConfigMap{}
-			err := suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: "argocd"}, argocdCM, metav1.GetOptions{})
+			err := suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: fixture.PrincipalNamespace}, argocdCM, metav1.GetOptions{})
 			if err != nil {
 				return err
 			}
@@ -368,7 +368,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	// Get the Argo server endpoint to use
 	srvService := &corev1.Service{}
 	err := suite.PrincipalClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-server"}, srvService, v1.GetOptions{})
+		types.NamespacedName{Namespace: fixture.PrincipalNamespace, Name: "argocd-server"}, srvService, v1.GetOptions{})
 	requires.NoError(err)
 	argoEndpoint := srvService.Spec.LoadBalancerIP
 
@@ -383,7 +383,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	// Read admin secret from principal's cluster
 	pwdSecret := &corev1.Secret{}
 	err = suite.PrincipalClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-initial-admin-secret"}, pwdSecret, v1.GetOptions{})
+		types.NamespacedName{Namespace: fixture.PrincipalNamespace, Name: "argocd-initial-admin-secret"}, pwdSecret, v1.GetOptions{})
 	requires.NoError(err)
 
 	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", string(pwdSecret.Data["password"]))
@@ -458,7 +458,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	}, 30*time.Second, 1*time.Second)
 
 	argocdCM := &corev1.ConfigMap{}
-	err = suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: "argocd"}, argocdCM, metav1.GetOptions{})
+	err = suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: fixture.PrincipalNamespace}, argocdCM, metav1.GetOptions{})
 	requires.NoError(err)
 
 	err = argoClient.RunResourceAction(&app, "Test",
@@ -535,9 +535,9 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 
 	// First, ensure we have a deployment to test with
 	depl := &appsv1.Deployment{}
-	err := suite.ManagedAgentClient.Get(context.TODO(), types.NamespacedName{Namespace: "argocd", Name: "argocd-repo-server"}, depl, v1.GetOptions{})
+	err := suite.ManagedAgentClient.Get(context.TODO(), types.NamespacedName{Namespace: fixture.ManagedAgentNamespace, Name: "argocd-repo-server"}, depl, v1.GetOptions{})
 	requires.NoError(err)
-	requires.Equal("argocd", depl.Namespace)
+	requires.Equal(fixture.ManagedAgentNamespace, depl.Namespace)
 	requires.Equal("argocd-repo-server", depl.Name)
 
 	err = suite.ManagedAgentClient.EnsureDeploymentUpdate(context.TODO(), fixture.ToNamespacedName(depl), func(d *appsv1.Deployment) error {

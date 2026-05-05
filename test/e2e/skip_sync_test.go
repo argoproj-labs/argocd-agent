@@ -105,7 +105,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_False() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	appKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	appKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the Application IS pushed to the managed-agent (skip sync is false)
 	requires.Eventually(func() bool {
@@ -122,7 +122,7 @@ func (suite *SkipSyncTestSuite) Test_AppProject_SkipSync() {
 	appProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "skip-sync-project",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				config.SkipSyncLabel: "true",
 			},
@@ -164,7 +164,7 @@ func (suite *SkipSyncTestSuite) Test_Repository_SkipSync() {
 	appProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "repo-project",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 		},
 		Spec: argoapp.AppProjectSpec{
 			Destinations: []argoapp.ApplicationDestination{
@@ -193,7 +193,7 @@ func (suite *SkipSyncTestSuite) Test_Repository_SkipSync() {
 	sourceRepo := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "skip-sync-repo",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
 				config.SkipSyncLabel:      "true",
@@ -250,7 +250,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_Update() {
 	requires.NoError(err)
 
 	appKeyPrincipal := fixture.ToNamespacedName(&app)
-	appKeyAgent := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	appKeyAgent := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the Application IS pushed to the managed-agent initially
 	requires.Eventually(func() bool {

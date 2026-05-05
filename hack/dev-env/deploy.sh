@@ -28,6 +28,7 @@ AGENTCTL=${BASEPATH}/dist/argocd-agentctl
 test -x ${AGENTCTL} || (echo "Please build the CLI" && exit 1)
 
 source ${SCRIPTPATH}/utility.sh
+source ${SCRIPTPATH}/namespaces.sh
 
 DEFAULT_IMAGE_NAME=ghcr.io/argoproj-labs/argocd-agent/argocd-agent:latest
 IMAGE_NAME=${DEFAULT_IMAGE_NAME}
@@ -54,22 +55,22 @@ cp -a ${BASEPATH}/install/kubernetes/* ${TMPDIR}
 deploy_principal() {
 	(
 		cd ${TMPDIR}/principal && (
-			kustomize edit set namespace argocd
+			kustomize edit set namespace ${ARGOCD_PRINCIPAL_NAMESPACE}
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
 		sed -i'' \
 			-e "s/  principal.allowed-namespaces:.*/  principal.allowed-namespaces: \"agent-*\"/" \
 			principal-params-cm.yaml
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd apply -f -
-		kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd rollout restart deployment argocd-agent-principal
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n ${ARGOCD_PRINCIPAL_NAMESPACE} apply -f -
+		kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n ${ARGOCD_PRINCIPAL_NAMESPACE} rollout restart deployment argocd-agent-principal
 	)
 }
 
 deploy_agent_managed() {
 	(
-		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
+		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} ${ARGOCD_PRINCIPAL_NAMESPACE} argocd-agent-principal)
 		cd ${TMPDIR}/agent && (
-			kustomize edit set namespace argocd
+			kustomize edit set namespace ${ARGOCD_MANAGED_NAMESPACE}
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
 		sed -i'' \
@@ -77,15 +78,15 @@ deploy_agent_managed() {
 			-e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
 			-e "s/  agent.server.address:.*/  agent.server.address: \"$principal_addr\"/" \
 			agent-params-cm.yaml
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_MANAGED_CONTEXT} -n argocd apply -f -
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_MANAGED_CONTEXT} -n ${ARGOCD_MANAGED_NAMESPACE} apply -f -
 	)
 }
 
 deploy_agent_autonomous() {
 	(
-		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
+		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} ${ARGOCD_PRINCIPAL_NAMESPACE} argocd-agent-principal)
 		cd ${TMPDIR}/agent && (
-			kustomize edit set namespace argocd
+			kustomize edit set namespace ${ARGOCD_AUTONOMOUS_NAMESPACE}
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
 		sed -i'' \
@@ -93,28 +94,28 @@ deploy_agent_autonomous() {
 			-e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
 			-e "s/  agent.server.address:.*/  agent.server.address: \"$principal_addr\"/" \
 			agent-params-cm.yaml
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_AUTONOMOUS_CONTEXT} -n argocd apply -f -
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_AUTONOMOUS_CONTEXT} -n ${ARGOCD_AUTONOMOUS_NAMESPACE} apply -f -
 	)
 }
 
 undeploy_principal() {
 	(
-		cd ${TMPDIR}/principal && kustomize edit set namespace argocd
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd delete -f -
+		cd ${TMPDIR}/principal && kustomize edit set namespace ${ARGOCD_PRINCIPAL_NAMESPACE}
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n ${ARGOCD_PRINCIPAL_NAMESPACE} delete -f -
 	)
 }
 
 undeploy_agent_managed() {
 	(
-		cd ${TMPDIR}/agent && kustomize edit set namespace argocd
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_MANAGED_CONTEXT} -n argocd delete -f -
+		cd ${TMPDIR}/agent && kustomize edit set namespace ${ARGOCD_MANAGED_NAMESPACE}
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_MANAGED_CONTEXT} -n ${ARGOCD_MANAGED_NAMESPACE} delete -f -
 	)
 }
 
 undeploy_agent_autonomous() {
 	(
-		cd ${TMPDIR}/agent && kustomize edit set namespace argocd
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_AUTONOMOUS_CONTEXT} -n argocd delete -f -
+		cd ${TMPDIR}/agent && kustomize edit set namespace ${ARGOCD_AUTONOMOUS_NAMESPACE}
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_AUTONOMOUS_CONTEXT} -n ${ARGOCD_AUTONOMOUS_NAMESPACE} delete -f -
 	)
 }
 

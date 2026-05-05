@@ -14,6 +14,8 @@
 # limitations under the License.
 
 set -ex -o pipefail
+SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+source ${SCRIPTPATH}/namespaces.sh
 ARGS=$*
 if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^vcluster-control-plane$'; then
     echo "kube context vcluster-control-plane is not configured; missing setup?" >&2
@@ -21,8 +23,8 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
 fi
 
 if test "${ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS}" = ""; then
-       ipaddr=$(kubectl --context vcluster-control-plane -n argocd get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-       hostname=$(kubectl --context vcluster-control-plane -n argocd get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+       ipaddr=$(kubectl --context vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE} get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+       hostname=$(kubectl --context vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE} get svc argocd-redis -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
        if test "$ipaddr" != ""; then
                ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS=$ipaddr:6379
        elif test "$hostname" != ""; then
@@ -36,7 +38,7 @@ if test "${ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS}" = ""; then
 fi
 
 if test "${REDIS_PASSWORD}" = ""; then
-    export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-control-plane -n argocd -o jsonpath='{.data.auth}' | base64 --decode)
+    export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE} -o jsonpath='{.data.auth}' | base64 --decode)
 fi
 
 # Point the principal to the e2e test configuration if it exists
@@ -58,7 +60,7 @@ go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent principal \
 	--allowed-namespaces '*' \
 	--kubecontext vcluster-control-plane \
 	--log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} \
-	--namespace argocd \
+	--namespace ${ARGOCD_PRINCIPAL_NAMESPACE} \
 	--auth "mtls:CN=([^,]+)" \
     --resource-proxy-address "${ARGOCD_AGENT_RESOURCE_PROXY}:9090" \
 	$ARGS

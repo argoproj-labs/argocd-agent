@@ -14,6 +14,8 @@
 # limitations under the License.
 
 set -ex -o pipefail
+SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+source ${SCRIPTPATH}/namespaces.sh
 ARGS=$*
 if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^vcluster-agent-managed$'; then
     echo "kube context vcluster-agent-managed is not configured; missing setup?" >&2
@@ -24,7 +26,7 @@ SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 export ARGOCD_AGENT_REMOTE_PORT=${ARGOCD_AGENT_REMOTE_PORT:-8443}
 
 if test "${REDIS_PASSWORD}" = ""; then
-    export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed -n argocd -o jsonpath='{.data.auth}' | base64 --decode)
+    export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-managed -n ${ARGOCD_MANAGED_NAMESPACE} -o jsonpath='{.data.auth}' | base64 --decode)
 fi
 
 # Point the agent to the toxiproxy server if it is configured from the e2e tests
@@ -42,7 +44,7 @@ go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --creds "mtls:any" \
     --server-address 127.0.0.1 \
     --kubecontext vcluster-agent-managed \
-    --namespace argocd \
+    --namespace ${ARGOCD_MANAGED_NAMESPACE} \
     --log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} $ARGS \
     --healthz-port 8001 \
     #--enable-compression true

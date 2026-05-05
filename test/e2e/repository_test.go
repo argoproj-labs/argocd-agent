@@ -40,7 +40,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 	appProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 		},
 		Spec: argoapp.AppProjectSpec{
 			Destinations: []argoapp.ApplicationDestination{
@@ -69,7 +69,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 	sourceRepo := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
 			},
@@ -147,7 +147,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Late_AppProjectCreation() {
 	sourceRepo := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
 			},
@@ -173,7 +173,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Late_AppProjectCreation() {
 	appProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 		},
 		Spec: argoapp.AppProjectSpec{
 			Destinations: []argoapp.ApplicationDestination{
@@ -229,7 +229,7 @@ func (suite *RepositoryTestSuite) Test_Repository_AppProjectUpdate() {
 	appProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 		},
 		Spec: argoapp.AppProjectSpec{
 			Destinations: []argoapp.ApplicationDestination{
@@ -258,7 +258,7 @@ func (suite *RepositoryTestSuite) Test_Repository_AppProjectUpdate() {
 	sourceRepo := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
 			},
@@ -302,7 +302,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_AppProject() {
 	appProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 		},
 		Spec: argoapp.AppProjectSpec{
 			Destinations: []argoapp.ApplicationDestination{
@@ -331,7 +331,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_AppProject() {
 	sourceRepo := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
 			},
@@ -384,7 +384,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_Reference_SameAgent() {
 	appProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 		},
 		Spec: argoapp.AppProjectSpec{
 			Destinations: []argoapp.ApplicationDestination{
@@ -413,7 +413,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_Reference_SameAgent() {
 	sourceRepo := corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
 			},
@@ -443,7 +443,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_Reference_SameAgent() {
 	appProject2 := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample2",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 		},
 		Spec: argoapp.AppProjectSpec{
 			Destinations: []argoapp.ApplicationDestination{

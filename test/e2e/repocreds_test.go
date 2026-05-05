@@ -38,7 +38,7 @@ func newRepoCreds() corev1.Secret {
 	return corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-repo-creds",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 			Labels: map[string]string{
 				common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds,
 			},
@@ -56,7 +56,7 @@ func (suite *RepoCredsTestSuite) createAppProjectAndWaitForSync() *argoapp.AppPr
 	appProject := &argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-app-project",
-			Namespace: "argocd",
+			Namespace: fixture.PrincipalNamespace,
 		},
 		Spec: argoapp.AppProjectSpec{
 			Destinations: []argoapp.ApplicationDestination{

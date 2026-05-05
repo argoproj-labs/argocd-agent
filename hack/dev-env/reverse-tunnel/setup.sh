@@ -5,6 +5,8 @@ SCRIPTPATH="$(
     pwd -P
 )"
 
+source ${SCRIPTPATH}/../namespaces.sh
+
 DOCKER_BIN=${DOCKER_BIN:-"docker"}
 
 
@@ -93,7 +95,7 @@ echo ""
 echo "Installing Rathole on K8s"
 
 K8S_CONTEXT_CONTROL_PLANE="--context=vcluster-control-plane"
-K8S_NAMESPACE="-n argocd"
+K8S_NAMESPACE="-n ${ARGOCD_PRINCIPAL_NAMESPACE}"
 
 kubectl apply $K8S_CONTEXT_CONTROL_PLANE $K8S_NAMESPACE -k $TEMP_DIR/server 
 
@@ -130,11 +132,11 @@ kubectl $K8S_CONTEXT_CONTROL_PLANE $K8S_NAMESPACE patch configmap argocd-cmd-par
 
 echo ""
 echo "Patching Service 'argocds-redis' to enable type: LoadBalancer, on vcluster-agent-managed"
-kubectl --context=vcluster-agent-managed $K8S_NAMESPACE patch service argocd-redis -p '{"spec":{"type":"LoadBalancer"}}'
+kubectl --context=vcluster-agent-managed -n ${ARGOCD_MANAGED_NAMESPACE} patch service argocd-redis -p '{"spec":{"type":"LoadBalancer"}}'
 
 echo ""
 echo "Patching Service 'argocds-redis' to enable type: LoadBalancer, on vcluster-agent-autonomous"
-kubectl --context=vcluster-agent-autonomous $K8S_NAMESPACE patch service argocd-redis -p '{"spec":{"type":"LoadBalancer"}}'
+kubectl --context=vcluster-agent-autonomous -n ${ARGOCD_AUTONOMOUS_NAMESPACE} patch service argocd-redis -p '{"spec":{"type":"LoadBalancer"}}'
 
 
 echo ""
