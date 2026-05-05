@@ -113,6 +113,15 @@ func WithCacheRefreshInterval(interval time.Duration) AgentOption {
 		return nil
 	}
 }
+func WithApplicationInformerEventBufferInterval(interval time.Duration) AgentOption {
+	return func(o *Agent) error {
+		if interval < 0 {
+			return fmt.Errorf("application informer event buffer interval must be positive")
+		}
+		o.applicationInformerEventBufferInterval = interval
+		return nil
+	}
+}
 
 func WithHeartbeatInterval(interval time.Duration) AgentOption {
 	return func(o *Agent) error {

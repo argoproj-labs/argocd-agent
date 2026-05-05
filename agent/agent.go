@@ -111,7 +111,11 @@ type Agent struct {
 	enableResourceProxy bool
 
 	cacheRefreshInterval time.Duration
-	clusterCache         *appstatecache.Cache
+	// applicationInformerEventBufferInterval is the minimum time between processing
+	// Application informer update callbacks for the same object (e.g. only send
+	// Application .status update once every 10 seconds)
+	applicationInformerEventBufferInterval time.Duration
+	clusterCache                           *appstatecache.Cache
 
 	inflightMu sync.Mutex
 	// inflightLogs blocks starting a duplicate stream for the same request UUID (esp. follow=true).
@@ -266,12 +270,26 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).Watch(ctx, config.LabelSelector(a.labelSelector))
 	}
 
+	// Default to un-buffered handlers
+	applicationAddHandler := a.addAppCreationToQueue
+	applicationUpdateHandler := a.addAppUpdateToQueue
+	applicationDeleteHandler := a.addAppDeletionToQueue
+
+	// If buffer is enabled, add a buffered layer between handlers and k8s informer callbacks
+	if a.applicationInformerEventBufferInterval != 0 {
+		log().Infof("Buffering of Application events is enabled at '%d' seconds", a.applicationInformerEventBufferInterval)
+		appBuffer := newInformerEventBuffer(a.addAppCreationToQueue, a.addAppUpdateToQueue, a.addAppDeletionToQueue, a.applicationInformerEventBufferInterval)
+		applicationAddHandler = appBuffer.receiveAddInformerEvent
+		applicationUpdateHandler = appBuffer.receiveUpdateInformerEvent
+		applicationDeleteHandler = appBuffer.receiveDeleteInformerEvent
+	}
+
 	appInformerOptions := []informer.InformerOption[*v1alpha1.Application]{
 		informer.WithListHandler[*v1alpha1.Application](appListFunc),
 		informer.WithWatchHandler[*v1alpha1.Application](appWatchFunc),
-		informer.WithAddHandler[*v1alpha1.Application](a.addAppCreationToQueue),
-		informer.WithUpdateHandler[*v1alpha1.Application](a.addAppUpdateToQueue),
-		informer.WithDeleteHandler[*v1alpha1.Application](a.addAppDeletionToQueue),
+		informer.WithAddHandler[*v1alpha1.Application](applicationAddHandler),
+		informer.WithUpdateHandler[*v1alpha1.Application](applicationUpdateHandler),
+		informer.WithDeleteHandler[*v1alpha1.Application](applicationDeleteHandler),
 		informer.WithFilters[*v1alpha1.Application](a.DefaultAppFilterChain()),
 		informer.WithNamespaceScope[*v1alpha1.Application](appNamespace),
 		informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
