@@ -2,6 +2,8 @@ package event
 
 import (
 	"context"
+	"math"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +21,7 @@ import (
 
 const (
 	// maxEventRetries is the maximum number of times an event will be retried before giving up.
-	maxEventRetries = 12
+	maxEventRetries = math.MaxInt
 )
 
 type streamWriter interface {
@@ -124,9 +126,10 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 
 	defaultBackoff := wait.Backoff{
 		Steps:    maxEventRetries,
-		Duration: 1 * time.Second,
-		Factor:   1.5,
-		Jitter:   0.1,
+		Duration: 5 * time.Second,
+		Factor:   4,
+		Jitter:   1,
+		Cap:      2 * time.Minute, // never wait longer than 2 minutes
 	}
 
 	if resID == "" {
@@ -182,7 +185,7 @@ func (ew *EventWriter) Get(resID string) *eventMessage {
 
 	// Then check unsent queue
 	if eq, exists := ew.unsentEvents[resID]; exists {
-		return eq.get()
+		return eq.peek()
 	}
 	return nil
 }
@@ -207,13 +210,18 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 		}
 	}
 
+	// JGW-TODO:
+	// - A) Should Remove remove from both sentEvents/unsentEvents? (I mean, it seems likely it will be in one or the other, but we could check both?)
+	// and
+	// - B) In the unsent case, why does remove only remove from the front of the queue?
+
 	// If not in sent events, check unsent queue
 	eq, exists := ew.unsentEvents[resourceID]
 	if !exists {
 		return
 	}
 
-	front := eq.get()
+	front := eq.peek()
 	if front == nil {
 		return
 	}
@@ -258,6 +266,11 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 				}
 			}
 			ew.mu.RUnlock()
+
+			// Shuffle so no resource is systematically starved
+			rand.Shuffle(len(resourceIDs), func(i, j int) {
+				resourceIDs[i], resourceIDs[j] = resourceIDs[j], resourceIDs[i]
+			})
 
 			for _, resourceID := range resourceIDs {
 				ew.sendEvent(resourceID)
@@ -503,26 +516,63 @@ func (eq *eventQueue) add(ev *eventMessage) {
 	eq.mu.Lock()
 	defer eq.mu.Unlock()
 
-	if len(eq.items) > 0 {
-		tail := eq.items[len(eq.items)-1]
-		tail.mu.Lock()
-
-		// Replace an older event with a newer one of the same type
-		if ev.event.Type() == tail.event.Type() {
-			tail.event = ev.event
-			tail.backoff = ev.backoff
-			tail.retryAfter = ev.retryAfter
-			tail.mu.Unlock()
-			return
-		}
-		tail.mu.Unlock()
-	}
-
 	eq.items = append(eq.items, ev)
+
+	deduplicateEventMessageItems(&eq.items)
+
+	// if len(eq.items) > 0 {
+	// 	tail := eq.items[len(eq.items)-1]
+	// 	tail.mu.Lock()
+
+	// 	// Replace an older event with a newer one of the same type
+	// 	if ev.event.Type() == tail.event.Type() {
+	// 		tail.event = ev.event
+	// 		tail.backoff = ev.backoff
+	// 		tail.retryAfter = ev.retryAfter
+	// 		tail.mu.Unlock()
+	// 		return
+	// 	}
+	// 	tail.mu.Unlock()
+	// }
+
+	// eq.items = append(eq.items, ev)
 }
 
-// get the first item from the queue.
-func (eq *eventQueue) get() *eventMessage {
+// deduplicateEventMessageItems
+// - Ensure you own the lock on the items parameter (e.g. via eq.mu.Lock()) before calling this function
+func deduplicateEventMessageItems(items *[]*eventMessage) {
+
+	// key: Type() of event
+	// value: (not used)
+	haveWeSeenMsgWithType := make(map[string]bool, 0)
+
+	// Work backwards through the list:
+	// - Items at the end of the list are 'fresher', items are the beginning of the list are more stale
+	// - We thus remove items early in the list in favour of those that are later in the list
+	for idx := len(*items) - 1; idx >= 0; idx-- {
+		item := (*items)[idx]
+
+		myType := item.event.Type()
+
+		// No de-duplication of events we can't guarantee are safe to de-duplicate
+		if myType != StatusUpdate.String() && myType != SpecUpdate.String() {
+			continue
+		}
+
+		// De-duplicate statusupdate and specupdate, as we know they are safe to de-duplicate
+		if _, typePreviouslySeen := haveWeSeenMsgWithType[myType]; typePreviouslySeen {
+			// Stale duplicate: a fresher same-type entry was retained when scanning from the tail.
+			*items = append((*items)[:idx], (*items)[idx+1:]...)
+		} else {
+			// This is the first type we have seen the type, so add it to the map and continue without removal
+			haveWeSeenMsgWithType[myType] = true
+		}
+	}
+
+}
+
+// peek the first item from the queue.
+func (eq *eventQueue) peek() *eventMessage {
 	eq.mu.RLock()
 	defer eq.mu.RUnlock()
 	if len(eq.items) == 0 {
