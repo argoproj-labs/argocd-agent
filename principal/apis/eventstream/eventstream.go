@@ -349,6 +349,40 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	return nil
 }
 
+// swapActiveClient atomically registers c as the active client for its agent,
+// cancels any prior client, updates (or creates) the agent's EventWriter to
+// target the new stream, and installs observer as the send-error callback.
+//
+// Lock order: activeClientsMu is held for the entire swap so that
+// (activeClients entry, EventWriter target, send-error observer) change as a
+// unit. eventWriters.Get/Add and ew.mu do not acquire activeClientsMu, so
+// there is no lock inversion.
+//
+// Returns the EventWriter, the TargetLease for the new stream, and whether a
+// prior client existed (used to decide whether to increment AgentConnected).
+func (s *Server) swapActiveClient(c *client, subs eventstreamapi.EventStream_SubscribeServer, observer event.SendErrorObserver) (*event.EventWriter, event.TargetLease, bool) {
+	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
+
+	prior, hadPrior := s.activeClients[c.agentName]
+	if hadPrior && prior != c {
+		c.logCtx.Info("Preempting existing Subscribe for this agent")
+		prior.cancelFn()
+	}
+	s.activeClients[c.agentName] = c
+
+	ew := s.eventWriters.Get(c.agentName)
+	var lease event.TargetLease
+	if ew != nil {
+		lease = ew.UpdateTarget(subs)
+	} else {
+		ew, lease = event.NewEventWriter(c.agentName, subs)
+		s.eventWriters.Add(c.agentName, ew)
+	}
+	ew.SetSendErrorObserver(observer)
+	return ew, lease, hadPrior
+}
+
 // Subscribe implements a bi-directional stream to exchange application updates
 // between the agent and the server.
 //
@@ -369,29 +403,32 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		}
 	}
 
-	s.activeClientsMu.Lock()
-	s.activeClients[c.agentName] = c
-	s.activeClientsMu.Unlock()
+	eventWriter, lease, hadPrior := s.swapActiveClient(c, subs, func(reason event.SendErrorReason, sendErr error) {
+		if s.metrics != nil && s.metrics.EventWriterSendErrors != nil {
+			s.metrics.EventWriterSendErrors.WithLabelValues(c.agentName, string(reason)).Inc()
+		}
+		switch reason {
+		case event.SendErrorTransportClosing, event.SendErrorContextCanceled:
+			c.logCtx.WithError(sendErr).Warnf("EventWriter Send failed (%s); cancelling Subscribe", reason)
+			c.cancelFn()
+		}
+	})
 
 	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
 
 	if s.metrics != nil {
-		// increase counter when an agent is connected with principal
-		s.metrics.AgentConnected.Inc()
-
-		// store connection time to find average connection time of all agents
+		if !hadPrior {
+			s.metrics.AgentConnected.Inc()
+		}
 		metrics.SetAgentConnectionTime(c.agentName, c.start)
 	}
 
-	eventWriter := s.eventWriters.Get(c.agentName)
-	if eventWriter != nil {
-		eventWriter.UpdateTarget(subs)
-	} else {
-		eventWriter = event.NewEventWriter(c.agentName, subs)
-		s.eventWriters.Add(c.agentName, eventWriter)
-	}
+	go eventWriter.SendWaitingEvents(c.ctx, lease)
 
-	go eventWriter.SendWaitingEvents(c.ctx)
+	// Queue-depth publisher exits when the Subscribe context is cancelled.
+	if s.metrics != nil && s.metrics.EventWriterQueueDepth != nil {
+		go s.publishQueueDepth(c, eventWriter)
+	}
 
 	// Notify to run handlers for the newly connected agent
 	if s.options.notifyOnConnect != nil {
@@ -455,21 +492,56 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	c.wg.Wait()
 	c.logCtx.Info("Closing EventStream")
 
+	// Only the *current* active client should perform global cleanup — a
+	// preempted prior Subscribe whose goroutines just unwound must NOT
+	// decrement metrics or delete state for the live successor.
 	s.activeClientsMu.Lock()
-	if s.activeClients[c.agentName] == c {
+	wasActive := s.activeClients[c.agentName] == c
+	if wasActive {
 		delete(s.activeClients, c.agentName)
 	}
 	s.activeClientsMu.Unlock()
 
-	if s.metrics != nil {
+	if wasActive && s.metrics != nil {
 		// decrease counter when an agent is disconnected with principal
 		s.metrics.AgentConnected.Dec()
 
 		// remove connection time of agent
 		metrics.DeleteAgentConnectionTime(c.agentName)
+
+		// Drop this agent's queue-depth gauge series so a permanently
+		// disconnected agent doesn't leave a stale value behind.
+		if s.metrics.EventWriterQueueDepth != nil {
+			s.metrics.EventWriterQueueDepth.DeleteLabelValues(c.agentName)
+		}
 	}
 
 	return nil
+}
+
+// publishQueueDepth periodically samples the EventWriter and publishes the
+// per-agent queue depth as a gauge. Returns when c.ctx is canceled.
+//
+// Note: the EventWriter outlives any single Subscribe (it's keyed by agent
+// in eventWriters), so on reconnect the new Subscribe takes over publishing.
+func (s *Server) publishQueueDepth(c *client, ew *event.EventWriter) {
+	const interval = 10 * time.Second
+	gauge := s.metrics.EventWriterQueueDepth.WithLabelValues(c.agentName)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		// Re-check: if both Done and ticker fired simultaneously Go may have
+		// chosen ticker, and gauge.Set would recreate the deleted label series.
+		if c.ctx.Err() != nil {
+			return
+		}
+		gauge.Set(float64(ew.Depth()))
+	}
 }
 
 // ConnectedAgentCount returns the number of currently connected agents.

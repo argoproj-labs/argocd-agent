@@ -25,10 +25,13 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream/mock"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/stretchr/testify/assert"
@@ -63,8 +66,13 @@ func (f *fakeStatusUpdater) statusesFor(name string) []v1alpha1.ConnectionStatus
 	return out
 }
 
+// sharedMetrics is process-wide because metrics.NewPrincipalMetrics uses
+// promauto's default registry — calling it a second time panics on
+// duplicate registration.
+var sharedMetrics = metrics.NewPrincipalMetrics()
+
 func Test_Subscribe(t *testing.T) {
-	metric := metrics.NewPrincipalMetrics()
+	metric := sharedMetrics
 	cluster := &cluster.Manager{}
 
 	t.Run("Test send to subcription stream", func(t *testing.T) {
@@ -186,6 +194,136 @@ func Test_Subscribe(t *testing.T) {
 		assert.Equal(t, 0, int(st.NumRecv.Load()))
 		assert.Equal(t, 1, int(st.NumSent.Load()))
 	})
+}
+
+// Two near-simultaneous Subscribes for the same agent must not leave the
+// EventWriter pointing at a dead stream. The newer call must cancel the
+// older one's context (which the recv goroutine observes once the recv
+// hook unblocks) and own the EventWriter target afterwards.
+func TestSubscribe_PreemptsDuplicateForSameAgent(t *testing.T) {
+	clusterMgr := &cluster.Manager{}
+	qs := queue.NewSendRecvQueues()
+	qs.Create("agent-x")
+	ewm := event.NewEventWritersMap()
+	s := NewServer(qs, ewm, nil, clusterMgr)
+
+	// Older Subscribe — recv blocks until released so the stream stays alive.
+	olderGate := make(chan struct{})
+	older := &mock.MockEventServer{AgentName: "agent-x"}
+	older.AddRecvHook(func(_ *mock.MockEventServer) error {
+		<-olderGate
+		return io.EOF
+	})
+	olderDone := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(older)
+		close(olderDone)
+	}()
+	require.Eventually(t, func() bool { return s.IsAgentConnected("agent-x") },
+		time.Second, 10*time.Millisecond)
+
+	// Capture the older client so we can verify it was preempted by checking
+	// its context was canceled.
+	s.activeClientsMu.Lock()
+	olderClient := s.activeClients["agent-x"]
+	s.activeClientsMu.Unlock()
+	require.NotNil(t, olderClient)
+
+	// Newer Subscribe — should preempt by cancelling the older client's ctx.
+	newerGate := make(chan struct{})
+	newer := &mock.MockEventServer{AgentName: "agent-x"}
+	newer.AddRecvHook(func(_ *mock.MockEventServer) error {
+		<-newerGate
+		return io.EOF
+	})
+	newerDone := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(newer)
+		close(newerDone)
+	}()
+
+	// Verify the older client's context got canceled by the preemption.
+	require.Eventually(t, func() bool {
+		return olderClient.ctx.Err() != nil
+	}, time.Second, 10*time.Millisecond, "older client's ctx should be canceled by preemption")
+
+	// Release both gates so recv hooks return EOF and the goroutines unwind.
+	close(olderGate)
+	close(newerGate)
+	<-olderDone
+	<-newerDone
+	require.False(t, s.IsAgentConnected("agent-x"))
+}
+
+// A Send() error reporting a dead transport must cancel the Subscribe so
+// the agent reconnects, instead of EventWriter retrying forever against a
+// broken target.
+//
+// Witness: the Subscribe handler's per-client context. We capture it via
+// the activeClients map while the recv hook is parked (which keeps
+// c.wg.Wait blocked, which keeps Subscribe's cleanup from running). We
+// then poll until the ctx is Done, which only happens if the Send-error
+// observer called c.cancelFn(). If a regression removes that call, the
+// ctx never cancels and the test times out — the metric counter alone
+// would still increment, so we assert on the cancel directly.
+func TestSubscribe_SendErrorCancelsSubscribeCtx(t *testing.T) {
+	clusterMgr := &cluster.Manager{}
+	qs := queue.NewSendRecvQueues()
+	qs.Create("agent-y")
+	ewm := event.NewEventWritersMap()
+	s := NewServer(qs, ewm, sharedMetrics, clusterMgr)
+
+	st := &mock.MockEventServer{
+		AgentName: "agent-y",
+		AgentMode: string(types.AgentModeManaged),
+	}
+	// recv parks; while parked, c.wg.Wait blocks, which means Subscribe's
+	// cleanup of activeClients[name] cannot run, so c is stable for us
+	// to read until the test releases recvGate.
+	recvGate := make(chan struct{})
+	st.AddRecvHook(func(_ *mock.MockEventServer) error {
+		<-recvGate
+		return io.EOF
+	})
+	// Every Send returns Unavailable — simulates a dead send half-stream.
+	st.AddSendHook(func(_ *mock.MockEventServer, _ *eventstreamapi.Event) error {
+		return status.Error(codes.Unavailable, "transport is closing")
+	})
+
+	// Queue an event so SendWaitingEvents will attempt a Send.
+	emitter := event.NewEventSource("test")
+	qs.SendQ("agent-y").Add(emitter.ApplicationEvent(
+		event.Create,
+		&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns"}},
+	))
+
+	subscribeReturned := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(st)
+		close(subscribeReturned)
+	}()
+
+	// Capture the client once Subscribe registers it.
+	var captured *client
+	require.Eventually(t, func() bool {
+		s.activeClientsMu.Lock()
+		captured = s.activeClients["agent-y"]
+		s.activeClientsMu.Unlock()
+		return captured != nil
+	}, time.Second, 10*time.Millisecond, "Subscribe didn't register active client")
+
+	// The Send-error observer must cancel c.ctx. recv is parked, so
+	// Subscribe is still running and activeClients still holds c — no
+	// race with cleanup.
+	select {
+	case <-captured.ctx.Done():
+	case <-time.After(3 * time.Second):
+		close(recvGate)
+		t.Fatal("Send error did not cancel Subscribe ctx within 3s")
+	}
+
+	close(recvGate)
+	<-subscribeReturned
 }
 
 func TestDisconnectAll(t *testing.T) {
