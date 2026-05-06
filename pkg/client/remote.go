@@ -586,13 +586,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: r.keepAlivePingInterval}))
 		}
 
-		conn, err = grpc.NewClient(r.Addr(), opts...)
-		if err != nil {
-			return err
-		}
 	}
-
-	authC := authapi.NewAuthenticationClient(conn)
 
 	authenticated := false
 	cBackoff := connectBackoff()
@@ -607,6 +601,12 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		case <-ctx.Done():
 			return status.Error(codes.Canceled, "context canceled")
 		default:
+			conn, err = grpc.NewClient(r.Addr(), opts...)
+			if err != nil {
+				return err
+			}
+			authC := authapi.NewAuthenticationClient(conn)
+
 			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String(), Version: r.agentVersion})
 			if ierr != nil {
 				st, ok := status.FromError(ierr)
