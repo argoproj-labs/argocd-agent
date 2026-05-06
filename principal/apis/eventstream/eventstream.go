@@ -460,6 +460,12 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		delete(s.activeClients, c.agentName)
 	}
 	s.activeClientsMu.Unlock()
+	// Update the event writer target to nil to prevent any further events from being sent
+	// while the agent is disconnected.
+	ew := s.eventWriters.Get(c.agentName)
+	if ew != nil {
+		ew.UpdateTarget(nil)
+	}
 
 	if s.metrics != nil {
 		// decrease counter when an agent is disconnected with principal
