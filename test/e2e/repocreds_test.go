@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type RepoCredsTestSuite struct {
@@ -71,10 +72,10 @@ func (suite *RepoCredsTestSuite) createAppProjectAndWaitForSync() *argoapp.AppPr
 
 	requires.NoError(suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{}))
 
-	key := fixture.ToNamespacedName(appProject)
+	keyAgent := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 	requires.Eventually(func() bool {
 		tempAppProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &tempAppProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &tempAppProject, metav1.GetOptions{})
 		return err == nil
 	}, 60*time.Second, 1*time.Second, "appProject should be synced to the managed-agent")
 
@@ -88,10 +89,10 @@ func (suite *RepoCredsTestSuite) createRepoCredsAndWaitForSync() corev1.Secret {
 
 	requires.NoError(suite.PrincipalClient.Create(suite.Ctx, &repoCreds, metav1.CreateOptions{}))
 
-	key := fixture.ToNamespacedName(&repoCreds)
+	keyAgent := types.NamespacedName{Name: repoCreds.Name, Namespace: fixture.ManagedAgentNamespace}
 	requires.Eventually(func() bool {
 		tempRepoCreds := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &tempRepoCreds, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &tempRepoCreds, metav1.GetOptions{})
 		return err == nil
 	}, 60*time.Second, 1*time.Second, "repo-creds should be synced to the managed-agent")
 
@@ -107,24 +108,26 @@ func (suite *RepoCredsTestSuite) Test_RepoCreds_Managed() {
 	// and ensure they are synced to the managed-agent
 	suite.createAppProjectAndWaitForSync()
 	repoCredsPrincipal := suite.createRepoCredsAndWaitForSync()
-	key := fixture.ToNamespacedName(&repoCredsPrincipal)
+	keyPrincipal := fixture.ToNamespacedName(&repoCredsPrincipal)
+	keyAgent := types.NamespacedName{Name: repoCredsPrincipal.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the repo-creds on the managed agent has the source UID annotation
 	repoCredsAgent := corev1.Secret{}
-	requires.NoError(suite.ManagedAgentClient.Get(suite.Ctx, key, &repoCredsAgent, metav1.GetOptions{}))
+	requires.NoError(suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repoCredsAgent, metav1.GetOptions{}))
 	requires.Equal(string(repoCredsPrincipal.UID), repoCredsAgent.Annotations[manager.SourceUIDAnnotation])
 	requires.Equal(repoCredsAgent.Data, repoCredsPrincipal.Data)
 
 	// Ensure the repo-creds is not pushed to the autonomous agent
+	keyAutonomous := types.NamespacedName{Name: repoCredsPrincipal.Name, Namespace: fixture.AutonomousAgentNamespace}
 	requires.Never(func() bool {
 		rc := corev1.Secret{}
-		err := suite.AutonomousAgentClient.Get(suite.Ctx, key, &rc, metav1.GetOptions{})
+		err := suite.AutonomousAgentClient.Get(suite.Ctx, keyAutonomous, &rc, metav1.GetOptions{})
 		return err == nil
 	}, 20*time.Second, 1*time.Second)
 
 	// Update the repo-creds and verify changes are propagated to the managed-agent
 	updatedURL := "https://github.com/example/updated/"
-	err := suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, key, func(repo *corev1.Secret) error {
+	err := suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, keyPrincipal, func(repo *corev1.Secret) error {
 		repo.Data["url"] = []byte(updatedURL)
 		return nil
 	}, metav1.UpdateOptions{})
@@ -132,7 +135,7 @@ func (suite *RepoCredsTestSuite) Test_RepoCreds_Managed() {
 
 	requires.Eventually(func() bool {
 		tempRepoCreds := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &tempRepoCreds, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &tempRepoCreds, metav1.GetOptions{})
 		if err != nil {
 			fmt.Println("error getting repo-creds", err)
 			return false
@@ -148,7 +151,7 @@ func (suite *RepoCredsTestSuite) Test_RepoCreds_Managed() {
 	requires.NoError(suite.PrincipalClient.Delete(suite.Ctx, &repoCredsPrincipal, metav1.DeleteOptions{}))
 	requires.Eventually(func() bool {
 		tempRepoCreds := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &tempRepoCreds, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &tempRepoCreds, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
 	}, 60*time.Second, 1*time.Second, "repo-creds should be deleted from the managed-agent")
 }
@@ -162,12 +165,12 @@ func (suite *RepoCredsTestSuite) Test_RepoCreds_without_AppProject() {
 	// Create the repo-creds on the principal's cluster
 	repoCredsPrincipal := newRepoCreds()
 	requires.NoError(suite.PrincipalClient.Create(suite.Ctx, &repoCredsPrincipal, metav1.CreateOptions{}))
-	repoCredsKey := fixture.ToNamespacedName(&repoCredsPrincipal)
+	repoCredsKeyAgent := types.NamespacedName{Name: repoCredsPrincipal.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the repo-creds is not synced to the managed-agent without a matching AppProject
 	requires.Never(func() bool {
 		tempRepoCreds := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, repoCredsKey, &tempRepoCreds, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, repoCredsKeyAgent, &tempRepoCreds, metav1.GetOptions{})
 		return err == nil
 	}, 20*time.Second, 1*time.Second, "repo-creds should not be created on the managed-agent without an AppProject")
 
@@ -177,7 +180,7 @@ func (suite *RepoCredsTestSuite) Test_RepoCreds_without_AppProject() {
 	// Now the repo-creds should be synced to the managed-agent, since the appProject is present
 	requires.Eventually(func() bool {
 		rc := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, repoCredsKey, &rc, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, repoCredsKeyAgent, &rc, metav1.GetOptions{})
 		return err == nil
 	}, 60*time.Second, 1*time.Second, "repo-creds should be created on the managed-agent")
 
@@ -187,7 +190,7 @@ func (suite *RepoCredsTestSuite) Test_RepoCreds_without_AppProject() {
 	// Ensure the repo-creds is deleted from the managed-agent, since the appProject is deleted
 	requires.Eventually(func() bool {
 		tempRepoCreds := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, repoCredsKey, &tempRepoCreds, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, repoCredsKeyAgent, &tempRepoCreds, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
 	}, 60*time.Second, 1*time.Second, "repo-creds should be deleted from the managed-agent")
 
@@ -207,11 +210,11 @@ func (suite *RepoCredsTestSuite) Test_RepoCreds_AppProjectUpdate() {
 	appProjectPrincipal := suite.createAppProjectAndWaitForSync()
 	repoCredsPrincipal := suite.createRepoCredsAndWaitForSync()
 
-	appProjectKey := fixture.ToNamespacedName(appProjectPrincipal)
-	repoCredsKey := fixture.ToNamespacedName(&repoCredsPrincipal)
+	appProjectKeyPrincipal := fixture.ToNamespacedName(appProjectPrincipal)
+	repoCredsKeyAgent := types.NamespacedName{Name: repoCredsPrincipal.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Update the appProject on the principal's cluster to no longer match the agent name
-	err := suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, appProjectKey, func(ap *argoapp.AppProject) error {
+	err := suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, appProjectKeyPrincipal, func(ap *argoapp.AppProject) error {
 		ap.Spec.SourceNamespaces = []string{"random"}
 		return nil
 	}, metav1.UpdateOptions{})
@@ -220,7 +223,7 @@ func (suite *RepoCredsTestSuite) Test_RepoCreds_AppProjectUpdate() {
 	// Ensure the repo-creds is deleted from the managed-agent, since the appProject no longer matches the agent name
 	requires.Eventually(func() bool {
 		tempRepoCreds := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, repoCredsKey, &tempRepoCreds, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, repoCredsKeyAgent, &tempRepoCreds, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
 	}, 60*time.Second, 1*time.Second, "repo-creds should be deleted from the managed-agent")
 }

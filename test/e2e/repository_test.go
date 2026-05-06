@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type RepositoryTestSuite struct {
@@ -56,12 +57,12 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := fixture.ToNamespacedName(&appProject)
+	projKeyAgent := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the appProject has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyAgent, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
 
@@ -83,17 +84,19 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 	err = suite.PrincipalClient.Create(suite.Ctx, &sourceRepo, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := fixture.ToNamespacedName(&sourceRepo)
+	keyPrincipal := fixture.ToNamespacedName(&sourceRepo)
+	keyAgent := types.NamespacedName{Name: sourceRepo.Name, Namespace: fixture.ManagedAgentNamespace}
+	keyAutonomous := types.NamespacedName{Name: sourceRepo.Name, Namespace: fixture.AutonomousAgentNamespace}
 	// Ensure the repository has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 
 	// Ensure the repository on the managed agent has the source UID annotation
 	repository := corev1.Secret{}
-	err = suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+	err = suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 	requires.NoError(err)
 	requires.Equal(string(sourceRepo.UID), repository.Annotations[manager.SourceUIDAnnotation])
 	requires.Equal(repository.Data, sourceRepo.Data)
@@ -101,13 +104,13 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 	// Ensure the repository is not pushed to the autonomous agent
 	requires.Never(func() bool {
 		repository := corev1.Secret{}
-		err := suite.AutonomousAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.AutonomousAgentClient.Get(suite.Ctx, keyAutonomous, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 10*time.Second, 1*time.Second)
 
 	// Update the repository and verify if the changes are propagated to the agent
 	updatedRepo := "https://github.com/example/repo-updated.git"
-	err = suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, key, func(repo *corev1.Secret) error {
+	err = suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, keyPrincipal, func(repo *corev1.Secret) error {
 		repo.Data["url"] = []byte(updatedRepo)
 		return nil
 	}, metav1.UpdateOptions{})
@@ -116,7 +119,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 	// Ensure the repository is updated on the managed agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		if err != nil {
 			fmt.Println("error getting repository", err)
 			return false
@@ -135,7 +138,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Managed() {
 	// Ensure the repository has been deleted from the managed-agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 }
@@ -161,11 +164,11 @@ func (suite *RepositoryTestSuite) Test_Repository_Late_AppProjectCreation() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &sourceRepo, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := fixture.ToNamespacedName(&sourceRepo)
+	keyAgent := types.NamespacedName{Name: sourceRepo.Name, Namespace: fixture.ManagedAgentNamespace}
 	// Ensure the repository is not created on the managed-agent
 	requires.Never(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 5*time.Second, 1*time.Second, "GET repository from managed-agent")
 
@@ -189,19 +192,19 @@ func (suite *RepositoryTestSuite) Test_Repository_Late_AppProjectCreation() {
 	err = suite.PrincipalClient.Create(suite.Ctx, &appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := fixture.ToNamespacedName(&appProject)
+	projKeyAgent := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the appProject has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyAgent, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
 
 	// Ensure the repository is created on the managed-agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 
@@ -217,7 +220,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Late_AppProjectCreation() {
 	// Ensure the repository has been deleted from the managed-agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 }
@@ -245,12 +248,13 @@ func (suite *RepositoryTestSuite) Test_Repository_AppProjectUpdate() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := fixture.ToNamespacedName(&appProject)
+	projKeyPrincipal := fixture.ToNamespacedName(&appProject)
+	projKeyAgent := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the appProject has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyAgent, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 60*time.Second, 1*time.Second, "GET appProject from managed-agent")
 
@@ -272,16 +276,16 @@ func (suite *RepositoryTestSuite) Test_Repository_AppProjectUpdate() {
 	err = suite.PrincipalClient.Create(suite.Ctx, &sourceRepo, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := fixture.ToNamespacedName(&sourceRepo)
+	keyAgent := types.NamespacedName{Name: sourceRepo.Name, Namespace: fixture.ManagedAgentNamespace}
 	// Ensure the repository has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 60*time.Second, 1*time.Second, "GET repository from managed-agent")
 
 	// Update the appProject on the principal's cluster to no longer match the agent name
-	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, projKey, func(appProject *argoapp.AppProject) error {
+	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, projKeyPrincipal, func(appProject *argoapp.AppProject) error {
 		appProject.Spec.SourceNamespaces = []string{"random"}
 		return nil
 	}, metav1.UpdateOptions{})
@@ -290,7 +294,7 @@ func (suite *RepositoryTestSuite) Test_Repository_AppProjectUpdate() {
 	// Ensure the repository is deleted from the managed-agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
 	}, 60*time.Second, 1*time.Second, "GET repository from managed-agent")
 }
@@ -318,12 +322,12 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_AppProject() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := fixture.ToNamespacedName(&appProject)
+	projKeyAgent := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the appProject has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyAgent, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
 
@@ -345,11 +349,12 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_AppProject() {
 	err = suite.PrincipalClient.Create(suite.Ctx, &sourceRepo, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := fixture.ToNamespacedName(&sourceRepo)
+	keyPrincipal := fixture.ToNamespacedName(&sourceRepo)
+	keyAgent := types.NamespacedName{Name: sourceRepo.Name, Namespace: fixture.ManagedAgentNamespace}
 	// Ensure the repository has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 
@@ -363,7 +368,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_AppProject() {
 	requires.NoError(err)
 
 	// Update the repository to refer the new appProject
-	err = suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, key, func(repo *corev1.Secret) error {
+	err = suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, keyPrincipal, func(repo *corev1.Secret) error {
 		repo.Data["project"] = []byte("sample2")
 		return nil
 	}, metav1.UpdateOptions{})
@@ -372,7 +377,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_AppProject() {
 	// Ensure the repository is deleted from the managed-agent since it no longer matches the agent name
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err != nil && errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 }
@@ -400,12 +405,12 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_Reference_SameAgent() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := fixture.ToNamespacedName(&appProject)
+	projKeyAgent := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the appProject has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyAgent, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
 
@@ -427,11 +432,13 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_Reference_SameAgent() {
 	err = suite.PrincipalClient.Create(suite.Ctx, &sourceRepo, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := fixture.ToNamespacedName(&sourceRepo)
+	keyPrincipal := fixture.ToNamespacedName(&sourceRepo)
+	keyAgent := types.NamespacedName{Name: sourceRepo.Name, Namespace: fixture.ManagedAgentNamespace}
+
 	// Ensure the repository has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 
@@ -460,7 +467,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_Reference_SameAgent() {
 	requires.NoError(err)
 
 	// Update the repository to refer the new appProject
-	err = suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, key, func(repo *corev1.Secret) error {
+	err = suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, keyPrincipal, func(repo *corev1.Secret) error {
 		repo.Data["project"] = []byte("sample2")
 		return nil
 	}, metav1.UpdateOptions{})
@@ -469,7 +476,7 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_Reference_SameAgent() {
 	// Ensure the repository is present on the managed-agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyAgent, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 }

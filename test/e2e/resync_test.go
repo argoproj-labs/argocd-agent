@@ -459,11 +459,12 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnAppProjectUpdate() {
 
 	// Create an appProject on the principal's cluster
 	appProject := suite.createAppProject()
-	projKey := fixture.ToNamespacedName(appProject)
+	projKeyPrincipal := fixture.ToNamespacedName(appProject)
+	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Create a repository on the principal's cluster
 	repo := suite.createRepository()
-	key := fixture.ToNamespacedName(repo)
+	keyManaged := managedClusterRepoKey(repo)
 
 	// Stop the principal and update the AppProject rules
 	err := fixture.StopProcess("principal")
@@ -474,7 +475,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnAppProjectUpdate() {
 	}, 30*time.Second, 1*time.Second)
 
 	// Update the AppProject rules to not match any agent
-	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, projKey, func(a *argoapp.AppProject) error {
+	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, projKeyPrincipal, func(a *argoapp.AppProject) error {
 		a.Spec.Destinations = []argoapp.ApplicationDestination{}
 		return nil
 	}, metav1.UpdateOptions{})
@@ -488,13 +489,13 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnAppProjectUpdate() {
 
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyManaged, &appProject, metav1.GetOptions{})
 		return errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second)
 
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyManaged, &repository, metav1.GetOptions{})
 		return errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second)
 
@@ -519,7 +520,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnCreation() {
 	err = suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := fixture.ToNamespacedName(appProject)
+	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Create a repository on the control plane cluster
 	sourceRepo := sampleRepository()
@@ -536,15 +537,15 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnCreation() {
 	// Ensure the appProject has been created on the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyManaged, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
 
-	key := fixture.ToNamespacedName(sourceRepo)
+	keyManaged := managedClusterRepoKey(sourceRepo)
 	// Ensure the repository has been created on the workload cluster
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyManaged, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 }
@@ -559,7 +560,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnUpdate() {
 
 	// Create a repository on the control plane cluster
 	sourceRepo := suite.createRepository()
-	key := fixture.ToNamespacedName(sourceRepo)
+	keyManaged := managedClusterRepoKey(sourceRepo)
 
 	// Stop the principal and update the AppProject rules
 	err := fixture.StopProcess("principal")
@@ -571,7 +572,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnUpdate() {
 
 	// Update the repository secret
 	newURL := "https://github.com/example/repo2.git"
-	err = suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, key, func(s *corev1.Secret) error {
+	err = suite.PrincipalClient.EnsureRepositoryUpdate(suite.Ctx, fixture.ToNamespacedName(sourceRepo), func(s *corev1.Secret) error {
 		s.Data["url"] = []byte(newURL)
 		return nil
 	}, metav1.UpdateOptions{})
@@ -587,7 +588,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnUpdate() {
 	// Ensure the repository is updated on the workload cluster
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyManaged, &repository, metav1.GetOptions{})
 		if err != nil {
 			fmt.Println("error getting repository", err)
 			return false
@@ -607,16 +608,16 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnDeletion() {
 
 	// Create an appProject on the control plane cluster
 	appProject := suite.createAppProject()
-	projKey := fixture.ToNamespacedName(appProject)
+	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Create a repository on the control plane cluster
 	sourceRepo := suite.createRepository()
 
-	key := fixture.ToNamespacedName(sourceRepo)
+	keyManaged := managedClusterRepoKey(sourceRepo)
 	// Ensure the repository has been pushed to the workload cluster
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyManaged, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 
@@ -641,7 +642,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnDeletion() {
 	// Ensure the appProject is still present on the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyManaged, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second)
 }
@@ -671,12 +672,12 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnCreate() {
 
 	fixture.CheckReadiness(suite.T(), "principal")
 
-	projKey := fixture.ToNamespacedName(appProject)
+	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Ensure the appProject has been created on the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyManaged, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
 
@@ -689,7 +690,8 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnUpdate() {
 
 	// Create an appProject on the control plane cluster
 	appProject := suite.createAppProject()
-	projKey := fixture.ToNamespacedName(appProject)
+	projKeyPrincipal := fixture.ToNamespacedName(appProject)
+	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Stop the principal
 	err := fixture.StopProcess("principal")
@@ -701,7 +703,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnUpdate() {
 
 	// Update the appProject spec
 	des := "updated from e2e test"
-	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, projKey, func(a *argoapp.AppProject) error {
+	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, projKeyPrincipal, func(a *argoapp.AppProject) error {
 		a.Spec.Description = des
 		return nil
 	}, metav1.UpdateOptions{})
@@ -716,7 +718,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnUpdate() {
 	// Ensure the appProject is updated on the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyManaged, &appProject, metav1.GetOptions{})
 		return err == nil && appProject.Spec.Description == des
 	}, 30*time.Second, 1*time.Second)
 }
@@ -728,7 +730,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnDeletion() {
 
 	// Create an appProject on the control plane cluster
 	appProject := suite.createAppProject()
-	projKey := fixture.ToNamespacedName(appProject)
+	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Stop the principal
 	err := fixture.StopProcess("principal")
@@ -751,7 +753,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnDeletion() {
 	// Ensure the appProject is deleted from the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyManaged, &appProject, metav1.GetOptions{})
 		return errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second)
 }
@@ -762,7 +764,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_DeleteOnAgentDelete() {
 	requires := suite.Require()
 
 	appProject := suite.createAppProject()
-	projKey := fixture.ToNamespacedName(appProject)
+	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Stop the agent
 	err := fixture.StopProcess("agent-managed")
@@ -777,7 +779,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_DeleteOnAgentDelete() {
 	requires.NoError(err)
 
 	// AppProject should still exist on the workload cluster
-	err = suite.ManagedAgentClient.Get(suite.Ctx, projKey, appProject, metav1.GetOptions{})
+	err = suite.ManagedAgentClient.Get(suite.Ctx, projKeyManaged, appProject, metav1.GetOptions{})
 	requires.NoError(err)
 
 	// Start the agent and ensure that the appProject is deleted from the workload cluster
@@ -789,7 +791,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_DeleteOnAgentDelete() {
 	// Ensure the appProject has been created on the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyManaged, &appProject, metav1.GetOptions{})
 		return errors.IsNotFound(err)
 	}, 30*time.Second, 1*time.Second)
 }
@@ -812,7 +814,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_CreateOnAgentDelete() {
 	err = suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := fixture.ToNamespacedName(appProject)
+	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Start the agent and ensure that the appProject is created on the workload cluster
 	err = fixture.StartProcess("agent-managed")
@@ -823,7 +825,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_CreateOnAgentDelete() {
 	// Ensure the appProject has been created on the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyManaged, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second)
 }
@@ -943,6 +945,8 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithUpdateO
 
 	// Update the AppProject on the control-plane cluster
 	principalAppProject := appProject.DeepCopy()
+	principalAppProject.Name = principalKey.Name
+	principalAppProject.Namespace = fixture.PrincipalNamespace
 	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, principalAppProject, func(obj fixture.KubeObject) {
 		a := obj.(*argoapp.AppProject)
 		a.Spec.Description = "updated from e2e test"
@@ -1057,6 +1061,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithUpdateOnPri
 	// Update the AppProject on the principal's cluster
 	principalAppProject := appProject.DeepCopy()
 	principalAppProject.Name = principalKey.Name
+	principalAppProject.Namespace = fixture.PrincipalNamespace
 	err = fixture.EnsureUpdate(suite.Ctx, suite.PrincipalClient, principalAppProject, func(obj fixture.KubeObject) {
 		a := obj.(*argoapp.AppProject)
 		a.Spec.Description = "updated from e2e test"
@@ -1096,6 +1101,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithDeleteO
 	// Delete the AppProject on the control-plane cluster
 	principalAppProject := appProject.DeepCopy()
 	principalAppProject.Name = principalKey.Name
+	principalAppProject.Namespace = fixture.PrincipalNamespace
 	err = suite.PrincipalClient.Delete(suite.Ctx, principalAppProject, metav1.DeleteOptions{})
 	requires.NoError(err)
 
@@ -1212,6 +1218,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithDeleteOnPri
 	// Delete the AppProject on the principal's cluster
 	principalAppProject := appProject.DeepCopy()
 	principalAppProject.Name = principalKey.Name
+	principalAppProject.Namespace = fixture.PrincipalNamespace
 	err = suite.PrincipalClient.Delete(suite.Ctx, principalAppProject, metav1.DeleteOptions{})
 	requires.NoError(err)
 
@@ -1365,12 +1372,12 @@ func (suite *ResyncTestSuite) createAppProject() *argoapp.AppProject {
 	err := suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := fixture.ToNamespacedName(appProject)
+	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Ensure the AppProject has been pushed to the workload cluster
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyManaged, &appProject, metav1.GetOptions{})
 		if err != nil {
 			fmt.Println("error getting appProject", err)
 			return false
@@ -1415,15 +1422,23 @@ func (suite *ResyncTestSuite) createRepository() *corev1.Secret {
 	err := suite.PrincipalClient.Create(suite.Ctx, sourceRepo, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	key := fixture.ToNamespacedName(sourceRepo)
+	keyManaged := managedClusterRepoKey(sourceRepo)
 	// Ensure the repository has been pushed to the managed-agent
 	requires.Eventually(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, keyManaged, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 
 	return sourceRepo
+}
+
+func managedClusterAppProjectKey(principalProj *argoapp.AppProject) types.NamespacedName {
+	return types.NamespacedName{Name: principalProj.Name, Namespace: fixture.ManagedAgentNamespace}
+}
+
+func managedClusterRepoKey(principalRepo *corev1.Secret) types.NamespacedName {
+	return types.NamespacedName{Name: principalRepo.Name, Namespace: fixture.ManagedAgentNamespace}
 }
 
 func sampleAppProject(namespace string) *argoapp.AppProject {

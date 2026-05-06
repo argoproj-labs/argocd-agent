@@ -17,3 +17,4 @@ patches:
 - path: argocd-cmd-params-cm.yaml
 - path: argocd-secret.yaml
 - path: redis-service.yaml
+- path: clusterrolebinding-namespace-patch.yaml

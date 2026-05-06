@@ -414,6 +414,14 @@ func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project
 	})
 
 	sourceUID, exists := project.Annotations[manager.SourceUIDAnnotation]
+
+	// Autonomous agents don't revert their AppProjects, they are the source of truth for their AppProjects
+	// If there is no source UID annotation, this is a locally created AppProject
+	if m.role == manager.ManagerRoleAgent && m.mode == manager.ManagerModeAutonomous {
+		return false, nil
+	}
+
+	// For managed agents and principal, source UID annotation is required
 	if !exists {
 		return false, fmt.Errorf("source UID annotation not found for resource")
 	}
