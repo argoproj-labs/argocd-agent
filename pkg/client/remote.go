@@ -513,6 +513,38 @@ func (r *Remote) Disconnect() {
 	}
 }
 
+func (r *Remote) newClientConn(ctx context.Context, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+	var conn *grpc.ClientConn
+	var err error
+	if r.enableWebSocket {
+		grpcHTTP1Opts := []grpchttp1client.ConnectOption{
+			grpchttp1client.UseWebSocket(true),
+			grpchttp1client.DialOpts(opts...),
+		}
+
+		// Use nil TLS config for plaintext mode (WebSocket over HTTP)
+		var tlsCfg *tls.Config
+		if !r.insecurePlaintext {
+			tlsCfg = r.tlsConfig
+		}
+		conn, err = grpchttp1client.ConnectViaProxy(ctx, r.Addr(), tlsCfg, grpcHTTP1Opts...)
+	} else {
+		// Use insecure credentials for plaintext mode (e.g., behind Istio)
+		if r.insecurePlaintext {
+			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		} else {
+			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(r.tlsConfig)))
+		}
+
+		if r.keepAlivePingInterval != 0 {
+			log().Debugf("Agent ping to principal is enabled, agent will send a ping event after every %s.", r.keepAlivePingInterval)
+			opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: r.keepAlivePingInterval}))
+		}
+		conn, err = grpc.NewClient(r.Addr(), opts...)
+	}
+	return conn, err
+}
+
 // Connect connects this Remote to the remote host and performs authentication.
 // If the remote is configured with a retry, Connect will keep trying to
 // establish a connection to the remote host until either the number of maximum
@@ -558,36 +590,6 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		conn *grpc.ClientConn
 		err  error
 	)
-	if r.enableWebSocket {
-		grpcHTTP1Opts := []grpchttp1client.ConnectOption{
-			grpchttp1client.UseWebSocket(true),
-			grpchttp1client.DialOpts(opts...),
-		}
-
-		// Use nil TLS config for plaintext mode (WebSocket over HTTP)
-		var tlsCfg *tls.Config
-		if !r.insecurePlaintext {
-			tlsCfg = r.tlsConfig
-		}
-		conn, err = grpchttp1client.ConnectViaProxy(ctx, r.Addr(), tlsCfg, grpcHTTP1Opts...)
-		if err != nil {
-			return err
-		}
-	} else {
-		// Use insecure credentials for plaintext mode (e.g., behind Istio)
-		if r.insecurePlaintext {
-			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		} else {
-			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(r.tlsConfig)))
-		}
-
-		if r.keepAlivePingInterval != 0 {
-			log().Debugf("Agent ping to principal is enabled, agent will send a ping event after every %s.", r.keepAlivePingInterval)
-			opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: r.keepAlivePingInterval}))
-		}
-
-	}
-
 	authenticated := false
 	cBackoff := connectBackoff()
 
@@ -601,13 +603,18 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		case <-ctx.Done():
 			return status.Error(codes.Canceled, "context canceled")
 		default:
-			conn, err = grpc.NewClient(r.Addr(), opts...)
+			conn, err = r.newClientConn(ctx, opts...)
 			if err != nil {
 				return err
 			}
 			authC := authapi.NewAuthenticationClient(conn)
 
 			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String(), Version: r.agentVersion})
+			defer func() {
+				if ierr != nil {
+					conn.Close()
+				}
+			}()
 			if ierr != nil {
 				st, ok := status.FromError(ierr)
 				if ok {
@@ -621,7 +628,6 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 					}
 				}
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
-				conn.Close()
 				return ierr
 			}
 
@@ -646,7 +652,8 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		}
 	})
 	if err != nil {
-		conn.Close()
+		// Connection is already closed by the defer func in the retry loop
+		// if the loop exits with an error
 		return err
 	}
 
