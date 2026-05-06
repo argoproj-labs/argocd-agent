@@ -536,10 +536,6 @@ func (r *Remote) newClientConn(ctx context.Context, opts ...grpc.DialOption) (*g
 			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(r.tlsConfig)))
 		}
 
-		if r.keepAlivePingInterval != 0 {
-			log().Debugf("Agent ping to principal is enabled, agent will send a ping event after every %s.", r.keepAlivePingInterval)
-			opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: r.keepAlivePingInterval}))
-		}
 		conn, err = grpc.NewClient(r.Addr(), opts...)
 	}
 	return conn, err
@@ -584,6 +580,11 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 	if r.enableCompression {
 		log().Debug("gRPC compression is enabled.")
 		opts = append(opts, grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)))
+	}
+
+	if r.keepAlivePingInterval != 0 {
+		log().Debugf("Agent ping to principal is enabled, agent will send a ping event after every %s.", r.keepAlivePingInterval)
+		opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: r.keepAlivePingInterval}))
 	}
 
 	var (
