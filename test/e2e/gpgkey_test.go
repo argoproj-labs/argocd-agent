@@ -307,7 +307,7 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_UseAndUpdatePreExistingConfigMap() {
 	orphanCM := corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      common.ArgoCDGPGKeysConfigMapName,
-			Namespace: fixture.PrincipalNamespace,
+			Namespace: fixture.ManagedAgentNamespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":    common.ArgoCDGPGKeysConfigMapName,
 				"app.kubernetes.io/part-of": "argocd",

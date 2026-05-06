@@ -325,7 +325,13 @@ func (suite *CacheTestSuite) Test_RevertAppProjectUpdatesManagedMode() {
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the appProject from the workload cluster and ensure it is recreated to be in sync with the control-plane
-	err = suite.ManagedAgentClient.Delete(suite.Ctx, appProject, metav1.DeleteOptions{})
+	managedAppProject := &argoapp.AppProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      appProject.Name,
+			Namespace: fixture.ManagedAgentNamespace,
+		},
+	}
+	err = suite.ManagedAgentClient.Delete(suite.Ctx, managedAppProject, metav1.DeleteOptions{})
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
@@ -371,14 +377,13 @@ func (suite *CacheTestSuite) Test_RevertAppProjectUpdatesAutonomousMode() {
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the appProject from the control-plane and ensure it is recreated to be in sync with the agent
-	principalAppProject := argoapp.AppProject{
+	principalAppProject := &argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      autonomousProjName,
 			Namespace: fixture.PrincipalNamespace,
 		},
-		Spec: appProject.Spec,
 	}
-	err = suite.PrincipalClient.Delete(suite.Ctx, &principalAppProject, metav1.DeleteOptions{})
+	err = suite.PrincipalClient.Delete(suite.Ctx, principalAppProject, metav1.DeleteOptions{})
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
@@ -435,7 +440,13 @@ func (suite *CacheTestSuite) Test_RevertRepositoryUpdatesManagedMode() {
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the repository from the workload cluster and ensure it is recreated to be in sync with the control-plane
-	err = suite.ManagedAgentClient.Delete(suite.Ctx, repository, metav1.DeleteOptions{})
+	managedRepository := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      repository.Name,
+			Namespace: fixture.ManagedAgentNamespace,
+		},
+	}
+	err = suite.ManagedAgentClient.Delete(suite.Ctx, managedRepository, metav1.DeleteOptions{})
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {

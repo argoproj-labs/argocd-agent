@@ -164,6 +164,8 @@ apply() {
     sed -i.bak -e "s/NamespacePlaceholder/${ARGOCD_MANAGED_NAMESPACE}/" $TMP_DIR/agent-managed/kustomization.yaml
     sed -i.bak -e "s/NamespacePlaceholder/${ARGOCD_AUTONOMOUS_NAMESPACE}/" $TMP_DIR/agent-autonomous/kustomization.yaml
     sed -i.bak -e "s/PrincipalNamespacePlaceholder/${ARGOCD_PRINCIPAL_NAMESPACE}/" $TMP_DIR/control-plane/clusterrolebinding-namespace-patch.yaml
+    sed -i.bak -e "s/ManagedNamespacePlaceholder/${ARGOCD_MANAGED_NAMESPACE}/" $TMP_DIR/agent-managed/clusterrolebinding-namespace-patch.yaml
+    sed -i.bak -e "s/AutonomousNamespacePlaceholder/${ARGOCD_AUTONOMOUS_NAMESPACE}/" $TMP_DIR/agent-autonomous/clusterrolebinding-namespace-patch.yaml
 
     # Generate the server secret key for the argocd running on the managed and autonomous agent clusters
     echo "-> Generate server.secretkey for agent's argocd-secrets"

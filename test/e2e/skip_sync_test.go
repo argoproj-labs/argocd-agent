@@ -61,18 +61,19 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	appKey := fixture.ToNamespacedName(&app)
+	appKeyPrincipal := fixture.ToNamespacedName(&app)
+	appKeyAgent := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the Application is NOT pushed to the managed-agent (should be filtered out)
 	suite.Require().Never(func() bool {
 		app := argoapp.Application{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, appKey, &app, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, appKeyAgent, &app, metav1.GetOptions{})
 		return err == nil
 	}, 5*time.Second, 1*time.Second, "Application with skip sync label should not be synced to agent")
 
 	// Verify the Application still exists on the principal
 	principalApp := argoapp.Application{}
-	err = suite.PrincipalClient.Get(suite.Ctx, appKey, &principalApp, metav1.GetOptions{})
+	err = suite.PrincipalClient.Get(suite.Ctx, appKeyPrincipal, &principalApp, metav1.GetOptions{})
 	requires.NoError(err)
 	requires.Equal("skip-sync-app", principalApp.Name)
 }
@@ -141,18 +142,19 @@ func (suite *SkipSyncTestSuite) Test_AppProject_SkipSync() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := fixture.ToNamespacedName(&appProject)
+	projKeyPrincipal := fixture.ToNamespacedName(&appProject)
+	projKeyAgent := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the AppProject is NOT pushed to the managed-agent
 	suite.Require().Never(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyAgent, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 10*time.Second, 1*time.Second, "AppProject with skip sync label should not be synced to agent")
 
 	// Verify the AppProject still exists on the principal
 	principalProject := argoapp.AppProject{}
-	err = suite.PrincipalClient.Get(suite.Ctx, projKey, &principalProject, metav1.GetOptions{})
+	err = suite.PrincipalClient.Get(suite.Ctx, projKeyPrincipal, &principalProject, metav1.GetOptions{})
 	requires.NoError(err)
 	requires.Equal("skip-sync-project", principalProject.Name)
 }
@@ -180,12 +182,12 @@ func (suite *SkipSyncTestSuite) Test_Repository_SkipSync() {
 	err := suite.PrincipalClient.Create(suite.Ctx, &appProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	projKey := fixture.ToNamespacedName(&appProject)
+	projKeyAgent := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Wait for the AppProject to be synced to the agent
 	requires.Eventually(func() bool {
 		appProject := argoapp.AppProject{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, projKey, &appProject, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, projKeyAgent, &appProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second, "AppProject should be synced to agent first")
 
@@ -208,18 +210,19 @@ func (suite *SkipSyncTestSuite) Test_Repository_SkipSync() {
 	err = suite.PrincipalClient.Create(suite.Ctx, &sourceRepo, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	repoKey := fixture.ToNamespacedName(&sourceRepo)
+	repoKeyPrincipal := fixture.ToNamespacedName(&sourceRepo)
+	repoKeyAgent := types.NamespacedName{Name: sourceRepo.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the Repository is NOT pushed to the managed-agent
 	suite.Require().Never(func() bool {
 		repository := corev1.Secret{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, repoKey, &repository, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, repoKeyAgent, &repository, metav1.GetOptions{})
 		return err == nil
 	}, 5*time.Second, 1*time.Second, "Repository with skip sync label should not be synced to agent")
 
 	// Verify the Repository still exists on the principal
 	principalRepo := corev1.Secret{}
-	err = suite.PrincipalClient.Get(suite.Ctx, repoKey, &principalRepo, metav1.GetOptions{})
+	err = suite.PrincipalClient.Get(suite.Ctx, repoKeyPrincipal, &principalRepo, metav1.GetOptions{})
 	requires.NoError(err)
 	requires.Equal("skip-sync-repo", principalRepo.Name)
 }
