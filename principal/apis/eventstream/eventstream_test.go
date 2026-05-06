@@ -285,17 +285,14 @@ func TestSubscribe_SendErrorCancelsSubscribeCtx(t *testing.T) {
 		<-recvGate
 		return io.EOF
 	})
-	// Every Send returns Unavailable — simulates a dead send half-stream.
+	// sendGate holds off the first Send until the test has captured the client.
+	// Without it the observer can cancel c.ctx before the test polls activeClients,
+	// causing recv to exit via ctx.Done() and cleanup to remove the entry.
+	sendGate := make(chan struct{})
 	st.AddSendHook(func(_ *mock.MockEventServer, _ *eventstreamapi.Event) error {
+		<-sendGate
 		return status.Error(codes.Unavailable, "transport is closing")
 	})
-
-	// Queue an event so SendWaitingEvents will attempt a Send.
-	emitter := event.NewEventSource("test")
-	qs.SendQ("agent-y").Add(emitter.ApplicationEvent(
-		event.Create,
-		&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns"}},
-	))
 
 	subscribeReturned := make(chan struct{})
 	go func() {
@@ -303,7 +300,8 @@ func TestSubscribe_SendErrorCancelsSubscribeCtx(t *testing.T) {
 		close(subscribeReturned)
 	}()
 
-	// Capture the client once Subscribe registers it.
+	// Capture the client once Subscribe registers it, then queue the event and
+	// release sendGate so the Send-error path can proceed.
 	var captured *client
 	require.Eventually(t, func() bool {
 		s.activeClientsMu.Lock()
@@ -311,6 +309,13 @@ func TestSubscribe_SendErrorCancelsSubscribeCtx(t *testing.T) {
 		s.activeClientsMu.Unlock()
 		return captured != nil
 	}, time.Second, 10*time.Millisecond, "Subscribe didn't register active client")
+
+	emitter := event.NewEventSource("test")
+	qs.SendQ("agent-y").Add(emitter.ApplicationEvent(
+		event.Create,
+		&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns"}},
+	))
+	close(sendGate)
 
 	// The Send-error observer must cancel c.ctx. recv is parked, so
 	// Subscribe is still running and activeClients still holds c — no
