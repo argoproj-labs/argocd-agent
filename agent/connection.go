@@ -177,12 +177,13 @@ func (a *Agent) handleStreamEvents() error {
 	streamCtx, streamCancel := context.WithCancel(a.context)
 	defer streamCancel()
 
+	var lease event.TargetLease
 	if a.eventWriter == nil {
-		a.eventWriter = event.NewEventWriter("", stream)
+		a.eventWriter, lease = event.NewEventWriter("", stream)
 	} else {
-		a.eventWriter.UpdateTarget(stream)
+		lease = a.eventWriter.UpdateTarget(stream)
 	}
-	go a.eventWriter.SendWaitingEvents(streamCtx)
+	go a.eventWriter.SendWaitingEvents(streamCtx, lease)
 
 	logCtx := log().WithFields(logrus.Fields{
 		logfields.Module:     "StreamEvent",
