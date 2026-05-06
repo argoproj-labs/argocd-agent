@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -25,6 +26,28 @@ type streamWriter interface {
 	Context() context.Context
 }
 
+// SendErrorReason classifies an error returned from streamWriter.Send so
+// callers (and metrics) can distinguish a dead transport from a transient
+// failure.
+type SendErrorReason string
+
+const (
+	SendErrorTransportClosing SendErrorReason = "transport-closing"
+	SendErrorContextCanceled  SendErrorReason = "context-canceled"
+	SendErrorOther            SendErrorReason = "other"
+)
+
+// SendErrorObserver is invoked synchronously after every Send() failure on
+// the underlying stream. The Subscribe handler installs one of these to
+// detect a permanently dead target and trigger a reconnect.
+type SendErrorObserver func(reason SendErrorReason, err error)
+
+// TargetLease is an opaque token returned by NewEventWriter and UpdateTarget.
+// Pass it to SendWaitingEvents to bind the send loop to exactly that stream;
+// the loop exits when a subsequent UpdateTarget advances the internal
+// generation and this lease becomes stale.
+type TargetLease struct{ gen uint64 }
+
 // EventWriter keeps track of the latest event for resources and sends them on a given gRPC stream.
 // It resends the event with exponential backoff until the event is ACK'd and removed from its list.
 type EventWriter struct {
@@ -43,8 +66,24 @@ type EventWriter struct {
 	// target refers to the specified gRPC stream.
 	target streamWriter
 
+	// targetGen is bumped every time UpdateTarget swaps the stream. A
+	// pending Send goroutine that captured an older generation must NOT
+	// surface its error to the current observer — that error belongs to
+	// a stream the current Subscribe owner does not control.
+	// - acquire 'mu' (read or write) before accessing
+	targetGen uint64
+
 	// agentName is the name of the agent for which this EventWriter is responsible.
 	agentName string
+
+	// onSendError is invoked after every Send() failure. May be nil.
+	// - acquire 'mu' (read or write) before accessing
+	onSendError SendErrorObserver
+
+	// testHookAfterUnlock is called in sendUnsentEvent after ew.mu is released
+	// and before snapshotTargetForGen. Nil in production; set in tests to
+	// inject a synchronization point that exercises the post-pop gen-advance race.
+	testHookAfterUnlock func()
 
 	log *logrus.Entry
 }
@@ -70,25 +109,37 @@ type eventMessage struct {
 
 // NewEventWriter creates a new EventWriter for the given target stream.
 // If you create an EventWriter targeting the principal, an empty agentName
-// should be used.
-func NewEventWriter(agentName string, target streamWriter) *EventWriter {
-	return &EventWriter{
+// should be used. The returned TargetLease must be passed to SendWaitingEvents
+// to bind that loop to this specific stream.
+func NewEventWriter(agentName string, target streamWriter) (*EventWriter, TargetLease) {
+	const initialGen uint64 = 1
+	ew := &EventWriter{
 		unsentEvents: map[string]*eventQueue{},
 		sentEvents:   map[string]*eventMessage{},
 		target:       target,
+		targetGen:    initialGen,
 		agentName:    agentName,
 		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).WithField(logfields.Agent, agentName),
 	}
+	return ew, TargetLease{initialGen}
 }
 
-func (ew *EventWriter) UpdateTarget(target streamWriter) {
+// UpdateTarget swaps in a new stream. Returns a TargetLease the caller must
+// pass to SendWaitingEvents to bind that loop to this stream; the loop exits
+// once a later UpdateTarget supersedes it.
+//
+// Clears the send-error observer — the new owner must call
+// SetSendErrorObserver after UpdateTarget. Resets retry timers so queued
+// events are resent immediately on the fresh stream.
+func (ew *EventWriter) UpdateTarget(target streamWriter) TargetLease {
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
 	ew.target = target
+	ew.targetGen++
 	ew.log = logging.GetDefaultLogger().ModuleLogger("EventWriter").
 		WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).
 		WithField(logfields.Agent, ew.agentName)
-
+	ew.onSendError = nil
 	// Reset retry timers so events in sentEvents are retried immediately on the new connection.
 	// This is important for reconnection scenarios where the old connection died
 	// and ACKs will never arrive, so we want to give events a fresh chance on the new stream.
@@ -98,6 +149,79 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 		msg.retryAfter = &now
 		msg.mu.Unlock()
 	}
+	return TargetLease{ew.targetGen}
+}
+
+// snapshotTargetForGen returns the current target if its generation still
+// matches the lease. Returns ok=false when a newer UpdateTarget has taken
+// over; callers must not Send in that case.
+func (ew *EventWriter) snapshotTargetForGen(lease TargetLease) (streamWriter, bool) {
+	ew.mu.RLock()
+	defer ew.mu.RUnlock()
+	if ew.targetGen != lease.gen {
+		return nil, false
+	}
+	return ew.target, true
+}
+
+// SetSendErrorObserver installs a callback fired after every Send() failure.
+// Pass nil to clear. Intended for the Subscribe handler to detect a dead
+// target and tear down the stream.
+func (ew *EventWriter) SetSendErrorObserver(fn SendErrorObserver) {
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+	ew.onSendError = fn
+}
+
+// Depth returns the total number of events currently held in the writer
+// (sent waiting for ACK + unsent queued). Cheap enough to call from a
+// metrics scrape loop.
+func (ew *EventWriter) Depth() int {
+	ew.mu.RLock()
+	defer ew.mu.RUnlock()
+
+	depth := len(ew.sentEvents)
+	for _, eq := range ew.unsentEvents {
+		eq.mu.RLock()
+		depth += len(eq.items)
+		eq.mu.RUnlock()
+	}
+	return depth
+}
+
+// classifySendError maps a Send() error to a SendErrorReason for metrics
+// labels and observer dispatch.
+func classifySendError(err error) SendErrorReason {
+	if err == nil {
+		return SendErrorOther
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return SendErrorContextCanceled
+	}
+	if grpcutil.NeedReconnectOnError(err) {
+		// NeedReconnectOnError covers Unavailable / Canceled / EOF / RST_STREAM —
+		// all of which mean the underlying transport is gone for this stream.
+		return SendErrorTransportClosing
+	}
+	return SendErrorOther
+}
+
+// notifySendError fires the registered observer (if any). Must be called
+// without ew.mu held to avoid re-entrant deadlocks if the observer touches
+// the EventWriter. Drops the notification when the lease is stale so a slow
+// Send goroutine from a replaced stream cannot tear down the current owner.
+func (ew *EventWriter) notifySendError(lease TargetLease, err error) {
+	ew.mu.RLock()
+	if ew.targetGen != lease.gen {
+		ew.mu.RUnlock()
+		return
+	}
+	fn := ew.onSendError
+	ew.mu.RUnlock()
+	if fn == nil {
+		return
+	}
+	fn(classifySendError(err), err)
 }
 
 func (ew *EventWriter) Add(ev *cloudevents.Event) {
@@ -222,7 +346,10 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 // SendWaitingEvents will periodically send the events waiting in the EventWriter.
 // Note: This function will never return unless the context is done, and therefore
 // should be started in a separate goroutine.
-func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
+//
+// The lease binds this loop to a specific stream generation. When UpdateTarget
+// is called the generation advances and the loop exits.
+func (ew *EventWriter) SendWaitingEvents(ctx context.Context, lease TargetLease) {
 	ew.mu.RLock()
 	logCtx := ew.log
 	ew.mu.RUnlock()
@@ -235,6 +362,11 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 			return
 		default:
 			ew.mu.RLock()
+			if ew.targetGen != lease.gen {
+				ew.mu.RUnlock()
+				logCtx.Info("Target generation advanced; stopping event writer")
+				return
+			}
 			// Collect all resource IDs that have either unsent or sent events
 			resourceIDs := make([]string, 0, len(ew.unsentEvents)+len(ew.sentEvents))
 			for resID := range ew.unsentEvents {
@@ -249,7 +381,7 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 			ew.mu.RUnlock()
 
 			for _, resourceID := range resourceIDs {
-				ew.sendEvent(resourceID)
+				ew.sendEvent(resourceID, lease)
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -257,33 +389,42 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 }
 
 // sendEvent determines whether to retry a sent event or send a new unsent event
-func (ew *EventWriter) sendEvent(resID string) {
+func (ew *EventWriter) sendEvent(resID string, lease TargetLease) {
 	// Check if there's a sent event awaiting retry
 	ew.mu.RLock()
 	sentMsg, hasSent := ew.sentEvents[resID]
 	ew.mu.RUnlock()
 
 	if hasSent {
-		ew.retrySentEvent(resID, sentMsg)
+		ew.retrySentEvent(resID, sentMsg, lease)
 	} else {
-		ew.sendUnsentEvent(resID)
+		ew.sendUnsentEvent(resID, lease)
 	}
 }
 
-// retrySentEvent handles retrying an event that was already sent but not yet acknowledged
-func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
+// retrySentEvent handles retrying an event that was already sent but not yet acknowledged.
+//
+// Lock order invariant: ew.mu must be acquired before sentMsg.mu, never the
+// reverse — UpdateTarget holds ew.mu while ranging over sentEvents and
+// locking each msg.mu. Snapshot (stream, gen) under ew.mu.RLock before
+// touching sentMsg.mu to preserve that order.
+func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage, lease TargetLease) {
 	ew.mu.RLock()
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"method":      "retrySentEvent",
 		"resource_id": resID,
 	})
-
 	// Re-verify the event is still in sentEvents
 	currentSent, stillExists := ew.sentEvents[resID]
+	stream := ew.target
+	currentGen := ew.targetGen
 	ew.mu.RUnlock()
 
 	// If event was ACK'd between check and use, skip retry
 	if !stillExists || currentSent != sentMsg {
+		return
+	}
+	if currentGen != lease.gen {
 		return
 	}
 
@@ -306,8 +447,8 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 	if sentMsg.retryCount >= maxEventRetries {
 		logCtx.Warnf("Event failed after %d retries, giving up to unblock queue", sentMsg.retryCount)
 		sentMsg.mu.Unlock()
-
-		// Remove from sentEvents to unblock the queue
+		// Remove from sentEvents to unblock the queue. ew.mu is taken
+		// AFTER sentMsg.mu was released, preserving lock order.
 		ew.mu.Lock()
 		delete(ew.sentEvents, resID)
 		ew.mu.Unlock()
@@ -317,24 +458,24 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 	logCtx.Trace("resending an event")
 
 	// Increment retry count and schedule next retry BEFORE attempting send
-	// This ensures proper backoff even when the send fails
+	// This ensures proper backoff even when the send fails.
 	sentMsg.retryCount++
 	retryAfter := time.Now().Add(sentMsg.backoff.Step())
 	sentMsg.retryAfter = &retryAfter
 
 	// Resend the event
 	pev, err := format.ToProto(sentMsg.event)
-	if err != nil {
-		logCtx.Errorf("Could not wire event: %v\n", err)
-		sentMsg.mu.Unlock()
-		return
-	}
-
-	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
 	sentMsg.mu.Unlock()
 
 	if err != nil {
+		logCtx.Errorf("Could not wire event: %v\n", err)
+		return
+	}
+
+	err = stream.Send(&eventstreamapi.Event{Event: pev})
+	if err != nil {
 		logCtx.Errorf("Error while sending: %v\n", err)
+		ew.notifySendError(lease, err)
 		return
 	}
 
@@ -350,12 +491,17 @@ func (ew *EventWriter) scheduleRetry(eventMsg *eventMessage) {
 }
 
 // sendUnsentEvent pops an event from the unsent queue and sends it for the first time
-func (ew *EventWriter) sendUnsentEvent(resID string) {
+func (ew *EventWriter) sendUnsentEvent(resID string, lease TargetLease) {
 	ew.mu.Lock()
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"method":      "sendUnsentEvent",
 		"resource_id": resID,
 	})
+
+	if ew.targetGen != lease.gen {
+		ew.mu.Unlock()
+		return
+	}
 
 	// Pop event from unsent queue and atomically move to sent tracker
 	eq, exists := ew.unsentEvents[resID]
@@ -374,8 +520,8 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		return
 	}
 
-	target := Target(eventMsg.event)
-	isFireAndForget := target == TargetEventAck || target == TargetHeartbeat
+	isFireAndForget := Target(eventMsg.event) == TargetEventAck || Target(eventMsg.event) == TargetHeartbeat
+
 	if !isFireAndForget {
 		// IMPORTANT: Set retryAfter *before* publishing into sentEvents.
 		// We can have concurrent SendWaitingEvents loops (e.g. brief overlap during reconnect),
@@ -389,6 +535,10 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		ew.sentEvents[resID] = eventMsg
 	}
 	ew.mu.Unlock()
+
+	if ew.testHookAfterUnlock != nil {
+		ew.testHookAfterUnlock()
+	}
 
 	// Send the event
 	eventMsg.mu.Lock()
@@ -410,10 +560,29 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		return
 	}
 
-	// A Send() on the stream is actually not blocking.
-	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
+	// A Send() on the stream is actually not blocking. If a successor took
+	// over the stream while we were preparing this event, snapshotTargetForGen
+	// returns false and we re-enqueue fire-and-forget events rather than drop them.
+	stream, ok := ew.snapshotTargetForGen(lease)
+	if !ok {
+		// Gen advanced between pop and here. Non-fire-and-forget events are
+		// safe: they landed in sentEvents above and the new owner retries them.
+		// Fire-and-forget events (ACKs, heartbeats) have no such safety net;
+		// push back to the front of the unsent queue for the new owner.
+		if isFireAndForget {
+			ew.mu.Lock()
+			if ew.unsentEvents[resID] == nil {
+				ew.unsentEvents[resID] = newEventQueue()
+			}
+			ew.unsentEvents[resID].pushFront(eventMsg)
+			ew.mu.Unlock()
+		}
+		return
+	}
+	err = stream.Send(&eventstreamapi.Event{Event: pev})
 	if err != nil {
 		logCtx.Errorf("Error while sending: %v\n", err)
+		ew.notifySendError(lease, err)
 		return
 	}
 
@@ -529,4 +698,12 @@ func (eq *eventQueue) isEmpty() bool {
 	eq.mu.RLock()
 	defer eq.mu.RUnlock()
 	return len(eq.items) == 0
+}
+
+// pushFront prepends an item to the front of the queue without dedup.
+// Used to restore a popped fire-and-forget event when the target gen changed.
+func (eq *eventQueue) pushFront(ev *eventMessage) {
+	eq.mu.Lock()
+	defer eq.mu.Unlock()
+	eq.items = append([]*eventMessage{ev}, eq.items...)
 }

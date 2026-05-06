@@ -66,6 +66,17 @@ type PrincipalMetrics struct {
 	EventProcessingTime *prometheus.HistogramVec
 
 	PrincipalErrors *prometheus.CounterVec
+
+	// EventWriterQueueDepth is the per-agent count of events held in the
+	// EventWriter (sent + unsent). A high or growing value indicates the
+	// agent's send half-stream is broken while the EventWriter still holds
+	// the same target.
+	EventWriterQueueDepth *prometheus.GaugeVec
+
+	// EventWriterSendErrors counts EventWriter Send() failures per agent and
+	// reason ("transport-closing", "context-canceled", "other"). A sustained
+	// rate signals a dead target the Subscribe handler hasn't noticed.
+	EventWriterSendErrors *prometheus.CounterVec
 }
 
 // AgentMetrics holds metrics of agent
@@ -172,6 +183,16 @@ func NewPrincipalMetrics() *PrincipalMetrics {
 			Name: "principal_errors",
 			Help: "The total number of errors occurred in principal",
 		}, []string{"resource_type"}),
+
+		EventWriterQueueDepth: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "principal_event_writer_queue_depth",
+			Help: "Number of events held in the per-agent EventWriter (sent + unsent). Persistently >0 indicates a broken send half-stream.",
+		}, []string{"agent_name"}),
+
+		EventWriterSendErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "principal_event_writer_send_errors_total",
+			Help: "EventWriter Send() failures per agent. Reason is one of: transport-closing, context-canceled, other.",
+		}, []string{"agent_name", "reason"}),
 	}
 }
 
