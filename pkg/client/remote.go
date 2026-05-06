@@ -621,6 +621,7 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 					}
 				}
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
+				conn.Close()
 				return ierr
 			}
 
