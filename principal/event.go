@@ -220,15 +220,14 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	}
 
 	// When destination-based mapping is active, the agent may send apps under
-	// its own installation namespace. The OriginalNamespaceAnnotation
-	// (stamped by the agent when it remapped the app) records the correct
-	// principal-side namespace; restore it and strip the annotation.
-	// If the annotation is absent the app was never remapped, so leave
-	// incoming.Namespace as-is.
+	// its own installation namespace. The NamespaceRemappedAnnotation is a
+	// boolean marker stamped by the agent when it remapped the app.
 	if s.destinationBasedMapping && agentMode.IsManaged() {
-		if originalNs, ok := incoming.Annotations[manager.OriginalNamespaceAnnotation]; ok {
-			incoming.SetNamespace(originalNs)
-			delete(incoming.Annotations, manager.OriginalNamespaceAnnotation)
+		if _, ok := incoming.Annotations[manager.NamespaceRemappedAnnotation]; ok {
+			if incoming.Namespace == s.agentNamespace(agentName) {
+				incoming.SetNamespace(s.namespace)
+			}
+			delete(incoming.Annotations, manager.NamespaceRemappedAnnotation)
 		}
 	}
 

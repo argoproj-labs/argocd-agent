@@ -304,7 +304,7 @@ func Test_newRequestUpdateFromObject(t *testing.T) {
 	t.Run("return ErrSourceUIDNotFound when annotation missing", func(t *testing.T) {
 		resource := fakeUnresApp()
 
-		_, err := newRequestUpdateFromObject(resource, "Application")
+		_, err := newRequestUpdateFromObject(resource, "Application", "argocd")
 		assert.ErrorIs(t, err, ErrSourceUIDNotFound)
 	})
 
@@ -312,7 +312,7 @@ func Test_newRequestUpdateFromObject(t *testing.T) {
 		resource := fakeUnresApp()
 		resource.SetAnnotations(nil)
 
-		_, err := newRequestUpdateFromObject(resource, "Application")
+		_, err := newRequestUpdateFromObject(resource, "Application", "argocd")
 		assert.ErrorIs(t, err, ErrSourceUIDNotFound)
 	})
 
@@ -322,7 +322,7 @@ func Test_newRequestUpdateFromObject(t *testing.T) {
 			manager.SourceUIDAnnotation: "source-uid-123",
 		})
 
-		reqUpdate, err := newRequestUpdateFromObject(resource, "Application")
+		reqUpdate, err := newRequestUpdateFromObject(resource, "Application", "argocd")
 		assert.Nil(t, err)
 		assert.NotNil(t, reqUpdate)
 		assert.Equal(t, "test-app", reqUpdate.Name)
@@ -332,32 +332,46 @@ func Test_newRequestUpdateFromObject(t *testing.T) {
 		assert.NotEmpty(t, reqUpdate.Checksum)
 	})
 
-	t.Run("use original-namespace annotation for Application namespace", func(t *testing.T) {
+	t.Run("no remap without peerNamespace", func(t *testing.T) {
 		resource := fakeUnresApp()
 		resource.SetNamespace("argocd-agent")
 		resource.SetAnnotations(map[string]string{
 			manager.SourceUIDAnnotation:         "source-uid-123",
-			manager.OriginalNamespaceAnnotation: "argocd",
+			manager.NamespaceRemappedAnnotation: "true",
 		})
 
-		reqUpdate, err := newRequestUpdateFromObject(resource, "Application")
-		assert.Nil(t, err)
-		assert.NotNil(t, reqUpdate)
-		assert.Equal(t, "argocd", reqUpdate.Namespace, "should use original-namespace annotation")
+		reqUpdate, err := newRequestUpdateFromObject(resource, "Application", "")
+		assert.NotNil(t, err)
+		assert.Nil(t, reqUpdate)
+		assert.Contains(t, err.Error(), "peer namespace is not set, cannot remap application test-app")
 	})
 
-	t.Run("ignore original-namespace annotation for non-Application kinds", func(t *testing.T) {
+	t.Run("remaps namespace when peerNamespace and annotation present", func(t *testing.T) {
 		resource := fakeUnresApp()
 		resource.SetNamespace("argocd-agent")
 		resource.SetAnnotations(map[string]string{
 			manager.SourceUIDAnnotation:         "source-uid-123",
-			manager.OriginalNamespaceAnnotation: "argocd",
+			manager.NamespaceRemappedAnnotation: "true",
 		})
 
-		reqUpdate, err := newRequestUpdateFromObject(resource, "AppProject")
+		reqUpdate, err := newRequestUpdateFromObject(resource, "Application", "argocd")
 		assert.Nil(t, err)
 		assert.NotNil(t, reqUpdate)
-		assert.Equal(t, "argocd-agent", reqUpdate.Namespace, "non-Application kinds should ignore the annotation")
+		assert.Equal(t, "argocd", reqUpdate.Namespace, "should remap to peerNamespace")
+	})
+
+	t.Run("no remap for non-Application kind even with annotation", func(t *testing.T) {
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation:         "source-uid-123",
+			manager.NamespaceRemappedAnnotation: "true",
+		})
+
+		reqUpdate, err := newRequestUpdateFromObject(resource, "AppProject", "argocd")
+		assert.Nil(t, err)
+		assert.NotNil(t, reqUpdate)
+		assert.Equal(t, "argocd-agent", reqUpdate.Namespace, "non-Application kinds should not be remapped")
 	})
 }
 
@@ -890,7 +904,7 @@ func Test_ProcessIncomingSyncedResource_PeerNamespaceRemap(t *testing.T) {
 		resource.SetNamespace("argocd-agent")
 		resource.SetAnnotations(map[string]string{
 			manager.SourceUIDAnnotation:         "source-uid",
-			manager.OriginalNamespaceAnnotation: "argocd",
+			manager.NamespaceRemappedAnnotation: "true",
 		})
 		_, err := handler.dynClient.Resource(gvr).Namespace("argocd-agent").Create(ctx, resource, v1.CreateOptions{})
 		require.Nil(t, err)

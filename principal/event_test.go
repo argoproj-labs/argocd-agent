@@ -418,7 +418,7 @@ func Test_StatusUpdateEvents(t *testing.T) {
 		incomingApp := existingApp.DeepCopy()
 		incomingApp.SetNamespace(agentNs)
 		incomingApp.Annotations = map[string]string{
-			manager.OriginalNamespaceAnnotation: principalNs,
+			manager.NamespaceRemappedAnnotation: "true",
 		}
 		incomingApp.Status.Sync.Status = v1alpha1.SyncStatusCodeSynced
 

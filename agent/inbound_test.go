@@ -2406,12 +2406,12 @@ func Test_getTargetNamespaceForApp(t *testing.T) {
 			result := a.getTargetNamespaceForApp(app)
 			assert.Equal(t, tt.expected, result)
 
-			annotation, hasAnnotation := app.Annotations[manager.OriginalNamespaceAnnotation]
+			_, hasAnnotation := app.Annotations[manager.NamespaceRemappedAnnotation]
 			if tt.expectAnnotation {
-				assert.True(t, hasAnnotation, "expected original-namespace annotation")
-				assert.Equal(t, tt.principalNamespace, annotation)
+				assert.True(t, hasAnnotation, "expected namespace-remapped annotation")
+				assert.Equal(t, "true", app.Annotations[manager.NamespaceRemappedAnnotation])
 			} else {
-				assert.False(t, hasAnnotation, "did not expect original-namespace annotation")
+				assert.False(t, hasAnnotation, "did not expect namespace-remapped annotation")
 			}
 		})
 	}
