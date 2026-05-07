@@ -249,6 +249,14 @@ func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret(
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
+	// After restarting the principal, wait for redis cache to be updated
+	requires.Eventually(func() bool {
+		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
+			Status:  appv1.ConnectionStatusSuccessful,
+			Message: fmt.Sprintf("Agent: '%s' is %s with principal", fixture.AgentManagedName, "connected"),
+		}, suite.ClusterDetails)
+	}, 60*time.Second, 1*time.Second)
+
 	// Stop the agent
 	err := fixture.StopProcess(fixture.AgentManagedName)
 	requires.NoError(err)

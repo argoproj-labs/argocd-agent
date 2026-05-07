@@ -340,6 +340,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 			ObjectMeta: v1.ObjectMeta{
 				Annotations: existing.Annotations,
 				Labels:      existing.Labels,
+				Finalizers:  existing.Finalizers,
 			},
 			Spec:      existing.Spec,
 			Operation: existing.Operation,

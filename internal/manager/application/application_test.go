@@ -321,6 +321,36 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		require.Equal(t, "principal-B", updated.Annotations[manager.PrincipalUIDAnnotation])
 	})
 
+	t.Run("Remove finalizers with patch backend", func(t *testing.T) {
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:       "foobar",
+				Namespace:  "argocd",
+				Finalizers: []string{"resources-finalizer.argocd.argoproj.io"},
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "source-uid",
+				},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent))
+		require.NoError(t, err)
+
+		updated, err := mgr.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{})
+
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		require.Empty(t, updated.Finalizers)
+	})
+
 }
 
 func Test_ManagerUpdateStatus(t *testing.T) {

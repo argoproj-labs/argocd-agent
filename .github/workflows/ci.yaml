@@ -277,12 +277,27 @@ jobs:
         with:
           persist-credentials: false
       
-      - name: Install required packages
+      - name: Install yq
+        env:
+          YQ_VERSION: v4.53.2
+          # SHA-256 of yq_linux_amd64 from
+          # https://github.com/mikefarah/yq/releases/download/v4.53.2/checksums
+          YQ_SHA256: d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b
         run: |
-          # Install yq
-          YQ_VERSION="v4.44.3"
-          sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
-          sudo chmod +x /usr/local/bin/yq
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            --output /tmp/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  /tmp/yq" | sha256sum --check --status
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+          rm -f /tmp/yq
+          yq --version
+
+      - name: Install Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        with:
+          version: v3.20.2
+
       - name: Validate schema
         working-directory: ${{ github.workspace }}
         run: |
