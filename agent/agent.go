@@ -618,6 +618,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		a.remote.SetClientMode(a.mode)
 		a.remote.SetOnAuthenticated(func(principalNs string) {
 			if principalNs == "" {
+				log().Error("principal namespace from auth response is empty")
 				return
 			}
 			a.principalNSMu.Lock()

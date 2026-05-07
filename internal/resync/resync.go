@@ -180,7 +180,11 @@ func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, inco
 		// For Applications with destination-based mapping, remap the namespace
 		// if the app exists in the peer's namespace
 		if r.destinationBasedMapping {
-			if r.peerNamespace != "" && incoming.Namespace == r.peerNamespace {
+			if r.peerNamespace == "" {
+				return fmt.Errorf("peer namespace is not set, cannot remap application %s", incoming.Name)
+			}
+
+			if incoming.Namespace == r.peerNamespace {
 				lookupNamespace = r.namespace
 			}
 		}
@@ -197,7 +201,7 @@ func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, inco
 		// The incoming app is not found locally
 		reqUpdate = event.NewRequestUpdate(incoming.Name, incoming.Namespace, incoming.Kind, "", nil)
 	} else {
-		reqUpdate, err = newRequestUpdateFromObject(res, incoming.Kind)
+		reqUpdate, err = newRequestUpdateFromObject(res, incoming.Kind, r.peerNamespace)
 		if err != nil {
 			if errors.Is(err, ErrSourceUIDNotFound) && r.ignoreUnmanagedApps {
 				logCtx.WithField(logfields.Name, res.GetName()).Debug("skipping resource without source UID annotation")
@@ -257,7 +261,7 @@ func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resourc
 		return fmt.Errorf("failed to get resource: %v", err)
 	}
 	logCtx := logCtxForResourceKey(r.log, resource)
-	reqUpdate, err := newRequestUpdateFromObject(res, resource.Kind)
+	reqUpdate, err := newRequestUpdateFromObject(res, resource.Kind, r.peerNamespace)
 	if err != nil {
 		if errors.Is(err, ErrSourceUIDNotFound) && r.ignoreUnmanagedApps {
 			logCtx.Debug("skipping resource without source UID annotation")
@@ -298,8 +302,8 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 			if r.destinationBasedMapping {
 				// With destination-based mapping, applications can be in any namespace
 				// on the principal. The agent's newRequestUpdateFromObject resolves
-				// the OriginalNamespaceAnnotation into reqUpdate.Namespace, so the
-				// value already points to the correct principal-side namespace.
+				// the reqUpdate.Namespace to the correct principal-side namespace
+				// based on the presence of the NamespaceRemappedAnnotation.
 				namespace = reqUpdate.Namespace
 			} else {
 				// With namespace-based mapping, applications on the principal are in the agent's namespace
@@ -536,7 +540,7 @@ func (r *RequestHandler) handleDeletedResource(logCtx *logrus.Entry, reqUpdate *
 	}
 }
 
-func newRequestUpdateFromObject(res *unstructured.Unstructured, kind string) (*event.RequestUpdate, error) {
+func newRequestUpdateFromObject(res *unstructured.Unstructured, kind string, peerNamespace string) (*event.RequestUpdate, error) {
 	// RequestUpdate is always sent by the peer. So, the object must have the source UID annotation
 	annotations := res.GetAnnotations()
 	sourceUID, ok := annotations[manager.SourceUIDAnnotation]
@@ -549,12 +553,12 @@ func newRequestUpdateFromObject(res *unstructured.Unstructured, kind string) (*e
 		return nil, fmt.Errorf("failed to generate checksum for resource %s/%s: %w", res.GetKind(), res.GetName(), err)
 	}
 
-	// If the agent remapped this app's namespace, the original-namespace
-	// annotation records where the app lives on the peer. Use that so the
-	// peer can look it up in the correct namespace without guessing.
 	namespace := res.GetNamespace()
-	if originalNs, found := annotations[manager.OriginalNamespaceAnnotation]; found && kind == "Application" {
-		namespace = originalNs
+	if _, found := annotations[manager.NamespaceRemappedAnnotation]; found && kind == "Application" {
+		if peerNamespace == "" {
+			return nil, fmt.Errorf("peer namespace is not set, cannot remap application %s", res.GetName())
+		}
+		namespace = peerNamespace
 	}
 
 	reqUpdate := event.NewRequestUpdate(res.GetName(), namespace, kind, sourceUID, checksum[:])

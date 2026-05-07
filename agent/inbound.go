@@ -1302,16 +1302,20 @@ func (a *Agent) deleteGPGKey(cm *corev1.ConfigMap) error {
 // getTargetNamespaceForApp returns the namespace where the application should
 // be created on the agent. In destination-based mapping + managed mode, apps
 // whose namespace matches the principal's namespace are remapped to the agent's
-// own namespace. When remapping occurs the original namespace is recorded in an
-// annotation so that the principal can unambiguously remap it back later.
+// own namespace. When remapping occurs a boolean annotation is stamped so that
+// the principal can unambiguously identify the app as remapped.
 func (a *Agent) getTargetNamespaceForApp(app *v1alpha1.Application) string {
 	if a.destinationBasedMapping && a.mode == types.AgentModeManaged {
 		principalNS := a.principalNS()
+		if principalNS == "" {
+			log().Errorf("principal namespace is not set, cannot remap application %s", app.QualifiedName())
+			return app.Namespace
+		}
 		if principalNS != "" && app.Namespace == principalNS && a.namespace != principalNS {
 			if app.Annotations == nil {
 				app.Annotations = make(map[string]string)
 			}
-			app.Annotations[manager.OriginalNamespaceAnnotation] = principalNS
+			app.Annotations[manager.NamespaceRemappedAnnotation] = "true"
 			return a.namespace
 		}
 		return app.Namespace
