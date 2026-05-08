@@ -98,6 +98,7 @@ spec:
             exit 1
           fi
 
+          {{- if .Values.rbac.create }}
           # Test RBAC labels
           echo "Testing RBAC labels..."
           ROLE_LABELS=$(kubectl get role "$ROLE_NAME" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.metadata.labels}")
@@ -122,8 +123,11 @@ spec:
             echo "✗ Role missing app.kubernetes.io/component label"
             exit 1
           fi
+          {{- else }}
+          echo "Skipping Role label checks (rbac.create=false)"
+          {{- end }}
 
-          {{- if .Values.rbac.createClusterRole }}
+          {{- if and .Values.rbac.create .Values.rbac.createClusterRole }}
           CLUSTER_ROLE_LABELS=$(kubectl get clusterrole "$CLUSTER_ROLE_NAME" -o jsonpath="{.metadata.labels}")
 
           if echo "$CLUSTER_ROLE_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-principal"; then
@@ -147,9 +151,10 @@ spec:
             exit 1
           fi
           {{- else }}
-          echo "Skipping ClusterRole label checks (rbac.createClusterRole=false)"
+          echo "Skipping ClusterRole label checks (cluster-scoped RBAC not enabled)"
           {{- end }}
 
+          {{- if .Values.serviceAccount.create }}
           # Test ServiceAccount labels
           SA_LABELS=$(kubectl get serviceaccount "$SERVICE_ACCOUNT_NAME" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.metadata.labels}")
 
@@ -173,6 +178,9 @@ spec:
             echo "✗ ServiceAccount missing app.kubernetes.io/component label"
             exit 1
           fi
+          {{- else }}
+          echo "Skipping ServiceAccount label checks (serviceAccount.create=false)"
+          {{- end }}
 
           # Test ConfigMap labels
           CM_LABELS=$(kubectl get configmap "$CONFIGMAP_NAME" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.metadata.labels}")

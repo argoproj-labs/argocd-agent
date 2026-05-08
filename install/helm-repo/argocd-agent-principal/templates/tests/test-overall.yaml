@@ -50,17 +50,22 @@ spec:
             exit 1
           fi
 
+          {{- if .Values.serviceAccount.create }}
           # Count service accounts
-          SA_COUNT=$(kubectl get serviceaccounts -n {{ include "argocd-agent-principal.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          SA_COUNT=$(kubectl get serviceaccounts -n {{ include "argocd-agent-principal.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l | tr -d ' ')
           if [ "$SA_COUNT" = "1" ]; then
             echo "✓ Found $SA_COUNT service account(s)"
           else
             echo "✗ Expected 1 service account, found $SA_COUNT"
             exit 1
           fi
+          {{- else }}
+          SA_COUNT=0
+          {{- end }}
 
+          {{- if .Values.rbac.create }}
           # Count roles
-          ROLE_COUNT=$(kubectl get roles -n {{ include "argocd-agent-principal.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          ROLE_COUNT=$(kubectl get roles -n {{ include "argocd-agent-principal.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l | tr -d ' ')
           if [ "$ROLE_COUNT" = "1" ]; then
             echo "✓ Found $ROLE_COUNT role(s)"
           else
@@ -69,17 +74,21 @@ spec:
           fi
 
           # Count role bindings
-          ROLEBINDING_COUNT=$(kubectl get rolebindings -n {{ include "argocd-agent-principal.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          ROLEBINDING_COUNT=$(kubectl get rolebindings -n {{ include "argocd-agent-principal.namespace" . }} -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l | tr -d ' ')
           if [ "$ROLEBINDING_COUNT" = "1" ]; then
             echo "✓ Found $ROLEBINDING_COUNT role binding(s)"
           else
             echo "✗ Expected 1 role binding, found $ROLEBINDING_COUNT"
             exit 1
           fi
+          {{- else }}
+          ROLE_COUNT=0
+          ROLEBINDING_COUNT=0
+          {{- end }}
 
-          {{- if .Values.rbac.createClusterRole }}
+          {{- if and .Values.rbac.create .Values.rbac.createClusterRole }}
           # Count cluster roles
-          CLUSTERROLE_COUNT=$(kubectl get clusterroles -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          CLUSTERROLE_COUNT=$(kubectl get clusterroles -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l | tr -d ' ')
           if [ "$CLUSTERROLE_COUNT" = "1" ]; then
             echo "✓ Found $CLUSTERROLE_COUNT cluster role(s)"
           else
@@ -88,7 +97,7 @@ spec:
           fi
 
           # Count cluster role bindings
-          CLUSTERROLEBINDING_COUNT=$(kubectl get clusterrolebindings -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l)
+          CLUSTERROLEBINDING_COUNT=$(kubectl get clusterrolebindings -l app.kubernetes.io/part-of=argocd-agent --no-headers | wc -l | tr -d ' ')
           if [ "$CLUSTERROLEBINDING_COUNT" = "1" ]; then
             echo "✓ Found $CLUSTERROLEBINDING_COUNT cluster role binding(s)"
           else
