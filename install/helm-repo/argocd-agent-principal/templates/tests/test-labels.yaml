@@ -123,6 +123,7 @@ spec:
             exit 1
           fi
 
+          {{- if .Values.rbac.createClusterRole }}
           CLUSTER_ROLE_LABELS=$(kubectl get clusterrole "$CLUSTER_ROLE_NAME" -o jsonpath="{.metadata.labels}")
 
           if echo "$CLUSTER_ROLE_LABELS" | grep -q "app.kubernetes.io/name.*argocd-agent-principal"; then
@@ -145,6 +146,9 @@ spec:
             echo "✗ ClusterRole missing app.kubernetes.io/component label"
             exit 1
           fi
+          {{- else }}
+          echo "Skipping ClusterRole label checks (rbac.createClusterRole=false)"
+          {{- end }}
 
           # Test ServiceAccount labels
           SA_LABELS=$(kubectl get serviceaccount "$SERVICE_ACCOUNT_NAME" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.metadata.labels}")

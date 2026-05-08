@@ -76,6 +76,7 @@ spec:
             exit 1
           fi
 
+          {{- if .Values.rbac.createClusterRole }}
           # Test ClusterRole
           echo "Testing ClusterRole..."
           if kubectl get clusterrole "$CLUSTER_ROLE_NAME"; then
@@ -129,6 +130,9 @@ spec:
             echo "✗ ClusterRoleBinding references incorrect namespace: $CLUSTER_NS_REF (expected {{ include "argocd-agent-principal.namespace" . }})"
             exit 1
           fi
+          {{- else }}
+          echo "Skipping ClusterRole/ClusterRoleBinding checks (rbac.createClusterRole=false)"
+          {{- end }}
 
           echo "RBAC configuration verified successfully!"
   restartPolicy: Never
