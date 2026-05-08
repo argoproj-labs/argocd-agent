@@ -73,15 +73,16 @@ spec:
 
           {{- if .Values.principal.redisProxy.enabled }}
           # Test Redis proxy service
+          REDIS_PROXY_SERVICE={{ include "argocd-agent-principal.redisProxyServiceName" . | quote }}
           echo "Testing Redis proxy service..."
-          if kubectl get service argocd-agent-redis-proxy -n {{ include "argocd-agent-principal.namespace" . }}; then
+          if kubectl get service "$REDIS_PROXY_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }}; then
             echo "✓ Redis proxy service exists"
           else
             echo "✗ Redis proxy service not found"
             exit 1
           fi
 
-          REDIS_PORT=$(kubectl get service argocd-agent-redis-proxy -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
+          REDIS_PORT=$(kubectl get service "$REDIS_PROXY_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
           if [ "$REDIS_PORT" = "6379" ]; then
             echo "✓ Redis proxy service has correct port: $REDIS_PORT"
           else
@@ -92,15 +93,16 @@ spec:
 
           {{- if .Values.principal.resourceProxy.enabled }}
           # Test resource proxy service
+          RESOURCE_PROXY_SERVICE={{ include "argocd-agent-principal.resourceProxyServiceName" . | quote }}
           echo "Testing resource proxy service..."
-          if kubectl get service argocd-agent-resource-proxy -n {{ include "argocd-agent-principal.namespace" . }}; then
+          if kubectl get service "$RESOURCE_PROXY_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }}; then
             echo "✓ Resource proxy service exists"
           else
             echo "✗ Resource proxy service not found"
             exit 1
           fi
 
-          RESOURCE_PROXY_PORT=$(kubectl get service argocd-agent-resource-proxy -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
+          RESOURCE_PROXY_PORT=$(kubectl get service "$RESOURCE_PROXY_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
           if [ "$RESOURCE_PROXY_PORT" = "9090" ]; then
             echo "✓ Resource proxy service has correct port: $RESOURCE_PROXY_PORT"
           else

@@ -104,6 +104,14 @@ Resource name helpers
 {{- printf "%s-healthz" (include "argocd-agent-principal.fullname" .) }}
 {{- end }}
 
+{{- define "argocd-agent-principal.redisProxyServiceName" -}}
+argocd-agent-redis-proxy
+{{- end }}
+
+{{- define "argocd-agent-principal.resourceProxyServiceName" -}}
+argocd-agent-resource-proxy
+{{- end }}
+
 {{- define "argocd-agent-principal.serviceMonitorName" -}}
 {{- printf "%s-servicemonitor" (include "argocd-agent-principal.fullname" .) }}
 {{- end }}
