@@ -1,14 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  namespace: {{ .Values.namespace }}
+  namespace: {{ include "argocd-agent-principal.namespace" . }}
   name: {{ include "argocd-agent-principal.configMapName" . }}
   labels:
     {{- include "argocd-agent-principal.labels" . | nindent 4 }}
-  {{- with include "argocd-agent-principal.annotations" . }}
-  annotations:
-    {{- . | nindent 4 }}
-  {{- end }}
 data:
   # principal.listen.host: The interface address to listen on. Leave empty
   # for all interfaces.
@@ -130,24 +126,26 @@ data:
   # principal.websocket.enable: Whether to use the websocket to stream events to the
   # agent.
   # Default: false
-  principal.websocket.enable: {{ dig "principal" "websocket" "enable" "false" .Values | quote }}
-  # principal.redis.compression.type: The compression type to use for the Redis
-  # connection.
-  # Default: "gzip"
-  principal.redis.compression.type: {{ dig "principal" "redis" "compressionType" "gzip" .Values | quote }}
-  # principal.resource-proxy.enable: Whether to enable the resource proxy.
-  # Default: true
-  principal.resource-proxy.enable: {{ dig "principal" "resourceProxy" "enable" "true" .Values | quote }}
-  # principal.keep-alive.min-interval: Drop agent connections that send keepalive pings 
-  # more often than the specified interval.
-  # Default: 0
-  principal.keep-alive.min-interval: {{ dig "principal" "keepAlive" "minInterval" "0" .Values | quote }}
-  # principal.pprof.port: The port the pprof server will listen on.
-  # Default: 0
-  principal.pprof.port: {{ dig "principal" "pprof" "port" "0" .Values | quote }}
-  # principal.redis.server.address: The address of the Redis server.
-  # Default: "argocd-redis:6379"
-  principal.redis.server.address: {{ dig "principal" "redis" "server" "address" "argocd-redis:6379" .Values | quote }}
+  principal.websocket.enable: {{ .Values.principal.websocket.enable | quote }}
+  principal.redis.compression.type: {{ .Values.principal.redis.compressionType | quote }}
+  principal.resource-proxy.enable: {{ .Values.principal.resourceProxy.enabled | quote }}
+  principal.keep-alive.min-interval: {{ .Values.principal.keepAlive.minInterval | quote }}
+  principal.pprof.port: {{ .Values.principal.pprof.port | quote }}
+  principal.redis.server.address: {{ .Values.principal.redis.server.address | quote }}
+  principal.tls.min-version: {{ .Values.principal.tls.minVersion | quote }}
+  principal.tls.max-version: {{ .Values.principal.tls.maxVersion | quote }}
+  principal.tls.ciphersuites: {{ .Values.principal.tls.ciphersuites | quote }}
+  principal.tls.insecure-plaintext: {{ .Values.principal.tls.insecurePlaintext | quote }}
+  principal.destination-based-mapping: {{ .Values.principal.destinationBasedMapping | quote }}
+  principal.label-selector: {{ .Values.principal.labelSelector | quote }}
+  principal.event-processors: {{ .Values.principal.eventProcessors | quote }}
+  principal.redis.tls.enabled: {{ .Values.principal.redis.tls.enabled | quote }}
+  principal.redis.tls.insecure: {{ .Values.principal.redis.tls.insecure | quote }}
+  principal.redis.ca-path: {{ .Values.principal.redis.tls.caPath | quote }}
+  principal.redis.ca-secret-name: {{ .Values.principal.redis.tls.caSecretName | quote }}
+  principal.redis.proxy.server.tls.cert-path: {{ .Values.principal.redis.proxy.server.tls.certPath | quote }}
+  principal.redis.proxy.server.tls.key-path: {{ .Values.principal.redis.proxy.server.tls.keyPath | quote }}
+  principal.redis.proxy.server.tls.secret-name: {{ .Values.principal.redis.proxy.server.tls.secretName | quote }}
   {{- range $key, $value := .Values.configMapData }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}

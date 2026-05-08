@@ -2,16 +2,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  namespace: {{ .Values.namespace }}
+  namespace: {{ include "argocd-agent-principal.namespace" . }}
   name: {{ include "argocd-agent-principal.healthzServiceName" . }}
   labels:
     {{- include "argocd-agent-principal.labels" . | nindent 4 }}
   {{- with .Values.healthzService.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with include "argocd-agent-principal.annotations" . }}
-    {{- . | nindent 4 }}
   {{- end }}
 spec:
   type: {{ .Values.healthzService.type }}

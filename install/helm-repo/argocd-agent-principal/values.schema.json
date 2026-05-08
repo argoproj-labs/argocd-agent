@@ -1,0 +1,617 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "additionalProperties": true,
+  "type": "object",
+  "properties": {
+    "namespaceOverride": {
+      "default": "",
+      "description": "Override namespace to deploy the principal into. Leave empty to use the release namespace.",
+      "title": "namespaceOverride",
+      "type": "string"
+    },
+    "nameOverride": {
+      "default": "",
+      "description": "Override the chart name used in app.kubernetes.io/name. Changing after initial install requires delete+reinstall.",
+      "title": "nameOverride",
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "default": "",
+      "description": "Override the fully-qualified resource name.",
+      "title": "fullnameOverride",
+      "type": "string"
+    },
+    "image": {
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "default": "ghcr.io/argoproj-labs/argocd-agent/argocd-agent",
+          "description": "Container image repository.",
+          "title": "repository",
+          "type": "string"
+        },
+        "tag": {
+          "default": "",
+          "description": "Overrides the image tag whose default is the chart appVersion.",
+          "title": "tag",
+          "type": "string"
+        },
+        "pullPolicy": {
+          "default": "IfNotPresent",
+          "description": "Image pull policy.",
+          "title": "pullPolicy",
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      },
+      "required": ["repository", "tag", "pullPolicy"],
+      "title": "image",
+      "type": "object"
+    },
+    "imagePullSecrets": {
+      "description": "Image pull secrets for private registries.",
+      "items": { "required": [] },
+      "title": "imagePullSecrets",
+      "type": "array"
+    },
+    "replicaCount": {
+      "default": 1,
+      "description": "Number of replicas for the principal Deployment.",
+      "title": "replicaCount",
+      "type": "integer",
+      "minimum": 1
+    },
+    "updateStrategy": {
+      "additionalProperties": true,
+      "description": "Deployment update strategy.",
+      "properties": {
+        "type": {
+          "default": "RollingUpdate",
+          "title": "type",
+          "type": "string",
+          "enum": ["RollingUpdate", "Recreate"]
+        }
+      },
+      "required": ["type"],
+      "title": "updateStrategy",
+      "type": "object"
+    },
+    "revisionHistoryLimit": {
+      "default": 10,
+      "description": "Number of old ReplicaSets to retain for rollback.",
+      "title": "revisionHistoryLimit",
+      "type": "integer"
+    },
+    "progressDeadlineSeconds": {
+      "default": 600,
+      "description": "Time allowed for the Deployment to make progress before failure.",
+      "title": "progressDeadlineSeconds",
+      "type": "integer"
+    },
+    "resources": {
+      "additionalProperties": false,
+      "description": "Resource requests and limits for the principal Pod.",
+      "properties": {
+        "limits": {
+          "additionalProperties": false,
+          "properties": {
+            "cpu": { "title": "cpu", "type": "string" },
+            "memory": { "title": "memory", "type": "string" }
+          },
+          "required": ["cpu", "memory"],
+          "title": "limits",
+          "type": "object"
+        },
+        "requests": {
+          "additionalProperties": false,
+          "properties": {
+            "cpu": { "title": "cpu", "type": "string" },
+            "memory": { "title": "memory", "type": "string" }
+          },
+          "required": ["cpu", "memory"],
+          "title": "requests",
+          "type": "object"
+        }
+      },
+      "required": ["limits", "requests"],
+      "title": "resources",
+      "type": "object"
+    },
+    "service": {
+      "additionalProperties": false,
+      "description": "Main gRPC service configuration.",
+      "properties": {
+        "type": {
+          "default": "LoadBalancer",
+          "title": "type",
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+        },
+        "port": { "default": 443, "title": "port", "type": "integer" },
+        "targetPort": { "default": 8443, "title": "targetPort", "type": "integer" },
+        "annotations": {
+          "additionalProperties": true,
+          "required": [],
+          "title": "annotations",
+          "type": "object"
+        }
+      },
+      "required": ["type", "port", "targetPort", "annotations"],
+      "title": "service",
+      "type": "object"
+    },
+    "metricsService": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "default": true, "title": "enabled", "type": "boolean" },
+        "type": { "default": "ClusterIP", "title": "type", "type": "string" },
+        "port": { "default": 8000, "title": "port", "type": "integer" },
+        "annotations": {
+          "additionalProperties": true,
+          "required": [],
+          "title": "annotations",
+          "type": "object"
+        }
+      },
+      "required": ["enabled", "type", "port", "annotations"],
+      "title": "metricsService",
+      "type": "object"
+    },
+    "healthzService": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "default": true, "title": "enabled", "type": "boolean" },
+        "type": { "default": "ClusterIP", "title": "type", "type": "string" },
+        "port": { "default": 8003, "title": "port", "type": "integer" },
+        "annotations": {
+          "additionalProperties": true,
+          "required": [],
+          "title": "annotations",
+          "type": "object"
+        }
+      },
+      "required": ["enabled", "type", "port", "annotations"],
+      "title": "healthzService",
+      "type": "object"
+    },
+    "podAnnotations": {
+      "additionalProperties": true,
+      "description": "Additional annotations to add to the principal Pod.",
+      "required": [],
+      "title": "podAnnotations",
+      "type": "object"
+    },
+    "podLabels": {
+      "additionalProperties": true,
+      "description": "Additional labels to add to the principal Pod.",
+      "required": [],
+      "title": "podLabels",
+      "type": "object"
+    },
+    "podSecurityContext": {
+      "additionalProperties": true,
+      "description": "Pod-level securityContext.",
+      "properties": {
+        "runAsNonRoot": { "default": true, "title": "runAsNonRoot", "type": "boolean" },
+        "runAsUser": { "default": 999, "title": "runAsUser", "type": "integer" },
+        "runAsGroup": { "default": 999, "title": "runAsGroup", "type": "integer" },
+        "fsGroup": { "default": 999, "title": "fsGroup", "type": "integer" }
+      },
+      "required": [],
+      "title": "podSecurityContext",
+      "type": "object"
+    },
+    "securityContext": {
+      "additionalProperties": true,
+      "description": "Container-level securityContext.",
+      "properties": {
+        "allowPrivilegeEscalation": { "default": false, "title": "allowPrivilegeEscalation", "type": "boolean" },
+        "readOnlyRootFilesystem": { "default": true, "title": "readOnlyRootFilesystem", "type": "boolean" },
+        "runAsNonRoot": { "default": true, "title": "runAsNonRoot", "type": "boolean" }
+      },
+      "required": [],
+      "title": "securityContext",
+      "type": "object"
+    },
+    "nodeSelector": {
+      "additionalProperties": true,
+      "description": "Node selector for scheduling the principal Pod.",
+      "required": [],
+      "title": "nodeSelector",
+      "type": "object"
+    },
+    "affinity": {
+      "additionalProperties": true,
+      "description": "Affinity rules for the principal Pod.",
+      "required": [],
+      "title": "affinity",
+      "type": "object"
+    },
+    "tolerations": {
+      "description": "Tolerations for the principal Pod.",
+      "items": { "required": [] },
+      "title": "tolerations",
+      "type": "array"
+    },
+    "topologySpreadConstraints": {
+      "description": "Topology spread constraints for the principal Pod.",
+      "items": { "required": [] },
+      "title": "topologySpreadConstraints",
+      "type": "array"
+    },
+    "priorityClassName": {
+      "default": "",
+      "description": "PriorityClassName for the principal Pod.",
+      "title": "priorityClassName",
+      "type": "string"
+    },
+    "terminationGracePeriodSeconds": {
+      "default": 30,
+      "description": "Grace period for Pod termination (seconds).",
+      "title": "terminationGracePeriodSeconds",
+      "type": "integer"
+    },
+    "hostAliases": {
+      "description": "Host aliases injected into /etc/hosts of the principal Pod.",
+      "items": { "required": [] },
+      "title": "hostAliases",
+      "type": "array"
+    },
+    "dnsPolicy": {
+      "default": "",
+      "description": "DNS policy for the Pod (e.g. ClusterFirst, None).",
+      "title": "dnsPolicy",
+      "type": "string"
+    },
+    "dnsConfig": {
+      "additionalProperties": true,
+      "description": "DNS config for the Pod. Only honored when dnsPolicy is None.",
+      "required": [],
+      "title": "dnsConfig",
+      "type": "object"
+    },
+    "probes": {
+      "additionalProperties": false,
+      "description": "Liveness and readiness probe configuration.",
+      "properties": {
+        "liveness": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "default": true, "description": "Enable the liveness probe.", "title": "enabled", "type": "boolean" },
+            "failureThreshold": { "default": 3, "title": "failureThreshold", "type": "integer" },
+            "httpGet": {
+              "additionalProperties": false,
+              "properties": {
+                "path": { "default": "/healthz", "title": "path", "type": "string" },
+                "port": { "default": "healthz", "title": "port", "type": "string" }
+              },
+              "required": ["path", "port"],
+              "title": "httpGet",
+              "type": "object"
+            },
+            "initialDelaySeconds": { "default": 10, "title": "initialDelaySeconds", "type": "integer" },
+            "periodSeconds": { "default": 10, "title": "periodSeconds", "type": "integer" },
+            "timeoutSeconds": { "default": 2, "title": "timeoutSeconds", "type": "integer" }
+          },
+          "required": ["enabled", "httpGet", "initialDelaySeconds", "periodSeconds", "timeoutSeconds", "failureThreshold"],
+          "title": "liveness",
+          "type": "object"
+        },
+        "readiness": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "default": true, "description": "Enable the readiness probe.", "title": "enabled", "type": "boolean" },
+            "failureThreshold": { "default": 3, "title": "failureThreshold", "type": "integer" },
+            "httpGet": {
+              "additionalProperties": false,
+              "properties": {
+                "path": { "default": "/healthz", "title": "path", "type": "string" },
+                "port": { "default": "healthz", "title": "port", "type": "string" }
+              },
+              "required": ["path", "port"],
+              "title": "httpGet",
+              "type": "object"
+            },
+            "initialDelaySeconds": { "default": 5, "title": "initialDelaySeconds", "type": "integer" },
+            "periodSeconds": { "default": 10, "title": "periodSeconds", "type": "integer" },
+            "timeoutSeconds": { "default": 2, "title": "timeoutSeconds", "type": "integer" }
+          },
+          "required": ["enabled", "httpGet", "initialDelaySeconds", "periodSeconds", "timeoutSeconds", "failureThreshold"],
+          "title": "readiness",
+          "type": "object"
+        }
+      },
+      "required": ["liveness", "readiness"],
+      "title": "probes",
+      "type": "object"
+    },
+    "redisSecretName": {
+      "default": "argocd-redis",
+      "description": "Name of the Kubernetes Secret containing the Redis password.",
+      "title": "redisSecretName",
+      "type": "string"
+    },
+    "redisPasswordKey": {
+      "default": "auth",
+      "description": "Key in the Redis Secret that holds the password.",
+      "title": "redisPasswordKey",
+      "type": "string"
+    },
+    "principal": {
+      "additionalProperties": true,
+      "description": "Principal binary configuration parameters.",
+      "properties": {
+        "listen": {
+          "additionalProperties": false,
+          "properties": {
+            "host": { "default": "127.0.0.1", "title": "host", "type": "string" },
+            "port": { "default": 8443, "title": "port", "type": "integer" }
+          },
+          "required": ["host", "port"],
+          "title": "listen",
+          "type": "object"
+        },
+        "log": {
+          "additionalProperties": false,
+          "properties": {
+            "level": {
+              "default": "info",
+              "title": "level",
+              "type": "string",
+              "enum": ["trace", "debug", "info", "warn", "error"]
+            },
+            "format": {
+              "default": "text",
+              "title": "format",
+              "type": "string",
+              "enum": ["text", "json"]
+            }
+          },
+          "required": ["level", "format"],
+          "title": "log",
+          "type": "object"
+        },
+        "tls": {
+          "additionalProperties": true,
+          "properties": {
+            "server": {
+              "additionalProperties": true,
+              "properties": {
+                "allowGenerate": {
+                  "default": false,
+                  "description": "Allow self-signed TLS cert generation. INSECURE — development only.",
+                  "title": "allowGenerate",
+                  "type": "boolean"
+                }
+              },
+              "title": "server",
+              "type": "object"
+            },
+            "insecurePlaintext": {
+              "default": false,
+              "description": "Run without TLS. Only use with a service mesh handling mTLS at the sidecar.",
+              "title": "insecurePlaintext",
+              "type": "boolean"
+            },
+            "minVersion": {
+              "default": "tls1.3",
+              "title": "minVersion",
+              "type": "string",
+              "enum": ["", "tls1.1", "tls1.2", "tls1.3"]
+            },
+            "maxVersion": {
+              "default": "",
+              "title": "maxVersion",
+              "type": "string",
+              "enum": ["", "tls1.1", "tls1.2", "tls1.3"]
+            }
+          },
+          "title": "tls",
+          "type": "object"
+        },
+        "jwt": {
+          "additionalProperties": true,
+          "properties": {
+            "allowGenerate": {
+              "default": false,
+              "description": "Allow JWT key auto-generation. INSECURE — development only.",
+              "title": "allowGenerate",
+              "type": "boolean"
+            }
+          },
+          "title": "jwt",
+          "type": "object"
+        },
+        "namespaceCreate": {
+          "additionalProperties": false,
+          "properties": {
+            "enable": { "default": false, "title": "enable", "type": "boolean" },
+            "pattern": { "default": "", "title": "pattern", "type": "string" },
+            "labels": { "default": "", "title": "labels", "type": "string" }
+          },
+          "required": ["enable", "pattern", "labels"],
+          "title": "namespaceCreate",
+          "type": "object"
+        },
+        "destinationBasedMapping": {
+          "default": false,
+          "description": "Route applications to agents based on spec.destination.name.",
+          "title": "destinationBasedMapping",
+          "type": "boolean"
+        },
+        "websocket": {
+          "additionalProperties": false,
+          "properties": {
+            "enable": { "default": false, "title": "enable", "type": "boolean" }
+          },
+          "required": ["enable"],
+          "title": "websocket",
+          "type": "object"
+        },
+        "redisProxy": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "default": true, "title": "enabled", "type": "boolean" }
+          },
+          "required": ["enabled"],
+          "title": "redisProxy",
+          "type": "object"
+        },
+        "resourceProxy": {
+          "additionalProperties": true,
+          "properties": {
+            "enabled": { "default": true, "title": "enabled", "type": "boolean" }
+          },
+          "title": "resourceProxy",
+          "type": "object"
+        }
+      },
+      "required": ["listen", "log", "tls", "jwt", "namespaceCreate", "websocket", "redisProxy", "resourceProxy"],
+      "title": "principal",
+      "type": "object"
+    },
+    "rbac": {
+      "additionalProperties": false,
+      "description": "RBAC resource creation configuration.",
+      "properties": {
+        "create": {
+          "default": true,
+          "description": "Create namespace-scoped Role and RoleBinding.",
+          "title": "create",
+          "type": "boolean"
+        },
+        "createClusterRole": {
+          "default": true,
+          "description": "Create cluster-scoped ClusterRole and ClusterRoleBinding.",
+          "title": "createClusterRole",
+          "type": "boolean"
+        }
+      },
+      "required": ["create", "createClusterRole"],
+      "title": "rbac",
+      "type": "object"
+    },
+    "serviceAccount": {
+      "additionalProperties": false,
+      "description": "ServiceAccount configuration.",
+      "properties": {
+        "create": { "default": true, "title": "create", "type": "boolean" },
+        "name": { "default": "", "title": "name", "type": "string" },
+        "automountServiceAccountToken": { "default": true, "title": "automountServiceAccountToken", "type": "boolean" },
+        "annotations": {
+          "additionalProperties": true,
+          "required": [],
+          "title": "annotations",
+          "type": "object"
+        }
+      },
+      "required": ["create", "name", "automountServiceAccountToken", "annotations"],
+      "title": "serviceAccount",
+      "type": "object"
+    },
+    "serviceMonitor": {
+      "additionalProperties": false,
+      "description": "Prometheus ServiceMonitor configuration.",
+      "properties": {
+        "enabled": { "default": false, "description": "Whether to create a ServiceMonitor resource.", "title": "enabled", "type": "boolean" },
+        "additionalLabels": { "additionalProperties": true, "required": [], "title": "additionalLabels", "type": "object" },
+        "annotations": { "additionalProperties": true, "required": [], "title": "annotations", "type": "object" },
+        "namespace": { "default": "", "title": "namespace", "type": "string" },
+        "interval": { "default": "30s", "title": "interval", "type": "string" },
+        "scrapeTimeout": { "default": "10s", "title": "scrapeTimeout", "type": "string" },
+        "relabelings": { "items": { "required": [] }, "title": "relabelings", "type": "array" },
+        "metricRelabelings": { "items": { "required": [] }, "title": "metricRelabelings", "type": "array" },
+        "honorLabels": { "default": false, "title": "honorLabels", "type": "boolean" },
+        "scheme": { "default": "", "title": "scheme", "type": "string" },
+        "tlsConfig": { "additionalProperties": true, "required": [], "title": "tlsConfig", "type": "object" }
+      },
+      "required": ["enabled", "additionalLabels", "annotations", "namespace", "interval", "scrapeTimeout", "relabelings", "metricRelabelings", "honorLabels", "scheme", "tlsConfig"],
+      "title": "serviceMonitor",
+      "type": "object"
+    },
+    "configMapData": {
+      "additionalProperties": true,
+      "description": "Extra key/value pairs merged into the params ConfigMap.",
+      "required": [],
+      "title": "configMapData",
+      "type": "object"
+    },
+    "networkPolicy": {
+      "description": "NetworkPolicy configuration for the principal Pod.",
+      "title": "networkPolicy",
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Whether to create a NetworkPolicy for the principal Pod.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "ingress": {
+          "description": "Ingress rule configuration.",
+          "title": "ingress",
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "tests": {
+      "description": "Helm chart test configuration.",
+      "title": "tests",
+      "type": "object",
+      "required": ["enabled", "image", "tag"],
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable or disable chart tests. Tests are disabled by default.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "image": {
+          "default": "bitnamilegacy/kubectl",
+          "description": "Container image used by kubectl-based test pods.",
+          "title": "image",
+          "type": "string"
+        },
+        "tag": {
+          "default": "1.33.4",
+          "description": "Image tag for the test image.",
+          "title": "tag",
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required": [
+    "namespaceOverride",
+    "image",
+    "replicaCount",
+    "updateStrategy",
+    "revisionHistoryLimit",
+    "progressDeadlineSeconds",
+    "resources",
+    "service",
+    "metricsService",
+    "healthzService",
+    "podAnnotations",
+    "podLabels",
+    "podSecurityContext",
+    "securityContext",
+    "nodeSelector",
+    "affinity",
+    "tolerations",
+    "priorityClassName",
+    "terminationGracePeriodSeconds",
+    "probes",
+    "redisSecretName",
+    "redisPasswordKey",
+    "principal",
+    "rbac",
+    "serviceAccount",
+    "serviceMonitor",
+    "configMapData",
+    "networkPolicy",
+    "tests"
+  ]
+}
