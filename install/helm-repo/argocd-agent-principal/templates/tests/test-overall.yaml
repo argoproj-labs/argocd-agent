@@ -113,21 +113,22 @@ spec:
 
           # Check if deployment is ready
           echo "Checking deployment readiness..."
+          EXPECTED_REPLICAS={{ .Values.replicaCount | quote }}
           READY_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.status.readyReplicas}")
-          if [ "$READY_REPLICAS" = "1" ]; then
+          if [ "$READY_REPLICAS" = "$EXPECTED_REPLICAS" ]; then
             echo "✓ Deployment is ready with $READY_REPLICAS replica(s)"
           else
-            echo "✗ Deployment not ready, ready replicas: $READY_REPLICAS"
+            echo "✗ Deployment not ready, ready replicas: $READY_REPLICAS (expected $EXPECTED_REPLICAS)"
             exit 1
           fi
 
           # Check if pods are running
           echo "Checking pod status..."
-          RUNNING_PODS=$(kubectl get pods -n {{ include "argocd-agent-principal.namespace" . }} -l app.kubernetes.io/name=argocd-agent-principal --no-headers | grep Running | wc -l)
-          if [ "$RUNNING_PODS" = "1" ]; then
+          RUNNING_PODS=$(kubectl get pods -n {{ include "argocd-agent-principal.namespace" . }} -l app.kubernetes.io/name=argocd-agent-principal --no-headers | grep Running | wc -l | tr -d ' ')
+          if [ "$RUNNING_PODS" = "$EXPECTED_REPLICAS" ]; then
             echo "✓ Found $RUNNING_PODS running pod(s)"
           else
-            echo "✗ Expected 1 running pod, found $RUNNING_PODS"
+            echo "✗ Expected $EXPECTED_REPLICAS running pod(s), found $RUNNING_PODS"
             kubectl get pods -n {{ include "argocd-agent-principal.namespace" . }} -l app.kubernetes.io/name=argocd-agent-principal
             exit 1
           fi

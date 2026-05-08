@@ -53,11 +53,12 @@ spec:
           fi
 
           # Check deployment replicas
+          EXPECTED_REPLICAS={{ .Values.replicaCount | quote }}
           REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.replicas}")
-          if [ "$REPLICAS" = "1" ]; then
+          if [ "$REPLICAS" = "$EXPECTED_REPLICAS" ]; then
             echo "✓ Deployment has correct replica count: $REPLICAS"
           else
-            echo "✗ Deployment has incorrect replica count: $REPLICAS (expected 1)"
+            echo "✗ Deployment has incorrect replica count: $REPLICAS (expected $EXPECTED_REPLICAS)"
             exit 1
           fi
 
