@@ -5,6 +5,7 @@ metadata:
   name: "test-labels"
   annotations:
     "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   serviceAccountName: {{ include "argocd-agent-principal.testResourceName" . }}
   containers:
