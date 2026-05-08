@@ -25,7 +25,7 @@ spec:
           echo "Verifying resource counts..."
 
           # Count deployments
-          DEPLOYMENT_COUNT=$(kubectl get deployments -n {{ include "argocd-agent-principal.namespace" . }} -l "app.kubernetes.io/name=argocd-agent-principal,app.kubernetes.io/instance={{ .Release.Name }}" --no-headers | wc -l)
+          DEPLOYMENT_COUNT=$(kubectl get deployments -n {{ include "argocd-agent-principal.namespace" . }} -l "app.kubernetes.io/name=argocd-agent-principal,app.kubernetes.io/instance={{ .Release.Name }}" --no-headers | wc -l | tr -d ' ')
           if [ "$DEPLOYMENT_COUNT" = "1" ]; then
             echo "✓ Found $DEPLOYMENT_COUNT deployment(s)"
           else
@@ -43,7 +43,7 @@ spec:
           fi
 
           # Count configmaps
-          CONFIGMAP_COUNT=$(kubectl get configmaps -n {{ include "argocd-agent-principal.namespace" . }} -l "app.kubernetes.io/name=argocd-agent-principal,app.kubernetes.io/instance={{ .Release.Name }}" --no-headers | wc -l)
+          CONFIGMAP_COUNT=$(kubectl get configmaps -n {{ include "argocd-agent-principal.namespace" . }} -l "app.kubernetes.io/name=argocd-agent-principal,app.kubernetes.io/instance={{ .Release.Name }}" --no-headers | wc -l | tr -d ' ')
           if [ "$CONFIGMAP_COUNT" = "1" ]; then
             echo "✓ Found $CONFIGMAP_COUNT configmap(s)"
           else
@@ -112,7 +112,7 @@ spec:
 
           # Verify all resources are in the correct namespace
           echo "Verifying namespace consistency..."
-          WRONG_NS_RESOURCES=$(kubectl get deployments,services,configmaps,secrets,serviceaccounts,roles,rolebindings -l "app.kubernetes.io/name=argocd-agent-principal,app.kubernetes.io/instance={{ .Release.Name }}" --all-namespaces --no-headers | grep -v "{{ include "argocd-agent-principal.namespace" . }}" | grep -v "default" | wc -l)
+          WRONG_NS_RESOURCES=$(kubectl get deployments,services,configmaps,secrets,serviceaccounts,roles,rolebindings -l "app.kubernetes.io/name=argocd-agent-principal,app.kubernetes.io/instance={{ .Release.Name }}" --all-namespaces --no-headers | grep -v "{{ include "argocd-agent-principal.namespace" . }}" | grep -v "default" | wc -l | tr -d ' ')
           if [ "$WRONG_NS_RESOURCES" = "0" ]; then
             echo "✓ All namespaced resources are in the correct namespace"
           else
