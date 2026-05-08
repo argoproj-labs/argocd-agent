@@ -364,13 +364,22 @@ configMapData: {}
 # Requires the cluster to support NetworkPolicy (CNI plugin such as Calico, Cilium, or Weave).
 networkPolicy:
   # -- Whether to create a NetworkPolicy for the principal Pod.
+  #
+  # NOTE on cross-cluster agents: a NetworkPolicy can only match in-cluster
+  # sources via pod/namespace selectors. Remote agents (running on a
+  # different cluster) reach the principal as external traffic and cannot be
+  # matched by selectors. To allow them, either keep this disabled, or add
+  # explicit `ipBlock` rules via `networkPolicy.ingress.extraRules` for the
+  # remote agent CIDRs.
   enabled: false
   ingress:
     grpc:
-      # -- Allow gRPC port (principal.listen.port) only from pods labeled as argocd-agent components.
+      # -- Allow gRPC port (principal.listen.port) from pods labeled as
+      # argocd-agent components in any namespace on the cluster.
       enabled: true
     redisProxy:
-      # -- Allow Redis proxy port (6379) only from pods labeled as ArgoCD components.
+      # -- Allow Redis proxy port (6379) from pods labeled as ArgoCD
+      # components in any namespace on the cluster.
       # Has no effect when principal.redisProxy.enabled is false.
       enabled: true
     metrics:
@@ -378,7 +387,8 @@ networkPolicy:
       enabled: true
       # -- Namespace label value for kubernetes.io/metadata.name to allow metrics scraping from.
       namespaceSelector: "monitoring"
-    # -- Additional custom ingress rules to append.
+    # -- Additional custom ingress rules to append. Use this to add `ipBlock`
+    # entries for remote (cross-cluster) agents.
     extraRules: []
 
 ## @section Tests

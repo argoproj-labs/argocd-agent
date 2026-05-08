@@ -19,6 +19,7 @@ spec:
             matchLabels:
               app.kubernetes.io/part-of: argocd-agent
               app.kubernetes.io/component: agent
+          namespaceSelector: {}
       ports:
         - protocol: TCP
           port: {{ .Values.principal.listen.port }}
@@ -28,6 +29,7 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/part-of: argocd
+          namespaceSelector: {}
       ports:
         - protocol: TCP
           port: 6379
