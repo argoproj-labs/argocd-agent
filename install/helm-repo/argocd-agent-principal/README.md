@@ -47,12 +47,12 @@ Kubernetes: `>=1.24.0-0`
 | nameOverride | string | `""` | Override the chart name used in app.kubernetes.io/name. Changing after initial install requires delete+reinstall. |
 | namespaceOverride | string | `""` | Override namespace to deploy the principal into. Leave empty to use the release namespace. |
 | networkPolicy | object | `{"enabled":false,"ingress":{"extraRules":[],"grpc":{"enabled":true},"metrics":{"enabled":true,"namespaceSelector":"monitoring"},"redisProxy":{"enabled":true}}}` | NetworkPolicy configuration. Restricts ingress to the principal Pod. Requires the cluster to support NetworkPolicy (CNI plugin such as Calico, Cilium, or Weave). |
-| networkPolicy.enabled | bool | `false` | Whether to create a NetworkPolicy for the principal Pod. |
-| networkPolicy.ingress.extraRules | list | `[]` | Additional custom ingress rules to append. |
-| networkPolicy.ingress.grpc.enabled | bool | `true` | Allow gRPC port (principal.listen.port) only from pods labeled as argocd-agent components. |
+| networkPolicy.enabled | bool | `false` | Whether to create a NetworkPolicy for the principal Pod.  NOTE on cross-cluster agents: a NetworkPolicy can only match in-cluster sources via pod/namespace selectors. Remote agents (running on a different cluster) reach the principal as external traffic and cannot be matched by selectors. To allow them, either keep this disabled, or add explicit `ipBlock` rules via `networkPolicy.ingress.extraRules` for the remote agent CIDRs. |
+| networkPolicy.ingress.extraRules | list | `[]` | Additional custom ingress rules to append. Use this to add `ipBlock` entries for remote (cross-cluster) agents. |
+| networkPolicy.ingress.grpc.enabled | bool | `true` | Allow gRPC port (principal.listen.port) from pods labeled as argocd-agent components in any namespace on the cluster. |
 | networkPolicy.ingress.metrics.enabled | bool | `true` | Allow metrics and healthz ports from the specified namespace (e.g. Prometheus). |
 | networkPolicy.ingress.metrics.namespaceSelector | string | `"monitoring"` | Namespace label value for kubernetes.io/metadata.name to allow metrics scraping from. |
-| networkPolicy.ingress.redisProxy.enabled | bool | `true` | Allow Redis proxy port (6379) only from pods labeled as ArgoCD components. Has no effect when principal.redisProxy.enabled is false. |
+| networkPolicy.ingress.redisProxy.enabled | bool | `true` | Allow Redis proxy port (6379) from pods labeled as ArgoCD components in any namespace on the cluster. Has no effect when principal.redisProxy.enabled is false. |
 | nodeSelector | object | `{}` | Node selector for scheduling the principal Pod. |
 | podAnnotations | object | `{}` | Additional annotations to add to the principal Pod. |
 | podLabels | object | `{}` | Additional labels to add to the principal Pod. |
