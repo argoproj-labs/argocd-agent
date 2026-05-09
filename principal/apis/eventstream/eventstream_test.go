@@ -25,10 +25,13 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream/mock"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/stretchr/testify/assert"
@@ -186,6 +189,61 @@ func Test_Subscribe(t *testing.T) {
 		assert.Equal(t, 0, int(st.NumRecv.Load()))
 		assert.Equal(t, 1, int(st.NumSent.Load()))
 	})
+}
+
+func TestSubscribe_SendErrorCancelsSubscribeCtx(t *testing.T) {
+	clusterMgr := &cluster.Manager{}
+	qs := queue.NewSendRecvQueues()
+	qs.Create("agent-y")
+	s := NewServer(qs, event.NewEventWritersMap(), nil, clusterMgr)
+
+	st := &mock.MockEventServer{
+		AgentName: "agent-y",
+		AgentMode: string(types.AgentModeManaged),
+	}
+
+	recvGate := make(chan struct{})
+	st.AddRecvHook(func(_ *mock.MockEventServer) error {
+		<-recvGate
+		return io.EOF
+	})
+
+	sendGate := make(chan struct{})
+	st.AddSendHook(func(_ *mock.MockEventServer, _ *eventstreamapi.Event) error {
+		<-sendGate
+		return status.Error(codes.Unavailable, "transport is closing")
+	})
+
+	subscribeReturned := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(st)
+		close(subscribeReturned)
+	}()
+
+	var captured *client
+	require.Eventually(t, func() bool {
+		s.activeClientsMu.Lock()
+		defer s.activeClientsMu.Unlock()
+		captured = s.activeClients["agent-y"]
+		return captured != nil
+	}, time.Second, 10*time.Millisecond)
+
+	emitter := event.NewEventSource("test")
+	qs.SendQ("agent-y").Add(emitter.ApplicationEvent(
+		event.Create,
+		&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns"}},
+	))
+	close(sendGate)
+
+	select {
+	case <-captured.ctx.Done():
+	case <-time.After(3 * time.Second):
+		close(recvGate)
+		t.Fatal("Send error did not cancel Subscribe ctx within 3s")
+	}
+
+	close(recvGate)
+	<-subscribeReturned
 }
 
 func TestDisconnectAll(t *testing.T) {

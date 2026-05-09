@@ -16,12 +16,14 @@ package eventstream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -71,6 +73,25 @@ type Server struct {
 // AcceptCheck is called at the start of Subscribe to decide whether to accept
 // the agent connection. Return a non-nil error to reject with that status.
 type AcceptCheck func(agentName string) error
+
+const (
+	eventWriterSendErrorReasonContextCanceled  = "context-canceled"
+	eventWriterSendErrorReasonTransportClosing = "transport-closing"
+	eventWriterSendErrorReasonOther            = "other"
+)
+
+type sendErrorObservingSubscribeServer struct {
+	eventstreamapi.EventStream_SubscribeServer
+	onSendError func(error)
+}
+
+func (s *sendErrorObservingSubscribeServer) Send(ev *eventstreamapi.Event) error {
+	err := s.EventStream_SubscribeServer.Send(ev)
+	if err != nil && s.onSendError != nil {
+		s.onSendError(err)
+	}
+	return err
+}
 
 type ServerOptions struct {
 	MaxStreamDuration time.Duration
@@ -169,6 +190,32 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 
 	c.logCtx.Info("An agent connected to the subscription stream")
 	return c, nil
+}
+
+func classifyEventWriterSendError(err error) string {
+	if errors.Is(err, context.Canceled) || status.Code(err) == codes.Canceled {
+		return eventWriterSendErrorReasonContextCanceled
+	}
+	if grpcutil.NeedReconnectOnError(err) {
+		return eventWriterSendErrorReasonTransportClosing
+	}
+	return eventWriterSendErrorReasonOther
+}
+
+func (s *Server) observeSubscribeSendErrors(c *client, subs eventstreamapi.EventStream_SubscribeServer) eventstreamapi.EventStream_SubscribeServer {
+	return &sendErrorObservingSubscribeServer{
+		EventStream_SubscribeServer: subs,
+		onSendError: func(err error) {
+			reason := classifyEventWriterSendError(err)
+			if s.metrics != nil {
+				s.metrics.EventWriterSendErrors.WithLabelValues(c.agentName, reason).Inc()
+			}
+			if reason == eventWriterSendErrorReasonContextCanceled || reason == eventWriterSendErrorReasonTransportClosing {
+				c.logCtx.WithError(err).WithField("reason", reason).Info("Event writer send error requires reconnect")
+				c.cancelFn()
+			}
+		},
+	}
 }
 
 // onDisconnect must be called whenever client c disconnects from the stream
@@ -383,11 +430,12 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		metrics.SetAgentConnectionTime(c.agentName, c.start)
 	}
 
+	target := s.observeSubscribeSendErrors(c, subs)
 	eventWriter := s.eventWriters.Get(c.agentName)
 	if eventWriter != nil {
-		eventWriter.UpdateTarget(subs)
+		eventWriter.UpdateTarget(target)
 	} else {
-		eventWriter = event.NewEventWriter(c.agentName, subs)
+		eventWriter = event.NewEventWriter(c.agentName, target)
 		s.eventWriters.Add(c.agentName, eventWriter)
 	}
 

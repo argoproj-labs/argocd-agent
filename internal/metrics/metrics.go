@@ -63,7 +63,8 @@ type PrincipalMetrics struct {
 	EventReceived prometheus.Counter
 	EventSent     prometheus.Counter
 
-	EventProcessingTime *prometheus.HistogramVec
+	EventProcessingTime   *prometheus.HistogramVec
+	EventWriterSendErrors *prometheus.CounterVec
 
 	PrincipalErrors *prometheus.CounterVec
 }
@@ -167,6 +168,11 @@ func NewPrincipalMetrics() *PrincipalMetrics {
 			Name: "principal_event_processing_time",
 			Help: "Histogram of time taken to process events (in seconds)",
 		}, []string{"status", "agent_name", "resource_type"}),
+
+		EventWriterSendErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "principal_event_writer_send_errors_total",
+			Help: "The total number of EventWriter send errors observed by principal",
+		}, []string{"agent_name", "reason"}),
 
 		PrincipalErrors: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "principal_errors",
