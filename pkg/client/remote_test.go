@@ -21,19 +21,28 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"math/big"
+	"net"
 	"path"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
 	"github.com/argoproj-labs/argocd-agent/internal/issuer"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/status"
 )
 
 func Test_Connect(t *testing.T) {
@@ -99,6 +108,108 @@ func Test_Connect(t *testing.T) {
 		assert.Nil(t, r.conn)
 	})
 
+}
+
+// grpcConnTracker counts transport connections opened and closed on a gRPC server.
+// Used to assert the agent closes the ClientConn after a failed Authenticate attempt.
+type grpcConnTracker struct {
+	begins atomic.Int32
+	ends   atomic.Int32
+}
+
+func (t *grpcConnTracker) TagRPC(ctx context.Context, info *stats.RPCTagInfo) context.Context {
+	return ctx
+}
+
+func (t *grpcConnTracker) HandleRPC(context.Context, stats.RPCStats) {}
+
+func (t *grpcConnTracker) TagConn(ctx context.Context, info *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+
+func (t *grpcConnTracker) HandleConn(_ context.Context, s stats.ConnStats) {
+	switch s.(type) {
+	case *stats.ConnBegin:
+		t.begins.Add(1)
+	case *stats.ConnEnd:
+		t.ends.Add(1)
+	}
+}
+
+type flakyAuthenticateServer struct {
+	authapi.UnimplementedAuthenticationServer
+	issuer issuer.Issuer
+	calls  atomic.Int32
+}
+
+func (s *flakyAuthenticateServer) Authenticate(context.Context, *authapi.AuthRequest) (*authapi.AuthResponse, error) {
+	if s.calls.Add(1) == 1 {
+		return nil, status.Errorf(codes.Unauthenticated, "forced first-attempt auth failure for test")
+	}
+	sub := `{"clientID":"retry-client","mode":"managed"}`
+	access, err := s.issuer.IssueAccessToken(sub, time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	refresh, err := s.issuer.IssueRefreshToken(sub, 24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	return &authapi.AuthResponse{AccessToken: access, RefreshToken: refresh}, nil
+}
+
+type stubVersionServer struct {
+	versionapi.UnimplementedVersionServer
+}
+
+func (stubVersionServer) Version(context.Context, *versionapi.VersionRequest) (*versionapi.VersionResponse, error) {
+	return &versionapi.VersionResponse{Version: "test-version"}, nil
+}
+
+// Regression: Connect must close the gRPC ClientConn when Authenticate fails so retries do not leak transports.
+func Test_Connect_closesConnOnFailedAuthAttempt_beforeRetry(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	iss, err := issuer.NewIssuer("test", issuer.WithRSAPrivateKey(key))
+	require.NoError(t, err)
+
+	tracker := &grpcConnTracker{}
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	srv := grpc.NewServer(grpc.StatsHandler(tracker))
+	authapi.RegisterAuthenticationServer(srv, &flakyAuthenticateServer{issuer: iss})
+	versionapi.RegisterVersionServer(srv, stubVersionServer{})
+
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() {
+		srv.Stop()
+	})
+
+	host, portStr, err := net.SplitHostPort(lis.Addr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r, err := NewRemote(host, port,
+		WithInsecurePlaintext(),
+		WithAuth("noop", auth.Credentials{}),
+		WithClientMode(types.AgentModeManaged),
+	)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, r.Connect(ctx, false))
+
+	require.Eventually(t, func() bool {
+		return tracker.begins.Load() >= 2 && tracker.ends.Load() >= 1
+	}, 2*time.Second, 5*time.Millisecond,
+		"expected first failed auth attempt to close its connection before the retry succeeds")
+
+	assert.Equal(t, int32(2), tracker.begins.Load(), "two dial attempts should open two connections")
+	assert.Equal(t, int32(1), tracker.ends.Load(), "only the failed attempt's conn should be closed before Connect returns")
+	require.NotNil(t, r.Conn())
 }
 
 func Test_WithMinimumTLSVersion(t *testing.T) {
