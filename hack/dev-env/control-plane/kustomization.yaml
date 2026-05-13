@@ -1,3 +1,5 @@
+namespace: NamespacePlaceholder
+
 resources:
 - ../argo-cd/manifests/crds
 - ../argo-cd/manifests/base/config
@@ -23,3 +25,4 @@ patches:
 - path: repo-server-service.yaml
 - path: redis-service.yaml
 - path: appproject-default.yaml
+- path: clusterrolebinding-namespace-patch.yaml

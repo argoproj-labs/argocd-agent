@@ -169,7 +169,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// Create the first application in the principal cluster and validate deployment to managed cluster
 	appFirst := createApp(suite.Ctx, suite.PrincipalClient, requires)
 	appFirst = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient,
-		fixture.ToNamespacedName(&appFirst), types.NamespacedName{Name: appFirst.Name, Namespace: "argocd"}, requires)
+		fixture.ToNamespacedName(&appFirst), types.NamespacedName{Name: appFirst.Name, Namespace: fixture.ManagedAgentNamespace}, requires)
 
 	// Step 2:
 	// Verify that cluster cache info has been updated for first application in agent cluster by Argo CD
@@ -186,7 +186,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// Create the second application having different name and namespace, also validate deployment to managed cluster
 	appSecond := createApp(suite.Ctx, suite.PrincipalClient, requires, struct{ Name, Namespace string }{Name: "guestbook1", Namespace: "guestbook1"})
 	appSecond = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient,
-		fixture.ToNamespacedName(&appSecond), types.NamespacedName{Name: appSecond.Name, Namespace: "argocd"}, requires)
+		fixture.ToNamespacedName(&appSecond), types.NamespacedName{Name: appSecond.Name, Namespace: fixture.ManagedAgentNamespace}, requires)
 
 	// Step 4:
 	// Verify that cluster cache info has been updated by Argo CD for second application in agent cluster
@@ -206,7 +206,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		return errors.IsNotFound(suite.ManagedAgentClient.Get(suite.Ctx,
-			types.NamespacedName{Name: appFirst.Name, Namespace: "argocd"}, &app, metav1.GetOptions{}))
+			types.NamespacedName{Name: appFirst.Name, Namespace: fixture.ManagedAgentNamespace}, &app, metav1.GetOptions{}))
 	}, 60*time.Second, 2*time.Second)
 
 	// Step 6:
