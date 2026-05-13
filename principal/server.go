@@ -1192,7 +1192,11 @@ func (s *Server) defaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 	c := filter.NewFilterChain[*v1alpha1.Application]()
 	// Admit based on namespace of the application
 	c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
-		return glob.MatchStringInList(s.options.namespaces, res.Namespace, glob.REGEXP)
+		namespaces := s.options.namespaces
+		if s.destinationBasedMapping {
+			namespaces = append([]string{s.namespace}, namespaces...)
+		}
+		return glob.MatchStringInList(namespaces, res.Namespace, glob.REGEXP)
 	})
 	// Ignore applications that have the skip sync label
 	c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
