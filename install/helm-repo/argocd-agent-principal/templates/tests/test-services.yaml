@@ -1,0 +1,134 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-services" (include "argocd-agent-principal.testResourceName" .) | quote }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "argocd-agent-principal.testResourceName" . }}
+  containers:
+    - name: kubectl
+      image: "{{ .Values.tests.image }}:{{ .Values.tests.tag }}"
+      command:
+        - sh
+        - -c
+        - |
+          echo "Testing Services configuration..."
+
+          GRPC_SERVICE={{ include "argocd-agent-principal.serviceName" . | quote }}
+          METRICS_SERVICE={{ include "argocd-agent-principal.metricsServiceName" . | quote }}
+          HEALTHZ_SERVICE={{ include "argocd-agent-principal.healthzServiceName" . | quote }}
+
+          # Test gRPC service
+          echo "Testing gRPC service..."
+          if kubectl get service "$GRPC_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }}; then
+            echo "✓ gRPC service exists"
+          else
+            echo "✗ gRPC service not found"
+            exit 1
+          fi
+
+          GRPC_PORT=$(kubectl get service "$GRPC_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
+          if [ "$GRPC_PORT" = "{{ .Values.service.port }}" ]; then
+            echo "✓ gRPC service has correct port: $GRPC_PORT"
+          else
+            echo "✗ gRPC service has incorrect port: $GRPC_PORT (expected {{ .Values.service.port }})"
+            exit 1
+          fi
+
+          # Test metrics service
+          echo "Testing metrics service..."
+          if kubectl get service "$METRICS_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }}; then
+            echo "✓ Metrics service exists"
+          else
+            echo "✗ Metrics service not found"
+            exit 1
+          fi
+
+          METRICS_PORT=$(kubectl get service "$METRICS_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
+          if [ "$METRICS_PORT" = "{{ .Values.principal.metrics.port }}" ]; then
+            echo "✓ Metrics service has correct port: $METRICS_PORT"
+          else
+            echo "✗ Metrics service has incorrect port: $METRICS_PORT (expected {{ .Values.principal.metrics.port }})"
+            exit 1
+          fi
+
+          # Test healthz service
+          echo "Testing healthz service..."
+          if kubectl get service "$HEALTHZ_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }}; then
+            echo "✓ Healthz service exists"
+          else
+            echo "✗ Healthz service not found"
+            exit 1
+          fi
+
+          HEALTHZ_PORT=$(kubectl get service "$HEALTHZ_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
+          if [ "$HEALTHZ_PORT" = "{{ .Values.principal.healthz.port }}" ]; then
+            echo "✓ Healthz service has correct port: $HEALTHZ_PORT"
+          else
+            echo "✗ Healthz service has incorrect port: $HEALTHZ_PORT (expected {{ .Values.principal.healthz.port }})"
+            exit 1
+          fi
+
+          {{- if .Values.principal.redisProxy.enabled }}
+          # Test Redis proxy service
+          REDIS_PROXY_SERVICE={{ include "argocd-agent-principal.redisProxyServiceName" . | quote }}
+          echo "Testing Redis proxy service..."
+          if kubectl get service "$REDIS_PROXY_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }}; then
+            echo "✓ Redis proxy service exists"
+          else
+            echo "✗ Redis proxy service not found"
+            exit 1
+          fi
+
+          REDIS_PORT=$(kubectl get service "$REDIS_PROXY_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
+          if [ "$REDIS_PORT" = "6379" ]; then
+            echo "✓ Redis proxy service has correct port: $REDIS_PORT"
+          else
+            echo "✗ Redis proxy service has incorrect port: $REDIS_PORT (expected 6379)"
+            exit 1
+          fi
+          {{- end }}
+
+          {{- if .Values.principal.resourceProxy.enabled }}
+          # Test resource proxy service
+          RESOURCE_PROXY_SERVICE={{ include "argocd-agent-principal.resourceProxyServiceName" . | quote }}
+          echo "Testing resource proxy service..."
+          if kubectl get service "$RESOURCE_PROXY_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }}; then
+            echo "✓ Resource proxy service exists"
+          else
+            echo "✗ Resource proxy service not found"
+            exit 1
+          fi
+
+          RESOURCE_PROXY_PORT=$(kubectl get service "$RESOURCE_PROXY_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.ports[0].port}")
+          if [ "$RESOURCE_PROXY_PORT" = "9090" ]; then
+            echo "✓ Resource proxy service has correct port: $RESOURCE_PROXY_PORT"
+          else
+            echo "✗ Resource proxy service has incorrect port: $RESOURCE_PROXY_PORT (expected 9090)"
+            exit 1
+          fi
+          {{- end }}
+
+          # Check service selectors
+          METRICS_SELECTOR=$(kubectl get service "$METRICS_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.selector.app\\.kubernetes\\.io/name}")
+          if [ "$METRICS_SELECTOR" = "argocd-agent-principal" ]; then
+            echo "✓ Metrics service has correct selector: $METRICS_SELECTOR"
+          else
+            echo "✗ Metrics service has incorrect selector: $METRICS_SELECTOR (expected argocd-agent-principal)"
+            exit 1
+          fi
+
+          HEALTHZ_SELECTOR=$(kubectl get service "$HEALTHZ_SERVICE" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.spec.selector.app\\.kubernetes\\.io/name}")
+          if [ "$HEALTHZ_SELECTOR" = "argocd-agent-principal" ]; then
+            echo "✓ Healthz service has correct selector: $HEALTHZ_SELECTOR"
+          else
+            echo "✗ Healthz service has incorrect selector: $HEALTHZ_SELECTOR (expected argocd-agent-principal)"
+            exit 1
+          fi
+
+          echo "Services configuration verified successfully!"
+  restartPolicy: Never
+{{- end }}

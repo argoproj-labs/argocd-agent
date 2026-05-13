@@ -1,0 +1,402 @@
+## @section Global
+# -- Override namespace to deploy the principal into. Leave empty to use the release namespace.
+namespaceOverride: ""
+# -- Override the chart name used in app.kubernetes.io/name. Changing after initial install requires delete+reinstall.
+nameOverride: ""
+# -- Override the fully-qualified resource name.
+fullnameOverride: ""
+
+## @section Image
+image:
+  # -- Container image repository for the principal.
+  repository: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
+  # -- Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+  # -- Image pull policy for the principal container.
+  pullPolicy: IfNotPresent
+
+## @section Deployment
+# -- Number of replicas for the principal Deployment.
+replicaCount: 1
+# -- Image pull secrets for private registries.
+imagePullSecrets: []
+# -- Deployment update strategy (passed through as `spec.strategy`).
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 25%
+# -- Number of old ReplicaSets to retain for rollback.
+revisionHistoryLimit: 10
+# -- Time allowed for the Deployment to make progress before the controller reports failure.
+progressDeadlineSeconds: 600
+# -- Resource requests and limits for the principal Pod.
+resources:
+  limits:
+    cpu: "2"
+    memory: 4Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+## @section Services
+# -- Main gRPC service configuration for agent connections.
+service:
+  # -- Service type. Use LoadBalancer to expose externally, ClusterIP for in-cluster only.
+  type: LoadBalancer
+  # -- External service port.
+  port: 443
+  # -- Container port the gRPC server listens on.
+  targetPort: 8443
+  # -- Annotations to add to the gRPC Service.
+  annotations: {}
+
+# -- Metrics service configuration.
+metricsService:
+  # -- Whether to create a metrics Service.
+  enabled: true
+  # -- Metrics service type.
+  type: ClusterIP
+  # -- Metrics service port.
+  port: 8000
+  # -- Annotations to add to the metrics Service.
+  annotations: {}
+
+# -- Healthz (readiness/liveness) service configuration.
+healthzService:
+  # -- Whether to create a healthz Service.
+  enabled: true
+  # -- Healthz service type.
+  type: ClusterIP
+  # -- Healthz service port.
+  port: 8003
+  # -- Annotations to add to the healthz Service.
+  annotations: {}
+
+## @section Pod
+# -- Additional annotations to add to the principal Pod.
+podAnnotations: {}
+# -- Additional labels to add to the principal Pod.
+podLabels: {}
+# -- Pod-level securityContext. Applied to the Pod spec.
+podSecurityContext:
+  fsGroup: 999
+  fsGroupChangePolicy: "OnRootMismatch"
+  runAsGroup: 999
+  runAsNonRoot: true
+  runAsUser: 999
+  seccompProfile:
+    type: RuntimeDefault
+# -- Container-level securityContext. Applied to the principal container.
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  privileged: false
+  readOnlyRootFilesystem: true
+  runAsGroup: 999
+  runAsNonRoot: true
+  runAsUser: 999
+  seccompProfile:
+    type: RuntimeDefault
+# -- Node selector for scheduling the principal Pod.
+nodeSelector: {}
+# -- Affinity rules for the principal Pod.
+affinity: {}
+# -- Tolerations for the principal Pod.
+tolerations: []
+# -- Topology spread constraints for the principal Pod.
+topologySpreadConstraints: []
+# -- PriorityClassName for the principal Pod.
+priorityClassName: ""
+# -- Grace period for Pod termination (seconds).
+terminationGracePeriodSeconds: 30
+# -- Host aliases injected into /etc/hosts of the principal Pod.
+hostAliases: []
+# -- DNS policy for the Pod (e.g. ClusterFirst, None). Empty leaves the default.
+dnsPolicy: ""
+# -- DNS config for the Pod. Only honored when `dnsPolicy` is "None".
+dnsConfig: {}
+
+## @section Probes
+# -- Liveness and readiness probe configuration.
+probes:
+  # -- Liveness probe configuration.
+  liveness:
+    # -- Enable the liveness probe.
+    enabled: true
+    httpGet:
+      path: /healthz
+      port: healthz
+    # -- Initial delay before the first liveness probe.
+    initialDelaySeconds: 10
+    # -- Frequency of liveness probes.
+    periodSeconds: 10
+    # -- Timeout for liveness probe.
+    timeoutSeconds: 2
+    # -- Failure threshold for liveness probe.
+    failureThreshold: 3
+  # -- Readiness probe configuration.
+  readiness:
+    # -- Enable the readiness probe.
+    enabled: true
+    httpGet:
+      path: /healthz
+      port: healthz
+    # -- Initial delay before the first readiness probe.
+    initialDelaySeconds: 5
+    # -- Frequency of readiness probes.
+    periodSeconds: 10
+    # -- Timeout for readiness probe.
+    timeoutSeconds: 2
+    # -- Failure threshold for readiness probe.
+    failureThreshold: 3
+
+## @section Redis
+# -- Name of the Secret containing the ArgoCD Redis password.
+redisSecretName: "argocd-redis"
+# -- Key within the Redis Secret that holds the password.
+redisPasswordKey: "auth"
+
+## @section Principal
+principal:
+  # -- Extra CLI arguments to pass to the principal binary.
+  additionalArgs: []
+
+  listen:
+    # -- Interface address to listen on. Use "127.0.0.1" for header-based auth (prevents bypass);
+    # use "" (all interfaces) only with mTLS.
+    host: "127.0.0.1"
+    # -- gRPC server port.
+    port: 8443
+
+  log:
+    # -- Log level (trace, debug, info, warn, error).
+    level: info
+    # -- Log format (text or json).
+    format: text
+
+  metrics:
+    # -- Metrics server port.
+    port: 8000
+  healthz:
+    # -- Health check server port.
+    port: 8003
+
+  # -- Namespace the principal operates in (syncs ArgoCD apps from/to).
+  namespace: "argocd"
+  # -- Comma-separated list of additional namespaces the principal watches. Supports glob patterns.
+  allowedNamespaces: ""
+
+  namespaceCreate:
+    # -- Allow the principal to create namespaces for agents when they don't exist.
+    enable: false
+    # -- Regexp pattern to restrict namespace names that may be auto-created.
+    pattern: ""
+    # -- Labels to apply to auto-created namespaces (e.g. "key=value,key2=value2").
+    labels: ""
+
+  tls:
+    # -- Name of the Secret containing the principal TLS certificate and key.
+    secretName: "argocd-agent-principal-tls"
+    server:
+      # -- Path to the TLS certificate file inside the container.
+      certPath: ""
+      # -- Path to the TLS private key file inside the container.
+      keyPath: ""
+      # -- Allow the principal to generate its own TLS cert on startup. INSECURE — development only.
+      allowGenerate: false
+      # -- Name of the Secret containing the root CA certificate for verifying agent client certs.
+      rootCaSecretName: "argocd-agent-ca"
+      # -- Path to the root CA certificate file inside the container.
+      rootCaPath: ""
+    clientCert:
+      # -- Require agents to present a client certificate upon connection.
+      require: false
+      # -- Match the subject field in the client certificate to the agent's registered name.
+      matchSubject: false
+    # -- Disable TLS and accept plaintext connections. Use only with a sidecar (e.g. Istio) that handles TLS.
+    insecurePlaintext: false
+    # -- Minimum TLS version (tls1.1, tls1.2, tls1.3). Empty uses Go default.
+    minVersion: "tls1.3"
+    # -- Maximum TLS version (tls1.1, tls1.2, tls1.3). Empty uses highest available.
+    maxVersion: ""
+    # -- Comma-separated list of TLS cipher suites. Empty uses Go defaults.
+    ciphersuites: ""
+
+  redis:
+    # -- Redis compression type for agent event streams (gzip, none).
+    compressionType: "gzip"
+    server:
+      # -- Redis server address (host:port).
+      address: "argocd-redis:6379"
+    # -- Redis TLS configuration.
+    tls:
+      # -- Enable TLS for Redis connections.
+      enabled: false
+      # -- Path to CA certificate for verifying the Redis TLS certificate (must match volume mount).
+      caPath: "/app/config/redis-tls/ca.crt"
+      # -- Name of the Secret containing the Redis TLS CA certificate (key: ca.crt).
+      caSecretName: "argocd-redis-tls"
+      # -- Skip verification of the Redis TLS certificate. INSECURE — development only.
+      insecure: false
+    proxy:
+      server:
+        tls:
+          # -- Path to the TLS certificate for the Redis proxy server.
+          certPath: "/app/config/redis-proxy-server-tls/tls.crt"
+          # -- Path to the TLS key for the Redis proxy server.
+          keyPath: "/app/config/redis-proxy-server-tls/tls.key"
+          # -- Name of the Secret containing the Redis proxy server TLS cert/key.
+          secretName: "argocd-redis-proxy-tls"
+
+  redisProxy:
+    # -- Enable the Redis proxy sidecar.
+    enabled: true
+
+  resourceProxy:
+    # -- Enable the resource proxy (required for destination-based mapping).
+    enabled: true
+    # -- Name of the Secret containing the resource proxy TLS cert/key.
+    secretName: "argocd-agent-resource-proxy-tls"
+    tls:
+      # -- Path to the resource proxy TLS certificate inside the container.
+      certPath: ""
+      # -- Path to the resource proxy TLS key inside the container.
+      keyPath: ""
+    ca:
+      # -- Name of the Secret containing the CA certificate for the resource proxy.
+      secretName: "argocd-agent-ca"
+      # -- Path to the resource proxy CA certificate inside the container.
+      path: ""
+
+  jwt:
+    # -- Allow the principal to generate its own JWT signing key on startup. INSECURE — development only.
+    allowGenerate: false
+    # -- Name of the Secret containing the JWT signing key.
+    secretName: "argocd-agent-jwt"
+    # -- Path to the JWT private key file inside the container.
+    keyPath: ""
+
+  # -- Authentication method. Formats: "mtls:CN=([^,]+)", "userpass:/path/to/creds",
+  # "header:x-forwarded-client-cert:^.*URI=spiffe://...".
+  auth: "mtls:CN=([^,]+)"
+
+  websocket:
+    # -- Enable WebSocket for streaming events to agents.
+    enable: false
+
+  keepAlive:
+    # -- Minimum keep-alive interval for gRPC connections.
+    minInterval: "0"
+
+  pprof:
+    # -- Port for the pprof profiling server. 0 disables it.
+    port: "0"
+
+  userpass:
+    # -- Name of the Secret containing encrypted agent credentials for userpass authentication.
+    # Only required when principal.auth is set to userpass mode.
+    # The secret must have a key "passwd" with the encrypted credentials file contents.
+    secretName: "argocd-agent-principal-userpass"
+
+  # -- Enable destination-based mapping (deploys apps into their declared namespace instead of the agent namespace).
+  destinationBasedMapping: false
+  # -- Kubernetes label selector to restrict which resources the principal watches.
+  labelSelector: ""
+  # -- Number of concurrent event processors.
+  eventProcessors: "10"
+
+## @section RBAC
+# -- RBAC configuration.
+rbac:
+  # -- Create namespace-scoped Role and RoleBinding for the principal.
+  create: true
+  # -- Create cluster-scoped ClusterRole and ClusterRoleBinding. Required for destination-based mapping and multi-namespace resource watching.
+  createClusterRole: true
+
+## @section ServiceAccount
+# -- ServiceAccount configuration.
+serviceAccount:
+  # -- Whether to create the ServiceAccount.
+  create: true
+  # -- Name of the ServiceAccount to use. If empty, a name is generated.
+  name: ""
+  # -- Automount API credentials for the Service Account.
+  automountServiceAccountToken: true
+  # -- Annotations to add to the ServiceAccount (e.g. IRSA on AWS, Workload Identity on GCP).
+  annotations: {}
+
+## @section ServiceMonitor
+# -- Prometheus ServiceMonitor configuration.
+serviceMonitor:
+  # -- Whether to create a ServiceMonitor resource.
+  enabled: false
+  # -- Additional labels for the ServiceMonitor.
+  additionalLabels: {}
+  # -- Annotations for the ServiceMonitor.
+  annotations: {}
+  # -- Namespace where the ServiceMonitor should be created. Defaults to release namespace.
+  namespace: ""
+  # -- Prometheus scrape interval.
+  interval: "30s"
+  # -- Prometheus scrape timeout.
+  scrapeTimeout: "10s"
+  # -- Prometheus RelabelConfigs to apply to samples before scraping.
+  relabelings: []
+  # -- Prometheus MetricRelabelConfigs to apply to samples before ingestion.
+  metricRelabelings: []
+  # -- When true, preserves metric labels when they collide with the target's labels.
+  honorLabels: false
+  # -- Prometheus ServiceMonitor scheme.
+  scheme: ""
+  # -- Prometheus ServiceMonitor TLS configuration.
+  tlsConfig: {}
+
+## @section Extra configuration
+# -- Arbitrary extra keys/values merged into the params ConfigMap.
+# Use this to set parameters not exposed by the chart without forking.
+configMapData: {}
+
+## @section NetworkPolicy
+# -- NetworkPolicy configuration. Restricts ingress to the principal Pod.
+# Requires the cluster to support NetworkPolicy (CNI plugin such as Calico, Cilium, or Weave).
+networkPolicy:
+  # -- Whether to create a NetworkPolicy for the principal Pod.
+  #
+  # NOTE on cross-cluster agents: a NetworkPolicy can only match in-cluster
+  # sources via pod/namespace selectors. Remote agents (running on a
+  # different cluster) reach the principal as external traffic and cannot be
+  # matched by selectors. To allow them, either keep this disabled, or add
+  # explicit `ipBlock` rules via `networkPolicy.ingress.extraRules` for the
+  # remote agent CIDRs.
+  enabled: false
+  ingress:
+    grpc:
+      # -- Allow gRPC port (principal.listen.port) from pods labeled as
+      # argocd-agent components in any namespace on the cluster.
+      enabled: true
+    redisProxy:
+      # -- Allow Redis proxy port (6379) from pods labeled as ArgoCD
+      # components in any namespace on the cluster.
+      # Has no effect when principal.redisProxy.enabled is false.
+      enabled: true
+    metrics:
+      # -- Allow metrics and healthz ports from the specified namespace (e.g. Prometheus).
+      enabled: true
+      # -- Namespace label value for kubernetes.io/metadata.name to allow metrics scraping from.
+      namespaceSelector: "monitoring"
+    # -- Additional custom ingress rules to append. Use this to add `ipBlock`
+    # entries for remote (cross-cluster) agents.
+    extraRules: []
+
+## @section Tests
+# -- Helm chart test configuration.
+tests:
+  # -- By default, chart tests are disabled.
+  enabled: false
+  # -- Test image.
+  image: bitnamilegacy/kubectl
+  # -- Test image tag.
+  tag: "1.33.4"

@@ -1,0 +1,457 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: {{ include "argocd-agent-principal.namespace" . }}
+  name: {{ include "argocd-agent-principal.fullname" . }}
+  labels:
+    {{- include "argocd-agent-principal.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  progressDeadlineSeconds: {{ .Values.progressDeadlineSeconds }}
+  {{- with .Values.updateStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "argocd-agent-principal.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "argocd-agent-principal.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "argocd-agent-principal.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dnsPolicy }}
+      dnsPolicy: {{ . }}
+      {{- end }}
+      {{- with .Values.dnsConfig }}
+      dnsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: argocd-agent-principal
+          image: "{{ .Values.image.repository }}:{{ include "argocd-agent-principal.defaultTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - principal
+            {{- range .Values.principal.additionalArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+          - name: ARGOCD_PRINCIPAL_LISTEN_HOST
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.listen.host
+                optional: true
+          - name: ARGOCD_PRINCIPAL_LISTEN_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.listen.port
+                optional: true
+          - name: ARGOCD_PRINCIPAL_LOG_LEVEL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.log.level
+                optional: true
+          - name: ARGOCD_PRINCIPAL_LOG_FORMAT
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.log.format
+                optional: true
+          - name: ARGOCD_PRINCIPAL_METRICS_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.metrics.port
+                optional: true
+          - name: ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.healthz.port
+                optional: true
+          - name: ARGOCD_PRINCIPAL_NAMESPACE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.namespace
+                optional: true
+          - name: ARGOCD_PRINCIPAL_ALLOWED_NAMESPACES
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.allowed-namespaces
+                optional: true
+          - name: ARGOCD_PRINCIPAL_NAMESPACE_CREATE_ENABLE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.namespace-create.enable
+                optional: true
+          - name: ARGOCD_PRINCIPAL_NAMESPACE_CREATE_PATTERN
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.namespace-create.pattern
+                optional: true
+          - name: ARGOCD_PRINCIPAL_NAMESPACE_CREATE_LABELS
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.namespace-create.labels
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_SERVER_CERT_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.server.cert-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_SERVER_KEY_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.server.key-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_SERVER_ALLOW_GENERATE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.server.allow-generate
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_CLIENT_CERT_REQUIRE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.client-cert.require
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.server.root-ca-secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.server.root-ca-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_CLIENT_CERT_MATCH_SUBJECT
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.client-cert.match-subject
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_MIN_VERSION
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.min-version
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_MAX_VERSION
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.max-version
+                optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_CIPHERSUITES
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.ciphersuites
+                optional: true
+          - name: ARGOCD_PRINCIPAL_INSECURE_PLAINTEXT
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.insecure-plaintext
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.resource-proxy.secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_TLS_CERT_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.resource-proxy.tls.cert-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_TLS_KEY_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.resource-proxy.tls.key-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_CA_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.resource-proxy.ca.secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_TLS_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.resource-proxy.ca.path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_JWT_ALLOW_GENERATE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.jwt.allow-generate
+                optional: true
+          - name: ARGOCD_PRINCIPAL_JWT_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.jwt.secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_JWT_KEY_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.jwt.key-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_AUTH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.auth
+                optional: true
+          - name: ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.websocket.enable
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.redis.compression.type
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.redis.server.address
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_TLS_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.redis.tls.enabled
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_TLS_INSECURE
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.redis.tls.insecure
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.redis.ca-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_CA_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.redis.ca-secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_CERT_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.redis.proxy.server.tls.cert-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_KEY_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.redis.proxy.server.tls.key-path
+                optional: true
+          - name: ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_SECRET_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.redis.proxy.server.tls.secret-name
+                optional: true
+          - name: ARGOCD_PRINCIPAL_ENABLE_RESOURCE_PROXY
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.resource-proxy.enable
+                optional: true
+          - name: ARGOCD_PRINCIPAL_KEEP_ALIVE_MIN_INTERVAL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.keep-alive.min-interval
+                optional: true
+          - name: ARGOCD_PRINCIPAL_PPROF_PORT
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.pprof.port
+                optional: true
+          - name: ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.destination-based-mapping
+                optional: true
+          - name: ARGOCD_PRINCIPAL_LABEL_SELECTOR
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.label-selector
+                optional: true
+          - name: ARGOCD_PRINCIPAL_EVENT_PROCESSORS
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.event-processors
+                optional: true
+          - name: REDIS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.redisSecretName }}
+                key: {{ .Values.redisPasswordKey }}
+          ports:
+            - containerPort: {{ .Values.principal.listen.port }}
+              name: principal
+              protocol: TCP
+            - containerPort: 6379
+              name: redis-proxy
+              protocol: TCP
+            - containerPort: {{ .Values.principal.metrics.port }}
+              name: metrics
+              protocol: TCP
+            - containerPort: {{ .Values.principal.healthz.port }}
+              name: healthz
+              protocol: TCP
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.httpGet.path }}
+              port: {{ .Values.probes.liveness.httpGet.port }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.httpGet.path }}
+              port: {{ .Values.probes.readiness.httpGet.port }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: jwt-secret
+              mountPath: /app/config/jwt
+              readOnly: true
+            - name: userpass-passwd
+              mountPath: /app/config/userpass
+              readOnly: true
+            - name: redis-proxy-server-tls
+              mountPath: /app/config/redis-proxy-server-tls
+              readOnly: true
+            - name: redis-tls-ca
+              mountPath: /app/config/redis-tls
+              readOnly: true
+      volumes:
+      - name: userpass-passwd
+        secret:
+          secretName: {{ include "argocd-agent-principal.userpassSecretName" . }}
+          items:
+          - key: passwd
+            path: passwd
+          optional: true
+      - name: jwt-secret
+        secret:
+          secretName: {{ .Values.principal.jwt.secretName | quote }}
+          items:
+          - key: jwt.key
+            path: jwt.key
+          optional: true
+      - name: redis-proxy-server-tls
+        secret:
+          secretName: {{ .Values.principal.redis.proxy.server.tls.secretName | quote }}
+          items:
+          - key: tls.crt
+            path: tls.crt
+          - key: tls.key
+            path: tls.key
+          optional: true
+      - name: redis-tls-ca
+        secret:
+          secretName: {{ .Values.principal.redis.tls.caSecretName | quote }}
+          items:
+          - key: ca.crt
+            path: ca.crt
+          optional: true
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
