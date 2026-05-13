@@ -377,6 +377,50 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 		require.False(t, a.appManager.IsManaged(incomingApp.QualifiedName()))
 	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, incomingApp), event.TargetApplication)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Upsert: Get (identity check) + Update only — no Delete, no Create
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), event.TargetApplication)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Upsert on Create: Get (identity check) + Update only — no Delete, no Create
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
 }
 
 func Test_processIncomingApplication_AutonomousUpdateDoesNotStampPrincipalUID(t *testing.T) {
@@ -928,6 +972,48 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		expectedCalls := []string{"Get", "Get", "Delete"}
 		gotCalls := []string{}
 		for _, call := range beMissing.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.projectManager.Manage(oldAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), event.TargetAppProject)
+		err := a.processIncomingAppProject(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.projectManager.Manage(oldAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), event.TargetAppProject)
+		err := a.processIncomingAppProject(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
 		}
 		require.Equal(t, expectedCalls, gotCalls)
@@ -1618,6 +1704,64 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.repoManager.Manage(oldRepo.Name)
+		defer a.repoManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+		supportsPatchMock := be.On("SupportsPatch").Return(false)
+		defer supportsPatchMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingRepo, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), event.TargetRepository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.repoManager.Manage(oldRepo.Name)
+		defer a.repoManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+		supportsPatchMock := be.On("SupportsPatch").Return(false)
+		defer supportsPatchMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingRepo, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), event.TargetRepository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
 }
 
 func Test_CreateRepository(t *testing.T) {
@@ -2081,6 +2225,60 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingCM, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.GPGKeyEvent(event.Create, incomingCM), event.TargetGPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingCM, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, incomingCM), event.TargetGPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
 }
 
 func Test_CreateGPGKey(t *testing.T) {
@@ -2188,7 +2386,7 @@ func Test_identityAction(t *testing.T) {
 				SourceUIDMatch:    false,
 				PrincipalUIDMatch: true,
 			},
-			expected: identityActionDeleteRecreate,
+			expected: identityActionMismatch,
 		},
 		{
 			name: "same principal, missing source-uid → stamp",
@@ -2237,7 +2435,7 @@ func Test_identityAction(t *testing.T) {
 				PrincipalUIDMatch:   true,
 				MissingPrincipalUID: true,
 			},
-			expected: identityActionDeleteRecreate,
+			expected: identityActionMismatch,
 		},
 		{
 			name: "adopted principal-uid, source-uid mismatch → transition (pre-upgrade failover)",

@@ -151,6 +151,9 @@ type Agent struct {
 	// labelSelector is an optional Kubernetes label selector that restricts
 	// which resources the agent can process.
 	labelSelector string
+
+	// mismatchPolicy defines the agent's behavior on source-UID mismatch
+	mismatchPolicy manager.SourceUIDMismatchPolicy
 }
 
 const defaultQueueName = "default"
@@ -191,6 +194,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.infStopCh = make(chan struct{})
 	a.namespace = namespace
 	a.mode = types.AgentModeAutonomous
+	a.mismatchPolicy = manager.MismatchPolicyRecreate
 	a.redisProxyMsgHandler = &redisProxyMsgHandler{}
 	// Resource proxy is enabled by default.
 	a.enableResourceProxy = true

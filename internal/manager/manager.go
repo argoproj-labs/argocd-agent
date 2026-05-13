@@ -53,6 +53,20 @@ const (
 	PrincipalUIDAnnotation = "argocd.argoproj.io/principal-uid"
 )
 
+// SourceUIDMismatchPolicy defines the agent's behavior on source-UID mismatch.
+type SourceUIDMismatchPolicy string
+
+const (
+	// MismatchPolicyRecreate deletes the existing resource and recreates it (default).
+	MismatchPolicyRecreate SourceUIDMismatchPolicy = "recreate"
+	// MismatchPolicyUpsert updates the existing resource in-place without deleting it.
+	MismatchPolicyUpsert SourceUIDMismatchPolicy = "upsert"
+
+	// MismatchPolicyAnnotation is the annotation operators set on a resource to override
+	// the global mismatch policy for that specific resource.
+	MismatchPolicyAnnotation = "argocd.argoproj.io/source-uid-mismatch-policy"
+)
+
 type Manager interface {
 	SetRole(role ManagerRole)
 	SetMode(role ManagerRole)

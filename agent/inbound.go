@@ -298,16 +298,25 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 			return fmt.Errorf("could not update app after source-uid wipe: %w", err)
 		}
 		return nil
-	case identityActionDeleteRecreate:
-		logCtx.Debug("Source UID mismatch. Deleting existing app")
-		if err := a.deleteApplication(incomingApp); err != nil {
-			return fmt.Errorf("could not delete existing app: %w", err)
+	case identityActionMismatch:
+		switch a.effectiveMismatchPolicy(incomingApp) {
+		case manager.MismatchPolicyUpsert:
+			logCtx.Info("Source UID mismatch, upsert policy: updating in-place")
+			if err := a.updateManagedApplicationIdentity(incomingApp, principalUID); err != nil {
+				return fmt.Errorf("could not upsert app on source-uid mismatch: %w", err)
+			}
+			return nil
+		default:
+			logCtx.Debug("Source UID mismatch. Deleting existing app")
+			if err := a.deleteApplication(incomingApp); err != nil {
+				return fmt.Errorf("could not delete existing app: %w", err)
+			}
+			logCtx.Debug("Creating incoming app after deleting existing app")
+			if _, err := a.createApplication(incomingApp, principalUID); err != nil {
+				return fmt.Errorf("could not create incoming app: %w", err)
+			}
+			return nil
 		}
-		logCtx.Debug("Creating incoming app after deleting existing app")
-		if _, err := a.createApplication(incomingApp, principalUID); err != nil {
-			return fmt.Errorf("could not create incoming app: %w", err)
-		}
-		return nil
 	default:
 		return fmt.Errorf("unknown identity action for app %s", incomingApp.QualifiedName())
 	}
@@ -319,9 +328,10 @@ const (
 	// identityActionUpdate: source-uid matches, same principal. Normal update path.
 	identityActionUpdate identityActionType = iota
 
-	// identityActionDeleteRecreate: source-uid changed on the same principal,
+	// identityActionMismatch: source-uid changed on the same principal,
 	// meaning the resource was deleted and recreated on the principal side.
-	identityActionDeleteRecreate
+	// The actual reconciliation action is determined by effectiveMismatchPolicy.
+	identityActionMismatch
 
 	// identityActionTransition: principal-uid changed (HA failover detected).
 	// The new principal has different resource UIDs, but the resource is
@@ -333,6 +343,29 @@ const (
 	// annotations). Safe to update in-place and re-stamp the source-uid.
 	identityActionUpdateStampUID
 )
+
+// effectiveMismatchPolicy returns the mismatch policy for the given incoming resource.
+// The annotation on the resource takes precedence over the global agent policy.
+func (a *Agent) effectiveMismatchPolicy(incoming metav1.Object) manager.SourceUIDMismatchPolicy {
+	if annotations := incoming.GetAnnotations(); annotations != nil {
+		if val, ok := annotations[manager.MismatchPolicyAnnotation]; ok {
+			p := manager.SourceUIDMismatchPolicy(val)
+			if p == manager.MismatchPolicyRecreate || p == manager.MismatchPolicyUpsert {
+				return p
+			}
+			logrus.Warnf("unknown source-uid-mismatch-policy annotation value %q on %s/%s, falling back to global policy",
+				val, incoming.GetNamespace(), incoming.GetName())
+		}
+	}
+	return a.mismatchPolicy
+}
+
+func stampSourceUID(meta *metav1.ObjectMeta, uid string) {
+	if meta.Annotations == nil {
+		meta.Annotations = make(map[string]string)
+	}
+	meta.Annotations[manager.SourceUIDAnnotation] = uid
+}
 
 // identityAction determines how the agent should handle an incoming resource
 // based on principal and source identity comparison.
@@ -356,7 +389,7 @@ func identityAction(r *application.IdentityCompareResult) identityActionType {
 	if r.AdoptedPrincipalUID && !r.SourceUIDMatch {
 		return identityActionTransition
 	}
-	return identityActionDeleteRecreate
+	return identityActionMismatch
 }
 
 func (a *Agent) processIncomingAppProject(ev *event.Event) error {
@@ -396,6 +429,12 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 				}
 				return nil
 			} else {
+				if a.effectiveMismatchPolicy(incomingAppProject) == manager.MismatchPolicyUpsert {
+					logCtx.Info("AppProject source UID mismatch, upsert policy: updating in-place")
+					stampSourceUID(&incomingAppProject.ObjectMeta, string(incomingAppProject.UID))
+					_, err := a.updateAppProject(incomingAppProject)
+					return err
+				}
 				logCtx.Debug("An appProject already exists with a different source UID. Deleting the existing appProject")
 				if err := a.deleteAppProject(incomingAppProject); err != nil {
 					return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
@@ -417,11 +456,16 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 		}
 
 		if !sourceUIDMatch {
+			if a.effectiveMismatchPolicy(incomingAppProject) == manager.MismatchPolicyUpsert {
+				logCtx.Info("AppProject source UID mismatch, upsert policy: updating in-place")
+				stampSourceUID(&incomingAppProject.ObjectMeta, string(incomingAppProject.UID))
+				_, err := a.updateAppProject(incomingAppProject)
+				return err
+			}
 			logCtx.Debug("Source UID mismatch between the incoming and existing appProject. Deleting the existing appProject")
 			if err := a.deleteAppProject(incomingAppProject); err != nil {
 				return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
 			}
-
 			logCtx.Debug("Creating the incoming appProject after deleting the existing appProject")
 			if _, err := a.createAppProject(incomingAppProject); err != nil {
 				return fmt.Errorf("could not create incoming appProject after deleting existing appProject: %w", err)
@@ -482,7 +526,13 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 				}
 				return nil
 			} else {
-				logCtx.Debug("Repository already exists with a different source UID. Deleting the existing repository")
+				if a.effectiveMismatchPolicy(incomingRepo) == manager.MismatchPolicyUpsert {
+					logCtx.Info("Repository source UID mismatch, upsert policy: updating in-place")
+					stampSourceUID(&incomingRepo.ObjectMeta, string(incomingRepo.UID))
+					_, err := a.updateRepository(incomingRepo)
+					return err
+				}
+				logCtx.Debug("A repository already exists with a different source UID. Deleting the existing repository")
 				if err := a.deleteRepository(incomingRepo); err != nil {
 					return fmt.Errorf("could not delete existing repository prior to creation: %w", err)
 				}
@@ -504,11 +554,16 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 		}
 
 		if !sourceUIDMatch {
-			logCtx.Debug("Source UID mismatch between the incoming repository and existing repository. Deleting the existing repository")
+			if a.effectiveMismatchPolicy(incomingRepo) == manager.MismatchPolicyUpsert {
+				logCtx.Info("Repository source UID mismatch, upsert policy: updating in-place")
+				stampSourceUID(&incomingRepo.ObjectMeta, string(incomingRepo.UID))
+				_, err := a.updateRepository(incomingRepo)
+				return err
+			}
+			logCtx.Debug("Source UID mismatch for repository. Deleting the existing repository")
 			if err := a.deleteRepository(incomingRepo); err != nil {
 				return fmt.Errorf("could not delete existing repository prior to creation: %w", err)
 			}
-
 			logCtx.Debug("Creating the incoming repository after deleting the existing repository")
 			if _, err := a.createRepository(incomingRepo); err != nil {
 				return fmt.Errorf("could not create incoming repository after deleting existing repository: %w", err)
@@ -1070,6 +1125,12 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 				}
 				return nil
 			} else {
+				if a.effectiveMismatchPolicy(incomingCM) == manager.MismatchPolicyUpsert {
+					logCtx.Info("GPG key source UID mismatch, upsert policy: updating in-place")
+					stampSourceUID(&incomingCM.ObjectMeta, string(incomingCM.UID))
+					_, err := a.updateGPGKey(incomingCM)
+					return err
+				}
 				logCtx.Debug("GPG key already exists with a different source UID. Deleting the existing GPG key")
 				if err := a.deleteGPGKey(incomingCM); err != nil {
 					return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)
@@ -1092,6 +1153,12 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 		}
 
 		if !sourceUIDMatch {
+			if a.effectiveMismatchPolicy(incomingCM) == manager.MismatchPolicyUpsert {
+				logCtx.Info("GPG key source UID mismatch, upsert policy: updating in-place")
+				stampSourceUID(&incomingCM.ObjectMeta, string(incomingCM.UID))
+				_, err := a.updateGPGKey(incomingCM)
+				return err
+			}
 			logCtx.Debug("Source UID mismatch between the incoming GPG key and existing GPG key. Deleting the existing GPG key")
 			if err := a.deleteGPGKey(incomingCM); err != nil {
 				return fmt.Errorf("could not delete existing GPG key prior to creation: %w", err)

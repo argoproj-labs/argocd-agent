@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"k8s.io/client-go/kubernetes"
 
@@ -214,5 +215,19 @@ func WithRedisTLSInsecure(insecure bool) AgentOption {
 	return func(o *Agent) error {
 		o.redisProxyMsgHandler.redisTLSInsecure = insecure
 		return nil
+	}
+}
+
+// WithSourceUIDMismatchPolicy sets the policy for handling source-UID mismatches.
+// Valid values: "recreate" (default) or "upsert".
+func WithSourceUIDMismatchPolicy(policy string) AgentOption {
+	return func(a *Agent) error {
+		switch manager.SourceUIDMismatchPolicy(policy) {
+		case manager.MismatchPolicyRecreate, manager.MismatchPolicyUpsert:
+			a.mismatchPolicy = manager.SourceUIDMismatchPolicy(policy)
+			return nil
+		default:
+			return fmt.Errorf("unknown source-uid-mismatch-policy %q: must be recreate or upsert", policy)
+		}
 	}
 }

@@ -473,3 +473,45 @@ When disabled (default), the agent logs errors for applications without the anno
 ```bash
 argocd-agent agent --ignore-unmanaged-apps
 ```
+
+### Source UID Mismatch Policy
+
+| | |
+|---|---|
+| **CLI Flag** | `--source-uid-mismatch-policy` |
+| **Environment Variable** | `ARGOCD_AGENT_SOURCE_UID_MISMATCH_POLICY` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `recreate` |
+
+Controls the agent's behavior when a source-UID mismatch is detected on an incoming managed resource.
+
+In managed mode, the agent stamps each resource with a source UID annotation (`argocd.argoproj.io/source-uid`) recording the resource's Kubernetes UID on the principal. When the agent receives an event for a resource that already exists locally with a different source UID, it means the resource was deleted and recreated on the principal side. This flag determines how the agent handles that situation.
+
+**Policies:**
+
+- `recreate` *(default)*: Delete the existing resource on the agent, then create the incoming one. Guarantees the agent copy exactly reflects the principal state.
+- `upsert`: Update the existing resource in-place without deleting it. Safer for sensitive resources where destructive replacement is undesirable.
+
+**Per-resource override:**
+
+Individual resources can override the global policy via the annotation `argocd.argoproj.io/source-uid-mismatch-policy` set on the resource on the principal side. The annotation value must be `recreate` or `upsert`; unknown values fall back to the global policy with a warning log.
+
+**Use Cases:**
+
+- Set `upsert` globally when managing sensitive resources like `argocd-gpg-keys-cm` where deletion is unacceptable
+- Use the per-resource annotation to apply `upsert` selectively to specific resources while keeping `recreate` as the default
+
+**Example:**
+
+```bash
+argocd-agent agent --source-uid-mismatch-policy=upsert
+```
+
+Per-resource annotation example (set on the principal):
+
+```yaml
+metadata:
+  annotations:
+    argocd.argoproj.io/source-uid-mismatch-policy: upsert
+```
