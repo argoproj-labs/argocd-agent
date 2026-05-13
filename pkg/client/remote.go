@@ -105,6 +105,11 @@ type Remote struct {
 
 	// agentVersion is the version of the agent, used for handshake validation
 	agentVersion string
+
+	// agentNamespace is the namespace where the agent is running.
+	agentNamespace string
+
+	onAuthenticated onAuthenticatedFunc
 }
 
 type RemoteOption func(r *Remote) error
@@ -313,6 +318,13 @@ func WithMinimumTLSVersion(version string) RemoteOption {
 			return err
 		}
 		r.tlsConfig.MinVersion = v
+		return nil
+	}
+}
+
+func WithAgentNamespace(namespace string) RemoteOption {
+	return func(r *Remote) error {
+		r.agentNamespace = namespace
 		return nil
 	}
 }
@@ -610,7 +622,14 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			}
 			authC := authapi.NewAuthenticationClient(conn)
 
-			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String(), Version: r.agentVersion})
+			authReq := &authapi.AuthRequest{
+				Method:         r.authMethod,
+				Credentials:    r.creds,
+				Mode:           r.clientMode.String(),
+				Version:        r.agentVersion,
+				AgentNamespace: r.agentNamespace,
+			}
+			resp, ierr := authC.Authenticate(ctx, authReq)
 			defer func() {
 				if ierr != nil {
 					conn.Close()
@@ -648,6 +667,11 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			if ierr != nil {
 				return ierr
 			}
+
+			if r.onAuthenticated != nil {
+				r.onAuthenticated(resp.PrincipalNamespace)
+			}
+
 			authenticated = true
 			return nil
 		}
@@ -686,6 +710,10 @@ func (r *Remote) Conn() *grpc.ClientConn {
 	return r.conn
 }
 
+// onAuthenticatedFunc is called after a successful authentication handshake.
+// principalNamespace is the namespace the principal reported in its auth response.
+type onAuthenticatedFunc func(principalNamespace string)
+
 // ClientID returns the client ID used by this remote
 func (r *Remote) ClientID() string {
 	return r.clientID
@@ -705,6 +733,12 @@ func (r *Remote) SetClientMode(mode types.AgentMode) {
 // The only use case for this is to be used in unit testing.
 func (r *Remote) SetClientID(id string) {
 	r.clientID = id
+}
+
+// SetOnAuthenticated registers a callback invoked after a successful auth
+// handshake, receiving the principal's namespace from the AuthResponse.
+func (r *Remote) SetOnAuthenticated(fn onAuthenticatedFunc) {
+	r.onAuthenticated = fn
 }
 
 func log() *logrus.Entry {
