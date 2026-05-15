@@ -1,0 +1,25 @@
+{{- if .Values.healthzService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ .Values.namespace }}
+  name: {{ include "argocd-agent-principal.healthzServiceName" . }}
+  labels:
+    {{- include "argocd-agent-principal.labels" . | nindent 4 }}
+  {{- with .Values.healthzService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with include "argocd-agent-principal.annotations" . }}
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.healthzService.type }}
+  ports:
+    - name: healthz
+      protocol: TCP
+      port: {{ .Values.healthzService.port }}
+      targetPort: {{ .Values.principal.healthz.port }}
+  selector:
+    {{- include "argocd-agent-principal.selectorLabels" . | nindent 4 }}
+{{- end }}

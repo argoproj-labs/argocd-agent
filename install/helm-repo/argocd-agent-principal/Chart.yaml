@@ -1,0 +1,11 @@
+apiVersion: v2
+name: argocd-agent-principal
+description: A Helm chart for ArgoCD Agent Principal
+type: application
+version: 0.3.1
+appVersion: "0.3.1"
+home: https://github.com/argoproj-labs/argocd-agent
+sources:
+  - https://github.com/argoproj-labs/argocd-agent
+maintainers:
+  - name: ArgoCD Agent Team
