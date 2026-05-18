@@ -154,6 +154,7 @@ func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppPro
 func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
 	created, err := m.appprojectBackend.Create(ctx, project)
 	if err == nil {
+		logging.LogActionCreate(log().WithField("appProject", project.Name), "appproject", created)
 		if err := m.Manage(created.Name); err != nil {
 			log().Warnf("Could not manage app %s: %v", created.Name, err)
 		}
@@ -195,6 +196,7 @@ func (m *AppProjectManager) Upsert(ctx context.Context, project *v1alpha1.AppPro
 	if err != nil {
 		return nil, err
 	}
+	logging.LogActionUpdate(log().WithField("appProject", updated.Name), "appproject", project, updated)
 	if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
 		log().Warnf("Could not ignore change %s for appproject %s: %v", updated.ResourceVersion, updated.Name, err)
 	}
@@ -267,10 +269,8 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 		return patch, err
 	})
 	if err == nil {
-		if updated.Generation == 1 {
-			logCtx.Infof("Created AppProject")
-		} else {
-			logCtx.Infof("Updated AppProject")
+		if updated.Generation > 1 {
+			logging.LogActionUpdate(logCtx, "appproject", incoming, updated)
 		}
 		if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Couldn't unignore change %s for AppProject %s: %v", updated.ResourceVersion, updated.Name, err)
@@ -352,7 +352,11 @@ func (m *AppProjectManager) Delete(ctx context.Context, incoming *v1alpha1.AppPr
 		}
 	}
 
-	return m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	err = m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	if err == nil {
+		logging.LogActionDelete(logCtx, "appproject", incoming.Namespace, incoming.Name)
+	}
+	return err
 }
 
 // RemoveFinalizers will remove finalizers on an existing app project.

@@ -123,7 +123,7 @@ spec:
                 name: argocd-agent-params
                 key: agent.healthz.port
                 optional: true
-          - name: ARGOCD_PRINCIPAL_LOG_FORMAT
+          - name: ARGOCD_AGENT_LOG_FORMAT
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
