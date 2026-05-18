@@ -491,7 +491,7 @@ For detailed profiling guidance, see the [Operations: Profiling](../operations/p
 | Parameter | CLI Flag | Env Variable | ConfigMap | Default |
 |-----------|----------|--------------|-----------|---------|
 | Log Level | `--log-level` | `ARGOCD_AGENT_LOG_LEVEL` | `agent.log.level` | `info` |
-| Log Format | `--log-format` | `ARGOCD_PRINCIPAL_LOG_FORMAT` | N/A | `text` |
+| Log Format | `--log-format` | `ARGOCD_AGENT_LOG_FORMAT` | N/A | `text` |
 | Full Detail | `--full-detail` | `ARGOCD_AGENT_FULL_DETAIL` | N/A | disabled |
 | Metrics Port | `--metrics-port` | `ARGOCD_AGENT_METRICS_PORT` | `agent.metrics.port` | `8181` |
 | Health Port | `--healthz-port` | `ARGOCD_AGENT_HEALTH_CHECK_PORT` | `agent.healthz.port` | `8001` |
