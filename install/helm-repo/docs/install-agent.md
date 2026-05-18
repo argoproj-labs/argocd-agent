@@ -1,6 +1,8 @@
 # ArgoCD Agent Helm Chart: Installation and Configuration Guide
 This guide provides step-by-step instructions on how to install the argocd-agent-agent-helm Helm chart from GitHub Container Registry (GHCR) and how to configure its various parameters using the values.yaml file.
 
+> **Contributors:** If you change the chart in this repository, bump `version` in `Chart.yaml` — see [Developing the agent Helm chart](develop-agent-chart.md).
+
 ## Prerequisites
 Before you begin, ensure you have the following:
 
