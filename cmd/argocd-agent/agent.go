@@ -363,7 +363,7 @@ func NewAgentRunCommand() *cobra.Command {
 		"INSECURE: Do not verify Redis TLS certificate")
 
 	command.Flags().StringVar(&logFormat, "log-format",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),
+		env.StringWithDefault("ARGOCD_AGENT_LOG_FORMAT", nil, "text"),
 		"The log format to use (one of: text, json)")
 	command.Flags().BoolVar(&insecure, "insecure-tls",
 		env.BoolWithDefault("ARGOCD_AGENT_TLS_INSECURE", false),
