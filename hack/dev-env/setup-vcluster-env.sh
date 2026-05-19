@@ -72,27 +72,12 @@ check_for_openshift() {
 }
 
 
-# wait_for_pods looks all Pods running in k8s context $1, and keeps waiting until running count == $2.
+# wait_for_pods waits for all Pods in the given context and namespace to be running.
+# Arguments: context, component, namespace
 wait_for_pods() {
     context="$1"
     component="$2"
-
-    # Determine namespace based on context
-    case "$context" in
-        "vcluster-control-plane")
-            ns="${ARGOCD_PRINCIPAL_NAMESPACE}"
-            ;;
-        "vcluster-agent-managed")
-            ns="${ARGOCD_MANAGED_NAMESPACE}"
-            ;;
-        "vcluster-agent-autonomous")
-            ns="${ARGOCD_AUTONOMOUS_NAMESPACE}"
-            ;;
-        *)
-            echo "Unknown context: $context"
-            exit 1
-            ;;
-    esac
+    ns="$3"
 
     case "$component" in
     "principal")
@@ -160,9 +145,9 @@ apply() {
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/control-plane/kustomization.yaml
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/agent-autonomous/kustomization.yaml
     sed -i.bak -e "s/LatestReleaseTag/${LATEST_RELEASE_TAG}/" $TMP_DIR/agent-managed/kustomization.yaml
-    sed -i.bak -e "s/NamespacePlaceholder/${ARGOCD_PRINCIPAL_NAMESPACE}/" $TMP_DIR/control-plane/kustomization.yaml
-    sed -i.bak -e "s/NamespacePlaceholder/${ARGOCD_MANAGED_NAMESPACE}/" $TMP_DIR/agent-managed/kustomization.yaml
-    sed -i.bak -e "s/NamespacePlaceholder/${ARGOCD_AUTONOMOUS_NAMESPACE}/" $TMP_DIR/agent-autonomous/kustomization.yaml
+    (cd $TMP_DIR/control-plane && kustomize edit set namespace ${ARGOCD_PRINCIPAL_NAMESPACE})
+    (cd $TMP_DIR/agent-managed && kustomize edit set namespace ${ARGOCD_MANAGED_NAMESPACE})
+    (cd $TMP_DIR/agent-autonomous && kustomize edit set namespace ${ARGOCD_AUTONOMOUS_NAMESPACE})
     sed -i.bak -e "s/PrincipalNamespacePlaceholder/${ARGOCD_PRINCIPAL_NAMESPACE}/" $TMP_DIR/control-plane/clusterrolebinding-namespace-patch.yaml
     sed -i.bak -e "s/ManagedNamespacePlaceholder/${ARGOCD_MANAGED_NAMESPACE}/" $TMP_DIR/agent-managed/clusterrolebinding-namespace-patch.yaml
     sed -i.bak -e "s/AutonomousNamespacePlaceholder/${ARGOCD_AUTONOMOUS_NAMESPACE}/" $TMP_DIR/agent-autonomous/clusterrolebinding-namespace-patch.yaml
@@ -274,9 +259,9 @@ apply() {
     kubectl --context vcluster-agent-managed create ns agent-managed || true
 
     echo "-> Waiting for all the Argo CD/vCluster pods to be running on vclusters"
-    wait_for_pods vcluster-control-plane principal
-    wait_for_pods vcluster-agent-autonomous agent
-    wait_for_pods vcluster-agent-managed agent
+    wait_for_pods vcluster-control-plane principal ${ARGOCD_PRINCIPAL_NAMESPACE}
+    wait_for_pods vcluster-agent-autonomous agent ${ARGOCD_AUTONOMOUS_NAMESPACE}
+    wait_for_pods vcluster-agent-managed agent ${ARGOCD_MANAGED_NAMESPACE}
 
     # Workaround for web-based terminal issue caused in 3.3.1 release.
     echo "-> Restarting argocd-server on control plane to pick up ConfigMap settings"

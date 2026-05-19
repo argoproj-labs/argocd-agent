@@ -85,9 +85,10 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_Managed() {
 	requires.Equal(sourceGPGKeys.Data, gpgKeysCM.Data)
 
 	// Ensure the GPG keys ConfigMap is not pushed to the autonomous agent
+	autonomousKey := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.AutonomousAgentNamespace}
 	requires.Never(func() bool {
 		cm := corev1.ConfigMap{}
-		err := suite.AutonomousAgentClient.Get(suite.Ctx, key, &cm, metav1.GetOptions{})
+		err := suite.AutonomousAgentClient.Get(suite.Ctx, autonomousKey, &cm, metav1.GetOptions{})
 		return err == nil
 	}, 15*time.Second, 1*time.Second, "GPG keys ConfigMap should not be pushed to autonomous agent")
 

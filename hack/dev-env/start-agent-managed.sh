@@ -21,7 +21,6 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
     echo "kube context vcluster-agent-managed is not configured; missing setup?" >&2
     exit 1
 fi
-SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 export ARGOCD_AGENT_REMOTE_PORT=${ARGOCD_AGENT_REMOTE_PORT:-8443}
 
