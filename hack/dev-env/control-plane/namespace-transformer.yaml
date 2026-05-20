@@ -1,0 +1,6 @@
+apiVersion: builtin
+kind: NamespaceTransformer
+metadata:
+  name: argocd-namespace-transformer
+  namespace: PrincipalNamespacePlaceholder
+setRoleBindingSubjects: allServiceAccounts
