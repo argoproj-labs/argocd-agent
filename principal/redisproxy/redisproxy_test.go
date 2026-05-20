@@ -62,9 +62,10 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name:               "'app|managed-resources' app in principal namespace (no underscore), no agentFn",
+			name:               "'app|managed-resources' local app in principal namespace (no underscore), no agentFn",
 			key:                "app|managed-resources|my-app|1.8.3",
-			errorExpected:      true,
+			value:              "",
+			errorExpected:      false,
 			principalNamespace: "argocd",
 		},
 		{
@@ -81,10 +82,10 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 			},
 		},
 		{
-			name:          "'app|managed-resources' no underscore without agentFn (namespace-based mapping) should error",
+			name:          "'app|managed-resources' no underscore without agentFn (namespace-based mapping) should return empty string for fallback",
 			key:           "app|managed-resources|my-app|1.8.3",
 			value:         "",
-			errorExpected: true,
+			errorExpected: false,
 		},
 		{
 			name:          "'app|resources-tree' with unexpected field format",
