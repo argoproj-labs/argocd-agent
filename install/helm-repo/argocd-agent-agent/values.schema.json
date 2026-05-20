@@ -51,6 +51,12 @@
       "title": "cacheRefreshInterval",
       "type": "string"
     },
+    "informerSyncTimeout": {
+      "default": "10s",
+      "description": "Timeout for the initial informer sync at agent startup. Increase on large clusters or when the API server is under heavy load.",
+      "title": "informerSyncTimeout",
+      "type": "string"
+    },
     "createNamespace": {
       "default": false,
       "description": "Whether to create target namespaces automatically when they don't exist.\nUsed with destination-based mapping.",
@@ -1052,6 +1058,7 @@
     "pprofPort",
     "enableResourceProxy",
     "cacheRefreshInterval",
+    "informerSyncTimeout",
     "keepAliveInterval",
     "tlsClientKeyPath",
     "tlsClientCertPath",

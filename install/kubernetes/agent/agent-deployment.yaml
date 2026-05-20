@@ -218,6 +218,12 @@ spec:
                 name: argocd-agent-params
                 key: agent.tls.insecure-plaintext
                 optional: true
+          - name: ARGOCD_AGENT_INFORMER_SYNC_TIMEOUT
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.informer-sync-timeout
+                optional: true
           image: argocd-agent
           imagePullPolicy: Always
           name: argocd-agent-agent
