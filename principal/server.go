@@ -214,6 +214,8 @@ var noAuthEndpoints = map[string]bool{
 	"/authapi.Authentication/RefreshToken": true,
 }
 
+var metricsRegistered sync.Once
+
 const waitForSyncedDuration = 60 * time.Second
 
 // defaultResourceProxyListenerAddr is the default listener address for the
@@ -248,6 +250,14 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if s.options.metricsPort > 0 {
+		s.metrics = metrics.NewPrincipalMetrics()
+		metricsRegistered.Do(func() {
+			metrics.RegisterK8sClientMetrics()
+			metrics.RegisterQueueMetrics("argocd_principal")
+		})
 	}
 
 	if s.options.resourceProxyLogger == nil {
@@ -330,10 +340,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		appproject.WithRole(manager.ManagerRolePrincipal),
 	}
 
-	if s.options.metricsPort > 0 {
-		s.metrics = metrics.NewPrincipalMetrics()
-		metrics.RegisterK8sClientMetrics()
-
+	if s.metrics != nil {
 		appInformerOpts = append(appInformerOpts, informer.WithMetrics[*v1alpha1.Application](prometheus.NewRegistry(), metrics.NewInformerMetrics("applications")))
 		projInformerOpts = append(projInformerOpts, informer.WithMetrics[*v1alpha1.AppProject](prometheus.NewRegistry(), metrics.NewInformerMetrics("appprojects")))
 	}
