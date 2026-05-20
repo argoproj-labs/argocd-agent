@@ -31,6 +31,7 @@ Kubernetes: `>=1.24.0-0`
 | argoCdRedisSecretName | string | `"argocd-redis"` | ArgoCD Redis password secret name. |
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
 | cacheRefreshInterval | string | `"10s"` | Cache refresh interval. |
+| informerSyncTimeout | string | `"10s"` | Timeout for the initial informer sync at agent startup. Increase on large clusters or when the API server is under heavy load. |
 | createNamespace | bool | `false` | Whether to create target namespaces automatically when they don't exist. Used with destination-based mapping. |
 | destinationBasedMapping | bool | `false` | Whether to enable destination-based mapping. When enabled, the agent creates applications in their original namespace (preserving the namespace from the principal) instead of the agent's own namespace. |
 | dnsConfig | object | `{}` | DNS config for the Pod. Only honored when `dnsPolicy` is "None". |

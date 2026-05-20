@@ -80,6 +80,9 @@ func NewAgentRunCommand() *cobra.Command {
 		// Time interval for agent to refresh cluster cache info in principal
 		cacheRefreshInterval time.Duration
 
+		// Timeout for the initial informer sync at startup
+		informerSyncTimeout time.Duration
+
 		// Time interval for application-level heartbeats over the Subscribe stream.
 		// This is used to keep the connection alive through service meshes like Istio.
 		heartbeatInterval time.Duration
@@ -294,6 +297,7 @@ func NewAgentRunCommand() *cobra.Command {
 
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
+			agentOpts = append(agentOpts, agent.WithInformerSyncTimeout(informerSyncTimeout))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
 			agentOpts = append(agentOpts, agent.WithCreateNamespace(createNamespace))
 			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
@@ -423,6 +427,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&cacheRefreshInterval, "cache-refresh-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_CACHE_REFRESH_INTERVAL", nil, 10*time.Second),
 		"Interval to refresh cluster cache info in principal")
+	command.Flags().DurationVar(&informerSyncTimeout, "informer-sync-timeout",
+		env.DurationWithDefault("ARGOCD_AGENT_INFORMER_SYNC_TIMEOUT", nil, 10*time.Second),
+		"Timeout to wait for Application/AppProject/Repository/GPG/Namespace informers to sync at startup")
 	command.Flags().DurationVar(&heartbeatInterval, "heartbeat-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_HEARTBEAT_INTERVAL", nil, 0),
 		"Interval for application-level heartbeats over the Subscribe stream (e.g., 30s). "+

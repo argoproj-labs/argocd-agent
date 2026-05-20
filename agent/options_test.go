@@ -36,6 +36,7 @@ func Test_WithSourceUIDMismatchPolicy(t *testing.T) {
 		return NewAgent(context.TODO(), kubec, "argocd",
 			WithRemote(remote),
 			WithCacheRefreshInterval(10*time.Second),
+			WithInformerSyncTimeout(10*time.Second),
 			WithSourceUIDMismatchPolicy(policy),
 		)
 	}
@@ -64,6 +65,7 @@ func Test_WithSourceUIDMismatchPolicy(t *testing.T) {
 		a, err := NewAgent(context.TODO(), kubec, "argocd",
 			WithRemote(remote),
 			WithCacheRefreshInterval(10*time.Second),
+			WithInformerSyncTimeout(10*time.Second),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, manager.MismatchPolicyRecreate, a.mismatchPolicy)
@@ -75,7 +77,7 @@ func Test_effectiveMismatchPolicy(t *testing.T) {
 		t.Helper()
 		kubec := fakekube.NewKubernetesFakeClientWithApps("argocd")
 		remote, _ := client.NewRemote("127.0.0.1", 8080)
-		a, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithCacheRefreshInterval(10*time.Second))
+		a, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithCacheRefreshInterval(10*time.Second), WithInformerSyncTimeout(10*time.Second))
 		require.NoError(t, err)
 		a.mismatchPolicy = globalPolicy
 		return a
@@ -105,5 +107,40 @@ func Test_effectiveMismatchPolicy(t *testing.T) {
 			},
 		}
 		assert.Equal(t, manager.MismatchPolicyUpsert, a.effectiveMismatchPolicy(obj))
+	})
+}
+
+func Test_WithInformerSyncTimeout(t *testing.T) {
+	newTestAgent := func(t *testing.T, opts ...AgentOption) (*Agent, error) {
+		t.Helper()
+		kubec := fakekube.NewKubernetesFakeClientWithApps("argocd")
+		remote, err := client.NewRemote("127.0.0.1", 8080)
+		require.NoError(t, err)
+		baseOpts := []AgentOption{WithRemote(remote), WithCacheRefreshInterval(10 * time.Second)}
+		return NewAgent(context.TODO(), kubec, "argocd", append(baseOpts, opts...)...)
+	}
+
+	t.Run("positive value is accepted", func(t *testing.T) {
+		a, err := newTestAgent(t, WithInformerSyncTimeout(30*time.Second))
+		require.NoError(t, err)
+		assert.Equal(t, 30*time.Second, a.informerSyncTimeout)
+	})
+
+	t.Run("zero value returns error", func(t *testing.T) {
+		_, err := newTestAgent(t, WithInformerSyncTimeout(0))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "informer sync timeout must be greater than 0")
+	})
+
+	t.Run("negative value returns error", func(t *testing.T) {
+		_, err := newTestAgent(t, WithInformerSyncTimeout(-1*time.Second))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "informer sync timeout must be greater than 0")
+	})
+
+	t.Run("missing option returns error", func(t *testing.T) {
+		_, err := newTestAgent(t)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "informer sync timeout must be greater than 0")
 	})
 }

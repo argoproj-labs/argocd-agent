@@ -115,6 +115,13 @@ func WithCacheRefreshInterval(interval time.Duration) AgentOption {
 	}
 }
 
+func WithInformerSyncTimeout(timeout time.Duration) AgentOption {
+	return func(o *Agent) error {
+		o.informerSyncTimeout = timeout
+		return nil
+	}
+}
+
 func WithHeartbeatInterval(interval time.Duration) AgentOption {
 	return func(o *Agent) error {
 		o.options.heartbeatInterval = interval

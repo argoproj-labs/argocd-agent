@@ -132,3 +132,8 @@ data:
   # agent.redis.tls.insecure: INSECURE: Do not verify Redis TLS certificate.
   # Default: false
   agent.redis.tls.insecure: "false"
+  # agent.informer-sync-timeout: How long the agent waits for its informers
+  # (Application, AppProject, Repository, GPG, Namespace) to complete the
+  # initial sync at startup. Increase on large or high-API-load clusters.
+  # Default: "10s"
+  agent.informer-sync-timeout: "10s"

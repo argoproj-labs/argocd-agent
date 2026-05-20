@@ -100,6 +100,9 @@ data:
   # agent.cache.refresh-interval: Cache refresh interval.
   # Default: "10s"
   agent.cache.refresh-interval: {{ .Values.cacheRefreshInterval | quote }}
+  # agent.informer-sync-timeout: Timeout for the initial informer sync at startup.
+  # Default: "10s"
+  agent.informer-sync-timeout: {{ .Values.informerSyncTimeout | quote }}
   # agent.destination-based-mapping: Whether to enable destination-based mapping.
   # When enabled, the agent creates applications in their original namespace
   # (preserving the namespace from the principal) instead of the agent's own namespace.
