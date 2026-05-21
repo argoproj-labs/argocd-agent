@@ -80,7 +80,7 @@ func TestNewHAComponents(t *testing.T) {
 		server := createTestServer()
 
 		components, err := NewHAComponents(ctx, server,
-			ha.WithEnabled(true),			ha.WithPreferredRole("primary"),
+			ha.WithEnabled(true), ha.WithPreferredRole("primary"),
 			ha.WithPeerAddress("peer.example.com:8443"),
 		)
 		require.NoError(t, err)
@@ -329,7 +329,7 @@ func TestGetHAStatus(t *testing.T) {
 		server := createTestServer()
 
 		components, err := NewHAComponents(ctx, server,
-			ha.WithEnabled(true),			ha.WithPreferredRole("primary"),
+			ha.WithEnabled(true), ha.WithPreferredRole("primary"),
 			ha.WithPeerAddress("peer:8443"),
 		)
 		require.NoError(t, err)
@@ -396,7 +396,7 @@ func TestForwardEventForReplication(t *testing.T) {
 		server := createTestServer()
 
 		components, err := NewHAComponents(ctx, server,
-			ha.WithEnabled(true),			ha.WithPreferredRole("replica"),
+			ha.WithEnabled(true), ha.WithPreferredRole("replica"),
 			ha.WithPeerAddress("peer:8443"),
 		)
 		require.NoError(t, err)
@@ -832,7 +832,7 @@ func newTestClusterSecret(name string) *corev1.Secret {
 			Namespace: "argocd",
 			UID:       k8stypes.UID("uid-" + name),
 			Labels: map[string]string{
-				common.LabelKeySecretType:                                "cluster",
+				common.LabelKeySecretType:                               "cluster",
 				"argocd-agent.argoproj-labs.io/self-registered-cluster": "true",
 			},
 		},
