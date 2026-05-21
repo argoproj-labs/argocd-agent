@@ -257,7 +257,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	appOnAutonomous := v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-app",
-			Namespace: "argocd",
+			Namespace: fixture.AutonomousAgentNamespace,
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",

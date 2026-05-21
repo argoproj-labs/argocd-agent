@@ -61,7 +61,7 @@ func (suite *BasicTestSuite) Test_AgentManaged() {
 	requires.NoError(err)
 
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Ensure the app has been pushed to the managed-agent
 	requires.Eventually(func() bool {
@@ -123,7 +123,7 @@ func (suite *BasicTestSuite) Test_AgentAutonomous() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "argocd",
+			Namespace: fixture.AutonomousAgentNamespace,
 			Finalizers: []string{
 				"resources-finalizer.argocd.argoproj.io",
 			},

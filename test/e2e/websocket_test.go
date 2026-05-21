@@ -82,11 +82,11 @@ func (suite *HTTP1DowngradeTestSuite) Test_WithHTTP1Downgrade() {
 	ctx := context.Background()
 
 	// Load the principal's certificate for incoming connections (agent → proxy)
-	principalServerCert, err := tlsutil.TLSCertFromSecret(ctx, principalClient, "argocd", config.SecretNamePrincipalTLS)
+	principalServerCert, err := tlsutil.TLSCertFromSecret(ctx, principalClient, fixture.PrincipalNamespace, config.SecretNamePrincipalTLS)
 	requires.NoError(err)
 
 	// Load the agent's client certificate for outgoing connections (proxy → principal)
-	agentClientCert, err := tlsutil.TLSCertFromSecret(ctx, agentClient, "argocd", config.SecretNameAgentClientCert)
+	agentClientCert, err := tlsutil.TLSCertFromSecret(ctx, agentClient, fixture.ManagedAgentNamespace, config.SecretNameAgentClientCert)
 	requires.NoError(err)
 
 	proxyPort := 9091
