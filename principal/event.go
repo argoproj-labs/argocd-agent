@@ -219,6 +219,18 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		incoming.Spec.Destination.Server = ""
 	}
 
+	// When destination-based mapping is active, the agent may send apps under
+	// its own installation namespace. The NamespaceRemappedAnnotation is a
+	// boolean marker stamped by the agent when it remapped the app.
+	if s.destinationBasedMapping && agentMode.IsManaged() {
+		if _, ok := incoming.Annotations[manager.NamespaceRemappedAnnotation]; ok {
+			if incoming.Namespace == s.agentNamespace(agentName) {
+				incoming.SetNamespace(s.namespace)
+			}
+			delete(incoming.Annotations, manager.NamespaceRemappedAnnotation)
+		}
+	}
+
 	switch ev.Type() {
 
 	// App creation event will only be processed in autonomous mode
@@ -660,7 +672,8 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx, manager.ManagerRolePrincipal, s.namespace).
 		WithDestinationBasedMapping(s.destinationBasedMapping).
-		WithPrincipalUID(s.principalUID)
+		WithPrincipalUID(s.principalUID).
+		WithPeerNamespace(s.agentNamespace(agentName))
 
 	switch ev.Type() {
 	case event.SyncedResourceList.String():
