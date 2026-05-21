@@ -375,6 +375,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		if err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, ptr.To(backend.DeletePropagationForeground)); err != nil {
 			return nil, err
 		}
+		logging.LogActionDelete(logCtx, "application", incoming.Namespace, incoming.Name)
 	}
 
 	return updated, err
@@ -615,7 +616,7 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
+		logging.LogActionUpdate(logCtx, "application", incoming, updated)
 	}
 	return updated, err
 }
@@ -673,7 +674,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
+		logging.LogActionUpdate(logCtx, "application", incoming, updated)
 	}
 	return updated, err
 }
@@ -709,7 +710,7 @@ func (m *ApplicationManager) SetOperation(ctx context.Context, incoming *v1alpha
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.Infof("Set operation on application")
+		logging.LogActionUpdate(logCtx, "application", incoming, updated)
 	}
 	return updated, err
 }
@@ -883,6 +884,9 @@ func (m *ApplicationManager) RemoveFinalizers(ctx context.Context, incoming *v1a
 		patch, err = jsondiff.Compare(source, target, jsondiff.SkipCompact())
 		return patch, err
 	})
+	if err == nil {
+		logging.LogActionUpdate(log().WithField("application", incoming.QualifiedName()), "application", incoming, updated)
+	}
 	return updated, err
 }
 

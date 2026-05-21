@@ -449,13 +449,6 @@ func LogActionError(logCtx *logrus.Entry, resourceType, action string, obj any, 
 
 // LogEventSent logs an outbound event
 func LogEventSent(logCtx *logrus.Entry, ev *cloudevents.Event) {
-
-	// Skip meta events (ACKs, heartbeats, periodic cache updates), they do not need verbose logging
-	// and are handled by the agent and principal respectively
-	if isMetaEvent(ev) {
-		return
-	}
-
 	target := ev.DataSchema()
 	action := shortType(ev.Type())
 
@@ -468,8 +461,14 @@ func LogEventSent(logCtx *logrus.Entry, ev *cloudevents.Event) {
 
 	logCtx = parseEventSubject(logCtx, ev)
 
-	// Include the event data in the log if full detail is enabled and event data is not empty
-	if fullDetailConfig.Events && hasEventData(ev.Data()) {
+	// Meta events are logged at debug level to avoid noise.
+	if isMetaEvent(ev) {
+		logCtx.Debugf("Event sent: %s %s", target, action)
+		return
+	}
+
+	// Events for sensitive resources are never verbose logged to avoid leaking credentials.
+	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) {
 		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
 	}
 	logCtx.Infof("Event sent: %s %s", target, action)
@@ -477,11 +476,6 @@ func LogEventSent(logCtx *logrus.Entry, ev *cloudevents.Event) {
 
 // LogEventReceived logs an inbound event
 func LogEventReceived(logCtx *logrus.Entry, ev *cloudevents.Event) {
-	// Skip meta events
-	if isMetaEvent(ev) {
-		return
-	}
-
 	target := ev.DataSchema()
 	action := shortType(ev.Type())
 
@@ -494,8 +488,14 @@ func LogEventReceived(logCtx *logrus.Entry, ev *cloudevents.Event) {
 
 	logCtx = parseEventSubject(logCtx, ev)
 
-	// Include the event data in the log if full detail is enabled and event data is not empty
-	if fullDetailConfig.Events && hasEventData(ev.Data()) {
+	// Meta events are logged at debug level to avoid noise.
+	if isMetaEvent(ev) {
+		logCtx.Debugf("Event received: %s %s", target, action)
+		return
+	}
+
+	// Events for sensitive resources are never verbose logged to avoid leaking credentials.
+	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) {
 		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
 	}
 	logCtx.Infof("Event received: %s %s", target, action)
@@ -513,8 +513,8 @@ func LogEventError(logCtx *logrus.Entry, ev *cloudevents.Event, err error) {
 	})
 	logCtx = parseEventSubject(logCtx, ev)
 
-	// Include the event data in the log if full detail is enabled and event data is not empty
-	if fullDetailConfig.Events && hasEventData(ev.Data()) {
+	// Events for sensitive resources are never verbose logged to avoid leaking credentials.
+	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) {
 		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
 	}
 	logCtx.WithError(err).Errorf("Error processing event: %s %s", target, action)
@@ -610,6 +610,18 @@ func isMetaEvent(ev *cloudevents.Event) bool {
 func hasEventData(data []byte) bool {
 	s := strings.TrimSpace(string(data))
 	return len(s) > 0 && s != "{}" && s != "null"
+}
+
+// isSensitiveEvent returns true if the event may carry sensitive data.
+// Repository events carry Secret objects directly. Redis and resource events
+// carry opaque payloads that could contain secrets (cached manifests, raw K8s
+// API responses), so they are treated as potentially sensitive.
+func isSensitiveEvent(ev *cloudevents.Event) bool {
+	switch ev.DataSchema() {
+	case "repository", "redis", "resource":
+		return true
+	}
+	return false
 }
 
 // resourceMeta extracts name and namespace from a K8s runtime object.

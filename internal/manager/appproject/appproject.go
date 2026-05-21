@@ -379,6 +379,10 @@ func (m *AppProjectManager) RemoveFinalizers(ctx context.Context, incoming *v1al
 		patch, err = jsondiff.Compare(source, target, jsondiff.SkipCompact())
 		return patch, err
 	})
+	
+	if err == nil {
+		logging.LogActionUpdate(log().WithField("appProject", incoming.Name), "appproject", incoming, updated)
+	}
 	return updated, err
 }
 

@@ -546,6 +546,15 @@ func TestIsMetaEvent(t *testing.T) {
 	assert.False(t, isMetaEvent(newCloudEvent("", "application", "", nil)))
 }
 
+func TestIsSensitiveEvent(t *testing.T) {
+	assert.True(t, isSensitiveEvent(newCloudEvent("", "repository", "", nil)))
+	assert.True(t, isSensitiveEvent(newCloudEvent("", "redis", "", nil)))
+	assert.True(t, isSensitiveEvent(newCloudEvent("", "resource", "", nil)))
+	assert.False(t, isSensitiveEvent(newCloudEvent("", "application", "", nil)))
+	assert.False(t, isSensitiveEvent(newCloudEvent("", "appProject", "", nil)))
+	assert.False(t, isSensitiveEvent(newCloudEvent("", "gpgkey", "", nil)))
+}
+
 func TestParseEventSubject(t *testing.T) {
 	var buf bytes.Buffer
 	logCtx := newTestEntry(&buf)
@@ -711,19 +720,20 @@ func TestLogActionError(t *testing.T) {
 }
 
 func TestLogEventSent(t *testing.T) {
-	defer SetFullDetailConfig(FullDetailConfig{})
 
-	t.Run("skips meta events", func(t *testing.T) {
+	t.Run("meta events logged at debug", func(t *testing.T) {
 		var buf bytes.Buffer
 		logCtx := newTestEntry(&buf)
 		ev := newCloudEvent("io.argoproj.argocd-agent.event.processed", "eventProcessed", "", nil)
 
 		LogEventSent(logCtx, ev)
 
-		assert.Empty(t, buf.String())
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "debug", entry["level"])
+		assert.Equal(t, "events", entry[logfields.LogCategory])
 	})
 
-	t.Run("logs non-meta event with fields", func(t *testing.T) {
+	t.Run("logs non-meta event with fields and detail", func(t *testing.T) {
 		var buf bytes.Buffer
 		logCtx := newTestEntry(&buf)
 		ev := newCloudEvent(
@@ -741,28 +751,10 @@ func TestLogEventSent(t *testing.T) {
 		assert.Equal(t, "application", entry[logfields.EventTarget])
 		assert.Equal(t, "my-app", entry[logfields.Name])
 		assert.Equal(t, "default", entry[logfields.Namespace])
-		assert.Nil(t, entry[logfields.Detail])
+		assert.Equal(t, `{"spec":{}}`, entry[logfields.Detail])
 	})
 
-	t.Run("with full detail includes data", func(t *testing.T) {
-		SetFullDetailConfig(FullDetailConfig{Events: true})
-		var buf bytes.Buffer
-		logCtx := newTestEntry(&buf)
-		ev := newCloudEvent(
-			"io.argoproj.argocd-agent.event.request-update",
-			"application",
-			"default/my-app",
-			[]byte(`{"spec":{}}`),
-		)
-
-		LogEventSent(logCtx, ev)
-
-		entry := parseLogLine(t, &buf)
-		assert.NotNil(t, entry[logfields.Detail])
-	})
-
-	t.Run("with full detail skips empty data", func(t *testing.T) {
-		SetFullDetailConfig(FullDetailConfig{Events: true})
+	t.Run("skips empty data", func(t *testing.T) {
 		var buf bytes.Buffer
 		logCtx := newTestEntry(&buf)
 		ev := newCloudEvent(
@@ -777,19 +769,37 @@ func TestLogEventSent(t *testing.T) {
 		entry := parseLogLine(t, &buf)
 		assert.Nil(t, entry[logfields.Detail])
 	})
+
+	t.Run("redacts repository events", func(t *testing.T) {
+		var buf bytes.Buffer
+		logCtx := newTestEntry(&buf)
+		ev := newCloudEvent(
+			"io.argoproj.argocd-agent.event.create",
+			"repository",
+			"argocd/my-repo",
+			[]byte(`{"data":{"password":"s3cret"}}`),
+		)
+
+		LogEventSent(logCtx, ev)
+
+		entry := parseLogLine(t, &buf)
+		assert.Nil(t, entry[logfields.Detail])
+	})
 }
 
 func TestLogEventReceived(t *testing.T) {
 	defer SetFullDetailConfig(FullDetailConfig{})
 
-	t.Run("skips meta events", func(t *testing.T) {
+	t.Run("meta events logged at debug", func(t *testing.T) {
 		var buf bytes.Buffer
 		logCtx := newTestEntry(&buf)
 		ev := newCloudEvent("", "heartbeat", "", nil)
 
 		LogEventReceived(logCtx, ev)
 
-		assert.Empty(t, buf.String())
+		entry := parseLogLine(t, &buf)
+		assert.Equal(t, "debug", entry["level"])
+		assert.Equal(t, "events", entry[logfields.LogCategory])
 	})
 
 	t.Run("logs non-meta event", func(t *testing.T) {
@@ -811,9 +821,7 @@ func TestLogEventReceived(t *testing.T) {
 }
 
 func TestLogEventError(t *testing.T) {
-	defer SetFullDetailConfig(FullDetailConfig{})
-
-	t.Run("basic error fields", func(t *testing.T) {
+	t.Run("includes error fields and detail", func(t *testing.T) {
 		var buf bytes.Buffer
 		logCtx := newTestEntry(&buf)
 		ev := newCloudEvent(
@@ -830,24 +838,23 @@ func TestLogEventError(t *testing.T) {
 		assert.Equal(t, "error", entry["level"])
 		assert.Contains(t, entry["error"], "event failed")
 		assert.Equal(t, "app", entry[logfields.Name])
-		assert.Nil(t, entry[logfields.Detail])
+		assert.Equal(t, `{"spec":{}}`, entry[logfields.Detail])
 	})
 
-	t.Run("with full detail includes data", func(t *testing.T) {
-		SetFullDetailConfig(FullDetailConfig{Events: true})
+	t.Run("redacts secret events", func(t *testing.T) {
 		var buf bytes.Buffer
 		logCtx := newTestEntry(&buf)
 		ev := newCloudEvent(
-			"io.argoproj.argocd-agent.event.request-update",
-			"application",
-			"ns/app",
-			[]byte(`{"spec":{}}`),
+			"io.argoproj.argocd-agent.event.create",
+			"repository",
+			"argocd/my-repo",
+			[]byte(`{"data":{"password":"s3cret"}}`),
 		)
 
 		LogEventError(logCtx, ev, errors.New("event failed"))
 
 		entry := parseLogLine(t, &buf)
-		assert.NotNil(t, entry[logfields.Detail])
+		assert.Nil(t, entry[logfields.Detail])
 	})
 }
 
