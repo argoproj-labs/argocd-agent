@@ -467,8 +467,9 @@ func LogEventSent(logCtx *logrus.Entry, ev *cloudevents.Event) {
 		return
 	}
 
-	// Events for sensitive resources are never verbose logged to avoid leaking credentials.
-	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) {
+	// Sensitive events never include detail. Large events only include detail
+	// when FULL_DETAIL is enabled. Small events always include detail.
+	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) && (!isLargeEvent(ev) || fullDetailConfig.Events) {
 		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
 	}
 	logCtx.Infof("Event sent: %s %s", target, action)
@@ -494,8 +495,9 @@ func LogEventReceived(logCtx *logrus.Entry, ev *cloudevents.Event) {
 		return
 	}
 
-	// Events for sensitive resources are never verbose logged to avoid leaking credentials.
-	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) {
+	// Sensitive events never include detail. Large events only include detail
+	// when FULL_DETAIL is enabled. Small events always include detail.
+	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) && (!isLargeEvent(ev) || fullDetailConfig.Events) {
 		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
 	}
 	logCtx.Infof("Event received: %s %s", target, action)
@@ -513,8 +515,9 @@ func LogEventError(logCtx *logrus.Entry, ev *cloudevents.Event, err error) {
 	})
 	logCtx = parseEventSubject(logCtx, ev)
 
-	// Events for sensitive resources are never verbose logged to avoid leaking credentials.
-	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) {
+	// Sensitive events never include detail. Large events only include detail
+	// when FULL_DETAIL is enabled. Small events always include detail.
+	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) && (!isLargeEvent(ev) || fullDetailConfig.Events) {
 		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
 	}
 	logCtx.WithError(err).Errorf("Error processing event: %s %s", target, action)
@@ -619,6 +622,16 @@ func hasEventData(data []byte) bool {
 func isSensitiveEvent(ev *cloudevents.Event) bool {
 	switch ev.DataSchema() {
 	case "repository", "redis", "resource":
+		return true
+	}
+	return false
+}
+
+// isLargeEvent returns true if the event carries a large payload (full .spec/.status)
+// that should only be logged when FULL_DETAIL is enabled.
+func isLargeEvent(ev *cloudevents.Event) bool {
+	switch ev.DataSchema() {
+	case "application", "applicationset":
 		return true
 	}
 	return false
