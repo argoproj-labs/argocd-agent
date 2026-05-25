@@ -52,6 +52,7 @@ nav:
     - Accessing live resources on workload clusters: user-guide/live-resources.md
     - Web-based terminal: user-guide/web-terminal.md
     - Migration from classical multi-cluster Argo CD: user-guide/migration.md
+    - Hybrid Architecture: user-guide/hybrid-architecture.md
   - Configuration:
     - Overview: configuration/index.md
     - Authentication: configuration/authentication.md
