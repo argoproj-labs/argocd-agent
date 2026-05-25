@@ -162,6 +162,12 @@ func (a *Agent) processIncomingPostResourceRequest(ctx context.Context, req *eve
 }
 
 func (a *Agent) processIncomingPatchResourceRequest(ctx context.Context, req *event.ResourceRequest, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
+	// Check to see if resource is managed by an Argo CD application.
+	_, err := a.getManagedResource(ctx, gvr, req.Name, req.Namespace)
+	if err != nil {
+		return nil, err
+	}
+
 	patchOpts := v1.PatchOptions{}
 	if params, ok := req.Params["dryRun"]; ok {
 		patchOpts.DryRun = []string{params}
