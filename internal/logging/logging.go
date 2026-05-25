@@ -539,7 +539,7 @@ func LogInformerAdd(logCtx *logrus.Entry, obj any) {
 	if fullDetailConfig.Informers {
 		logCtx = logCtx.WithField(logfields.Detail, marshalResource(obj))
 	}
-	logCtx.Infof("Informer add: %s %s/%s", resType, namespace, name)
+	logCtx.Debugf("Informer add: %s %s/%s", resType, namespace, name)
 }
 
 // LogInformerUpdate logs a K8s informer update event
@@ -562,7 +562,7 @@ func LogInformerUpdate(logCtx *logrus.Entry, oldObj, newObj any) {
 			logCtx = logCtx.WithField(logfields.Detail, diff)
 		}
 	}
-	logCtx.Infof("Informer update: %s %s/%s", resType, namespace, name)
+	logCtx.Debugf("Informer update: %s %s/%s", resType, namespace, name)
 }
 
 // LogInformerDelete logs a K8s informer delete event
@@ -578,7 +578,7 @@ func LogInformerDelete(logCtx *logrus.Entry, obj any) {
 		logfields.Namespace:    namespace,
 	})
 
-	logCtx.Infof("Informer delete: %s %s/%s", resType, namespace, name)
+	logCtx.Debugf("Informer delete: %s %s/%s", resType, namespace, name)
 }
 
 // parseEventSubject is to parse and add name and namespace fields from the CloudEvent Subject
@@ -631,7 +631,7 @@ func isSensitiveEvent(ev *cloudevents.Event) bool {
 // that should only be logged when FULL_DETAIL is enabled.
 func isLargeEvent(ev *cloudevents.Event) bool {
 	switch ev.DataSchema() {
-	case "application", "applicationset":
+	case "application", "applicationset", "appproject":
 		return true
 	}
 	return false
