@@ -5,7 +5,7 @@ description: Argo CD Agent for connecting managed clusters to a Principal
 type: application
 
 # chart version
-version: 0.2.1
+version: 0.2.2
 
 # application version, ArgoCD Agent version
 appVersion: v0.8.1

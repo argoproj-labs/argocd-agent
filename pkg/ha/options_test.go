@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 func TestDefaultOptions(t *testing.T) {
 	opts := DefaultOptions()
 
