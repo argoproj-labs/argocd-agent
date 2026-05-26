@@ -22,14 +22,25 @@ In managed mode, AppProjects must be created on the **principal cluster** (contr
 
 ### Distribution Logic
 
-The principal distributes an AppProject to a managed agent when **both** conditions are met:
+The principal distributes an AppProject to a managed agent based on the active mapping mode.
+Glob pattern matching is used throughout, so wildcards like `agent-*` are supported.
 
-1. The agent name matches one of the patterns in `.spec.destinations[].name`
-2. The agent name matches one of the patterns in `.spec.sourceNamespaces`
+**Namespace-based mapping** (default): the agent name must match **both**:
 
-This uses glob pattern matching, so wildcards like `agent-*` are supported.
+1. A pattern in `.spec.destinations[].name` (or via server URL `?agentName=` param)
+2. A pattern in `.spec.sourceNamespaces`
+
+**Destination-based mapping**: the agent name must match:
+
+1. A pattern in `.spec.destinations[].name` (or via server URL `?agentName=` param)
+
+`.spec.sourceNamespaces` is not consulted for routing in this mode — it is preserved on the AppProject sent to the agent and controls where Applications may live on the workload cluster.
+
+In both modes, a destination deny pattern (`!name`) matching the agent causes the AppProject to be withheld from that agent.
 
 ### Example: Creating an AppProject for Managed Agents
+
+**Namespace-based mapping** (both fields required for routing):
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -40,11 +51,30 @@ metadata:
 spec:
   # This project will be distributed to agents matching "agent-*" pattern
   sourceNamespaces:
-  - agent-*
+  - agent-*          # agent name must match here (routing)
   destinations:
-  - name: agent-*
+  - name: agent-*    # and here
     namespace: "guestbook"
     server: "*"
+  sourceRepos:
+  - "*"
+```
+
+**Destination-based mapping** (only destinations required for routing):
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: my-project
+  namespace: argocd
+spec:
+  destinations:
+  - name: agent-*    # agent name must match here
+    namespace: "guestbook"
+    server: "*"
+  sourceNamespaces:
+  - "*"              # controls app namespaces on the workload cluster, not routing
   sourceRepos:
   - "*"
 ```
@@ -63,8 +93,9 @@ When an AppProject is sent to an agent, it undergoes transformation to make it a
      namespace: "guestbook"  # Preserves original namespace restrictions
 ```
 
-2. **Source Namespaces**: Removed completely since they're only used on the control plane for routing
-    - The `sourceNamespaces` field is used on the control plane to determine which agents should receive the AppProject. Once the AppProject arrives at the agent cluster, this field is removed as it's no longer needed.
+2. **Source Namespaces**:
+    - **Namespace-based mapping**: removed from the AppProject sent to the agent, since it was only used on the principal for routing.
+    - **Destination-based mapping**: preserved on the AppProject sent to the agent, where it controls which namespaces Applications may be created in on the workload cluster.
 
 3. **Roles**: Removed since they're not relevant on the workload cluster
 
@@ -164,9 +195,9 @@ The transformation logic differs significantly between managed and autonomous ag
 
 ### Managed Agents (Principal → Agent)
 - **Direction**: AppProject flows from principal to agent
-- **Selection**: Uses glob pattern matching on `sourceNamespaces` and `destinations` to determine which agents receive the project
+- **Selection**: Glob pattern matching on `destinations` (always) and `sourceNamespaces` (namespace-based mapping only)
 - **Destinations**: Filtered to only include destinations matching the agent, then transformed to `in-cluster`
-- **Source Namespaces**: Removed completely since they're only used on the control plane for routing
+- **Source Namespaces**: Removed in namespace-based mapping (used only for routing on the principal); preserved in destination-based mapping (controls app namespaces on the workload cluster)
 - **Name**: Remains unchanged
 
 ### Autonomous Agents (Agent → Principal)
@@ -187,14 +218,19 @@ The transformation logic differs significantly between managed and autonomous ag
 
 ### For Managed Agents
 
-1. **Use Descriptive Patterns**: Use clear glob patterns in `sourceNamespaces` and `destinations` to target the right agents:
+1. **Use Descriptive Patterns**: Use clear glob patterns to target the right agents. In namespace-based mapping both `sourceNamespaces` and `destinations` must match; in destination-based mapping only `destinations` is used for routing:
 ```yaml
+   # namespace-based mapping
    sourceNamespaces:
    - "production-*"
-   - "staging-*"
    destinations:
    - name: "production-*"
-   - name: "staging-*"
+
+   # destination-based mapping (sourceNamespaces controls app placement, not routing)
+   destinations:
+   - name: "production-*"
+   sourceNamespaces:
+   - "*"
 ```
 
 2. **Test Connectivity**: Ensure agents are connected before creating AppProjects, or they'll receive them upon next connection
@@ -214,7 +250,7 @@ The transformation logic differs significantly between managed and autonomous ag
 ### AppProject Not Appearing on Agent
 
 1. **Check Agent Mode**: Ensure the agent is in managed mode
-2. **Verify Patterns**: Confirm the agent name matches patterns in `sourceNamespaces` and `destinations`
+2. **Verify Patterns**: Confirm the agent name matches patterns in `destinations`. In namespace-based mapping it must also match `sourceNamespaces`
 3. **Check Connectivity**: Verify the agent is connected to the principal
 4. **Review Logs**: Check principal and agent logs for synchronization errors
 

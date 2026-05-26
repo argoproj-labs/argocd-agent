@@ -429,7 +429,7 @@ func (r *RequestHandler) isAppProjectRelevant(ctx context.Context, logCtx *logru
 			return err, false
 		}
 
-		if appproject.DoesAgentMatchWithProject(agentName, *appProject) {
+		if appproject.DoesAgentMatchWithProject(agentName, *appProject, r.destinationBasedMapping) {
 			// The AppProject is still relevant to the agent
 			logCtx.Trace("AppProject is still relevant to the agent")
 			return nil, true
@@ -476,7 +476,7 @@ func (r *RequestHandler) isAppProjectRelevant(ctx context.Context, logCtx *logru
 			return err, false
 		}
 
-		if appproject.DoesAgentMatchWithProject(agentName, *appProject) {
+		if appproject.DoesAgentMatchWithProject(agentName, *appProject, r.destinationBasedMapping) {
 			// The AppProject is still relevant to the agent
 			logCtx.Trace("AppProject is still relevant to the agent. Checking the repository for updates")
 			return nil, true
