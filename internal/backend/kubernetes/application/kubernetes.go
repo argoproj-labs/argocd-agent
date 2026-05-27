@@ -157,6 +157,12 @@ func (be *KubernetesBackend) Update(ctx context.Context, app *v1alpha1.Applicati
 	return be.appClient.ArgoprojV1alpha1().Applications(app.Namespace).Update(ctx, app, v1.UpdateOptions{})
 }
 
+func (be *KubernetesBackend) PatchStatus(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.Application, error) {
+	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Patch(
+		ctx, name, types.MergePatchType, patch, v1.PatchOptions{}, "status",
+	)
+}
+
 func (be *KubernetesBackend) Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.Application, error) {
 	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Patch(ctx, name, types.JSONPatchType, patch, v1.PatchOptions{})
 }

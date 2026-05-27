@@ -898,6 +898,22 @@ func (m *ApplicationManager) List(ctx context.Context, selector backend.Applicat
 	return m.applicationBackend.List(ctx, selector)
 }
 
+// ClearOperationState removes the operationState from an application's status.
+func (m *ApplicationManager) ClearOperationState(ctx context.Context, app *v1alpha1.Application) error {
+	logCtx := log().WithFields(logrus.Fields{
+		"component":   "ClearOperationState",
+		"application": app.Namespace + "/" + app.Name,
+	})
+	updated, err := m.applicationBackend.Patch(ctx, app.Name, app.Namespace,
+		[]byte(`[{"op":"replace","path":"/status/operationState","value":null}]`))
+	if err != nil {
+		logging.LogActionError(logCtx, "application", "clear-operation-state", app, err)
+		return err
+	}
+	logging.LogActionUpdate(logCtx, "application", app, updated)
+	return nil
+}
+
 // RevertManagedAppChanges compares the actual spec with expected spec stored in cache,
 // if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as principal.
 func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v1alpha1.Application, appCache *cache.ResourceCache[v1alpha1.ApplicationSpec]) bool {

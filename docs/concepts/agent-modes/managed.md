@@ -56,3 +56,28 @@ When enabled, applications without the source UID annotation are silently skippe
 
 See the [Agent Configuration Reference](../../configuration/reference/agent.md#ignore-unmanaged-apps) for more details.
 
+## Application Stuck OutOfSync After Unauthorized Deletion
+
+In managed mode, the agent reverts unauthorized deletions by recreating the Application. However, when the deleted Application had the `resources-finalizer.argocd.argoproj.io` finalizer, the following sequence occurs:
+
+1. A user or external process deletes the Application directly on the agent cluster
+2. Argo CD's application controller processes the finalizer (deleting managed resources)
+3. The agent detects the unauthorized deletion and recreates the Application
+4. The recreated Application carries over stale `operationState` from the previous sync
+5. Argo CD sees the operation as already completed and does not re-trigger auto-sync
+6. The Application remains stuck in `OutOfSync` or `Missing` status
+
+This is the expected default behavior (`ignore` action) to allow administrators to investigate why the deletion occurred.
+
+To automatically recover from this situation, configure the `--on-application-recreate` flag:
+
+```bash
+# Clear stale state so auto-sync re-triggers naturally
+argocd-agent agent --on-application-recreate=clear-status
+
+# Or force an immediate re-sync
+argocd-agent agent --on-application-recreate=resync
+```
+
+See the [Agent Configuration Reference](../../configuration/reference/agent.md#on-application-recreate) for more details on each action.
+

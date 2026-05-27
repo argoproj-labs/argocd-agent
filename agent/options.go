@@ -238,3 +238,17 @@ func WithSourceUIDMismatchPolicy(policy string) AgentOption {
 		}
 	}
 }
+
+// WithRecreateAction sets the action taken after recreating an application from
+// an unauthorized deletion in managed mode.
+func WithRecreateAction(action string) AgentOption {
+	return func(a *Agent) error {
+		switch manager.RecreateAction(action) {
+		case manager.RecreateActionIgnore, manager.RecreateActionClearStatus, manager.RecreateActionResync:
+			a.recreateAction = manager.RecreateAction(action)
+			return nil
+		default:
+			return fmt.Errorf("unknown on-application-recreate %q: must be ignore, clear-status, or resync", action)
+		}
+	}
+}
