@@ -208,11 +208,9 @@ func (p *serverStateProvider) ConfirmMissingResources(agentName string, candidat
 			Kind:      candidate.Kind,
 			UID:       candidate.UID,
 		}
-		data, err := p.serializeResource(key)
-		resource := candidate
+		resource, err := p.currentResourceInfo(key)
 		switch {
-		case err == nil && len(data) > 0:
-			resource.Data = data
+		case err == nil && len(resource.Data) > 0:
 			confirmations = append(confirmations, replicationserver.MissingResourceConfirmation{
 				Resource: resource,
 				Status:   replicationserver.MissingResourceStatusExists,
@@ -241,37 +239,55 @@ func (p *serverStateProvider) ConfirmMissingResources(agentName string, candidat
 }
 
 func (p *serverStateProvider) serializeResource(key resources.ResourceKey) ([]byte, error) {
+	info, err := p.currentResourceInfo(key)
+	return info.Data, err
+}
+
+func (p *serverStateProvider) currentResourceInfo(key resources.ResourceKey) (replicationserver.ResourceInfo, error) {
 	ctx := p.server.ctx
 	switch key.Kind {
 	case "Application":
 		if p.server.appManager == nil {
-			return nil, nil
+			return replicationserver.ResourceInfo{}, nil
 		}
 		app, err := p.server.appManager.Get(ctx, key.Name, key.Namespace)
 		if err != nil {
-			return nil, err
+			return replicationserver.ResourceInfo{}, err
 		}
-		return json.Marshal(app)
+		data, err := json.Marshal(app)
+		return replicationserver.ResourceInfo{Name: app.Name, Namespace: app.Namespace, Kind: key.Kind, UID: string(app.UID), Data: data}, err
 	case "AppProject":
 		if p.server.projectManager == nil {
-			return nil, nil
+			return replicationserver.ResourceInfo{}, nil
 		}
 		proj, err := p.server.projectManager.Get(ctx, key.Name, key.Namespace)
 		if err != nil {
-			return nil, err
+			return replicationserver.ResourceInfo{}, err
 		}
-		return json.Marshal(proj)
+		data, err := json.Marshal(proj)
+		return replicationserver.ResourceInfo{Name: proj.Name, Namespace: proj.Namespace, Kind: key.Kind, UID: string(proj.UID), Data: data}, err
+	case "ApplicationSet":
+		if p.server.appSetManager == nil {
+			return replicationserver.ResourceInfo{}, nil
+		}
+		appSet, err := p.server.appSetManager.Get(ctx, key.Name, key.Namespace)
+		if err != nil {
+			return replicationserver.ResourceInfo{}, err
+		}
+		data, err := json.Marshal(appSet)
+		return replicationserver.ResourceInfo{Name: appSet.Name, Namespace: appSet.Namespace, Kind: key.Kind, UID: string(appSet.UID), Data: data}, err
 	case "Repository":
 		if p.server.repoManager == nil {
-			return nil, nil
+			return replicationserver.ResourceInfo{}, nil
 		}
 		repo, err := p.server.repoManager.Get(ctx, key.Name, key.Namespace)
 		if err != nil {
-			return nil, err
+			return replicationserver.ResourceInfo{}, err
 		}
-		return json.Marshal(repo)
+		data, err := json.Marshal(repo)
+		return replicationserver.ResourceInfo{Name: repo.Name, Namespace: repo.Namespace, Kind: key.Kind, UID: string(repo.UID), Data: data}, err
 	default:
-		return nil, nil
+		return replicationserver.ResourceInfo{}, nil
 	}
 }
 

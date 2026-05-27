@@ -222,6 +222,9 @@ func TestServerGetSnapshot_NoStateProvider(t *testing.T) {
 
 func TestServerConfirmMissingResources(t *testing.T) {
 	forwarder := replication.NewForwarder()
+	for range 7 {
+		forwarder.Forward(nil, "agent1", replication.DirectionInbound)
+	}
 	stateProvider := newMockStateProvider()
 	stateProvider.confirmMissing = func(agentName string, resources []ResourceInfo) []MissingResourceConfirmation {
 		assert.Equal(t, "agent1", agentName)
@@ -266,6 +269,34 @@ func TestServerConfirmMissingResources(t *testing.T) {
 	assert.Equal(t, "stale-app", resp.Results[0].Resource.Name)
 	assert.Equal(t, "unknown", resp.Results[1].Status)
 	assert.Equal(t, "temporary list failure", resp.Results[1].Reason)
+}
+
+func TestServerConfirmMissingResources_SequenceMismatch(t *testing.T) {
+	forwarder := replication.NewForwarder()
+	forwarder.Forward(nil, "agent1", replication.DirectionInbound)
+	stateProvider := newMockStateProvider()
+	var providerCalled bool
+	stateProvider.confirmMissing = func(agentName string, resources []ResourceInfo) []MissingResourceConfirmation {
+		providerCalled = true
+		return nil
+	}
+	server := NewServer(forwarder, stateProvider)
+
+	resp, err := server.ConfirmMissingResources(context.Background(), &replicationapi.ConfirmMissingResourcesRequest{
+		AgentName:           "agent1",
+		SnapshotSequenceNum: 0,
+		Resources: []*replicationapi.Resource{{
+			Name:      "maybe-stale-app",
+			Namespace: "project-example",
+			Kind:      "Application",
+			Uid:       "uid-1",
+		}},
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, "unknown", resp.Results[0].Status)
+	assert.Contains(t, resp.Results[0].Reason, "snapshot sequence")
+	assert.False(t, providerCalled)
 }
 
 func TestServerStatus(t *testing.T) {

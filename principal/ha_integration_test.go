@@ -248,12 +248,12 @@ func TestServerStateProvider(t *testing.T) {
 		assert.Nil(t, res)
 	})
 
-	t.Run("ConfirmMissingResources returns exists with serialized data", func(t *testing.T) {
+	t.Run("ConfirmMissingResources returns exists with current UID and serialized data", func(t *testing.T) {
 		app := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "existing-app",
 				Namespace: "project-example",
-				UID:       "uid-1",
+				UID:       "current-uid",
 			},
 			Spec: v1alpha1.ApplicationSpec{Project: "example"},
 		}
@@ -266,11 +266,12 @@ func TestServerStateProvider(t *testing.T) {
 			Name:      app.Name,
 			Namespace: app.Namespace,
 			Kind:      "Application",
-			UID:       string(app.UID),
+			UID:       "stale-candidate-uid",
 		}})
 
 		require.Len(t, confirmations, 1)
 		assert.Equal(t, replicationserver.MissingResourceStatusExists, confirmations[0].Status)
+		assert.Equal(t, string(app.UID), confirmations[0].Resource.UID)
 		assert.NotEmpty(t, confirmations[0].Resource.Data)
 	})
 

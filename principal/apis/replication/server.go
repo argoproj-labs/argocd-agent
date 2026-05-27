@@ -392,6 +392,11 @@ func (s *Server) ConfirmMissingResources(ctx context.Context, req *replicationap
 		return nil, status.Errorf(codes.Internal, "state provider not configured")
 	}
 
+	currentSequence := s.forwarder.CurrentSequenceNum()
+	if currentSequence != req.SnapshotSequenceNum {
+		return unknownMissingResourcesResponse(req.Resources, fmt.Sprintf("snapshot sequence %d no longer current, current sequence %d", req.SnapshotSequenceNum, currentSequence)), nil
+	}
+
 	resources := make([]ResourceInfo, 0, len(req.Resources))
 	for _, res := range req.Resources {
 		resources = append(resources, ResourceInfo{
@@ -424,6 +429,20 @@ func (s *Server) ConfirmMissingResources(ctx context.Context, req *replicationap
 	}
 
 	return resp, nil
+}
+
+func unknownMissingResourcesResponse(resources []*replicationapi.Resource, reason string) *replicationapi.ConfirmMissingResourcesResponse {
+	resp := &replicationapi.ConfirmMissingResourcesResponse{
+		Results: make([]*replicationapi.ConfirmMissingResourceResult, 0, len(resources)),
+	}
+	for _, res := range resources {
+		resp.Results = append(resp.Results, &replicationapi.ConfirmMissingResourceResult{
+			Resource: res,
+			Status:   string(MissingResourceStatusUnknown),
+			Reason:   reason,
+		})
+	}
+	return resp
 }
 
 // Status returns the current replication status.
