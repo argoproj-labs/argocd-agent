@@ -38,7 +38,6 @@ import (
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // HAComponents holds all HA-related components for the principal server
@@ -290,22 +289,26 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 			replication.WithEventHandler(components.handleReplicatedEvent),
 		}
 
-		// Derive client TLS lazily from the server's TLS config, which isn't
-		// populated until Listen() is called (after NewHAComponents returns).
-		// The server cert acts as the client identity; ClientCAs (root CA) is
-		// reused as RootCAs to verify the peer's server cert.
-		clientOpts = append(clientOpts, replication.WithTLSConfigFunc(func() *tls.Config {
-			if server.tlsConfig == nil {
-				return nil
-			}
-			return &tls.Config{
-				Certificates: server.tlsConfig.Certificates,
-				RootCAs:      server.tlsConfig.ClientCAs,
-				MinVersion:   server.tlsConfig.MinVersion,
-				MaxVersion:   server.tlsConfig.MaxVersion,
-				CipherSuites: server.tlsConfig.CipherSuites,
-			}
-		}))
+		if server.options != nil && server.options.insecurePlaintext {
+			clientOpts = append(clientOpts, replication.WithInsecure())
+		} else {
+			// Derive client TLS lazily from the server's TLS config, which isn't
+			// populated until Listen() is called (after NewHAComponents returns).
+			// The server cert acts as the client identity; ClientCAs (root CA) is
+			// reused as RootCAs to verify the peer's server cert.
+			clientOpts = append(clientOpts, replication.WithTLSConfigFunc(func() *tls.Config {
+				if server.tlsConfig == nil {
+					return nil
+				}
+				return &tls.Config{
+					Certificates: server.tlsConfig.Certificates,
+					RootCAs:      server.tlsConfig.ClientCAs,
+					MinVersion:   server.tlsConfig.MinVersion,
+					MaxVersion:   server.tlsConfig.MaxVersion,
+					CipherSuites: server.tlsConfig.CipherSuites,
+				}
+			}))
+		}
 
 		components.ReplicationClient = replication.NewClient(ctx, clientOpts...)
 	}
@@ -686,9 +689,6 @@ func (h *HAComponents) handleSnapshot(snapshot *replicationapi.ReplicationSnapsh
 		mode := types.AgentModeFromString(agentState.Mode)
 		server.setAgentMode(agentState.Name, mode)
 
-		// Build set of snapshot resource keys for this agent
-		snapshotKeys := make(map[resources.ResourceKey]struct{}, len(agentState.Resources))
-
 		// Sync resources: write full objects to cluster and track keys
 		for _, res := range agentState.Resources {
 			key := resources.ResourceKey{
@@ -697,26 +697,16 @@ func (h *HAComponents) handleSnapshot(snapshot *replicationapi.ReplicationSnapsh
 				Kind:      res.Kind,
 				UID:       res.Uid,
 			}
-			snapshotKeys[key] = struct{}{}
 			if len(res.Data) > 0 {
 				if err := h.upsertResourceFromSnapshot(server.ctx, server, res); err != nil {
 					log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to upsert resource from snapshot")
 				} else {
 					log().WithField("resource", key.String()).Debug("HA: upserted resource from snapshot")
+					h.replaceTrackedResource(agentState.Name, server, key)
 				}
 			} else {
 				log().WithField("resource", key.String()).Warn("HA: snapshot resource has no data")
 			}
-			server.resources.Add(agentState.Name, key)
-		}
-
-		// Remove resources that exist locally but are absent from the snapshot
-		for _, existing := range server.resources.GetAllResources(agentState.Name) {
-			if _, ok := snapshotKeys[existing]; ok {
-				continue
-			}
-			h.deleteStaleResource(server.ctx, server, existing)
-			server.resources.Remove(agentState.Name, existing)
 		}
 
 		// Ensure queue pair exists so the replica is ready to serve
@@ -730,6 +720,15 @@ func (h *HAComponents) handleSnapshot(snapshot *replicationapi.ReplicationSnapsh
 
 	log().WithField("sequence", snapshot.LastSequenceNum).Info("HA: Snapshot applied successfully")
 	return nil
+}
+
+func (h *HAComponents) replaceTrackedResource(agentName string, server *Server, key resources.ResourceKey) {
+	for _, existing := range server.resources.GetAllResources(agentName) {
+		if existing.Kind == key.Kind && existing.Namespace == key.Namespace && existing.Name == key.Name && existing.UID != key.UID {
+			server.resources.Remove(agentName, existing)
+		}
+	}
+	server.resources.Add(agentName, key)
 }
 
 func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *Server, res *replicationapi.Resource) error {
@@ -791,45 +790,6 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 		}
 	}
 	return nil
-}
-
-func (h *HAComponents) deleteStaleResource(ctx context.Context, server *Server, key resources.ResourceKey) {
-	switch key.Kind {
-	case "Application":
-		if server.appManager != nil {
-			if err := server.appManager.Delete(ctx, key.Namespace, &v1alpha1.Application{
-				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
-			}, nil); err != nil && !k8serrors.IsNotFound(err) {
-				h.recordResourceError("Application", "delete")
-				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale application")
-			}
-		}
-	case "AppProject":
-		if server.projectManager != nil {
-			if err := server.projectManager.Delete(ctx, &v1alpha1.AppProject{
-				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
-			}, nil); err != nil && !k8serrors.IsNotFound(err) {
-				h.recordResourceError("AppProject", "delete")
-				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale appproject")
-			}
-		}
-	case "ApplicationSet":
-		if server.appSetManager != nil {
-			if err := server.appSetManager.Delete(ctx, key.Namespace, &v1alpha1.ApplicationSet{
-				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
-			}, nil); err != nil && !k8serrors.IsNotFound(err) {
-				h.recordResourceError("ApplicationSet", "delete")
-				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale applicationset")
-			}
-		}
-	case "Repository":
-		if server.repoManager != nil {
-			if err := server.repoManager.Delete(ctx, key.Name, key.Namespace, nil); err != nil && !k8serrors.IsNotFound(err) {
-				h.recordResourceError("Repository", "delete")
-				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete stale repository")
-			}
-		}
-	}
 }
 
 // recordResourceError records a resource operation error metric if HA metrics are available.

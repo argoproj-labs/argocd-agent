@@ -26,6 +26,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	appmanager "github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
@@ -90,6 +91,24 @@ func TestNewHAComponents(t *testing.T) {
 		assert.True(t, opts.Enabled)
 		assert.Equal(t, ha.RolePrimary, opts.PreferredRole)
 		assert.Equal(t, "peer.example.com:8443", opts.PeerAddress)
+	})
+
+	t.Run("replication client uses insecure transport when server plaintext is enabled", func(t *testing.T) {
+		ctx := context.Background()
+		server := createTestServer()
+		server.options = &ServerOptions{insecurePlaintext: true}
+
+		components, err := NewHAComponents(ctx, server,
+			ha.WithEnabled(true),
+			ha.WithPreferredRole("replica"),
+			ha.WithPeerAddress("localhost:0"),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, components.ReplicationClient)
+
+		err = components.ReplicationClient.Connect(ctx)
+		require.NoError(t, err)
+		require.NoError(t, components.ReplicationClient.Disconnect())
 	})
 }
 
@@ -780,24 +799,89 @@ func TestUpsertResourceFromSnapshot_Repository(t *testing.T) {
 	})
 }
 
-func TestDeleteStaleResource_Repository(t *testing.T) {
-	repo := makeRepoSecret("stale-repo", "argocd")
-	mockBackend := &mocks.Repository{}
-	mockBackend.On("Delete", mock.Anything, repo.Name, repo.Namespace, mock.Anything).Return(nil)
-
-	server := newRepoTestServer(mockBackend)
-	components, err := NewHAComponents(context.Background(), server)
-	require.NoError(t, err)
-
-	key := resources.ResourceKey{
-		Name:      repo.Name,
-		Namespace: repo.Namespace,
-		Kind:      "Repository",
-		UID:       string(repo.UID),
+func newAppTestServer(mockAppBackend *mocks.Application) *Server {
+	s := createTestServer()
+	s.ctx = context.Background()
+	mgr, err := appmanager.NewApplicationManager(mockAppBackend, "argocd")
+	if err != nil {
+		panic(err)
 	}
-	components.deleteStaleResource(context.Background(), server, key)
+	s.appManager = mgr
+	return s
+}
 
-	mockBackend.AssertCalled(t, "Delete", mock.Anything, repo.Name, repo.Namespace, mock.Anything)
+func TestHandleSnapshot_DoesNotDeleteTrackedApplications(t *testing.T) {
+	t.Run("keeps same named application when snapshot UID changes", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "same-app",
+				Namespace: "project-example",
+				UID:       "primary-uid",
+			},
+			Spec: v1alpha1.ApplicationSpec{Project: "example"},
+		}
+		data, err := json.Marshal(app)
+		require.NoError(t, err)
+
+		mockBackend := &mocks.Application{}
+		mockBackend.On("Create", mock.Anything, mock.AnythingOfType("*v1alpha1.Application")).Return(app, nil)
+
+		server := newAppTestServer(mockBackend)
+		oldKey := resources.ResourceKey{
+			Name:      app.Name,
+			Namespace: app.Namespace,
+			Kind:      "Application",
+			UID:       "replica-old-uid",
+		}
+		server.resources.Add("agent1", oldKey)
+
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		err = components.handleSnapshot(&replicationapi.ReplicationSnapshot{
+			Agents: []*replicationapi.AgentState{{
+				Name: "agent1",
+				Mode: "managed",
+				Resources: []*replicationapi.Resource{{
+					Kind:      "Application",
+					Name:      app.Name,
+					Namespace: app.Namespace,
+					Uid:       string(app.UID),
+					Data:      data,
+				}},
+			}},
+		})
+		require.NoError(t, err)
+
+		mockBackend.AssertNotCalled(t, "Delete", mock.Anything, app.Name, app.Namespace, mock.Anything)
+	})
+
+	t.Run("keeps tracked application when one snapshot omits it", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+		server := newAppTestServer(mockBackend)
+		key := resources.ResourceKey{
+			Name:      "missing-from-snapshot",
+			Namespace: "project-example",
+			Kind:      "Application",
+			UID:       "uid-1",
+		}
+		server.resources.Add("agent1", key)
+
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+
+		err = components.handleSnapshot(&replicationapi.ReplicationSnapshot{
+			Agents: []*replicationapi.AgentState{{
+				Name:      "agent1",
+				Mode:      "managed",
+				Resources: nil,
+			}},
+		})
+		require.NoError(t, err)
+
+		mockBackend.AssertNotCalled(t, "Delete", mock.Anything, key.Name, key.Namespace, mock.Anything)
+		assert.Contains(t, server.resources.GetAllResources("agent1"), key)
+	})
 }
 
 func TestSerializeResource_Repository(t *testing.T) {
