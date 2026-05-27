@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -44,6 +45,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,6 +53,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
+
+type confirmMissingServer struct {
+	replicationapi.UnimplementedReplicationServer
+	response *replicationapi.ConfirmMissingResourcesResponse
+	request  *replicationapi.ConfirmMissingResourcesRequest
+}
+
+func (s *confirmMissingServer) ConfirmMissingResources(_ context.Context, req *replicationapi.ConfirmMissingResourcesRequest) (*replicationapi.ConfirmMissingResourcesResponse, error) {
+	s.request = req
+	return s.response, nil
+}
 
 // createTestServer creates a minimal Server for testing HA integration
 func createTestServer() *Server {
@@ -214,6 +227,52 @@ func TestServerStateProvider(t *testing.T) {
 
 		res := provider.GetAgentResources("unknown-agent")
 		assert.Nil(t, res)
+	})
+
+	t.Run("ConfirmMissingResources returns exists with serialized data", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "existing-app",
+				Namespace: "project-example",
+				UID:       "uid-1",
+			},
+			Spec: v1alpha1.ApplicationSpec{Project: "example"},
+		}
+		mockBackend := &mocks.Application{}
+		mockBackend.On("Get", mock.Anything, app.Name, app.Namespace).Return(app, nil)
+		server := newAppTestServer(mockBackend)
+		provider := &serverStateProvider{server: server}
+
+		confirmations := provider.ConfirmMissingResources("agent1", []replicationserver.ResourceInfo{{
+			Name:      app.Name,
+			Namespace: app.Namespace,
+			Kind:      "Application",
+			UID:       string(app.UID),
+		}})
+
+		require.Len(t, confirmations, 1)
+		assert.Equal(t, replicationserver.MissingResourceStatusExists, confirmations[0].Status)
+		assert.NotEmpty(t, confirmations[0].Resource.Data)
+	})
+
+	t.Run("ConfirmMissingResources returns deleted for NotFound", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+		mockBackend.On("Get", mock.Anything, "missing-app", "project-example").Return(nil, k8serrors.NewNotFound(schema.GroupResource{
+			Group:    "argoproj.io",
+			Resource: "applications",
+		}, "missing-app"))
+		server := newAppTestServer(mockBackend)
+		provider := &serverStateProvider{server: server}
+
+		confirmations := provider.ConfirmMissingResources("agent1", []replicationserver.ResourceInfo{{
+			Name:      "missing-app",
+			Namespace: "project-example",
+			Kind:      "Application",
+			UID:       "uid-1",
+		}})
+
+		require.Len(t, confirmations, 1)
+		assert.Equal(t, replicationserver.MissingResourceStatusDeleted, confirmations[0].Status)
 	})
 }
 
@@ -810,6 +869,32 @@ func newAppTestServer(mockAppBackend *mocks.Application) *Server {
 	return s
 }
 
+func newConfirmMissingClient(t *testing.T, response *replicationapi.ConfirmMissingResourcesResponse) (*replication.Client, *confirmMissingServer) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	grpcServer := grpc.NewServer()
+	server := &confirmMissingServer{response: response}
+	replicationapi.RegisterReplicationServer(grpcServer, server)
+	go func() {
+		_ = grpcServer.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		_ = listener.Close()
+	})
+
+	client := replication.NewClient(context.Background(),
+		replication.WithPrimaryAddress(listener.Addr().String()),
+		replication.WithInsecure(),
+	)
+	require.NoError(t, client.Connect(context.Background()))
+	t.Cleanup(func() {
+		require.NoError(t, client.Disconnect())
+	})
+	return client, server
+}
+
 func TestHandleSnapshot_DoesNotDeleteTrackedApplications(t *testing.T) {
 	t.Run("keeps same named application when snapshot UID changes", func(t *testing.T) {
 		app := &v1alpha1.Application{
@@ -881,6 +966,41 @@ func TestHandleSnapshot_DoesNotDeleteTrackedApplications(t *testing.T) {
 
 		mockBackend.AssertNotCalled(t, "Delete", mock.Anything, key.Name, key.Namespace, mock.Anything)
 		assert.Contains(t, server.resources.GetAllResources("agent1"), key)
+	})
+
+	t.Run("deletes omitted application when primary confirms deletion", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+		server := newAppTestServer(mockBackend)
+		key := resources.ResourceKey{
+			Name:      "deleted-on-primary",
+			Namespace: "project-example",
+			Kind:      "Application",
+			UID:       "uid-1",
+		}
+		server.resources.Add("agent1", key)
+		mockBackend.On("Delete", mock.Anything, key.Name, key.Namespace, mock.Anything).Return(nil)
+
+		components, err := NewHAComponents(context.Background(), server)
+		require.NoError(t, err)
+		components.ReplicationClient, _ = newConfirmMissingClient(t, &replicationapi.ConfirmMissingResourcesResponse{
+			Results: []*replicationapi.ConfirmMissingResourceResult{{
+				Resource: &replicationapi.Resource{Name: key.Name, Namespace: key.Namespace, Kind: key.Kind, Uid: key.UID},
+				Status:   "deleted",
+			}},
+		})
+
+		err = components.handleSnapshot(&replicationapi.ReplicationSnapshot{
+			LastSequenceNum: 7,
+			Agents: []*replicationapi.AgentState{{
+				Name:      "agent1",
+				Mode:      "managed",
+				Resources: nil,
+			}},
+		})
+		require.NoError(t, err)
+
+		mockBackend.AssertCalled(t, "Delete", mock.Anything, key.Name, key.Namespace, mock.Anything)
+		assert.NotContains(t, server.resources.GetAllResources("agent1"), key)
 	})
 }
 

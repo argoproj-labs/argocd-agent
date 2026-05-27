@@ -17,6 +17,7 @@ package replication
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,8 +28,25 @@ import (
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+type confirmMissingTestServer struct {
+	replicationapi.UnimplementedReplicationServer
+	req *replicationapi.ConfirmMissingResourcesRequest
+}
+
+func (s *confirmMissingTestServer) ConfirmMissingResources(_ context.Context, req *replicationapi.ConfirmMissingResourcesRequest) (*replicationapi.ConfirmMissingResourcesResponse, error) {
+	s.req = req
+	return &replicationapi.ConfirmMissingResourcesResponse{
+		Results: []*replicationapi.ConfirmMissingResourceResult{{
+			Resource: req.Resources[0],
+			Status:   "deleted",
+		}},
+	}, nil
+}
 
 func TestNewClient(t *testing.T) {
 	t.Run("creates with defaults", func(t *testing.T) {
@@ -194,6 +212,43 @@ func TestClientGetStatus(t *testing.T) {
 	assert.Equal(t, ClientStateDisconnected, status.State)
 	assert.Equal(t, "primary.example.com:8404", status.PrimaryAddress)
 	assert.Equal(t, uint64(100), status.LastSequenceNum)
+}
+
+func TestClientConfirmMissingResources(t *testing.T) {
+	ctx := context.Background()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	replicationServer := &confirmMissingTestServer{}
+	replicationapi.RegisterReplicationServer(server, replicationServer)
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	t.Cleanup(server.Stop)
+
+	conn, err := grpc.DialContext(ctx, listener.Addr().String(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, conn.Close())
+	})
+
+	c := NewClient(ctx)
+	c.conn = conn
+
+	resp, err := c.ConfirmMissingResources(ctx, "agent1", []*replicationapi.Resource{{
+		Name:      "stale-app",
+		Namespace: "project-example",
+		Kind:      "Application",
+		Uid:       "uid-1",
+	}}, 7)
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, "deleted", resp.Results[0].Status)
+	require.NotNil(t, replicationServer.req)
+	assert.Equal(t, "agent1", replicationServer.req.AgentName)
+	assert.Equal(t, uint64(7), replicationServer.req.SnapshotSequenceNum)
 }
 
 func TestClientStop(t *testing.T) {

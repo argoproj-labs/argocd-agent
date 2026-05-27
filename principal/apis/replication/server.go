@@ -43,6 +43,7 @@ type AgentStateProvider interface {
 	IsAgentConnected(agentName string) bool
 	GetAgentResources(agentName string) []ResourceInfo
 	GetPrincipalResources() []ResourceInfo
+	ConfirmMissingResources(agentName string, resources []ResourceInfo) []MissingResourceConfirmation
 }
 
 // ResourceInfo contains information about a resource
@@ -53,6 +54,20 @@ type ResourceInfo struct {
 	UID          string
 	SpecChecksum []byte
 	Data         []byte
+}
+
+type MissingResourceStatus string
+
+const (
+	MissingResourceStatusExists  MissingResourceStatus = "exists"
+	MissingResourceStatusDeleted MissingResourceStatus = "deleted"
+	MissingResourceStatusUnknown MissingResourceStatus = "unknown"
+)
+
+type MissingResourceConfirmation struct {
+	Resource ResourceInfo
+	Status   MissingResourceStatus
+	Reason   string
 }
 
 // Server implements the gRPC replication service.
@@ -370,6 +385,45 @@ func (s *Server) GetSnapshot(ctx context.Context, req *replicationapi.SnapshotRe
 	}).Info("Generated snapshot for replica")
 
 	return snapshot, nil
+}
+
+func (s *Server) ConfirmMissingResources(ctx context.Context, req *replicationapi.ConfirmMissingResourcesRequest) (*replicationapi.ConfirmMissingResourcesResponse, error) {
+	if s.stateProvider == nil {
+		return nil, status.Errorf(codes.Internal, "state provider not configured")
+	}
+
+	resources := make([]ResourceInfo, 0, len(req.Resources))
+	for _, res := range req.Resources {
+		resources = append(resources, ResourceInfo{
+			Name:         res.Name,
+			Namespace:    res.Namespace,
+			Kind:         res.Kind,
+			UID:          res.Uid,
+			SpecChecksum: res.SpecChecksum,
+			Data:         res.Data,
+		})
+	}
+
+	confirmations := s.stateProvider.ConfirmMissingResources(req.AgentName, resources)
+	resp := &replicationapi.ConfirmMissingResourcesResponse{
+		Results: make([]*replicationapi.ConfirmMissingResourceResult, 0, len(confirmations)),
+	}
+	for _, confirmation := range confirmations {
+		resp.Results = append(resp.Results, &replicationapi.ConfirmMissingResourceResult{
+			Resource: &replicationapi.Resource{
+				Name:         confirmation.Resource.Name,
+				Namespace:    confirmation.Resource.Namespace,
+				Kind:         confirmation.Resource.Kind,
+				Uid:          confirmation.Resource.UID,
+				SpecChecksum: confirmation.Resource.SpecChecksum,
+				Data:         confirmation.Resource.Data,
+			},
+			Status: string(confirmation.Status),
+			Reason: confirmation.Reason,
+		})
+	}
+
+	return resp, nil
 }
 
 // Status returns the current replication status.

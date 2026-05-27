@@ -38,6 +38,7 @@ import (
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // HAComponents holds all HA-related components for the principal server
@@ -196,6 +197,47 @@ func (p *serverStateProvider) GetPrincipalResources() []replicationserver.Resour
 		}
 	}
 	return result
+}
+
+func (p *serverStateProvider) ConfirmMissingResources(agentName string, candidates []replicationserver.ResourceInfo) []replicationserver.MissingResourceConfirmation {
+	confirmations := make([]replicationserver.MissingResourceConfirmation, 0, len(candidates))
+	for _, candidate := range candidates {
+		key := resources.ResourceKey{
+			Name:      candidate.Name,
+			Namespace: candidate.Namespace,
+			Kind:      candidate.Kind,
+			UID:       candidate.UID,
+		}
+		data, err := p.serializeResource(key)
+		resource := candidate
+		switch {
+		case err == nil && len(data) > 0:
+			resource.Data = data
+			confirmations = append(confirmations, replicationserver.MissingResourceConfirmation{
+				Resource: resource,
+				Status:   replicationserver.MissingResourceStatusExists,
+			})
+		case err == nil:
+			confirmations = append(confirmations, replicationserver.MissingResourceConfirmation{
+				Resource: resource,
+				Status:   replicationserver.MissingResourceStatusUnknown,
+				Reason:   "resource could not be serialized",
+			})
+		case k8serrors.IsNotFound(err):
+			confirmations = append(confirmations, replicationserver.MissingResourceConfirmation{
+				Resource: resource,
+				Status:   replicationserver.MissingResourceStatusDeleted,
+			})
+		default:
+			confirmations = append(confirmations, replicationserver.MissingResourceConfirmation{
+				Resource: resource,
+				Status:   replicationserver.MissingResourceStatusUnknown,
+				Reason:   err.Error(),
+			})
+		}
+	}
+	log().WithField("agent", agentName).WithField("resources", len(confirmations)).Debug("HA: confirmed missing resources")
+	return confirmations
 }
 
 func (p *serverStateProvider) serializeResource(key resources.ResourceKey) ([]byte, error) {
@@ -685,11 +727,10 @@ func (h *HAComponents) handleSnapshot(snapshot *replicationapi.ReplicationSnapsh
 			"resources": len(agentState.Resources),
 		}).Debug("HA: Syncing agent state from snapshot")
 
-		// Set agent mode in namespace map
 		mode := types.AgentModeFromString(agentState.Mode)
 		server.setAgentMode(agentState.Name, mode)
 
-		// Sync resources: write full objects to cluster and track keys
+		snapshotResources := make(map[string]struct{}, len(agentState.Resources))
 		for _, res := range agentState.Resources {
 			key := resources.ResourceKey{
 				Name:      res.Name,
@@ -697,6 +738,7 @@ func (h *HAComponents) handleSnapshot(snapshot *replicationapi.ReplicationSnapsh
 				Kind:      res.Kind,
 				UID:       res.Uid,
 			}
+			snapshotResources[resourceIdentity(key)] = struct{}{}
 			if len(res.Data) > 0 {
 				if err := h.upsertResourceFromSnapshot(server.ctx, server, res); err != nil {
 					log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to upsert resource from snapshot")
@@ -708,9 +750,8 @@ func (h *HAComponents) handleSnapshot(snapshot *replicationapi.ReplicationSnapsh
 				log().WithField("resource", key.String()).Warn("HA: snapshot resource has no data")
 			}
 		}
+		h.confirmMissingSnapshotResources(server.ctx, server, agentState.Name, snapshot.LastSequenceNum, snapshotResources)
 
-		// Ensure queue pair exists so the replica is ready to serve
-		// this agent if promoted
 		if !server.queues.HasQueuePair(agentState.Name) {
 			if err := server.queues.Create(agentState.Name); err != nil {
 				log().WithField("agent", agentState.Name).WithError(err).Warn("HA: Failed to create queue pair from snapshot")
@@ -722,6 +763,10 @@ func (h *HAComponents) handleSnapshot(snapshot *replicationapi.ReplicationSnapsh
 	return nil
 }
 
+func resourceIdentity(key resources.ResourceKey) string {
+	return key.Kind + "/" + key.Namespace + "/" + key.Name
+}
+
 func (h *HAComponents) replaceTrackedResource(agentName string, server *Server, key resources.ResourceKey) {
 	for _, existing := range server.resources.GetAllResources(agentName) {
 		if existing.Kind == key.Kind && existing.Namespace == key.Namespace && existing.Name == key.Name && existing.UID != key.UID {
@@ -729,6 +774,74 @@ func (h *HAComponents) replaceTrackedResource(agentName string, server *Server, 
 		}
 	}
 	server.resources.Add(agentName, key)
+}
+
+func (h *HAComponents) confirmMissingSnapshotResources(ctx context.Context, server *Server, agentName string, snapshotSequenceNum uint64, snapshotResources map[string]struct{}) {
+	if h.ReplicationClient == nil {
+		return
+	}
+
+	candidates := make([]resources.ResourceKey, 0)
+	requestResources := make([]*replicationapi.Resource, 0)
+	for _, existing := range server.resources.GetAllResources(agentName) {
+		if _, ok := snapshotResources[resourceIdentity(existing)]; ok {
+			continue
+		}
+		candidates = append(candidates, existing)
+		requestResources = append(requestResources, &replicationapi.Resource{
+			Name:      existing.Name,
+			Namespace: existing.Namespace,
+			Kind:      existing.Kind,
+			Uid:       existing.UID,
+		})
+	}
+	if len(requestResources) == 0 {
+		return
+	}
+
+	resp, err := h.ReplicationClient.ConfirmMissingResources(ctx, agentName, requestResources, snapshotSequenceNum)
+	if err != nil {
+		log().WithField("agent", agentName).WithError(err).Warn("HA: failed to confirm missing snapshot resources")
+		return
+	}
+
+	candidateByIdentity := make(map[string]resources.ResourceKey, len(candidates))
+	for _, candidate := range candidates {
+		candidateByIdentity[resourceIdentity(candidate)] = candidate
+	}
+	for _, result := range resp.Results {
+		if result.Resource == nil {
+			continue
+		}
+		key := resources.ResourceKey{
+			Name:      result.Resource.Name,
+			Namespace: result.Resource.Namespace,
+			Kind:      result.Resource.Kind,
+			UID:       result.Resource.Uid,
+		}
+		switch result.Status {
+		case string(replicationserver.MissingResourceStatusExists):
+			if len(result.Resource.Data) == 0 {
+				log().WithField("resource", key.String()).Warn("HA: primary confirmed missing resource exists without data")
+				continue
+			}
+			if err := h.upsertResourceFromSnapshot(ctx, server, result.Resource); err != nil {
+				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to repair missing resource confirmed by primary")
+				continue
+			}
+			h.replaceTrackedResource(agentName, server, key)
+		case string(replicationserver.MissingResourceStatusDeleted):
+			candidate, ok := candidateByIdentity[resourceIdentity(key)]
+			if !ok {
+				candidate = key
+			}
+			if h.deleteConfirmedMissingResource(ctx, server, candidate) {
+				server.resources.Remove(agentName, candidate)
+			}
+		default:
+			log().WithField("resource", key.String()).WithField("reason", result.Reason).Warn("HA: primary could not confirm missing resource")
+		}
+	}
 }
 
 func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *Server, res *replicationapi.Resource) error {
@@ -790,6 +903,50 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 		}
 	}
 	return nil
+}
+
+func (h *HAComponents) deleteConfirmedMissingResource(ctx context.Context, server *Server, key resources.ResourceKey) bool {
+	switch key.Kind {
+	case "Application":
+		if server.appManager != nil {
+			if err := server.appManager.Delete(ctx, key.Namespace, &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
+			}, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("Application", "delete")
+				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete primary-confirmed missing application")
+				return false
+			}
+		}
+	case "AppProject":
+		if server.projectManager != nil {
+			if err := server.projectManager.Delete(ctx, &v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
+			}, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("AppProject", "delete")
+				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete primary-confirmed missing appproject")
+				return false
+			}
+		}
+	case "ApplicationSet":
+		if server.appSetManager != nil {
+			if err := server.appSetManager.Delete(ctx, key.Namespace, &v1alpha1.ApplicationSet{
+				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
+			}, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("ApplicationSet", "delete")
+				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete primary-confirmed missing applicationset")
+				return false
+			}
+		}
+	case "Repository":
+		if server.repoManager != nil {
+			if err := server.repoManager.Delete(ctx, key.Name, key.Namespace, nil); err != nil && !k8serrors.IsNotFound(err) {
+				h.recordResourceError("Repository", "delete")
+				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to delete primary-confirmed missing repository")
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // recordResourceError records a resource operation error metric if HA metrics are available.
