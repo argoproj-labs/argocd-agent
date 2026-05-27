@@ -123,6 +123,25 @@ func TestNewHAComponents(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, components.ReplicationClient.Disconnect())
 	})
+
+	t.Run("replication client can load TLS before server listens", func(t *testing.T) {
+		ctx := context.Background()
+		server := createTestServer()
+		server.options = defaultOptions()
+		require.NoError(t, WithGeneratedTLS("argocd-agent-principal--generated")(server))
+
+		components, err := NewHAComponents(ctx, server,
+			ha.WithEnabled(true),
+			ha.WithPreferredRole("replica"),
+			ha.WithPeerAddress("localhost:0"),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, components.ReplicationClient)
+
+		err = components.ReplicationClient.Connect(ctx)
+		require.NoError(t, err)
+		require.NoError(t, components.ReplicationClient.Disconnect())
+	})
 }
 
 func TestServerStateProvider(t *testing.T) {

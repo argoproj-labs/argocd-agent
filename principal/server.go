@@ -81,8 +81,9 @@ import (
 )
 
 type Server struct {
-	options   *ServerOptions
-	tlsConfig *tls.Config
+	options     *ServerOptions
+	tlsConfig   *tls.Config
+	tlsConfigMu sync.RWMutex
 	// listener contains GRPC server listener
 	listener *Listener
 	// server is not currently used
@@ -1196,6 +1197,35 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 		tlsConfig.ClientCAs = s.options.rootCa
 	}
 
+	return tlsConfig, nil
+}
+
+func (s *Server) currentTLSConfig() *tls.Config {
+	s.tlsConfigMu.RLock()
+	defer s.tlsConfigMu.RUnlock()
+	return s.tlsConfig
+}
+
+func (s *Server) ensureTLSConfig() (*tls.Config, error) {
+	s.tlsConfigMu.RLock()
+	if s.tlsConfig != nil || s.options.insecurePlaintext {
+		tlsConfig := s.tlsConfig
+		s.tlsConfigMu.RUnlock()
+		return tlsConfig, nil
+	}
+	s.tlsConfigMu.RUnlock()
+
+	s.tlsConfigMu.Lock()
+	defer s.tlsConfigMu.Unlock()
+	if s.tlsConfig != nil || s.options.insecurePlaintext {
+		return s.tlsConfig, nil
+	}
+
+	tlsConfig, err := s.loadTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	s.tlsConfig = tlsConfig
 	return tlsConfig, nil
 }
 

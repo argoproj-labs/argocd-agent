@@ -334,21 +334,14 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 		if server.options != nil && server.options.insecurePlaintext {
 			clientOpts = append(clientOpts, replication.WithInsecure())
 		} else {
-			// Derive client TLS lazily from the server's TLS config, which isn't
-			// populated until Listen() is called (after NewHAComponents returns).
-			// The server cert acts as the client identity; ClientCAs (root CA) is
-			// reused as RootCAs to verify the peer's server cert.
+			// HA components are built before listener startup, so initialize TLS lazily.
 			clientOpts = append(clientOpts, replication.WithTLSConfigFunc(func() *tls.Config {
-				if server.tlsConfig == nil {
+				serverTLSConfig, err := server.ensureTLSConfig()
+				if err != nil {
+					log().WithError(err).Warn("HA: failed to load TLS config for replication client")
 					return nil
 				}
-				return &tls.Config{
-					Certificates: server.tlsConfig.Certificates,
-					RootCAs:      server.tlsConfig.ClientCAs,
-					MinVersion:   server.tlsConfig.MinVersion,
-					MaxVersion:   server.tlsConfig.MaxVersion,
-					CipherSuites: server.tlsConfig.CipherSuites,
-				}
+				return replicationClientTLSConfig(serverTLSConfig)
 			}))
 		}
 
@@ -378,6 +371,19 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 	})
 
 	return components, nil
+}
+
+func replicationClientTLSConfig(serverTLSConfig *tls.Config) *tls.Config {
+	if serverTLSConfig == nil {
+		return nil
+	}
+	return &tls.Config{
+		Certificates: serverTLSConfig.Certificates,
+		RootCAs:      serverTLSConfig.ClientCAs,
+		MinVersion:   serverTLSConfig.MinVersion,
+		MaxVersion:   serverTLSConfig.MaxVersion,
+		CipherSuites: serverTLSConfig.CipherSuites,
+	}
 }
 
 // StartHA starts the HA components.
