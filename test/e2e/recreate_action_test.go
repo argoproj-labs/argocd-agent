@@ -106,7 +106,8 @@ func (suite *RecreateActionTestSuite) createAndDeleteApp(action, appName string)
 		principalApp := argoapp.Application{}
 		err := suite.PrincipalClient.Get(suite.Ctx, appKey, &principalApp, metav1.GetOptions{})
 		if err != nil {
-			return true
+			t.Logf("waiting for principal app status update: %v", err)
+			return false
 		}
 		return principalApp.Status.Sync.Status != argoapp.SyncStatusCodeSynced ||
 			principalApp.Status.Health.Status != health.HealthStatusHealthy
