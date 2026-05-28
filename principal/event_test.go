@@ -263,6 +263,67 @@ func Test_CreateEvents(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, ns)
 	})
+	t.Run("Create application in autonomous mode rewrites child app namespaces in status.resources", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "parent-app",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "https://github.com/example/apps",
+					Path:           ".",
+					TargetRevision: "HEAD",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
+				Resources: []v1alpha1.ResourceStatus{
+					{
+						Group:     "argoproj.io",
+						Kind:      "Application",
+						Name:      "child-app",
+						Namespace: "argocd",
+						Version:   "v1alpha1",
+						Status:    v1alpha1.SyncStatusCodeSynced,
+					},
+					{
+						Group:     "apps",
+						Kind:      "Deployment",
+						Name:      "my-deploy",
+						Namespace: "default",
+						Version:   "v1",
+						Status:    v1alpha1.SyncStatusCodeSynced,
+					},
+				},
+			},
+		}
+		fac := kube.NewKubernetesFakeClientWithApps("argocd", app)
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("application")
+		ev.SetType(event.Create.String())
+		ev.SetData(cloudevents.ApplicationJSON, app)
+		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq.On("Get").Return(&ev, false)
+		wq.On("Done", &ev)
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil), WithRedisProxyDisabled())
+		require.NoError(t, err)
+		s.clusterMgr.MapCluster("agent-staging", &v1alpha1.Cluster{Name: "agent-staging", Server: "https://staging.com"})
+		s.setAgentMode("agent-staging", types.AgentModeAutonomous)
+		_, err = s.processRecvQueue(context.Background(), "agent-staging", wq)
+		assert.NoError(t, err)
+		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("agent-staging").Get(context.TODO(), "parent-app", v1.GetOptions{})
+		require.NoError(t, err)
+		require.NotNil(t, napp)
+		require.Len(t, napp.Status.Resources, 2)
+		// Child Application namespace should be rewritten to the agent name (principal-side namespace)
+		assert.Equal(t, "agent-staging", napp.Status.Resources[0].Namespace)
+		assert.Equal(t, "Application", napp.Status.Resources[0].Kind)
+		// Non-Application resources should retain their original namespace
+		assert.Equal(t, "default", napp.Status.Resources[1].Namespace)
+		assert.Equal(t, "Deployment", napp.Status.Resources[1].Kind)
+	})
 	t.Run("Create pre-existing application in autonomous mode", func(t *testing.T) {
 		app := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
@@ -723,6 +784,83 @@ func Test_UpdateEvents(t *testing.T) {
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, napp.Status.Sync.Status)
 	})
 
+	t.Run("SpecUpdate in autonomous mode rewrites child app namespaces in status.resources", func(t *testing.T) {
+		upApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "parent-app",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "https://github.com/example/apps",
+					Path:           ".",
+					TargetRevision: "HEAD",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
+				Resources: []v1alpha1.ResourceStatus{
+					{
+						Group:     "argoproj.io",
+						Kind:      "Application",
+						Name:      "child-app",
+						Namespace: "argocd",
+						Version:   "v1alpha1",
+						Status:    v1alpha1.SyncStatusCodeSynced,
+					},
+					{
+						Group:     "apps",
+						Kind:      "Deployment",
+						Name:      "my-deploy",
+						Namespace: "default",
+						Version:   "v1",
+						Status:    v1alpha1.SyncStatusCodeSynced,
+					},
+				},
+			},
+		}
+		exApp := upApp.DeepCopy()
+		exApp.Namespace = "agent-staging"
+		fac := kube.NewKubernetesFakeClientWithApps("argocd", exApp)
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("application")
+		ev.SetType(event.SpecUpdate.String())
+		ev.SetData(cloudevents.ApplicationJSON, upApp)
+		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq.On("Get").Return(&ev, false)
+		wq.On("Done", &ev)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, err := NewServer(ctx, fac, "argocd",
+			WithGeneratedTokenSigningKey(),
+			WithAutoNamespaceCreate(true, "", nil),
+			WithRedisProxyDisabled(),
+		)
+		require.NoError(t, err)
+
+		defer func() {
+			_ = s.Shutdown()
+		}()
+
+		err = s.Start(ctx, make(chan error))
+		require.NoError(t, err)
+
+		s.clusterMgr.MapCluster("agent-staging", &v1alpha1.Cluster{Name: "agent-staging", Server: "https://staging.com"})
+		s.setAgentMode("agent-staging", types.AgentModeAutonomous)
+		_, err = s.processRecvQueue(ctx, "agent-staging", wq)
+		assert.NoError(t, err)
+		napp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("agent-staging").Get(ctx, "parent-app", v1.GetOptions{})
+		require.NoError(t, err)
+		require.NotNil(t, napp)
+		require.Len(t, napp.Status.Resources, 2)
+		assert.Equal(t, "agent-staging", napp.Status.Resources[0].Namespace)
+		assert.Equal(t, "Application", napp.Status.Resources[0].Kind)
+		assert.Equal(t, "default", napp.Status.Resources[1].Namespace)
+		assert.Equal(t, "Deployment", napp.Status.Resources[1].Kind)
+	})
 	t.Run("Spec update for managed mode fails", func(t *testing.T) {
 		upApp := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
