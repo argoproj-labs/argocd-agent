@@ -245,49 +245,55 @@ func (p *serverStateProvider) serializeResource(key resources.ResourceKey) ([]by
 
 func (p *serverStateProvider) currentResourceInfo(key resources.ResourceKey) (replicationserver.ResourceInfo, error) {
 	ctx := p.server.ctx
+	resource := replicationserver.ResourceInfo{
+		Name:      key.Name,
+		Namespace: key.Namespace,
+		Kind:      key.Kind,
+		UID:       key.UID,
+	}
 	switch key.Kind {
 	case "Application":
 		if p.server.appManager == nil {
-			return replicationserver.ResourceInfo{}, nil
+			return resource, nil
 		}
 		app, err := p.server.appManager.Get(ctx, key.Name, key.Namespace)
 		if err != nil {
-			return replicationserver.ResourceInfo{}, err
+			return resource, err
 		}
 		data, err := json.Marshal(app)
 		return replicationserver.ResourceInfo{Name: app.Name, Namespace: app.Namespace, Kind: key.Kind, UID: string(app.UID), Data: data}, err
 	case "AppProject":
 		if p.server.projectManager == nil {
-			return replicationserver.ResourceInfo{}, nil
+			return resource, nil
 		}
 		proj, err := p.server.projectManager.Get(ctx, key.Name, key.Namespace)
 		if err != nil {
-			return replicationserver.ResourceInfo{}, err
+			return resource, err
 		}
 		data, err := json.Marshal(proj)
 		return replicationserver.ResourceInfo{Name: proj.Name, Namespace: proj.Namespace, Kind: key.Kind, UID: string(proj.UID), Data: data}, err
 	case "ApplicationSet":
 		if p.server.appSetManager == nil {
-			return replicationserver.ResourceInfo{}, nil
+			return resource, nil
 		}
 		appSet, err := p.server.appSetManager.Get(ctx, key.Name, key.Namespace)
 		if err != nil {
-			return replicationserver.ResourceInfo{}, err
+			return resource, err
 		}
 		data, err := json.Marshal(appSet)
 		return replicationserver.ResourceInfo{Name: appSet.Name, Namespace: appSet.Namespace, Kind: key.Kind, UID: string(appSet.UID), Data: data}, err
 	case "Repository":
 		if p.server.repoManager == nil {
-			return replicationserver.ResourceInfo{}, nil
+			return resource, nil
 		}
 		repo, err := p.server.repoManager.Get(ctx, key.Name, key.Namespace)
 		if err != nil {
-			return replicationserver.ResourceInfo{}, err
+			return resource, err
 		}
 		data, err := json.Marshal(repo)
 		return replicationserver.ResourceInfo{Name: repo.Name, Namespace: repo.Namespace, Kind: key.Kind, UID: string(repo.UID), Data: data}, err
 	default:
-		return replicationserver.ResourceInfo{}, nil
+		return resource, nil
 	}
 }
 

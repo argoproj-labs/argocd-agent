@@ -915,6 +915,40 @@ func newConfirmMissingClient(t *testing.T, response *replicationapi.ConfirmMissi
 	return client, server
 }
 
+func newReplicationConfirmationClient(t *testing.T, primary *Server, snapshotSequenceNum uint64, currentSequenceNum uint64) *replication.Client {
+	t.Helper()
+	forwarder := replication.NewForwarder()
+	for range currentSequenceNum {
+		forwarder.Forward(nil, "agent1", replication.DirectionInbound)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	grpcServer := grpc.NewServer()
+	replicationapi.RegisterReplicationServer(grpcServer, replicationserver.NewServer(forwarder, &serverStateProvider{server: primary}))
+	go func() {
+		_ = grpcServer.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		_ = listener.Close()
+	})
+
+	client := replication.NewClient(context.Background(),
+		replication.WithPrimaryAddress(listener.Addr().String()),
+		replication.WithInsecure(),
+	)
+	require.NoError(t, client.Connect(context.Background()))
+	t.Cleanup(func() {
+		require.NoError(t, client.Disconnect())
+	})
+
+	resp, err := client.ConfirmMissingResources(context.Background(), "agent1", nil, snapshotSequenceNum)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	return client
+}
+
 func TestHandleSnapshot_DoesNotDeleteTrackedApplications(t *testing.T) {
 	t.Run("keeps same named application when snapshot UID changes", func(t *testing.T) {
 		app := &v1alpha1.Application{
@@ -1021,6 +1055,125 @@ func TestHandleSnapshot_DoesNotDeleteTrackedApplications(t *testing.T) {
 
 		mockBackend.AssertCalled(t, "Delete", mock.Anything, key.Name, key.Namespace, mock.Anything)
 		assert.NotContains(t, server.resources.GetAllResources("agent1"), key)
+	})
+
+	t.Run("keeps omitted application when primary sequence has advanced", func(t *testing.T) {
+		replicaBackend := &mocks.Application{}
+		replica := newAppTestServer(replicaBackend)
+		key := resources.ResourceKey{
+			Name:      "sequence-mismatch-app",
+			Namespace: "project-example",
+			Kind:      "Application",
+			UID:       "uid-1",
+		}
+		replica.resources.Add("agent1", key)
+
+		components, err := NewHAComponents(context.Background(), replica)
+		require.NoError(t, err)
+		components.ReplicationClient = newReplicationConfirmationClient(t, newAppTestServer(&mocks.Application{}), 7, 8)
+
+		err = components.handleSnapshot(&replicationapi.ReplicationSnapshot{
+			LastSequenceNum: 7,
+			Agents: []*replicationapi.AgentState{{
+				Name:      "agent1",
+				Mode:      "managed",
+				Resources: nil,
+			}},
+		})
+		require.NoError(t, err)
+
+		replicaBackend.AssertNotCalled(t, "Delete", mock.Anything, key.Name, key.Namespace, mock.Anything)
+		assert.Contains(t, replica.resources.GetAllResources("agent1"), key)
+	})
+
+	t.Run("deletes omitted application when real primary confirms deletion", func(t *testing.T) {
+		key := resources.ResourceKey{
+			Name:      "real-confirmed-delete",
+			Namespace: "project-example",
+			Kind:      "Application",
+			UID:       "uid-1",
+		}
+
+		primaryBackend := &mocks.Application{}
+		primaryBackend.On("Get", mock.Anything, key.Name, key.Namespace).Return(nil, k8serrors.NewNotFound(schema.GroupResource{
+			Group:    "argoproj.io",
+			Resource: "applications",
+		}, key.Name))
+		primary := newAppTestServer(primaryBackend)
+
+		replicaBackend := &mocks.Application{}
+		replicaBackend.On("Delete", mock.Anything, key.Name, key.Namespace, mock.Anything).Return(nil)
+		replica := newAppTestServer(replicaBackend)
+		replica.resources.Add("agent1", key)
+
+		components, err := NewHAComponents(context.Background(), replica)
+		require.NoError(t, err)
+		components.ReplicationClient = newReplicationConfirmationClient(t, primary, 7, 7)
+
+		err = components.handleSnapshot(&replicationapi.ReplicationSnapshot{
+			LastSequenceNum: 7,
+			Agents: []*replicationapi.AgentState{{
+				Name:      "agent1",
+				Mode:      "managed",
+				Resources: nil,
+			}},
+		})
+		require.NoError(t, err)
+
+		replicaBackend.AssertCalled(t, "Delete", mock.Anything, key.Name, key.Namespace, mock.Anything)
+		assert.NotContains(t, replica.resources.GetAllResources("agent1"), key)
+	})
+
+	t.Run("repairs omitted application when real primary confirms it exists", func(t *testing.T) {
+		oldKey := resources.ResourceKey{
+			Name:      "real-confirmed-exists",
+			Namespace: "project-example",
+			Kind:      "Application",
+			UID:       "old-uid",
+		}
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      oldKey.Name,
+				Namespace: oldKey.Namespace,
+				UID:       "current-uid",
+			},
+			Spec: v1alpha1.ApplicationSpec{Project: "example"},
+		}
+		currentKey := resources.ResourceKey{
+			Name:      app.Name,
+			Namespace: app.Namespace,
+			Kind:      "Application",
+			UID:       string(app.UID),
+		}
+
+		primaryBackend := &mocks.Application{}
+		primaryBackend.On("Get", mock.Anything, oldKey.Name, oldKey.Namespace).Return(app, nil)
+		primary := newAppTestServer(primaryBackend)
+
+		replicaBackend := &mocks.Application{}
+		replicaBackend.On("Create", mock.Anything, mock.MatchedBy(func(created *v1alpha1.Application) bool {
+			return created.Name == app.Name && created.Namespace == app.Namespace && created.UID == app.UID
+		})).Return(app, nil)
+		replica := newAppTestServer(replicaBackend)
+		replica.resources.Add("agent1", oldKey)
+
+		components, err := NewHAComponents(context.Background(), replica)
+		require.NoError(t, err)
+		components.ReplicationClient = newReplicationConfirmationClient(t, primary, 7, 7)
+
+		err = components.handleSnapshot(&replicationapi.ReplicationSnapshot{
+			LastSequenceNum: 7,
+			Agents: []*replicationapi.AgentState{{
+				Name:      "agent1",
+				Mode:      "managed",
+				Resources: nil,
+			}},
+		})
+		require.NoError(t, err)
+
+		replicaBackend.AssertNotCalled(t, "Delete", mock.Anything, oldKey.Name, oldKey.Namespace, mock.Anything)
+		assert.NotContains(t, replica.resources.GetAllResources("agent1"), oldKey)
+		assert.Contains(t, replica.resources.GetAllResources("agent1"), currentKey)
 	})
 }
 
