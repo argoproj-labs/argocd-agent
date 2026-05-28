@@ -227,7 +227,7 @@ Migration in this context means moving responsibility for an Application from th
 
 ### Step 1: Sync the AppProject to the spoke cluster
 
-Before migrating Applications, the AppProjects referenced by these Applications needs to be synced to the spoke cluster. Update the AppProject on the hub cluster to include the agent name in the project's `.spec.destinations` and `sourceNamespaces` fields. Then add the label (e.g. `argocd-agent=true`) that matches the principal's label selector. See the [AppProjects](appprojects.md) page for full details on how AppProjects are managed and distributed to agents.
+Before migrating Applications, the AppProjects referenced by these Applications need to be synced to the spoke cluster. Update the AppProject on the hub cluster to include the agent name in the project's `.spec.destinations` and `sourceNamespaces` fields. Then add the label (e.g. `argocd-agent=true`) that matches the principal's label selector. See the [AppProjects](appprojects.md) page for full details on how AppProjects are managed and distributed to agents.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
