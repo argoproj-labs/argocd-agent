@@ -1,6 +1,6 @@
 # Hybrid Architecture: Running Agent alongside an existing Argo CD instance
 
-This guide explains how to run argocd-agent (principal + agent) alongside a pre-existing Argo CD installation on the same hub cluster. This enables you to try out argocd-agent without replacing your existing setup, gradually migrate applications, or run both architectures long-term. This document assumes the agent is running in [managed mode](../concepts/agent-mapping.md) with destination-based mapping.
+This guide explains how to run argocd-agent (principal + agent) alongside a pre-existing Argo CD installation on the same hub cluster. This enables you to try out argocd-agent without replacing your existing setup, gradually migrate applications, or run both architectures long-term. This document assumes the agent is running in [managed mode](../concepts/agent-mapping.md) with [destination-based mapping](../concepts/agent-mapping.md#destination-based-mapping).
 
 !!! tip "Who is this for?"
     This guide is for teams that already have a working Argo CD installation managing applications and want to adopt argocd-agent incrementally. If you are setting up argocd-agent from scratch, see the [Getting Started](../getting-started/index.md) guide instead.
@@ -225,9 +225,9 @@ argocd app list
 
 Migration in this context means moving responsibility for an Application from the hub's Argo CD application controller (push-based) to the spoke's local application controller, managed via the agent's pull-based model. Once the hybrid setup is running, you can migrate applications from the traditional setup to the agent-based setup, one application at a time. This allows you to validate each application is synced and healthy via the agent before proceeding to the next.
 
-### Step 1: Prepare the AppProject on hub
+### Step 1: Sync the AppProject to the spoke cluster
 
-The AppProject must be available on the spoke cluster before migrating applications that reference it. Ensure the project's `destinations` and `sourceNamespaces` include the agent name, then add the label (e.g. `argocd-agent=true`) that matches the principal's label selector. See the [AppProjects](appprojects.md) page for full details on how AppProjects are managed and distributed to agents.
+Before migrating Applications, the AppProjects referenced by these Applications needs to be synced to the spoke cluster. Update the AppProject on the hub cluster to include the agent name in the project's `.spec.destinations` and `sourceNamespaces` fields. Then add the label (e.g. `argocd-agent=true`) that matches the principal's label selector. See the [AppProjects](appprojects.md) page for full details on how AppProjects are managed and distributed to agents.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -247,7 +247,7 @@ spec:
     - '*'
 ```
 
-### Step 2: Prepare Repository Secrets on hub
+### Step 2: Sync the Repository Secrets to the spoke cluster
 
 If your application uses private repositories, ensure the repository secret is project-scoped and labeled. Only project-scoped repository secrets are distributed to agents. See the [Repository](repository.md) page for full details on how repository secrets are managed and distributed to agents.
 
@@ -371,5 +371,3 @@ After setting up the hybrid architecture, verify the following:
 
 - [ ] Both traditional and agent apps can be synced simultaneously without interference
 - [ ] Modifying a traditional app does not affect agent apps, and vice versa
-- [ ] Adding the label (e.g. `argocd-agent=true`) moves an app to agent management
-- [ ] Removing the label (e.g. `argocd-agent=true`) returns an app to traditional management
