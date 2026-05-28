@@ -1,15 +1,15 @@
 # Hybrid Architecture: Running Agent alongside an existing Argo CD instance
 
-This guide explains how to run argocd-agent (principal + agent) alongside a pre-existing Argo CD installation on the same hub cluster. This enables you to try out argocd-agent without replacing your existing setup, gradually migrate applications, or run both architectures long-term.
+This guide explains how to run argocd-agent (principal + agent) alongside a pre-existing Argo CD installation on the same hub cluster. This enables you to try out argocd-agent without replacing your existing setup, gradually migrate applications, or run both architectures long-term. This document assumes the agent is running in [managed mode](../concepts/agent-mapping.md) with destination-based mapping.
 
 !!! tip "Who is this for?"
     This guide is for teams that already have a working Argo CD installation managing applications and want to adopt argocd-agent incrementally. If you are setting up argocd-agent from scratch, see the [Getting Started](../getting-started/index.md) guide instead.
 
 ## Overview
 
-In a hybrid architecture, the traditional Argo CD components (server, app controller, repo-server, Redis) continue to operate on the hub cluster. The argocd-agent principal is installed alongside them. Both systems share the same Argo CD UI and API, but each manages a distinct set of applications:
+In a hybrid architecture, the traditional Argo CD components (server, application controller, repository server, Redis) continue to operate on the hub cluster. The argocd-agent principal is installed alongside them. Both systems share the same Argo CD UI and API, but each manages a distinct set of applications:
 
-- **Traditional apps**: managed by the hub app controller, deployed to spokes via direct cluster access
+- **Traditional apps**: managed by the Argo CD application controller on the hub, deployed to spokes via direct cluster access
 - **Agent apps**: managed by the principal, deployed to spokes via the agent pull model
 
 The two systems coexist through isolation mechanisms on both sides: label selectors on the principal and agent, the `skip-reconcile` annotation on agent cluster secrets, and the `ignore-unmanaged-apps` flag as an additional safety net.
@@ -20,8 +20,8 @@ The two systems coexist through isolation mechanisms on both sides: label select
 flowchart TB
     subgraph hub [Hub Cluster]
         ArgoServer["Argo CD Server"]
-        AppController["App Controller"]
-        RepoServer["Repo Server"]
+        AppController["Application Controller"]
+        RepoServer["Repository Server"]
         Redis["Redis"]
         Principal["Principal"]
         RedisProxy["Redis Proxy"]
@@ -34,8 +34,8 @@ flowchart TB
 
     subgraph spoke [Spoke Cluster]
         Agent["Agent"]
-        SpokeAppCtrl["App Controller"]
-        SpokeRepo["Repo Server"]
+        SpokeAppCtrl["Application Controller"]
+        SpokeRepo["Repository Server"]
         SpokeRedis["Redis"]
         SpokeAppCtrl --> SpokeRedis
     end
@@ -46,34 +46,39 @@ flowchart TB
 
 **Hub cluster** runs all existing Argo CD components unchanged, plus the principal and its Redis proxy. The Argo CD server is reconfigured to talk to the Redis proxy instead of Redis directly. The proxy transparently routes traffic: traditional app data goes to the Redis on the hub cluster, agent app data is forwarded to the appropriate agent via the principal.
 
-**Spoke cluster** runs the agent, a local app controller, repo-server, and Redis. The agent initiates a gRPC connection to the principal. The local app controller reconciles applications that the principal pushes to the spoke.
+**Spoke cluster** runs the agent, a local Argo CD application controller, repository server, and Redis. The agent initiates a gRPC connection to the principal. The local application controller reconciles applications that the principal pushes to the spoke.
 
 ## How Isolation Works
 
-The following mechanisms prevent conflicts between the traditional setup and the agent setup.
+The following mechanisms prevent conflicts between the traditional setup and the agent setup. The principal/agent label selector and `skip-reconcile` annotation are required for a correct hybrid setup. The `ignore-unmanaged-apps` flag is an optional but recommended defense-in-depth measure.
 
 ### Label Selector
 
-The principal and agent are configured with a label selector. They only watch and process Kubernetes resources (Applications, AppProjects, Repositories) that carry the matching label. The existing app controller is unaware of this label and continues to process all applications as before.
+**Configure this in all hybrid setups.** The principal and agent are configured with a label selector. They only watch and process Kubernetes resources (Applications, AppProjects, Repositories) that carry the matching label. Apply the matching label to every Application, AppProject, and Repository secret you want the agent to manage. Resources without the label remain invisible to both the principal and the agent, so the existing Argo CD application controller continues to process them without interference.
 
 ```yaml
 # Principal configuration (argocd-agent-params ConfigMap)
-principal.label-selector: "migrate=true"
+principal.label-selector: "argocd-agent=true"
 
 # Agent configuration (argocd-agent-params ConfigMap on spoke)
-agent.label-selector: "migrate=true"
+agent.label-selector: "argocd-agent=true"
 ```
+
+!!! note "Label selector value"
+    Any valid Kubernetes label selector can be used. The value must be consistent between the principal and agent configurations. `argocd-agent=true` is used throughout this guide, but you can choose any key/value that fits your labeling conventions.
 
 The label selector is combined with a built-in exclusion of resources labeled `argocd-agent.argoproj-labs.io/ignore-sync=true`, using Kubernetes label selector AND semantics.
 
 ### skip-reconcile Annotation
 
-When you create an agent using `argocd-agentctl agent create`, the resulting cluster secret is stamped with the annotation `argocd.argoproj.io/skip-reconcile: "true"`. This tells the hub app controller to skip reconciliation for all applications targeting that cluster.
+When you create an agent using `argocd-agentctl agent create`, the resulting cluster secret is stamped with the annotation `argocd.argoproj.io/skip-reconcile: "true"`. This tells the Argo CD application controller on the hub to skip reconciliation for all applications targeting that cluster.
 
-This is the key mechanism that prevents the hub app controller from interfering with applications that have been migrated to the agent. The agent cluster secret can coexist with a traditional cluster secret for the same physical spoke cluster because they have different names and point to different endpoints (the agent secret points to the resource proxy).
+This is the key mechanism that prevents the hub's application controller from interfering with applications that have been migrated to the agent. The agent cluster secret can coexist with a traditional cluster secret for the same physical spoke cluster because they have different names and point to different endpoints (the agent secret points to the resource proxy).
+
+**Required on every agent cluster secret.** This annotation must be present on any cluster secret that points to an agent-managed cluster, to ensure the hub's Argo CD application controller does not reconcile applications targeting that cluster. `argocd-agentctl agent create` applies it automatically. If you create cluster secrets by other means (e.g. manually or via GitOps), add the annotation explicitly.
 
 !!! warning "Requires Argo CD v3.4+"
-    The `skip-reconcile` annotation is only supported in Argo CD v3.4 and later. On older versions, the hub app controller will still attempt to reconcile applications targeting agent clusters, which will cause conflicts.
+    The `skip-reconcile` annotation is only supported in Argo CD v3.4 and later. On older versions, the Argo CD application controller on the hub will still attempt to reconcile applications targeting agent clusters, which will cause conflicts.
 
 ### Agent Label Selector
 
@@ -81,14 +86,16 @@ The agent also supports a label selector (`agent.label-selector`), which filters
 
 ```yaml
 # Agent configuration (argocd-agent-params ConfigMap on spoke)
-agent.label-selector: "migrate=true"
+agent.label-selector: "argocd-agent=true"
 ```
 
 When the principal pushes an application to the spoke, it preserves the application's existing labels. Since only labeled apps are picked up by the principal in the first place, the spoke-side label selector naturally ensures the agent only processes apps that came through the principal.
 
+**Configure this in all hybrid setups.** Set it to the same value as the principal's label selector. Without it, pre-existing spoke applications would be visible to the agent, which could cause spurious status events or conflicts with applications the agent did not create.
+
 ### ignore-unmanaged-apps (Additional Safety Net)
 
-As an additional safeguard, the `ignore-unmanaged-apps` flag tells the agent to skip any application that lacks the `argocd.argoproj.io/source-uid` annotation, which is automatically set by the agent when it creates an application locally on the spoke. This is an in-memory filter that runs after the label selector.
+The `ignore-unmanaged-apps` flag tells the agent to skip any application that lacks the `argocd.argoproj.io/source-uid` annotation, which is automatically set by the agent when it creates an application locally on the spoke.
 
 This flag is passed via the `--ignore-unmanaged-apps` CLI flag or the `ARGOCD_AGENT_IGNORE_UNMANAGED_APPS` environment variable on the agent Deployment:
 
@@ -98,14 +105,14 @@ This flag is passed via the `--ignore-unmanaged-apps` CLI flag or the `ARGOCD_AG
   value: "true"
 ```
 
-This is useful as a defense-in-depth measure: if a pre-existing spoke app happens to carry the same label used for migration, the agent will still skip it because it lacks the `source-uid` annotation. Without this flag, the agent would treat such apps as managed, send status events to the principal for apps that don't exist there, and cause errors.
+Enable this in hybrid setups where the spoke has pre-existing applications — it prevents the agent from picking up apps that coincidentally carry the agent label but were not created by the agent. Although harmless, this flag may not be required for spoke clusters with no pre-existing apps.
 
 ## Prerequisites
 
 Before setting up the hybrid architecture, ensure:
 
 - **Argo CD v3.4+** is installed on the hub cluster (required for `skip-reconcile`)
-- The hub cluster has a working Argo CD installation with server, app controller, repo-server, and Redis
+- The hub cluster has a working Argo CD installation with server, application controller, repository server, and Redis
 - Spoke clusters are network-accessible from the hub (for the traditional setup) and can initiate outbound connections to the hub (for the agent setup)
 - You have `argocd-agentctl` installed for PKI management and agent creation
 
@@ -123,13 +130,13 @@ metadata:
   name: argocd-agent-params
   namespace: argocd
 data:
-  principal.label-selector: "migrate=true"
+  principal.label-selector: "argocd-agent=true"
   principal.destination-based-mapping: "true"
-  ..............
+  # (...)
 ```
 
 !!! note "Destination-based mapping"
-    Enabling destination-based mapping is recommended for hybrid setups. It allows applications to reside in any namespace on the hub and routes to agents based on `spec.destination.name` rather than the application's namespace. This means your existing applications can stay in their current namespaces during migration.
+    Enabling destination-based mapping is strongly recommended for hybrid setups. It allows applications to reside in any namespace on the hub and routes to agents based on `spec.destination.name` rather than the application's namespace. This means your existing applications can stay in their current namespaces during migration. Without it, users would have to move applications to the corresponding agent namespaces, making the migration more disruptive. See [destination-based mapping](../concepts/agent-mapping.md#destination-based-mapping) for more details.
 
 ### Step 2: Point the Argo CD Server to the Redis Proxy
 
@@ -158,13 +165,14 @@ Use `argocd-agentctl` to create the agent on the hub. This creates a cluster sec
 ```bash
 argocd-agentctl agent create agent-spoke-1 \
   --namespace argocd
+  # (...) additional parameters required here
 ```
 
 This creates:
 
 - A Kubernetes secret named `cluster-agent-spoke-1` in the `argocd` namespace
-- The secret has the annotation `argocd.argoproj.io/skip-reconcile: "true"`
-- The cluster's `server` URL points to the principal's resource proxy
+- The secret has the annotation `argocd.argoproj.io/skip-reconcile: "true"` which tells the hub's application controller to skip reconciliation for all applications targeting that cluster
+- The cluster's `server` URL points to the principal's resource proxy ensuring Argo CD has visibility (via agent) into spoke cluster resources
 - TLS client credentials for the agent to authenticate with the principal
 
 You can verify the secret:
@@ -177,7 +185,7 @@ kubectl get secret cluster-agent-spoke-1 -n argocd \
 
 ### Step 4: Install the Agent on the Spoke
 
-Deploy the agent, app controller, repo-server, and Redis on the spoke cluster. Configure the agent to connect to the principal and enable the same label selector and mapping mode.
+Deploy the agent, Argo CD application controller, repository server, and Redis on the spoke cluster. Configure the agent to connect to the principal and enable the same label selector and mapping mode.
 
 ```yaml
 # argocd-agent-params ConfigMap on the spoke cluster
@@ -190,8 +198,8 @@ data:
   agent.destination-based-mapping: "true"
   agent.create-namespace: "true"
   agent.allowed-namespaces: "*"
-  agent.label-selector: "migrate=true"
-  ......................
+  agent.label-selector: "argocd-agent=true"
+  # (...)
 ```
 
 ### Step 5: Verify Connectivity
@@ -199,11 +207,11 @@ data:
 Check that the agent has connected to the principal:
 
 ```bash
-# On the hub, check principal logs for agent connection
-kubectl logs deployment/argocd-agent-principal -n argocd | grep "agent-spoke-1"
+# On the hub, check principal logs for the agent connection event.
+kubectl logs deployment/argocd-agent-principal -n argocd | grep "An agent connected to the subscription stream"
 
-# Verify the agent is connected
-kubectl logs deployment/argocd-agent-agent -n argocd | grep "connected"
+# On the spoke, confirm the agent has opened the event stream to the principal.
+kubectl logs deployment/argocd-agent-agent -n argocd | grep "Starting to receive events from event stream"
 ```
 
 Verify that existing applications are unaffected:
@@ -215,11 +223,11 @@ argocd app list
 
 ## Migrating Applications
 
-Once the hybrid setup is running, you can migrate applications from the traditional setup to the agent-based setup. Migration is done per-application.
+Migration in this context means moving responsibility for an Application from the hub's Argo CD application controller (push-based) to the spoke's local application controller, managed via the agent's pull-based model. Once the hybrid setup is running, you can migrate applications from the traditional setup to the agent-based setup, one application at a time. This allows you to validate each application is synced and healthy via the agent before proceeding to the next.
 
-### Step 1: Prepare the AppProject
+### Step 1: Prepare the AppProject on hub
 
-The AppProject must be available on the spoke cluster before migrating applications that reference it. Ensure the project's `destinations` and `sourceNamespaces` include the agent name, then add the migration label that matches the principal's label selector.
+The AppProject must be available on the spoke cluster before migrating applications that reference it. Ensure the project's `destinations` and `sourceNamespaces` include the agent name, then add the label (e.g. `argocd-agent=true`) that matches the principal's label selector. See the [AppProjects](appprojects.md) page for full details on how AppProjects are managed and distributed to agents.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -228,7 +236,7 @@ metadata:
   name: my-project
   namespace: argocd
   labels:
-    migrate: "true"    # Matches the principal's label selector
+    argocd-agent: "true"    # Matches the principal's label selector
 spec:
   sourceNamespaces:
     - "agent-spoke-1"  # Must match agent name
@@ -239,32 +247,48 @@ spec:
     - '*'
 ```
 
-### Step 2: Prepare Repository Secrets
+### Step 2: Prepare Repository Secrets on hub
 
-If your application uses private repositories, ensure the repository secret is project-scoped and labeled. Only project-scoped repository secrets are distributed to agents.
+If your application uses private repositories, ensure the repository secret is project-scoped and labeled. Only project-scoped repository secrets are distributed to agents. See the [Repository](repository.md) page for full details on how repository secrets are managed and distributed to agents.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-private-repo
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+type: Opaque
+stringData:
+  type: git
+  url: https://github.com/myorg/backend-services.git
+  project: my-project  # Associates with AppProject above
+  #(...)
+```
 
 ```bash
-kubectl label secret repo-my-private-repo -n argocd migrate=true
+kubectl label secret my-private-repo -n argocd argocd-agent=true
 ```
 
 ### Step 3: Migrate the Application
 
-Migration involves two changes to the Application: updating the destination to point to the agent cluster, and adding the migration label.
+Migration involves two changes to the Application: updating the destination (.spec.destination's name field) to point to the agent cluster, and adding the shared selector label (in our case argocd-agent=true).
 
-**Update the destination** to point to the agent cluster name. Since the agent cluster secret has `skip-reconcile`, the hub app controller will stop reconciling this application:
+**Update the destination** to point to the agent cluster name. Since the agent cluster secret has `skip-reconcile`, the hub's Argo CD application controller will stop reconciling this application:
 
 ```bash
 kubectl patch application my-app -n argocd --type merge \
-  -p '{"spec":{"destination":{"name":"agent-spoke-1","server":""}}}'
+  -p '{"spec":{"destination":{"name":"agent-spoke-1"}}}'
 ```
 
-**Add the migration label** so the principal picks up the application:
+**Add the shared selector label** (in our case `argocd-agent=true`) so the principal picks up the application:
 
 ```bash
-kubectl label application my-app -n argocd migrate=true
+kubectl label application my-app -n argocd argocd-agent=true
 ```
 
-The principal will now sync this application to the spoke agent. The spoke's local app controller will reconcile it and deploy the resources.
+The principal will now sync this application to the spoke agent. The spoke's local Argo CD application controller will reconcile it and deploy the resources.
 
 ### Step 4: Verify
 
@@ -278,17 +302,7 @@ argocd app get my-app
 
 ## How the UI Works in Hybrid Mode
 
-The Argo CD UI works seamlessly for both traditional and agent-managed applications. All applications appear in the same UI, and users interact with them the same way.
-
-Behind the scenes, the Redis proxy handles the routing:
-
-| Operation | Traditional Apps | Agent Apps |
-| --------- | --------------- | ---------- |
-| App list / status | Argo CD server reads from Redis (via proxy, forwarded to real Redis) | Argo CD server reads from Redis (via proxy, forwarded to real Redis) |
-| Resource tree | `GET app\|resources-tree\|...` forwarded to real Redis | `GET app\|resources-tree\|...` routed to agent via principal |
-| Managed resources | `GET app\|managed-resources\|...` forwarded to real Redis | `GET app\|managed-resources\|...` routed to agent via principal |
-| Pod logs | Argo CD server connects to spoke directly | Routed through resource proxy to agent |
-| Sync / Refresh | App controller on hub handles it | Principal forwards to agent |
+The Argo CD UI works seamlessly for both traditional and agent-managed applications. All applications appear in the same UI, and users interact with them the same way. See [Live Resources](../user-guide/live-resources.md) for more details around how Argo CD UI displays resources from the spoke cluster.
 
 ## Other Topologies
 
@@ -324,7 +338,7 @@ This means you can continue using cluster generators, Git generators, and other 
 
 ### skip-reconcile Requires Argo CD v3.4+
 
-The `argocd.argoproj.io/skip-reconcile` annotation is only supported in Argo CD v3.4 and later. On older versions, the hub app controller will still attempt to reconcile applications targeting agent clusters, leading to conflicts.
+The `argocd.argoproj.io/skip-reconcile` annotation is only supported in Argo CD v3.4 and later. On older versions, the hub's application controller will still attempt to reconcile applications targeting agent clusters, leading to conflicts.
 
 ## Validation Checklist
 
@@ -341,7 +355,7 @@ After setting up the hybrid architecture, verify the following:
 
 ### Traditional Apps
 
-- [ ] Existing apps without the migration label continue to sync normally
+- [ ] Existing apps without the label (e.g. `argocd-agent=true`) continue to sync normally
 - [ ] The principal logs show NO activity for unlabeled apps
 - [ ] Resource tree loads in the UI for traditional apps
 
@@ -351,11 +365,11 @@ After setting up the hybrid architecture, verify the following:
 - [ ] Apps are synced to the spoke and show Synced/Healthy
 - [ ] Resource tree loads in the UI for agent apps
 - [ ] Pod logs are accessible through the UI
-- [ ] The hub app controller does NOT reconcile agent apps
+- [ ] The hub's application controller does NOT reconcile agent apps
 
 ### Coexistence
 
 - [ ] Both traditional and agent apps can be synced simultaneously without interference
 - [ ] Modifying a traditional app does not affect agent apps, and vice versa
-- [ ] Adding the migration label moves an app to agent management
-- [ ] Removing the migration label returns an app to traditional management
+- [ ] Adding the label (e.g. `argocd-agent=true`) moves an app to agent management
+- [ ] Removing the label (e.g. `argocd-agent=true`) returns an app to traditional management
