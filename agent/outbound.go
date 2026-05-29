@@ -181,23 +181,28 @@ func (a *Agent) handleRecreatedApp(app *v1alpha1.Application, logCtx *logrus.Ent
 		return
 	}
 
-	// Remove the deletion timestamp from the application to allow it to be synced.
-	app.SetDeletionTimestamp(nil)
+	// Fetch the recreated app,
+	// deleted object is stale and still has DeletionTimestamp from the original deletion.
+	recreated, err := a.appManager.Get(a.context, app.Name, app.Namespace)
+	if err != nil {
+		logCtx.WithError(err).Error("failed to get recreated application")
+		return
+	}
 
 	switch a.recreateAction {
 	// If the recreate action is clear-status, clear the operationState on the recreated application.
 	case manager.RecreateActionClearStatus:
-		if err := a.appManager.ClearOperationState(a.context, app); err != nil {
+		if err := a.appManager.ClearOperationState(a.context, recreated); err != nil {
 			logCtx.WithError(err).Error("failed to clear operationState on recreated application")
 		} else {
 			logCtx.Info("Cleared operationState on recreated application to allow auto-sync")
 		}
 	// If the recreate action is resync, set the sync operation on the recreated application.
 	case manager.RecreateActionResync:
-		app.Operation = &v1alpha1.Operation{
+		recreated.Operation = &v1alpha1.Operation{
 			Sync: &v1alpha1.SyncOperation{},
 		}
-		if _, err := a.appManager.UpdateManagedApp(a.context, app, application.ManagedIdentity{}); err != nil {
+		if _, err := a.appManager.UpdateManagedApp(a.context, recreated, application.ManagedIdentity{}); err != nil {
 			logCtx.WithError(err).Error("failed to set sync operation on recreated application")
 		} else {
 			logCtx.Info("Triggered resync on recreated application")
