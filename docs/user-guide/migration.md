@@ -2,6 +2,9 @@
 
 This guide outlines the strategy for migrating from a traditional, multi-cluster Argo CD installation to argocd-agent. The migration involves transitioning from a **push-based architecture** (where the control plane reaches out to workload clusters) to a **pull-based architecture** (where agents reach back to the control plane).
 
+!!! note "Hybrid Architecture"
+    It is now possible to install and run argocd-agent alongside an existing Argo CD setup. The hybrid architecture enables you to try out argocd-agent without replacing your existing setup, gradually migrate applications, or run both architectures long-term. Please see [Hybrid Architecture](./hybrid-architecture.md) page for more details.
+
 !!! warning "Migration Complexity"
     Migration from traditional Argo CD to argocd-agent requires careful planning and will involve service interruption. This is an architectural change that affects your entire GitOps infrastructure.
 
