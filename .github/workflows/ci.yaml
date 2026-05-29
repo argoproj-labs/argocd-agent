@@ -233,9 +233,9 @@ jobs:
           sleep 30
       - name: Create Argo CD logs
         run: |
-          kubectl --context vcluster-agent-autonomous logs -n argocd argocd-application-controller-0 > /tmp/vcluster-agent-autonomous-controller.log
-          kubectl --context vcluster-agent-managed logs -n argocd argocd-application-controller-0 > /tmp/vcluster-agent-managed-controller.log
-          kubectl --context vcluster-control-plane logs -n argocd deployment/argocd-server > /tmp/vcluster-control-plane-server.log
+          kubectl --context vcluster-agent-autonomous logs -n argocd-autonomous argocd-application-controller-0 > /tmp/vcluster-agent-autonomous-controller.log
+          kubectl --context vcluster-agent-managed logs -n argocd-managed argocd-application-controller-0 > /tmp/vcluster-agent-managed-controller.log
+          kubectl --context vcluster-control-plane logs -n argocd-principal deployment/argocd-server > /tmp/vcluster-control-plane-server.log
         if: ${{ failure() }}
       - name: Upload e2e-argocd-agent logs
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3

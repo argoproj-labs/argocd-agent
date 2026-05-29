@@ -193,6 +193,9 @@ pprofPort: "0"
 enableResourceProxy: true
 # -- Cache refresh interval.
 cacheRefreshInterval: "10s"
+# -- Timeout for the initial informer sync at agent startup. Increase on
+# large clusters or when the API server is under heavy load.
+informerSyncTimeout: "10s"
 # -- Keep-alive interval for connections.
 keepAliveInterval: "50s"
 # -- Path to the TLS client key.

@@ -25,9 +25,10 @@ KUBECTL=$(which kubectl)
 OPENSSL=$(which openssl)
 
 source ${SCRIPTPATH}/utility.sh
+source ${SCRIPTPATH}/namespaces.sh
 
 export ARGOCD_AGENT_PRINCIPAL_CONTEXT=vcluster-control-plane
-export ARGOCD_AGENT_PRINCIPAL_NAMESPACE=argocd
+export ARGOCD_AGENT_PRINCIPAL_NAMESPACE=${ARGOCD_PRINCIPAL_NAMESPACE}
 
 if test "${ARGOCD_AGENT_IN_CLUSTER}" = ""; then
 	IPADDR=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
@@ -36,7 +37,7 @@ if test "${ARGOCD_AGENT_IN_CLUSTER}" = ""; then
 	ARGOCD_AGENT_RESOURCE_PROXY=${IPADDR}
 	ARGOCD_AGENT_RESOURCE_PROXY_SAN="--ip 127.0.0.1,${IPADDR}"
 else
-	ARGOCD_AGENT_GRPC_SVC=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
+	ARGOCD_AGENT_GRPC_SVC=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} ${ARGOCD_PRINCIPAL_NAMESPACE} argocd-agent-principal)
 	ARGOCD_AGENT_GRPC_SAN="--ip 127.0.0.1,$ARGOCD_AGENT_GRPC_SVC"
 	ARGOCD_AGENT_RESOURCE_PROXY=argocd-agent-resource-proxy
 	ARGOCD_AGENT_RESOURCE_PROXY_SAN="--dns ${ARGOCD_AGENT_RESOURCE_PROXY}"
@@ -57,13 +58,13 @@ fi
 
 echo "[*] Creating principal TLS configuration"
 ${AGENTCTL} pki issue principal --upsert \
-	--principal-namespace argocd \
+	--principal-namespace ${ARGOCD_PRINCIPAL_NAMESPACE} \
 	${ARGOCD_AGENT_GRPC_SAN}
 echo "  -> Principal TLS config created."
 
 echo "[*] Creating resource proxy TLS configuration"
 ${AGENTCTL} pki issue resource-proxy --upsert \
-	--principal-namespace argocd \
+	--principal-namespace ${ARGOCD_PRINCIPAL_NAMESPACE} \
 	${ARGOCD_AGENT_RESOURCE_PROXY_SAN}
 echo "  -> Resource proxy TLS config created."
 
@@ -72,6 +73,13 @@ ${AGENTCTL} jwt create-key --principal-context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT}
 
 AGENTS="agent-managed agent-autonomous"
 for agent in ${AGENTS}; do
+	# Determine agent namespace based on agent name
+	if [[ $agent == "agent-managed" ]]; then
+		AGENT_NS=${ARGOCD_MANAGED_NAMESPACE}
+	else
+		AGENT_NS=${ARGOCD_AUTONOMOUS_NAMESPACE}
+	fi
+
 	echo "[*] Creating configuration for agent ${agent}"
 	if test "$RECREATE" = "--recreate"; then
 		echo "  -> Deleting existing cluster secret, if it exists"
@@ -85,6 +93,6 @@ for agent in ${AGENTS}; do
 		echo "  -> Reusing existing cluster secret for agent configuration"
 	fi
 	echo "  -> Creating mTLS client certificate and key"
-	${AGENTCTL} pki propagate --agent-context vcluster-${agent} --agent-namespace argocd -f
-	${AGENTCTL} pki issue agent ${agent} --agent-context vcluster-${agent} --agent-namespace argocd --upsert
+	${AGENTCTL} pki propagate --agent-context vcluster-${agent} --agent-namespace ${AGENT_NS} -f
+	${AGENTCTL} pki issue agent ${agent} --agent-context vcluster-${agent} --agent-namespace ${AGENT_NS} --upsert
 done

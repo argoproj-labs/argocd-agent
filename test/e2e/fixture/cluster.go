@@ -199,7 +199,7 @@ func getCacheInstance(source string, clusterDetails *ClusterDetails) *appstateca
 
 			// Load CA certificate directly from Kubernetes secret
 			certPool, err := tlsutil.X509CertPoolFromSecret(ctx, clusterDetails.PrincipalClient.Clientset,
-				"argocd", "argocd-redis-tls", "ca.crt")
+				PrincipalNamespace, "argocd-redis-tls", "ca.crt")
 			if err != nil {
 				panic(fmt.Sprintf("Failed to load Principal Redis CA certificate from secret argocd-redis-tls: %v. "+
 					"Run 'make setup-e2e' to generate certificates.", err))
@@ -224,7 +224,7 @@ func getCacheInstance(source string, clusterDetails *ClusterDetails) *appstateca
 
 			// Load CA certificate directly from Kubernetes secret
 			certPool, err := tlsutil.X509CertPoolFromSecret(ctx, clusterDetails.ManagedAgentClient.Clientset,
-				"argocd", "argocd-redis-tls", "ca.crt")
+				ManagedAgentNamespace, "argocd-redis-tls", "ca.crt")
 			if err != nil {
 				panic(fmt.Sprintf("Failed to load Managed Agent Redis CA certificate from secret argocd-redis-tls: %v. "+
 					"Run 'make setup-e2e' to generate certificates.", err))
@@ -271,7 +271,7 @@ func getClusterConfigurations(ctx context.Context, managedAgentClient KubeClient
 func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClient, clusterDetails *ClusterDetails) error {
 	// Fetch Redis service to get the address
 	service := &corev1.Service{}
-	serviceKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
+	serviceKey := types.NamespacedName{Name: "argocd-redis", Namespace: ManagedAgentNamespace}
 	err := managedAgentClient.Get(ctx, serviceKey, service, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get Redis service: %w", err)
@@ -297,7 +297,7 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 
 	// Fetch Redis secret to get the password
 	secret := &corev1.Secret{}
-	secretKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
+	secretKey := types.NamespacedName{Name: "argocd-redis", Namespace: ManagedAgentNamespace}
 	err = managedAgentClient.Get(ctx, secretKey, secret, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get Redis secret: %w", err)
@@ -318,7 +318,7 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, clusterDetails *ClusterDetails) error {
 	// Fetch Redis service to get the address
 	service := &corev1.Service{}
-	serviceKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
+	serviceKey := types.NamespacedName{Name: "argocd-redis", Namespace: PrincipalNamespace}
 	err := principalClient.Get(ctx, serviceKey, service, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get Principal Redis service: %w", err)
@@ -344,7 +344,7 @@ func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, cl
 
 	// Fetch Redis secret to get the password
 	secret := &corev1.Secret{}
-	secretKey := types.NamespacedName{Name: "argocd-redis", Namespace: "argocd"}
+	secretKey := types.NamespacedName{Name: "argocd-redis", Namespace: PrincipalNamespace}
 	err = principalClient.Get(ctx, secretKey, secret, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get Principal Redis secret: %w", err)
@@ -365,7 +365,7 @@ func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, cl
 func getClusterServerAddresses(ctx context.Context, principalClient KubeClient, clusterDetails *ClusterDetails) error {
 	// Fetch managed cluster server address
 	managedSecret := &corev1.Secret{}
-	managedSecretKey := types.NamespacedName{Name: "cluster-agent-managed", Namespace: "argocd"}
+	managedSecretKey := types.NamespacedName{Name: "cluster-agent-managed", Namespace: PrincipalNamespace}
 	err := principalClient.Get(ctx, managedSecretKey, managedSecret, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get managed cluster secret: %w", err)
@@ -379,7 +379,7 @@ func getClusterServerAddresses(ctx context.Context, principalClient KubeClient, 
 
 	// Fetch autonomous cluster server address
 	autonomousSecret := &corev1.Secret{}
-	autonomousSecretKey := types.NamespacedName{Name: "cluster-agent-autonomous", Namespace: "argocd"}
+	autonomousSecretKey := types.NamespacedName{Name: "cluster-agent-autonomous", Namespace: PrincipalNamespace}
 	err = principalClient.Get(ctx, autonomousSecretKey, autonomousSecret, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get autonomous cluster secret: %w", err)

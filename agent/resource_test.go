@@ -1057,6 +1057,7 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 		expectErr     bool
 		expectPatched bool
 		forceValue    string
+		managedByApp  bool
 	}
 
 	originalObj := &corev1.Pod{
@@ -1081,6 +1082,7 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
 			expectErr:     false,
 			expectPatched: true,
+			managedByApp:  true,
 		},
 		{
 			name:      "Patch returns error",
@@ -1094,6 +1096,7 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 			},
 			expectErr:     true,
 			expectPatched: false,
+			managedByApp:  true,
 		},
 		{
 			name:          "Invalid force param returns error",
@@ -1103,6 +1106,7 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
 			expectErr:     true,
 			expectPatched: false,
+			managedByApp:  true,
 		},
 		{
 			name:          "Passes PatchOptions params",
@@ -1112,21 +1116,40 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
 			expectErr:     false,
 			expectPatched: true,
+			managedByApp:  true,
+		},
+		{
+			name:          "Returns error on unmanaged resource",
+			params:        map[string]string{},
+			namespace:     "default",
+			patchBody:     patch,
+			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
+			expectErr:     true,
+			expectPatched: false,
+			managedByApp:  false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			kubeClient := kube.NewDynamicFakeClient(originalObj)
+			obj := originalObj.DeepCopy()
+			if tc.managedByApp {
+				obj.ObjectMeta.Labels = map[string]string{
+					"app.kubernetes.io/instance": "test-app",
+				}
+			}
+
+			kubeClient := kube.NewDynamicFakeClient(obj)
 			scheme := runtime.NewScheme()
 			_ = corev1.AddToScheme(scheme)
-			fakeDyn := fake.NewSimpleDynamicClient(scheme, originalObj)
+			fakeDyn := fake.NewSimpleDynamicClient(scheme, obj)
 			tc.setupReactor(fakeDyn)
 			kubeClient.DynamicClient = fakeDyn
 
 			agent := &Agent{
-				context:    context.Background(),
-				kubeClient: kubeClient,
+				context:        context.Background(),
+				kubeClient:     kubeClient,
+				trackingReader: newTestTrackingReader(v1alpha1.TrackingMethodLabel),
 			}
 
 			gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}

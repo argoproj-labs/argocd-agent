@@ -51,6 +51,13 @@ const (
 	// mismatch (same principal recreated the resource) from an AppSet annotation
 	// wipe on a new principal (different principal-uid → transition in-place).
 	PrincipalUIDAnnotation = "argocd.argoproj.io/principal-uid"
+
+	// NamespaceRemappedAnnotation is a boolean marker stamped by the agent when
+	// it remaps an application from the principal's namespace to its own namespace
+	// (under destination-based mapping in managed mode). Its presence signals to
+	// the principal that the app's namespace should be restored to the principal's
+	// namespace.
+	NamespaceRemappedAnnotation = "argocd.argoproj.io/namespace-remapped"
 )
 
 // SourceUIDMismatchPolicy defines the agent's behavior on source-UID mismatch.

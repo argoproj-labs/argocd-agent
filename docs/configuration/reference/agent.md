@@ -270,6 +270,24 @@ Port the metrics server will listen on.
 
 Port the health check server will listen on.
 
+## Startup Behavior
+
+### Informer Sync Timeout
+
+| | |
+|---|---|
+| **CLI Flag** | `--informer-sync-timeout` |
+| **Environment Variable** | `ARGOCD_AGENT_INFORMER_SYNC_TIMEOUT` |
+| **ConfigMap Entry** | `agent.informer-sync-timeout` |
+| **Type** | Duration |
+| **Default** | `10s` |
+
+How long the agent waits for its informers (Application, AppProject, Repository, GPG, Namespace) to complete the initial cache sync at startup. If the informers do not sync within this window, the agent fails to start.
+
+Increase this value on large clusters or clusters under high API server load where the initial list-and-watch round-trips take longer than the default.
+
+**Example:** `30s`
+
 ## Network and Performance
 
 ### Enable WebSocket

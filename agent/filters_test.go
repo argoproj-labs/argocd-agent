@@ -34,7 +34,7 @@ func TestDefaultAppFilterChain_SkipSyncLabel(t *testing.T) {
 	kubec := fakekube.NewKubernetesFakeClientWithApps("argocd")
 	remote, err := client.NewRemote("127.0.0.1", 8080)
 	require.NoError(t, err)
-	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithCacheRefreshInterval(10*time.Second))
+	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithCacheRefreshInterval(10*time.Second), WithInformerSyncTimeout(10*time.Second))
 	require.NoError(t, err)
 
 	filterChain := agent.DefaultAppFilterChain()
@@ -155,7 +155,8 @@ func TestDefaultAppFilterChain_NamespaceAndSkipSyncInteraction(t *testing.T) {
 	agent, err := NewAgent(context.TODO(), kubec, "argocd",
 		WithRemote(remote),
 		WithAllowedNamespaces("argocd", "apps", "staging"),
-		WithCacheRefreshInterval(10*time.Second))
+		WithCacheRefreshInterval(10*time.Second),
+		WithInformerSyncTimeout(10*time.Second))
 	require.NoError(t, err)
 
 	filterChain := agent.DefaultAppFilterChain()
@@ -219,7 +220,7 @@ func TestDefaultAppFilterChain_ProcessChange(t *testing.T) {
 	kubec := fakekube.NewKubernetesFakeClientWithApps("argocd")
 	remote, err := client.NewRemote("127.0.0.1", 8080)
 	require.NoError(t, err)
-	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithCacheRefreshInterval(10*time.Second))
+	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithCacheRefreshInterval(10*time.Second), WithInformerSyncTimeout(10*time.Second))
 	require.NoError(t, err)
 
 	filterChain := agent.DefaultAppFilterChain()
@@ -256,7 +257,7 @@ func TestDefaultAppFilterChain_IgnoreUnmanagedApps(t *testing.T) {
 
 	newAgent := func(t *testing.T, ignore bool) *Agent {
 		t.Helper()
-		opts := []AgentOption{WithRemote(remote), WithCacheRefreshInterval(10 * time.Second)}
+		opts := []AgentOption{WithRemote(remote), WithCacheRefreshInterval(10 * time.Second), WithInformerSyncTimeout(10 * time.Second)}
 		if ignore {
 			opts = append(opts, WithIgnoreUnmanagedApps(true))
 		}

@@ -217,6 +217,26 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		}
 		incoming.Spec.Destination.Name = cluster.Name
 		incoming.Spec.Destination.Server = ""
+
+		// Rewrite namespace for child Application entries in status.resources
+		// so the UI navigates to child apps using the principal-side namespace
+		for i, res := range incoming.Status.Resources {
+			if res.Group == "argoproj.io" && res.Kind == "Application" {
+				incoming.Status.Resources[i].Namespace = agentName
+			}
+		}
+	}
+
+	// When destination-based mapping is active, the agent may send apps under
+	// its own installation namespace. The NamespaceRemappedAnnotation is a
+	// boolean marker stamped by the agent when it remapped the app.
+	if s.destinationBasedMapping && agentMode.IsManaged() {
+		if _, ok := incoming.Annotations[manager.NamespaceRemappedAnnotation]; ok {
+			if incoming.Namespace == s.agentNamespace(agentName) {
+				incoming.SetNamespace(s.namespace)
+			}
+			delete(incoming.Annotations, manager.NamespaceRemappedAnnotation)
+		}
 	}
 
 	switch ev.Type() {
@@ -660,7 +680,8 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx, manager.ManagerRolePrincipal, s.namespace).
 		WithDestinationBasedMapping(s.destinationBasedMapping).
-		WithPrincipalUID(s.principalUID)
+		WithPrincipalUID(s.principalUID).
+		WithPeerNamespace(s.agentNamespace(agentName))
 
 	switch ev.Type() {
 	case event.SyncedResourceList.String():

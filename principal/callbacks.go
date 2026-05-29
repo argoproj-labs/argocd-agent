@@ -289,7 +289,7 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 	})
 
 	// Check if this AppProject was created by an autonomous agent
-	if s.isResourceFromAutonomousAgent(outbound) {
+	if s.isAppProjectFromAutonomousAgent(outbound) {
 		if s.IsActive() {
 			if len(outbound.Spec.SourceNamespaces) > 0 {
 				agentName := outbound.Spec.SourceNamespaces[0]
@@ -350,7 +350,7 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		return
 	}
 
-	if s.isResourceFromAutonomousAgent(new) {
+	if s.isAppProjectFromAutonomousAgent(new) {
 		if len(new.Spec.SourceNamespaces) > 0 {
 			agentName := new.Spec.SourceNamespaces[0]
 			s.resources.Add(agentName, resources.NewResourceKeyFromAppProject(new))
@@ -372,7 +372,7 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 	})
 
 	// Check if this AppProject was created by an autonomous agent
-	if s.isResourceFromAutonomousAgent(new) {
+	if s.isAppProjectFromAutonomousAgent(new) {
 		// Revert modifications on autonomous agent appProjects
 		reverted, err := s.projectManager.RevertAppProjectChanges(s.ctx, new, s.sourceCache.AppProject)
 		if err != nil {
@@ -429,7 +429,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	})
 
 	// Revert user-initiated deletion on autonomous agent applications
-	if s.isResourceFromAutonomousAgent(outbound) {
+	if s.isAppProjectFromAutonomousAgent(outbound) {
 		if s.IsActive() {
 			reverted, err := manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.projectManager, logCtx)
 			if err != nil {
@@ -961,6 +961,29 @@ func (s *Server) isResourceFromAutonomousAgent(resource metav1.Object) bool {
 		return false
 	}
 	return s.agentMode(resource.GetNamespace()) == types.AgentModeAutonomous
+}
+
+// isAppProjectFromAutonomousAgent detects autonomous AppProjects.
+// Mirrored autonomous AppProjects live in the
+// principal namespace, so we also check Spec.SourceNamespaces[0] (agent name).
+func (s *Server) isAppProjectFromAutonomousAgent(project *v1alpha1.AppProject) bool {
+	if project == nil {
+		return false
+	}
+	if s.isResourceFromAutonomousAgent(project) {
+		return true
+	}
+	annotations := project.GetAnnotations()
+	if annotations == nil {
+		return false
+	}
+	if _, ok := annotations[manager.SourceUIDAnnotation]; !ok {
+		return false
+	}
+	if len(project.Spec.SourceNamespaces) == 0 {
+		return false
+	}
+	return s.agentMode(project.Spec.SourceNamespaces[0]) == types.AgentModeAutonomous
 }
 
 func isTerminateOperation(old, new *v1alpha1.Application) bool {

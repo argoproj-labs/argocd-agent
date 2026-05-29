@@ -58,7 +58,7 @@ func (suite *ResourceProxyTestSuite) getRpClient(agentName string) *http.Client 
 	defer cancel()
 
 	// Read agent root CA
-	caCert, err := tlsutil.TLSCertFromSecret(ctx, pc, "argocd", config.SecretNamePrincipalCA)
+	caCert, err := tlsutil.TLSCertFromSecret(ctx, pc, fixture.PrincipalNamespace, config.SecretNamePrincipalCA)
 	requires.NoError(err)
 	requires.NotNil(caCert)
 	certPool := x509.NewCertPool()
@@ -88,9 +88,9 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	rpClient := suite.getRpClient("agent-managed")
 
 	depl := &appsv1.Deployment{}
-	err := suite.ManagedAgentClient.Get(context.TODO(), types.NamespacedName{Namespace: "argocd", Name: "argocd-repo-server"}, depl, v1.GetOptions{})
+	err := suite.ManagedAgentClient.Get(context.TODO(), types.NamespacedName{Namespace: fixture.ManagedAgentNamespace, Name: "argocd-repo-server"}, depl, v1.GetOptions{})
 	requires.NoError(err)
-	requires.Equal("argocd", depl.Namespace)
+	requires.Equal(fixture.ManagedAgentNamespace, depl.Namespace)
 	requires.Equal("argocd-repo-server", depl.Name)
 
 	err = suite.ManagedAgentClient.EnsureDeploymentUpdate(context.TODO(), fixture.ToNamespacedName(depl), func(d *appsv1.Deployment) error {
@@ -98,13 +98,13 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 		if d.Annotations == nil {
 			d.Annotations = make(map[string]string)
 		}
-		d.Annotations["argocd.argoproj.io/tracking-id"] = "argocd-repo-server:apps/Deployment:argocd/argocd-repo-server"
+		d.Annotations["argocd.argoproj.io/tracking-id"] = fmt.Sprintf("argocd-repo-server:apps/Deployment:%s/argocd-repo-server", fixture.ManagedAgentNamespace)
 		return nil
 	}, v1.UpdateOptions{})
 	requires.NoError(err)
 
 	// Managed agents should respond swiftly
-	resp, err := rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-repo-server")
+	resp, err := rpClient.Get(fmt.Sprintf("https://127.0.0.1:9090/apis/apps/v1/namespaces/%s/deployments/argocd-repo-server", fixture.ManagedAgentNamespace))
 	requires.NoError(err)
 	requires.NotNil(resp)
 	requires.Equal(http.StatusOK, resp.StatusCode)
@@ -117,10 +117,10 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	err = json.Unmarshal(resource, depl)
 	requires.NoError(err)
 	requires.Equal("argocd-repo-server", depl.Name)
-	requires.Equal("argocd", depl.Namespace)
+	requires.Equal(fixture.ManagedAgentNamespace, depl.Namespace)
 
 	// Request an unmanaged resource
-	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-redis")
+	resp, err = rpClient.Get(fmt.Sprintf("https://127.0.0.1:9090/apis/apps/v1/namespaces/%s/deployments/argocd-redis", fixture.ManagedAgentNamespace))
 	requires.NoError(err)
 	requires.NotNil(resp)
 	requires.NotEqual(http.StatusNotFound, resp.StatusCode)
@@ -137,7 +137,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	resp.Body.Close()
 
 	// argocd-server should not exist on the agent
-	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-server")
+	resp, err = rpClient.Get(fmt.Sprintf("https://127.0.0.1:9090/apis/apps/v1/namespaces/%s/deployments/argocd-server", fixture.ManagedAgentNamespace))
 	requires.NoError(err)
 	requires.NotNil(resp)
 	requires.Equal(http.StatusNotFound, resp.StatusCode)
@@ -147,7 +147,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 	for _, m := range []string{http.MethodConnect, http.MethodOptions, http.MethodPut} {
 		resp, err = rpClient.Do(&http.Request{
 			Method: m,
-			URL:    &url.URL{Scheme: "https", Host: "127.0.0.1:9090", Path: "/apis/apps/v1/namespaces/argocd/deployments/argocd-server"},
+			URL:    &url.URL{Scheme: "https", Host: "127.0.0.1:9090", Path: fmt.Sprintf("/apis/apps/v1/namespaces/%s/deployments/argocd-server", fixture.ManagedAgentNamespace)},
 		})
 		requires.NoError(err)
 		requires.NotNil(resp)
@@ -156,7 +156,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 
 	// Unknown agent
 	rpClient = suite.getRpClient("unknown-agent")
-	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-repo-server")
+	resp, err = rpClient.Get(fmt.Sprintf("https://127.0.0.1:9090/apis/apps/v1/namespaces/%s/deployments/argocd-repo-server", fixture.ManagedAgentNamespace))
 	requires.NoError(err)
 	requires.NotNil(resp)
 	requires.Equal(http.StatusBadGateway, resp.StatusCode)
@@ -327,7 +327,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	updateResourceAction := func(updateFn func(argocdCM *corev1.ConfigMap)) {
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 			argocdCM := &corev1.ConfigMap{}
-			err := suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: "argocd"}, argocdCM, metav1.GetOptions{})
+			err := suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: fixture.PrincipalNamespace}, argocdCM, metav1.GetOptions{})
 			if err != nil {
 				return err
 			}
@@ -368,7 +368,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	// Get the Argo server endpoint to use
 	srvService := &corev1.Service{}
 	err := suite.PrincipalClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-server"}, srvService, v1.GetOptions{})
+		types.NamespacedName{Namespace: fixture.PrincipalNamespace, Name: "argocd-server"}, srvService, v1.GetOptions{})
 	requires.NoError(err)
 	argoEndpoint := srvService.Spec.LoadBalancerIP
 
@@ -383,7 +383,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	// Read admin secret from principal's cluster
 	pwdSecret := &corev1.Secret{}
 	err = suite.PrincipalClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-initial-admin-secret"}, pwdSecret, v1.GetOptions{})
+		types.NamespacedName{Namespace: fixture.PrincipalNamespace, Name: "argocd-initial-admin-secret"}, pwdSecret, v1.GetOptions{})
 	requires.NoError(err)
 
 	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", string(pwdSecret.Data["password"]))
@@ -458,7 +458,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	}, 30*time.Second, 1*time.Second)
 
 	argocdCM := &corev1.ConfigMap{}
-	err = suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: "argocd"}, argocdCM, metav1.GetOptions{})
+	err = suite.PrincipalClient.Get(ctx, types.NamespacedName{Name: "argocd-cm", Namespace: fixture.PrincipalNamespace}, argocdCM, metav1.GetOptions{})
 	requires.NoError(err)
 
 	err = argoClient.RunResourceAction(&app, "Test",
@@ -535,9 +535,9 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 
 	// First, ensure we have a deployment to test with
 	depl := &appsv1.Deployment{}
-	err := suite.ManagedAgentClient.Get(context.TODO(), types.NamespacedName{Namespace: "argocd", Name: "argocd-repo-server"}, depl, v1.GetOptions{})
+	err := suite.ManagedAgentClient.Get(context.TODO(), types.NamespacedName{Namespace: fixture.ManagedAgentNamespace, Name: "argocd-repo-server"}, depl, v1.GetOptions{})
 	requires.NoError(err)
-	requires.Equal("argocd", depl.Namespace)
+	requires.Equal(fixture.ManagedAgentNamespace, depl.Namespace)
 	requires.Equal("argocd-repo-server", depl.Name)
 
 	err = suite.ManagedAgentClient.EnsureDeploymentUpdate(context.TODO(), fixture.ToNamespacedName(depl), func(d *appsv1.Deployment) error {
@@ -545,13 +545,13 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 		if d.Annotations == nil {
 			d.Annotations = make(map[string]string)
 		}
-		d.Annotations["argocd.argoproj.io/tracking-id"] = "argocd-repo-server:apps/Deployment:argocd/argocd-repo-server"
+		d.Annotations["argocd.argoproj.io/tracking-id"] = fmt.Sprintf("argocd-repo-server:apps/Deployment:%s/argocd-repo-server", fixture.ManagedAgentNamespace)
 		return nil
 	}, v1.UpdateOptions{})
 	requires.NoError(err)
 
 	// Test GET request for status subresource
-	resp, err := rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-repo-server/status")
+	resp, err := rpClient.Get(fmt.Sprintf("https://127.0.0.1:9090/apis/apps/v1/namespaces/%s/deployments/argocd-repo-server/status", fixture.ManagedAgentNamespace))
 	requires.NoError(err)
 	requires.NotNil(resp)
 	requires.Equal(http.StatusOK, resp.StatusCode)
@@ -564,12 +564,12 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	err = json.Unmarshal(resource, statusDepl)
 	requires.NoError(err)
 	requires.Equal("argocd-repo-server", statusDepl.Name)
-	requires.Equal("argocd", statusDepl.Namespace)
+	requires.Equal(fixture.ManagedAgentNamespace, statusDepl.Namespace)
 	// Status should have status field populated
 	requires.NotNil(statusDepl.Status)
 
 	// Test GET request for scale subresource
-	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-repo-server/scale")
+	resp, err = rpClient.Get(fmt.Sprintf("https://127.0.0.1:9090/apis/apps/v1/namespaces/%s/deployments/argocd-repo-server/scale", fixture.ManagedAgentNamespace))
 	requires.NoError(err)
 	requires.NotNil(resp)
 	requires.Equal(http.StatusOK, resp.StatusCode)
@@ -587,7 +587,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	requires.Contains(scale, "status")
 
 	// Test that subresource of unmanaged resource returns 404
-	resp, err = rpClient.Get("https://127.0.0.1:9090/apis/apps/v1/namespaces/argocd/deployments/argocd-server/status")
+	resp, err = rpClient.Get(fmt.Sprintf("https://127.0.0.1:9090/apis/apps/v1/namespaces/%s/deployments/argocd-server/status", fixture.ManagedAgentNamespace))
 	requires.NoError(err)
 	requires.NotNil(resp)
 	requires.Equal(http.StatusNotFound, resp.StatusCode)
@@ -597,8 +597,8 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	// This test verifies that POST requests to subresources work correctly
 	// We'll test with a pod eviction endpoint - it should fail with 404 since the pod doesn't exist,
 	// but this proves the subresource routing works
-	postData := []byte(`{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"test-pod","namespace":"argocd"}}`)
-	req, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:9090/api/v1/namespaces/argocd/pods/test-pod/eviction",
+	postData := []byte(fmt.Sprintf(`{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"test-pod","namespace":"%s"}}`, fixture.ManagedAgentNamespace))
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://127.0.0.1:9090/api/v1/namespaces/%s/pods/test-pod/eviction", fixture.ManagedAgentNamespace),
 		io.NopCloser(strings.NewReader(string(postData))))
 	requires.NoError(err)
 	req.Header.Set("Content-Type", "application/json")
