@@ -146,6 +146,9 @@ service Replication {
 
     // ConfirmMissingResources classifies resources absent from a snapshot before cleanup.
     rpc ConfirmMissingResources(ConfirmMissingResourcesRequest) returns (ConfirmMissingResourcesResponse) {
-        option (google.api.http).post = "/api/v1/replication/confirm-missing-resources";
+        option (google.api.http) = {
+            post: "/api/v1/replication/confirm-missing-resources"
+            body: "*"
+        };
     }
 }

@@ -29,7 +29,9 @@ import (
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -297,6 +299,26 @@ func TestServerConfirmMissingResources_SequenceMismatch(t *testing.T) {
 	assert.Equal(t, "unknown", resp.Results[0].Status)
 	assert.Contains(t, resp.Results[0].Reason, "snapshot sequence")
 	assert.False(t, providerCalled)
+}
+
+func TestServerConfirmMissingResources_InvalidInput(t *testing.T) {
+	forwarder := replication.NewForwarder()
+	server := NewServer(forwarder, newMockStateProvider())
+
+	t.Run("nil request", func(t *testing.T) {
+		_, err := server.ConfirmMissingResources(context.Background(), nil)
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
+
+	t.Run("nil resource", func(t *testing.T) {
+		_, err := server.ConfirmMissingResources(context.Background(), &replicationapi.ConfirmMissingResourcesRequest{
+			SnapshotSequenceNum: 0,
+			Resources:           []*replicationapi.Resource{nil},
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
 }
 
 func TestServerStatus(t *testing.T) {

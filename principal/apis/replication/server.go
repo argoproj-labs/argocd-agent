@@ -388,8 +388,16 @@ func (s *Server) GetSnapshot(ctx context.Context, req *replicationapi.SnapshotRe
 }
 
 func (s *Server) ConfirmMissingResources(ctx context.Context, req *replicationapi.ConfirmMissingResourcesRequest) (*replicationapi.ConfirmMissingResourcesResponse, error) {
+	if req == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "request is required")
+	}
 	if s.stateProvider == nil {
 		return nil, status.Errorf(codes.Internal, "state provider not configured")
+	}
+	for i, res := range req.Resources {
+		if res == nil {
+			return nil, status.Errorf(codes.InvalidArgument, "resources[%d] is nil", i)
+		}
 	}
 
 	currentSequence := s.forwarder.CurrentSequenceNum()
