@@ -44,8 +44,10 @@ import (
 	ktypes "k8s.io/apimachinery/pkg/types"
 )
 
-var appExistsError = errors.NewAlreadyExists(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
-var appNotFoundError = errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
+var (
+	appExistsError   = errors.NewAlreadyExists(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
+	appNotFoundError = errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, "existing")
+)
 
 func fakeInformer(t *testing.T, namespace string, objects ...runtime.Object) (*fakeappclient.Clientset, *informer.Informer[*v1alpha1.Application]) {
 	t.Helper()
@@ -350,7 +352,6 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		require.NotNil(t, updated)
 		require.Empty(t, updated.Finalizers)
 	})
-
 }
 
 func Test_ManagerUpdateStatus(t *testing.T) {

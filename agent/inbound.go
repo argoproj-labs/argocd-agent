@@ -186,6 +186,11 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		if err != nil {
 			return fmt.Errorf("failed to compare identity of app: %w", err)
 		}
+
+		if identity.ExistingMissingSourceUID && ev.Type() != event.Create {
+			return fmt.Errorf("source UID annotation is not found for app: %s", incomingApp.Name)
+		}
+
 		// In managed mode, Drop ownerReferences from the incoming resource
 		// This can lead to garbage-collection of the resource on the agent cluster, if referenced owner is missing. For example, AppSet
 		incomingApp.OwnerReferences = nil
@@ -194,6 +199,10 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 	switch ev.Type() {
 	case event.Create:
 		if a.mode == types.AgentModeManaged {
+			if identity.Exists && identity.ExistingMissingSourceUID {
+				logCtx.Error("Application already exists on agent but is unmanaged.")
+				return fmt.Errorf("application already exists on agent but is unmanaged, please clean it up or switch agent to autonomous mode")
+			}
 			err = a.syncManagedApplication(logCtx, incomingApp, identity, principalUID)
 		} else {
 			_, err = a.createApplication(incomingApp, principalUID)

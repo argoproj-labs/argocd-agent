@@ -38,8 +38,10 @@ import (
 	ty "k8s.io/apimachinery/pkg/types"
 )
 
-type updateTransformer func(existing, incoming *v1alpha1.Application)
-type patchTransformer func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error)
+type (
+	updateTransformer func(existing, incoming *v1alpha1.Application)
+	patchTransformer  func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error)
+)
 
 // LastUpdatedAnnotation is a label put on applications which contains the time
 // when an update was last received for this Application
@@ -147,7 +149,6 @@ func stampLastUpdated(app *v1alpha1.Application) {
 
 // Create creates the application app using the Manager's application backend.
 func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
-
 	// A new Application must neither specify ResourceVersion nor Generation
 	app.ResourceVersion = ""
 	app.Generation = 0
@@ -322,7 +323,6 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
 			deletionTimestampChanged = true
 		}
-
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		applyManagedIdentity(existing, incoming, identity)
 
@@ -385,13 +385,14 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 // resource and the existing resource on the agent. The agent uses this to
 // decide whether to update, delete/recreate, or transition in-place.
 type IdentityCompareResult struct {
-	Exists              bool
-	SourceUIDMatch      bool
-	PrincipalUIDMatch   bool
-	PrincipalTransition bool // principal-uid changed (failover detected)
-	MissingSourceUID    bool // incoming has no source-uid (AppSet wiped it)
-	MissingPrincipalUID bool // no principal-uid in event (pre-upgrade principal)
-	AdoptedPrincipalUID bool // existing had no principal-uid; incoming's was accepted as-is
+	Exists                   bool
+	SourceUIDMatch           bool
+	PrincipalUIDMatch        bool
+	PrincipalTransition      bool // principal-uid changed (failover detected)
+	MissingSourceUID         bool // incoming has no source-uid (AppSet wiped it)
+	MissingPrincipalUID      bool // no principal-uid in event (pre-upgrade principal)
+	AdoptedPrincipalUID      bool // existing had no principal-uid; incoming's was accepted as-is
+	ExistingMissingSourceUID bool // existing application does not have a source-uid (exists before principal does)
 }
 
 // CompareIdentity checks an existing app against the incoming app and
@@ -418,7 +419,7 @@ func (m *ApplicationManager) CompareIdentity(ctx context.Context, incoming *v1al
 
 	existingSourceUID, hasSourceUID := existing.Annotations[manager.SourceUIDAnnotation]
 	if !hasSourceUID {
-		return result, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
+		result.ExistingMissingSourceUID = true
 	}
 
 	incomingUID := string(incoming.UID)
@@ -454,6 +455,9 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 	result, err := m.CompareIdentity(ctx, incoming, "")
 	if err != nil {
 		return result != nil && result.Exists, false, err
+	}
+	if result.ExistingMissingSourceUID {
+		return result != nil && result.Exists, false, fmt.Errorf("source UID Annotation is not found for app: test")
 	}
 	return result.Exists, result.SourceUIDMatch, nil
 }
