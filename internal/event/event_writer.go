@@ -85,9 +85,11 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
 	ew.target = target
-	ew.log = logging.GetDefaultLogger().ModuleLogger("EventWriter").
-		WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).
-		WithField(logfields.Agent, ew.agentName)
+	if target != nil {
+		ew.log = logging.GetDefaultLogger().ModuleLogger("EventWriter").
+			WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).
+			WithField(logfields.Agent, ew.agentName)
+	}
 
 	// Reset retry timers so events in sentEvents are retried immediately on the new connection.
 	// This is important for reconnection scenarios where the old connection died
@@ -235,6 +237,11 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 			return
 		default:
 			ew.mu.RLock()
+			// If we're disconnected, stop sending events
+			if ew.target == nil {
+				ew.mu.RUnlock()
+				continue
+			}
 			// Collect all resource IDs that have either unsent or sent events
 			resourceIDs := make([]string, 0, len(ew.unsentEvents)+len(ew.sentEvents))
 			for resID := range ew.unsentEvents {
@@ -260,6 +267,11 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 func (ew *EventWriter) sendEvent(resID string) {
 	// Check if there's a sent event awaiting retry
 	ew.mu.RLock()
+	// If we're disconnected, do not send anything
+	if ew.target == nil {
+		ew.mu.RUnlock()
+		return
+	}
 	sentMsg, hasSent := ew.sentEvents[resID]
 	ew.mu.RUnlock()
 
