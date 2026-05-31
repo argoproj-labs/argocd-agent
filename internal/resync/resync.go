@@ -258,7 +258,7 @@ func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resourc
 	resClient := r.dynClient.Resource(gvr)
 	res, err := resClient.Namespace(resource.Namespace).Get(ctx, resource.Name, v1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get resource: %v", err)
+		return fmt.Errorf("failed to get resource: %w", err)
 	}
 	logCtx := logCtxForResourceKey(r.log, resource)
 	reqUpdate, err := newRequestUpdateFromObject(res, resource.Kind, r.peerNamespace)
@@ -629,7 +629,7 @@ func generateSpecChecksum(resObj *unstructured.Unstructured) ([]byte, error) {
 
 	specBytes, err := json.Marshal(resSpec)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal application spec: %v", err)
+		return nil, fmt.Errorf("failed to marshal application spec: %w", err)
 	}
 
 	checksum := sha256.Sum256(specBytes)

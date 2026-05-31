@@ -92,7 +92,7 @@ func generateAgentClientCert(agentName string, clt *kube.KubernetesClient) (clie
 	// PEM already, but the tls.Certificate contains only RAW byte.
 	caData, err = tlsutil.CertDataToPEM(tlsCert.Certificate[0])
 	if err != nil {
-		err = fmt.Errorf("could not encode CA cert to PEM: %v", err)
+		err = fmt.Errorf("could not encode CA cert to PEM: %w", err)
 		return
 	}
 
@@ -536,7 +536,7 @@ func loadClusterSecret(agentName string) (*v1alpha1.Cluster, error) {
 	}
 	clus, err := db.SecretToCluster(sec)
 	if err != nil {
-		return nil, fmt.Errorf("invalid cluster secret: %v", err)
+		return nil, fmt.Errorf("invalid cluster secret: %w", err)
 	}
 	return clus, nil
 }

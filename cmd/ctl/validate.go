@@ -591,7 +591,7 @@ func principalNoApplicationCRs(ctx context.Context, kc *kube.KubernetesClient, n
 	gvr := schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
 	apps, err := kc.DynamicClient.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to list applications in namespace %s: %v", ns, err)
+		return fmt.Errorf("failed to list applications in namespace %s: %w", ns, err)
 	}
 
 	if len(apps.Items) > 0 {

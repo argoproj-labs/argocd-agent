@@ -403,12 +403,12 @@ func (s *Server) extractAgentFromAuth(r *http.Request) (string, error) {
 		claims, err := s.issuer.ValidateResourceProxyToken(token)
 		if err != nil {
 			logCtx.WithError(err).Info("Bearer token validation failed")
-			return "", fmt.Errorf("invalid bearer token: %v", err)
+			return "", fmt.Errorf("invalid bearer token: %w", err)
 		}
 		subject, err := claims.GetSubject()
 		if err != nil {
 			logCtx.WithError(err).Info("Could not get subject from token")
-			return "", fmt.Errorf("could not get subject from token: %v", err)
+			return "", fmt.Errorf("could not get subject from token: %w", err)
 		}
 		logCtx.WithField("agent", subject).Info("Successfully authenticated via bearer token")
 		return subject, nil

@@ -926,7 +926,7 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 			// So, we send the current state of AppProjects/Repositories to the agent after it reconnects.
 			logCtx.Trace("Sending current state of AppProjects and Repositories to the agent")
 			if err := s.sendCurrentStateToAgent(agent.Name()); err != nil {
-				return fmt.Errorf("failed to send current state to agent: %v", err)
+				return fmt.Errorf("failed to send current state to agent: %w", err)
 			}
 		}
 		logCtx.Trace("Skipping resync messages since the principal has synced with this agent before")
@@ -960,7 +960,7 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 		// send the checksum to the principal
 		ev, err := s.events.RequestSyncedResourceListEvent(checksum)
 		if err != nil {
-			return fmt.Errorf("failed to create SyncedResourceList event: %v", err)
+			return fmt.Errorf("failed to create SyncedResourceList event: %w", err)
 		}
 
 		span.SetAttributes(tracing.AttrEventType.String(event.SyncedResourceList.String()))
@@ -973,13 +973,13 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 		// So, we send the current state of AppProjects and Repositories to the agent. This ensures that the agent is in sync with the principal.
 		logCtx.Trace("Sending current state of AppProjects and Repositories to the agent")
 		if err := s.sendCurrentStateToAgent(agent.Name()); err != nil {
-			return fmt.Errorf("failed to send current state to agent: %v", err)
+			return fmt.Errorf("failed to send current state to agent: %w", err)
 		}
 
 		// In managed mode, principal is the source of truth and the it should request resource resync
 		ev, err := s.events.RequestResourceResyncEvent()
 		if err != nil {
-			return fmt.Errorf("failed to create ResourceResync event: %v", err)
+			return fmt.Errorf("failed to create ResourceResync event: %w", err)
 		}
 
 		span.SetAttributes(tracing.AttrEventType.String(event.EventRequestResourceResync.String()))
@@ -1004,7 +1004,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 	// Send all the AppProjects to the agent
 	appProjects, err := s.projectManager.List(s.ctx, backend.AppProjectSelector{Namespace: s.namespace})
 	if err != nil {
-		return fmt.Errorf("failed to list AppProjects: %v", err)
+		return fmt.Errorf("failed to list AppProjects: %w", err)
 	}
 
 	projectMap := map[string]v1alpha1.AppProject{}
@@ -1042,7 +1042,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			},
 		})
 		if err != nil {
-			return fmt.Errorf("failed to list secrets of type %s: %v", secretType, err)
+			return fmt.Errorf("failed to list secrets of type %s: %w", secretType, err)
 		}
 
 		for _, repository := range repositories {

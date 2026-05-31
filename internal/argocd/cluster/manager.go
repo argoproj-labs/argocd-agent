@@ -81,7 +81,7 @@ func NewManager(ctx context.Context, namespace, redisAddress, redisPassword stri
 
 	m.clusterCache, err = NewClusterCacheInstance(redisAddress, redisPassword, redisCompressionType, tlsConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
+		return nil, fmt.Errorf("failed to create cluster cache instance: %w", err)
 	}
 
 	// We are only interested in secrets that have both, Argo CD's label for

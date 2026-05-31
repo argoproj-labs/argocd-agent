@@ -30,7 +30,7 @@ func GetKubeConfig(ctx context.Context, namespace string, kubeConfig string, kub
 	if kubeConfig != "" {
 		fullKubeConfigPath, err = filepath.Abs(kubeConfig)
 		if err != nil {
-			return nil, fmt.Errorf("cannot expand path %s: %v", kubeConfig, err)
+			return nil, fmt.Errorf("cannot expand path %s: %w", kubeConfig, err)
 		}
 	}
 

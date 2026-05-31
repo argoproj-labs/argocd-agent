@@ -159,7 +159,7 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 		var err error
 		channelName, err = stripNamespaceFromRedisKey(channelName, logCtx)
 		if err != nil {
-			return nil, fmt.Errorf("unable to transform SUBSCRIBE key for agent: %v", err)
+			return nil, fmt.Errorf("unable to transform SUBSCRIBE key for agent: %w", err)
 		}
 	}
 
@@ -273,7 +273,7 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 		var err error
 		key, err = stripNamespaceFromRedisKey(key, logCtx)
 		if err != nil {
-			return nil, fmt.Errorf("unable to transform GET key for agent: %v", err)
+			return nil, fmt.Errorf("unable to transform GET key for agent: %w", err)
 		}
 	}
 
