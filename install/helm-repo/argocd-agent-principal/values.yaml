@@ -9,7 +9,7 @@ fullnameOverride: ""
 ## @section Image
 image:
   # -- Container image repository for the principal.
-  repository: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
+  repository: quay.io/argoprojlabs/argocd-agent
   # -- Overrides the image tag whose default is the chart appVersion.
   tag: ""
   # -- Image pull policy for the principal container.

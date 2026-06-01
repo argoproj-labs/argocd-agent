@@ -25,7 +25,7 @@
       "additionalProperties": false,
       "properties": {
         "repository": {
-          "default": "ghcr.io/argoproj-labs/argocd-agent/argocd-agent",
+          "default": "quay.io/argoprojlabs/argocd-agent",
           "description": "Container image repository.",
           "title": "repository",
           "type": "string"

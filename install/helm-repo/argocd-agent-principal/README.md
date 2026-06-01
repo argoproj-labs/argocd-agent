@@ -36,7 +36,7 @@ Kubernetes: `>=1.24.0-0`
 | healthzService.type | string | `"ClusterIP"` | Healthz service type. |
 | hostAliases | list | `[]` | Host aliases injected into /etc/hosts of the principal Pod. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the principal container. |
-| image.repository | string | `"ghcr.io/argoproj-labs/argocd-agent/argocd-agent"` | Container image repository for the principal. |
+| image.repository | string | `"quay.io/argoprojlabs/argocd-agent"` | Container image repository for the principal. |
 | image.tag | string | `""` | Overrides the image tag whose default is the chart appVersion. |
 | imagePullSecrets | list | `[]` | Image pull secrets for private registries. |
 | metricsService | object | `{"annotations":{},"enabled":true,"port":8000,"type":"ClusterIP"}` | Metrics service configuration. |

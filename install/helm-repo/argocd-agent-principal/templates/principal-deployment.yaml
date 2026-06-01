@@ -360,9 +360,11 @@ spec:
             - containerPort: {{ .Values.principal.listen.port }}
               name: principal
               protocol: TCP
+            {{- if .Values.principal.redisProxy.enabled }}
             - containerPort: 6379
               name: redis-proxy
               protocol: TCP
+            {{- end }}
             - containerPort: {{ .Values.principal.metrics.port }}
               name: metrics
               protocol: TCP
@@ -402,9 +404,11 @@ spec:
             - name: userpass-passwd
               mountPath: /app/config/userpass
               readOnly: true
+            {{- if .Values.principal.redisProxy.enabled }}
             - name: redis-proxy-server-tls
               mountPath: /app/config/redis-proxy-server-tls
               readOnly: true
+            {{- end }}
             - name: redis-tls-ca
               mountPath: /app/config/redis-tls
               readOnly: true
@@ -423,6 +427,7 @@ spec:
           - key: jwt.key
             path: jwt.key
           optional: true
+      {{- if .Values.principal.redisProxy.enabled }}
       - name: redis-proxy-server-tls
         secret:
           secretName: {{ .Values.principal.redis.proxy.server.tls.secretName | quote }}
@@ -432,6 +437,7 @@ spec:
           - key: tls.key
             path: tls.key
           optional: true
+      {{- end }}
       - name: redis-tls-ca
         secret:
           secretName: {{ .Values.principal.redis.tls.caSecretName | quote }}
