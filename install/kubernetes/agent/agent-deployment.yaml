@@ -123,7 +123,7 @@ spec:
                 name: argocd-agent-params
                 key: agent.healthz.port
                 optional: true
-          - name: ARGOCD_PRINCIPAL_LOG_FORMAT
+          - name: ARGOCD_AGENT_LOG_FORMAT
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
@@ -217,6 +217,12 @@ spec:
               configMapKeyRef:
                 name: argocd-agent-params
                 key: agent.tls.insecure-plaintext
+                optional: true
+          - name: ARGOCD_AGENT_INFORMER_SYNC_TIMEOUT
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.informer-sync-timeout
                 optional: true
           image: argocd-agent
           imagePullPolicy: Always

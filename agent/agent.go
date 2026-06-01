@@ -63,8 +63,6 @@ import (
 	ty "k8s.io/apimachinery/pkg/types"
 )
 
-const waitForSyncedDuration = 10 * time.Second
-
 // Agent is a controller that synchronizes Application resources
 type Agent struct {
 	context  context.Context
@@ -111,6 +109,7 @@ type Agent struct {
 	enableResourceProxy bool
 
 	cacheRefreshInterval time.Duration
+	informerSyncTimeout  time.Duration
 	clusterCache         *appstatecache.Cache
 
 	inflightMu sync.Mutex
@@ -139,6 +138,13 @@ type Agent struct {
 	// - The agent watches for applications in all namespaces
 	destinationBasedMapping bool
 
+	// principalNamespace is the namespace where the principal is running.
+	// This is learned from the auth response during the initial handshake.
+	// Protected by principalNSMu because it is written during
+	// (re)authentication and read from event-processing goroutines.
+	principalNamespace string
+	principalNSMu      sync.RWMutex
+
 	// ignoreUnmanagedApps when true, resources without the source UID annotation
 	// will be silently skipped during resync instead of causing errors.
 	ignoreUnmanagedApps bool
@@ -151,6 +157,9 @@ type Agent struct {
 	// labelSelector is an optional Kubernetes label selector that restricts
 	// which resources the agent can process.
 	labelSelector string
+
+	// mismatchPolicy defines the agent's behavior on source-UID mismatch
+	mismatchPolicy manager.SourceUIDMismatchPolicy
 }
 
 const defaultQueueName = "default"
@@ -178,6 +187,8 @@ type AgentOptions struct {
 // It takes a pointer to an Agent and returns an error if the configuration fails.
 type AgentOption func(*Agent) error
 
+var metricsRegistered sync.Once
+
 // NewAgent creates a new agent instance, using the given client interfaces and
 // options.
 func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace string, opts ...AgentOption) (*Agent, error) {
@@ -191,6 +202,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.infStopCh = make(chan struct{})
 	a.namespace = namespace
 	a.mode = types.AgentModeAutonomous
+	a.mismatchPolicy = manager.MismatchPolicyRecreate
 	a.redisProxyMsgHandler = &redisProxyMsgHandler{}
 	// Resource proxy is enabled by default.
 	a.enableResourceProxy = true
@@ -200,6 +212,15 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	// Register metrics early
+	if a.options.metricsPort > 0 {
+		a.metrics = metrics.NewAgentMetrics()
+		metricsRegistered.Do(func() {
+			metrics.RegisterK8sClientMetrics()
+			metrics.RegisterQueueMetrics("argocd_agent")
+		})
 	}
 
 	if a.resourceProxyLogger == nil {
@@ -224,6 +245,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 
 	if a.cacheRefreshInterval == 0 {
 		return nil, fmt.Errorf("cache refresh interval not set")
+	}
+
+	if a.informerSyncTimeout <= 0 {
+		return nil, fmt.Errorf("informer sync timeout must be greater than 0")
 	}
 
 	a.kubeClient = client
@@ -288,11 +313,6 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		application.WithMode(managerMode),
 		application.WithDeletionTracker(a.deletions),
 		application.WithDestinationBasedMapping(a.destinationBasedMapping),
-	}
-
-	if a.options.metricsPort > 0 {
-		a.metrics = metrics.NewAgentMetrics()
-		metrics.RegisterK8sClientMetrics()
 	}
 
 	appInformer, err := informer.NewInformer(ctx, appInformerOptions...)
@@ -514,13 +534,13 @@ func (a *Agent) Start(ctx context.Context) error {
 	}()
 
 	// Wait for the app informer to be synced
-	err := a.appManager.EnsureSynced(waitForSyncedDuration)
+	err := a.appManager.EnsureSynced(a.informerSyncTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to sync applications: %w", err)
 	}
 
 	// Wait for the appProject informer to be synced
-	err = a.projectManager.EnsureSynced(waitForSyncedDuration)
+	err = a.projectManager.EnsureSynced(a.informerSyncTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to sync appProjects: %w", err)
 	}
@@ -534,7 +554,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		}
 	}()
 
-	if err := a.namespaceManager.EnsureSynced(waitForSyncedDuration); err != nil {
+	if err := a.namespaceManager.EnsureSynced(a.informerSyncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Namespace informer: %w", err)
 	}
 	log().Infof("Namespace informer synced and ready")
@@ -557,12 +577,12 @@ func (a *Agent) Start(ctx context.Context) error {
 		}
 	}()
 
-	if err = a.repoManager.EnsureSynced(waitForSyncedDuration); err != nil {
+	if err = a.repoManager.EnsureSynced(a.informerSyncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Repository informer: %w", err)
 	}
 	log().Infof("Repository informer synced and ready")
 
-	if err = a.gpgKeyManager.EnsureSynced(waitForSyncedDuration); err != nil {
+	if err = a.gpgKeyManager.EnsureSynced(a.informerSyncTimeout); err != nil {
 		return fmt.Errorf("unable to sync GPG key informer: %w", err)
 	}
 	log().Infof("GPG key informer synced and ready")
@@ -596,12 +616,27 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
+		a.remote.SetOnAuthenticated(func(principalNs string) {
+			if principalNs == "" {
+				log().Error("principal namespace from auth response is empty")
+				return
+			}
+			a.principalNSMu.Lock()
+			a.principalNamespace = principalNs
+			a.principalNSMu.Unlock()
+		})
 		// TODO: Right now, maintainConnection always returns nil. Revisit
 		// this.
 		_ = a.maintainConnection()
 	}
 
 	return nil
+}
+
+func (a *Agent) principalNS() string {
+	a.principalNSMu.RLock()
+	defer a.principalNSMu.RUnlock()
+	return a.principalNamespace
 }
 
 func (a *Agent) Stop() error {

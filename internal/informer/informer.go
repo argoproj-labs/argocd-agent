@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -202,6 +203,7 @@ func (i *Informer[T]) installEventHandlers() error {
 				if !ok {
 					return
 				}
+				logging.LogInformerAdd(i.logger, obj)
 				if i.onAdd != nil {
 					i.onAdd(res)
 				}
@@ -212,6 +214,7 @@ func (i *Informer[T]) installEventHandlers() error {
 				if !oldOk || !newOk {
 					return
 				}
+				logging.LogInformerUpdate(i.logger, oldObj, newObj)
 				if i.onUpdate != nil {
 					i.onUpdate(oldRes, newRes)
 				}
@@ -221,6 +224,7 @@ func (i *Informer[T]) installEventHandlers() error {
 				if !ok {
 					return
 				}
+				logging.LogInformerDelete(i.logger, obj)
 				if i.onDelete != nil {
 					i.onDelete(res)
 				}

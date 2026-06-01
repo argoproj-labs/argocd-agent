@@ -23,6 +23,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
@@ -99,6 +100,7 @@ func (m *RepositoryManager) Create(ctx context.Context, repo *corev1.Secret) (*c
 
 	created, err := m.backend.Create(ctx, repo)
 	if err == nil {
+		logging.LogActionCreate(log().WithField("repository", repo.Name), "repository", created)
 		if err := m.Manage(created.Name); err != nil {
 			log().Warnf("Could not manage repository %s: %v", created.Name, err)
 		}
@@ -111,7 +113,11 @@ func (m *RepositoryManager) Create(ctx context.Context, repo *corev1.Secret) (*c
 }
 
 func (m *RepositoryManager) Delete(ctx context.Context, name, namespace string, deletionPropagation *backend.DeletionPropagation) error {
-	return m.backend.Delete(ctx, name, namespace, deletionPropagation)
+	err := m.backend.Delete(ctx, name, namespace, deletionPropagation)
+	if err == nil {
+		logging.LogActionDelete(log(), "repository", namespace, name)
+	}
+	return err
 }
 
 func (m *RepositoryManager) List(ctx context.Context, selector backend.RepositorySelector) ([]corev1.Secret, error) {
@@ -177,10 +183,8 @@ func (m *RepositoryManager) UpdateManagedRepository(ctx context.Context, incomin
 		return patch, err
 	})
 	if err == nil {
-		if updated.Generation == 1 {
-			logCtx.Infof("Created Repository")
-		} else {
-			logCtx.Infof("Updated Repository")
+		if updated.Generation > 1 {
+			logging.LogActionUpdate(logCtx, "repository", incoming, updated)
 		}
 		if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Couldn't unignore change %s for Repository %s: %v", updated.ResourceVersion, updated.Name, err)

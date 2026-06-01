@@ -35,14 +35,14 @@ func newAgent(t *testing.T, apps ...runtime.Object) (*Agent, *kube.KubernetesCli
 	kubec := fakekube.NewKubernetesFakeClientWithApps("argocd", apps...)
 	remote, err := client.NewRemote("127.0.0.1", 8080)
 	require.NoError(t, err)
-	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithCacheRefreshInterval(10*time.Second))
+	agent, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithCacheRefreshInterval(10*time.Second), WithInformerSyncTimeout(10*time.Second))
 	require.NoError(t, err)
 	return agent, kubec
 }
 
 func Test_NewAgent(t *testing.T) {
 	kubec := fakekube.NewKubernetesFakeClientWithApps("agent")
-	agent, err := NewAgent(context.TODO(), kubec, "agent", WithRemote(&client.Remote{}), WithCacheRefreshInterval(10*time.Second))
+	agent, err := NewAgent(context.TODO(), kubec, "agent", WithRemote(&client.Remote{}), WithCacheRefreshInterval(10*time.Second), WithInformerSyncTimeout(10*time.Second))
 	require.NotNil(t, agent)
 	require.NoError(t, err)
 }

@@ -41,7 +41,7 @@ func Test_Authenticate(t *testing.T) {
 	testVersion := version.New("argocd-agent").Version()
 
 	t.Run("Authentication method unsupported", func(t *testing.T) {
-		auths, err := NewServer(queues, nil, nil)
+		auths, err := NewServer(queues, "argocd", nil, nil)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
@@ -59,7 +59,7 @@ func Test_Authenticate(t *testing.T) {
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
 		ams.RegisterMethod("userpass", am)
 
-		auths, err := NewServer(queues, ams, nil)
+		auths, err := NewServer(queues, "argocd", ams, nil)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
@@ -77,7 +77,7 @@ func Test_Authenticate(t *testing.T) {
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
 		ams.RegisterMethod("userpass", am)
 
-		auths, err := NewServer(queues, ams, nil)
+		auths, err := NewServer(queues, "argocd", ams, nil)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
@@ -98,19 +98,21 @@ func Test_Authenticate(t *testing.T) {
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
 		iss.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("refresh", nil)
 
-		auths, err := NewServer(queues, ams, iss)
+		auths, err := NewServer(queues, "argocd", ams, iss)
 		require.NoError(t, err)
 		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
-			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
-			Mode:        "managed",
-			Version:     testVersion,
+			Method:         "userpass",
+			Credentials:    map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
+			Mode:           "managed",
+			Version:        testVersion,
+			AgentNamespace: "argocd-agent",
 		})
 		require.NoError(t, err)
 		require.NotNil(t, r)
 		assert.Equal(t, "access", r.AccessToken)
 		assert.Equal(t, "refresh", r.RefreshToken)
 		assert.Equal(t, testVersion, r.Version)
+		assert.Equal(t, "argocd", r.PrincipalNamespace)
 	})
 
 	t.Run("Wrong credentials", func(t *testing.T) {
@@ -118,7 +120,7 @@ func Test_Authenticate(t *testing.T) {
 		am := authmock.NewMethod(t)
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("", errAuthenticationFailed)
 		ams.RegisterMethod("userpass", am)
-		auths, err := NewServer(queues, ams, nil)
+		auths, err := NewServer(queues, "argocd", ams, nil)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
@@ -136,7 +138,7 @@ func Test_Authenticate(t *testing.T) {
 		ams.RegisterMethod("userpass", am)
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("", fmt.Errorf("oops"))
-		auths, err := NewServer(queues, ams, iss)
+		auths, err := NewServer(queues, "argocd", ams, iss)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
@@ -155,7 +157,7 @@ func Test_Authenticate(t *testing.T) {
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
 		iss.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("", fmt.Errorf("oops"))
-		auths, err := NewServer(queues, ams, iss)
+		auths, err := NewServer(queues, "argocd", ams, iss)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
@@ -180,7 +182,7 @@ func Test_Authenticate(t *testing.T) {
 		kubeclient := kube.NewFakeKubeClient("argocd")
 		mgr := registration.NewAgentRegistrationManager(false, "argocd", "resource-proxy:8443", "", kubeclient, iss)
 
-		auths, err := NewServer(queues, ams, iss, WithAgentRegistrationManager(mgr))
+		auths, err := NewServer(queues, "argocd", ams, iss, WithAgentRegistrationManager(mgr))
 		require.NoError(t, err)
 		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
@@ -206,7 +208,7 @@ func Test_Authenticate(t *testing.T) {
 		mockIss.On("IssueResourceProxyToken", "user1").Return("test-token", nil)
 		mgr := registration.NewAgentRegistrationManager(true, "argocd", "resource-proxy:8443", "", kubeclient, mockIss)
 
-		auths, err := NewServer(queues, ams, nil, WithAgentRegistrationManager(mgr))
+		auths, err := NewServer(queues, "argocd", ams, nil, WithAgentRegistrationManager(mgr))
 		require.NoError(t, err)
 
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
@@ -229,7 +231,7 @@ func Test_Authenticate(t *testing.T) {
 		iss.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("refresh", nil)
 
 		// No cluster registration manager provided
-		auths, err := NewServer(queues, ams, iss)
+		auths, err := NewServer(queues, "argocd", ams, iss)
 		require.NoError(t, err)
 		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
 			Method:      "userpass",
@@ -259,7 +261,7 @@ func Test_RefreshToken(t *testing.T) {
 		issuer.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
 		// issuer.On("IssueRefreshToken", "user1", mock.Anything).Return("refresh", nil)
 
-		auths, err := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, "argocd", methods, issuer)
 		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.NoError(t, err)
@@ -278,7 +280,7 @@ func Test_RefreshToken(t *testing.T) {
 		issuer.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
 		issuer.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("refresh", nil)
 
-		auths, err := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, "argocd", methods, issuer)
 		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.NoError(t, err)
@@ -291,7 +293,7 @@ func Test_RefreshToken(t *testing.T) {
 		methods := auth.NewMethods()
 
 		issuer := issuermock.NewIssuer(t)
-		auths, err := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, "argocd", methods, issuer)
 		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{})
 		require.Error(t, err)
@@ -304,7 +306,7 @@ func Test_RefreshToken(t *testing.T) {
 		issuer := issuermock.NewIssuer(t)
 		issuer.On("ValidateRefreshToken", "refresh").Return(nil, fmt.Errorf("oops"))
 
-		auths, err := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, "argocd", methods, issuer)
 		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.Error(t, err)
@@ -320,7 +322,7 @@ func Test_RefreshToken(t *testing.T) {
 		issuer := issuermock.NewIssuer(t)
 		issuer.On("ValidateRefreshToken", "refresh").Return(claims, nil)
 
-		auths, err := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, "argocd", methods, issuer)
 		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.Error(t, err)
@@ -337,7 +339,7 @@ func Test_RefreshToken(t *testing.T) {
 		issuer := issuermock.NewIssuer(t)
 		issuer.On("ValidateRefreshToken", "refresh").Return(claims, nil)
 
-		auths, err := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, "argocd", methods, issuer)
 		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.Error(t, err)
@@ -355,7 +357,7 @@ func Test_RefreshToken(t *testing.T) {
 		issuer.On("ValidateRefreshToken", "refresh").Return(claims, nil)
 		issuer.On("IssueAccessToken", encodedSubject, mock.Anything).Return("", fmt.Errorf("ooops"))
 
-		auths, err := NewServer(queues, methods, issuer)
+		auths, err := NewServer(queues, "argocd", methods, issuer)
 		require.NoError(t, err)
 		nr, err := auths.RefreshToken(context.TODO(), &authapi.RefreshTokenRequest{RefreshToken: "refresh"})
 		require.Error(t, err)

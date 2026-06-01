@@ -28,6 +28,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -166,6 +167,7 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 
 	created, err := m.applicationBackend.Create(ctx, app)
 	if err == nil {
+		logging.LogActionCreate(log().WithField("application", app.QualifiedName()), "application", created)
 		if err := m.Manage(created.QualifiedName()); err != nil {
 			log().Warnf("Could not manage app %s: %v", created.QualifiedName(), err)
 		}
@@ -226,6 +228,7 @@ func (m *ApplicationManager) Upsert(ctx context.Context, app *v1alpha1.Applicati
 	if err != nil {
 		return nil, err
 	}
+	logging.LogActionUpdate(log().WithField("application", updated.QualifiedName()), "application", app, updated)
 	if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 		log().Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 	}
@@ -352,10 +355,8 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		return patch, err
 	})
 	if err == nil {
-		if updated.Generation == 1 {
-			logCtx.Infof("Created application")
-		} else {
-			logCtx.Infof("Updated application")
+		if updated.Generation > 1 {
+			logging.LogActionUpdate(logCtx, "application", incoming, updated)
 		}
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Couldn't unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
@@ -374,6 +375,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		if err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, ptr.To(backend.DeletePropagationForeground)); err != nil {
 			return nil, err
 		}
+		logging.LogActionDelete(logCtx, "application", incoming.Namespace, incoming.Name)
 	}
 
 	return updated, err
@@ -541,7 +543,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
+		logging.LogActionUpdate(logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion), "application", incoming, updated)
 	}
 	return updated, err
 }
@@ -614,7 +616,7 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
+		logging.LogActionUpdate(logCtx, "application", incoming, updated)
 	}
 	return updated, err
 }
@@ -672,7 +674,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion).Infof("Updated application status")
+		logging.LogActionUpdate(logCtx, "application", incoming, updated)
 	}
 	return updated, err
 }
@@ -708,7 +710,7 @@ func (m *ApplicationManager) SetOperation(ctx context.Context, incoming *v1alpha
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logCtx.Infof("Set operation on application")
+		logging.LogActionUpdate(logCtx, "application", incoming, updated)
 	}
 	return updated, err
 }
@@ -802,7 +804,11 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 		}
 	}
 
-	return m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	err = m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	if err == nil {
+		logging.LogActionDelete(logCtx, "application", incoming.Namespace, incoming.Name)
+	}
+	return err
 }
 
 // update updates an existing Application resource on the Manager m's backend
@@ -878,6 +884,9 @@ func (m *ApplicationManager) RemoveFinalizers(ctx context.Context, incoming *v1a
 		patch, err = jsondiff.Compare(source, target, jsondiff.SkipCompact())
 		return patch, err
 	})
+	if err == nil {
+		logging.LogActionUpdate(log().WithField("application", incoming.QualifiedName()), "application", incoming, updated)
+	}
 	return updated, err
 }
 

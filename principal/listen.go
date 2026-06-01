@@ -232,8 +232,9 @@ func (l *Listener) Address() string {
 // This method should be called after the server is configured, and has all
 // required configuration properties set.
 func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
-	authSrv, err := auth.NewServer(s.queues, s.authMethods, s.issuer,
-		auth.WithAgentRegistrationManager(s.agentRegistrationManager))
+	authSrv, err := auth.NewServer(s.queues, s.namespace, s.authMethods, s.issuer,
+		auth.WithAgentRegistrationManager(s.agentRegistrationManager),
+		auth.WithOnAuthenticated(s.setAgentNamespace))
 	if err != nil {
 		return fmt.Errorf("could not create new auth server: %w", err)
 	}

@@ -377,6 +377,50 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 		require.False(t, a.appManager.IsManaged(incomingApp.QualifiedName()))
 	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, incomingApp), event.TargetApplication)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Upsert: Get (identity check) + Update only — no Delete, no Create
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), event.TargetApplication)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Upsert on Create: Get (identity check) + Update only — no Delete, no Create
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
 }
 
 func Test_processIncomingApplication_AutonomousUpdateDoesNotStampPrincipalUID(t *testing.T) {
@@ -928,6 +972,48 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		expectedCalls := []string{"Get", "Get", "Delete"}
 		gotCalls := []string{}
 		for _, call := range beMissing.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.projectManager.Manage(oldAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), event.TargetAppProject)
+		err := a.processIncomingAppProject(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.projectManager.Manage(oldAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), event.TargetAppProject)
+		err := a.processIncomingAppProject(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
 		}
 		require.Equal(t, expectedCalls, gotCalls)
@@ -1618,6 +1704,64 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.repoManager.Manage(oldRepo.Name)
+		defer a.repoManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+		supportsPatchMock := be.On("SupportsPatch").Return(false)
+		defer supportsPatchMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingRepo, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), event.TargetRepository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.repoManager.Manage(oldRepo.Name)
+		defer a.repoManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+		supportsPatchMock := be.On("SupportsPatch").Return(false)
+		defer supportsPatchMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingRepo, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), event.TargetRepository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
 }
 
 func Test_CreateRepository(t *testing.T) {
@@ -2081,6 +2225,60 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingCM, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.GPGKeyEvent(event.Create, incomingCM), event.TargetGPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingCM, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, incomingCM), event.TargetGPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
 }
 
 func Test_CreateGPGKey(t *testing.T) {
@@ -2188,7 +2386,7 @@ func Test_identityAction(t *testing.T) {
 				SourceUIDMatch:    false,
 				PrincipalUIDMatch: true,
 			},
-			expected: identityActionDeleteRecreate,
+			expected: identityActionMismatch,
 		},
 		{
 			name: "same principal, missing source-uid → stamp",
@@ -2237,7 +2435,7 @@ func Test_identityAction(t *testing.T) {
 				PrincipalUIDMatch:   true,
 				MissingPrincipalUID: true,
 			},
-			expected: identityActionDeleteRecreate,
+			expected: identityActionMismatch,
 		},
 		{
 			name: "adopted principal-uid, source-uid mismatch → transition (pre-upgrade failover)",
@@ -2314,4 +2512,105 @@ func Test_processIncomingApplication_TransitionUsesResolvedSourceUID(t *testing.
 	assert.Equal(t, "old-source-uid", updatedArg.Annotations[manager.SourceUIDAnnotation])
 	assert.True(t, a.sourceCache.Application.Contains(ktypes.UID("old-source-uid")))
 	assert.False(t, a.sourceCache.Application.Contains(ktypes.UID("new-principal-uid")))
+}
+
+func Test_getTargetNamespaceForApp(t *testing.T) {
+	tests := []struct {
+		name                    string
+		agentNamespace          string
+		principalNamespace      string
+		destinationBasedMapping bool
+		agentMode               types.AgentMode
+		appNamespace            string
+		expected                string
+		expectAnnotation        bool
+	}{
+		{
+			name:                    "Remaps principal namespace to agent namespace and stamps annotation",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd",
+			expected:                "argocd-agent",
+			expectAnnotation:        true,
+		},
+		{
+			name:                    "No remap and no annotation when app namespace differs from principal",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "tenant-apps",
+			expected:                "tenant-apps",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Tenant namespace same as agent namespace gets no annotation",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd-agent",
+			expected:                "argocd-agent",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Falls back to agent namespace without destination-based mapping",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: false,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd",
+			expected:                "argocd-agent",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Falls back to agent namespace in autonomous mode",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeAutonomous,
+			appNamespace:            "argocd",
+			expected:                "argocd-agent",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Same namespace on agent and principal skips annotation",
+			agentNamespace:          "argocd",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd",
+			expected:                "argocd",
+			expectAnnotation:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &Agent{
+				namespace:               tt.agentNamespace,
+				principalNamespace:      tt.principalNamespace,
+				destinationBasedMapping: tt.destinationBasedMapping,
+				mode:                    tt.agentMode,
+			}
+			app := &v1alpha1.Application{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      "myapp",
+					Namespace: tt.appNamespace,
+				},
+			}
+			result := a.getTargetNamespaceForApp(app)
+			assert.Equal(t, tt.expected, result)
+
+			_, hasAnnotation := app.Annotations[manager.NamespaceRemappedAnnotation]
+			if tt.expectAnnotation {
+				assert.True(t, hasAnnotation, "expected namespace-remapped annotation")
+				assert.Equal(t, "true", app.Annotations[manager.NamespaceRemappedAnnotation])
+			} else {
+				assert.False(t, hasAnnotation, "did not expect namespace-remapped annotation")
+			}
+		})
+	}
 }

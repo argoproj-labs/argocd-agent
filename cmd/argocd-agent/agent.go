@@ -43,35 +43,36 @@ import (
 // NewAgentRunCommand returns a new agent run command.
 func NewAgentRunCommand() *cobra.Command {
 	var (
-		serverAddress       string
-		serverPort          int
-		logLevels           []string
-		logFormat           string
-		insecure            bool
-		insecurePlaintext   bool
-		rootCASecretName    string
-		rootCAPath          string
-		kubeConfig          string
-		kubeContext         string
-		namespace           string
-		agentMode           string
-		creds               string
-		tlsSecretName       string
-		tlsClientCrt        string
-		tlsClientKey        string
-		tlsMinVersion       string
-		tlsMaxVersion       string
-		tlsCipherSuites     []string
-		enableWebSocket     bool
-		metricsPort         int
-		healthzPort         int
-		enableCompression   bool
-		pprofPort           int
-		redisAddr           string
-		redisUsername       string
-		redisPassword       string
-		redisCredsDirPath   string
-		enableResourceProxy bool
+		serverAddress        string
+		serverPort           int
+		logLevels            []string
+		logFormat            string
+		fullDetailCategories []string
+		insecure             bool
+		insecurePlaintext    bool
+		rootCASecretName     string
+		rootCAPath           string
+		kubeConfig           string
+		kubeContext          string
+		namespace            string
+		agentMode            string
+		creds                string
+		tlsSecretName        string
+		tlsClientCrt         string
+		tlsClientKey         string
+		tlsMinVersion        string
+		tlsMaxVersion        string
+		tlsCipherSuites      []string
+		enableWebSocket      bool
+		metricsPort          int
+		healthzPort          int
+		enableCompression    bool
+		pprofPort            int
+		redisAddr            string
+		redisUsername        string
+		redisPassword        string
+		redisCredsDirPath    string
+		enableResourceProxy  bool
 
 		// Time interval for agent to principal ping
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
@@ -79,6 +80,9 @@ func NewAgentRunCommand() *cobra.Command {
 
 		// Time interval for agent to refresh cluster cache info in principal
 		cacheRefreshInterval time.Duration
+
+		// Timeout for the initial informer sync at startup
+		informerSyncTimeout time.Duration
 
 		// Time interval for application-level heartbeats over the Subscribe stream.
 		// This is used to keep the connection alive through service meshes like Istio.
@@ -94,6 +98,7 @@ func NewAgentRunCommand() *cobra.Command {
 		createNamespace         bool
 		destinationBasedMapping bool
 		ignoreUnmanagedApps     bool
+		sourceMismatchPolicy    string
 
 		// Allowed namespaces for filtering applications
 		allowedNamespaces []string
@@ -161,6 +166,9 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 
 			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
+
+			cmdutil.ParseFullDetail(fullDetailCategories)
+
 			if namespace == "" {
 				cmdutil.Fatal("namespace value is empty and must be specified")
 			}
@@ -233,6 +241,7 @@ func NewAgentRunCommand() *cobra.Command {
 			remoteOpts = append(remoteOpts, client.WithKeepAlivePingInterval(keepAlivePingInterval))
 			remoteOpts = append(remoteOpts, client.WithCompression(enableCompression))
 			remoteOpts = append(remoteOpts, client.WithMaxGRPCMessageSize(maxGRPCMessageSize))
+			remoteOpts = append(remoteOpts, client.WithAgentNamespace(namespace))
 
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
 				remote, err = client.NewRemote(serverAddress, serverPort, remoteOpts...)
@@ -293,10 +302,12 @@ func NewAgentRunCommand() *cobra.Command {
 
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
+			agentOpts = append(agentOpts, agent.WithInformerSyncTimeout(informerSyncTimeout))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
 			agentOpts = append(agentOpts, agent.WithCreateNamespace(createNamespace))
 			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
 			agentOpts = append(agentOpts, agent.WithIgnoreUnmanagedApps(ignoreUnmanagedApps))
+			agentOpts = append(agentOpts, agent.WithSourceUIDMismatchPolicy(sourceMismatchPolicy))
 			agentOpts = append(agentOpts, agent.WithAllowedNamespaces(allowedNamespaces...))
 			agentOpts = append(agentOpts, agent.WithLabelSelector(labelSelector))
 
@@ -324,6 +335,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&logLevels, "log-level",
 		env.StringSliceWithDefault("ARGOCD_AGENT_LOG_LEVEL", nil, []string{"info"}),
 		"The log level to use. Comma-separated list of components in the format [<component>=]level")
+	command.Flags().StringSliceVar(&fullDetailCategories, "full-detail",
+		env.StringSliceWithDefault("ARGOCD_AGENT_FULL_DETAIL", nil, nil),
+		"Enable full detail logging for specified categories. Comma-separated list of: "+cmdutil.AvailableFullDetailCategories)
 
 	command.Flags().StringVar(&redisAddr, "redis-addr",
 		env.StringWithDefault("REDIS_ADDR", nil, "argocd-redis:6379"),
@@ -354,7 +368,7 @@ func NewAgentRunCommand() *cobra.Command {
 		"INSECURE: Do not verify Redis TLS certificate")
 
 	command.Flags().StringVar(&logFormat, "log-format",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),
+		env.StringWithDefault("ARGOCD_AGENT_LOG_FORMAT", nil, "text"),
 		"The log format to use (one of: text, json)")
 	command.Flags().BoolVar(&insecure, "insecure-tls",
 		env.BoolWithDefault("ARGOCD_AGENT_TLS_INSECURE", false),
@@ -421,6 +435,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&cacheRefreshInterval, "cache-refresh-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_CACHE_REFRESH_INTERVAL", nil, 10*time.Second),
 		"Interval to refresh cluster cache info in principal")
+	command.Flags().DurationVar(&informerSyncTimeout, "informer-sync-timeout",
+		env.DurationWithDefault("ARGOCD_AGENT_INFORMER_SYNC_TIMEOUT", nil, 10*time.Second),
+		"Timeout to wait for Application/AppProject/Repository/GPG/Namespace informers to sync at startup")
 	command.Flags().DurationVar(&heartbeatInterval, "heartbeat-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_HEARTBEAT_INTERVAL", nil, 0),
 		"Interval for application-level heartbeats over the Subscribe stream (e.g., 30s). "+
@@ -446,6 +463,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&ignoreUnmanagedApps, "ignore-unmanaged-apps",
 		env.BoolWithDefault("ARGOCD_AGENT_IGNORE_UNMANAGED_APPS", false),
 		"Ignore applications without the source UID annotation during resync instead of logging errors")
+	command.Flags().StringVar(&sourceMismatchPolicy, "source-uid-mismatch-policy",
+		env.StringWithDefault("ARGOCD_AGENT_SOURCE_UID_MISMATCH_POLICY", nil, "recreate"),
+		"Policy for source-UID mismatches: recreate (delete and recreate, default) or upsert (update in-place)")
 	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
 		env.StringSliceWithDefault("ARGOCD_AGENT_ALLOWED_NAMESPACES", nil, []string{}),
 		"List of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature)")

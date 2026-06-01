@@ -19,6 +19,7 @@ jobs:
       code: ${{ steps.filter.outputs.code_any_changed }}
       docs: ${{ steps.filter.outputs.docs_any_changed }}
       helm: ${{ steps.filter.outputs.helm_any_changed }}
+      agent-helm-chart: ${{ steps.filter.outputs.agent-helm-chart_any_changed }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -36,6 +37,8 @@ jobs:
               - 'docs/**'
             helm:
               - 'install/helm-repo/**'
+            agent-helm-chart:
+              - 'install/helm-repo/argocd-agent-agent/**'
 
   check-go:
     name: Check go modules synchronicity
@@ -230,9 +233,9 @@ jobs:
           sleep 30
       - name: Create Argo CD logs
         run: |
-          kubectl --context vcluster-agent-autonomous logs -n argocd argocd-application-controller-0 > /tmp/vcluster-agent-autonomous-controller.log
-          kubectl --context vcluster-agent-managed logs -n argocd argocd-application-controller-0 > /tmp/vcluster-agent-managed-controller.log
-          kubectl --context vcluster-control-plane logs -n argocd deployment/argocd-server > /tmp/vcluster-control-plane-server.log
+          kubectl --context vcluster-agent-autonomous logs -n argocd-autonomous argocd-application-controller-0 > /tmp/vcluster-agent-autonomous-controller.log
+          kubectl --context vcluster-agent-managed logs -n argocd-managed argocd-application-controller-0 > /tmp/vcluster-agent-managed-controller.log
+          kubectl --context vcluster-control-plane logs -n argocd-principal deployment/argocd-server > /tmp/vcluster-control-plane-server.log
         if: ${{ failure() }}
       - name: Upload e2e-argocd-agent logs
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
@@ -308,3 +311,52 @@ jobs:
         with:
           fail-on-diff: true
           version: v1.14.2
+
+  check-agent-chart-version:
+    name: Check agent chart version bump
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.agent-helm-chart == 'true' }}
+    runs-on: ubuntu-22.04
+    needs:
+      - changes
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install yq
+        env:
+          YQ_VERSION: v4.53.2
+          YQ_SHA256: d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            --output /tmp/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  /tmp/yq" | sha256sum --check --status
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+          rm -f /tmp/yq
+
+      - name: Check agent chart version was bumped
+        run: |
+          set -euo pipefail
+          CHART_PATH="install/helm-repo/argocd-agent-agent/Chart.yaml"
+          BASE_VERSION=$(git show origin/${{ github.base_ref }}:${CHART_PATH} | yq '.version')
+          HEAD_VERSION=$(yq '.version' ${CHART_PATH})
+
+          echo "Base version: ${BASE_VERSION}"
+          echo "Head version: ${HEAD_VERSION}"
+
+          if [ "${BASE_VERSION}" = "${HEAD_VERSION}" ]; then
+            echo "::error::Chart files changed but chart version was not bumped. Please update the 'version' field in ${CHART_PATH} (current: ${HEAD_VERSION})."
+            exit 1
+          fi
+
+          LOWEST=$(printf '%s\n%s' "${BASE_VERSION}" "${HEAD_VERSION}" | sort -V | head -n1)
+          if [ "${LOWEST}" != "${BASE_VERSION}" ]; then
+            echo "::error::Chart version in ${CHART_PATH} must be strictly greater than the base branch (${BASE_VERSION}), but is ${HEAD_VERSION}. Please update the 'version' field in ${CHART_PATH}."
+            exit 1
+          fi
+
+          echo "Chart version in ${CHART_PATH} was bumped: ${BASE_VERSION} -> ${HEAD_VERSION}"

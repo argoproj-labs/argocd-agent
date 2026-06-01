@@ -441,7 +441,7 @@ func GetInitialAdminSecret(k8sClient KubeClient) (string, error) {
 	// Read admin secret from principal's cluster
 	pwdSecret := &corev1.Secret{}
 	err := k8sClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-initial-admin-secret"}, pwdSecret, metav1.GetOptions{})
+		types.NamespacedName{Namespace: PrincipalNamespace, Name: "argocd-initial-admin-secret"}, pwdSecret, metav1.GetOptions{})
 
 	if err != nil {
 		return "", fmt.Errorf("unable to get admin secret: %v", err)
@@ -455,7 +455,7 @@ func GetArgoCDServerEndpoint(k8sClient KubeClient) (string, error) {
 	// Get the Argo server endpoint to use
 	srvService := &corev1.Service{}
 	err := k8sClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-server"}, srvService, metav1.GetOptions{})
+		types.NamespacedName{Namespace: PrincipalNamespace, Name: "argocd-server"}, srvService, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
