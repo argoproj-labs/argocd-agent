@@ -580,6 +580,71 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		assert.Equal(t, 403, resp.Status) // Should return forbidden for unmanaged resources
 	})
 
+	t.Run("Get CRD without tracking metadata succeeds", func(t *testing.T) {
+		// CRDs never receive Argo CD tracking metadata (argoproj/argo-cd#17400),
+		// so the managed-resource check must be skipped for them. See #873.
+		crd := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "apiextensions.k8s.io/v1",
+				"kind":       "CustomResourceDefinition",
+				"metadata": map[string]interface{}{
+					"name": "policyexceptions.kyverno.io",
+					// Intentionally no Argo CD tracking label/annotation.
+				},
+			},
+		}
+
+		// Setup test environment with a tracking reader that would otherwise
+		// reject the resource, proving the CRD bypass is what allows access.
+		kubeClient := kube.NewDynamicFakeClient(crd)
+		agent := &Agent{
+			context:             context.Background(),
+			kubeClient:          kubeClient,
+			queues:              queue.NewSendRecvQueues(),
+			emitter:             event.NewEventSource("test-agent"),
+			enableResourceProxy: true,
+			trackingReader:      newTestTrackingReader(v1alpha1.TrackingMethodLabel),
+		}
+		require.NoError(t, agent.queues.Create(defaultQueueName))
+
+		reqUUID := "test-uuid"
+		resourceReq := &event.ResourceRequest{
+			UUID: reqUUID,
+			Name: "policyexceptions.kyverno.io",
+			GroupVersionResource: v1.GroupVersionResource{
+				Group:    "apiextensions.k8s.io",
+				Version:  "v1",
+				Resource: "customresourcedefinitions",
+			},
+			Method: http.MethodGet,
+		}
+
+		ev := cloudevents.NewEvent()
+		ev.SetType(event.GetRequest.String())
+		require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, resourceReq))
+
+		err := agent.processIncomingResourceRequest(event.New(&ev, event.TargetResource))
+		require.NoError(t, err)
+
+		q := agent.queues.SendQ(defaultQueueName)
+		require.NotNil(t, q)
+
+		responseEv, shutdown := q.Get()
+		assert.False(t, shutdown)
+		require.NotNil(t, responseEv)
+
+		resp := &event.ResourceResponse{}
+		err = responseEv.DataAs(resp)
+		require.NoError(t, err)
+		assert.Equal(t, reqUUID, resp.UUID)
+		assert.Equal(t, 200, resp.Status) // CRD is returned despite lacking tracking metadata
+
+		var responseResource unstructured.Unstructured
+		err = json.Unmarshal([]byte(resp.Resource), &responseResource)
+		require.NoError(t, err)
+		assert.Equal(t, "policyexceptions.kyverno.io", responseResource.GetName())
+	})
+
 	t.Run("Resource not found returns error", func(t *testing.T) {
 		// Setup test environment with empty client
 		kubeClient := kube.NewDynamicFakeClient()
