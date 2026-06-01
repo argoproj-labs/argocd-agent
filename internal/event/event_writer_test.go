@@ -290,6 +290,14 @@ func TestEventWriter(t *testing.T) {
 		fs := &fakeStream{}
 		evSender := NewEventWriter("test", fs)
 
+		discardCalled := false
+		var discardedEventType, discardedResourceType string
+		evSender.SetOnDiscard(func(eventType, resourceType string) {
+			discardCalled = true
+			discardedEventType = eventType
+			discardedResourceType = resourceType
+		})
+
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
 		evSender.Add(ev)
@@ -308,6 +316,11 @@ func TestEventWriter(t *testing.T) {
 
 		// After max retries, event should be removed from sentEvents
 		require.NotContains(t, evSender.sentEvents, resID)
+
+		// Verify onDiscard callback was called with correct values
+		require.True(t, discardCalled)
+		require.Equal(t, "create", discardedEventType)
+		require.Equal(t, TargetApplication.String(), discardedResourceType)
 	})
 
 	t.Run("should not send ACK events to sentEvents", func(t *testing.T) {

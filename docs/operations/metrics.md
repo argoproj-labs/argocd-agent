@@ -23,6 +23,7 @@ Here is the list of available metrics:
 |   `principal_events_received` |	counter |   The total number of events sent by principal.   |
 |   `principal_events_sent` |   counter |   The total number of events sent by principal.   |
 |   `principal_event_processing_time`   |   histogramVec    |   Histogram of time taken to process events (in seconds). |
+|   `argocd_principal_event_writer_events_discarded_total`  |	counterVec  |   The total number of events discarded by the EventWriter after exhausting retries.   |
 |   `principal_errors`  |	counterVec  |   The total number of errors occurred in principal.   |
 
 ### Agent Metrics
@@ -31,6 +32,7 @@ Here is the list of available metrics:
 |   `agent_events_received` |   counter |   The total number of events received by agent.   |
 |   `agent_events_sent` |   counter |   The total number of events sent by agent.   |
 |   `agent_event_processing_time`   |	histogramVec    | Histogram of time taken to process events (in seconds).   |
+|   `argocd_agent_event_writer_events_discarded_total`  |	counterVec  |   The total number of events discarded by the EventWriter after exhausting retries.   |
 |   `agent_errors`  |   counterVec	| The total number of errors occurred in agent. |
 
 Here is the list of available labels:
@@ -41,3 +43,4 @@ Here is the list of available labels:
 |   `call_status` | success   |   Status of event processing. Possible values are: success, failure, discarded, not-allowed.  |
 |   `agent_name`  |   agent-managed   |   Name of Agent. Possible values are: agent-managed, agent-autonomous.    |
 |   `resource_type`   |   application |   Type of resource. Possible values are: application, app project, resource, resourceResync.   |
+|   `event_type`   |   create |   Type of event. Possible values are: create, delete, spec-update, status-update, etc.   |

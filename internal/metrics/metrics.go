@@ -63,19 +63,21 @@ type PrincipalMetrics struct {
 	EventReceived prometheus.Counter
 	EventSent     prometheus.Counter
 
-	EventProcessingTime   *prometheus.HistogramVec
-	EventWriterSendErrors *prometheus.CounterVec
+	EventProcessingTime        *prometheus.HistogramVec
+	EventWriterSendErrors      *prometheus.CounterVec
+	EventWriterEventsDiscarded *prometheus.CounterVec
 
 	PrincipalErrors *prometheus.CounterVec
 }
 
 // AgentMetrics holds metrics of agent
 type AgentMetrics struct {
-	EventReceived       prometheus.Counter
-	EventSent           prometheus.Counter
-	EventProcessingTime *prometheus.HistogramVec
-	PropagationLatency  *prometheus.HistogramVec
-	AgentErrors         *prometheus.CounterVec
+	EventReceived              prometheus.Counter
+	EventSent                  prometheus.Counter
+	EventProcessingTime        *prometheus.HistogramVec
+	PropagationLatency         *prometheus.HistogramVec
+	EventWriterEventsDiscarded *prometheus.CounterVec
+	AgentErrors                *prometheus.CounterVec
 }
 
 func NewInformerMetrics(label string) *InformerMetrics {
@@ -174,6 +176,11 @@ func NewPrincipalMetrics() *PrincipalMetrics {
 			Help: "The total number of EventWriter send errors observed by principal",
 		}, []string{"agent_name", "reason"}),
 
+		EventWriterEventsDiscarded: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_principal_event_writer_events_discarded_total",
+			Help: "The total number of events discarded by the EventWriter after exhausting retries",
+		}, []string{"agent_name", "event_type", "resource_type"}),
+
 		PrincipalErrors: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "principal_errors",
 			Help: "The total number of errors occurred in principal",
@@ -202,6 +209,11 @@ func NewAgentMetrics() *AgentMetrics {
 			Help:    "Histogram of time from principal send to agent processing (in seconds)",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"resource_type"}),
+
+		EventWriterEventsDiscarded: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_agent_event_writer_events_discarded_total",
+			Help: "The total number of events discarded by the EventWriter after exhausting retries",
+		}, []string{"event_type", "resource_type"}),
 
 		AgentErrors: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "agent_errors",
