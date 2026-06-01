@@ -177,7 +177,7 @@ func NewPrincipalMetrics() *PrincipalMetrics {
 		}, []string{"agent_name", "reason"}),
 
 		EventWriterEventsDiscarded: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "principal_event_writer_events_discarded_total",
+			Name: "argocd_principal_event_writer_events_discarded_total",
 			Help: "The total number of events discarded by the EventWriter after exhausting retries",
 		}, []string{"agent_name", "event_type", "resource_type"}),
 
@@ -211,7 +211,7 @@ func NewAgentMetrics() *AgentMetrics {
 		}, []string{"resource_type"}),
 
 		EventWriterEventsDiscarded: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "agent_event_writer_events_discarded_total",
+			Name: "argocd_agent_event_writer_events_discarded_total",
 			Help: "The total number of events discarded by the EventWriter after exhausting retries",
 		}, []string{"event_type", "resource_type"}),
 
