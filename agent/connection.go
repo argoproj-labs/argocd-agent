@@ -181,6 +181,12 @@ func (a *Agent) handleStreamEvents() error {
 
 	if a.eventWriter == nil {
 		a.eventWriter = event.NewEventWriter("", stream)
+		if a.metrics != nil {
+			// set function to call when an event is discarded
+			a.eventWriter.SetOnDiscard(func(eventType, resourceType string) {
+				a.metrics.EventWriterEventsDiscarded.WithLabelValues(eventType, resourceType).Inc()
+			})
+		}
 	} else {
 		a.eventWriter.UpdateTarget(stream)
 	}

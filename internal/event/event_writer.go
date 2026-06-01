@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +46,9 @@ type EventWriter struct {
 
 	// agentName is the name of the agent for which this EventWriter is responsible.
 	agentName string
+
+	// onDiscard is called when an event is discarded after exhausting retries.
+	onDiscard func(eventType, resourceType string)
 
 	log *logrus.Entry
 }
@@ -98,6 +102,12 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 		msg.retryAfter = &now
 		msg.mu.Unlock()
 	}
+}
+
+func (ew *EventWriter) SetOnDiscard(fn func(eventType, resourceType string)) {
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+	ew.onDiscard = fn
 }
 
 func (ew *EventWriter) Add(ev *cloudevents.Event) {
@@ -305,12 +315,20 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 	// Check if we've exhausted retries
 	if sentMsg.retryCount >= maxEventRetries {
 		logCtx.Warnf("Event failed after %d retries, giving up to unblock queue", sentMsg.retryCount)
+		evType := strings.TrimPrefix(sentMsg.event.Type(), TypePrefix+".")
+		resType := sentMsg.event.DataSchema()
 		sentMsg.mu.Unlock()
 
 		// Remove from sentEvents to unblock the queue
 		ew.mu.Lock()
+		onDiscard := ew.onDiscard
 		delete(ew.sentEvents, resID)
 		ew.mu.Unlock()
+
+		// call function provided by caller to handle the discarded event
+		if onDiscard != nil {
+			onDiscard(evType, resType)
+		}
 		return
 	}
 
