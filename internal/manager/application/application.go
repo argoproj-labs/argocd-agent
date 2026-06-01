@@ -457,7 +457,7 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 		return result != nil && result.Exists, false, err
 	}
 	if result.ExistingMissingSourceUID {
-		return result != nil && result.Exists, false, fmt.Errorf("source UID Annotation is not found for app: test")
+		return result != nil && result.Exists, false, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
 	}
 	return result.Exists, result.SourceUIDMatch, nil
 }
