@@ -160,6 +160,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: test/out/coverage.out
+          flags: unit-tests
 
   test-e2e:
     name: Run end-to-end tests
