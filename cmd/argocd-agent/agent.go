@@ -537,7 +537,7 @@ func redisCreds(credsDirPath string, username string, password string) (outUsern
 		if err != nil {
 			// The file is optional, use an empty username if missing
 			if !os.IsNotExist(err) {
-				return "", "", fmt.Errorf("failed reading username from '%s': %v", usernameFile, err)
+				return "", "", fmt.Errorf("failed reading username from '%s': %w", usernameFile, err)
 			}
 			usernameData = []byte{}
 		}
@@ -546,7 +546,7 @@ func redisCreds(credsDirPath string, username string, password string) (outUsern
 		passwordFile := filepath.Join(credsDirPath, "auth")
 		passwordData, err := os.ReadFile(passwordFile)
 		if err != nil {
-			return "", "", fmt.Errorf("failed reading password from '%s': %v", passwordFile, err)
+			return "", "", fmt.Errorf("failed reading password from '%s': %w", passwordFile, err)
 		}
 		password = strings.TrimSpace(string(passwordData))
 	}

@@ -169,7 +169,7 @@ func (m *Manager) setClusterInfo(clusterServer, agentName, clusterName string, c
 
 	// Save the given cluster info in cache.
 	if err := m.clusterCache.SetClusterInfo(clusterServer, clusterInfo); err != nil {
-		return fmt.Errorf("failed to refresh connection info in cluster: '%s' mapped with agent: '%s': %v", clusterName, agentName, err)
+		return fmt.Errorf("failed to refresh connection info in cluster: '%s' mapped with agent: '%s': %w", clusterName, agentName, err)
 	}
 	return nil
 }
@@ -205,14 +205,14 @@ func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Int
 	// Generate bearer token for this agent
 	bearerToken, err := tokenIssuer.IssueResourceProxyToken(agentName)
 	if err != nil {
-		return fmt.Errorf("could not issue resource proxy token: %v", err)
+		return fmt.Errorf("could not issue resource proxy token: %w", err)
 	}
 	logCtx.Info("Successfully issued resource proxy token")
 
 	// Read shared client certificate for mTLS
 	clientCert, clientKey, caData, err := readClientCertFromSecret(ctx, kubeclient, namespace, clientCertSecretName)
 	if err != nil {
-		return fmt.Errorf("could not read client certificate from secret %s: %v", clientCertSecretName, err)
+		return fmt.Errorf("could not read client certificate from secret %s: %w", clientCertSecretName, err)
 	}
 	logCtx.Info("Successfully read client certificate from secret")
 
@@ -247,7 +247,7 @@ func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Int
 		},
 	}
 	if err := ClusterToSecret(cluster, secret); err != nil {
-		return fmt.Errorf("could not convert cluster to secret: %v", err)
+		return fmt.Errorf("could not convert cluster to secret: %w", err)
 	}
 
 	// Create the cluster secret
@@ -256,7 +256,7 @@ func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Int
 			logCtx.Info("Cluster secret already exists, skipping creation")
 			return nil
 		}
-		return fmt.Errorf("could not create cluster secret: %v", err)
+		return fmt.Errorf("could not create cluster secret: %w", err)
 	}
 
 	logCtx.Info("Successfully created self-registered cluster secret with shared client cert and bearer token")
@@ -281,24 +281,24 @@ func UpdateClusterBearerTokenFromSecret(ctx context.Context, kubeclient kubernet
 
 	cluster, err := db.SecretToCluster(secret)
 	if err != nil {
-		return fmt.Errorf("could not parse cluster secret: %v", err)
+		return fmt.Errorf("could not parse cluster secret: %w", err)
 	}
 
 	// Generate new bearer token
 	bearerToken, err := tokenIssuer.IssueResourceProxyToken(agentName)
 	if err != nil {
-		return fmt.Errorf("could not issue resource proxy token: %v", err)
+		return fmt.Errorf("could not issue resource proxy token: %w", err)
 	}
 	logCtx.Info("Successfully issued new resource proxy token")
 
 	cluster.Config.BearerToken = bearerToken
 
 	if err := ClusterToSecret(cluster, secret); err != nil {
-		return fmt.Errorf("could not convert cluster to secret: %v", err)
+		return fmt.Errorf("could not convert cluster to secret: %w", err)
 	}
 
 	if _, err = kubeclient.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("could not update cluster secret: %v", err)
+		return fmt.Errorf("could not update cluster secret: %w", err)
 	}
 
 	logCtx.Info("Successfully updated cluster secret bearer token")

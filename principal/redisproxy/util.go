@@ -61,7 +61,7 @@ var ErrInvalidRequest = errors.New("invalid request")
 func readRedisArray(rd *bufio.Reader) ([]string, []string, error) {
 	line, err := rd.ReadString('\n')
 	if err != nil {
-		return nil, nil, fmt.Errorf("readArray ReadString error: %v", err)
+		return nil, nil, fmt.Errorf("readArray ReadString error: %w", err)
 	}
 	if len(line) < 3 {
 		return nil, nil, fmt.Errorf("readArray unexpected 'line' length")

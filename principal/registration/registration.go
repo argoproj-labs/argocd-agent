@@ -59,7 +59,7 @@ func (mgr *AgentRegistrationManager) RegisterAgent(ctx context.Context, agentNam
 	// Get cluster secret if it exists
 	existingSecret, err := cluster.GetClusterSecret(ctx, mgr.kubeclient, mgr.namespace, agentName)
 	if err != nil {
-		return fmt.Errorf("could not get cluster secret: %v", err)
+		return fmt.Errorf("could not get cluster secret: %w", err)
 	}
 
 	if existingSecret != nil {
@@ -88,7 +88,7 @@ func (mgr *AgentRegistrationManager) RegisterAgent(ctx context.Context, agentNam
 
 		// Token is invalid, update it
 		if err := cluster.UpdateClusterBearerTokenFromSecret(ctx, mgr.kubeclient, mgr.namespace, agentName, existingSecret, mgr.issuer); err != nil {
-			return fmt.Errorf("failed to refresh cluster bearer token: %v", err)
+			return fmt.Errorf("failed to refresh cluster bearer token: %w", err)
 		}
 
 		logCtx.Info("Cluster bearer token refreshed successfully")

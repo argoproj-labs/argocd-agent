@@ -167,7 +167,7 @@ func WithTLSClientCertFromFile(certPath, keyPath string) RemoteOption {
 	return func(r *Remote) error {
 		c, err := tlsutil.TLSCertFromFile(certPath, keyPath, true)
 		if err != nil {
-			return fmt.Errorf("unable to read TLS client cert: %v", err)
+			return fmt.Errorf("unable to read TLS client cert: %w", err)
 		}
 		r.tlsConfig.Certificates = append(r.tlsConfig.Certificates, c)
 		return nil
@@ -180,7 +180,7 @@ func WithTLSClientCertFromSecret(kube kubernetes.Interface, namespace, name stri
 	return func(r *Remote) error {
 		c, err := tlsutil.TLSCertFromSecret(context.Background(), kube, namespace, name)
 		if err != nil {
-			return fmt.Errorf("unable to read TLS client from secret: %v", err)
+			return fmt.Errorf("unable to read TLS client from secret: %w", err)
 		}
 		r.tlsConfig.Certificates = append(r.tlsConfig.Certificates, c)
 		return nil

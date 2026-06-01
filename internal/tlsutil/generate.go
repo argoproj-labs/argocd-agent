@@ -68,7 +68,7 @@ func GenerateCaCertificate(commonName string) (string, string, error) {
 		Bytes: certBytes,
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("error encoding certificate: %v", err)
+		return "", "", fmt.Errorf("error encoding certificate: %w", err)
 	}
 
 	keyPem := new(bytes.Buffer)
@@ -77,7 +77,7 @@ func GenerateCaCertificate(commonName string) (string, string, error) {
 		Bytes: x509.MarshalPKCS1PrivateKey(key),
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("error encoding key: %v", err)
+		return "", "", fmt.Errorf("error encoding key: %w", err)
 	}
 
 	return certPem.String(), keyPem.String(), nil
@@ -161,7 +161,7 @@ func GenerateCertificate(cert *x509.Certificate, signerCert *x509.Certificate, s
 		Bytes: certBytes,
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("error encoding certificate: %v", err)
+		return "", "", fmt.Errorf("error encoding certificate: %w", err)
 	}
 
 	keyPem := new(bytes.Buffer)
@@ -170,7 +170,7 @@ func GenerateCertificate(cert *x509.Certificate, signerCert *x509.Certificate, s
 		Bytes: x509.MarshalPKCS1PrivateKey(key),
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("error encoding key: %v", err)
+		return "", "", fmt.Errorf("error encoding key: %w", err)
 	}
 
 	return certPem.String(), keyPem.String(), nil

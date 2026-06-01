@@ -36,7 +36,7 @@ const (
 func EnableSelfAgentRegistration(ctx context.Context, principalClient, agentClient KubeClient) error {
 	// Create the shared client cert secret for self-registration
 	if err := CreateSharedClientCertSecret(ctx, principalClient, agentClient); err != nil {
-		return fmt.Errorf("failed to create shared client cert secret: %v", err)
+		return fmt.Errorf("failed to create shared client cert secret: %w", err)
 	}
 
 	// Set both the enable flag and the client cert secret name environment variables
@@ -100,7 +100,7 @@ func CreateSharedClientCertSecret(ctx context.Context, principalClient, agentCli
 	agentClientCert := &corev1.Secret{}
 	agentClientCertKey := types.NamespacedName{Name: config.SecretNameAgentClientCert, Namespace: ManagedAgentNamespace}
 	if err := agentClient.Get(ctx, agentClientCertKey, agentClientCert, metav1.GetOptions{}); err != nil {
-		return fmt.Errorf("failed to get agent client certificate: %v", err)
+		return fmt.Errorf("failed to get agent client certificate: %w", err)
 	}
 
 	tlsCert, ok := agentClientCert.Data["tls.crt"]
@@ -117,7 +117,7 @@ func CreateSharedClientCertSecret(ctx context.Context, principalClient, agentCli
 	caSecret := &corev1.Secret{}
 	caSecretKey := types.NamespacedName{Name: config.SecretNamePrincipalCA, Namespace: PrincipalNamespace}
 	if err := principalClient.Get(ctx, caSecretKey, caSecret, metav1.GetOptions{}); err != nil {
-		return fmt.Errorf("failed to get CA certificate secret: %v", err)
+		return fmt.Errorf("failed to get CA certificate secret: %w", err)
 	}
 
 	caCert, ok := caSecret.Data["tls.crt"]
@@ -140,7 +140,7 @@ func CreateSharedClientCertSecret(ctx context.Context, principalClient, agentCli
 	}
 
 	if err := principalClient.Create(ctx, sharedSecret, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("failed to create shared client cert secret: %v", err)
+		return fmt.Errorf("failed to create shared client cert secret: %w", err)
 	}
 
 	return nil

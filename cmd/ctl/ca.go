@@ -592,7 +592,7 @@ func readAndSummarizeCertificate(ctx context.Context, clt *kube.KubernetesClient
 	}
 	parsedCert, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
-		return certificateSummary{}, fmt.Errorf("could not parse certificate: %v", err)
+		return certificateSummary{}, fmt.Errorf("could not parse certificate: %w", err)
 	}
 
 	warnings := []string{}

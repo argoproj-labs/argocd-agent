@@ -88,7 +88,7 @@ func Bool(key string) (bool, error) {
 	}
 	bv, err := strconv.ParseBool(ev)
 	if err != nil {
-		return false, fmt.Errorf("error parsing environment '%s': %v", key, err)
+		return false, fmt.Errorf("error parsing environment '%s': %w", key, err)
 	}
 	return bv, nil
 }
@@ -100,7 +100,7 @@ func String(key string, validator func(string) error) (string, error) {
 	}
 	if validator != nil {
 		if err := validator(ev); err != nil {
-			return "", fmt.Errorf("error validating environment '%s': %v", key, err)
+			return "", fmt.Errorf("error validating environment '%s': %w", key, err)
 		}
 	}
 	return ev, nil
@@ -117,7 +117,7 @@ func Num(key string, validator func(num int) error) (int, error) {
 	}
 	if validator != nil {
 		if err := validator(int(nv)); err != nil {
-			return 0, fmt.Errorf("error validating environment '%s': %v", key, err)
+			return 0, fmt.Errorf("error validating environment '%s': %w", key, err)
 		}
 	}
 	return int(nv), nil
@@ -133,7 +133,7 @@ func StringSlice(key string, validator func(string) error) ([]string, error) {
 		s = strings.TrimSpace(s)
 		if validator != nil {
 			if err := validator(s); err != nil {
-				return []string{}, fmt.Errorf("error validating environment '%s': %v", key, err)
+				return []string{}, fmt.Errorf("error validating environment '%s': %w", key, err)
 			}
 		}
 		ret = append(ret, s)
@@ -149,12 +149,12 @@ func Duration(key string, validator func(time.Duration) error) (time.Duration, e
 
 	d, err := time.ParseDuration(ev)
 	if err != nil {
-		return 0, fmt.Errorf("error parsing duration '%s': %v", key, err)
+		return 0, fmt.Errorf("error parsing duration '%s': %w", key, err)
 	}
 
 	if validator != nil {
 		if err := validator(d); err != nil {
-			return 0, fmt.Errorf("error validating environment '%s': %v", key, err)
+			return 0, fmt.Errorf("error validating environment '%s': %w", key, err)
 		}
 	}
 	return d, nil

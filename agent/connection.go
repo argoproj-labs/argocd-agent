@@ -330,7 +330,7 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 		// send the checksum to the principal
 		ev, err := a.emitter.RequestSyncedResourceListEvent(checksum)
 		if err != nil {
-			return fmt.Errorf("failed to create synced resource list event: %v", err)
+			return fmt.Errorf("failed to create synced resource list event: %w", err)
 		}
 
 		sendQ.Add(ev)

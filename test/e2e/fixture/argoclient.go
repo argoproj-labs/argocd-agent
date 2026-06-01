@@ -444,7 +444,7 @@ func GetInitialAdminSecret(k8sClient KubeClient) (string, error) {
 		types.NamespacedName{Namespace: PrincipalNamespace, Name: "argocd-initial-admin-secret"}, pwdSecret, metav1.GetOptions{})
 
 	if err != nil {
-		return "", fmt.Errorf("unable to get admin secret: %v", err)
+		return "", fmt.Errorf("unable to get admin secret: %w", err)
 	}
 
 	return string(pwdSecret.Data["password"]), nil
