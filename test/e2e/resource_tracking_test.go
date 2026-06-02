@@ -21,13 +21,14 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/stretchr/testify/suite"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 )
 
 // ResourceTrackingTestSuite tests that the argocd-agent correctly identifies
@@ -164,8 +165,8 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 			},
 			SyncPolicy: &argoapp.SyncPolicy{
 				Automated: &argoapp.SyncPolicyAutomated{
-					Prune:    true,
-					SelfHeal: true,
+					Prune:    ptr.To(true),
+					SelfHeal: ptr.To(true),
 				},
 			},
 		},

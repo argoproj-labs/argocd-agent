@@ -1,6 +1,6 @@
 module github.com/argoproj/argocd-agent/hack/chaos-tester
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0

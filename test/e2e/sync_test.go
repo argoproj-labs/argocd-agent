@@ -22,7 +22,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
 	"github.com/argoproj/argo-cd/v3/pkg/apiclient/application"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
+	synccommon "github.com/argoproj/argo-cd/gitops-engine/pkg/sync/common"
 	"github.com/stretchr/testify/suite"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
