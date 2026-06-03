@@ -1,0 +1,148 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-rbac" (include "argocd-agent-principal.testResourceName" .) | quote }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "argocd-agent-principal.testResourceName" . }}
+  containers:
+    - name: kubectl
+      image: "{{ .Values.tests.image }}:{{ .Values.tests.tag }}"
+      command:
+        - sh
+        - -c
+        - |
+          echo "Testing RBAC configuration..."
+
+          SERVICE_ACCOUNT_NAME={{ include "argocd-agent-principal.serviceAccountName" . | quote }}
+          ROLE_NAME={{ include "argocd-agent-principal.roleName" . | quote }}
+          ROLEBINDING_NAME={{ include "argocd-agent-principal.roleBindingName" . | quote }}
+          CLUSTER_ROLE_NAME={{ include "argocd-agent-principal.clusterRoleName" . | quote }}
+          CLUSTER_ROLEBINDING_NAME={{ include "argocd-agent-principal.clusterRoleBindingName" . | quote }}
+
+          {{- if .Values.serviceAccount.create }}
+          # Test ServiceAccount
+          echo "Testing ServiceAccount..."
+          if kubectl get serviceaccount "$SERVICE_ACCOUNT_NAME" -n {{ include "argocd-agent-principal.namespace" . }}; then
+            echo "✓ ServiceAccount exists"
+          else
+            echo "✗ ServiceAccount not found"
+            exit 1
+          fi
+          {{- else }}
+          echo "Skipping ServiceAccount check (serviceAccount.create=false)"
+          {{- end }}
+
+          {{- if .Values.rbac.create }}
+          # Test Role
+          echo "Testing Role..."
+          if kubectl get role "$ROLE_NAME" -n {{ include "argocd-agent-principal.namespace" . }}; then
+            echo "✓ Role exists"
+          else
+            echo "✗ Role not found"
+            exit 1
+          fi
+
+          # Check Role rules for core resources (secrets, configmaps, events)
+          CORE_RULES=$(kubectl get role "$ROLE_NAME" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.rules[?(@.apiGroups[0]==\"\")]}")
+          if [ -n "$CORE_RULES" ]; then
+            echo "✓ Role has core resource rules"
+          else
+            echo "✗ Role missing core resource rules"
+            exit 1
+          fi
+
+          # Test RoleBinding
+          echo "Testing RoleBinding..."
+          if kubectl get rolebinding "$ROLEBINDING_NAME" -n {{ include "argocd-agent-principal.namespace" . }}; then
+            echo "✓ RoleBinding exists"
+          else
+            echo "✗ RoleBinding not found"
+            exit 1
+          fi
+
+          # Check RoleBinding references correct role
+          ROLE_REF=$(kubectl get rolebinding "$ROLEBINDING_NAME" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.roleRef.name}")
+          if [ "$ROLE_REF" = "$ROLE_NAME" ]; then
+            echo "✓ RoleBinding references correct role: $ROLE_REF"
+          else
+            echo "✗ RoleBinding references incorrect role: $ROLE_REF (expected $ROLE_NAME)"
+            exit 1
+          fi
+
+          # Check RoleBinding references correct service account
+          SA_REF=$(kubectl get rolebinding "$ROLEBINDING_NAME" -n {{ include "argocd-agent-principal.namespace" . }} -o jsonpath="{.subjects[0].name}")
+          if [ "$SA_REF" = "$SERVICE_ACCOUNT_NAME" ]; then
+            echo "✓ RoleBinding references correct service account: $SA_REF"
+          else
+            echo "✗ RoleBinding references incorrect service account: $SA_REF (expected $SERVICE_ACCOUNT_NAME)"
+            exit 1
+          fi
+          {{- else }}
+          echo "Skipping Role/RoleBinding checks (rbac.create=false)"
+          {{- end }}
+
+          {{- if and .Values.rbac.create .Values.rbac.createClusterRole }}
+          # Test ClusterRole
+          echo "Testing ClusterRole..."
+          if kubectl get clusterrole "$CLUSTER_ROLE_NAME"; then
+            echo "✓ ClusterRole exists"
+          else
+            echo "✗ ClusterRole not found"
+            exit 1
+          fi
+
+          # Check ClusterRole rules for argoproj.io resources (applications, appprojects, applicationsets)
+          ARGOPROJ_RULES=$(kubectl get clusterrole "$CLUSTER_ROLE_NAME" -o jsonpath="{.rules[?(@.apiGroups[0]==\"argoproj.io\")]}")
+          if [ -n "$ARGOPROJ_RULES" ]; then
+            echo "✓ ClusterRole has argoproj.io resource rules"
+          else
+            echo "✗ ClusterRole missing argoproj.io resource rules"
+            exit 1
+          fi
+
+          # Test ClusterRoleBinding
+          echo "Testing ClusterRoleBinding..."
+          if kubectl get clusterrolebinding "$CLUSTER_ROLEBINDING_NAME"; then
+            echo "✓ ClusterRoleBinding exists"
+          else
+            echo "✗ ClusterRoleBinding not found"
+            exit 1
+          fi
+
+          # Check ClusterRoleBinding references correct cluster role
+          CLUSTER_ROLE_REF=$(kubectl get clusterrolebinding "$CLUSTER_ROLEBINDING_NAME" -o jsonpath="{.roleRef.name}")
+          if [ "$CLUSTER_ROLE_REF" = "$CLUSTER_ROLE_NAME" ]; then
+            echo "✓ ClusterRoleBinding references correct cluster role: $CLUSTER_ROLE_REF"
+          else
+            echo "✗ ClusterRoleBinding references incorrect cluster role: $CLUSTER_ROLE_REF (expected $CLUSTER_ROLE_NAME)"
+            exit 1
+          fi
+
+          # Check ClusterRoleBinding references correct service account
+          CLUSTER_SA_REF=$(kubectl get clusterrolebinding "$CLUSTER_ROLEBINDING_NAME" -o jsonpath="{.subjects[0].name}")
+          if [ "$CLUSTER_SA_REF" = "$SERVICE_ACCOUNT_NAME" ]; then
+            echo "✓ ClusterRoleBinding references correct service account: $CLUSTER_SA_REF"
+          else
+            echo "✗ ClusterRoleBinding references incorrect service account: $CLUSTER_SA_REF (expected $SERVICE_ACCOUNT_NAME)"
+            exit 1
+          fi
+
+          # Check ClusterRoleBinding references correct namespace
+          CLUSTER_NS_REF=$(kubectl get clusterrolebinding "$CLUSTER_ROLEBINDING_NAME" -o jsonpath="{.subjects[0].namespace}")
+          if [ "$CLUSTER_NS_REF" = "{{ include "argocd-agent-principal.namespace" . }}" ]; then
+            echo "✓ ClusterRoleBinding references correct namespace: $CLUSTER_NS_REF"
+          else
+            echo "✗ ClusterRoleBinding references incorrect namespace: $CLUSTER_NS_REF (expected {{ include "argocd-agent-principal.namespace" . }})"
+            exit 1
+          fi
+          {{- else }}
+          echo "Skipping ClusterRole/ClusterRoleBinding checks (cluster-scoped RBAC not enabled)"
+          {{- end }}
+
+          echo "RBAC configuration verified successfully!"
+  restartPolicy: Never
+{{- end }}
