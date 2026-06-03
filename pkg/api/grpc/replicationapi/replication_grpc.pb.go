@@ -29,6 +29,8 @@ type ReplicationClient interface {
 	GetSnapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*ReplicationSnapshot, error)
 	// Status returns the current replication status
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*ReplicationStatus, error)
+	// ConfirmMissingResources classifies resources absent from a snapshot before cleanup.
+	ConfirmMissingResources(ctx context.Context, in *ConfirmMissingResourcesRequest, opts ...grpc.CallOption) (*ConfirmMissingResourcesResponse, error)
 }
 
 type replicationClient struct {
@@ -88,6 +90,15 @@ func (c *replicationClient) Status(ctx context.Context, in *StatusRequest, opts 
 	return out, nil
 }
 
+func (c *replicationClient) ConfirmMissingResources(ctx context.Context, in *ConfirmMissingResourcesRequest, opts ...grpc.CallOption) (*ConfirmMissingResourcesResponse, error) {
+	out := new(ConfirmMissingResourcesResponse)
+	err := c.cc.Invoke(ctx, "/replicationapi.Replication/ConfirmMissingResources", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ReplicationServer is the server API for Replication service.
 // All implementations must embed UnimplementedReplicationServer
 // for forward compatibility
@@ -99,6 +110,8 @@ type ReplicationServer interface {
 	GetSnapshot(context.Context, *SnapshotRequest) (*ReplicationSnapshot, error)
 	// Status returns the current replication status
 	Status(context.Context, *StatusRequest) (*ReplicationStatus, error)
+	// ConfirmMissingResources classifies resources absent from a snapshot before cleanup.
+	ConfirmMissingResources(context.Context, *ConfirmMissingResourcesRequest) (*ConfirmMissingResourcesResponse, error)
 	mustEmbedUnimplementedReplicationServer()
 }
 
@@ -114,6 +127,9 @@ func (UnimplementedReplicationServer) GetSnapshot(context.Context, *SnapshotRequ
 }
 func (UnimplementedReplicationServer) Status(context.Context, *StatusRequest) (*ReplicationStatus, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Status not implemented")
+}
+func (UnimplementedReplicationServer) ConfirmMissingResources(context.Context, *ConfirmMissingResourcesRequest) (*ConfirmMissingResourcesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ConfirmMissingResources not implemented")
 }
 func (UnimplementedReplicationServer) mustEmbedUnimplementedReplicationServer() {}
 
@@ -190,6 +206,24 @@ func _Replication_Status_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Replication_ConfirmMissingResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfirmMissingResourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReplicationServer).ConfirmMissingResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/replicationapi.Replication/ConfirmMissingResources",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReplicationServer).ConfirmMissingResources(ctx, req.(*ConfirmMissingResourcesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Replication_ServiceDesc is the grpc.ServiceDesc for Replication service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -204,6 +238,10 @@ var Replication_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Status",
 			Handler:    _Replication_Status_Handler,
+		},
+		{
+			MethodName: "ConfirmMissingResources",
+			Handler:    _Replication_ConfirmMissingResources_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

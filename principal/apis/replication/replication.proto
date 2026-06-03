@@ -106,6 +106,26 @@ message SnapshotRequest {
 // StatusRequest is used to query replication status
 message StatusRequest {}
 
+// ConfirmMissingResourcesRequest asks the active principal to classify resources
+// that were tracked locally but absent from a received snapshot.
+message ConfirmMissingResourcesRequest {
+    string agent_name = 1;
+    uint64 snapshot_sequence_num = 2;
+    repeated Resource resources = 3;
+}
+
+// ConfirmMissingResourcesResponse returns one decision for each requested resource.
+message ConfirmMissingResourcesResponse {
+    repeated ConfirmMissingResourceResult results = 1;
+}
+
+// ConfirmMissingResourceResult classifies a missing resource.
+message ConfirmMissingResourceResult {
+    Resource resource = 1;
+    string status = 2;
+    string reason = 3;
+}
+
 // Replication service for principal-to-principal state replication
 service Replication {
     // Subscribe establishes a bidirectional stream for replication.
@@ -122,5 +142,13 @@ service Replication {
     // Status returns the current replication status
     rpc Status(StatusRequest) returns (ReplicationStatus) {
         option (google.api.http).get = "/api/v1/replication/status";
+    }
+
+    // ConfirmMissingResources classifies resources absent from a snapshot before cleanup.
+    rpc ConfirmMissingResources(ConfirmMissingResourcesRequest) returns (ConfirmMissingResourcesResponse) {
+        option (google.api.http) = {
+            post: "/api/v1/replication/confirm-missing-resources"
+            body: "*"
+        };
     }
 }

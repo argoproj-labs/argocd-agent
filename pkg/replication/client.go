@@ -860,3 +860,21 @@ func (c *Client) GetSnapshot(ctx context.Context) (*replicationapi.ReplicationSn
 
 	return snapshot, nil
 }
+
+func (c *Client) ConfirmMissingResources(ctx context.Context, agentName string, resources []*replicationapi.Resource, snapshotSequenceNum uint64) (*replicationapi.ConfirmMissingResourcesResponse, error) {
+	conn := c.Conn()
+	if conn == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	client := replicationapi.NewReplicationClient(conn)
+	resp, err := client.ConfirmMissingResources(ctx, &replicationapi.ConfirmMissingResourcesRequest{
+		AgentName:           agentName,
+		SnapshotSequenceNum: snapshotSequenceNum,
+		Resources:           resources,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to confirm missing resources: %w", err)
+	}
+	return resp, nil
+}

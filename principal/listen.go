@@ -110,7 +110,7 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 		// Even though we load TLS configuration here, we will not yet create
 		// a TLS listener. TLS will be setup using the appropriate grpc-go API
 		// functions.
-		s.tlsConfig, lerr = s.loadTLSConfig()
+		_, lerr = s.ensureTLSConfig()
 		if lerr != nil {
 			return false, lerr
 		}
@@ -165,9 +165,11 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 		),
 	}
 
+	tlsConfig := s.currentTLSConfig()
+
 	// Add TLS credentials unless running in plaintext mode (e.g., behind Istio)
-	if s.tlsConfig != nil {
-		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(s.tlsConfig)))
+	if tlsConfig != nil {
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsConfig)))
 	} else {
 		log().Warn("gRPC server running without TLS - ensure service mesh provides transport security")
 	}
@@ -192,13 +194,13 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 
 		downgradingHandler := grpchttp1server.CreateDowngradingHandler(s.grpcServer, http.NotFoundHandler(), opts...)
 		downgradingServer := &http.Server{
-			TLSConfig: s.tlsConfig,
+			TLSConfig: tlsConfig,
 			Handler:   h2c.NewHandler(downgradingHandler, &http2.Server{}),
 		}
 
 		go func() {
 			// Use plaintext HTTP if TLS is disabled (e.g., behind Istio)
-			if s.tlsConfig != nil {
+			if tlsConfig != nil {
 				err = downgradingServer.ServeTLS(s.listener.l, s.options.tlsCertPath, s.options.tlsKeyPath)
 			} else {
 				err = downgradingServer.Serve(s.listener.l)
