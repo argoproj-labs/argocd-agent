@@ -1002,10 +1002,10 @@ func (rp *RedisProxy) extractAgentNameFromRedisCommandKey(redisKey string, logCt
 		// but may target an agent via destination-based mapping.
 		if rp.agentLookupFn == nil {
 			// agentLookupFn not set indicates namespace-based mapping mode,
-			// where missing underscore is an error
-			errMsg := fmt.Sprintf("unexpected lack of '_' namespace/name separator: '%s'", redisKey)
-			logCtx.Error(errMsg)
-			return "", fmt.Errorf("%s", errMsg)
+			// for which we require the namespace to be specified in the key
+			// if there is no namespace, we assume it's a local application and forward to principal redis.
+			logCtx.Debugf("local application detected (no '_' in key): '%s', forwarding to redis", redisKey)
+			return "", nil
 		}
 		namespace = rp.principalNamespace
 		appName = namespaceAndName
