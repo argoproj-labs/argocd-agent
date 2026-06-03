@@ -456,11 +456,12 @@ func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project
 
 // DoesAgentMatchWithProject checks if the agent name matches the given AppProject.
 // We match the agent to an AppProject if:
-// 1. The agent name matches any one of the destination names OR
-// 2. The agent name is empty but the agent name is present in the server URL parameter AND
-// 3. The agent name is not denied by any of the destination names
+// 1. The agent name is not denied by any of the destination names.
+// 2. The agent name matches one of the AppProject's destination names and source namespaces in the case of namespace-based mapping.
+// 3. The agent name matches one of the AppProject's destination names in the case of destination-based mapping.
+// It matches the agent name with the server URL parameter if the destination name is empty and the server URL is present.
 // Ref: https://github.com/argoproj/argo-cd/blob/master/pkg/apis/application/v1alpha1/app_project_types.go#L477
-func DoesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
+func DoesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject, dstMapping bool) bool {
 	destinationMatched := false
 
 	for _, dst := range appProject.Spec.Destinations {
@@ -498,9 +499,14 @@ func DoesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject)
 		}
 	}
 
-	// Must match both destination and source namespace requirements
-	return destinationMatched &&
-		glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
+	// Must match both destination and source namespace requirements for namespace-based mapping
+	if !dstMapping {
+		return destinationMatched &&
+			glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
+	}
+
+	// For destination-based mapping, only match the destination name
+	return destinationMatched
 }
 
 func isDenyPattern(pattern string) bool {

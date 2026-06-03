@@ -770,10 +770,7 @@ func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {
 	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
 }
 
-// mapAppProjectToAgents maps an AppProject to the list of managed agents that should receive it.
-// We sync an AppProject from the principal to an agent if:
-// 1. It is a managed agent (not autonomous)
-// 2. The agent name matches one of the AppProject's destinations and source namespaces
+// mapAppProjectToAgents returns the set of managed agents that should receive this AppProject.
 func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[string]bool {
 	agents := map[string]bool{}
 	s.clientLock.RLock()
@@ -783,7 +780,7 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 			continue
 		}
 
-		if appproject.DoesAgentMatchWithProject(agentName, appProject) {
+		if appproject.DoesAgentMatchWithProject(agentName, appProject, s.destinationBasedMapping) {
 			agents[agentName] = true
 		}
 	}

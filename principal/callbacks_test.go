@@ -54,6 +54,7 @@ func TestMapAppProjectToAgents(t *testing.T) {
 		appProject v1alpha1.AppProject
 		agents     map[string]types.AgentMode
 		want       map[string]bool
+		dstMapping bool
 	}{
 		{
 			name: "matches single agent",
@@ -124,11 +125,32 @@ func TestMapAppProjectToAgents(t *testing.T) {
 			},
 			want: map[string]bool{},
 		},
+		{
+			name: "destination-based mapping - agent only matches destination name",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "cluster-1"},
+					},
+				},
+			},
+			agents: map[string]types.AgentMode{
+				"cluster-1": types.AgentModeManaged,
+				"cluster-2": types.AgentModeManaged,
+			},
+			want: map[string]bool{
+				"cluster-1": true,
+			},
+			dstMapping: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Server{namespaceMap: tt.agents}
+			s := &Server{
+				namespaceMap:            tt.agents,
+				destinationBasedMapping: tt.dstMapping,
+			}
 			got := s.mapAppProjectToAgents(tt.appProject)
 			assert.Equal(t, tt.want, got)
 		})

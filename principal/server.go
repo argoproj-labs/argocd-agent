@@ -1016,7 +1016,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			}
 		}
 
-		if !appproject.DoesAgentMatchWithProject(agent, appProject) {
+		if !appproject.DoesAgentMatchWithProject(agent, appProject, s.destinationBasedMapping) {
 			continue
 		}
 
@@ -1062,7 +1062,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 				continue
 			}
 
-			if !appproject.DoesAgentMatchWithProject(agent, project) {
+			if !appproject.DoesAgentMatchWithProject(agent, project, s.destinationBasedMapping) {
 				continue
 			}
 

@@ -351,6 +351,7 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 		agentName  string
 		appProject v1alpha1.AppProject
 		want       bool
+		dstMapping bool
 	}{
 		{
 			name:      "agent matches destination name",
@@ -499,11 +500,51 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 			},
 			want: false, // Agent name doesn't match extracted query parameter
 		},
+		{
+			name:      "destination-based mapping - agent only matches destination name",
+			agentName: "agent-prod",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "agent-prod", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"test"},
+				},
+			},
+			want:       true,
+			dstMapping: true,
+		},
+		{
+			name:      "destination-based mapping - nil sourceNamespaces with matching destination",
+			agentName: "agent-prod",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "agent-prod", Namespace: "default"},
+					},
+				},
+			},
+			want:       true,
+			dstMapping: true,
+		},
+		{
+			name:      "destination-based mapping - destination does not match",
+			agentName: "agent-prod",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "other-agent", Namespace: "default"},
+					},
+				},
+			},
+			want:       false,
+			dstMapping: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := DoesAgentMatchWithProject(tt.agentName, tt.appProject)
+			got := DoesAgentMatchWithProject(tt.agentName, tt.appProject, tt.dstMapping)
 			assert.Equal(t, tt.want, got)
 		})
 	}
