@@ -17,6 +17,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
@@ -200,10 +201,6 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 	switch ev.Type() {
 	case event.Create:
 		if a.mode == types.AgentModeManaged {
-			if identity.Exists && identity.ExistingMissingSourceUID {
-				logCtx.Error("Application already exists on agent but is unmanaged.")
-				return fmt.Errorf("application already exists on agent but is unmanaged, please clean it up or switch agent to autonomous mode")
-			}
 			err = a.syncManagedApplication(logCtx, incomingApp, identity, principalUID)
 		} else {
 			_, err = a.createApplication(incomingApp, principalUID)
@@ -333,6 +330,22 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 			}
 			return nil
 		}
+	case identityActionAdoptExistingApp:
+		logCtx.Info("Application already exists on agent, adopting existing app")
+		dontAdopt, err := a.shouldNotAdopt(incomingApp)
+		if err != nil {
+			logCtx.Warn("failed to check if existing application should be adopted, falling back to global default: %w", err)
+		}
+
+		if dontAdopt {
+			logCtx.Info("Existing application is set to not be adopted")
+			return nil
+		}
+
+		if err := a.updateManagedApplicationIdentity(incomingApp, principalUID); err != nil {
+			return fmt.Errorf("could not adopt app: %w", err)
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown identity action for app %s", incomingApp.QualifiedName())
 	}
@@ -358,6 +371,10 @@ const (
 	// on the incoming resource (e.g. AppSet controller reconciled and wiped
 	// annotations). Safe to update in-place and re-stamp the source-uid.
 	identityActionUpdateStampUID
+
+	// identityActionAdoptExistingApp: principals targeted app exists on the
+	// agent already. Stamp existing app with source-uid if allowed.
+	identityActionAdoptExistingApp
 )
 
 // effectiveMismatchPolicy returns the mismatch policy for the given incoming resource.
@@ -405,6 +422,11 @@ func identityAction(r *application.IdentityCompareResult) identityActionType {
 	if r.AdoptedPrincipalUID && !r.SourceUIDMatch {
 		return identityActionTransition
 	}
+
+	if r.Exists && r.ExistingMissingSourceUID {
+		return identityActionAdoptExistingApp
+	}
+
 	return identityActionMismatch
 }
 
@@ -1358,4 +1380,24 @@ func (a *Agent) ensureNamespaceExists(namespace string) error {
 
 	log().Infof("Created namespace %s", namespace)
 	return nil
+}
+
+// shouldNotAdopt checks to see if an application should not be adopted
+// The annotation on the existing application takes priority over the the global setting
+func (a *Agent) shouldNotAdopt(incoming metav1.Object) (bool, error) {
+	existing, err := a.appManager.Get(a.context, incoming.GetName(), incoming.GetNamespace())
+	if err != nil {
+		return a.disableAdoption, err
+	}
+
+	if annotations := existing.GetAnnotations(); annotations != nil {
+		if val, ok := annotations[manager.DontAdoptAnnotation]; ok {
+			disabled, err := strconv.ParseBool(val)
+			if err != nil {
+				return a.disableAdoption, err
+			}
+			return disabled, nil
+		}
+	}
+	return a.disableAdoption, nil
 }

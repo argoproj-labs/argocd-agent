@@ -164,6 +164,8 @@ type Agent struct {
 	// recreateAction defines the agent's behavior after recreating an app from
 	// an unauthorized deletion. It is only applicable in managed mode.
 	recreateAction manager.RecreateAction
+	// disableAdoption disables existing applications being stamped with source-uid on creation in managed mode
+	disableAdoption bool
 }
 
 const defaultQueueName = "default"

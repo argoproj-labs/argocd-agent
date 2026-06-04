@@ -120,7 +120,6 @@ func Test_CreateApplication(t *testing.T) {
 		require.NotEqual(t, a.namespace, newApp.Namespace)
 		require.Equal(t, "principal-namespace", newApp.Namespace, "Namespace should not be modified in destination based mapping")
 	})
-
 }
 
 func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
@@ -291,7 +290,8 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 
 		getMock.Unset()
 		notFoundError := kerrors.NewNotFound(schema.GroupResource{
-			Group: "argoproj.io", Resource: "application"}, newApp.Name)
+			Group: "argoproj.io", Resource: "application",
+		}, newApp.Name)
 		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
 
 		createMock.Unset()
@@ -784,7 +784,8 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 
 		getMock.Unset()
 		notFoundError := kerrors.NewNotFound(schema.GroupResource{
-			Group: "argoproj.io", Resource: "appproject"}, newAppProject.Name)
+			Group: "argoproj.io", Resource: "appproject",
+		}, newAppProject.Name)
 		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
 
 		createMock.Unset()
@@ -1041,7 +1042,8 @@ func Test_UpdateApplication(t *testing.T) {
 					UID:        "uid-1",
 				},
 			},
-		}}
+		},
+	}
 	t.Run("Discard event because version has been seen already", func(t *testing.T) {
 		defer a.appManager.ClearIgnored()
 		a.appManager.IgnoreChange(fmt.Sprintf("%s/test", a.namespace), "12345")
@@ -1142,7 +1144,6 @@ func Test_UpdateApplication(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 	})
-
 }
 
 func Test_CreateAppProject(t *testing.T) {
@@ -1205,7 +1206,6 @@ func Test_CreateAppProject(t *testing.T) {
 		require.NotNil(t, napp)
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app project")
 	})
-
 }
 
 func Test_UpdateAppProject(t *testing.T) {
@@ -1231,7 +1231,8 @@ func Test_UpdateAppProject(t *testing.T) {
 		},
 		Spec: v1alpha1.AppProjectSpec{
 			SourceNamespaces: []string{"default", "argocd"},
-		}}
+		},
+	}
 
 	t.Run("Update appproject using patch", func(t *testing.T) {
 		a.mode = types.AgentModeManaged
@@ -1451,7 +1452,6 @@ func Test_UpdateAppProject(t *testing.T) {
 		assert.Equal(t, customAgentNamespace, capturedDeleteNamespace, "Delete should use custom agent namespace")
 		assert.NotEqual(t, "principal-namespace", capturedDeleteNamespace, "Delete should not use principal namespace")
 	})
-
 }
 
 func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
@@ -1623,7 +1623,8 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 
 		// Set up mock expectations
 		notFoundError := kerrors.NewNotFound(schema.GroupResource{
-			Group: "", Resource: "secret"}, newRepo.Name)
+			Group: "", Resource: "secret",
+		}, newRepo.Name)
 		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
 		defer getMock.Unset()
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdRepo, nil)
@@ -2149,7 +2150,8 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		newCM := incomingCM.DeepCopy()
 
 		notFoundError := kerrors.NewNotFound(schema.GroupResource{
-			Group: "", Resource: "configmap"}, newCM.Name)
+			Group: "", Resource: "configmap",
+		}, newCM.Name)
 		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
 		defer getMock.Unset()
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdCM, nil)
@@ -2614,4 +2616,145 @@ func Test_getTargetNamespaceForApp(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
+	a, _ := newAgent(t)
+	a.mode = types.AgentModeManaged
+	var be *backend_mocks.Application
+	var getMock, updateMock, patchMock *mock.Call
+	var updatedApp *v1alpha1.Application
+
+	incomingApp := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-app",
+			Namespace: "argocd",
+			UID:       ktypes.UID("new-app"),
+		},
+	}
+
+	existingApp := incomingApp.DeepCopy()
+	existingApp.UID = ktypes.UID("existing-app")
+
+	expectedPrincipalUID := "principal-uid"
+
+	configureManager := func(t *testing.T, app *v1alpha1.Application) {
+		t.Helper()
+		be = backend_mocks.NewApplication(t)
+		var err error
+		a.appManager, err = application.NewApplicationManager(be, "argocd",
+			application.WithAllowUpsert(true),
+			application.WithRole(manager.ManagerRoleAgent),
+			application.WithMode(manager.ManagerModeManaged))
+		require.NoError(t, err)
+
+		getMock = be.On("Get", mock.Anything, "test-app", "argocd").Return(app, nil)
+
+		updateMock = be.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			updatedApp = args.Get(1).(*v1alpha1.Application).DeepCopy()
+		}).Return(app, nil)
+
+		patchMock = be.On("SupportsPatch").Return(false)
+	}
+
+	unsetMocks := func(t *testing.T) {
+		t.Helper()
+		getMock.Unset()
+		updateMock.Unset()
+		patchMock.Unset()
+	}
+
+	clearUpdatedApp := func() {
+		updatedApp = nil
+	}
+
+	t.Run("Existing application gets stamped with principal uid when enabled", func(t *testing.T) {
+		defer unsetMocks(t)
+		defer clearUpdatedApp()
+
+		configureManager(t, existingApp.DeepCopy())
+
+		evs := event.NewEventSource("test-app")
+		ce := evs.ApplicationEvent(event.Create, incomingApp)
+		event.SetPrincipalUID(ce, expectedPrincipalUID)
+
+		err := a.processIncomingApplication(event.New(ce, event.TargetApplication))
+		require.NoError(t, err)
+		require.NotNil(t, updatedApp)
+		require.NotNil(t, updatedApp.Annotations)
+
+		sourceUID, exists := updatedApp.Annotations[manager.SourceUIDAnnotation]
+		require.True(t, exists)
+		require.Equal(t, string(incomingApp.UID), sourceUID)
+
+		principalUID, exists := updatedApp.Annotations[manager.PrincipalUIDAnnotation]
+		require.True(t, exists)
+		require.Equal(t, expectedPrincipalUID, principalUID)
+	})
+
+	t.Run("Existing application does not get principal uid when adoption is disabled on existing application", func(t *testing.T) {
+		defer unsetMocks(t)
+		defer clearUpdatedApp()
+
+		existingAppWithAnnotation := existingApp.DeepCopy()
+		existingAppWithAnnotation.SetAnnotations(map[string]string{
+			manager.DontAdoptAnnotation: "true",
+		})
+		configureManager(t, existingAppWithAnnotation)
+
+		evs := event.NewEventSource("test-app")
+		ce := evs.ApplicationEvent(event.Create, incomingApp)
+		event.SetPrincipalUID(ce, expectedPrincipalUID)
+
+		err := a.processIncomingApplication(event.New(ce, event.TargetApplication))
+		require.NoError(t, err)
+		require.Nil(t, updatedApp)
+	})
+
+	t.Run("Existing application does not get principal uid when adoption is disabled globally", func(t *testing.T) {
+		defer unsetMocks(t)
+		defer clearUpdatedApp()
+
+		a.disableAdoption = true
+
+		configureManager(t, existingApp.DeepCopy())
+
+		evs := event.NewEventSource("test-app")
+		ce := evs.ApplicationEvent(event.Create, incomingApp)
+		event.SetPrincipalUID(ce, expectedPrincipalUID)
+
+		err := a.processIncomingApplication(event.New(ce, event.TargetApplication))
+		require.NoError(t, err)
+		require.Nil(t, updatedApp)
+	})
+
+	t.Run("Existing application gets stamped if adoption is globally disabled but enabled on app", func(t *testing.T) {
+		defer unsetMocks(t)
+		defer clearUpdatedApp()
+
+		a.disableAdoption = true
+
+		existingAppWithAnnotation := existingApp.DeepCopy()
+		existingAppWithAnnotation.SetAnnotations(map[string]string{
+			manager.DontAdoptAnnotation: "false",
+		})
+		configureManager(t, existingAppWithAnnotation)
+
+		evs := event.NewEventSource("test-app")
+		ce := evs.ApplicationEvent(event.Create, incomingApp)
+		event.SetPrincipalUID(ce, expectedPrincipalUID)
+
+		err := a.processIncomingApplication(event.New(ce, event.TargetApplication))
+		require.NoError(t, err)
+		require.NotNil(t, updatedApp)
+		require.NotNil(t, updatedApp.Annotations)
+
+		sourceUID, exists := updatedApp.Annotations[manager.SourceUIDAnnotation]
+		require.True(t, exists)
+		require.Equal(t, string(incomingApp.UID), sourceUID)
+
+		principalUID, exists := updatedApp.Annotations[manager.PrincipalUIDAnnotation]
+		require.True(t, exists)
+		require.Equal(t, expectedPrincipalUID, principalUID)
+	})
 }

@@ -72,6 +72,9 @@ const (
 	// MismatchPolicyAnnotation is the annotation operators set on a resource to override
 	// the global mismatch policy for that specific resource.
 	MismatchPolicyAnnotation = "argocd.argoproj.io/source-uid-mismatch-policy"
+
+	// DontAdoptAnnotation is an annotation for setting whether an app should not be adopted
+	DontAdoptAnnotation = "argocd.argoproj.io/dont-adopt"
 )
 
 // RecreateAction defines the agent's behavior after recreating an Application
