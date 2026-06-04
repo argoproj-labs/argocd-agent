@@ -74,6 +74,19 @@ const (
 	MismatchPolicyAnnotation = "argocd.argoproj.io/source-uid-mismatch-policy"
 )
 
+// RecreateAction defines the agent's behavior after recreating an Application
+// from an unauthorized deletion. It is only applicable in managed mode.
+type RecreateAction string
+
+const (
+	// RecreateActionIgnore takes no action after recreation. This is the default action.
+	RecreateActionIgnore RecreateAction = "ignore"
+	// RecreateActionClearStatus clears operationState so auto-sync can re-trigger.
+	RecreateActionClearStatus RecreateAction = "clear-status"
+	// RecreateActionResync sets a sync operation to force immediate re-sync.
+	RecreateActionResync RecreateAction = "resync"
+)
+
 type Manager interface {
 	SetRole(role ManagerRole)
 	SetMode(role ManagerRole)

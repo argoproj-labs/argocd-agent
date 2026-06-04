@@ -511,6 +511,67 @@ func (_c *Application_Update_Call) RunAndReturn(run func(context.Context, *v1alp
 	return _c
 }
 
+// PatchStatus provides a mock function with given fields: ctx, name, namespace, patch
+func (_m *Application) PatchStatus(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.Application, error) {
+	ret := _m.Called(ctx, name, namespace, patch)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PatchStatus")
+	}
+
+	var r0 *v1alpha1.Application
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, []byte) (*v1alpha1.Application, error)); ok {
+		return rf(ctx, name, namespace, patch)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, []byte) *v1alpha1.Application); ok {
+		r0 = rf(ctx, name, namespace, patch)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1alpha1.Application)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, []byte) error); ok {
+		r1 = rf(ctx, name, namespace, patch)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Application_PatchStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PatchStatus'
+type Application_PatchStatus_Call struct {
+	*mock.Call
+}
+
+// PatchStatus is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+//   - namespace string
+//   - patch []byte
+func (_e *Application_Expecter) PatchStatus(ctx interface{}, name interface{}, namespace interface{}, patch interface{}) *Application_PatchStatus_Call {
+	return &Application_PatchStatus_Call{Call: _e.mock.On("PatchStatus", ctx, name, namespace, patch)}
+}
+
+func (_c *Application_PatchStatus_Call) Run(run func(ctx context.Context, name string, namespace string, patch []byte)) *Application_PatchStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].([]byte))
+	})
+	return _c
+}
+
+func (_c *Application_PatchStatus_Call) Return(_a0 *v1alpha1.Application, _a1 error) *Application_PatchStatus_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Application_PatchStatus_Call) RunAndReturn(run func(context.Context, string, string, []byte) (*v1alpha1.Application, error)) *Application_PatchStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewApplication creates a new instance of Application. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewApplication(t interface {

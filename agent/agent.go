@@ -160,6 +160,10 @@ type Agent struct {
 
 	// mismatchPolicy defines the agent's behavior on source-UID mismatch
 	mismatchPolicy manager.SourceUIDMismatchPolicy
+
+	// recreateAction defines the agent's behavior after recreating an app from
+	// an unauthorized deletion. It is only applicable in managed mode.
+	recreateAction manager.RecreateAction
 }
 
 const defaultQueueName = "default"
@@ -203,6 +207,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.namespace = namespace
 	a.mode = types.AgentModeAutonomous
 	a.mismatchPolicy = manager.MismatchPolicyRecreate
+	a.recreateAction = manager.RecreateActionIgnore
 	a.redisProxyMsgHandler = &redisProxyMsgHandler{}
 	// Resource proxy is enabled by default.
 	a.enableResourceProxy = true

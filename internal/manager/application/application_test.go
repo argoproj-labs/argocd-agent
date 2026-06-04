@@ -1146,3 +1146,56 @@ func Test_Upsert_CopiesExistingUID(t *testing.T) {
 	require.NoError(t, err)
 	mockedBackend.AssertExpectations(t)
 }
+
+func Test_ClearOperationState(t *testing.T) {
+	t.Run("Successfully clears operationState", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "guestbook",
+				Namespace: "argocd",
+			},
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: synccommon.OperationSucceeded,
+				},
+			},
+		}
+		updatedApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "guestbook",
+				Namespace: "argocd",
+			},
+			Status: v1alpha1.ApplicationStatus{},
+		}
+
+		mockedBackend := appmock.NewApplication(t)
+		mockedBackend.On("Patch", mock.Anything, "guestbook", "argocd", []byte(`[{"op":"replace","path":"/status/operationState","value":null}]`)).Return(updatedApp, nil)
+
+		m, err := NewApplicationManager(mockedBackend, "argocd")
+		require.NoError(t, err)
+
+		err = m.ClearOperationState(context.TODO(), app)
+		assert.NoError(t, err)
+		mockedBackend.AssertExpectations(t)
+	})
+
+	t.Run("Returns error when patch fails", func(t *testing.T) {
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "guestbook",
+				Namespace: "argocd",
+			},
+		}
+
+		mockedBackend := appmock.NewApplication(t)
+		mockedBackend.On("Patch", mock.Anything, "guestbook", "argocd", []byte(`[{"op":"replace","path":"/status/operationState","value":null}]`)).Return(nil, fmt.Errorf("patch failed"))
+
+		m, err := NewApplicationManager(mockedBackend, "argocd")
+		require.NoError(t, err)
+
+		err = m.ClearOperationState(context.TODO(), app)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "patch failed")
+		mockedBackend.AssertExpectations(t)
+	})
+}

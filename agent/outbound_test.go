@@ -232,6 +232,104 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 	})
 }
 
+func Test_handleRecreatedApp(t *testing.T) {
+	app := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "guestbook",
+			Namespace: "argocd",
+			Annotations: map[string]string{
+				manager.SourceUIDAnnotation: "uid-123",
+			},
+		},
+		Status: v1alpha1.ApplicationStatus{
+			OperationState: &v1alpha1.OperationState{
+				Phase: "Succeeded",
+			},
+		},
+	}
+
+	t.Run("Ignore action does nothing", func(t *testing.T) {
+		a, _ := newAgent(t, app)
+		a.mode = types.AgentModeManaged
+		a.recreateAction = manager.RecreateActionIgnore
+
+		logCtx := log().WithField("test", true)
+		a.handleRecreatedApp(app, logCtx)
+
+		updated, err := a.appManager.Get(context.Background(), "guestbook", "argocd")
+		require.NoError(t, err)
+		assert.NotNil(t, updated.Status.OperationState)
+		assert.Equal(t, "Succeeded", string(updated.Status.OperationState.Phase))
+	})
+
+	t.Run("ClearStatus action clears operationState", func(t *testing.T) {
+		a, _ := newAgent(t, app)
+		a.mode = types.AgentModeManaged
+		a.recreateAction = manager.RecreateActionClearStatus
+		a.context = context.Background()
+
+		logCtx := log().WithField("test", true)
+		a.handleRecreatedApp(app, logCtx)
+
+		updated, err := a.appManager.Get(context.Background(), "guestbook", "argocd")
+		require.NoError(t, err)
+		assert.Nil(t, updated.Status.OperationState)
+	})
+
+	t.Run("Resync action sets Operation on the app", func(t *testing.T) {
+		a, _ := newAgentManaged(t, app)
+		a.recreateAction = manager.RecreateActionResync
+		a.context = context.Background()
+		_ = a.appManager.Manage("argocd/guestbook")
+		defer a.appManager.ClearManaged()
+
+		logCtx := log().WithField("test", true)
+		a.handleRecreatedApp(app, logCtx)
+
+		updated, err := a.appManager.Get(context.Background(), "guestbook", "argocd")
+		require.NoError(t, err)
+		assert.NotNil(t, updated.Operation)
+		assert.NotNil(t, updated.Operation.Sync)
+	})
+
+	t.Run("Resync action with DeletionTimestamp does not re-delete", func(t *testing.T) {
+		now := v1.Now()
+		appWithDeletion := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:              "guestbook",
+				Namespace:         "argocd",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{"resources-finalizer.argocd.argoproj.io"},
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "uid-123",
+				},
+			},
+			Spec: app.Spec,
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: "Succeeded",
+				},
+			},
+		}
+
+		a, _ := newAgentManaged(t, app)
+		a.recreateAction = manager.RecreateActionResync
+		a.context = context.Background()
+		_ = a.appManager.Manage("argocd/guestbook")
+		defer a.appManager.ClearManaged()
+
+		logCtx := log().WithField("test", true)
+		a.handleRecreatedApp(appWithDeletion, logCtx)
+
+		// App should still exist (not re-deleted) and have Operation.Sync set
+		updated, err := a.appManager.Get(context.Background(), "guestbook", "argocd")
+		require.NoError(t, err)
+		assert.NotNil(t, updated.Operation)
+		assert.NotNil(t, updated.Operation.Sync)
+		assert.Nil(t, updated.DeletionTimestamp)
+	})
+}
+
 func Test_deleteNamespaceCallback(t *testing.T) {
 	a, _ := newAgent(t)
 	a.remote.SetClientID("agent")

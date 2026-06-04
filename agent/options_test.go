@@ -110,6 +110,57 @@ func Test_effectiveMismatchPolicy(t *testing.T) {
 	})
 }
 
+func Test_WithRecreateAction(t *testing.T) {
+	newTestAgent := func(t *testing.T, action string) (*Agent, error) {
+		t.Helper()
+		kubec := fakekube.NewKubernetesFakeClientWithApps("argocd")
+		remote, err := client.NewRemote("127.0.0.1", 8080)
+		require.NoError(t, err)
+		return NewAgent(context.TODO(), kubec, "argocd",
+			WithRemote(remote),
+			WithCacheRefreshInterval(10*time.Second),
+			WithInformerSyncTimeout(10*time.Second),
+			WithRecreateAction(action),
+		)
+	}
+
+	t.Run("ignore is accepted", func(t *testing.T) {
+		a, err := newTestAgent(t, "ignore")
+		require.NoError(t, err)
+		assert.Equal(t, manager.RecreateActionIgnore, a.recreateAction)
+	})
+
+	t.Run("clear-status is accepted", func(t *testing.T) {
+		a, err := newTestAgent(t, "clear-status")
+		require.NoError(t, err)
+		assert.Equal(t, manager.RecreateActionClearStatus, a.recreateAction)
+	})
+
+	t.Run("resync is accepted", func(t *testing.T) {
+		a, err := newTestAgent(t, "resync")
+		require.NoError(t, err)
+		assert.Equal(t, manager.RecreateActionResync, a.recreateAction)
+	})
+
+	t.Run("unknown value returns error", func(t *testing.T) {
+		_, err := newTestAgent(t, "block")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown on-application-recreate")
+	})
+
+	t.Run("default is ignore when option not set", func(t *testing.T) {
+		kubec := fakekube.NewKubernetesFakeClientWithApps("argocd")
+		remote, _ := client.NewRemote("127.0.0.1", 8080)
+		a, err := NewAgent(context.TODO(), kubec, "argocd",
+			WithRemote(remote),
+			WithCacheRefreshInterval(10*time.Second),
+			WithInformerSyncTimeout(10*time.Second),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, manager.RecreateActionIgnore, a.recreateAction)
+	})
+}
+
 func Test_WithInformerSyncTimeout(t *testing.T) {
 	newTestAgent := func(t *testing.T, opts ...AgentOption) (*Agent, error) {
 		t.Helper()

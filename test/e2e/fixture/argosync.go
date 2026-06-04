@@ -81,5 +81,5 @@ func WaitForAppSyncedAndHealthy(t *testing.T, ctx context.Context, kclient KubeC
 		}
 		retries++
 		return false
-	}, 60*time.Second, 1*time.Second)
+	}, 180*time.Second, 1*time.Second)
 }

@@ -533,3 +533,36 @@ metadata:
   annotations:
     argocd.argoproj.io/source-uid-mismatch-policy: upsert
 ```
+
+### On Application Recreate
+
+| | |
+|---|---|
+| **CLI Flag** | `--on-application-recreate` |
+| **Environment Variable** | `ARGOCD_AGENT_ON_APPLICATION_RECREATE` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `ignore` |
+| **Valid Values** | `ignore`, `clear-status`, `resync` |
+
+Controls the agent's behavior after it reverts an unauthorized application deletion in managed mode.
+
+When a user or external process deletes an Application directly on the agent cluster (bypassing the principal), the agent detects this as an unauthorized deletion and recreates the Application. However, if the deleted Application had the `resources-finalizer.argocd.argoproj.io` finalizer, the recreated Application inherits a stale `operationState` from the previous sync. This stale state prevents Argo CD's auto-sync from triggering, leaving the Application stuck in `OutOfSync` or `Missing` status indefinitely.
+
+**Actions:**
+
+- `ignore` *(default)*: Take no corrective action after recreation. The Application may remain stuck in `OutOfSync` if it had a finalizer. Use this if you want to manually investigate unauthorized deletions.
+- `clear-status`: Clear the `operationState` on the recreated Application. This allows Argo CD's automated sync policy to re-trigger naturally, bringing the Application back to `Synced` and `Healthy`.
+- `resync`: Set a sync operation on the recreated Application to force an immediate re-sync. This is the most aggressive option and brings the Application back to `Synced` fastest.
+
+**Example:**
+
+```bash
+argocd-agent agent --on-application-recreate=clear-status
+```
+
+Or via environment variable:
+
+```bash
+ARGOCD_AGENT_ON_APPLICATION_RECREATE=clear-status
+```

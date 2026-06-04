@@ -99,6 +99,7 @@ func NewAgentRunCommand() *cobra.Command {
 		destinationBasedMapping bool
 		ignoreUnmanagedApps     bool
 		sourceMismatchPolicy    string
+		onApplicationRecreate   string
 
 		// Allowed namespaces for filtering applications
 		allowedNamespaces []string
@@ -308,6 +309,7 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
 			agentOpts = append(agentOpts, agent.WithIgnoreUnmanagedApps(ignoreUnmanagedApps))
 			agentOpts = append(agentOpts, agent.WithSourceUIDMismatchPolicy(sourceMismatchPolicy))
+			agentOpts = append(agentOpts, agent.WithRecreateAction(onApplicationRecreate))
 			agentOpts = append(agentOpts, agent.WithAllowedNamespaces(allowedNamespaces...))
 			agentOpts = append(agentOpts, agent.WithLabelSelector(labelSelector))
 
@@ -466,6 +468,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&sourceMismatchPolicy, "source-uid-mismatch-policy",
 		env.StringWithDefault("ARGOCD_AGENT_SOURCE_UID_MISMATCH_POLICY", nil, "recreate"),
 		"Policy for source-UID mismatches: recreate (delete and recreate, default) or upsert (update in-place)")
+	command.Flags().StringVar(&onApplicationRecreate, "on-application-recreate",
+		env.StringWithDefault("ARGOCD_AGENT_ON_APPLICATION_RECREATE", nil, "ignore"),
+		"Action after recreating an app from unauthorized deletion (managed mode only): ignore (default), clear-status, or resync")
 	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
 		env.StringSliceWithDefault("ARGOCD_AGENT_ALLOWED_NAMESPACES", nil, []string{}),
 		"List of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature)")
