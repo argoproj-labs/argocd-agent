@@ -234,6 +234,10 @@ Any repository URL starting with `https://github.com/myorg` will automatically u
 
 The distribution logic (AppProject matching, agent pattern matching) is identical to repository secrets — refer to the [Repository-to-Agent Distribution Logic](#repository-to-agent-distribution-logic) section above for details.
 
+### Creating Repo-Creds (Autonomous Mode)
+
+For autonomous agents, repo-creds are created and managed locally on the workload cluster. It has the same steps and pattern described in [Autonomous agent mode for repository secrets](#autonomous-agent-mode) above.
+
 ### Repo-Creds Lifecycle
 
 - **Creation**: Repo-creds created on the principal are sent to matching agents
