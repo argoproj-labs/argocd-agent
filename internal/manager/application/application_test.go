@@ -65,9 +65,9 @@ func fakeInformer(t *testing.T, namespace string, objects ...runtime.Object) (*f
 	require.NoError(t, err)
 
 	go func() {
-		err = informer.Start(context.Background())
-		if err != nil {
-			t.Errorf("failed to start informer: %v", err)
+		startErr := informer.Start(context.Background())
+		if startErr != nil {
+			t.Errorf("failed to start informer: %v", startErr)
 		}
 	}()
 
