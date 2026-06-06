@@ -236,7 +236,7 @@ The distribution logic (AppProject matching, agent pattern matching) is identica
 
 ### Creating Repo-Creds (Autonomous Mode)
 
-For autonomous agents, repo-creds are created and managed locally on the workload cluster. It has the same steps and pattern described in [Autonomous agent mode for repository secrets](#autonomous-agent-mode) above.
+For autonomous agents, repo-creds are created and managed locally on the workload cluster. They follow the same steps and patterns described in [Autonomous Agent Mode](`#autonomous-agent-mode`) above.
 
 ### Repo-Creds Lifecycle
 
