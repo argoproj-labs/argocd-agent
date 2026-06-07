@@ -47,6 +47,7 @@ nav:
     - Managing Applications: user-guide/applications.md
     - Managing AppProjects: user-guide/appprojects.md
     - ApplicationSets: user-guide/applicationsets.md
+    - Managing Repositories: user-guide/repository.md
     - GPG Key Synchronization: user-guide/gpg-keys.md
     - Adding an agent: user-guide/adding-agents.md
     - Accessing live resources on workload clusters: user-guide/live-resources.md
