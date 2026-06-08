@@ -59,6 +59,7 @@ deploy_principal() {
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
 		sed -i'' \
+			-e "s/  principal.namespace:.*/  principal.namespace: \"${ARGOCD_PRINCIPAL_NAMESPACE}\"/" \
 			-e "s/  principal.allowed-namespaces:.*/  principal.allowed-namespaces: \"agent-*\"/" \
 			principal-params-cm.yaml
 		kustomize build . | kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n ${ARGOCD_PRINCIPAL_NAMESPACE} apply -f -
@@ -74,7 +75,8 @@ deploy_agent_managed() {
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
 		sed -i'' \
-		        -e "s/  agent.mode:.*/  agent.mode: \"managed\"/" \
+			-e "s/  agent.namespace:.*/  agent.namespace: \"${ARGOCD_MANAGED_NAMESPACE}\"/" \
+			-e "s/  agent.mode:.*/  agent.mode: \"managed\"/" \
 			-e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
 			-e "s/  agent.server.address:.*/  agent.server.address: \"$principal_addr\"/" \
 			agent-params-cm.yaml
@@ -90,7 +92,8 @@ deploy_agent_autonomous() {
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
 		sed -i'' \
-		        -e "s/  agent.mode:.*/  agent.mode: \"autonomous\"/" \
+			-e "s/  agent.namespace:.*/  agent.namespace: \"${ARGOCD_AUTONOMOUS_NAMESPACE}\"/" \
+			-e "s/  agent.mode:.*/  agent.mode: \"autonomous\"/" \
 			-e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
 			-e "s/  agent.server.address:.*/  agent.server.address: \"$principal_addr\"/" \
 			agent-params-cm.yaml
@@ -135,4 +138,3 @@ case "$1" in
 	echo "[image] is optional and defaults to ${DEFAULT_IMAGE_NAME}" >&2
 	exit 1
 esac
-
