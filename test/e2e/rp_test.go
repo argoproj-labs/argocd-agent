@@ -65,7 +65,7 @@ func (suite *ResourceProxyTestSuite) getRpClient(agentName string) *http.Client 
 	certPool.AddCert(caCert.Leaf)
 
 	// Generate client certificate
-	ccert, ckey, err := tlsutil.GenerateClientCertificate(agentName, caCert.Leaf, caCert.PrivateKey)
+	ccert, ckey, err := tlsutil.GenerateClientCertificate(agentName, caCert.Leaf, caCert.PrivateKey, tlsutil.DefaultLeafCertValidityDays)
 	requires.NoError(err)
 	tlsCert, err := tls.X509KeyPair([]byte(ccert), []byte(ckey))
 	requires.NoError(err)
