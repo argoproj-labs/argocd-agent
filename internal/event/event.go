@@ -622,9 +622,8 @@ func FromWire(pev *pb.CloudEvent) (*Event, error) {
 		return nil, err
 	}
 	ev := &Event{}
-	var target targets.EventTarget
 	if ev.target = Target(raw); ev.target == "" {
-		return nil, fmt.Errorf("unknown event target FromWire: %s / %v", target, *raw)
+		return nil, fmt.Errorf("unknown event target FromWire: %s / %v", raw.DataSchema(), *raw)
 	}
 	ev.event = raw
 	return ev, nil
