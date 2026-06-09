@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
@@ -95,7 +96,7 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 	// Inject trace context into the event for propagation to agent
 	s.stampEvent(ctx, ev)
 	q.Add(ev)
-	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplication), agentName, replication.DirectionOutbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.Application), agentName, replication.DirectionOutbound)
 	logCtx.Tracef("Added app %s to send queue, total length now %d", outbound.QualifiedName(), q.Len())
 
 	if s.metrics != nil {
@@ -197,7 +198,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 	// Inject trace context into the event for propagation to agent
 	s.stampEvent(ctx, ev)
 	q.Add(ev)
-	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplication), agentName, replication.DirectionOutbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.Application), agentName, replication.DirectionOutbound)
 	logCtx.WithField("event_type", ev.Type()).Tracef("Added app to send queue, total length now %d", q.Len())
 
 	// When a new operation appears (nil → non-nil), send it as a separate
@@ -206,7 +207,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		opEv := s.events.ApplicationEvent(event.SetOperation, new)
 		tracing.InjectTraceContext(ctx, opEv)
 		q.Add(opEv)
-		s.ha.ForwardEventForReplication(event.New(opEv, event.TargetApplication), agentName, replication.DirectionOutbound)
+		s.ha.ForwardEventForReplication(event.New(opEv, targets.Application), agentName, replication.DirectionOutbound)
 		logCtx.WithField("event_type", opEv.Type()).Trace("Added SetOperation to send queue")
 	}
 
@@ -270,7 +271,7 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 	s.stampEvent(ctx, ev)
 	logCtx.WithField("event", "DeleteApp").WithField("sendq_len", q.Len()+1).Tracef("Added event to send queue")
 	q.Add(ev)
-	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplication), agentName, replication.DirectionOutbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.Application), agentName, replication.DirectionOutbound)
 
 	if s.metrics != nil {
 		s.metrics.ApplicationDeleted.Inc()
@@ -339,7 +340,7 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 	}
 
 	ev := s.events.AppProjectEvent(event.Create, outbound)
-	s.ha.ForwardEventForReplication(event.New(ev, event.TargetAppProject), outbound.Namespace, replication.DirectionOutbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.AppProject), outbound.Namespace, replication.DirectionOutbound)
 
 	// Reconcile repositories that reference this project.
 	s.syncRepositoriesForProject(ctx, outbound.Name, outbound.Namespace, logCtx)
@@ -410,7 +411,7 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 	s.syncAppProjectUpdatesToAgents(ctx, old, new, logCtx)
 
 	ev := s.events.AppProjectEvent(event.SpecUpdate, new)
-	s.ha.ForwardEventForReplication(event.New(ev, event.TargetAppProject), new.Namespace, replication.DirectionOutbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.AppProject), new.Namespace, replication.DirectionOutbound)
 
 	// The project rules could have been updated. Reconcile repositories that reference this project.
 	s.syncRepositoriesForProject(ctx, new.Name, new.Namespace, logCtx)
@@ -488,7 +489,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	}
 
 	ev := s.events.AppProjectEvent(event.Delete, outbound)
-	s.ha.ForwardEventForReplication(event.New(ev, event.TargetAppProject), outbound.Namespace, replication.DirectionOutbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.AppProject), outbound.Namespace, replication.DirectionOutbound)
 
 	// Project is deleted, remove all repositories and credentials that reference this project
 	s.syncRepositoriesForProject(ctx, outbound.Name, outbound.Namespace, logCtx)
@@ -505,7 +506,7 @@ func (s *Server) newAppSetCallback(outbound *v1alpha1.ApplicationSet) {
 		return
 	}
 	ev := s.events.ApplicationSetEvent(event.Create, outbound)
-	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplicationSet), "", replication.DirectionOutbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.ApplicationSet), "", replication.DirectionOutbound)
 }
 
 func (s *Server) updateAppSetCallback(old *v1alpha1.ApplicationSet, new *v1alpha1.ApplicationSet) {
@@ -513,7 +514,7 @@ func (s *Server) updateAppSetCallback(old *v1alpha1.ApplicationSet, new *v1alpha
 		return
 	}
 	ev := s.events.ApplicationSetEvent(event.SpecUpdate, new)
-	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplicationSet), "", replication.DirectionOutbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.ApplicationSet), "", replication.DirectionOutbound)
 }
 
 func (s *Server) deleteAppSetCallback(outbound *v1alpha1.ApplicationSet) {
@@ -521,7 +522,7 @@ func (s *Server) deleteAppSetCallback(outbound *v1alpha1.ApplicationSet) {
 		return
 	}
 	ev := s.events.ApplicationSetEvent(event.Delete, outbound)
-	s.ha.ForwardEventForReplication(event.New(ev, event.TargetApplicationSet), "", replication.DirectionOutbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.ApplicationSet), "", replication.DirectionOutbound)
 }
 
 func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
@@ -568,7 +569,7 @@ func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
 		q.Add(ev)
-		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
+		s.ha.ForwardEventForReplication(event.New(ev, targets.Repository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Add(outbound.Name, agent)
 		logCtx.Tracef("Added repository %s to send queue, total length now %d", outbound.Name, q.Len())
@@ -652,7 +653,7 @@ func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
 		q.Add(ev)
-		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
+		s.ha.ForwardEventForReplication(event.New(ev, targets.Repository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Delete(outbound.Name, agent)
 		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added repository delete event to send queue")
@@ -903,7 +904,7 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
 		q.Add(ev)
-		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
+		s.ha.ForwardEventForReplication(event.New(ev, targets.Repository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Delete(new.Name, agent)
 
@@ -923,7 +924,7 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
 		q.Add(ev)
-		s.ha.ForwardEventForReplication(event.New(ev, event.TargetRepository), agent, replication.DirectionOutbound)
+		s.ha.ForwardEventForReplication(event.New(ev, targets.Repository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Add(new.Name, agent)
 

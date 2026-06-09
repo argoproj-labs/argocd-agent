@@ -27,6 +27,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	appmanager "github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
@@ -536,9 +537,9 @@ func TestHandleReplicatedEvent_EventDecoding(t *testing.T) {
 		}
 
 		ce := evSource.ApplicationEvent(event.Create, app)
-		ev := event.New(ce, event.TargetApplication)
+		ev := event.New(ce, targets.Application)
 
-		assert.Equal(t, event.TargetApplication, event.Target(ev.CloudEvent()))
+		assert.Equal(t, targets.Application, event.Target(ev.CloudEvent()))
 		assert.Equal(t, event.Create, event.EventType(ev.CloudEvent().Type()))
 
 		decoded, err := ev.Application()
@@ -561,9 +562,9 @@ func TestHandleReplicatedEvent_EventDecoding(t *testing.T) {
 		}
 
 		ce := evSource.AppProjectEvent(event.Create, proj)
-		ev := event.New(ce, event.TargetAppProject)
+		ev := event.New(ce, targets.AppProject)
 
-		assert.Equal(t, event.TargetAppProject, event.Target(ev.CloudEvent()))
+		assert.Equal(t, targets.AppProject, event.Target(ev.CloudEvent()))
 		assert.Equal(t, event.Create, event.EventType(ev.CloudEvent().Type()))
 
 		decoded, err := ev.AppProject()
@@ -583,9 +584,9 @@ func TestHandleReplicatedEvent_EventDecoding(t *testing.T) {
 		}
 
 		ce := evSource.ApplicationSetEvent(event.Create, appSet)
-		ev := event.New(ce, event.TargetApplicationSet)
+		ev := event.New(ce, targets.ApplicationSet)
 
-		assert.Equal(t, event.TargetApplicationSet, event.Target(ev.CloudEvent()))
+		assert.Equal(t, targets.ApplicationSet, event.Target(ev.CloudEvent()))
 		assert.Equal(t, event.Create, event.EventType(ev.CloudEvent().Type()))
 
 		decoded, err := ev.ApplicationSet()
@@ -608,7 +609,7 @@ func TestHandleReplicatedEvent_EventDecoding(t *testing.T) {
 		}
 
 		ce := evSource.ApplicationEvent(event.SpecUpdate, app)
-		ev := event.New(ce, event.TargetApplication)
+		ev := event.New(ce, targets.Application)
 
 		replEv := &replication.ReplicatedEvent{
 			Event:       ev,
@@ -617,7 +618,7 @@ func TestHandleReplicatedEvent_EventDecoding(t *testing.T) {
 			SequenceNum: 42,
 		}
 
-		assert.Equal(t, event.TargetApplication, event.Target(replEv.Event.CloudEvent()))
+		assert.Equal(t, targets.Application, event.Target(replEv.Event.CloudEvent()))
 		assert.Equal(t, event.SpecUpdate, event.EventType(replEv.Event.CloudEvent().Type()))
 
 		decoded, err := replEv.Event.Application()
@@ -705,7 +706,7 @@ func makeRepoSecret(name, namespace string) *corev1.Secret {
 func makeRepoEvent(evType event.EventType, repo *corev1.Secret) *replication.ReplicatedEvent {
 	evSource := event.NewEventSource("test")
 	ce := evSource.RepositoryEvent(evType, repo)
-	ev := event.New(ce, event.TargetRepository)
+	ev := event.New(ce, targets.Repository)
 	return &replication.ReplicatedEvent{
 		Event:     ev,
 		AgentName: "agent1",
@@ -814,9 +815,9 @@ func TestHandleReplicatedEvent_Repository(t *testing.T) {
 		repo := makeRepoSecret("decode-repo", "argocd")
 		evSource := event.NewEventSource("test")
 		ce := evSource.RepositoryEvent(event.Create, repo)
-		ev := event.New(ce, event.TargetRepository)
+		ev := event.New(ce, targets.Repository)
 
-		assert.Equal(t, event.TargetRepository, event.Target(ev.CloudEvent()))
+		assert.Equal(t, targets.Repository, event.Target(ev.CloudEvent()))
 		assert.Equal(t, event.Create, event.EventType(ev.CloudEvent().Type()))
 
 		decoded, err := ev.Repository()

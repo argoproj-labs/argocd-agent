@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
@@ -134,7 +135,7 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 
 	logging.LogEventReceived(logCtx, ev.CloudEvent())
 
-	if ev.Target() == event.TargetEventAck {
+	if ev.Target() == targets.EventAck {
 		logCtx.Trace("Received an ACK for an event")
 		rawEvent, err := format.FromProto(rcvd.Event)
 		if err != nil {

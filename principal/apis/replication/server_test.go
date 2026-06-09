@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -466,7 +467,7 @@ func TestServerForwardEvent_RoundTrip(t *testing.T) {
 		},
 	}
 	cloudEvent := event.NewEventSource("test").ApplicationEvent(event.Create, app)
-	ev := event.New(cloudEvent, event.TargetApplication)
+	ev := event.New(cloudEvent, targets.Application)
 	server.ForwardEvent(ev, "agent1", replication.DirectionOutbound)
 
 	time.Sleep(100 * time.Millisecond)

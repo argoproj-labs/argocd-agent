@@ -27,6 +27,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
@@ -364,7 +365,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		ev, shutdown := sendQ.Get()
 		assert.False(t, shutdown)
 		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
-		assert.Equal(t, event.TargetAppProject.String(), ev.DataSchema())
+		assert.Equal(t, targets.AppProject.String(), ev.DataSchema())
 	})
 
 	t.Run("skips project that does not match the agent", func(t *testing.T) {

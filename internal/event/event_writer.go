@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
@@ -315,7 +316,7 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 	// Check if we've exhausted retries
 	if sentMsg.retryCount >= maxEventRetries {
 		logCtx.Warnf("Event failed after %d retries, giving up to unblock queue", sentMsg.retryCount)
-		evType := strings.TrimPrefix(sentMsg.event.Type(), TypePrefix+".")
+		evType := strings.TrimPrefix(sentMsg.event.Type(), targets.TypePrefix+".")
 		resType := sentMsg.event.DataSchema()
 		sentMsg.mu.Unlock()
 
@@ -393,7 +394,7 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	}
 
 	target := Target(eventMsg.event)
-	isFireAndForget := target == TargetEventAck || target == TargetHeartbeat
+	isFireAndForget := target == targets.EventAck || target == targets.Heartbeat
 	if !isFireAndForget {
 		// IMPORTANT: Set retryAfter *before* publishing into sentEvents.
 		// We can have concurrent SendWaitingEvents loops (e.g. brief overlap during reconnect),
