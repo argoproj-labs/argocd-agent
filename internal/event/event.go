@@ -39,8 +39,6 @@ const cloudEventSpecVersion = "1.0"
 
 type EventType string
 
-
-
 // Supported EventTypes that are sent agent <-> principal. Note that not every
 // EventType is supported by every EventTarget.
 const (
@@ -64,7 +62,6 @@ const (
 	ClusterCacheInfoUpdate     EventType = targets.TypePrefix + ".cluster-cache-info-update"
 	TerminalRequest            EventType = targets.TypePrefix + ".terminal-request"
 )
-
 
 const (
 	resourceID   string = "resourceid"
