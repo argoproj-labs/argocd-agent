@@ -231,4 +231,8 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfAnnotationIsPresen
 		_, exists := annotations[manager.SourceUIDAnnotation]
 		return !exists
 	}, 30*time.Second, 1*time.Second)
+
+	// Manually clean up managed agent application
+	err = suite.ManagedAgentClient.Delete(suite.Ctx, &app, metav1.DeleteOptions{})
+	requires.NoError(err)
 }
