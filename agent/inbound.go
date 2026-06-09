@@ -334,7 +334,7 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 		logCtx.Info("Application already exists on agent, adopting existing app")
 		dontAdopt, err := a.shouldNotAdopt(incomingApp)
 		if err != nil {
-			logCtx.Warn("failed to check if existing application should be adopted, falling back to global default: %w", err)
+			logCtx.WithError(err).Warn("failed to check if existing application should be adopted, falling back to global default")
 		}
 
 		if dontAdopt {

@@ -568,6 +568,7 @@ ARGOCD_AGENT_ON_APPLICATION_RECREATE=clear-status
 ```
 
 ### Application Adoption
+
 | | |
 |---|---|
 | **CLI Flag** | `--disable-application-adoption` |
@@ -576,7 +577,7 @@ ARGOCD_AGENT_ON_APPLICATION_RECREATE=clear-status
 | **Type** | Boolean |
 | **Default** | `false` |
 
-This flag will disable the principal from adopting applications in managed mode if it is present.
+This flag will disable adoption of applications in managed mode. The agent will not stamp the principal's UID on the application on the create action.
 
 Adoption occurs when the application that the principal is trying to create already exists on the agent. It stamps the UID on the application
 similar to the `upsert` mismatch policy.
