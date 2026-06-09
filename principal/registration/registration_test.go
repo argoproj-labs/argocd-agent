@@ -26,6 +26,7 @@ import (
 	issuermocks "github.com/argoproj-labs/argocd-agent/internal/issuer/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
+	"github.com/argoproj/argo-cd/v3/util/db"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -278,6 +279,44 @@ func Test_RegisterCluster_TokenValidation(t *testing.T) {
 		// Second registration - should skip because token is valid
 		err = mgr.RegisterAgent(context.Background(), testAgentName)
 		require.NoError(t, err)
+	})
+
+	t.Run("Refreshes TLS data when cluster secret exists with valid token", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+		clientCertSecretName := createTestClientCertSecret(t, kubeclient)
+
+		iss := issuermocks.NewIssuer(t)
+		iss.On("IssueResourceProxyToken", testAgentName).Return("valid-token", nil)
+
+		mockClaims := issuermocks.NewClaims(t)
+		mockClaims.On("GetSubject").Return(testAgentName, nil)
+		iss.On("ValidateResourceProxyToken", "valid-token").Return(mockClaims, nil)
+
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+
+		err := mgr.RegisterAgent(context.Background(), testAgentName)
+		require.NoError(t, err)
+
+		tlsSecret, err := kubeclient.CoreV1().Secrets(testNamespace).Get(context.Background(), clientCertSecretName, metav1.GetOptions{})
+		require.NoError(t, err)
+		tlsSecret.Data["tls.crt"] = []byte("rotated-cert")
+		tlsSecret.Data["tls.key"] = []byte("rotated-key")
+		tlsSecret.Data["ca.crt"] = []byte("rotated-ca")
+		_, err = kubeclient.CoreV1().Secrets(testNamespace).Update(context.Background(), tlsSecret, metav1.UpdateOptions{})
+		require.NoError(t, err)
+
+		err = mgr.RegisterAgent(context.Background(), testAgentName)
+		require.NoError(t, err)
+
+		secret, err := kubeclient.CoreV1().Secrets(testNamespace).Get(context.Background(), cluster.GetClusterSecretName(testAgentName), metav1.GetOptions{})
+		require.NoError(t, err)
+		parsed, err := db.SecretToCluster(secret)
+		require.NoError(t, err)
+
+		assert.Equal(t, []byte("rotated-cert"), parsed.Config.TLSClientConfig.CertData)
+		assert.Equal(t, []byte("rotated-key"), parsed.Config.TLSClientConfig.KeyData)
+		assert.Equal(t, []byte("rotated-ca"), parsed.Config.TLSClientConfig.CAData)
+		assert.Equal(t, "valid-token", parsed.Config.BearerToken)
 	})
 
 	t.Run("Refreshes token when existing token is invalid", func(t *testing.T) {

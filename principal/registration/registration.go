@@ -82,13 +82,23 @@ func (mgr *AgentRegistrationManager) RegisterAgent(ctx context.Context, agentNam
 		}
 
 		if valid {
-			logCtx.Debug("Cluster secret already exists with valid token, skipping registration")
+			updated, err := cluster.UpdateClusterTLSFromSecret(ctx, mgr.kubeclient, mgr.namespace, agentName, existingSecret, mgr.clientCertSecretName)
+			if err != nil {
+				return fmt.Errorf("failed to refresh cluster TLS data: %v", err)
+			}
+			if updated {
+				logCtx.Info("Cluster TLS data refreshed successfully")
+			}
+			logCtx.Debug("Cluster secret already exists with valid token")
 			return nil
 		}
 
 		// Token is invalid, update it
 		if err := cluster.UpdateClusterBearerTokenFromSecret(ctx, mgr.kubeclient, mgr.namespace, agentName, existingSecret, mgr.issuer); err != nil {
 			return fmt.Errorf("failed to refresh cluster bearer token: %w", err)
+		}
+		if _, err := cluster.UpdateClusterTLSFromSecret(ctx, mgr.kubeclient, mgr.namespace, agentName, existingSecret, mgr.clientCertSecretName); err != nil {
+			return fmt.Errorf("failed to refresh cluster TLS data: %v", err)
 		}
 
 		logCtx.Info("Cluster bearer token refreshed successfully")
