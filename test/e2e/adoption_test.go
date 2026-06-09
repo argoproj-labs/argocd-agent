@@ -213,11 +213,8 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfAnnotationIsPresen
 		return err == nil
 	}, 30*time.Second, 1*time.Second)
 
-	// Wait a short time for principal to sync
-	time.Sleep(3 * time.Second)
-
-	// Recapture the managed appliction and check if it has not been adopted by the principal
-	requires.Eventually(func() bool {
+	// Recapture the managed appliction and check for thirty seconds if the annotation never appears
+	requires.Never(func() bool {
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &managedApp, metav1.GetOptions{})
 		if err != nil {
 			return false
@@ -229,7 +226,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfAnnotationIsPresen
 		}
 
 		_, exists := annotations[manager.SourceUIDAnnotation]
-		return !exists
+		return exists
 	}, 30*time.Second, 1*time.Second)
 
 	// Manually clean up managed agent application
