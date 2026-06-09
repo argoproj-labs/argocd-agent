@@ -314,8 +314,8 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 // "app|resources-tree|my-app|1.8.3.gz
 func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error) {
 
-	// git-refs and gitdirs keys don't contain namespace information; return as-is
-	if strings.HasPrefix(key, "git-refs|") || strings.HasPrefix(key, "gitdirs|") {
+	// git-refs, gitdirs, and gitfiles keys don't contain namespace information; return as-is
+	if strings.HasPrefix(key, "git-refs|") || strings.HasPrefix(key, "gitdirs|") || strings.HasPrefix(key, "gitfiles|") {
 		return key, nil
 	}
 
