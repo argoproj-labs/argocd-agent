@@ -84,7 +84,7 @@ func (mgr *AgentRegistrationManager) RegisterAgent(ctx context.Context, agentNam
 		if valid {
 			updated, err := cluster.UpdateClusterTLSFromSecret(ctx, mgr.kubeclient, mgr.namespace, agentName, existingSecret, mgr.clientCertSecretName)
 			if err != nil {
-				return fmt.Errorf("failed to refresh cluster TLS data: %v", err)
+				return fmt.Errorf("failed to refresh cluster TLS data: %w", err)
 			}
 			if updated {
 				logCtx.Info("Cluster TLS data refreshed successfully")
@@ -98,7 +98,7 @@ func (mgr *AgentRegistrationManager) RegisterAgent(ctx context.Context, agentNam
 			return fmt.Errorf("failed to refresh cluster bearer token: %w", err)
 		}
 		if _, err := cluster.UpdateClusterTLSFromSecret(ctx, mgr.kubeclient, mgr.namespace, agentName, existingSecret, mgr.clientCertSecretName); err != nil {
-			return fmt.Errorf("failed to refresh cluster TLS data: %v", err)
+			return fmt.Errorf("failed to refresh cluster TLS data: %w", err)
 		}
 
 		logCtx.Info("Cluster bearer token refreshed successfully")

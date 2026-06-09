@@ -313,12 +313,12 @@ func UpdateClusterTLSFromSecret(ctx context.Context, kubeclient kubernetes.Inter
 
 	cluster, err := db.SecretToCluster(secret)
 	if err != nil {
-		return false, fmt.Errorf("could not parse cluster secret: %v", err)
+		return false, fmt.Errorf("could not parse cluster secret: %w", err)
 	}
 
 	clientCert, clientKey, caData, err := readClientCertFromSecret(ctx, kubeclient, namespace, clientCertSecretName)
 	if err != nil {
-		return false, fmt.Errorf("could not read client certificate from secret %s: %v", clientCertSecretName, err)
+		return false, fmt.Errorf("could not read client certificate from secret %s: %w", clientCertSecretName, err)
 	}
 
 	tlsConfig := &cluster.Config.TLSClientConfig
@@ -333,11 +333,11 @@ func UpdateClusterTLSFromSecret(ctx context.Context, kubeclient kubernetes.Inter
 	tlsConfig.CAData = []byte(caData)
 
 	if err := ClusterToSecret(cluster, secret); err != nil {
-		return false, fmt.Errorf("could not convert cluster to secret: %v", err)
+		return false, fmt.Errorf("could not convert cluster to secret: %w", err)
 	}
 
 	if _, err = kubeclient.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
-		return false, fmt.Errorf("could not update cluster secret: %v", err)
+		return false, fmt.Errorf("could not update cluster secret: %w", err)
 	}
 
 	logCtx.Info("Successfully updated cluster secret TLS data")
