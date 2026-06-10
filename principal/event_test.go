@@ -24,11 +24,11 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
-	wqmock "github.com/argoproj-labs/argocd-agent/test/mocks/k8s-workqueue"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
@@ -37,6 +37,14 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 )
+
+// newTestRecvQueue creates a RecvQueue with a single event pre-loaded, for use in
+// tests that call processRecvQueue.
+func newTestRecvQueue(ev *cloudevents.Event) queue.RecvQueue {
+	q := queue.NewDedupeQueueForTest(1000)
+	q.Add(ev)
+	return q
+}
 
 func Test_EventProcessorRoutesACKToMatchingQueue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
