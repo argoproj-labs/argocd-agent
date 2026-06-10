@@ -73,8 +73,14 @@ const (
 	// the global mismatch policy for that specific resource.
 	MismatchPolicyAnnotation = "argocd.argoproj.io/source-uid-mismatch-policy"
 
+	// AdoptionPolicyAlways adopts an application by stamping the principal-uid onto the application
+	AdoptionPolicyAlways = "always"
+
+	// AdoptionPolicyNever does not adoption the application and leaves it as is
+	AdoptionPolicyNever = "never"
+
 	// DontAdoptAnnotation is an annotation for setting whether an app should not be adopted
-	DontAdoptAnnotation = "argocd.argoproj.io/dont-adopt"
+	AdoptionPolicyAnnotation = "argocd.argoproj.io/adoption-policy"
 )
 
 // RecreateAction defines the agent's behavior after recreating an Application
@@ -255,7 +261,6 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 	mgr resourceManager[R],
 	logCtx *logrus.Entry,
 ) (bool, error) {
-
 	logCtx = logCtx.WithFields(logrus.Fields{
 		"resource": outbound.GetName(),
 		"kind":     outbound.GetObjectKind().GroupVersionKind().Kind,

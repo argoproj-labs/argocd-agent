@@ -165,7 +165,7 @@ type Agent struct {
 	// an unauthorized deletion. It is only applicable in managed mode.
 	recreateAction manager.RecreateAction
 	// disableAdoption disables existing applications being stamped with source-uid on creation in managed mode
-	disableAdoption bool
+	adoptionPolicy string
 }
 
 const defaultQueueName = "default"
@@ -209,6 +209,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.namespace = namespace
 	a.mode = types.AgentModeAutonomous
 	a.mismatchPolicy = manager.MismatchPolicyRecreate
+	a.adoptionPolicy = manager.AdoptionPolicyAlways
 	a.recreateAction = manager.RecreateActionIgnore
 	a.redisProxyMsgHandler = &redisProxyMsgHandler{}
 	// Resource proxy is enabled by default.

@@ -571,18 +571,20 @@ ARGOCD_AGENT_ON_APPLICATION_RECREATE=clear-status
 
 | | |
 |---|---|
-| **CLI Flag** | `--disable-application-adoption` |
-| **Environment Variable** | `ARGOCD_AGENT_DISABLE_APPLICATION_ADOPTION` |
+| **CLI Flag** | `--adoption-policy` |
+| **Environment Variable** | `ARGOCD_AGENT_ADOPTION_POLICY` |
 | **ConfigMap Entry** | N/A |
-| **Type** | Boolean |
-| **Default** | `false` |
+| **Type** | String |
+| **Default** | `always` |
+| **Valid Values** | `always`, `never` |
 
-This flag will disable adoption of applications in managed mode. The agent will not stamp the principal's UID on the application on the create action.
+This flag sets the adoption policy for existing applications in managed mode. Adoption occurs when the application that the principal is trying to create already exists on the agent.
 
-Adoption occurs when the application that the principal is trying to create already exists on the agent. It stamps the UID on the application
-similar to the `upsert` mismatch policy.
+**Policies:**
 
-This setting can also be set on the application level by including the annotation `argocd.argoproj.io/dont-adopt` to the value of `true` or
-`false`. The annotation takes priority over the global flag.
+- `always`: always adopt existing applications
+- `never`: never adopt existing applications
+
+This setting can also be set on the application level by including the annotation `argocd.argoproj.io/adoption-policy` to the value of a valid policy.
 
 **Use Case:** The main use case for this would be to transfer applications from a multi-instance Argo CD set up to using the agent set up.

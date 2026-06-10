@@ -149,7 +149,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfAnnotationIsPresen
 			Name:      "guestbook-dontadopt",
 			Namespace: fixture.ManagedAgentNamespace,
 			Annotations: map[string]string{
-				manager.DontAdoptAnnotation: "true",
+				manager.AdoptionPolicyAnnotation: manager.AdoptionPolicyNever,
 			},
 		},
 		Spec: argoapp.ApplicationSpec{

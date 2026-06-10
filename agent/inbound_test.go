@@ -2698,7 +2698,7 @@ func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
 
 		existingAppWithAnnotation := existingApp.DeepCopy()
 		existingAppWithAnnotation.SetAnnotations(map[string]string{
-			manager.DontAdoptAnnotation: "true",
+			manager.AdoptionPolicyAnnotation: manager.AdoptionPolicyNever,
 		})
 		configureManager(t, existingAppWithAnnotation)
 
@@ -2715,7 +2715,7 @@ func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
 		defer unsetMocks(t)
 		defer clearUpdatedApp()
 
-		a.disableAdoption = true
+		a.adoptionPolicy = manager.AdoptionPolicyNever
 
 		configureManager(t, existingApp.DeepCopy())
 
@@ -2732,11 +2732,11 @@ func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
 		defer unsetMocks(t)
 		defer clearUpdatedApp()
 
-		a.disableAdoption = true
+		a.adoptionPolicy = manager.AdoptionPolicyNever
 
 		existingAppWithAnnotation := existingApp.DeepCopy()
 		existingAppWithAnnotation.SetAnnotations(map[string]string{
-			manager.DontAdoptAnnotation: "false",
+			manager.AdoptionPolicyAnnotation: manager.AdoptionPolicyAlways,
 		})
 		configureManager(t, existingAppWithAnnotation)
 

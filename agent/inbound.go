@@ -17,7 +17,6 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
@@ -26,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -331,19 +331,15 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 			return nil
 		}
 	case identityActionAdoptExistingApp:
-		logCtx.Info("Application already exists on agent, adopting existing app")
-		dontAdopt, err := a.shouldNotAdopt(incomingApp)
-		if err != nil {
-			logCtx.WithError(err).Warn("failed to check if existing application should be adopted, falling back to global default")
-		}
-
-		if dontAdopt {
-			logCtx.Info("Existing application is set to not be adopted")
-			return nil
-		}
-
-		if err := a.updateManagedApplicationIdentity(incomingApp, principalUID); err != nil {
-			return fmt.Errorf("could not adopt app: %w", err)
+		logCtx.WithField(logfields.Application, incomingApp.GetName()).Info("Application already exists on agent, adopting existing app")
+		switch a.effectiveAdoptionPolicy(incomingApp) {
+		case manager.AdoptionPolicyAlways:
+			logCtx.WithField(logfields.Application, incomingApp.GetName()).Info("Adopting existing application")
+			if err := a.updateManagedApplicationIdentity(incomingApp, principalUID); err != nil {
+				return fmt.Errorf("could not adopt app: %w", err)
+			}
+		case manager.AdoptionPolicyNever:
+			logCtx.WithField(logfields.Application, incomingApp.GetName()).Info("Existing application is set to not be adopted")
 		}
 		return nil
 	default:
@@ -1382,22 +1378,19 @@ func (a *Agent) ensureNamespaceExists(namespace string) error {
 	return nil
 }
 
-// shouldNotAdopt checks to see if an application should not be adopted
+// shouldAdopt checks to see if an application should not be adopted
 // The annotation on the existing application takes priority over the the global setting
-func (a *Agent) shouldNotAdopt(incoming metav1.Object) (bool, error) {
+func (a *Agent) effectiveAdoptionPolicy(incoming metav1.Object) string {
 	existing, err := a.appManager.Get(a.context, incoming.GetName(), incoming.GetNamespace())
 	if err != nil {
-		return a.disableAdoption, err
+		log().WithError(err).WithField(logfields.Application, incoming.GetName()).Errorf("Failed to get application to check adoption policy, falling back to default policy")
+		return a.adoptionPolicy
 	}
 
 	if annotations := existing.GetAnnotations(); annotations != nil {
-		if val, ok := annotations[manager.DontAdoptAnnotation]; ok {
-			disabled, err := strconv.ParseBool(val)
-			if err != nil {
-				return a.disableAdoption, err
-			}
-			return disabled, nil
+		if policy, ok := annotations[manager.AdoptionPolicyAnnotation]; ok {
+			return policy
 		}
 	}
-	return a.disableAdoption, nil
+	return a.adoptionPolicy
 }

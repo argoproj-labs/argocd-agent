@@ -253,9 +253,9 @@ func WithRecreateAction(action string) AgentOption {
 	}
 }
 
-func WithDisableAdoption(adopt bool) AgentOption {
+func WithAdoptionPolicy(policy string) AgentOption {
 	return func(a *Agent) error {
-		a.disableAdoption = adopt
+		a.adoptionPolicy = policy
 		return nil
 	}
 }
