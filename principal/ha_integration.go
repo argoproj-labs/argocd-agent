@@ -26,6 +26,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/haadminapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
@@ -623,7 +624,7 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 	ctx := server.ctx
 
 	switch target {
-	case event.TargetApplication:
+	case targets.Application:
 		app, err := ev.Event.Application()
 		if err != nil {
 			return fmt.Errorf("failed to decode application from replicated event: %w", err)
@@ -655,7 +656,7 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 			server.resources.Remove(ev.AgentName, key)
 		}
 
-	case event.TargetAppProject:
+	case targets.AppProject:
 		proj, err := ev.Event.AppProject()
 		if err != nil {
 			return fmt.Errorf("failed to decode appproject from replicated event: %w", err)
@@ -676,7 +677,7 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 			server.resources.Remove(ev.AgentName, key)
 		}
 
-	case event.TargetApplicationSet:
+	case targets.ApplicationSet:
 		appSet, err := ev.Event.ApplicationSet()
 		if err != nil {
 			return fmt.Errorf("failed to decode applicationset from replicated event: %w", err)
@@ -694,7 +695,7 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 			}
 		}
 
-	case event.TargetRepository:
+	case targets.Repository:
 		repo, err := ev.Event.Repository()
 		if err != nil {
 			return fmt.Errorf("failed to decode repository from replicated event: %w", err)

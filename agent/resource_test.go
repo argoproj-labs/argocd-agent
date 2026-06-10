@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -496,7 +497,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, resourceReq))
 
 		// Process the request
-		err := agent.processIncomingResourceRequest(event.New(&ev, event.TargetResource))
+		err := agent.processIncomingResourceRequest(event.New(&ev, targets.Resource))
 		require.NoError(t, err)
 
 		// Verify response
@@ -562,7 +563,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, resourceReq))
 
 		// Process the request
-		err := agent.processIncomingResourceRequest(event.New(&ev, event.TargetResource))
+		err := agent.processIncomingResourceRequest(event.New(&ev, targets.Resource))
 		require.NoError(t, err)
 
 		// Verify error response
@@ -612,7 +613,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, resourceReq))
 
 		// Process the request
-		err := agent.processIncomingResourceRequest(event.New(&ev, event.TargetResource))
+		err := agent.processIncomingResourceRequest(event.New(&ev, targets.Resource))
 		require.NoError(t, err)
 
 		// Verify error response
@@ -647,7 +648,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		ev.SetType(event.GetRequest.String())
 
 		// Process the request
-		err := agent.processIncomingResourceRequest(event.New(&ev, event.TargetResource))
+		err := agent.processIncomingResourceRequest(event.New(&ev, targets.Resource))
 		assert.NoError(t, err)
 	})
 }

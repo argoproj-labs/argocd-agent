@@ -81,6 +81,12 @@ func Test_stripNamespaceFromKeyForAutonomousAgent(t *testing.T) {
 			expectedValue: "gitdirs|https://github.com/gnunn-gitops/cluster-config-v2%7C232c92db490001cb7f239ba70a2a14ff42b7e2d0%7C1.8.3.gz",
 			errorExpected: false,
 		},
+		{
+			name:          "gitfiles key is returned unchanged",
+			key:           "gitfiles|https://github.com/argoproj/argocd-example-apps|d9dec7aed84f20b6b25905fe24ab0844bfa38a8e|apps/config.yaml|1.8.3.gz",
+			expectedValue: "gitfiles|https://github.com/argoproj/argocd-example-apps|d9dec7aed84f20b6b25905fe24ab0844bfa38a8e|apps/config.yaml|1.8.3.gz",
+			errorExpected: false,
+		},
 	}
 
 	for _, testEntry := range testEntries {

@@ -100,6 +100,12 @@ func Test_extractAgentNameFromRedisCommandKey(t *testing.T) {
 			errorExpected: false,
 		},
 		{
+			name:          "gitfiles| key",
+			key:           "gitfiles|https://github.com/argoproj/argocd-example-apps|d9dec7aed84f20b6b25905fe24ab0844bfa38a8e|apps/config.yaml|1.8.3.gz",
+			value:         "",
+			errorExpected: false,
+		},
+		{
 			name:          "unexpected key should just return empty value, so it will be forwarded to principal",
 			key:           "some other unexpected key",
 			value:         "",
