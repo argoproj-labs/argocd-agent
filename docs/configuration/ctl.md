@@ -97,7 +97,7 @@ Inspect and manage agent configuration
 
 `list` - List configured agents
 
-`print-tls` - Print the TLS client certificate of an agent to stdout
+`print-tls` - Print a TLS asset of an agent to stdout (`cert`, `key`, or `ca`)
 
 `reconfigure` - Reconfigures an agent's properties
 
@@ -159,4 +159,3 @@ OR TO PROTECT ANY KIND OF DATA.
 `issue` - NON-PROD!! Issue TLS certificates signed by the PKI's CA
 
 `propagate` - NON-PROD!! Propagate the PKI to the agent
-

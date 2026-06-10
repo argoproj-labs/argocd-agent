@@ -375,7 +375,7 @@ func NewAgentInspectCommand() *cobra.Command {
 func NewAgentPrintTLSCommand() *cobra.Command {
 	var printWhat string
 	command := &cobra.Command{
-		Short:   "Print the TLS client certificate of an agent to stdout",
+		Short:   "Print a TLS asset of an agent to stdout",
 		Use:     "print-tls",
 		Aliases: []string{"dump-tls"},
 		Run: func(cmd *cobra.Command, args []string) {
@@ -391,19 +391,30 @@ func NewAgentPrintTLSCommand() *cobra.Command {
 				cmd.Printf("Agent '%s' is not configured.\n", agentName)
 				os.Exit(1)
 			}
-			switch printWhat {
-			case "cert":
-				fmt.Print(string(clus.Config.CertData))
-			case "key":
-				fmt.Print(string(clus.Config.KeyData))
-			case "ca:":
-				fmt.Print(string(clus.Config.CAData))
+
+			assetData, err := clusterTLSAsset(clus, printWhat)
+			if err != nil {
+				cmdutil.Fatal("%v", err)
 			}
+			fmt.Print(string(assetData))
 		},
 	}
 
-	command.Flags().StringVarP(&printWhat, "type", "t", "cert", "Type of asset to print (cert or key)")
+	command.Flags().StringVarP(&printWhat, "type", "t", "cert", "Type of asset to print (cert, key, or ca)")
 	return command
+}
+
+func clusterTLSAsset(clus *v1alpha1.Cluster, assetType string) ([]byte, error) {
+	switch strings.ToLower(assetType) {
+	case "cert":
+		return clus.Config.CertData, nil
+	case "key":
+		return clus.Config.KeyData, nil
+	case "ca":
+		return clus.Config.CAData, nil
+	default:
+		return nil, fmt.Errorf("unknown TLS asset type %q; expected one of cert, key, or ca", assetType)
+	}
 }
 
 func NewAgentReconfigureCommand() *cobra.Command {
