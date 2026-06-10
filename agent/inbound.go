@@ -23,6 +23,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
@@ -84,19 +85,19 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 
 	var err error
 	switch ev.Target() {
-	case event.TargetApplication:
+	case targets.Application:
 		err = a.processIncomingApplication(ev)
-	case event.TargetAppProject:
+	case targets.AppProject:
 		err = a.processIncomingAppProject(ev)
-	case event.TargetRepository:
+	case targets.Repository:
 		err = a.processIncomingRepository(ev)
-	case event.TargetGPGKey:
+	case targets.GPGKey:
 		err = a.processIncomingGPGKey(ev)
-	case event.TargetResource:
+	case targets.Resource:
 		err = a.processIncomingResourceRequest(ev)
-	case event.TargetResourceResync:
+	case targets.ResourceResync:
 		err = a.processIncomingResourceResyncEvent(ev)
-	case event.TargetRedis:
+	case targets.Redis:
 		go func() {
 			// Process request in a separate go routine, to avoid blocking the event thread on redis I/O
 			_, redisSpan := tracing.Tracer().Start(ctx, "redis.async_processing")
@@ -109,9 +110,9 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 				tracing.SetSpanOK(redisSpan)
 			}
 		}()
-	case event.TargetContainerLog:
+	case targets.ContainerLog:
 		err = a.processIncomingContainerLogRequest(ev)
-	case event.TargetTerminal:
+	case targets.Terminal:
 		// Process terminal request in a separate goroutine to avoid blocking the event thread
 		go func() {
 			if termErr := a.processIncomingTerminalRequest(ev); termErr != nil && !isShellNotFoundError(termErr) {

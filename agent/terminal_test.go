@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/terminalstreamapi"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/terminalstream/mock"
@@ -546,7 +547,7 @@ func TestDuplicateTerminalRequest(t *testing.T) {
 	ev, err := evs.NewTerminalRequestEvent(terminalReq)
 	require.NoError(t, err)
 
-	wrappedEvent := event.New(ev, event.TargetTerminal)
+	wrappedEvent := event.New(ev, targets.Terminal)
 
 	// Process the event - should return nil without error for duplicate
 	err = agent.processIncomingTerminalRequest(wrappedEvent)

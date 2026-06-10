@@ -31,6 +31,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
@@ -200,7 +201,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		a.appManager.Manage(oldApp.QualifiedName())
 		defer a.appManager.ClearManaged()
 
-		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -233,7 +234,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 			"name": "test",
 		}
 
-		ev := event.New(evs.ApplicationEvent(event.Create, newApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.Create, newApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -258,7 +259,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		defer a.appManager.ClearManaged()
 
 		// Create an Update event for the new app
-		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, incomingApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -297,7 +298,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		createMock = be.On("Create", mock.Anything, mock.Anything).Return(newApp, nil)
 
 		// Create an Update event for the new app
-		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, newApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, newApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -338,7 +339,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		updateMock.Unset()
 		updateMock = be.On("Update", mock.Anything, mock.Anything).Return(newApp, nil)
 
-		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, newApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, newApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -363,7 +364,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		defer a.appManager.ClearManaged()
 
 		// Create a delete event for the new app
-		ev := event.New(evs.ApplicationEvent(event.Delete, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.Delete, incomingApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -387,7 +388,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		a.mismatchPolicy = manager.MismatchPolicyUpsert
 		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
 
-		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, incomingApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -409,7 +410,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		a.mismatchPolicy = manager.MismatchPolicyUpsert
 		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
 
-		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -461,7 +462,7 @@ func Test_processIncomingApplication_AutonomousUpdateDoesNotStampPrincipalUID(t 
 	ce := evs.ApplicationEvent(event.SpecUpdate, incomingApp)
 	event.SetPrincipalUID(ce, "principal-B")
 
-	err = a.processIncomingApplication(event.New(ce, event.TargetApplication))
+	err = a.processIncomingApplication(event.New(ce, targets.Application))
 	require.NoError(t, err)
 	require.NotNil(t, updatedArg)
 	assert.NotContains(t, updatedArg.Annotations, manager.PrincipalUIDAnnotation)
@@ -515,7 +516,7 @@ func Test_ProcessIncomingApplicationSetOperation(t *testing.T) {
 		be.On("Get", mock.Anything, "test", "argocd").Return(existingApp, nil)
 		be.On("Update", mock.Anything, mock.Anything).Return(updatedApp, nil)
 
-		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), targets.Application)
 		err = a.processIncomingApplication(ev)
 		require.NoError(t, err)
 
@@ -569,7 +570,7 @@ func Test_ProcessIncomingApplicationSetOperation(t *testing.T) {
 		be.On("Get", mock.Anything, "test", "argocd").Return(existingApp, nil)
 		be.On("Update", mock.Anything, mock.Anything).Return(updatedApp, nil)
 
-		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), targets.Application)
 		err = a.processIncomingApplication(ev)
 		require.NoError(t, err)
 
@@ -622,7 +623,7 @@ func Test_ProcessIncomingApplicationSetOperation(t *testing.T) {
 
 		be.On("Get", mock.Anything, "test", "argocd").Return(existingApp, nil)
 
-		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), targets.Application)
 		err = a.processIncomingApplication(ev)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "source UID mismatch")
@@ -693,7 +694,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		defer unsetMocks(t)
 		a.projectManager.Manage(oldAppProject.Name)
 		defer a.projectManager.ClearManaged()
-		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -726,7 +727,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 			"name": "test",
 		}
 
-		ev := event.New(evs.AppProjectEvent(event.Create, newAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Create, newAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -751,7 +752,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		defer a.projectManager.ClearManaged()
 
 		// Create an Update event for the new appProject
-		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -790,7 +791,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		createMock = be.On("Create", mock.Anything, mock.Anything).Return(newAppProject, nil)
 
 		// Create an Update event for the new appProject
-		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, newAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, newAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -816,7 +817,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		defer a.projectManager.ClearManaged()
 
 		// Create a delete event for the new appProject
-		ev := event.New(evs.AppProjectEvent(event.Delete, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Delete, incomingAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -862,7 +863,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		a.projectManager.Manage(existingAppProject.Name)
 		defer a.projectManager.ClearManaged()
 
-		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), targets.AppProject)
 		err = a.processIncomingAppProject(ev)
 
 		// The process should succeed after deleting the existing AppProject and creating the new one
@@ -913,7 +914,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		a.projectManager.Manage(existingAppProject.Name)
 		defer a.projectManager.ClearManaged()
 
-		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), targets.AppProject)
 		err = a.processIncomingAppProject(ev)
 
 		// The process should succeed after deleting the existing AppProject and creating the new one
@@ -962,7 +963,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		a.projectManager.Manage(existingAppProject.Name)
 		defer a.projectManager.ClearManaged()
 
-		ev := event.New(evs.AppProjectEvent(event.Delete, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Delete, incomingAppProject), targets.AppProject)
 		err = a.processIncomingAppProject(ev)
 
 		// Delete events should succeed after deleting the existing AppProject
@@ -986,7 +987,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		a.mismatchPolicy = manager.MismatchPolicyUpsert
 		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
 
-		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -1007,7 +1008,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		a.mismatchPolicy = manager.MismatchPolicyUpsert
 		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
 
-		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -1507,7 +1508,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		defer deleteMock.Unset()
 
-		ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1556,7 +1557,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(updatedRepo, nil)
 		defer updateMock.Unset()
 
-		ev := event.New(evs.RepositoryEvent(event.Create, newRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.Create, newRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1594,7 +1595,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		defer deleteMock.Unset()
 
 		// Create an Update event for the new repository
-		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1629,7 +1630,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		defer createMock.Unset()
 
 		// Create an Update event for the new repository
-		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, newRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, newRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1665,7 +1666,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		defer deleteMock.Unset()
 
 		// Create a delete event for the new repository
-		ev := event.New(evs.RepositoryEvent(event.Delete, incomingRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.Delete, incomingRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1692,7 +1693,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		defer getMock.Unset()
 
 		// Create an unknown event type
-		ev := event.New(evs.RepositoryEvent(event.EventType("Unknown"), incomingRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.EventType("Unknown"), incomingRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1722,7 +1723,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingRepo, nil)
 		defer updateMock.Unset()
 
-		ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1751,7 +1752,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingRepo, nil)
 		defer updateMock.Unset()
 
-		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1906,7 +1907,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		expected := "agent can only handle SyncedResourceList request in the autonomous mode"
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Equal(t, expected, err.Error())
 	})
 
@@ -1916,7 +1917,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		ev, err := a.emitter.RequestSyncedResourceListEvent([]byte{})
 		assert.Nil(t, err)
 
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Nil(t, err)
 	})
 
@@ -1931,7 +1932,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		ev, err := a.emitter.SyncedResourceEvent(res)
 		assert.Nil(t, err)
 
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.NotNil(t, err)
 	})
 
@@ -1942,7 +1943,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		expected := "agent can only handle SyncedResource request in the managed mode"
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Equal(t, expected, err.Error())
 	})
 
@@ -1956,7 +1957,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		ev, err := a.emitter.RequestUpdateEvent(update)
 		assert.Nil(t, err)
 
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.NotNil(t, err)
 	})
 
@@ -1968,7 +1969,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		expected := "agent can only handle RequestUpdate in the autonomous mode"
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Equal(t, expected, err.Error())
 	})
 
@@ -1978,7 +1979,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		ev, err := a.emitter.RequestResourceResyncEvent()
 		assert.Nil(t, err)
 
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Nil(t, err)
 	})
 
@@ -1989,7 +1990,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		expected := "agent can only handle ResourceResync request in the managed mode"
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Equal(t, expected, err.Error())
 	})
 }
@@ -2042,7 +2043,7 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		defer deleteMock.Unset()
 
-		ev := event.New(evs.GPGKeyEvent(event.Create, incomingCM), event.TargetGPGKey)
+		ev := event.New(evs.GPGKeyEvent(event.Create, incomingCM), targets.GPGKey)
 		err := a.processIncomingGPGKey(ev)
 		require.Nil(t, err)
 
@@ -2088,7 +2089,7 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(updatedCM, nil)
 		defer updateMock.Unset()
 
-		ev := event.New(evs.GPGKeyEvent(event.Create, newCM), event.TargetGPGKey)
+		ev := event.New(evs.GPGKeyEvent(event.Create, newCM), targets.GPGKey)
 		err := a.processIncomingGPGKey(ev)
 		require.Nil(t, err)
 
@@ -2124,7 +2125,7 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		defer deleteMock.Unset()
 
 		// Create an Update event for the incoming GPG key
-		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, incomingCM), event.TargetGPGKey)
+		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, incomingCM), targets.GPGKey)
 		err := a.processIncomingGPGKey(ev)
 		require.Nil(t, err)
 
@@ -2155,7 +2156,7 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		defer createMock.Unset()
 
 		// Create an Update event for the incoming GPG key
-		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, newCM), event.TargetGPGKey)
+		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, newCM), targets.GPGKey)
 		err := a.processIncomingGPGKey(ev)
 		require.Nil(t, err)
 
@@ -2189,7 +2190,7 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		defer deleteMock.Unset()
 
 		// Create a delete event for the incoming GPG key
-		ev := event.New(evs.GPGKeyEvent(event.Delete, incomingCM), event.TargetGPGKey)
+		ev := event.New(evs.GPGKeyEvent(event.Delete, incomingCM), targets.GPGKey)
 		err := a.processIncomingGPGKey(ev)
 		require.Nil(t, err)
 
@@ -2213,7 +2214,7 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		defer getMock.Unset()
 
 		// Create an unknown event type
-		ev := event.New(evs.GPGKeyEvent(event.EventType("Unknown"), incomingCM), event.TargetGPGKey)
+		ev := event.New(evs.GPGKeyEvent(event.EventType("Unknown"), incomingCM), targets.GPGKey)
 		err := a.processIncomingGPGKey(ev)
 		require.Nil(t, err)
 
@@ -2241,7 +2242,7 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingCM, nil)
 		defer updateMock.Unset()
 
-		ev := event.New(evs.GPGKeyEvent(event.Create, incomingCM), event.TargetGPGKey)
+		ev := event.New(evs.GPGKeyEvent(event.Create, incomingCM), targets.GPGKey)
 		err := a.processIncomingGPGKey(ev)
 		require.Nil(t, err)
 
@@ -2268,7 +2269,7 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingCM, nil)
 		defer updateMock.Unset()
 
-		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, incomingCM), event.TargetGPGKey)
+		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, incomingCM), targets.GPGKey)
 		err := a.processIncomingGPGKey(ev)
 		require.Nil(t, err)
 
@@ -2506,7 +2507,7 @@ func Test_processIncomingApplication_TransitionUsesResolvedSourceUID(t *testing.
 	ce := evs.ApplicationEvent(event.SpecUpdate, incomingApp)
 	event.SetPrincipalUID(ce, "principal-B")
 
-	err = a.processIncomingApplication(event.New(ce, event.TargetApplication))
+	err = a.processIncomingApplication(event.New(ce, targets.Application))
 	require.NoError(t, err)
 	require.NotNil(t, updatedArg)
 	assert.Equal(t, "old-source-uid", updatedArg.Annotations[manager.SourceUIDAnnotation])
