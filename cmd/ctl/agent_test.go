@@ -20,6 +20,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/test/testutil"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
@@ -246,6 +247,49 @@ func Test_serverURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_clusterTLSAsset(t *testing.T) {
+	cluster := &v1alpha1.Cluster{
+		Config: v1alpha1.ClusterConfig{
+			TLSClientConfig: v1alpha1.TLSClientConfig{
+				CertData: []byte("cert-data"),
+				KeyData:  []byte("key-data"),
+				CAData:   []byte("ca-data"),
+			},
+		},
+	}
+
+	t.Run("returns cert data", func(t *testing.T) {
+		data, err := clusterTLSAsset(cluster, "cert")
+		require.NoError(t, err)
+		assert.Equal(t, []byte("cert-data"), data)
+	})
+
+	t.Run("returns key data", func(t *testing.T) {
+		data, err := clusterTLSAsset(cluster, "key")
+		require.NoError(t, err)
+		assert.Equal(t, []byte("key-data"), data)
+	})
+
+	t.Run("returns ca data", func(t *testing.T) {
+		data, err := clusterTLSAsset(cluster, "ca")
+		require.NoError(t, err)
+		assert.Equal(t, []byte("ca-data"), data)
+	})
+
+	t.Run("accepts uppercase input", func(t *testing.T) {
+		data, err := clusterTLSAsset(cluster, "CA")
+		require.NoError(t, err)
+		assert.Equal(t, []byte("ca-data"), data)
+	})
+
+	t.Run("rejects invalid asset type", func(t *testing.T) {
+		data, err := clusterTLSAsset(cluster, "foo")
+		require.Error(t, err)
+		assert.Nil(t, data)
+		assert.Contains(t, err.Error(), `unknown TLS asset type "foo"`)
+	})
 }
 
 func Test_parseSecretRef(t *testing.T) {
