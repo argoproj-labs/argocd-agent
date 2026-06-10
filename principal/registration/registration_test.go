@@ -31,8 +31,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 const (
@@ -339,6 +343,73 @@ func Test_RegisterCluster_TokenValidation(t *testing.T) {
 		// Second registration - token validation fails, should refresh
 		err = mgr.RegisterAgent(context.Background(), testAgentName)
 		require.NoError(t, err)
+	})
+
+	t.Run("Refreshes TLS data after token refresh with latest cluster secret", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+		clientCertSecretName := createTestClientCertSecret(t, kubeclient)
+
+		iss := issuermocks.NewIssuer(t)
+		iss.On("IssueResourceProxyToken", testAgentName).Return("new-token", nil)
+		iss.On("ValidateResourceProxyToken", "new-token").Return(nil, fmt.Errorf("token validation failed"))
+
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+
+		err := mgr.RegisterAgent(context.Background(), testAgentName)
+		require.NoError(t, err)
+
+		tlsSecret, err := kubeclient.CoreV1().Secrets(testNamespace).Get(context.Background(), clientCertSecretName, metav1.GetOptions{})
+		require.NoError(t, err)
+		tlsSecret.Data["tls.crt"] = []byte("rotated-cert")
+		tlsSecret.Data["tls.key"] = []byte("rotated-key")
+		tlsSecret.Data["ca.crt"] = []byte("rotated-ca")
+		_, err = kubeclient.CoreV1().Secrets(testNamespace).Update(context.Background(), tlsSecret, metav1.UpdateOptions{})
+		require.NoError(t, err)
+
+		clusterSecretName := cluster.GetClusterSecretName(testAgentName)
+		var latestClusterSecret *corev1.Secret
+		updateCount := 0
+
+		kubeclient.Fake.PrependReactor("get", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			getAction := action.(k8stesting.GetAction)
+			if getAction.GetName() != clusterSecretName || latestClusterSecret == nil {
+				return false, nil, nil
+			}
+			return true, latestClusterSecret.DeepCopy(), nil
+		})
+
+		kubeclient.Fake.PrependReactor("update", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			updateAction := action.(k8stesting.UpdateAction)
+			secret := updateAction.GetObject().(*corev1.Secret)
+			if secret.Name != clusterSecretName {
+				return false, nil, nil
+			}
+
+			updateCount++
+			switch updateCount {
+			case 1:
+				latestClusterSecret = secret.DeepCopy()
+				latestClusterSecret.ResourceVersion = "2"
+				return true, latestClusterSecret.DeepCopy(), nil
+			case 2:
+				if secret.ResourceVersion != "2" {
+					return true, nil, apierrors.NewConflict(
+						schema.GroupResource{Resource: "secrets"},
+						secret.Name,
+						fmt.Errorf("stale resource version %q", secret.ResourceVersion),
+					)
+				}
+				latestClusterSecret = secret.DeepCopy()
+				latestClusterSecret.ResourceVersion = "3"
+				return true, latestClusterSecret.DeepCopy(), nil
+			default:
+				return false, nil, nil
+			}
+		})
+
+		err = mgr.RegisterAgent(context.Background(), testAgentName)
+		require.NoError(t, err)
+		assert.Equal(t, 2, updateCount)
 	})
 
 	t.Run("Refreshes token when subject does not match agent name", func(t *testing.T) {
