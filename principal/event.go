@@ -22,6 +22,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -46,9 +47,9 @@ import (
 // skipReplication returns true for event targets that are operational noise and
 // should not be forwarded to HA replicas. Replicas get fresh data from agents
 // on promotion.
-func skipReplication(target event.EventTarget) bool {
+func skipReplication(target targets.EventTarget) bool {
 	switch target {
-	case event.TargetHeartbeat, event.TargetClusterCacheInfoUpdate:
+	case targets.Heartbeat, targets.ClusterCacheInfoUpdate:
 		return true
 	default:
 		return false
@@ -98,13 +99,13 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	logCtx.Debugf("Processing event %s", target)
 
 	switch target {
-	case event.TargetApplication:
+	case targets.Application:
 		err = s.processApplicationEvent(ctx, agentName, ev)
-	case event.TargetAppProject:
+	case targets.AppProject:
 		err = s.processAppProjectEvent(ctx, agentName, ev)
-	case event.TargetResource:
+	case targets.Resource:
 		err = s.processResourceEventResponse(ctx, agentName, ev)
-	case event.TargetRedis:
+	case targets.Redis:
 		resReq := &event.RedisResponse{}
 		err := ev.DataAs(resReq)
 		if err == nil {
@@ -124,11 +125,11 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 			}
 		}()
 
-	case event.TargetResourceResync:
+	case targets.ResourceResync:
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
-	case event.TargetClusterCacheInfoUpdate:
+	case targets.ClusterCacheInfoUpdate:
 		err = s.processClusterCacheInfoUpdateEvent(agentName, ev)
-	case event.TargetHeartbeat:
+	case targets.Heartbeat:
 		err = s.processHeartbeatEvent(agentName, ev)
 	default:
 		err = fmt.Errorf("unknown target: '%s'", target)
@@ -833,7 +834,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					})
 
 					logCtx.Trace("sending an ACK for an event")
-					sendQ.Add(s.events.ProcessedEvent(event.EventProcessed, event.New(ev, event.TargetEventAck)))
+					sendQ.Add(s.events.ProcessedEvent(event.EventProcessed, event.New(ev, targets.EventAck)))
 				}(queueName, q, queueLogCtx)
 			}
 		}

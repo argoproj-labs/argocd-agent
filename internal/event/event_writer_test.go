@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
@@ -320,7 +322,7 @@ func TestEventWriter(t *testing.T) {
 		// Verify onDiscard callback was called with correct values
 		require.True(t, discardCalled)
 		require.Equal(t, "create", discardedEventType)
-		require.Equal(t, TargetApplication.String(), discardedResourceType)
+		require.Equal(t, targets.Application.String(), discardedResourceType)
 	})
 
 	t.Run("should not send ACK events to sentEvents", func(t *testing.T) {
@@ -331,7 +333,7 @@ func TestEventWriter(t *testing.T) {
 		cev := cloudevents.NewEvent()
 		cev.SetSource("test")
 		cev.SetType(EventProcessed.String())
-		cev.SetDataSchema(TargetEventAck.String())
+		cev.SetDataSchema(targets.EventAck.String())
 		cev.SetExtension(eventID, "test-ack")
 		cev.SetExtension(resourceID, "test-resource")
 
@@ -389,7 +391,7 @@ func TestEventWriter(t *testing.T) {
 		cev := cloudevents.NewEvent()
 		cev.SetSource("test")
 		cev.SetType(Create.String())
-		cev.SetDataSchema(TargetApplication.String())
+		cev.SetDataSchema(targets.Application.String())
 		cev.SetExtension(eventID, "test-event-id")
 		// Explicitly set resourceID to empty string
 		cev.SetExtension(resourceID, "")

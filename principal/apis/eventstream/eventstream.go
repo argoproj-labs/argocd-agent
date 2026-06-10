@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
@@ -292,13 +293,13 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	})
 
 	switch event.Target(incomingEvent) {
-	case event.TargetApplication:
+	case targets.Application:
 		err = incomingEvent.DataAs(app)
-	case event.TargetAppProject:
+	case targets.AppProject:
 		err = incomingEvent.DataAs(proj)
-	case event.TargetResource:
+	case targets.Resource:
 		err = incomingEvent.DataAs(resResp)
-	case event.TargetRedis:
+	case targets.Redis:
 		err = incomingEvent.DataAs(redisResp)
 		if err != nil {
 			logCtx = logCtx.WithField("connectionUUID", redisResp.ConnectionUUID)
@@ -317,7 +318,7 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: no recvq for agent %s", c.agentName)
 	}
 
-	if event.Target(incomingEvent) == event.TargetEventAck {
+	if event.Target(incomingEvent) == targets.EventAck {
 		logCtx.Trace("Received an ACK")
 		eventWriter := s.eventWriters.Get(c.agentName)
 		if eventWriter == nil {

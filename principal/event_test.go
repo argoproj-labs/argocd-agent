@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -1609,7 +1610,7 @@ func Test_processClusterCacheInfoUpdateEvent(t *testing.T) {
 
 		// Create a event with invalid data
 		ev := cloudevents.NewEvent()
-		ev.SetDataSchema(event.TargetClusterCacheInfoUpdate.String())
+		ev.SetDataSchema(targets.ClusterCacheInfoUpdate.String())
 		ev.SetType(event.ClusterCacheInfoUpdate.String())
 		err := ev.SetData(cloudevents.ApplicationJSON, "invalid-json-data")
 		require.NoError(t, err)
@@ -1635,7 +1636,7 @@ func Test_processClusterCacheInfoUpdateEvent(t *testing.T) {
 
 		// Create a event
 		ev := cloudevents.NewEvent()
-		ev.SetDataSchema(event.TargetClusterCacheInfoUpdate.String())
+		ev.SetDataSchema(targets.ClusterCacheInfoUpdate.String())
 		ev.SetType(event.ClusterCacheInfoUpdate.String())
 		ev.SetExtension("eventid", "test-event-456")
 		ev.SetExtension("resourceid", "test-resource-456")

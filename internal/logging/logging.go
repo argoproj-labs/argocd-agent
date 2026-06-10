@@ -33,6 +33,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 )
 
@@ -594,7 +595,7 @@ func parseEventSubject(logCtx *logrus.Entry, ev *cloudevents.Event) *logrus.Entr
 
 // shortType strips the CloudEvent type prefix, returning just the action part
 func shortType(evType string) string {
-	const prefix = "io.argoproj.argocd-agent.event."
+	prefix := targets.TypePrefix + "."
 	if strings.HasPrefix(evType, prefix) {
 		return evType[len(prefix):]
 	}
@@ -603,10 +604,11 @@ func shortType(evType string) string {
 
 // isMetaEvent checks if the event is a meta event
 func isMetaEvent(ev *cloudevents.Event) bool {
-	target := ev.DataSchema()
-	return target == "eventProcessed" ||
-		target == "heartbeat" ||
-		target == "clusterCacheInfoUpdate"
+	switch targets.EventTarget(ev.DataSchema()) {
+	case targets.EventAck, targets.Heartbeat, targets.ClusterCacheInfoUpdate:
+		return true
+	}
+	return false
 }
 
 // hasEventData checks if the event data is not empty
@@ -620,8 +622,8 @@ func hasEventData(data []byte) bool {
 // carry opaque payloads that could contain secrets (cached manifests, raw K8s
 // API responses), so they are treated as potentially sensitive.
 func isSensitiveEvent(ev *cloudevents.Event) bool {
-	switch ev.DataSchema() {
-	case "repository", "redis", "resource":
+	switch targets.EventTarget(ev.DataSchema()) {
+	case targets.Repository, targets.Redis, targets.Resource:
 		return true
 	}
 	return false
@@ -630,8 +632,8 @@ func isSensitiveEvent(ev *cloudevents.Event) bool {
 // isLargeEvent returns true if the event carries a large payload (full .spec/.status)
 // that should only be logged when FULL_DETAIL is enabled.
 func isLargeEvent(ev *cloudevents.Event) bool {
-	switch ev.DataSchema() {
-	case "application", "applicationset", "appproject":
+	switch targets.EventTarget(ev.DataSchema()) {
+	case targets.Application, targets.ApplicationSet, targets.AppProject:
 		return true
 	}
 	return false

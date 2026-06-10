@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/require"
@@ -390,7 +392,7 @@ func TestNewTerminalRequestEvent(t *testing.T) {
 
 		// Verify event type and schema
 		require.Equal(t, TerminalRequest.String(), ev.Type())
-		require.Equal(t, TargetTerminal.String(), ev.DataSchema())
+		require.Equal(t, targets.Terminal.String(), ev.DataSchema())
 
 		// Verify extensions
 		resID, err := ev.Context.GetExtension(resourceID)
@@ -440,7 +442,7 @@ func TestTerminalRequestFromEvent(t *testing.T) {
 		require.NoError(t, err)
 
 		// Wrap in Event type
-		ev := New(cloudEvent, TargetTerminal)
+		ev := New(cloudEvent, targets.Terminal)
 
 		// Extract terminal request
 		extractedReq, err := ev.TerminalRequest()
@@ -470,7 +472,7 @@ func TestTerminalRequestFromEvent(t *testing.T) {
 		cloudEvent, err := es.NewTerminalRequestEvent(originalReq)
 		require.NoError(t, err)
 
-		ev := New(cloudEvent, TargetTerminal)
+		ev := New(cloudEvent, targets.Terminal)
 		extractedReq, err := ev.TerminalRequest()
 		require.NoError(t, err)
 		require.Empty(t, extractedReq.Command)
@@ -491,11 +493,11 @@ func TestTargetTerminal(t *testing.T) {
 		require.NoError(t, err)
 
 		target := Target(ev)
-		require.Equal(t, TargetTerminal, target)
+		require.Equal(t, targets.Terminal, target)
 	})
 
 	t.Run("TargetTerminal string representation", func(t *testing.T) {
-		require.Equal(t, "terminal", TargetTerminal.String())
+		require.Equal(t, "terminal", targets.Terminal.String())
 	})
 
 	t.Run("TerminalRequest event type string representation", func(t *testing.T) {
@@ -545,10 +547,10 @@ func TestApplicationSetEventRoundtrip(t *testing.T) {
 		cev := es.ApplicationSetEvent(Create, appSet)
 		require.NotNil(t, cev)
 		require.Equal(t, Create.String(), cev.Type())
-		require.Equal(t, TargetApplicationSet.String(), cev.DataSchema())
+		require.Equal(t, targets.ApplicationSet.String(), cev.DataSchema())
 
-		wrapped := New(cev, TargetApplicationSet)
-		require.Equal(t, TargetApplicationSet, wrapped.Target())
+		wrapped := New(cev, targets.ApplicationSet)
+		require.Equal(t, targets.ApplicationSet, wrapped.Target())
 
 		decoded, err := wrapped.ApplicationSet()
 		require.NoError(t, err)
@@ -561,7 +563,7 @@ func TestApplicationSetEventRoundtrip(t *testing.T) {
 		require.NotNil(t, cev)
 		require.Equal(t, Delete.String(), cev.Type())
 
-		wrapped := New(cev, TargetApplicationSet)
+		wrapped := New(cev, targets.ApplicationSet)
 		decoded, err := wrapped.ApplicationSet()
 		require.NoError(t, err)
 		require.Equal(t, appSet.Name, decoded.Name)
