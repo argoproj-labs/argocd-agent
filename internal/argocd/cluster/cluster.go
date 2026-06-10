@@ -306,6 +306,8 @@ func UpdateClusterBearerTokenFromSecret(ctx context.Context, kubeclient kubernet
 	return nil
 }
 
+// UpdateClusterTLSFromSecret refreshes the TLS client config in a self-registered cluster secret.
+// It returns true only when the cluster secret was updated.
 func UpdateClusterTLSFromSecret(ctx context.Context, kubeclient kubernetes.Interface,
 	namespace, agentName string, secret *v1.Secret, clientCertSecretName string) (bool, error) {
 

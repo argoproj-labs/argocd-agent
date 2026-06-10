@@ -104,8 +104,12 @@ func (mgr *AgentRegistrationManager) RegisterAgent(ctx context.Context, agentNam
 		if updatedSecret == nil {
 			return fmt.Errorf("cluster secret disappeared after bearer token refresh")
 		}
-		if _, err := cluster.UpdateClusterTLSFromSecret(ctx, mgr.kubeclient, mgr.namespace, agentName, updatedSecret, mgr.clientCertSecretName); err != nil {
+		updated, err := cluster.UpdateClusterTLSFromSecret(ctx, mgr.kubeclient, mgr.namespace, agentName, updatedSecret, mgr.clientCertSecretName)
+		if err != nil {
 			return fmt.Errorf("failed to refresh cluster TLS data: %w", err)
+		}
+		if updated {
+			logCtx.Info("Cluster TLS data refreshed successfully")
 		}
 
 		logCtx.Info("Cluster bearer token refreshed successfully")
