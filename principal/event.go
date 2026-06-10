@@ -27,6 +27,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
+	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/replication"
@@ -41,7 +42,6 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/util/workqueue"
 )
 
 // skipReplication returns true for event targets that are operational noise and
@@ -59,7 +59,7 @@ func skipReplication(target targets.EventTarget) bool {
 // processRecvQueue processes an entry from the receiver queue, which holds the
 // events received by agents. It will trigger updates of resources in the
 // server's backend.
-func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) (*cloudevents.Event, error) {
+func (s *Server) processRecvQueue(ctx context.Context, agentName string, q queue.RecvQueue) (*cloudevents.Event, error) {
 	status := metrics.EventProcessingSuccess
 	ev, _ := q.Get()
 
@@ -805,7 +805,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 
 				queueLogCtx.Trace("Acquired semaphore")
 
-				go func(agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event], logCtx *logrus.Entry) {
+				go func(agentName string, q queue.RecvQueue, logCtx *logrus.Entry) {
 					defer func() {
 						sem.Release(1)
 						queueLock.Unlock(agentName)
