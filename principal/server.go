@@ -262,6 +262,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		metricsRegistered.Do(func() {
 			metrics.RegisterK8sClientMetrics()
 			metrics.RegisterQueueMetrics("argocd_principal")
+			metrics.RegisterDedupeQueueMetrics("argocd_principal")
 		})
 	}
 
