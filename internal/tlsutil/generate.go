@@ -165,7 +165,7 @@ func ValidateLeafValidityDays(signerCert *x509.Certificate, validityDays int) er
 	}
 	requestedNotAfter := time.Now().AddDate(0, 0, validityDays)
 	if requestedNotAfter.After(signerCert.NotAfter) {
-		maxDays := int(signerCert.NotAfter.Sub(time.Now()).Hours() / 24)
+		maxDays := int(time.Until(signerCert.NotAfter).Hours() / 24)
 		return fmt.Errorf(
 			"requested validity of %d days exceeds CA expiry (%s); maximum is approximately %d days",
 			validityDays, signerCert.NotAfter.Format(time.RFC1123Z), maxDays,
