@@ -2678,7 +2678,7 @@ func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
 		ce := evs.ApplicationEvent(event.Create, incomingApp)
 		event.SetPrincipalUID(ce, expectedPrincipalUID)
 
-		err := a.processIncomingApplication(event.New(ce, event.TargetApplication))
+		err := a.processIncomingApplication(event.New(ce, targets.Application))
 		require.NoError(t, err)
 		require.NotNil(t, updatedApp)
 		require.NotNil(t, updatedApp.Annotations)
@@ -2706,7 +2706,7 @@ func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
 		ce := evs.ApplicationEvent(event.Create, incomingApp)
 		event.SetPrincipalUID(ce, expectedPrincipalUID)
 
-		err := a.processIncomingApplication(event.New(ce, event.TargetApplication))
+		err := a.processIncomingApplication(event.New(ce, targets.Application))
 		require.NoError(t, err)
 		require.Nil(t, updatedApp)
 	})
@@ -2723,7 +2723,7 @@ func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
 		ce := evs.ApplicationEvent(event.Create, incomingApp)
 		event.SetPrincipalUID(ce, expectedPrincipalUID)
 
-		err := a.processIncomingApplication(event.New(ce, event.TargetApplication))
+		err := a.processIncomingApplication(event.New(ce, targets.Application))
 		require.NoError(t, err)
 		require.Nil(t, updatedApp)
 	})
@@ -2744,7 +2744,7 @@ func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
 		ce := evs.ApplicationEvent(event.Create, incomingApp)
 		event.SetPrincipalUID(ce, expectedPrincipalUID)
 
-		err := a.processIncomingApplication(event.New(ce, event.TargetApplication))
+		err := a.processIncomingApplication(event.New(ce, targets.Application))
 		require.NoError(t, err)
 		require.NotNil(t, updatedApp)
 		require.NotNil(t, updatedApp.Annotations)
