@@ -15,6 +15,7 @@
 package queue
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -47,6 +48,10 @@ func NewDedupeQueueForTest(maxSize int) *dedupeQueue {
 }
 
 func newDedupeQueue(maxSize int, name string) *dedupeQueue {
+	if maxSize <= 0 {
+		panic(fmt.Sprintf("maxSize must be positive, got %d", maxSize))
+	}
+
 	return &dedupeQueue{
 		items:   make([]*queueItem, 0),
 		notify:  make(chan struct{}, 10),
@@ -121,29 +126,29 @@ func (dq *dedupeQueue) Get() (*event.Event, bool) {
 	dq.mu.Unlock()
 
 	// Block until an item is available or shutdown
-	for {
-		select {
-		case <-dq.notify:
-			dq.mu.Lock()
-			if len(dq.items) > 0 {
-				item := dq.pop()
+	for range dq.notify {
+		dq.mu.Lock()
+		if len(dq.items) > 0 {
+			item := dq.pop()
 
-				if dq.metrics != nil {
-					dq.metrics.Depth.WithLabelValues(dq.name).Set(float64(len(dq.items)))
-					dq.metrics.Duration.WithLabelValues(dq.name).Observe(time.Since(item.enqueuedAt).Seconds())
-				}
-
-				dq.mu.Unlock()
-				return item.event, false
+			if dq.metrics != nil {
+				dq.metrics.Depth.WithLabelValues(dq.name).Set(float64(len(dq.items)))
+				dq.metrics.Duration.WithLabelValues(dq.name).Observe(time.Since(item.enqueuedAt).Seconds())
 			}
 
-			if dq.isShutdown {
-				dq.mu.Unlock()
-				return nil, true
-			}
 			dq.mu.Unlock()
+			return item.event, false
 		}
+
+		if dq.isShutdown {
+			dq.mu.Unlock()
+			return nil, true
+		}
+		dq.mu.Unlock()
 	}
+
+	// notify channel was closed (shutdown)
+	return nil, true
 }
 
 func (dq *dedupeQueue) Done(_ *event.Event) {
