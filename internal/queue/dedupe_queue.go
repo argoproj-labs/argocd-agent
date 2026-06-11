@@ -179,6 +179,7 @@ func (dq *dedupeQueue) removeDuplicates(incoming *event.Event) {
 		return
 	}
 
+	// TODO: avoid this linear scan/shift for every incoming event.
 	for i := len(dq.items) - 1; i >= 0; i-- {
 		existingID, existingEvType := dedupeKey(dq.items[i].event)
 		if existingID == resID && existingEvType == evType {
