@@ -12,6 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# set_rbac_subject_namespace rewrites the ServiceAccount subject namespace in
+# RoleBinding/ClusterRoleBinding manifests. Required when deploying to namespaces
+# other than the install default of "argocd" (e.g. argocd-principal).
+set_rbac_subject_namespace() {
+  local namespace="$1"
+  shift
+  sed -i.bak -e "s/  namespace: argocd/  namespace: ${namespace}/" "$@"
+}
+
 # getExternalLoadBalancerIP will set EXTERNAL_IP with the load balancer hostname from the specified Service
 getExternalLoadBalancerIP() {
   CONTEXT=$1
