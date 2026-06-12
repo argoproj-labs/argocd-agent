@@ -1,4 +1,4 @@
-// Copyright 2025 The argocd-agent Authors
+// Copyright 2026 The argocd-agent Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -78,6 +78,9 @@ func GeneratePrivateKey(opts KeyGenOptions) (crypto.PrivateKey, error) {
 
 	switch opts.Algorithm {
 	case "rsa":
+		if opts.RSABits < 2048 {
+			return nil, fmt.Errorf("RSA key size must be at least 2048 bits")
+		}
 		return rsa.GenerateKey(rand.Reader, opts.RSABits)
 	case "ecdsa-p256":
 		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
