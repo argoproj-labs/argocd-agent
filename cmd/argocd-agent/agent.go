@@ -111,6 +111,9 @@ func NewAgentRunCommand() *cobra.Command {
 		redisTLSCAPath       string
 		redisTLSCASecretName string
 		redisTLSInsecure     bool
+
+		// Adoption options
+		adoptionPolicy string
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -312,6 +315,7 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithRecreateAction(onApplicationRecreate))
 			agentOpts = append(agentOpts, agent.WithAllowedNamespaces(allowedNamespaces...))
 			agentOpts = append(agentOpts, agent.WithLabelSelector(labelSelector))
+			agentOpts = append(agentOpts, agent.WithAdoptionPolicy(adoptionPolicy))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
@@ -478,6 +482,10 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&labelSelector, "label-selector",
 		env.StringWithDefault("ARGOCD_AGENT_LABEL_SELECTOR", nil, ""),
 		"Kubernetes label selector to restrict which resources the agent watches")
+
+	command.Flags().StringVar(&adoptionPolicy, "adoption-policy",
+		env.StringWithDefault("ARGOCD_AGENT_ADOPTION_POLICY", nil, "always"),
+		"Set the adoption policy for applications that already exist on a managed agent (always or never)")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
