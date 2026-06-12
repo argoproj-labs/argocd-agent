@@ -374,7 +374,7 @@ func (r *ResourceRequest) IsValid() bool {
 }
 
 // ResourceResponse is an event that holds the response to a resource request.
-// It is usually sent by an agent to the princiapl in response to a prior
+// It is usually sent by an agent to the principal in response to a prior
 // resource request.
 type ResourceResponse struct {
 	// UUID is the unique ID of the request this response is targeted at
