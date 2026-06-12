@@ -15,6 +15,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -303,6 +304,46 @@ func UpdateClusterBearerTokenFromSecret(ctx context.Context, kubeclient kubernet
 
 	logCtx.Info("Successfully updated cluster secret bearer token")
 	return nil
+}
+
+// UpdateClusterTLSFromSecret refreshes the TLS client config in a self-registered cluster secret.
+// It returns true only when the cluster secret was updated.
+func UpdateClusterTLSFromSecret(ctx context.Context, kubeclient kubernetes.Interface,
+	namespace, agentName string, secret *v1.Secret, clientCertSecretName string) (bool, error) {
+
+	logCtx := log().WithField("agent", agentName).WithField("process", "self-agent-registration")
+
+	cluster, err := db.SecretToCluster(secret)
+	if err != nil {
+		return false, fmt.Errorf("could not parse cluster secret: %w", err)
+	}
+
+	clientCert, clientKey, caData, err := readClientCertFromSecret(ctx, kubeclient, namespace, clientCertSecretName)
+	if err != nil {
+		return false, fmt.Errorf("could not read client certificate from secret %s: %w", clientCertSecretName, err)
+	}
+
+	tlsConfig := &cluster.Config.TLSClientConfig
+	if bytes.Equal(tlsConfig.CertData, []byte(clientCert)) &&
+		bytes.Equal(tlsConfig.KeyData, []byte(clientKey)) &&
+		bytes.Equal(tlsConfig.CAData, []byte(caData)) {
+		return false, nil
+	}
+
+	tlsConfig.CertData = []byte(clientCert)
+	tlsConfig.KeyData = []byte(clientKey)
+	tlsConfig.CAData = []byte(caData)
+
+	if err := ClusterToSecret(cluster, secret); err != nil {
+		return false, fmt.Errorf("could not convert cluster to secret: %w", err)
+	}
+
+	if _, err = kubeclient.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+		return false, fmt.Errorf("could not update cluster secret: %w", err)
+	}
+
+	logCtx.Info("Successfully updated cluster secret TLS data")
+	return true, nil
 }
 
 // readClientCertFromSecret reads TLS credentials from an existing Kubernetes TLS secret.
