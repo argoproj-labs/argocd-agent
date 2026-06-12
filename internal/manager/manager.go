@@ -72,15 +72,6 @@ const (
 	// MismatchPolicyAnnotation is the annotation operators set on a resource to override
 	// the global mismatch policy for that specific resource.
 	MismatchPolicyAnnotation = "argocd.argoproj.io/source-uid-mismatch-policy"
-
-	// AdoptionPolicyAlways adopts an application by stamping the principal-uid onto the application
-	AdoptionPolicyAlways = "always"
-
-	// AdoptionPolicyNever does not adoption the application and leaves it as is
-	AdoptionPolicyNever = "never"
-
-	// DontAdoptAnnotation is an annotation for setting whether an app should not be adopted
-	AdoptionPolicyAnnotation = "argocd.argoproj.io/adoption-policy"
 )
 
 // RecreateAction defines the agent's behavior after recreating an Application
@@ -94,6 +85,21 @@ const (
 	RecreateActionClearStatus RecreateAction = "clear-status"
 	// RecreateActionResync sets a sync operation to force immediate re-sync.
 	RecreateActionResync RecreateAction = "resync"
+)
+
+// AdoptionPolicy defines a managed mode agent's behavior when dealing with a create event where
+// the application to be created already exists
+type AdoptionPolicy string
+
+const (
+	// AdoptionPolicyAlways adopts an application by stamping the principal-uid onto the application
+	AdoptionPolicyAlways AdoptionPolicy = "always"
+
+	// AdoptionPolicyNever does not adoption the application and leaves it as is
+	AdoptionPolicyNever AdoptionPolicy = "never"
+
+	// DontAdoptAnnotation is an annotation for setting whether an app should not be adopted
+	AdoptionPolicyAnnotation = "argocd.argoproj.io/adoption-policy"
 )
 
 type Manager interface {

@@ -1378,9 +1378,9 @@ func (a *Agent) ensureNamespaceExists(namespace string) error {
 	return nil
 }
 
-// shouldAdopt checks to see if an application should not be adopted
-// The annotation on the existing application takes priority over the the global setting
-func (a *Agent) effectiveAdoptionPolicy(incoming metav1.Object) string {
+// effectiveAdoptionPolicy gets the adoption policy for the existing appilcation
+// The annotation takes precedence over the global default
+func (a *Agent) effectiveAdoptionPolicy(incoming metav1.Object) manager.AdoptionPolicy {
 	existing, err := a.appManager.Get(a.context, incoming.GetName(), incoming.GetNamespace())
 	if err != nil {
 		log().WithError(err).WithField(logfields.Application, incoming.GetName()).Errorf("Failed to get application to check adoption policy, falling back to default policy")
@@ -1389,7 +1389,11 @@ func (a *Agent) effectiveAdoptionPolicy(incoming metav1.Object) string {
 
 	if annotations := existing.GetAnnotations(); annotations != nil {
 		if policy, ok := annotations[manager.AdoptionPolicyAnnotation]; ok {
-			return policy
+			p := manager.AdoptionPolicy(policy)
+			if p == manager.AdoptionPolicyAlways || p == manager.AdoptionPolicyNever {
+				return p
+			}
+			log().Warnf("unknown adoption policy annotation value %q on %s/%s, defaulting to global option", policy, existing.GetNamespace(), existing.GetName())
 		}
 	}
 	return a.adoptionPolicy
