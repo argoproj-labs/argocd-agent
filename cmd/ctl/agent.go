@@ -64,7 +64,7 @@ func NewAgentCommand() *cobra.Command {
 	return command
 }
 
-func generateAgentClientCert(agentName string, clt *kube.KubernetesClient, validityDays int) (clientCert string, clientKey string, caData string, err error) {
+func generateAgentClientCert(agentName string, clt *kube.KubernetesClient, validityDays int, opts tlsutil.KeyGenOptions) (clientCert string, clientKey string, caData string, err error) {
 	ctx := context.Background()
 
 	// Our CA certificate is stored in a secret
@@ -86,7 +86,7 @@ func generateAgentClientCert(agentName string, clt *kube.KubernetesClient, valid
 	}
 
 	// Generate a client cert and sign it using the CA's cert and key
-	clientCert, clientKey, err = tlsutil.GenerateClientCertificate(agentName, signerCert, tlsCert.PrivateKey, validityDays)
+	clientCert, clientKey, err = tlsutil.GenerateClientCertificate(agentName, signerCert, tlsCert.PrivateKey, validityDays, opts)
 	if err != nil {
 		err = fmt.Errorf("could not create client cert: %w", err)
 		return
@@ -178,6 +178,8 @@ func NewAgentCreateCommand() *cobra.Command {
 		tlsFromSecret string
 		caFromSecret  string
 		days          int
+		keyAlgorithm  string
+		keySize       int
 	)
 	command := &cobra.Command{
 		Short: "Create a new agent configuration",
@@ -236,7 +238,8 @@ func NewAgentCreateCommand() *cobra.Command {
 				}
 			} else {
 				// Generate certificates from the PKI
-				clientCert, clientKey, caData, err = generateAgentClientCert(agentName, clt, days)
+				keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+				clientCert, clientKey, caData, err = generateAgentClientCert(agentName, clt, days, keyOpts)
 				if err != nil {
 					cmdutil.Fatal("%v", err)
 				}
@@ -284,6 +287,7 @@ func NewAgentCreateCommand() *cobra.Command {
 	command.Flags().StringVar(&tlsFromSecret, "tls-from-secret", "", "Name of an existing secret containing TLS certificate and key (keys: tls.crt, tls.key). Format: [namespace/]name")
 	command.Flags().StringVar(&caFromSecret, "ca-from-secret", "", "Name of an existing secret containing CA certificate (key: ca.crt). Format: [namespace/]name")
 	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the client certificate is valid for (only used when generating from PKI)")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize)
 	return command
 }
 
@@ -431,6 +435,8 @@ func NewAgentReconfigureCommand() *cobra.Command {
 		rpPassword        string
 		reissueClientCert bool
 		days              int
+		keyAlgorithm      string
+		keySize           int
 	)
 	command := &cobra.Command{
 		Short: "Reconfigures an agent's properties",
@@ -470,7 +476,8 @@ func NewAgentReconfigureCommand() *cobra.Command {
 				if err != nil {
 					cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 				}
-				clientCert, clientKey, caData, err := generateAgentClientCert(agentName, clt, days)
+				keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+				clientCert, clientKey, caData, err := generateAgentClientCert(agentName, clt, days, keyOpts)
 				if err != nil {
 					cmdutil.Fatal("%v", err)
 				}
@@ -495,6 +502,7 @@ func NewAgentReconfigureCommand() *cobra.Command {
 	command.Flags().StringVar(&rpPassword, "resource-proxy-password", "", "The password for the resource-proxy")
 	command.Flags().BoolVar(&reissueClientCert, "reissue-client-cert", false, "Reissue the agent's client cert")
 	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the client certificate is valid for (only used with --reissue-client-cert)")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize)
 	return command
 }
 
