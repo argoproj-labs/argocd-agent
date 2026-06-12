@@ -25,6 +25,12 @@ const ownerLookupRecursionLimit = 5
 
 var ErrUnmanaged = errors.New("resource not managed by app")
 
+// isCRD reports whether the given GroupVersionResource refers to a
+// CustomResourceDefinition.
+func isCRD(gvr schema.GroupVersionResource) bool {
+	return gvr.Group == "apiextensions.k8s.io" && gvr.Resource == "customresourcedefinitions"
+}
+
 // processIncomingResourceRequest processes an incoming event that requests
 // to retrieve information from the Kubernetes API.
 //
@@ -79,6 +85,14 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 				if subresource != "" {
 					logCtx.Debugf("Fetching subresource %s of managed resource %s/%s/%s", subresource, gvr.Group, gvr.Version, gvr.Resource)
 					unres, err = a.getManagedResourceSubresource(ctx, gvr, name, namespace, subresource)
+				} else if isCRD(gvr) {
+					// CRDs never receive Argo CD tracking metadata (argoproj/argo-cd#17400),
+					// so the managed-resource check would always reject them. Allow reading
+					// CRDs without the check so their live manifests are viewable in the UI;
+					// Argo CD's own authorization still gates access to the resource proxy.
+					// See #873.
+					logCtx.Debugf("Fetching CRD %s/%s without managed-resource check", gvr.Version, name)
+					unres, err = a.getResource(ctx, gvr, name, namespace)
 				} else {
 					logCtx.Debugf("Fetching managed resource %s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
 					unres, err = a.getManagedResource(ctx, gvr, name, namespace)
@@ -308,20 +322,22 @@ func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.Gr
 	return result, nil
 }
 
+// getResource retrieves a single resource from the cluster and returns it as
+// unstructured data, without performing any Argo CD management check.
+func (a *Agent) getResource(ctx context.Context, gvr schema.GroupVersionResource, name, namespace string) (*unstructured.Unstructured, error) {
+	rif := a.kubeClient.DynamicClient.Resource(gvr)
+
+	if namespace != "" {
+		return rif.Namespace(namespace).Get(ctx, name, v1.GetOptions{})
+	}
+	return rif.Get(ctx, name, v1.GetOptions{})
+}
+
 // getManagedResource retrieves a single resource from the cluster
 // and returns it as unstructured data. The resource to be returned must be
 // managed by Argo CD.
 func (a *Agent) getManagedResource(ctx context.Context, gvr schema.GroupVersionResource, name, namespace string) (*unstructured.Unstructured, error) {
-	var err error
-	var res *unstructured.Unstructured
-
-	rif := a.kubeClient.DynamicClient.Resource(gvr)
-
-	if namespace != "" {
-		res, err = rif.Namespace(namespace).Get(ctx, name, v1.GetOptions{})
-	} else {
-		res, err = rif.Get(ctx, name, v1.GetOptions{})
-	}
+	res, err := a.getResource(ctx, gvr, name, namespace)
 	if err != nil {
 		return nil, err
 	}
