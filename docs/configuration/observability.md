@@ -274,7 +274,7 @@ spec:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `argocd_agent_connected_agents` | Gauge | Number of currently connected agents |
+| `agent_connected_with_principal` | Gauge | Number of currently connected agents |
 | `argocd_agent_grpc_requests_total` | Counter | Total gRPC requests by method |
 | `argocd_agent_grpc_request_duration_seconds` | Histogram | gRPC request duration |
 | `argocd_agent_sync_operations_total` | Counter | Total sync operations |

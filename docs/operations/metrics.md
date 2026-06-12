@@ -9,13 +9,13 @@ Similarly for agent metrics are exposed at `http://0.0.0.0:8181/metrics` endpoin
 
 Here is the list of available metrics:
 
-### Build Metrics
+## Build Metrics
 
 | Metric | Type | Description |
 |---|:-:|---|
 | `argocd_agent_build_info` | gauge | Build metadata for the running argocd-agent binary. Labels: `version`, `git_revision`. |
 
-### Principal Metrics
+## Principal Metrics
 
 | Metric | Type | Description |
 |---|:-:|---|
@@ -46,7 +46,7 @@ Here is the list of available metrics:
 | `argocd_principal_redis_proxy_requests_total` | counterVec | The total number of Redis proxy requests forwarded to agents. |
 | `argocd_principal_redis_proxy_errors_total` | counterVec | The total number of Redis proxy request failures on principal. |
 
-### Agent Metrics
+## Agent Metrics
 
 | Metric | Type | Description |
 |---|:-:|---|
