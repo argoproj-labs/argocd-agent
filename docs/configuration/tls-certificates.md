@@ -74,6 +74,7 @@ This creates the `argocd-agent-ca` secret containing the CA certificate and priv
 **Options:**
 
 - `--force, -f`: Overwrite existing CA if it already exists
+- `--days`: Number of days the CA certificate is valid for (default: 3650, ~10 years)
 
 ### Step 2: Issue Principal Server Certificate
 
@@ -93,6 +94,7 @@ argocd-agentctl pki issue principal \
 - `--ip`: Comma-separated list of IP addresses for the principal service
 - `--dns`: Comma-separated list of DNS names for the principal service
 - `--upsert, -u`: Update existing certificate if it already exists
+- `--days`: Number of days the certificate is valid for (default: 180, ~6 months). Must not exceed the signing CA's remaining validity.
 
 **Example for Kubernetes:**
 
@@ -113,6 +115,8 @@ argocd-agentctl pki issue resource-proxy \
   --dns "localhost,argocd-agent-resource-proxy.argocd.svc.cluster.local" \
   --upsert
 ```
+
+Supports the same `--days` flag as `pki issue principal` (default: 180).
 
 ### Step 4: Create JWT Signing Key
 
@@ -138,6 +142,8 @@ argocd-agentctl pki issue agent <agent-name> \
 This command creates both:
 - `argocd-agent-client-tls` secret (client certificate) in the agent cluster
 - `argocd-agent-ca` secret (CA certificate) in the agent cluster
+
+Supports `--days` (default: 180). The requested lifetime must not exceed the signing CA's remaining validity.
 
 **Note**: If you need to propagate the CA certificate separately (e.g., for existing agents), you can still use:
 

@@ -88,7 +88,10 @@ OR TO PROTECT ANY KIND OF DATA.
 }
 
 func NewPKIInitCommand() *cobra.Command {
-	var force bool
+	var (
+		force bool
+		days  int
+	)
 	command := &cobra.Command{
 		Short: "NON-PROD!! Initialize the PKI for use with argocd-agent",
 		Use:   "init",
@@ -109,7 +112,7 @@ func NewPKIInitCommand() *cobra.Command {
 				exists = true
 			}
 			fmt.Println("Generating CA and storing it in secret")
-			cert, key, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA)
+			cert, key, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, days)
 			if err != nil {
 				cmdutil.Fatal("Could not generate certificate: %v", err)
 			}
@@ -139,6 +142,7 @@ func NewPKIInitCommand() *cobra.Command {
 	}
 
 	command.Flags().BoolVarP(&force, "force", "f", false, "Force regeneration of PKI if it exists")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultCACertValidityDays, "Number of days the certificate is valid for")
 	return command
 }
 
@@ -381,19 +385,21 @@ func NewPKIIssuePrincipalCommand() *cobra.Command {
 		ips    []string
 		dns    []string
 		upsert bool
+		days   int
 	)
 	command := &cobra.Command{
 		Short: "Issue a TLS certificate for the principal",
 		Use:   "principal",
 		Run: func(cmd *cobra.Command, args []string) {
-			issueAndSaveSecret(principalCfg.KubeContext, "argocd-agent-principal-tls", principalCfg.Namespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
-				return tlsutil.GenerateServerCertificate("argocd-agent-principal", c, pk, ips, dns)
+			issueAndSaveSecret(principalCfg.KubeContext, "argocd-agent-principal-tls", principalCfg.Namespace, upsert, days, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateServerCertificate("argocd-agent-principal", c, pk, ips, dns, days)
 			})
 		},
 	}
 	command.Flags().StringSliceVar(&ips, "ip", []string{"127.0.0.1"}, "The IP addresses this certificate is valid for")
 	command.Flags().StringSliceVar(&dns, "dns", []string{"localhost"}, "The DNS names this certificate is valid for")
 	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
 	return command
 }
 
@@ -403,17 +409,18 @@ func NewPKIIssueResourceProxyCommand() *cobra.Command {
 		dns    []string
 		upsert bool
 		noSAN  bool
+		days   int
 	)
 	command := &cobra.Command{
 		Short: "Issue a TLS certificate for the resource proxy",
 		Use:   "resource-proxy",
 		Run: func(cmd *cobra.Command, args []string) {
-			if len(ips) == 0 && len(dns) == 0 {
-				fmt.Println("Please pass at least one of --ips or --dns options or use --no-san to create certificate without SAN")
+			if len(ips) == 0 && len(dns) == 0 && !noSAN {
+				fmt.Println("Please pass at least one of --ip or --dns options or use --no-san to create certificate without SAN")
 				os.Exit(1)
 			}
-			issueAndSaveSecret(principalCfg.KubeContext, "argocd-agent-resource-proxy-tls", principalCfg.Namespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
-				return tlsutil.GenerateServerCertificate("argocd-agent-resource-proxy", c, pk, ips, dns)
+			issueAndSaveSecret(principalCfg.KubeContext, "argocd-agent-resource-proxy-tls", principalCfg.Namespace, upsert, days, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateServerCertificate("argocd-agent-resource-proxy", c, pk, ips, dns, days)
 			})
 		},
 	}
@@ -421,6 +428,7 @@ func NewPKIIssueResourceProxyCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&dns, "dns", []string{}, "The DNS names this certificate is valid for")
 	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
 	command.Flags().BoolVar(&noSAN, "no-san", false, "Do not add SAN information to the certificate")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
 	return command
 }
 
@@ -429,6 +437,7 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 		upsert         bool
 		sameContext    bool
 		agentNamespace string
+		days           int
 	)
 	command := &cobra.Command{
 		Use:   "agent <name>",
@@ -447,8 +456,8 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 			if principalCfg.KubeContext == agentCfg.KubeContext && !sameContext {
 				cmdutil.Fatal("PKI and agent usually do not reside within the same context. Use --same-context if you really mean it.")
 			}
-			issueAndSaveSecret(agentCfg.KubeContext, config.SecretNameAgentClientCert, agentNamespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
-				return tlsutil.GenerateClientCertificate(agentName, c, pk)
+			issueAndSaveSecret(agentCfg.KubeContext, config.SecretNameAgentClientCert, agentNamespace, upsert, days, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateClientCertificate(agentName, c, pk, days)
 			})
 			ctx := context.TODO()
 
@@ -503,6 +512,7 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
 	command.Flags().BoolVar(&sameContext, "same-context", false, "Use when the PKI and agent use the same context")
 	command.Flags().StringVar(&agentNamespace, "agent-namespace", "argocd", "The namespace the agent is installed to")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
 	return command
 }
 
@@ -512,7 +522,7 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 // secret's certificate and private key as PEM encoded string. The resulting
 // certificate will be saved to a secret referred to by outContext, outName and
 // outNamespace.
-func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, issue func(*x509.Certificate, crypto.PrivateKey) (string, string, error)) {
+func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, validityDays int, issue func(*x509.Certificate, crypto.PrivateKey) (string, string, error)) {
 	ctx := context.TODO()
 
 	// Client for principal's kube context - it has the CA
@@ -546,6 +556,10 @@ func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, i
 	signerCert, err := x509.ParseCertificate(caCert.Certificate[0])
 	if err != nil {
 		cmdutil.Fatal("Could not parse CA certificate: %v", err)
+	}
+
+	if err := tlsutil.ValidateLeafValidityDays(signerCert, validityDays); err != nil {
+		cmdutil.Fatal("%v", err)
 	}
 
 	// Generate a new TLS keypair from the cert and private key
