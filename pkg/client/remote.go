@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
+
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
@@ -109,7 +111,11 @@ type Remote struct {
 	// agentNamespace is the namespace where the agent is running.
 	agentNamespace string
 
+	// grpcClientMetrics holds gRPC client-side Prometheus metrics
+	grpcClientMetrics *grpcprom.ClientMetrics
+
 	onAuthenticated onAuthenticatedFunc
+	onAuthFailure   func()
 }
 
 type RemoteOption func(r *Remote) error
@@ -325,6 +331,15 @@ func WithMinimumTLSVersion(version string) RemoteOption {
 func WithAgentNamespace(namespace string) RemoteOption {
 	return func(r *Remote) error {
 		r.agentNamespace = namespace
+		return nil
+	}
+}
+
+// WithGRPCClientMetrics attaches gRPC Prometheus client-side metrics
+// interceptors to every outgoing RPC.
+func WithGRPCClientMetrics(m *grpcprom.ClientMetrics) RemoteOption {
+	return func(r *Remote) error {
+		r.grpcClientMetrics = m
 		return nil
 	}
 }
@@ -573,20 +588,34 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		MinConnectTimeout: 365 * 24 * time.Hour,
 	}
 
-	// Some default options
+	unaryInterceptors := []grpc.UnaryClientInterceptor{
+		r.unaryAuthInterceptor,
+		grpcutil.UnaryClientMsgSizeInterceptor(r.MaxGRPCMessageSize),
+	}
+	streamInterceptors := []grpc.StreamClientInterceptor{
+		r.streamAuthInterceptor,
+		grpcutil.StreamClientMsgSizeInterceptor(r.MaxGRPCMessageSize),
+	}
+
+	// Prepend gRPC Prometheus interceptors so they observe all RPCs.
+	if r.grpcClientMetrics != nil {
+		unaryInterceptors = append(
+			[]grpc.UnaryClientInterceptor{r.grpcClientMetrics.UnaryClientInterceptor()},
+			unaryInterceptors...,
+		)
+		streamInterceptors = append(
+			[]grpc.StreamClientInterceptor{r.grpcClientMetrics.StreamClientInterceptor()},
+			streamInterceptors...,
+		)
+	}
+
 	opts := []grpc.DialOption{
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(r.MaxGRPCMessageSize), grpc.MaxCallSendMsgSize(r.MaxGRPCMessageSize)),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithConnectParams(cparams),
 		grpc.WithUserAgent("argocd-agent/v0.0.1"),
-		grpc.WithChainUnaryInterceptor(
-			r.unaryAuthInterceptor,
-			grpcutil.UnaryClientMsgSizeInterceptor(r.MaxGRPCMessageSize),
-		),
-		grpc.WithChainStreamInterceptor(
-			r.streamAuthInterceptor,
-			grpcutil.StreamClientMsgSizeInterceptor(r.MaxGRPCMessageSize),
-		),
+		grpc.WithChainUnaryInterceptor(unaryInterceptors...),
+		grpc.WithChainStreamInterceptor(streamInterceptors...),
 	}
 
 	if r.enableCompression {
@@ -636,6 +665,9 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 				}
 			}()
 			if ierr != nil {
+				if r.onAuthFailure != nil {
+					r.onAuthFailure()
+				}
 				st, ok := status.FromError(ierr)
 				if ok {
 					if st.Code() == codes.FailedPrecondition {
@@ -739,6 +771,11 @@ func (r *Remote) SetClientID(id string) {
 // handshake, receiving the principal's namespace from the AuthResponse.
 func (r *Remote) SetOnAuthenticated(fn onAuthenticatedFunc) {
 	r.onAuthenticated = fn
+}
+
+// SetOnAuthFailure registers a callback invoked on each authentication failure.
+func (r *Remote) SetOnAuthFailure(fn func()) {
+	r.onAuthFailure = fn
 }
 
 func log() *logrus.Entry {

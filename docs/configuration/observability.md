@@ -274,7 +274,7 @@ spec:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `argocd_agent_connected_agents` | Gauge | Number of currently connected agents |
+| `agent_connected_with_principal` | Gauge | Number of currently connected agents |
 | `argocd_agent_grpc_requests_total` | Counter | Total gRPC requests by method |
 | `argocd_agent_grpc_request_duration_seconds` | Histogram | gRPC request duration |
 | `argocd_agent_sync_operations_total` | Counter | Total sync operations |
@@ -288,9 +288,26 @@ spec:
 | `argocd_agent_events_sent_total` | Counter | Total events sent to principal |
 | `argocd_agent_events_received_total` | Counter | Total events received from principal |
 
-### Grafana Dashboard
+### Grafana Dashboards
 
-For detailed metrics visualization, see the [Operations: Metrics](../operations/metrics.md) documentation.
+Pre-built Grafana dashboards are available in `install/grafana/`:
+
+**Principal Dashboard** (`argocd-agent-principal-dashboard.json`):
+Import on the control-plane cluster. Monitors the principal component including connected agents, resource operations (Applications, AppProjects, Repositories, ApplicationSets, GPG keys), event processing, connection status, and resource/Redis proxy metrics.
+
+**Agent Dashboard** (`argocd-agent-agent-dashboard.json`):
+The same dashboard JSON can be imported in two ways:
+
+- **On the control-plane**: Shows metrics from all connected agents. Use the "Agent Name" dropdown to filter by a specific agent or view all at once. Requires agent's metrics endpoint to be reachable from the control-plane Prometheus.
+- **On a workload cluster**: Shows only that cluster's local agent data, since the local Prometheus only scrapes the local agent.
+
+The agent dashboard includes connection status, event processing, resource/Redis proxy metrics, gRPC metrics, Kubernetes API metrics, and process health (CPU, memory, goroutines).
+
+> **Note**: When the control-plane Prometheus scrapes agent metrics from workload clusters, it stores its own copy of the data. If a workload cluster also has its own Prometheus scraping the same agent locally, both instances independently collect and store the same metrics.
+
+See `install/grafana/grafana-setup.md` in the repository for instructions on configuring Prometheus, importing dashboards, and setting up multi-cluster monitoring.
+
+For a complete list of available metrics, see the [Operations: Metrics](../operations/metrics.md) documentation.
 
 ## Health Checks
 

@@ -423,8 +423,11 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
 
 	if s.metrics != nil {
-		// increase counter when an agent is connected with principal
+		// increase counter to track how many agents are currently connected with principal
 		s.metrics.AgentConnected.Inc()
+
+		// increase counter to track how many times an agent has connected/reconnected to principal
+		s.metrics.AgentConnectionCount.WithLabelValues(c.agentName).Inc()
 
 		// store connection time to find average connection time of all agents
 		metrics.SetAgentConnectionTime(c.agentName, c.start)

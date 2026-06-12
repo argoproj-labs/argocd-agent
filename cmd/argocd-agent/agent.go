@@ -33,6 +33,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -243,6 +244,10 @@ func NewAgentRunCommand() *cobra.Command {
 			remoteOpts = append(remoteOpts, client.WithCompression(enableCompression))
 			remoteOpts = append(remoteOpts, client.WithMaxGRPCMessageSize(maxGRPCMessageSize))
 			remoteOpts = append(remoteOpts, client.WithAgentNamespace(namespace))
+
+			if metricsPort > 0 {
+				remoteOpts = append(remoteOpts, client.WithGRPCClientMetrics(metrics.NewClientGRPCMetrics()))
+			}
 
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
 				remote, err = client.NewRemote(serverAddress, serverPort, remoteOpts...)

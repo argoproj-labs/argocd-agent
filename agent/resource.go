@@ -40,6 +40,10 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 		return fmt.Errorf("resource proxy is disabled in agent configuration")
 	}
 
+	if a.metrics != nil {
+		a.metrics.ResourceProxyRequests.Inc()
+	}
+
 	rreq, err := ev.ResourceRequest()
 	if err != nil {
 		return err
@@ -112,6 +116,9 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 
 	if err != nil {
 		logCtx.Errorf("could not request resource: %v", err)
+		if a.metrics != nil {
+			a.metrics.ResourceProxyErrors.Inc()
+		}
 		status = err
 	} else {
 		// Marshal the unstructured resource to JSON for submission
