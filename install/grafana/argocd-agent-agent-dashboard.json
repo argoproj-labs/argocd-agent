@@ -564,7 +564,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(agent_events_received{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m])",
+          "expr": "rate(agent_events_received{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m])",
           "legendFormat": "Received",
           "refId": "A"
         },
@@ -573,7 +573,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(agent_events_sent{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m])",
+          "expr": "rate(agent_events_sent{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m])",
           "legendFormat": "Sent",
           "refId": "B"
         }
@@ -672,7 +672,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (resource_type) (rate(agent_errors{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m]))",
+          "expr": "sum by (resource_type) (rate(agent_errors{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m]))",
           "legendFormat": "{{resource_type}}",
           "refId": "A"
         }
@@ -771,7 +771,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(agent_event_propagation_latency_seconds_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(agent_event_propagation_latency_seconds_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
@@ -780,7 +780,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(agent_event_propagation_latency_seconds_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(agent_event_propagation_latency_seconds_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         },
@@ -789,7 +789,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(agent_event_propagation_latency_seconds_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(agent_event_propagation_latency_seconds_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m])))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -888,7 +888,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(agent_event_processing_time_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(agent_event_processing_time_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
@@ -897,7 +897,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(agent_event_processing_time_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(agent_event_processing_time_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         },
@@ -906,7 +906,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(agent_event_processing_time_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(agent_event_processing_time_bucket{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m])))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -1005,7 +1005,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (status) (rate(agent_event_processing_time_count{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m]))",
+          "expr": "sum by (status) (rate(agent_event_processing_time_count{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m]))",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -1054,7 +1054,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (agent_mode) (rate(agent_event_processing_time_count{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m]))",
+          "expr": "sum by (agent_mode) (rate(agent_event_processing_time_count{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m]))",
           "legendFormat": "{{agent_mode}}",
           "refId": "A"
         }
@@ -1103,7 +1103,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (resource_type) (rate(agent_event_processing_time_count{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m]))",
+          "expr": "sum by (resource_type) (rate(agent_event_processing_time_count{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m]))",
           "legendFormat": "{{resource_type}}",
           "refId": "A"
         }
@@ -1152,7 +1152,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (event_type) (rate(argocd_agent_event_writer_events_discarded_total{namespace=~\"$namespace\", agent_name=~\"$agent_name\"}[5m]))",
+          "expr": "sum by (event_type) (rate(argocd_agent_event_writer_events_discarded_total{namespace=~\"$namespace\", agent_name=~\"$agent_name\", job=~\"$job\"}[5m]))",
           "legendFormat": "{{event_type}}",
           "refId": "A"
         }
