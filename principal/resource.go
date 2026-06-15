@@ -68,6 +68,10 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 
 	logCtx = logCtx.WithField("agent", agentName)
 
+	if s.metrics != nil {
+		s.metrics.ResourceProxyRequests.WithLabelValues(agentName).Inc()
+	}
+
 	// Handle exec subresource separately.
 	// because it requires WebSocket for bidirectional streaming
 	subresource := params.Get("subresource")
@@ -79,6 +83,9 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 	// If the agent is not connected, return early
 	if !s.isAgentConnected(agentName) {
 		logCtx.Debugf("Agent is not connected, stop proxying")
+		if s.metrics != nil {
+			s.metrics.ResourceProxyErrors.WithLabelValues(agentName, "agent_disconnected").Inc()
+		}
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
@@ -86,6 +93,9 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 	q := s.queues.SendQ(agentName)
 	if q == nil {
 		logCtx.Errorf("Help! Queue disappeared")
+		if s.metrics != nil {
+			s.metrics.ResourceProxyErrors.WithLabelValues(agentName, "queue_missing").Inc()
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -238,12 +248,18 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 		select {
 		case <-ctx.Done():
 			log().Infof("Timeout communicating to the agent, closing proxy connection.")
+			if s.metrics != nil {
+				s.metrics.ResourceProxyErrors.WithLabelValues(agentName, "timeout").Inc()
+			}
 			w.WriteHeader(http.StatusGatewayTimeout)
 			return
 		case rcvdEv, ok := <-eventCh:
 			// Channel was closed. Bail out.
 			if !ok {
 				log().Info("EventQueue has closed the channel")
+				if s.metrics != nil {
+					s.metrics.ResourceProxyErrors.WithLabelValues(agentName, "channel_closed").Inc()
+				}
 				w.WriteHeader(http.StatusGatewayTimeout)
 				return
 			}
@@ -278,6 +294,9 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 					log().Errorf("Could not write response to client: %v", err)
 				}
 			} else {
+				if s.metrics != nil {
+					s.metrics.ResourceProxyErrors.WithLabelValues(agentName, "agent_error").Inc()
+				}
 				w.WriteHeader(resp.Status)
 			}
 			return

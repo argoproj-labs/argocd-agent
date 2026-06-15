@@ -228,6 +228,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	if a.options.metricsPort > 0 {
 		a.metrics = metrics.NewAgentMetrics()
 		metricsRegistered.Do(func() {
+			metrics.RegisterBuildInfo(a.version)
 			metrics.RegisterK8sClientMetrics()
 			metrics.RegisterQueueMetrics("argocd_agent")
 		})
@@ -626,6 +627,11 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	if a.remote != nil {
 		a.remote.SetClientMode(a.mode)
+		if a.metrics != nil {
+			a.remote.SetOnAuthFailure(func() {
+				a.metrics.AuthFailures.Inc()
+			})
+		}
 		a.remote.SetOnAuthenticated(func(principalNs string) {
 			if principalNs == "" {
 				log().Error("principal namespace from auth response is empty")

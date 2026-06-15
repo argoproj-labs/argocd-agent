@@ -86,6 +86,9 @@ type RedisProxy struct {
 	redisTLSCA       *x509.CertPool
 	redisTLSCAPath   string
 	redisTLSInsecure bool
+
+	onRequest func(agentName, command string)
+	onError   func(agentName, command string)
 }
 
 const (
@@ -126,6 +129,16 @@ func (rp *RedisProxy) SetAgentLookupFunc(fn AgentLookupFunc) {
 // SetPrincipalNamespace sets the principal's namespace
 func (rp *RedisProxy) SetPrincipalNamespace(namespace string) {
 	rp.principalNamespace = namespace
+}
+
+// SetOnRequest sets a callback invoked for each Redis proxy request.
+func (rp *RedisProxy) SetOnRequest(fn func(agentName, command string)) {
+	rp.onRequest = fn
+}
+
+// SetOnError sets a callback invoked when a Redis proxy request fails.
+func (rp *RedisProxy) SetOnError(fn func(agentName, command string)) {
+	rp.onError = fn
 }
 
 // SetTLSEnabled enables or disables TLS for the Redis proxy
@@ -391,6 +404,9 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 
 				if err := rp.handleAgentSubscribe(connState, channelName, agentName, argocdWriter, logCtx); err != nil {
 					logCtx.WithError(err).Error("exit due to unable to handle agent subscribe")
+					if rp.onError != nil {
+						rp.onError(agentName, "subscribe")
+					}
 					return
 				}
 			}
@@ -416,6 +432,9 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 
 				if err := rp.handleAgentGet(connState, key, argocdWriter, agentName, logCtx); err != nil {
 					logCtx.WithError(err).Error("exit due to unable to handle agent get")
+					if rp.onError != nil {
+						rp.onError(agentName, "get")
+					}
 					return
 				}
 			}
@@ -486,6 +505,9 @@ func handleInternalNotify(vals []string, argocdWriter argoCDRedisWriter, logCtx 
 
 // handleAgentGet processes a redis get message that is destinated for a specific agent
 func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, argocdWriter argoCDRedisWriter, agentName string, logCtx *logrus.Entry) error {
+	if rp.onRequest != nil {
+		rp.onRequest(agentName, "get")
+	}
 	rp.beginPingGoRoutineIfNeeded(connState, agentName, logCtx)
 
 	// Example of a redis get command request/response:
@@ -562,6 +584,9 @@ func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, arg
 
 // handleAgentSubscribe handles a subscription request from Argo CD to be forwarded to agent redis
 func (rp *RedisProxy) handleAgentSubscribe(connState *connectionState, channelName string, agentName string, argoCDWrite argoCDRedisWriter, logCtx *logrus.Entry) error {
+	if rp.onRequest != nil {
+		rp.onRequest(agentName, "subscribe")
+	}
 	rp.beginPingGoRoutineIfNeeded(connState, agentName, logCtx)
 
 	// Create the channel and start the goroutine for the channel that is responsible for reading asynchronous redis subscription responses from agents
