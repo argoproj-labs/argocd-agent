@@ -420,6 +420,7 @@ func (m *ApplicationManager) CompareIdentity(ctx context.Context, incoming *v1al
 	existingSourceUID, hasSourceUID := existing.Annotations[manager.SourceUIDAnnotation]
 	if !hasSourceUID {
 		result.ExistingMissingSourceUID = true
+		return result, nil
 	}
 
 	incomingUID := string(incoming.UID)

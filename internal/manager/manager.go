@@ -87,6 +87,21 @@ const (
 	RecreateActionResync RecreateAction = "resync"
 )
 
+// AdoptionPolicy defines a managed mode agent's behavior when dealing with a create event where
+// the application to be created already exists
+type AdoptionPolicy string
+
+const (
+	// AdoptionPolicyAlways adopts an application by stamping the principal-uid onto the application
+	AdoptionPolicyAlways AdoptionPolicy = "always"
+
+	// AdoptionPolicyNever does not adoption the application and leaves it as is
+	AdoptionPolicyNever AdoptionPolicy = "never"
+
+	// DontAdoptAnnotation is an annotation for setting whether an app should not be adopted
+	AdoptionPolicyAnnotation = "argocd.argoproj.io/adoption-policy"
+)
+
 type Manager interface {
 	SetRole(role ManagerRole)
 	SetMode(role ManagerRole)
@@ -252,7 +267,6 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 	mgr resourceManager[R],
 	logCtx *logrus.Entry,
 ) (bool, error) {
-
 	logCtx = logCtx.WithFields(logrus.Fields{
 		"resource": outbound.GetName(),
 		"kind":     outbound.GetObjectKind().GroupVersionKind().Kind,

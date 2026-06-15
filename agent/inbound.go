@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -200,10 +201,6 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 	switch ev.Type() {
 	case event.Create:
 		if a.mode == types.AgentModeManaged {
-			if identity.Exists && identity.ExistingMissingSourceUID {
-				logCtx.Error("Application already exists on agent but is unmanaged.")
-				return fmt.Errorf("application already exists on agent but is unmanaged, please clean it up or switch agent to autonomous mode")
-			}
 			err = a.syncManagedApplication(logCtx, incomingApp, identity, principalUID)
 		} else {
 			_, err = a.createApplication(incomingApp, principalUID)
@@ -333,6 +330,18 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 			}
 			return nil
 		}
+	case identityActionAdoptExistingApp:
+		logCtx.WithField(logfields.Application, incomingApp.GetName()).Info("Application already exists on agent, adopting existing app")
+		switch a.effectiveAdoptionPolicy(incomingApp) {
+		case manager.AdoptionPolicyAlways:
+			logCtx.WithField(logfields.Application, incomingApp.GetName()).Info("Adopting existing application")
+			if err := a.updateManagedApplicationIdentity(incomingApp, principalUID); err != nil {
+				return fmt.Errorf("could not adopt app: %w", err)
+			}
+		case manager.AdoptionPolicyNever:
+			logCtx.WithField(logfields.Application, incomingApp.GetName()).Info("Existing application is set to not be adopted")
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown identity action for app %s", incomingApp.QualifiedName())
 	}
@@ -358,6 +367,10 @@ const (
 	// on the incoming resource (e.g. AppSet controller reconciled and wiped
 	// annotations). Safe to update in-place and re-stamp the source-uid.
 	identityActionUpdateStampUID
+
+	// identityActionAdoptExistingApp: principals targeted app exists on the
+	// agent already. Stamp existing app with source-uid if allowed.
+	identityActionAdoptExistingApp
 )
 
 // effectiveMismatchPolicy returns the mismatch policy for the given incoming resource.
@@ -405,6 +418,11 @@ func identityAction(r *application.IdentityCompareResult) identityActionType {
 	if r.AdoptedPrincipalUID && !r.SourceUIDMatch {
 		return identityActionTransition
 	}
+
+	if r.Exists && r.ExistingMissingSourceUID {
+		return identityActionAdoptExistingApp
+	}
+
 	return identityActionMismatch
 }
 
@@ -1358,4 +1376,25 @@ func (a *Agent) ensureNamespaceExists(namespace string) error {
 
 	log().Infof("Created namespace %s", namespace)
 	return nil
+}
+
+// effectiveAdoptionPolicy gets the adoption policy for the existing appilcation
+// The annotation takes precedence over the global default
+func (a *Agent) effectiveAdoptionPolicy(incoming metav1.Object) manager.AdoptionPolicy {
+	existing, err := a.appManager.Get(a.context, incoming.GetName(), incoming.GetNamespace())
+	if err != nil {
+		log().WithError(err).WithField(logfields.Application, incoming.GetName()).Errorf("Failed to get application to check adoption policy, falling back to default policy")
+		return a.adoptionPolicy
+	}
+
+	if annotations := existing.GetAnnotations(); annotations != nil {
+		if policy, ok := annotations[manager.AdoptionPolicyAnnotation]; ok {
+			p := manager.AdoptionPolicy(policy)
+			if p == manager.AdoptionPolicyAlways || p == manager.AdoptionPolicyNever {
+				return p
+			}
+			log().Warnf("unknown adoption policy annotation value %q on %s/%s, defaulting to global option", policy, existing.GetNamespace(), existing.GetName())
+		}
+	}
+	return a.adoptionPolicy
 }

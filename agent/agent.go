@@ -164,6 +164,10 @@ type Agent struct {
 	// recreateAction defines the agent's behavior after recreating an app from
 	// an unauthorized deletion. It is only applicable in managed mode.
 	recreateAction manager.RecreateAction
+
+	// adoptionPolicy sets the adoption policy for when an application that's going to be create
+	// already exists in managed mode.
+	adoptionPolicy manager.AdoptionPolicy
 }
 
 const defaultQueueName = "default"
@@ -207,6 +211,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.namespace = namespace
 	a.mode = types.AgentModeAutonomous
 	a.mismatchPolicy = manager.MismatchPolicyRecreate
+	a.adoptionPolicy = manager.AdoptionPolicyAlways
 	a.recreateAction = manager.RecreateActionIgnore
 	a.redisProxyMsgHandler = &redisProxyMsgHandler{}
 	// Resource proxy is enabled by default.

@@ -566,3 +566,25 @@ Or via environment variable:
 ```bash
 ARGOCD_AGENT_ON_APPLICATION_RECREATE=clear-status
 ```
+
+### Application Adoption
+
+| | |
+|---|---|
+| **CLI Flag** | `--adoption-policy` |
+| **Environment Variable** | `ARGOCD_AGENT_ADOPTION_POLICY` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `always` |
+| **Valid Values** | `always`, `never` |
+
+This flag sets the adoption policy for existing applications in managed mode. Adoption occurs when the application that the principal is trying to create already exists on the agent.
+
+**Policies:**
+
+- `always`: always adopt existing applications
+- `never`: never adopt existing applications
+
+This setting can also be set on the application level by including the annotation `argocd.argoproj.io/adoption-policy` to the value of a valid policy.
+
+**Use Case:** The main use case for this would be to transfer applications from a multi-instance Argo CD set up to using the agent set up.
