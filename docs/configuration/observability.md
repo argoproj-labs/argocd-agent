@@ -274,7 +274,7 @@ spec:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `agent_connected_with_principal` | Gauge | Number of currently connected agents |
+| `argocd_principal_connected_agents` | Gauge | Number of currently connected agents |
 | `argocd_agent_grpc_requests_total` | Counter | Total gRPC requests by method |
 | `argocd_agent_grpc_request_duration_seconds` | Histogram | gRPC request duration |
 | `argocd_agent_sync_operations_total` | Counter | Total sync operations |
@@ -290,7 +290,7 @@ spec:
 
 ### Grafana Dashboards
 
-Pre-built Grafana dashboards are available in `install/grafana/`:
+Example Grafana dashboards are available in `examples/o11y/`:
 
 **Principal Dashboard** (`argocd-agent-principal-dashboard.json`):
 Import on the control-plane cluster. Monitors the principal component including connected agents, resource operations (Applications, AppProjects, Repositories, ApplicationSets, GPG keys), event processing, connection status, and resource/Redis proxy metrics.
@@ -305,7 +305,7 @@ The agent dashboard includes connection status, event processing, resource/Redis
 
 > **Note**: When the control-plane Prometheus scrapes agent metrics from workload clusters, it stores its own copy of the data. If a workload cluster also has its own Prometheus scraping the same agent locally, both instances independently collect and store the same metrics.
 
-See `install/grafana/grafana-setup.md` in the repository for instructions on configuring Prometheus, importing dashboards, and setting up multi-cluster monitoring.
+See `examples/o11y/grafana-setup.md` in the repository for instructions on configuring Prometheus scrape targets, importing dashboards, and setting up multi-cluster monitoring.
 
 For a complete list of available metrics, see the [Operations: Metrics](../operations/metrics.md) documentation.
 

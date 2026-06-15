@@ -117,7 +117,7 @@ func NewInformerMetrics(label string) *InformerMetrics {
 func NewPrincipalMetrics() *PrincipalMetrics {
 	return &PrincipalMetrics{
 		AgentConnected: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "agent_connected_with_principal",
+			Name: "argocd_principal_connected_agents",
 			Help: "The total number of agents connected with principal",
 		}),
 		AvgAgentConnectionTime: promauto.NewGauge(prometheus.GaugeOpts{

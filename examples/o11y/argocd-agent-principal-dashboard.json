@@ -705,7 +705,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "agent_connected_with_principal{namespace=~\"$namespace\"}",
+          "expr": "argocd_principal_connected_agents{namespace=~\"$namespace\"}",
           "legendFormat": "",
           "refId": "A"
         }
@@ -2883,7 +2883,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(agent_connected_with_principal, namespace)",
+        "definition": "label_values(argocd_principal_connected_agents, namespace)",
         "hide": 0,
         "includeAll": true,
         "label": "Namespace",
@@ -2892,7 +2892,7 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(agent_connected_with_principal, namespace)"
+          "query": "label_values(argocd_principal_connected_agents, namespace)"
         },
         "refresh": 2,
         "regex": "",
