@@ -17,12 +17,42 @@ package tlsutil
 import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func Test_ParsePrivateKeyFromPEM(t *testing.T) {
+	t.Run("PKCS#8 round trip", func(t *testing.T) {
+		key, err := GeneratePrivateKey(KeyGenOptions{})
+		require.NoError(t, err)
+
+		pemData, err := PrivateKeyToPEM(key)
+		require.NoError(t, err)
+
+		parsed, err := ParsePrivateKeyFromPEM([]byte(pemData))
+		require.NoError(t, err)
+		assert.IsType(t, key, parsed)
+	})
+
+	t.Run("PKCS#1 RSA key", func(t *testing.T) {
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+
+		block := &pem.Block{
+			Type:  "RSA PRIVATE KEY",
+			Bytes: x509.MarshalPKCS1PrivateKey(key),
+		}
+		parsed, err := ParsePrivateKeyFromPEM(pem.EncodeToMemory(block))
+		require.NoError(t, err)
+		assert.IsType(t, &rsa.PrivateKey{}, parsed)
+	})
+}
 
 func Test_ParseKeyAlgorithm(t *testing.T) {
 	t.Run("defaults for empty values", func(t *testing.T) {

@@ -59,9 +59,7 @@ func createTestClientCertSecret(t *testing.T, kubeclient kubernetes.Interface) s
 	caCert, err := x509.ParseCertificate(certBlock.Bytes)
 	require.NoError(t, err, "parse CA certificate")
 
-	keyBlock, _ := pem.Decode([]byte(caKeyPEM))
-	require.NotNil(t, keyBlock, "decode CA key PEM")
-	caKey, err := x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
+	caKey, err := tlsutil.ParsePrivateKeyFromPEM([]byte(caKeyPEM))
 	require.NoError(t, err, "parse CA private key")
 
 	// Generate client certificate signed by CA

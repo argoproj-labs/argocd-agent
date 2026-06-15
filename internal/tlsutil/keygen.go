@@ -21,6 +21,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"slices"
 )
@@ -99,6 +101,24 @@ func GeneratePrivateKey(opts KeyGenOptions) (crypto.PrivateKey, error) {
 // PrivateKeyToPEM encodes a private key as PKCS#8 PEM.
 func PrivateKeyToPEM(key crypto.PrivateKey) (string, error) {
 	return KeyDataToPEM(key)
+}
+
+// ParsePrivateKeyFromPEM parses a PEM-encoded private key in PKCS#8 or PKCS#1 format.
+func ParsePrivateKeyFromPEM(data []byte) (crypto.PrivateKey, error) {
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("no valid PEM data found")
+	}
+	switch block.Type {
+	case "PRIVATE KEY":
+		return x509.ParsePKCS8PrivateKey(block.Bytes)
+	case "RSA PRIVATE KEY":
+		return x509.ParsePKCS1PrivateKey(block.Bytes)
+	case "EC PRIVATE KEY":
+		return x509.ParseECPrivateKey(block.Bytes)
+	default:
+		return nil, fmt.Errorf("unsupported private key PEM type: %s", block.Type)
+	}
 }
 
 // PublicKey returns the public key for a private key.
