@@ -93,6 +93,8 @@ Inspect and manage agent configuration
 
 `create` - Create a new agent configuration
 
+  - `--days`: Client certificate validity in days when generating from PKI (default: 180). Ignored when using `--tls-from-secret` / `--ca-from-secret`. Must not exceed the signing CA's remaining validity.
+
 `inspect` - Inspect agent configuration
 
 `list` - List configured agents
@@ -100,6 +102,8 @@ Inspect and manage agent configuration
 `print-tls` - Print a TLS asset of an agent to stdout (`cert`, `key`, or `ca`)
 
 `reconfigure` - Reconfigures an agent's properties
+
+  - `--days`: Client certificate validity in days when using `--reissue-client-cert` (default: 180). Must not exceed the signing CA's remaining validity.
 
 ## `check-config` Command
 
@@ -154,8 +158,14 @@ OR TO PROTECT ANY KIND OF DATA.
 
 `init` - NON-PROD!! Initialize the PKI for use with argocd-agent
 
+  - `--days`: Certificate validity in days (default: 3650, ~10 years)
+
 `inspect` - NON-PROD!! Inspect the configured PKI
 
 `issue` - NON-PROD!! Issue TLS certificates signed by the PKI's CA
+
+  Subcommands: `principal`, `resource-proxy`, `agent <name>`
+
+  - `--days`: Certificate validity in days (default: 180, ~6 months). For leaf certificates, must not exceed the signing CA's remaining validity.
 
 `propagate` - NON-PROD!! Propagate the PKI to the agent
