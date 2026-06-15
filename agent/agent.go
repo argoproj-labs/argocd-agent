@@ -165,7 +165,8 @@ type Agent struct {
 	// an unauthorized deletion. It is only applicable in managed mode.
 	recreateAction manager.RecreateAction
 
-	// disableAdoption disables existing applications being stamped with source-uid on creation in managed mode
+	// adoptionPolicy sets the adoption policy for when an application that's going to be create
+	// already exists in managed mode.
 	adoptionPolicy manager.AdoptionPolicy
 }
 
