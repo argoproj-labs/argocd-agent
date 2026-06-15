@@ -136,13 +136,16 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	defer span.End()
 
 	if isResourceFromPrincipal(app) {
-		reverted, err := manager.RevertUserInitiatedDeletion(a.context, app, a.deletions, a.appManager, logCtx, a.recreateTransform(logCtx))
+		var transforms []func(*v1alpha1.Application)
+		if a.mode == types.AgentModeManaged {
+			transforms = append(transforms, a.recreateTransform(logCtx))
+		}
+		reverted, err := manager.RevertUserInitiatedDeletion(a.context, app, a.deletions, a.appManager, logCtx, transforms...)
 		if err != nil {
 			logCtx.WithError(err).Error("failed to revert invalid deletion of application")
 			return
 		}
 		if reverted {
-			logCtx.Trace("Deleted application is recreated")
 			return
 		}
 	}
