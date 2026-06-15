@@ -251,6 +251,7 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 	deletions *DeletionTracker,
 	mgr resourceManager[R],
 	logCtx *logrus.Entry,
+	preCreateTransforms ...func(R),
 ) (bool, error) {
 
 	logCtx = logCtx.WithFields(logrus.Fields{
@@ -275,6 +276,12 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 	resource.SetResourceVersion("")
 	resource.SetDeletionTimestamp(nil)
 	resource.SetUID(types.UID(sourceUID))
+
+	// apply the pre-create transforms to the resource
+	for _, transform := range preCreateTransforms {
+		transform(resource)
+	}
+
 	_, err := mgr.Create(ctx, resource)
 	if err != nil {
 		return false, err
