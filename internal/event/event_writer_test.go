@@ -288,43 +288,6 @@ func TestEventWriter(t *testing.T) {
 		require.Equal(t, 1, sentMsg.retryCount)
 	})
 
-	// t.Run("should give up after max retries", func(t *testing.T) {
-	// 	fs := &fakeStream{}
-	// 	evSender := NewEventWriter("test", fs)
-
-	// discardCalled := false
-	// var discardedEventType, discardedResourceType string
-	// evSender.SetOnDiscard(func(eventType, resourceType string) {
-	// 	discardCalled = true
-	// 	discardedEventType = eventType
-	// 	discardedResourceType = resourceType
-	// })
-
-	// ev := es.ApplicationEvent(Create, app1)
-	// resID := createResourceID(app1.ObjectMeta)
-	// evSender.Add(ev)
-
-	// 	// Send the event
-	// 	evSender.sendEvent(resID)
-	// 	sentMsg := evSender.sentEvents[resID]
-	// 	require.NotNil(t, sentMsg)
-
-	// 	// Exhaust retries
-	// 	for i := 0; i <= maxEventRetries; i++ {
-	// 		pastTime := time.Now().Add(-1 * time.Second)
-	// 		sentMsg.retryAfter = &pastTime
-	// 		evSender.retrySentEvent(resID, sentMsg)
-	// 	}
-
-	// 	// After max retries, event should be removed from sentEvents
-	// 	require.NotContains(t, evSender.sentEvents, resID)
-
-	// 	// Verify onDiscard callback was called with correct values
-	// 	require.True(t, discardCalled)
-	// 	require.Equal(t, "create", discardedEventType)
-	// 	require.Equal(t, targets.Application.String(), discardedResourceType)
-	// })
-
 	t.Run("should not send ACK events to sentEvents", func(t *testing.T) {
 		fs := &fakeStream{}
 		evSender := NewEventWriter("test", fs)

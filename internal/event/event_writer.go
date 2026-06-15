@@ -210,11 +210,6 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 		}
 	}
 
-	// JGW-TODO:
-	// - A) Should Remove remove from both sentEvents/unsentEvents? (I mean, it seems likely it will be in one or the other, but we could check both?)
-	// and
-	// - B) In the unsent case, why does remove only remove from the front of the queue?
-
 	// If not in sent events, check unsent queue
 	eq, exists := ew.unsentEvents[resourceID]
 	if !exists {
@@ -304,6 +299,8 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 
 	// Re-verify the event is still in sentEvents
 	currentSent, stillExists := ew.sentEvents[resID]
+	// Create thread local copy of target under lock to avoid a data race with UpdateTarget.
+	target := ew.target
 	ew.mu.RUnlock()
 
 	// If event was ACK'd between check and use, skip retry
@@ -362,7 +359,7 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 		return
 	}
 
-	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
+	err = target.Send(&eventstreamapi.Event{Event: pev})
 	sentMsg.mu.Unlock()
 
 	if err != nil {
@@ -420,6 +417,8 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		ew.scheduleRetry(eventMsg)
 		ew.sentEvents[resID] = eventMsg
 	}
+	// Create thread local copy of target under lock to avoid a data race with UpdateTarget.
+	sendTarget := ew.target
 	ew.mu.Unlock()
 
 	// Send the event
@@ -443,7 +442,7 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	}
 
 	// A Send() on the stream is actually not blocking.
-	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
+	err = sendTarget.Send(&eventstreamapi.Event{Event: pev})
 	if err != nil {
 		logCtx.Errorf("Error while sending: %v\n", err)
 		return
@@ -520,22 +519,6 @@ func (eq *eventQueue) add(ev *eventMessage) {
 
 	deduplicateEventMessageItems(&eq.items)
 
-	// if len(eq.items) > 0 {
-	// 	tail := eq.items[len(eq.items)-1]
-	// 	tail.mu.Lock()
-
-	// 	// Replace an older event with a newer one of the same type
-	// 	if ev.event.Type() == tail.event.Type() {
-	// 		tail.event = ev.event
-	// 		tail.backoff = ev.backoff
-	// 		tail.retryAfter = ev.retryAfter
-	// 		tail.mu.Unlock()
-	// 		return
-	// 	}
-	// 	tail.mu.Unlock()
-	// }
-
-	// eq.items = append(eq.items, ev)
 }
 
 // deduplicateEventMessageItems
@@ -547,7 +530,7 @@ func deduplicateEventMessageItems(items *[]*eventMessage) {
 	haveWeSeenMsgWithType := make(map[string]bool, 0)
 
 	// Work backwards through the list:
-	// - Items at the end of the list are 'fresher', items are the beginning of the list are more stale
+	// - Items at the end of the list are 'fresher', items at the beginning of the list are more stale
 	// - We thus remove items early in the list in favour of those that are later in the list
 	for idx := len(*items) - 1; idx >= 0; idx-- {
 		item := (*items)[idx]
