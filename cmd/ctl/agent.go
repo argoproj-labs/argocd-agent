@@ -197,6 +197,9 @@ func NewAgentCreateCommand() *cobra.Command {
 				cmdutil.Fatal("Both --tls-from-secret and --ca-from-secret must be provided together")
 			}
 
+			usingExistingTLS := tlsFromSecret != "" && caFromSecret != ""
+			rejectUnusedKeyGenFlags(c, !usingExistingTLS, "are only used when generating certificates from the PKI")
+
 			// A set of labels for the cluster secret
 			labels := make(map[string]string)
 			if len(addLabels) > 0 {
@@ -230,7 +233,7 @@ func NewAgentCreateCommand() *cobra.Command {
 
 			var clientCert, clientKey, caData string
 
-			if tlsFromSecret != "" && caFromSecret != "" {
+			if usingExistingTLS {
 				// Read TLS credentials from existing secrets
 				clientCert, clientKey, caData, err = readTLSFromExistingSecrets(ctx, clt, tlsFromSecret, caFromSecret)
 				if err != nil {
@@ -287,7 +290,7 @@ func NewAgentCreateCommand() *cobra.Command {
 	command.Flags().StringVar(&tlsFromSecret, "tls-from-secret", "", "Name of an existing secret containing TLS certificate and key (keys: tls.crt, tls.key). Format: [namespace/]name")
 	command.Flags().StringVar(&caFromSecret, "ca-from-secret", "", "Name of an existing secret containing CA certificate (key: ca.crt). Format: [namespace/]name")
 	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the client certificate is valid for (only used when generating from PKI)")
-	addKeyGenFlags(command, &keyAlgorithm, &keySize)
+	addKeyGenFlags(command, &keyAlgorithm, &keySize, "only used when generating from PKI")
 	return command
 }
 
@@ -456,6 +459,8 @@ func NewAgentReconfigureCommand() *cobra.Command {
 				os.Exit(1)
 			}
 
+			rejectUnusedKeyGenFlags(cmd, reissueClientCert, "are only used with --reissue-client-cert")
+
 			if rpServerAddr != "" && rpServerAddr != cluster.Server {
 				cmd.Println("Setting new server address")
 				cluster.Server = rpServerAddr
@@ -502,7 +507,7 @@ func NewAgentReconfigureCommand() *cobra.Command {
 	command.Flags().StringVar(&rpPassword, "resource-proxy-password", "", "The password for the resource-proxy")
 	command.Flags().BoolVar(&reissueClientCert, "reissue-client-cert", false, "Reissue the agent's client cert")
 	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the client certificate is valid for (only used with --reissue-client-cert)")
-	addKeyGenFlags(command, &keyAlgorithm, &keySize)
+	addKeyGenFlags(command, &keyAlgorithm, &keySize, "only used with --reissue-client-cert")
 	return command
 }
 

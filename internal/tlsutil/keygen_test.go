@@ -101,6 +101,16 @@ func Test_GeneratePrivateKey(t *testing.T) {
 				assert.Equal(t, 256, keyLength)
 				_, ok := key.(*ecdsa.PrivateKey)
 				assert.True(t, ok)
+			case "ecdsa-p384":
+				assert.Equal(t, "ECDSA", keyType)
+				assert.Equal(t, 384, keyLength)
+				_, ok := key.(*ecdsa.PrivateKey)
+				assert.True(t, ok)
+			case "ecdsa-p521":
+				assert.Equal(t, "ECDSA", keyType)
+				assert.Equal(t, 521, keyLength)
+				_, ok := key.(*ecdsa.PrivateKey)
+				assert.True(t, ok)
 			case "ed25519":
 				assert.Equal(t, "Ed25519", keyType)
 				assert.Equal(t, 256, keyLength)

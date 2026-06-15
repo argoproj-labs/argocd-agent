@@ -20,11 +20,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func addKeyGenFlags(cmd *cobra.Command, algorithm *string, size *int) {
-	cmd.Flags().StringVar(algorithm, "key-algorithm", tlsutil.DefaultKeyAlgorithm,
-		"Private key algorithm (rsa, ecdsa-p256, ecdsa-p384, ecdsa-p521, ed25519)")
-	cmd.Flags().IntVar(size, "key-size", tlsutil.DefaultRSABits,
-		"RSA key size in bits (2048, 3072, or 4096; ignored for non-RSA algorithms)")
+func addKeyGenFlags(cmd *cobra.Command, algorithm *string, size *int, onlyWhen ...string) {
+	algDesc := "Private key algorithm (rsa, ecdsa-p256, ecdsa-p384, ecdsa-p521, ed25519)"
+	sizeDesc := "RSA key size in bits (2048, 3072, or 4096; ignored for non-RSA algorithms)"
+	if len(onlyWhen) > 0 && onlyWhen[0] != "" {
+		algDesc += " (" + onlyWhen[0] + ")"
+		sizeDesc += " (" + onlyWhen[0] + ")"
+	}
+	cmd.Flags().StringVar(algorithm, "key-algorithm", tlsutil.DefaultKeyAlgorithm, algDesc)
+	cmd.Flags().IntVar(size, "key-size", tlsutil.DefaultRSABits, sizeDesc)
+}
+
+// rejectUnusedKeyGenFlags fails if key-generation flags were set but will not be used.
+func rejectUnusedKeyGenFlags(cmd *cobra.Command, willGenerate bool, context string) {
+	if willGenerate {
+		return
+	}
+	if cmd.Flags().Changed("key-algorithm") || cmd.Flags().Changed("key-size") {
+		cmdutil.Fatal("--key-algorithm and --key-size %s", context)
+	}
 }
 
 func parseKeyGenFlags(algorithm string, size int) tlsutil.KeyGenOptions {
