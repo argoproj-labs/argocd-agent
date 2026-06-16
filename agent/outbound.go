@@ -22,7 +22,6 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
-	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -137,17 +136,16 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	defer span.End()
 
 	if isResourceFromPrincipal(app) {
-		reverted, err := manager.RevertUserInitiatedDeletion(a.context, app, a.deletions, a.appManager, logCtx)
+		var transforms []func(*v1alpha1.Application)
+		if a.mode == types.AgentModeManaged {
+			transforms = append(transforms, a.recreateTransform(logCtx))
+		}
+		reverted, err := manager.RevertUserInitiatedDeletion(a.context, app, a.deletions, a.appManager, logCtx, transforms...)
 		if err != nil {
 			logCtx.WithError(err).Error("failed to revert invalid deletion of application")
 			return
 		}
 		if reverted {
-			logCtx.Trace("Deleted application is recreated")
-			// If the agent is in managed mode, handle the recreated application.
-			if a.mode == types.AgentModeManaged {
-				a.handleRecreatedApp(app, logCtx)
-			}
 			return
 		}
 	}
@@ -173,38 +171,18 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added app delete event to send queue")
 }
 
-// handleRecreatedApp applies the configured recreateAction after an application
-// is recreated from an unauthorized deletion.
-func (a *Agent) handleRecreatedApp(app *v1alpha1.Application, logCtx *logrus.Entry) {
-	// If the recreate action is ignore, do nothing.
-	if a.recreateAction == manager.RecreateActionIgnore {
-		return
-	}
-
-	// Fetch the recreated app,
-	// deleted object is stale and still has DeletionTimestamp from the original deletion.
-	recreated, err := a.appManager.Get(a.context, app.Name, app.Namespace)
-	if err != nil {
-		logCtx.WithError(err).Error("failed to get recreated application")
-		return
-	}
-
-	switch a.recreateAction {
-	// If the recreate action is clear-status, clear the operationState on the recreated application.
-	case manager.RecreateActionClearStatus:
-		if err := a.appManager.ClearOperationState(a.context, recreated); err != nil {
-			logCtx.WithError(err).Error("failed to clear operationState on recreated application")
-		} else {
+// recreateTransform returns a pre-create transform that applies the configured
+// recreateAction to the application before it is created.
+func (a *Agent) recreateTransform(logCtx *logrus.Entry) func(*v1alpha1.Application) {
+	return func(app *v1alpha1.Application) {
+		switch a.recreateAction {
+		case manager.RecreateActionClearStatus:
+			app.Status.OperationState = nil
 			logCtx.Info("Cleared operationState on recreated application to allow auto-sync")
-		}
-	// If the recreate action is resync, set the sync operation on the recreated application.
-	case manager.RecreateActionResync:
-		recreated.Operation = &v1alpha1.Operation{
-			Sync: &v1alpha1.SyncOperation{},
-		}
-		if _, err := a.appManager.UpdateManagedApp(a.context, recreated, application.ManagedIdentity{}); err != nil {
-			logCtx.WithError(err).Error("failed to set sync operation on recreated application")
-		} else {
+		case manager.RecreateActionResync:
+			app.Operation = &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{},
+			}
 			logCtx.Info("Triggered resync on recreated application")
 		}
 	}

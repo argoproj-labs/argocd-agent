@@ -232,79 +232,12 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 	})
 }
 
-func Test_handleRecreatedApp(t *testing.T) {
-	app := &v1alpha1.Application{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      "guestbook",
-			Namespace: "argocd",
-			Annotations: map[string]string{
-				manager.SourceUIDAnnotation: "uid-123",
-			},
-		},
-		Status: v1alpha1.ApplicationStatus{
-			OperationState: &v1alpha1.OperationState{
-				Phase: "Succeeded",
-			},
-		},
-	}
-
-	t.Run("Ignore action does nothing", func(t *testing.T) {
-		a, _ := newAgent(t, app)
-		a.mode = types.AgentModeManaged
+func Test_recreateTransform(t *testing.T) {
+	t.Run("Ignore action does not modify the app", func(t *testing.T) {
+		a, _ := newAgent(t)
 		a.recreateAction = manager.RecreateActionIgnore
 
-		logCtx := log().WithField("test", true)
-		a.handleRecreatedApp(app, logCtx)
-
-		updated, err := a.appManager.Get(context.Background(), "guestbook", "argocd")
-		require.NoError(t, err)
-		assert.NotNil(t, updated.Status.OperationState)
-		assert.Equal(t, "Succeeded", string(updated.Status.OperationState.Phase))
-	})
-
-	t.Run("ClearStatus action clears operationState", func(t *testing.T) {
-		a, _ := newAgent(t, app)
-		a.mode = types.AgentModeManaged
-		a.recreateAction = manager.RecreateActionClearStatus
-		a.context = context.Background()
-
-		logCtx := log().WithField("test", true)
-		a.handleRecreatedApp(app, logCtx)
-
-		updated, err := a.appManager.Get(context.Background(), "guestbook", "argocd")
-		require.NoError(t, err)
-		assert.Nil(t, updated.Status.OperationState)
-	})
-
-	t.Run("Resync action sets Operation on the app", func(t *testing.T) {
-		a, _ := newAgentManaged(t, app)
-		a.recreateAction = manager.RecreateActionResync
-		a.context = context.Background()
-		_ = a.appManager.Manage("argocd/guestbook")
-		defer a.appManager.ClearManaged()
-
-		logCtx := log().WithField("test", true)
-		a.handleRecreatedApp(app, logCtx)
-
-		updated, err := a.appManager.Get(context.Background(), "guestbook", "argocd")
-		require.NoError(t, err)
-		assert.NotNil(t, updated.Operation)
-		assert.NotNil(t, updated.Operation.Sync)
-	})
-
-	t.Run("Resync action with DeletionTimestamp does not re-delete", func(t *testing.T) {
-		now := v1.Now()
-		appWithDeletion := &v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{
-				Name:              "guestbook",
-				Namespace:         "argocd",
-				DeletionTimestamp: &now,
-				Finalizers:        []string{"resources-finalizer.argocd.argoproj.io"},
-				Annotations: map[string]string{
-					manager.SourceUIDAnnotation: "uid-123",
-				},
-			},
-			Spec: app.Spec,
+		app := &v1alpha1.Application{
 			Status: v1alpha1.ApplicationStatus{
 				OperationState: &v1alpha1.OperationState{
 					Phase: "Succeeded",
@@ -312,21 +245,54 @@ func Test_handleRecreatedApp(t *testing.T) {
 			},
 		}
 
-		a, _ := newAgentManaged(t, app)
-		a.recreateAction = manager.RecreateActionResync
-		a.context = context.Background()
-		_ = a.appManager.Manage("argocd/guestbook")
-		defer a.appManager.ClearManaged()
+		logCtx := log().WithField("test", true)
+		transform := a.recreateTransform(logCtx)
+		transform(app)
+
+		assert.NotNil(t, app.Status.OperationState)
+		assert.Equal(t, "Succeeded", string(app.Status.OperationState.Phase))
+		assert.Nil(t, app.Operation)
+	})
+
+	t.Run("ClearStatus action clears operationState", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.recreateAction = manager.RecreateActionClearStatus
+
+		app := &v1alpha1.Application{
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: "Succeeded",
+				},
+			},
+		}
 
 		logCtx := log().WithField("test", true)
-		a.handleRecreatedApp(appWithDeletion, logCtx)
+		transform := a.recreateTransform(logCtx)
+		transform(app)
 
-		// App should still exist (not re-deleted) and have Operation.Sync set
-		updated, err := a.appManager.Get(context.Background(), "guestbook", "argocd")
-		require.NoError(t, err)
-		assert.NotNil(t, updated.Operation)
-		assert.NotNil(t, updated.Operation.Sync)
-		assert.Nil(t, updated.DeletionTimestamp)
+		assert.Nil(t, app.Status.OperationState)
+		assert.Nil(t, app.Operation)
+	})
+
+	t.Run("Resync action sets Operation.Sync on the app", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.recreateAction = manager.RecreateActionResync
+
+		app := &v1alpha1.Application{
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: "Succeeded",
+				},
+			},
+		}
+
+		logCtx := log().WithField("test", true)
+		transform := a.recreateTransform(logCtx)
+		transform(app)
+
+		require.NotNil(t, app.Operation)
+		assert.NotNil(t, app.Operation.Sync)
+		assert.NotNil(t, app.Status.OperationState)
 	})
 }
 
