@@ -15,191 +15,208 @@
 package queue
 
 import (
-	"fmt"
 	"sync"
-	"time"
 
 	internalevent "github.com/argoproj-labs/argocd-agent/internal/event"
-	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/cloudevents/sdk-go/v2/event"
+	"k8s.io/client-go/util/workqueue"
 )
 
-// dedupeQueue is a bounded FIFO queue that de-duplicates resource events. When a new event
-// arrives for a resource of the same type, the older events are removed and the
-// newer event is appended to the tail of the queue.
-type dedupeQueue struct {
-	mu         sync.Mutex
-	items      []*queueItem
-	notify     chan struct{}
-	name       string
-	maxSize    int
-	isShutdown bool
-	metrics    *metrics.DedupeQueueMetrics
+// EventKey is the key that goes into the workqueue
+type EventKey struct {
+	ResourceID string
+	EventType  string
+	EventID    string
 }
 
-type queueItem struct {
-	event      *event.Event
-	enqueuedAt time.Time
+// reorderQueue is used to customize the functionality of the default workqueue.
+// When a duplicate item is added (via Touch), it removes the existing entry and
+// appends the item to the tail of the queue.
+type reorderQueue[T comparable] struct {
+	items []T
+	// index is a map of item to its index in the queue
+	index map[T]int
 }
 
-// NewDedupeQueueForTest creates a dedupeQueue for use in tests.
-func NewDedupeQueueForTest(maxSize int) *dedupeQueue {
-	return newDedupeQueue(maxSize, "test")
-}
-
-func newDedupeQueue(maxSize int, name string) *dedupeQueue {
-	if maxSize <= 0 {
-		panic(fmt.Sprintf("maxSize must be positive, got %d", maxSize))
+func newReorderQueue[T comparable]() workqueue.Queue[T] {
+	return &reorderQueue[T]{
+		index: make(map[T]int),
 	}
+}
+
+func (q *reorderQueue[T]) Push(item T) {
+	q.index[item] = len(q.items)
+	q.items = append(q.items, item)
+}
+
+func (q *reorderQueue[T]) Pop() (item T) {
+	item = q.items[0]
+	delete(q.index, item)
+
+	q.items[0] = *new(T)
+	q.items = q.items[1:]
+
+	// Rebuild indices after shift
+	for i, it := range q.items {
+		q.index[it] = i
+	}
+	return item
+}
+
+// Touch is a hook that is invoked when queue.Add is called with an item that already exists in the queue.
+// It is only called when the item is not being processed i.e in dirty set and not in processing set.
+func (q *reorderQueue[T]) Touch(item T) {
+	idx, ok := q.index[item]
+	if !ok {
+		return
+	}
+	// Remove from current position
+	q.items = append(q.items[:idx], q.items[idx+1:]...)
+	// Re-add at the end
+	q.items = append(q.items, item)
+	// Rebuild indices from the moved position onward
+	for i := idx; i < len(q.items); i++ {
+		q.index[q.items[i]] = i
+	}
+}
+
+func (q *reorderQueue[T]) Len() int {
+	return len(q.items)
+}
+
+type dedupeQueue struct {
+	queue workqueue.TypedRateLimitingInterface[EventKey]
+
+	maxSize int
+
+	mu           sync.Mutex
+	latestEvents map[EventKey]*event.Event
+	eventKeys    map[*event.Event]EventKey
+
+	notify chan struct{}
+}
+
+func NewDedupeQueue(name string, maxSize int) WorkQueue {
+	baseQueue := workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[EventKey]{
+		Name:  name,
+		Queue: newReorderQueue[EventKey](),
+	})
+
+	delayingQueue := workqueue.NewTypedDelayingQueueWithConfig(workqueue.TypedDelayingQueueConfig[EventKey]{
+		Queue: baseQueue,
+	})
+
+	queue := workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.DefaultTypedControllerRateLimiter[EventKey](),
+		workqueue.TypedRateLimitingQueueConfig[EventKey]{
+			DelayingQueue: delayingQueue,
+		},
+	)
 
 	return &dedupeQueue{
-		items:   make([]*queueItem, 0),
-		notify:  make(chan struct{}, 10),
-		name:    name,
-		maxSize: maxSize,
-		metrics: metrics.GetDedupeQueueMetrics(),
+		queue:        queue,
+		maxSize:      maxSize,
+		latestEvents: make(map[EventKey]*event.Event),
+		eventKeys:    make(map[*event.Event]EventKey),
+		notify:       make(chan struct{}, 10),
 	}
+}
+
+func getKey(ev *event.Event) EventKey {
+	resID := internalevent.ResourceID(ev)
+	evType := ev.Type()
+
+	if canDedupe(ev) {
+		return EventKey{
+			ResourceID: resID,
+			EventType:  evType,
+		}
+	}
+
+	// Non-dedupable events get a unique key
+	return EventKey{
+		ResourceID: resID,
+		EventType:  evType,
+		EventID:    internalevent.EventID(ev),
+	}
+}
+
+func (q *dedupeQueue) Add(item *event.Event) {
+	key := getKey(item)
+
+	q.mu.Lock()
+	oldEvent := q.latestEvents[key]
+	_, exists := q.latestEvents[key]
+	q.latestEvents[key] = item
+	q.eventKeys[item] = key
+	if exists && oldEvent != nil {
+		delete(q.eventKeys, oldEvent)
+	}
+	q.mu.Unlock()
+
+	// Only evict when this is a genuinely new key. If the key already
+	// exists the workqueue will update it in-place (Touch) without
+	// growing, so evicting would incorrectly shrink the queue.
+	if !exists && q.queue.Len() == q.maxSize {
+		oldest, shutdown := q.queue.Get()
+		if !shutdown {
+			q.mu.Lock()
+			evicted := q.latestEvents[oldest]
+			delete(q.latestEvents, oldest)
+			if evicted != nil {
+				delete(q.eventKeys, evicted)
+			}
+			q.mu.Unlock()
+			q.queue.Done(oldest)
+		}
+	}
+
+	q.queue.Add(key)
+	select {
+	case q.notify <- struct{}{}:
+	default:
+		return
+	}
+}
+
+func (q *dedupeQueue) Get() (*event.Event, bool) {
+	key, shutdown := q.queue.Get()
+	if shutdown {
+		return nil, shutdown
+	}
+
+	q.mu.Lock()
+	ev := q.latestEvents[key]
+	delete(q.latestEvents, key)
+	q.mu.Unlock()
+
+	return ev, shutdown
+}
+
+func (q *dedupeQueue) Done(item *event.Event) {
+	q.mu.Lock()
+	key, ok := q.eventKeys[item]
+	if ok {
+		delete(q.eventKeys, item)
+		delete(q.latestEvents, key)
+	}
+	q.mu.Unlock()
+
+	if ok {
+		q.queue.Done(key)
+	}
+}
+
+func (q *dedupeQueue) ShutDown() {
+	q.queue.ShutDown()
+}
+
+func (q *dedupeQueue) Len() int {
+	return q.queue.Len()
 }
 
 // canDedupe returns true if the event type supports de-duplication.
 func canDedupe(ev *event.Event) bool {
 	evType := ev.Type()
 	return evType == internalevent.SpecUpdate.String() || evType == internalevent.StatusUpdate.String()
-}
-
-// dedupeKey returns a composite key of resourceID and event type for
-// identifying duplicate events.
-func dedupeKey(ev *event.Event) (string, string) {
-	return internalevent.ResourceID(ev), ev.Type()
-}
-
-func (dq *dedupeQueue) Add(item *event.Event) {
-	dq.mu.Lock()
-	defer dq.mu.Unlock()
-
-	if item == nil || dq.isShutdown {
-		return
-	}
-
-	if canDedupe(item) {
-		dq.removeDuplicates(item)
-	}
-
-	if len(dq.items) >= dq.maxSize {
-		dq.pop()
-	}
-
-	dq.items = append(dq.items, &queueItem{
-		event:      item,
-		enqueuedAt: time.Now(),
-	})
-
-	if dq.metrics != nil {
-		dq.metrics.Adds.WithLabelValues(dq.name).Inc()
-		dq.metrics.Depth.WithLabelValues(dq.name).Set(float64(len(dq.items)))
-	}
-
-	select {
-	case dq.notify <- struct{}{}:
-	default:
-	}
-}
-
-func (dq *dedupeQueue) Get() (*event.Event, bool) {
-	dq.mu.Lock()
-	if dq.isShutdown && len(dq.items) == 0 {
-		dq.mu.Unlock()
-		return nil, true
-	}
-
-	if len(dq.items) > 0 {
-		item := dq.pop()
-
-		if dq.metrics != nil {
-			dq.metrics.Depth.WithLabelValues(dq.name).Set(float64(len(dq.items)))
-			dq.metrics.Duration.WithLabelValues(dq.name).Observe(time.Since(item.enqueuedAt).Seconds())
-		}
-
-		dq.mu.Unlock()
-		return item.event, false
-	}
-	dq.mu.Unlock()
-
-	// Block until an item is available or shutdown
-	for range dq.notify {
-		dq.mu.Lock()
-		if len(dq.items) > 0 {
-			item := dq.pop()
-
-			if dq.metrics != nil {
-				dq.metrics.Depth.WithLabelValues(dq.name).Set(float64(len(dq.items)))
-				dq.metrics.Duration.WithLabelValues(dq.name).Observe(time.Since(item.enqueuedAt).Seconds())
-			}
-
-			dq.mu.Unlock()
-			return item.event, false
-		}
-
-		if dq.isShutdown {
-			dq.mu.Unlock()
-			return nil, true
-		}
-		dq.mu.Unlock()
-	}
-
-	// notify channel was closed (shutdown)
-	return nil, true
-}
-
-func (dq *dedupeQueue) Done(_ *event.Event) {
-	// No-op: the dedupe queue does not track in-flight items.
-}
-
-func (dq *dedupeQueue) Len() int {
-	dq.mu.Lock()
-	defer dq.mu.Unlock()
-	return len(dq.items)
-}
-
-func (dq *dedupeQueue) ShutDown() {
-	dq.mu.Lock()
-	defer dq.mu.Unlock()
-	if dq.isShutdown {
-		return
-	}
-	dq.isShutdown = true
-	close(dq.notify)
-}
-
-// removeDuplicates removes all queued events matching the same resourceID and
-// event type as item. Must be called with dq.mu held.
-func (dq *dedupeQueue) removeDuplicates(incoming *event.Event) {
-	resID, evType := dedupeKey(incoming)
-	if resID == "" {
-		return
-	}
-
-	// TODO: avoid this linear scan/shift for every incoming event.
-	for i := len(dq.items) - 1; i >= 0; i-- {
-		existingID, existingEvType := dedupeKey(dq.items[i].event)
-		if existingID == resID && existingEvType == evType {
-			dq.items[i] = nil
-			dq.items = append(dq.items[:i], dq.items[i+1:]...)
-			if dq.metrics != nil {
-				dq.metrics.EventsDeduped.WithLabelValues(dq.name).Inc()
-			}
-		}
-	}
-}
-
-// pop the first item from the queue.
-// Must be called with queue lock held.
-func (dq *dedupeQueue) pop() *queueItem {
-	if len(dq.items) == 0 {
-		return nil
-	}
-	item := dq.items[0]
-	dq.items[0] = nil
-	dq.items = dq.items[1:]
-	return item
 }

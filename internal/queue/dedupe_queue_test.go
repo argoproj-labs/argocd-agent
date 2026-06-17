@@ -15,290 +15,387 @@
 package queue
 
 import (
-	"strconv"
+	"fmt"
+	"sync"
 	"testing"
 
 	internalevent "github.com/argoproj-labs/argocd-agent/internal/event"
-	"github.com/cloudevents/sdk-go/v2/event"
+	cloudevents "github.com/cloudevents/sdk-go/v2/event"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func newTestEvent(id string, eventType string, resourceID string) *event.Event {
-	ev := event.New()
-	ev.SetID(id)
-	ev.SetType(eventType)
-	if resourceID != "" {
-		ev.SetExtension("resourceid", resourceID)
-	}
+func newDedupableEvent(resourceID, data string) *cloudevents.Event {
+	ev := cloudevents.New()
+	ev.SetType(internalevent.SpecUpdate.String())
+	ev.SetExtension("resourceid", resourceID)
+	ev.SetExtension("eventid", fmt.Sprintf("%s_%s", resourceID, data))
+	_ = ev.SetData(cloudevents.TextPlain, data)
 	return &ev
 }
 
-func TestDedupeQueue_BasicFIFO(t *testing.T) {
-	t.Run("Events dequeue in FIFO order", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		ev1 := newTestEvent("1", internalevent.Create.String(), "app-a")
-		ev2 := newTestEvent("2", internalevent.Create.String(), "app-b")
-		ev3 := newTestEvent("3", internalevent.Delete.String(), "app-c")
-
-		q.Add(ev1)
-		q.Add(ev2)
-		q.Add(ev3)
-
-		assert.Equal(t, 3, q.Len())
-
-		got, shutdown := q.Get()
-		assert.False(t, shutdown)
-		assert.Equal(t, "1", got.ID())
-
-		got, _ = q.Get()
-		assert.Equal(t, "2", got.ID())
-
-		got, _ = q.Get()
-		assert.Equal(t, "3", got.ID())
-
-		assert.Equal(t, 0, q.Len())
-	})
+func newStatusUpdateEvent(resourceID, data string) *cloudevents.Event {
+	ev := cloudevents.New()
+	ev.SetType(internalevent.StatusUpdate.String())
+	ev.SetExtension("resourceid", resourceID)
+	ev.SetExtension("eventid", fmt.Sprintf("%s_%s", resourceID, data))
+	_ = ev.SetData(cloudevents.TextPlain, data)
+	return &ev
 }
 
-func TestDedupeQueue_SpecUpdateDedup(t *testing.T) {
-	t.Run("Newer SpecUpdate replaces older for same resource", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		ev1 := newTestEvent("v1", internalevent.SpecUpdate.String(), "app-x_uid1")
-		ev2 := newTestEvent("v2", internalevent.SpecUpdate.String(), "app-x_uid1")
-		ev3 := newTestEvent("v3", internalevent.SpecUpdate.String(), "app-x_uid1")
-
-		q.Add(ev1)
-		q.Add(ev2)
-		q.Add(ev3)
-
-		assert.Equal(t, 1, q.Len())
-
-		got, _ := q.Get()
-		assert.Equal(t, "v3", got.ID())
-	})
-
-	t.Run("SpecUpdates for different resources are not deduped", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		ev1 := newTestEvent("v1", internalevent.SpecUpdate.String(), "app-x_uid1")
-		ev2 := newTestEvent("v2", internalevent.SpecUpdate.String(), "app-y_uid2")
-
-		q.Add(ev1)
-		q.Add(ev2)
-
-		assert.Equal(t, 2, q.Len())
-
-		got, _ := q.Get()
-		assert.Equal(t, "v1", got.ID())
-
-		got, _ = q.Get()
-		assert.Equal(t, "v2", got.ID())
-	})
+func newNonDedupableEvent(resourceID, eventID, data string) *cloudevents.Event {
+	ev := cloudevents.New()
+	ev.SetType(internalevent.Create.String())
+	ev.SetExtension("resourceid", resourceID)
+	ev.SetExtension("eventid", eventID)
+	_ = ev.SetData(cloudevents.TextPlain, data)
+	return &ev
 }
 
-func TestDedupeQueue_StatusUpdateDedup(t *testing.T) {
-	t.Run("Newer StatusUpdate replaces older for same resource", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		ev1 := newTestEvent("s1", internalevent.StatusUpdate.String(), "app-x_uid1")
-		ev2 := newTestEvent("s2", internalevent.StatusUpdate.String(), "app-x_uid1")
+func TestDedupeQueue_DifferentResourcesNotDeduplicated(t *testing.T) {
+	q := NewDedupeQueue("test", 100)
 
-		q.Add(ev1)
-		q.Add(ev2)
+	ev1 := newDedupableEvent("app1_uid1", "v1")
+	ev2 := newDedupableEvent("app2_uid2", "v1")
 
-		assert.Equal(t, 1, q.Len())
+	q.Add(ev1)
+	q.Add(ev2)
 
-		got, _ := q.Get()
-		assert.Equal(t, "s2", got.ID())
-	})
+	assert.Equal(t, 2, q.Len())
 }
 
-func TestDedupeQueue_DifferentTypesNotDeduped(t *testing.T) {
-	t.Run("SpecUpdate and StatusUpdate for same resource are both kept (different types)", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		evSpec := newTestEvent("spec1", internalevent.SpecUpdate.String(), "app-x_uid1")
-		evStatus := newTestEvent("status1", internalevent.StatusUpdate.String(), "app-x_uid1")
+func TestDedupeQueue_DifferentTypesNotDeduplicated(t *testing.T) {
+	q := NewDedupeQueue("test", 100)
 
-		q.Add(evSpec)
-		q.Add(evStatus)
+	ev1 := newDedupableEvent("app1_uid1", "v1")
+	ev2 := newStatusUpdateEvent("app1_uid1", "v1")
 
-		assert.Equal(t, 2, q.Len())
+	q.Add(ev1)
+	q.Add(ev2)
 
-		got, _ := q.Get()
-		assert.Equal(t, "spec1", got.ID())
-
-		got, _ = q.Get()
-		assert.Equal(t, "status1", got.ID())
-	})
-
-	t.Run("Create event is never deduped even for same resource", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		evCreate := newTestEvent("c1", internalevent.Create.String(), "app-x_uid1")
-		evSpec := newTestEvent("spec1", internalevent.SpecUpdate.String(), "app-x_uid1")
-
-		q.Add(evCreate)
-		q.Add(evSpec)
-
-		assert.Equal(t, 2, q.Len())
-
-		got, _ := q.Get()
-		assert.Equal(t, "c1", got.ID())
-
-		got, _ = q.Get()
-		assert.Equal(t, "spec1", got.ID())
-	})
-
-	t.Run("Delete event is never deduped", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		evDel1 := newTestEvent("d1", internalevent.Delete.String(), "app-x_uid1")
-		evDel2 := newTestEvent("d2", internalevent.Delete.String(), "app-x_uid1")
-
-		q.Add(evDel1)
-		q.Add(evDel2)
-
-		assert.Equal(t, 2, q.Len())
-
-		got, _ := q.Get()
-		assert.Equal(t, "d1", got.ID())
-
-		got, _ = q.Get()
-		assert.Equal(t, "d2", got.ID())
-	})
+	assert.Equal(t, 2, q.Len())
 }
 
-func TestDedupeQueue_MoveToTail(t *testing.T) {
-	t.Run("Deduped event moves to tail preserving order", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
+func TestDedupeQueue_NonDedupableEventsNeverCoalesce(t *testing.T) {
+	q := NewDedupeQueue("test", 100)
 
-		evSpecX := newTestEvent("spec-x-v1", internalevent.SpecUpdate.String(), "app-x_uid1")
-		evCreate := newTestEvent("create-y", internalevent.Create.String(), "app-y_uid2")
-		evSpecXv2 := newTestEvent("spec-x-v2", internalevent.SpecUpdate.String(), "app-x_uid1")
+	ev1 := newNonDedupableEvent("app1_uid1", "evt-1", "data1")
+	ev2 := newNonDedupableEvent("app1_uid1", "evt-2", "data2")
+	ev3 := newNonDedupableEvent("app1_uid1", "evt-3", "data3")
 
-		q.Add(evSpecX)
-		q.Add(evCreate)
-		// This should remove evSpecX from position 0 and append evSpecXv2 at tail
-		q.Add(evSpecXv2)
+	q.Add(ev1)
+	q.Add(ev2)
+	q.Add(ev3)
 
-		assert.Equal(t, 2, q.Len())
-
-		got, _ := q.Get()
-		assert.Equal(t, "create-y", got.ID())
-
-		got, _ = q.Get()
-		assert.Equal(t, "spec-x-v2", got.ID())
-	})
+	assert.Equal(t, 3, q.Len())
 }
 
-func TestDedupeQueue_NonDedupEligibleEvents(t *testing.T) {
-	t.Run("Heartbeat events are never deduped", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		ev1 := newTestEvent("hb1", internalevent.Ping.String(), "uuid-1")
-		ev2 := newTestEvent("hb2", internalevent.Ping.String(), "uuid-2")
+func TestDedupeQueue_FIFOOrdering(t *testing.T) {
+	q := NewDedupeQueue("test", 100)
 
-		q.Add(ev1)
-		q.Add(ev2)
+	ev1 := newNonDedupableEvent("app1", "evt-1", "first")
+	ev2 := newNonDedupableEvent("app2", "evt-2", "second")
+	ev3 := newNonDedupableEvent("app3", "evt-3", "third")
 
-		assert.Equal(t, 2, q.Len())
-	})
+	q.Add(ev1)
+	q.Add(ev2)
+	q.Add(ev3)
 
-	t.Run("Events with empty resourceID are not deduped", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		ev1 := newTestEvent("1", internalevent.SpecUpdate.String(), "")
-		ev2 := newTestEvent("2", internalevent.SpecUpdate.String(), "")
+	got1, _ := q.Get()
+	q.Done(got1)
+	got2, _ := q.Get()
+	q.Done(got2)
+	got3, _ := q.Get()
+	q.Done(got3)
 
-		q.Add(ev1)
-		q.Add(ev2)
-
-		assert.Equal(t, 2, q.Len())
-	})
+	var d1, d2, d3 string
+	_ = got1.DataAs(&d1)
+	_ = got2.DataAs(&d2)
+	_ = got3.DataAs(&d3)
+	assert.Equal(t, "first", d1)
+	assert.Equal(t, "second", d2)
+	assert.Equal(t, "third", d3)
 }
 
-func TestDedupeQueue_MaxSize(t *testing.T) {
-	t.Run("Oldest item is dropped when max size is exceeded", func(t *testing.T) {
-		maxSize := 5
-		q := newDedupeQueue(maxSize, "test")
+func TestDedupeQueue_DedupeMovesToBack(t *testing.T) {
+	q := NewDedupeQueue("test", 100)
 
-		for i := 1; i <= maxSize; i++ {
-			q.Add(newTestEvent(strconv.Itoa(i), internalevent.Create.String(), "app-"+strconv.Itoa(i)))
-		}
+	ev1 := newDedupableEvent("app1_uid1", "v1")
+	ev2 := newDedupableEvent("app2_uid2", "v1")
 
-		assert.Equal(t, maxSize, q.Len())
+	q.Add(ev1)
+	q.Add(ev2)
 
-		q.Add(newTestEvent("6", internalevent.Create.String(), "app-6"))
+	// Re-add app1 with new data — should move to back
+	ev1Updated := newDedupableEvent("app1_uid1", "v2")
+	q.Add(ev1Updated)
 
-		assert.Equal(t, maxSize, q.Len())
+	assert.Equal(t, 2, q.Len())
 
-		got, _ := q.Get()
-		assert.Equal(t, "2", got.ID())
-	})
+	// First out should be app2 (app1 moved to back)
+	got, _ := q.Get()
+	q.Done(got)
+	assert.Equal(t, "app2_uid2", internalevent.ResourceID(got))
+
+	got, _ = q.Get()
+	q.Done(got)
+	assert.Equal(t, "app1_uid1", internalevent.ResourceID(got))
+	var data string
+	_ = got.DataAs(&data)
+	assert.Equal(t, "v2", data, "should have latest payload")
+}
+
+func TestDedupeQueue_BoundedEviction(t *testing.T) {
+	maxSize := 5
+	q := NewDedupeQueue("test", maxSize)
+
+	for i := 0; i < maxSize; i++ {
+		ev := newNonDedupableEvent(fmt.Sprintf("app%d", i), fmt.Sprintf("evt-%d", i), fmt.Sprintf("data%d", i))
+		q.Add(ev)
+	}
+	assert.Equal(t, maxSize, q.Len())
+
+	// Adding one more should evict the oldest
+	overflow := newNonDedupableEvent("appNew", "evt-new", "new-data")
+	q.Add(overflow)
+	assert.Equal(t, maxSize, q.Len())
+
+	// The oldest (app0) should have been evicted; first available is app1
+	got, _ := q.Get()
+	q.Done(got)
+	var data string
+	_ = got.DataAs(&data)
+	assert.Equal(t, "data1", data)
+}
+
+func TestDedupeQueue_DuplicateDoesNotEvict(t *testing.T) {
+	maxSize := 3
+	q := NewDedupeQueue("test", maxSize)
+
+	ev1 := newDedupableEvent("app1_uid1", "v1")
+	ev2 := newDedupableEvent("app2_uid2", "v1")
+	ev3 := newDedupableEvent("app3_uid3", "v1")
+
+	q.Add(ev1)
+	q.Add(ev2)
+	q.Add(ev3)
+	assert.Equal(t, maxSize, q.Len())
+
+	// Re-adding app1 (deduplicate) should NOT evict anything
+	ev1Updated := newDedupableEvent("app1_uid1", "v2")
+	q.Add(ev1Updated)
+	assert.Equal(t, maxSize, q.Len())
+
+	// All three resources should still be present
+	got1, _ := q.Get()
+	q.Done(got1)
+	got2, _ := q.Get()
+	q.Done(got2)
+	got3, _ := q.Get()
+	q.Done(got3)
+
+	resources := []string{
+		internalevent.ResourceID(got1),
+		internalevent.ResourceID(got2),
+		internalevent.ResourceID(got3),
+	}
+	assert.Contains(t, resources, "app1_uid1")
+	assert.Contains(t, resources, "app2_uid2")
+	assert.Contains(t, resources, "app3_uid3")
+}
+
+func TestDedupeQueue_GetReturnsLatestAfterMultipleUpdates(t *testing.T) {
+	q := NewDedupeQueue("test", 100)
+
+	for i := 0; i < 10; i++ {
+		ev := newDedupableEvent("app1_uid1", fmt.Sprintf("version-%d", i))
+		q.Add(ev)
+	}
+
+	assert.Equal(t, 1, q.Len())
+
+	got, _ := q.Get()
+	var data string
+	_ = got.DataAs(&data)
+	assert.Equal(t, "version-9", data)
 }
 
 func TestDedupeQueue_Done(t *testing.T) {
-	t.Run("Done is a no-op", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		ev := newTestEvent("1", internalevent.Create.String(), "app-a")
-		q.Add(ev)
+	q := NewDedupeQueue("test", 100)
 
-		got, _ := q.Get()
-		q.Done(got) // should not panic
-		assert.Equal(t, 0, q.Len())
-	})
+	ev := newDedupableEvent("app1_uid1", "v1")
+	q.Add(ev)
+
+	got, _ := q.Get()
+	assert.Equal(t, 0, q.Len())
+	q.Done(got)
+
+	// After Done, adding a new event for the same resource should work fresh
+	ev2 := newDedupableEvent("app1_uid1", "v2")
+	q.Add(ev2)
+	assert.Equal(t, 1, q.Len())
 }
 
 func TestDedupeQueue_ShutDown(t *testing.T) {
-	t.Run("Get returns shutdown signal after ShutDown", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		q.ShutDown()
+	q := NewDedupeQueue("test", 100)
 
-		_, shutdown := q.Get()
-		assert.True(t, shutdown)
-	})
+	ev := newDedupableEvent("app1_uid1", "v1")
+	q.Add(ev)
 
-	t.Run("Double ShutDown does not panic", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		q.ShutDown()
-		assert.NotPanics(t, func() { q.ShutDown() })
-	})
+	q.ShutDown()
 
-	t.Run("Add after ShutDown does not panic and is ignored", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
-		q.ShutDown()
-		assert.NotPanics(t, func() {
-			q.Add(newTestEvent("1", internalevent.SpecUpdate.String(), "app-x"))
-		})
-		assert.Equal(t, 0, q.Len())
-	})
+	// Pending items are still returned after shutdown
+	got, shutdown := q.Get()
+	assert.False(t, shutdown)
+	assert.NotNil(t, got)
+	q.Done(got)
+
+	// Once drained, Get signals shutdown
+	_, shutdown = q.Get()
+	assert.True(t, shutdown)
 }
 
-func TestDedupeQueue_MixedScenario(t *testing.T) {
-	t.Run("Mixed dedup-eligible and non-dedup-eligible events", func(t *testing.T) {
-		q := newDedupeQueue(1000, "test")
+func TestDedupeQueue_EmptyQueueLen(t *testing.T) {
+	q := NewDedupeQueue("test", 100)
+	assert.Equal(t, 0, q.Len())
+}
 
-		q.Add(newTestEvent("create-x", internalevent.Create.String(), "app-x_uid1"))
-		q.Add(newTestEvent("spec-x-v1", internalevent.SpecUpdate.String(), "app-x_uid1"))
-		q.Add(newTestEvent("status-y-v1", internalevent.StatusUpdate.String(), "app-y_uid2"))
-		q.Add(newTestEvent("spec-x-v2", internalevent.SpecUpdate.String(), "app-x_uid1"))
-		q.Add(newTestEvent("status-y-v2", internalevent.StatusUpdate.String(), "app-y_uid2"))
-		q.Add(newTestEvent("delete-z", internalevent.Delete.String(), "app-z_uid3"))
+func TestDedupeQueue_MixedDedupableAndNonDedupable(t *testing.T) {
+	q := NewDedupeQueue("test", 100)
 
-		// Expected order:
-		// create-x (non-dedup-eligible, stays at original position)
-		// spec-x-v2 (replaced spec-x-v1, moved to tail of where spec-x-v1 was... no, moved to tail)
-		// status-y-v2 (replaced status-y-v1, moved to tail)
-		// delete-z (non-dedup-eligible, appended)
+	spec1 := newDedupableEvent("app1_uid1", "spec-v1")
+	spec2 := newDedupableEvent("app1_uid1", "spec-v2")
+	create1 := newNonDedupableEvent("app1_uid1", "create-1", "create-data")
 
-		assert.Equal(t, 4, q.Len())
+	q.Add(spec1)
+	q.Add(create1)
+	q.Add(spec2)
 
-		got, _ := q.Get()
-		assert.Equal(t, "create-x", got.ID())
+	// spec events coalesce (1 slot), create is separate (1 slot) = 2 total
+	assert.Equal(t, 2, q.Len())
+}
 
-		got, _ = q.Get()
-		assert.Equal(t, "spec-x-v2", got.ID())
+func TestDedupeQueue_NotifyOnAdd(t *testing.T) {
+	dq := NewDedupeQueue("test", 100).(*dedupeQueue)
 
-		got, _ = q.Get()
-		assert.Equal(t, "status-y-v2", got.ID())
+	ev := newDedupableEvent("app1_uid1", "v1")
+	q := dq
+	q.Add(ev)
 
-		got, _ = q.Get()
-		assert.Equal(t, "delete-z", got.ID())
+	select {
+	case <-dq.notify:
+		// expected
+	default:
+		t.Fatal("expected notification on Add")
+	}
+}
 
-		assert.Equal(t, 0, q.Len())
-	})
+func TestDedupeQueue_ConcurrentAdds(t *testing.T) {
+	q := NewDedupeQueue("test", 1000)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ev := newDedupableEvent(fmt.Sprintf("app%d_uid%d", i, i), fmt.Sprintf("v%d", i))
+			q.Add(ev)
+		}(i)
+	}
+	wg.Wait()
+
+	assert.Equal(t, 100, q.Len())
+}
+
+func TestDedupeQueue_ConcurrentDeduplication(t *testing.T) {
+	q := NewDedupeQueue("test", 1000)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ev := newDedupableEvent("app1_uid1", fmt.Sprintf("v%d", i))
+			q.Add(ev)
+		}(i)
+	}
+	wg.Wait()
+
+	assert.Equal(t, 1, q.Len())
+
+	got, _ := q.Get()
+	require.NotNil(t, got)
+}
+
+func TestReorderQueue_Push_Pop(t *testing.T) {
+	q := newReorderQueue[string]()
+
+	q.Push("a")
+	q.Push("b")
+	q.Push("c")
+
+	assert.Equal(t, 3, q.Len())
+	assert.Equal(t, "a", q.Pop())
+	assert.Equal(t, "b", q.Pop())
+	assert.Equal(t, "c", q.Pop())
+	assert.Equal(t, 0, q.Len())
+}
+
+func TestReorderQueue_Touch_MovesToBack(t *testing.T) {
+	q := newReorderQueue[string]()
+
+	q.Push("a")
+	q.Push("b")
+	q.Push("c")
+
+	q.Touch("a")
+
+	assert.Equal(t, 3, q.Len())
+	assert.Equal(t, "b", q.Pop())
+	assert.Equal(t, "c", q.Pop())
+	assert.Equal(t, "a", q.Pop())
+}
+
+func TestReorderQueue_Touch_MiddleElement(t *testing.T) {
+	q := newReorderQueue[string]()
+
+	q.Push("a")
+	q.Push("b")
+	q.Push("c")
+	q.Push("d")
+
+	q.Touch("b")
+
+	assert.Equal(t, "a", q.Pop())
+	assert.Equal(t, "c", q.Pop())
+	assert.Equal(t, "d", q.Pop())
+	assert.Equal(t, "b", q.Pop())
+}
+
+func TestReorderQueue_Touch_LastElement(t *testing.T) {
+	q := newReorderQueue[string]()
+
+	q.Push("a")
+	q.Push("b")
+	q.Push("c")
+
+	q.Touch("c")
+
+	// "c" is already last — order shouldn't change
+	assert.Equal(t, "a", q.Pop())
+	assert.Equal(t, "b", q.Pop())
+	assert.Equal(t, "c", q.Pop())
+}
+
+func TestReorderQueue_Touch_NonExistent(t *testing.T) {
+	q := newReorderQueue[string]()
+
+	q.Push("a")
+	q.Push("b")
+
+	q.Touch("z") // should be a no-op
+
+	assert.Equal(t, 2, q.Len())
+	assert.Equal(t, "a", q.Pop())
+	assert.Equal(t, "b", q.Pop())
 }

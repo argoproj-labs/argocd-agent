@@ -255,19 +255,19 @@ func (_c *QueuePair_Names_Call) RunAndReturn(run func() []string) *QueuePair_Nam
 }
 
 // RecvQ provides a mock function with given fields: name
-func (_m *QueuePair) RecvQ(name string) queue.RecvQueue {
+func (_m *QueuePair) RecvQ(name string) queue.WorkQueue {
 	ret := _m.Called(name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RecvQ")
 	}
 
-	var r0 queue.RecvQueue
-	if rf, ok := ret.Get(0).(func(string) queue.RecvQueue); ok {
+	var r0 queue.WorkQueue
+	if rf, ok := ret.Get(0).(func(string) queue.WorkQueue); ok {
 		r0 = rf(name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(queue.RecvQueue)
+			r0 = ret.Get(0).(queue.WorkQueue)
 		}
 	}
 
@@ -292,12 +292,12 @@ func (_c *QueuePair_RecvQ_Call) Run(run func(name string)) *QueuePair_RecvQ_Call
 	return _c
 }
 
-func (_c *QueuePair_RecvQ_Call) Return(_a0 queue.RecvQueue) *QueuePair_RecvQ_Call {
+func (_c *QueuePair_RecvQ_Call) Return(_a0 queue.WorkQueue) *QueuePair_RecvQ_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *QueuePair_RecvQ_Call) RunAndReturn(run func(string) queue.RecvQueue) *QueuePair_RecvQ_Call {
+func (_c *QueuePair_RecvQ_Call) RunAndReturn(run func(string) queue.WorkQueue) *QueuePair_RecvQ_Call {
 	_c.Call.Return(run)
 	return _c
 }

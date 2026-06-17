@@ -21,8 +21,6 @@ import (
 
 var _ workqueue.MetricsProvider = &QueueMetrics{}
 
-var dqMetricsProvider *DedupeQueueMetrics
-
 // QueueMetrics implements the workqueue.MetricsProvider interface,
 // providing metrics for our send/recv queues.
 type QueueMetrics struct {
@@ -143,60 +141,4 @@ func RegisterQueueMetrics(prefix string) {
 		provider.retries,
 	)
 	workqueue.SetProvider(provider)
-}
-
-// DedupeQueueMetrics holds Prometheus metrics for dedupeQueue instances.
-type DedupeQueueMetrics struct {
-	Depth         *prometheus.GaugeVec
-	Adds          *prometheus.CounterVec
-	EventsDeduped *prometheus.CounterVec
-	Duration      *prometheus.HistogramVec
-}
-
-func NewDedupeQueueMetrics(prefix string) *DedupeQueueMetrics {
-	return &DedupeQueueMetrics{
-		Depth: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: prefix + "_queue_depth",
-				Help: "Current depth of queue",
-			},
-			[]string{"queue"},
-		),
-		Adds: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: prefix + "_queue_adds_total",
-				Help: "Total number of adds to the deduped queue",
-			},
-			[]string{"queue"},
-		),
-		EventsDeduped: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: prefix + "_queue_events_deduped_total",
-				Help: "Total number of events deduped from the queue",
-			},
-			[]string{"queue"},
-		),
-		Duration: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Name:    prefix + "_queue_duration_seconds",
-				Help:    "Time an event spent waiting in the queue before being dequeued",
-				Buckets: prometheus.DefBuckets,
-			},
-			[]string{"queue"},
-		),
-	}
-}
-
-func RegisterDedupeQueueMetrics(prefix string) {
-	dqMetricsProvider = NewDedupeQueueMetrics(prefix)
-	prometheus.DefaultRegisterer.MustRegister(
-		dqMetricsProvider.Depth,
-		dqMetricsProvider.Adds,
-		dqMetricsProvider.EventsDeduped,
-		dqMetricsProvider.Duration,
-	)
-}
-
-func GetDedupeQueueMetrics() *DedupeQueueMetrics {
-	return dqMetricsProvider
 }

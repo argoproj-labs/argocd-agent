@@ -69,12 +69,16 @@ func Test_Queue(t *testing.T) {
 		for i := 1; i <= defaultMaxQueueSize; i++ {
 			ev := event.New()
 			ev.SetID(strconv.Itoa(i))
+			ev.SetExtension("eventid", strconv.Itoa(i))
+			ev.SetExtension("resourceid", strconv.Itoa(i))
 			queue.Add(&ev)
 		}
 
 		// Since the queue is full, check if the oldest item is popped before adding a new item.
 		ev := event.New()
 		ev.SetID(strconv.Itoa(defaultMaxQueueSize + 1))
+		ev.SetExtension("eventid", "new-event-id")
+		ev.SetExtension("resourceid", "new-resource-id")
 		queue.Add(&ev)
 		assert.Equal(t, defaultMaxQueueSize, queue.Len())
 		front, _ := queue.Get()
@@ -94,6 +98,8 @@ func Test_Queue(t *testing.T) {
 		for i := 1; i <= queueSize+20; i++ {
 			ev := event.New()
 			ev.SetID(strconv.Itoa(i))
+			ev.SetExtension("eventid", strconv.Itoa(i))
+			ev.SetExtension("resourceid", strconv.Itoa(i))
 			recvQueue.Add(&ev)
 			sendQueue.Add(&ev)
 		}
@@ -101,6 +107,8 @@ func Test_Queue(t *testing.T) {
 		// Since the queue is full, check if the oldest item is popped before adding a new item.
 		ev := event.New()
 		ev.SetID(strconv.Itoa(queueSize + 1))
+		ev.SetExtension("eventid", "new-event-id")
+		ev.SetExtension("resourceid", "new-resource-id")
 		recvQueue.Add(&ev)
 		sendQueue.Add(&ev)
 		assert.Equal(t, queueSize, recvQueue.Len())
