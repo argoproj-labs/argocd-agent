@@ -50,7 +50,7 @@ func createTestClientCertSecret(t *testing.T, kubeclient kubernetes.Interface) s
 	t.Helper()
 
 	// Generate CA certificate
-	caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+	caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 	require.NoError(t, err, "generate CA certificate")
 
 	// Parse CA cert PEM for signing
@@ -59,13 +59,11 @@ func createTestClientCertSecret(t *testing.T, kubeclient kubernetes.Interface) s
 	caCert, err := x509.ParseCertificate(certBlock.Bytes)
 	require.NoError(t, err, "parse CA certificate")
 
-	keyBlock, _ := pem.Decode([]byte(caKeyPEM))
-	require.NotNil(t, keyBlock, "decode CA key PEM")
-	caKey, err := x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
+	caKey, err := tlsutil.ParsePrivateKeyFromPEM([]byte(caKeyPEM))
 	require.NoError(t, err, "parse CA private key")
 
 	// Generate client certificate signed by CA
-	clientCertPEM, clientKeyPEM, err := tlsutil.GenerateClientCertificate("shared-client", caCert, caKey, tlsutil.DefaultLeafCertValidityDays)
+	clientCertPEM, clientKeyPEM, err := tlsutil.GenerateClientCertificate("shared-client", caCert, caKey, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 	require.NoError(t, err, "generate client certificate")
 
 	// Create secret with tls.crt, tls.key, and ca.crt

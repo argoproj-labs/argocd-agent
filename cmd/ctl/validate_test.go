@@ -89,7 +89,7 @@ func createExpiredCertificate(t *testing.T, name string, signerCert *x509.Certif
 		IPAddresses:           ipAddresses,
 	}
 
-	certPEM, keyPEM, err := tlsutil.GenerateCertificate(cert, signerCert, signerKey)
+	certPEM, keyPEM, err := tlsutil.GenerateCertificate(cert, signerCert, signerKey, tlsutil.KeyGenOptions{})
 	require.NoError(t, err, "create expired certificate")
 	return certPEM, keyPEM
 }
@@ -98,7 +98,7 @@ func createExpiredCertificate(t *testing.T, name string, signerCert *x509.Certif
 func createCertSignedByDifferentCA(t *testing.T, name string, ips []string, dns []string) (string, string) {
 	t.Helper()
 	// Create a different CA
-	differentCAPEM, differentCAKeyPEM, err := tlsutil.GenerateCaCertificate("different-ca", tlsutil.DefaultCACertValidityDays)
+	differentCAPEM, differentCAKeyPEM, err := tlsutil.GenerateCaCertificate("different-ca", tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 	require.NoError(t, err, "generate different CA")
 
 	// Create a fake client to parse the CA
@@ -143,7 +143,7 @@ func createCertSignedByDifferentCA(t *testing.T, name string, ips []string, dns 
 		IPAddresses:           ipAddresses,
 	}
 
-	certPEM, keyPEM, err := tlsutil.GenerateCertificate(cert, differentCASigner, differentCA.PrivateKey)
+	certPEM, keyPEM, err := tlsutil.GenerateCertificate(cert, differentCASigner, differentCA.PrivateKey, tlsutil.KeyGenOptions{})
 	require.NoError(t, err, "create cert signed by different CA")
 
 	return certPEM, keyPEM
@@ -166,7 +166,7 @@ func createCertWithEmptyCN(t *testing.T, signerCert *x509.Certificate, signerKey
 		BasicConstraintsValid: true,
 	}
 
-	certPEM, keyPEM, err := tlsutil.GenerateCertificate(cert, signerCert, signerKey)
+	certPEM, keyPEM, err := tlsutil.GenerateCertificate(cert, signerCert, signerKey, tlsutil.KeyGenOptions{})
 	require.NoError(t, err, "create cert with empty CN")
 	return certPEM, keyPEM
 }
@@ -334,7 +334,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		}
 
 		// CA
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 
 		// Principal TLS
@@ -345,12 +345,12 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "read CA")
 		signer, err := x509.ParseCertificate(caCert.Certificate[0])
 		require.NoError(t, err, "parse CA")
-		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen principal cert")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalTLS, pCertPEM, pKeyPEM)
 
 		// Resource proxy TLS
-		rpCertPEM, rpKeyPEM, err := tlsutil.GenerateServerCertificate("resource-proxy", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+		rpCertPEM, rpKeyPEM, err := tlsutil.GenerateServerCertificate("resource-proxy", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen rp cert")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNameProxyTLS, rpCertPEM, rpKeyPEM)
 
@@ -452,7 +452,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "create namespace")
 
 		// Create CA only
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -498,7 +498,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "create namespace")
 
 		// Create CA and Principal TLS
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -506,7 +506,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "read CA")
 		signer, err := x509.ParseCertificate(caCert.Certificate[0])
 		require.NoError(t, err, "parse CA")
-		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen principal cert")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalTLS, pCertPEM, pKeyPEM)
 
@@ -552,7 +552,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "create namespace")
 
 		// Create CA and TLS secrets
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -560,11 +560,11 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "read CA")
 		signer, err := x509.ParseCertificate(caCert.Certificate[0])
 		require.NoError(t, err, "parse CA")
-		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen principal cert")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalTLS, pCertPEM, pKeyPEM)
 
-		rpCertPEM, rpKeyPEM, err := tlsutil.GenerateServerCertificate("resource-proxy", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+		rpCertPEM, rpKeyPEM, err := tlsutil.GenerateServerCertificate("resource-proxy", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen rp cert")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNameProxyTLS, rpCertPEM, rpKeyPEM)
 
@@ -610,7 +610,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "create namespace")
 
 		// Create CA
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -664,7 +664,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "create namespace")
 
 		// Create CA
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -674,7 +674,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "parse CA")
 
 		// Create valid Principal TLS
-		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen principal cert")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalTLS, pCertPEM, pKeyPEM)
 
@@ -765,7 +765,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "create namespace")
 
 		// Create CA and TLS secrets
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -773,11 +773,11 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "read CA")
 		signer, err := x509.ParseCertificate(caCert.Certificate[0])
 		require.NoError(t, err, "parse CA")
-		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen principal cert")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalTLS, pCertPEM, pKeyPEM)
 
-		rpCertPEM, rpKeyPEM, err := tlsutil.GenerateServerCertificate("resource-proxy", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+		rpCertPEM, rpKeyPEM, err := tlsutil.GenerateServerCertificate("resource-proxy", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen rp cert")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNameProxyTLS, rpCertPEM, rpKeyPEM)
 
@@ -839,7 +839,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		require.NoError(t, err, "create namespace")
 
 		// Create CA and TLS secrets
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -848,11 +848,11 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		signer, err := x509.ParseCertificate(caCert.Certificate[0])
 		require.NoError(t, err, "parse CA")
 		// Certificate with DNS: localhost, but route will have different host
-		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+		pCertPEM, pKeyPEM, err := tlsutil.GenerateServerCertificate("principal", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen principal cert")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNamePrincipalTLS, pCertPEM, pKeyPEM)
 
-		rpCertPEM, rpKeyPEM, err := tlsutil.GenerateServerCertificate("resource-proxy", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+		rpCertPEM, rpKeyPEM, err := tlsutil.GenerateServerCertificate("resource-proxy", signer, caCert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen rp cert")
 		mustCreateTLSSecret(t, cl, principalNS, config.SecretNameProxyTLS, rpCertPEM, rpKeyPEM)
 
@@ -1107,7 +1107,7 @@ func TestCheckConfigAgent(t *testing.T) {
 		}
 
 		// Create principal CA
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, principalCl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -1127,7 +1127,7 @@ func TestCheckConfigAgent(t *testing.T) {
 		signer, err := x509.ParseCertificate(caCert.Certificate[0])
 		require.NoError(t, err, "parse CA")
 		agentName := "test-cluster"
-		cCert, cKey, err := tlsutil.GenerateClientCertificate(agentName, signer, caCert.PrivateKey, tlsutil.DefaultLeafCertValidityDays)
+		cCert, cKey, err := tlsutil.GenerateClientCertificate(agentName, signer, caCert.PrivateKey, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen client cert")
 		mustCreateTLSSecret(t, agentCl, agentNS, config.SecretNameAgentClientCert, cCert, cKey)
 
@@ -1169,7 +1169,7 @@ func TestCheckConfigAgent(t *testing.T) {
 		}
 
 		// Create principal CA (required for principal checks)
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, principalCl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -1213,7 +1213,7 @@ func TestCheckConfigAgent(t *testing.T) {
 		}
 
 		// Create principal CA
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, principalCl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -1233,7 +1233,7 @@ func TestCheckConfigAgent(t *testing.T) {
 		signer, err := x509.ParseCertificate(caCert.Certificate[0])
 		require.NoError(t, err, "parse CA")
 		agentName := "non-existent-namespace"
-		cCert, cKey, err := tlsutil.GenerateClientCertificate(agentName, signer, caCert.PrivateKey, tlsutil.DefaultLeafCertValidityDays)
+		cCert, cKey, err := tlsutil.GenerateClientCertificate(agentName, signer, caCert.PrivateKey, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "gen client cert")
 		mustCreateTLSSecret(t, agentCl, agentNS, config.SecretNameAgentClientCert, cCert, cKey)
 
@@ -1277,7 +1277,7 @@ func TestCheckConfigAgent(t *testing.T) {
 		}
 
 		// Create principal CA
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, principalCl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -1331,7 +1331,7 @@ func TestCheckConfigAgent(t *testing.T) {
 		}
 
 		// Create principal CA
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, principalCl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -1393,7 +1393,7 @@ func TestCheckConfigAgent(t *testing.T) {
 		}
 
 		// Create principal CA
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, principalCl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -1455,7 +1455,7 @@ func TestCheckConfigAgent(t *testing.T) {
 		}
 
 		// Create principal CA
-		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays)
+		caCertPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, principalCl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
@@ -1673,7 +1673,7 @@ func TestX509FromTLSSecret(t *testing.T) {
 	ctx := context.TODO()
 
 	// Generate a root CA
-	rootCACertPEM, rootCAKeyPEM, err := tlsutil.GenerateCaCertificate("root-ca", tlsutil.DefaultCACertValidityDays)
+	rootCACertPEM, rootCAKeyPEM, err := tlsutil.GenerateCaCertificate("root-ca", tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 	require.NoError(t, err)
 	cl := fake.NewSimpleClientset()
 	mustCreateTLSSecret(t, cl, "default", "root-ca", rootCACertPEM, rootCAKeyPEM)
@@ -1683,7 +1683,7 @@ func TestX509FromTLSSecret(t *testing.T) {
 	require.NoError(t, err)
 
 	// Generate an intermediate CA signed by root CA
-	intermCACertPEM, intermCAKeyPEM, err := tlsutil.GenerateCaCertificate("intermediate-ca", tlsutil.DefaultCACertValidityDays)
+	intermCACertPEM, intermCAKeyPEM, err := tlsutil.GenerateCaCertificate("intermediate-ca", tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 	require.NoError(t, err)
 	mustCreateTLSSecret(t, cl, "default", "interm-ca", intermCACertPEM, intermCAKeyPEM)
 	intermCACert, err := tlsutil.TLSCertFromSecret(ctx, cl, "default", "interm-ca")
@@ -1693,7 +1693,7 @@ func TestX509FromTLSSecret(t *testing.T) {
 	_ = rootCASigner
 
 	// Generate a leaf certificate signed by the intermediate CA
-	leafCertPEM, leafKeyPEM, err := tlsutil.GenerateServerCertificate("leaf", intermCASigner, intermCACert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays)
+	leafCertPEM, leafKeyPEM, err := tlsutil.GenerateServerCertificate("leaf", intermCASigner, intermCACert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 	require.NoError(t, err)
 
 	// Parse the expected leaf cert DER for strict identity checks
