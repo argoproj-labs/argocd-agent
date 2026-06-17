@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 
 # Copyright 2025 The argocd-agent Authors
 #
