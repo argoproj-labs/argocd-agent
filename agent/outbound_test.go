@@ -139,6 +139,7 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 		_ = a.appManager.Manage("agent/guestbook")
 		a.addAppDeletionToQueue(app)
 		ev, _ := a.queues.SendQ(defaultQueueName).Get()
+		a.queues.SendQ(defaultQueueName).Done(ev)
 		assert.Equal(t, event.Delete.String(), ev.Type())
 		require.False(t, a.appManager.IsManaged("agent/guestbook"))
 	})
@@ -331,6 +332,7 @@ func Test_addAppProjectCreationToQueue(t *testing.T) {
 		require.Equal(t, 1, a.queues.SendQ(defaultQueueName).Len())
 		ev, _ := a.queues.SendQ(defaultQueueName).Get()
 		assert.NotNil(t, ev)
+		a.queues.SendQ(defaultQueueName).Done(ev)
 		assert.Equal(t, event.Create.String(), ev.Type())
 		// Queue should be empty after get
 		assert.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
@@ -478,6 +480,7 @@ func Test_addAppProjectDeletionToQueue(t *testing.T) {
 		a.addAppProjectDeletionToQueue(appProject)
 
 		ev, _ := a.queues.SendQ(defaultQueueName).Get()
+		a.queues.SendQ(defaultQueueName).Done(ev)
 		assert.Equal(t, event.Delete.String(), ev.Type())
 		require.False(t, a.projectManager.IsManaged("test-project"))
 	})

@@ -59,7 +59,7 @@ func skipReplication(target targets.EventTarget) bool {
 // processRecvQueue processes an entry from the receiver queue, which holds the
 // events received by agents. It will trigger updates of resources in the
 // server's backend.
-func (s *Server) processRecvQueue(ctx context.Context, agentName string, q queue.RecvQueue) (*cloudevents.Event, error) {
+func (s *Server) processRecvQueue(ctx context.Context, agentName string, q queue.WorkQueue) (*cloudevents.Event, error) {
 	status := metrics.EventProcessingSuccess
 	ev, _ := q.Get()
 
@@ -805,7 +805,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 
 				queueLogCtx.Trace("Acquired semaphore")
 
-				go func(agentName string, q queue.RecvQueue, logCtx *logrus.Entry) {
+				go func(agentName string, q queue.WorkQueue, logCtx *logrus.Entry) {
 					defer func() {
 						sem.Release(1)
 						queueLock.Unlock(agentName)

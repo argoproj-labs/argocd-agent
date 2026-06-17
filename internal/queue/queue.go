@@ -27,10 +27,10 @@ import (
 
 var _ QueuePair = &SendRecvQueues{}
 
-// RecvQueue is the minimal interface used by RecvQ consumers. It covers only
-// the methods actually called on receive queues (Add, Get, Done, Len,
+// WorkQueue is the minimal interface used by workqueue consumers. It covers only
+// the methods actually called on workqueues (Add, Get, Done, Len,
 // ShutDown), avoiding a dependency on the full workqueue interface.
-type RecvQueue interface {
+type WorkQueue interface {
 	Add(item *event.Event)
 	Get() (*event.Event, bool)
 	Done(item *event.Event)
@@ -43,8 +43,8 @@ type QueuePair interface {
 	Names() []string
 	HasQueuePair(name string) bool
 	Len() int
-	SendQ(name string) workqueue.TypedRateLimitingInterface[*event.Event]
-	RecvQ(name string) RecvQueue
+	SendQ(name string) WorkQueue
+	RecvQ(name string) WorkQueue
 	Create(name string) error
 	Delete(name string, shutdown bool) error
 }
@@ -55,8 +55,8 @@ const (
 )
 
 type queuepair struct {
-	recvq *dedupeQueue
-	sendq *boundedQueue
+	recvq WorkQueue
+	sendq WorkQueue
 }
 
 type boundedQueue struct {
@@ -136,7 +136,7 @@ func (q *SendRecvQueues) Len() int {
 
 // SendQ will return the send queue from the queue pair named name. If no such
 // queue pair exists, returns nil
-func (q *SendRecvQueues) SendQ(name string) workqueue.TypedRateLimitingInterface[*event.Event] {
+func (q *SendRecvQueues) SendQ(name string) WorkQueue {
 	q.queuelock.RLock()
 	defer q.queuelock.RUnlock()
 	qp, ok := q.queues[name]
@@ -148,7 +148,7 @@ func (q *SendRecvQueues) SendQ(name string) workqueue.TypedRateLimitingInterface
 
 // RecvQ will return the receive queue from the queue pair named name. If no
 // such queue pair exists, returns nil
-func (q *SendRecvQueues) RecvQ(name string) RecvQueue {
+func (q *SendRecvQueues) RecvQ(name string) WorkQueue {
 	q.queuelock.RLock()
 	defer q.queuelock.RUnlock()
 	qp, ok := q.queues[name]
@@ -182,8 +182,8 @@ func (q *SendRecvQueues) Create(name string) error {
 	}, defaultMaxQueueSize)
 	qp := &queuepair{}
 
-	qp.sendq = newBoundedQueue(sendQueueSize, name+"-send")
-	qp.recvq = newDedupeQueue(recvQueueSize, name+"-recv")
+	qp.sendq = NewDedupeQueue(name+"-send", sendQueueSize)
+	qp.recvq = NewDedupeQueue(name+"-recv", recvQueueSize)
 	q.queues[name] = qp
 
 	return nil
@@ -210,8 +210,8 @@ func (q *SendRecvQueues) Delete(name string, shutdown bool) error {
 
 // GetWithContext is a wrapper around the workqueue's Get method.
 // It waits until an item is available in the queue or the context is Done
-func GetWithContext(q workqueue.TypedRateLimitingInterface[*event.Event], ctx context.Context) (*event.Event, bool) {
-	bq, ok := q.(*boundedQueue)
+func GetWithContext(q WorkQueue, ctx context.Context) (*event.Event, bool) {
+	bq, ok := q.(*dedupeQueue)
 	if !ok {
 		return nil, false
 	}
