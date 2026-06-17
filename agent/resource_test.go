@@ -1289,6 +1289,20 @@ func Test_getAvailableAPIs(t *testing.T) {
 		assert.Contains(t, firstVersion, "version")
 	})
 
+	t.Run("Successfully get API group metadata when only group is specified", func(t *testing.T) {
+		agent := &Agent{
+			context:    context.Background(),
+			kubeClient: kube.NewDynamicFakeClient(),
+		}
+
+		result, err := agent.getAvailableAPIs(context.Background(), "apps", "")
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, "apps", result.Object["name"])
+		assert.Contains(t, result.Object, "versions")
+		assert.Contains(t, result.Object, "preferredVersion")
+	})
+
 	t.Run("Returns error for non-existent API group", func(t *testing.T) {
 		agent := &Agent{
 			context:    context.Background(),
@@ -1296,6 +1310,17 @@ func Test_getAvailableAPIs(t *testing.T) {
 		}
 
 		result, err := agent.getAvailableAPIs(context.Background(), "nonexistent", "v1")
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	})
+
+	t.Run("Returns error for non-existent API group without version", func(t *testing.T) {
+		agent := &Agent{
+			context:    context.Background(),
+			kubeClient: kube.NewDynamicFakeClient(),
+		}
+
+		result, err := agent.getAvailableAPIs(context.Background(), "nonexistent", "")
 		assert.Error(t, err)
 		assert.Nil(t, result)
 	})
