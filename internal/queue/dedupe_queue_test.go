@@ -53,7 +53,7 @@ func newNonDedupableEvent(resourceID, eventID, data string) *cloudevents.Event {
 }
 
 func TestDedupeQueue_DifferentResourcesNotDeduplicated(t *testing.T) {
-	q := NewDedupeQueue("test", 100)
+	q := NewDedupeQueue("test")
 
 	ev1 := newDedupableEvent("app1_uid1", "v1")
 	ev2 := newDedupableEvent("app2_uid2", "v1")
@@ -65,7 +65,7 @@ func TestDedupeQueue_DifferentResourcesNotDeduplicated(t *testing.T) {
 }
 
 func TestDedupeQueue_DifferentTypesNotDeduplicated(t *testing.T) {
-	q := NewDedupeQueue("test", 100)
+	q := NewDedupeQueue("test")
 
 	ev1 := newDedupableEvent("app1_uid1", "v1")
 	ev2 := newStatusUpdateEvent("app1_uid1", "v1")
@@ -77,7 +77,7 @@ func TestDedupeQueue_DifferentTypesNotDeduplicated(t *testing.T) {
 }
 
 func TestDedupeQueue_NonDedupableEventsNeverCoalesce(t *testing.T) {
-	q := NewDedupeQueue("test", 100)
+	q := NewDedupeQueue("test")
 
 	ev1 := newNonDedupableEvent("app1_uid1", "evt-1", "data1")
 	ev2 := newNonDedupableEvent("app1_uid1", "evt-2", "data2")
@@ -91,7 +91,7 @@ func TestDedupeQueue_NonDedupableEventsNeverCoalesce(t *testing.T) {
 }
 
 func TestDedupeQueue_FIFOOrdering(t *testing.T) {
-	q := NewDedupeQueue("test", 100)
+	q := NewDedupeQueue("test")
 
 	ev1 := newNonDedupableEvent("app1", "evt-1", "first")
 	ev2 := newNonDedupableEvent("app2", "evt-2", "second")
@@ -118,7 +118,7 @@ func TestDedupeQueue_FIFOOrdering(t *testing.T) {
 }
 
 func TestDedupeQueue_DedupeMovesToBack(t *testing.T) {
-	q := NewDedupeQueue("test", 100)
+	q := NewDedupeQueue("test")
 
 	ev1 := newDedupableEvent("app1_uid1", "v1")
 	ev2 := newDedupableEvent("app2_uid2", "v1")
@@ -145,67 +145,18 @@ func TestDedupeQueue_DedupeMovesToBack(t *testing.T) {
 	assert.Equal(t, "v2", data, "should have latest payload")
 }
 
-func TestDedupeQueue_BoundedEviction(t *testing.T) {
-	maxSize := 5
-	q := NewDedupeQueue("test", maxSize)
+func TestDedupeQueue_UnboundedGrowth(t *testing.T) {
+	q := NewDedupeQueue("test")
 
-	for i := 0; i < maxSize; i++ {
+	for i := 0; i < 100; i++ {
 		ev := newNonDedupableEvent(fmt.Sprintf("app%d", i), fmt.Sprintf("evt-%d", i), fmt.Sprintf("data%d", i))
 		q.Add(ev)
 	}
-	assert.Equal(t, maxSize, q.Len())
-
-	// Adding one more should evict the oldest
-	overflow := newNonDedupableEvent("appNew", "evt-new", "new-data")
-	q.Add(overflow)
-	assert.Equal(t, maxSize, q.Len())
-
-	// The oldest (app0) should have been evicted; first available is app1
-	got, _ := q.Get()
-	q.Done(got)
-	var data string
-	_ = got.DataAs(&data)
-	assert.Equal(t, "data1", data)
-}
-
-func TestDedupeQueue_DuplicateDoesNotEvict(t *testing.T) {
-	maxSize := 3
-	q := NewDedupeQueue("test", maxSize)
-
-	ev1 := newDedupableEvent("app1_uid1", "v1")
-	ev2 := newDedupableEvent("app2_uid2", "v1")
-	ev3 := newDedupableEvent("app3_uid3", "v1")
-
-	q.Add(ev1)
-	q.Add(ev2)
-	q.Add(ev3)
-	assert.Equal(t, maxSize, q.Len())
-
-	// Re-adding app1 (deduplicate) should NOT evict anything
-	ev1Updated := newDedupableEvent("app1_uid1", "v2")
-	q.Add(ev1Updated)
-	assert.Equal(t, maxSize, q.Len())
-
-	// All three resources should still be present
-	got1, _ := q.Get()
-	q.Done(got1)
-	got2, _ := q.Get()
-	q.Done(got2)
-	got3, _ := q.Get()
-	q.Done(got3)
-
-	resources := []string{
-		internalevent.ResourceID(got1),
-		internalevent.ResourceID(got2),
-		internalevent.ResourceID(got3),
-	}
-	assert.Contains(t, resources, "app1_uid1")
-	assert.Contains(t, resources, "app2_uid2")
-	assert.Contains(t, resources, "app3_uid3")
+	assert.Equal(t, 100, q.Len())
 }
 
 func TestDedupeQueue_GetReturnsLatestAfterMultipleUpdates(t *testing.T) {
-	q := NewDedupeQueue("test", 100)
+	q := NewDedupeQueue("test")
 
 	for i := 0; i < 10; i++ {
 		ev := newDedupableEvent("app1_uid1", fmt.Sprintf("version-%d", i))
@@ -221,7 +172,7 @@ func TestDedupeQueue_GetReturnsLatestAfterMultipleUpdates(t *testing.T) {
 }
 
 func TestDedupeQueue_Done(t *testing.T) {
-	q := NewDedupeQueue("test", 100)
+	q := NewDedupeQueue("test")
 
 	ev := newDedupableEvent("app1_uid1", "v1")
 	q.Add(ev)
@@ -236,8 +187,43 @@ func TestDedupeQueue_Done(t *testing.T) {
 	assert.Equal(t, 1, q.Len())
 }
 
+func TestDedupeQueue_DoneDoesNotEvictNewerEvent(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	ev1 := newDedupableEvent("app1_uid1", "v1")
+	q.Add(ev1)
+
+	// Simulate processing: Get ev1
+	got, _ := q.Get()
+	assert.Equal(t, ev1, got)
+
+	// Add newer events for the same key
+	for i := 2; i <= 5; i++ {
+		ev := newDedupableEvent("app1_uid1", fmt.Sprintf("v%d", i))
+		q.Add(ev)
+	}
+
+	// The workqueue is empty because the latest event is being processed
+	// new events are deferred until the latest event is processed
+	assert.Equal(t, 0, q.Len())
+
+	// Done(ev1) must NOT destroy the pending latest event
+	q.Done(got)
+
+	assert.Equal(t, 1, q.Len())
+
+	// The workqueue re-queues the key (it was dirty), so Get should return the latest event
+	got2, shutdown := q.Get()
+	assert.False(t, shutdown)
+	require.NotNil(t, got2)
+
+	var data string
+	_ = got2.DataAs(&data)
+	assert.Equal(t, "v5", data)
+}
+
 func TestDedupeQueue_ShutDown(t *testing.T) {
-	q := NewDedupeQueue("test", 100)
+	q := NewDedupeQueue("test")
 
 	ev := newDedupableEvent("app1_uid1", "v1")
 	q.Add(ev)
@@ -256,12 +242,12 @@ func TestDedupeQueue_ShutDown(t *testing.T) {
 }
 
 func TestDedupeQueue_EmptyQueueLen(t *testing.T) {
-	q := NewDedupeQueue("test", 100)
+	q := NewDedupeQueue("test")
 	assert.Equal(t, 0, q.Len())
 }
 
 func TestDedupeQueue_MixedDedupableAndNonDedupable(t *testing.T) {
-	q := NewDedupeQueue("test", 100)
+	q := NewDedupeQueue("test")
 
 	spec1 := newDedupableEvent("app1_uid1", "spec-v1")
 	spec2 := newDedupableEvent("app1_uid1", "spec-v2")
@@ -276,7 +262,7 @@ func TestDedupeQueue_MixedDedupableAndNonDedupable(t *testing.T) {
 }
 
 func TestDedupeQueue_NotifyOnAdd(t *testing.T) {
-	dq := NewDedupeQueue("test", 100).(*dedupeQueue)
+	dq := NewDedupeQueue("test").(*dedupeQueue)
 
 	ev := newDedupableEvent("app1_uid1", "v1")
 	q := dq
@@ -291,7 +277,7 @@ func TestDedupeQueue_NotifyOnAdd(t *testing.T) {
 }
 
 func TestDedupeQueue_ConcurrentAdds(t *testing.T) {
-	q := NewDedupeQueue("test", 1000)
+	q := NewDedupeQueue("test")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
@@ -308,7 +294,7 @@ func TestDedupeQueue_ConcurrentAdds(t *testing.T) {
 }
 
 func TestDedupeQueue_ConcurrentDeduplication(t *testing.T) {
-	q := NewDedupeQueue("test", 1000)
+	q := NewDedupeQueue("test")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {

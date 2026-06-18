@@ -19,10 +19,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/argoproj-labs/argocd-agent/internal/config"
-	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"k8s.io/client-go/util/workqueue"
 )
 
 var _ QueuePair = &SendRecvQueues{}
@@ -49,49 +46,9 @@ type QueuePair interface {
 	Delete(name string, shutdown bool) error
 }
 
-const (
-	// defaultMaxQueueSize is the max number of items that the workqueue can hold.
-	defaultMaxQueueSize int = 1000
-)
-
 type queuepair struct {
 	recvq WorkQueue
 	sendq WorkQueue
-}
-
-type boundedQueue struct {
-	workqueue.TypedRateLimitingInterface[*event.Event]
-	maxSize int
-	notify  chan struct{}
-	name    string
-}
-
-func newBoundedQueue(maxSize int, name string) *boundedQueue {
-	rateLimiter := workqueue.DefaultTypedControllerRateLimiter[*event.Event]()
-	return &boundedQueue{
-		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig(rateLimiter,
-			workqueue.TypedRateLimitingQueueConfig[*event.Event]{Name: name}),
-		maxSize: maxSize,
-		notify:  make(chan struct{}, 10),
-		name:    name,
-	}
-}
-
-func (bq *boundedQueue) Add(item *event.Event) {
-	// We pop the oldest item if the size is going to exceed maxSize.
-	if bq.Len() == bq.maxSize {
-		old, _ := bq.Get()
-		bq.Done(old)
-	}
-	bq.TypedRateLimitingInterface.Add(item)
-
-	// Notify any waiting goroutines that an item has been added to the queue.
-	select {
-	case bq.notify <- struct{}{}:
-	default:
-		// We don't want to block the caller if the notify channel is full.
-		return
-	}
 }
 
 type SendRecvQueues struct {
@@ -168,22 +125,10 @@ func (q *SendRecvQueues) Create(name string) error {
 	if ok {
 		return fmt.Errorf("cannot initialize queue for %s: queue already exists", name)
 	}
-	recvQueueSize := env.NumWithDefault(config.EnvRecvQueueSize, func(size int) error {
-		if size <= 0 {
-			return fmt.Errorf("queue size must be greater than 0")
-		}
-		return nil
-	}, defaultMaxQueueSize)
-	sendQueueSize := env.NumWithDefault(config.EnvSendQueueSize, func(size int) error {
-		if size <= 0 {
-			return fmt.Errorf("queue size must be greater than 0")
-		}
-		return nil
-	}, defaultMaxQueueSize)
 	qp := &queuepair{}
 
-	qp.sendq = NewDedupeQueue(name+"-send", sendQueueSize)
-	qp.recvq = NewDedupeQueue(name+"-recv", recvQueueSize)
+	qp.sendq = NewDedupeQueue(name + "-send")
+	qp.recvq = NewDedupeQueue(name + "-recv")
 	q.queues[name] = qp
 
 	return nil
