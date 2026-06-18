@@ -87,8 +87,6 @@ func (q *reorderQueue[T]) Len() int {
 type dedupeQueue struct {
 	queue workqueue.TypedRateLimitingInterface[EventKey]
 
-	maxSize int
-
 	mu           sync.Mutex
 	latestEvents map[EventKey]*event.Event
 	eventKeys    map[*event.Event]EventKey
@@ -96,7 +94,7 @@ type dedupeQueue struct {
 	notify chan struct{}
 }
 
-func NewDedupeQueue(name string, maxSize int) WorkQueue {
+func NewDedupeQueue(name string) WorkQueue {
 	baseQueue := workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[EventKey]{
 		Name:  name,
 		Queue: newReorderQueue[EventKey](),
@@ -115,7 +113,6 @@ func NewDedupeQueue(name string, maxSize int) WorkQueue {
 
 	return &dedupeQueue{
 		queue:        queue,
-		maxSize:      maxSize,
 		latestEvents: make(map[EventKey]*event.Event),
 		eventKeys:    make(map[*event.Event]EventKey),
 		notify:       make(chan struct{}, 10),
@@ -146,30 +143,12 @@ func (q *dedupeQueue) Add(item *event.Event) {
 
 	q.mu.Lock()
 	oldEvent := q.latestEvents[key]
-	_, exists := q.latestEvents[key]
 	q.latestEvents[key] = item
 	q.eventKeys[item] = key
-	if exists && oldEvent != nil {
+	if oldEvent != nil && oldEvent != item {
 		delete(q.eventKeys, oldEvent)
 	}
 	q.mu.Unlock()
-
-	// Only evict when this is a genuinely new key. If the key already
-	// exists the workqueue will update it in-place (Touch) without
-	// growing, so evicting would incorrectly shrink the queue.
-	if !exists && q.queue.Len() == q.maxSize {
-		oldest, shutdown := q.queue.Get()
-		if !shutdown {
-			q.mu.Lock()
-			evicted := q.latestEvents[oldest]
-			delete(q.latestEvents, oldest)
-			if evicted != nil {
-				delete(q.eventKeys, evicted)
-			}
-			q.mu.Unlock()
-			q.queue.Done(oldest)
-		}
-	}
 
 	q.queue.Add(key)
 	select {
@@ -198,7 +177,10 @@ func (q *dedupeQueue) Done(item *event.Event) {
 	key, ok := q.eventKeys[item]
 	if ok {
 		delete(q.eventKeys, item)
-		delete(q.latestEvents, key)
+		// Don't remove the latest item if Done is called for an older event
+		if q.latestEvents[key] == item {
+			delete(q.latestEvents, key)
+		}
 	}
 	q.mu.Unlock()
 

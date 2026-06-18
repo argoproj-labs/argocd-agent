@@ -41,7 +41,7 @@ import (
 // newTestRecvQueue creates a RecvQueue with a single event pre-loaded, for use in
 // tests that call processRecvQueue.
 func newTestRecvQueue(ev *cloudevents.Event) queue.WorkQueue {
-	q := queue.NewDedupeQueue("cloud-events", 1000)
+	q := queue.NewDedupeQueue("cloud-events")
 	q.Add(ev)
 	return q
 }
