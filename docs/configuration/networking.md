@@ -77,10 +77,17 @@ The principal's `--keepalive-min-interval` drops connections that send pings mor
 
 The `--heartbeat-interval` option sends actual gRPC messages over the stream:
 
-**Agent:**
+**Agent (CLI):**
 
 ```bash
 argocd-agent agent --heartbeat-interval=30s
+```
+
+**Agent (Helm):**
+
+```yaml
+# values.yaml
+heartbeatInterval: "30s"
 ```
 
 **Use case:** Preventing idle connection timeouts from proxies, load balancers, and service meshes.
@@ -228,15 +235,15 @@ argocd-agent principal --redis-compression-type=gzip
 
 ### Networking Parameters
 
-| Parameter | Component | CLI Flag | Default |
-|-----------|-----------|----------|---------|
-| WebSocket | Both | `--enable-websocket` | `false` |
-| Heartbeat Interval | Agent | `--heartbeat-interval` | `0` (disabled) |
-| Keep-Alive Ping | Agent | `--keep-alive-ping-interval` | `0` (disabled) |
-| Keep-Alive Min | Principal | `--keepalive-min-interval` | `0` (disabled) |
-| Compression | Agent | `--enable-compression` | `false` |
-| Redis Compression | Principal | `--redis-compression-type` | `gzip` |
-| Plaintext Mode | Principal | `--insecure-plaintext` | `false` |
+| Parameter | Component | CLI Flag | Helm Value | Default |
+|-----------|-----------|----------|------------|---------|
+| WebSocket | Both | `--enable-websocket` | `enableWebSocket` | `false` |
+| Heartbeat Interval | Agent | `--heartbeat-interval` | `heartbeatInterval` | `""` (disabled) |
+| Keep-Alive Ping | Agent | `--keep-alive-ping-interval` | `keepAliveInterval` | `50s` |
+| Keep-Alive Min | Principal | `--keepalive-min-interval` | — | `0` (disabled) |
+| Compression | Agent | `--enable-compression` | `enableCompression` | `false` |
+| Redis Compression | Principal | `--redis-compression-type` | — | `gzip` |
+| Plaintext Mode | Principal | `--insecure-plaintext` | `tlsInsecurePlaintext` | `false` |
 
 ## Related Documentation
 
