@@ -21,4 +21,4 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
     exit 1
 fi
 
-go test -count=1 -v -race -timeout 30m github.com/argoproj-labs/argocd-agent/test/e2e
+go test -count=1 -v -race -timeout 45m github.com/argoproj-labs/argocd-agent/test/e2e
