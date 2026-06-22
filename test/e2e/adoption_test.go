@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/suite"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -140,7 +142,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsAdoptedIfExists() {
 	}, 30*time.Second, 1*time.Second)
 }
 
-func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfAnnotationIsPresent() {
+func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfPolicyIsNever() {
 	requires := suite.Require()
 
 	// Create application on managed agent with ignore annotation
@@ -227,6 +229,25 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfAnnotationIsPresen
 
 		_, exists := annotations[manager.SourceUIDAnnotation]
 		return exists
+	}, 30*time.Second, 1*time.Second)
+
+	// Check health status of principal's application, it should be degraded
+	requires.Eventually(func() bool {
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalApp, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+
+		if principalApp.Status.Health.Status != health.HealthStatusDegraded {
+			return false
+		}
+
+		if len(principalApp.Status.Conditions) == 0 {
+			return false
+		}
+
+		return principalApp.Status.Conditions[0].Type == application.AppConditionAdoptionError &&
+			principalApp.Status.Conditions[0].Message != ""
 	}, 30*time.Second, 1*time.Second)
 
 	// Manually clean up managed agent application

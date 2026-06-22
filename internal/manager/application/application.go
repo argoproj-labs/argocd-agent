@@ -31,6 +31,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	synccommon "github.com/argoproj/argo-cd/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
@@ -46,6 +47,16 @@ type (
 // LastUpdatedAnnotation is a label put on applications which contains the time
 // when an update was last received for this Application
 const LastUpdatedAnnotation = "argocd-agent.argoproj.io/last-updated"
+
+// AppConditionType defines ApplicationConditionTypes to be used to report errors on the
+// principal's application
+type AppConditionType string
+
+const (
+	// AppConditionAdoptionError is for errors related to adoption, in most cases will be due to
+	// not allowing the adoption to happen
+	AppConditionAdoptionError = "AdoptionError"
+)
 
 // ApplicationManager manages Argo CD application resources on a given backend.
 //
@@ -980,4 +991,20 @@ func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app
 
 func log() *logrus.Entry {
 	return logrus.WithField("component", "AppManager")
+}
+
+// SetErrorCondition creates a copy of the passed application where the health status is degraded with
+// a condition type and a message within that explains the error
+func SetErrorCondition(app *v1alpha1.Application, condition AppConditionType, message string) *v1alpha1.Application {
+	appCopy := app.DeepCopy()
+	appCopy.Status.Health = v1alpha1.AppHealthStatus{
+		Status: health.HealthStatusDegraded,
+	}
+	appCopy.Status.Conditions = []v1alpha1.ApplicationCondition{
+		{
+			Type:    v1alpha1.ApplicationConditionType(condition),
+			Message: message,
+		},
+	}
+	return appCopy
 }

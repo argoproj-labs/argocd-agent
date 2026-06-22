@@ -22,6 +22,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -169,6 +170,26 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	tracing.InjectTraceContext(ctx, ev)
 	q.Add(ev)
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added app delete event to send queue")
+}
+
+// addAppErrorToQueue copies an application and adds error information and then puts it in the send queue
+func (a *Agent) addAppErrorToQueue(app *v1alpha1.Application, condition application.AppConditionType, message string) {
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "AppError").WithField(logfields.Application, app.QualifiedName())
+	errorApp := application.SetErrorCondition(app, condition, message)
+
+	ctx, span := a.startSpan("error", "Application", errorApp)
+	defer span.End()
+
+	q := a.queues.SendQ(defaultQueueName)
+	if q == nil {
+		logCtx.Error("Queue not found!")
+		return
+	}
+
+	ev := a.emitter.ApplicationEvent(event.Error, errorApp)
+	tracing.InjectTraceContext(ctx, ev)
+	q.Add(ev)
+	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added app error event to send queue")
 }
 
 // recreateTransform returns a pre-create transform that applies the configured

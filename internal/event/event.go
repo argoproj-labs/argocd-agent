@@ -61,6 +61,7 @@ const (
 	EventRequestResourceResync EventType = targets.TypePrefix + ".request-resource-resync"
 	ClusterCacheInfoUpdate     EventType = targets.TypePrefix + ".cluster-cache-info-update"
 	TerminalRequest            EventType = targets.TypePrefix + ".terminal-request"
+	Error                      EventType = targets.TypePrefix + ".error"
 )
 
 const (

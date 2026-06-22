@@ -340,6 +340,7 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 			}
 		case manager.AdoptionPolicyNever:
 			logCtx.WithField(logfields.Application, incomingApp.GetName()).Info("Existing application is set to not be adopted")
+			a.addAppErrorToQueue(incomingApp, application.AppConditionAdoptionError, "Application that was to be created matches an existing application on the principal and the adoption policy is set to \"never\"")
 		}
 		return nil
 	default:

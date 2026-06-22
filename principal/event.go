@@ -379,6 +379,18 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		} else {
 			return fmt.Errorf("unexpected agent mode")
 		}
+	// Application errors should only happen in managed mode
+	case event.Error.String():
+		if !agentMode.IsManaged() {
+			logCtx.Debug("Discarding event, because agent is not in managed mode")
+			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
+		}
+
+		_, err := s.appManager.UpdateStatus(ctx, agentName, incoming)
+		if err != nil {
+			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
+		}
+		logCtx.Infof("Error status set on application %s", incoming.QualifiedName())
 	default:
 		return fmt.Errorf("unable to process event of type %s", ev.Type())
 	}
