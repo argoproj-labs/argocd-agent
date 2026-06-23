@@ -476,36 +476,47 @@ func GetArgoCDServerEndpoint(k8sClient KubeClient) (string, error) {
 
 // CreateApplication creates a new application in ArgoCD
 func (c *ArgoRestClient) CreateApplication(app *v1alpha1.Application) (*v1alpha1.Application, error) {
-	reqURL := c.url()
-	reqURL.Path = "/api/v1/applications"
 	appBytes, err := json.Marshal(app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal application: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, reqURL.String(), bytes.NewBuffer(appBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
+	var lastErr error
+	deadline := time.Now().Add(45 * time.Second)
 
-	resp, err := c.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create application: %w", err)
-	}
-	defer resp.Body.Close()
+	for time.Now().Before(deadline) {
+		reqURL := c.url()
+		reqURL.Path = "/api/v1/applications"
 
-	if resp.StatusCode != http.StatusOK {
+		req, err := http.NewRequest(http.MethodPost, reqURL.String(), bytes.NewBuffer(appBytes))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create application: %w", err)
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to create application: status %d, body: %s", resp.StatusCode, string(body))
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			var createdApp v1alpha1.Application
+			if err := json.Unmarshal(body, &createdApp); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal created application: %w", err)
+			}
+			return &createdApp, nil
+		}
+
+		lastErr = fmt.Errorf("failed to create application: status %d, body: %s", resp.StatusCode, string(body))
+		time.Sleep(3 * time.Second)
 	}
 
-	var createdApp v1alpha1.Application
-	if err := json.NewDecoder(resp.Body).Decode(&createdApp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal created application: %w", err)
-	}
-
-	return &createdApp, nil
+	return nil, lastErr
 }
 
 // GetApplication retrieves an application by its name
