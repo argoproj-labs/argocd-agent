@@ -36,6 +36,7 @@ func Test_addAppCreationToQueue(t *testing.T) {
 		require.Equal(t, 1, a.queues.SendQ(defaultQueueName).Len())
 		ev, _ := a.queues.SendQ(defaultQueueName).Get()
 		assert.NotNil(t, ev)
+		a.queues.SendQ(defaultQueueName).Done(ev)
 		// Queue should be empty after get
 		assert.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
 
@@ -103,6 +104,7 @@ func Test_addAppUpdateToQueue(t *testing.T) {
 
 		ev, _ := a.queues.SendQ(defaultQueueName).Get()
 		require.NotNil(t, ev)
+		a.queues.SendQ(defaultQueueName).Done(ev)
 		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
 	})
 
@@ -116,6 +118,7 @@ func Test_addAppUpdateToQueue(t *testing.T) {
 
 		ev, _ := a.queues.SendQ(defaultQueueName).Get()
 		require.NotNil(t, ev)
+		a.queues.SendQ(defaultQueueName).Done(ev)
 		assert.Equal(t, event.StatusUpdate.String(), ev.Type())
 	})
 
@@ -230,6 +233,7 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 		assert.Equal(t, 1, testAgent.queues.SendQ(defaultQueueName).Len())
 		ev, _ := testAgent.queues.SendQ(defaultQueueName).Get()
 		assert.Equal(t, event.Delete.String(), ev.Type())
+		testAgent.queues.SendQ(defaultQueueName).Done(ev)
 	})
 }
 
@@ -402,6 +406,7 @@ func Test_addAppProjectUpdateToQueue(t *testing.T) {
 		ev, _ := a.queues.SendQ(defaultQueueName).Get()
 		require.NotNil(t, ev)
 		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+		a.queues.SendQ(defaultQueueName).Done(ev)
 	})
 
 	t.Run("Update event for managed agent", func(t *testing.T) {
@@ -508,6 +513,7 @@ func Test_addAppProjectDeletionToQueue(t *testing.T) {
 
 		ev, _ := a.queues.SendQ(defaultQueueName).Get()
 		assert.Equal(t, event.Delete.String(), ev.Type())
+		a.queues.SendQ(defaultQueueName).Done(ev)
 		require.False(t, a.projectManager.IsManaged("test-project"))
 	})
 }
