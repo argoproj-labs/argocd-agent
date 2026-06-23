@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 )
@@ -629,7 +630,7 @@ func isSensitiveEvent(ev *cloudevents.Event) bool {
 	case targets.Resource:
 		return ev.Type() != "GET"
 	case targets.Redis:
-		return strings.HasSuffix(ev.Type(), "redis-response")
+		return !strings.HasSuffix(ev.Type(), event.RedisGenericRequest.String()) // only redis request is non-sensitive
 	}
 	return false
 }
