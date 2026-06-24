@@ -85,7 +85,7 @@ func (q *reorderQueue[T]) Len() int {
 }
 
 type dedupeQueue struct {
-	queue workqueue.TypedRateLimitingInterface[EventKey]
+	queue workqueue.TypedInterface[EventKey]
 
 	mu           sync.Mutex
 	latestEvents map[EventKey]*event.Event
@@ -95,24 +95,12 @@ type dedupeQueue struct {
 }
 
 func NewDedupeQueue(name string) WorkQueue {
-	baseQueue := workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[EventKey]{
-		Name:  name,
-		Queue: newReorderQueue[EventKey](),
-	})
-
-	delayingQueue := workqueue.NewTypedDelayingQueueWithConfig(workqueue.TypedDelayingQueueConfig[EventKey]{
-		Queue: baseQueue,
-	})
-
-	queue := workqueue.NewTypedRateLimitingQueueWithConfig(
-		workqueue.DefaultTypedControllerRateLimiter[EventKey](),
-		workqueue.TypedRateLimitingQueueConfig[EventKey]{
-			DelayingQueue: delayingQueue,
-		},
-	)
-
 	return &dedupeQueue{
-		queue:        queue,
+		queue: workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[EventKey]{
+			Name: name,
+			// Use a custom internal queue that removes duplicates and reorders new items to the tail.
+			Queue: newReorderQueue[EventKey](),
+		}),
 		latestEvents: make(map[EventKey]*event.Event),
 		eventKeys:    make(map[*event.Event]EventKey),
 		notify:       make(chan struct{}, 10),
@@ -159,17 +147,27 @@ func (q *dedupeQueue) Add(item *event.Event) {
 }
 
 func (q *dedupeQueue) Get() (*event.Event, bool) {
-	key, shutdown := q.queue.Get()
-	if shutdown {
-		return nil, shutdown
+	for {
+		key, shutdown := q.queue.Get()
+		if shutdown {
+			return nil, true
+		}
+
+		q.mu.Lock()
+		ev := q.latestEvents[key]
+		delete(q.latestEvents, key)
+		q.mu.Unlock()
+
+		if ev != nil {
+			return ev, false
+		}
+
+		// Phantom key: the workqueue's dirty-set re-pushed this key after
+		// Done(), but the event data was already consumed by a prior Get()
+		// that raced with a concurrent Add() for the same dedup key.
+		// Release the key from the processing set so it doesn't get stuck.
+		q.queue.Done(key)
 	}
-
-	q.mu.Lock()
-	ev := q.latestEvents[key]
-	delete(q.latestEvents, key)
-	q.mu.Unlock()
-
-	return ev, shutdown
 }
 
 func (q *dedupeQueue) Done(item *event.Event) {
