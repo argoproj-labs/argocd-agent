@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	internalevent "github.com/argoproj-labs/argocd-agent/internal/event"
 	cloudevents "github.com/cloudevents/sdk-go/v2/event"
@@ -311,6 +312,65 @@ func TestDedupeQueue_ConcurrentDeduplication(t *testing.T) {
 
 	got, _ := q.Get()
 	require.NotNil(t, got)
+}
+
+func TestDedupeQueue_GetSkipsPhantomKey(t *testing.T) {
+	dq := NewDedupeQueue("test").(*dedupeQueue)
+
+	// Inject a phantom: add a key directly to the workqueue with no
+	// corresponding entry in latestEvents. This is the exact state produced
+	// by the dirty-set race between concurrent Add() and Get().
+	phantomKey := EventKey{ResourceID: "phantom_uid", EventType: internalevent.SpecUpdate.String()}
+	dq.queue.Add(phantomKey)
+
+	// Add a real event (different resource) that sits behind the phantom
+	realEv := newDedupableEvent("real_uid", "real-data")
+	dq.Add(realEv)
+
+	// Get must skip the phantom and return the real event
+	got, shutdown := dq.Get()
+	assert.False(t, shutdown)
+	require.NotNil(t, got, "Get() must skip phantom keys and return real events")
+
+	var data string
+	_ = got.DataAs(&data)
+	assert.Equal(t, "real-data", data)
+	dq.Done(got)
+}
+
+func TestDedupeQueue_PhantomKeyDoesNotBlockSameResource(t *testing.T) {
+	dq := NewDedupeQueue("test").(*dedupeQueue)
+
+	// Inject a phantom key for app1
+	phantomKey := EventKey{ResourceID: "app1_uid1", EventType: internalevent.SpecUpdate.String()}
+	dq.queue.Add(phantomKey)
+
+	// Start Get() in a goroutine — it will clean up the phantom and then
+	// block waiting for the next real item.
+	gotCh := make(chan *cloudevents.Event, 1)
+	go func() {
+		got, _ := dq.Get()
+		gotCh <- got
+	}()
+
+	// Give Get() time to encounter and clean up the phantom
+	time.Sleep(50 * time.Millisecond)
+
+	// Add a real event for the SAME resource. If the phantom key were stuck
+	// in the processing set, this Add would never be delivered.
+	realEv := newDedupableEvent("app1_uid1", "v1")
+	dq.Add(realEv)
+
+	select {
+	case got := <-gotCh:
+		require.NotNil(t, got, "Get() must not be stuck by a phantom key")
+		var data string
+		_ = got.DataAs(&data)
+		assert.Equal(t, "v1", data)
+		dq.Done(got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Get() is stuck — phantom key was not released from processing set")
+	}
 }
 
 func TestReorderQueue_Push_Pop(t *testing.T) {
