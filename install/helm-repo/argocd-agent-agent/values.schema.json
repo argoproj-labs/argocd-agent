@@ -173,7 +173,7 @@
     },
     "heartbeatInterval": {
       "default": "",
-      "description": "Heartbeat ping interval for the gRPC Subscribe stream. Keeps connections alive through proxies that terminate idle TCP connections (e.g. Istio Ambient Mesh). Recommended: 30s. Empty string disables heartbeats.",
+      "description": "Heartbeat ping interval for the gRPC Subscribe stream. Keeps connections alive through proxies that terminate idle TCP connections (e.g. Istio Ambient Mesh). Empty string disables heartbeats.",
       "pattern": "^$|^[-+]?([0-9]*(\\.[0-9]+)?[a-z]+)+$",
       "title": "heartbeatInterval",
       "type": "string"
