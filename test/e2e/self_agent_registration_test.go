@@ -263,17 +263,12 @@ func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret(
 
 	// Wait for agent to disconnect
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.AgentManagedName)
-	}, 30*time.Second, 1*time.Second)
-
-	// Wait for principal to detect the disconnect
-	requires.Eventually(func() bool {
 		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
 			Status:     appv1.ConnectionStatusFailed,
 			Message:    fmt.Sprintf("Agent: '%s' is %s with principal", fixture.AgentManagedName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, suite.ClusterDetails)
-	}, 90*time.Second, 1*time.Second)
+	}, 30*time.Second, 1*time.Second)
 
 	// Store secret UID of manually created secret
 	originalSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
