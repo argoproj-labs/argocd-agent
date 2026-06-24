@@ -56,7 +56,12 @@ fi
 ARGOCD_AGENT_RESOURCE_PROXY=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
 export ARGOCD_AGENT_RESOURCE_PROXY
 
-go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent principal \
+RACE_FLAG=""
+if [ "${ENABLE_DATA_RACE_DETECTOR}" = "true" ]; then
+    RACE_FLAG="-race"
+fi
+
+go run ${RACE_FLAG} github.com/argoproj-labs/argocd-agent/cmd/argocd-agent principal \
 	--allowed-namespaces '*' \
 	--kubecontext vcluster-control-plane \
 	--log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} \
