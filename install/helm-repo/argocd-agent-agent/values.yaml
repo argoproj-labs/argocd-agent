@@ -198,11 +198,7 @@ cacheRefreshInterval: "10s"
 informerSyncTimeout: "10s"
 # -- Keep-alive interval for connections.
 keepAliveInterval: "50s"
-# -- Heartbeat interval for the gRPC Subscribe stream. Sends periodic pings to
-# keep the connection alive through proxies that terminate idle TCP connections
-# (e.g. Istio Ambient Mesh kills streams idle > 65s). Recommended: "30s".
-# Corresponds to --heartbeat-interval / ARGOCD_AGENT_HEARTBEAT_INTERVAL.
-# Empty string disables heartbeats (default behavior unchanged).
+# -- Heartbeat interval for the gRPC Subscribe stream. See docs for details.
 heartbeatInterval: ""
 # -- Path to the TLS client key.
 tlsClientKeyPath: ""

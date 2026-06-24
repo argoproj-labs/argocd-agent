@@ -40,7 +40,7 @@ Kubernetes: `>=1.24.0-0`
 | enableWebSocket | bool | `false` | Whether to enable WebSocket connections. |
 | fullnameOverride | string | `""` | Override the fully-qualified resource name (defaults to `<release>-agent-helm`). |
 | healthzPort | string | `"8002"` | Healthz server port exposed by the agent. |
-| heartbeatInterval | string | `""` | Heartbeat interval for the gRPC Subscribe stream. Sends periodic pings to keep the connection alive through proxies that terminate idle TCP connections (e.g. Istio Ambient Mesh kills streams idle > 65s). Recommended: "30s". Corresponds to --heartbeat-interval / ARGOCD_AGENT_HEARTBEAT_INTERVAL. Empty string disables heartbeats (default behavior unchanged). |
+| heartbeatInterval | string | `""` | Heartbeat interval for the gRPC Subscribe stream. See docs for details. |
 | hostAliases | list | `[]` | Host aliases injected into /etc/hosts of the agent Pod. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the agent container. |
 | image.repository | string | `"ghcr.io/argoproj-labs/argocd-agent/argocd-agent"` | Container image repository for the agent. |
