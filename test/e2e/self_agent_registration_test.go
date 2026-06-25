@@ -265,13 +265,14 @@ func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret(
 
 	// Enable self agent registration
 	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
-	oldInfo, _ := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	oldInfo, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	requires.NoError(err)
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
 
 	// Stop the agent
-	err := fixture.StopProcess(fixture.AgentManagedName)
+	err = fixture.StopProcess(fixture.AgentManagedName)
 	requires.NoError(err)
 
 	// Wait for agent to disconnect
@@ -340,7 +341,8 @@ func (suite *SelfAgentRegistrationTestSuite) Test_ManuallyCreatedAndSelfRegister
 
 	// Enable self registration
 	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
-	oldInfo, _ := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	oldInfo, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	requires.NoError(err)
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
@@ -398,13 +400,14 @@ func (suite *SelfAgentRegistrationTestSuite) Test_NoSecretAndSelfRegistrationDis
 
 	// Disable self agent registration
 	_ = fixture.DisableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient)
-	oldInfo, _ := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	oldInfo, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	requires.NoError(err)
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
 
 	// Stop agent to trigger agent disconnection
-	err := fixture.StopProcess(fixture.AgentManagedName)
+	err = fixture.StopProcess(fixture.AgentManagedName)
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
