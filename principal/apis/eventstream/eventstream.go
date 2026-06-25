@@ -438,7 +438,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	if eventWriter != nil {
 		eventWriter.UpdateTarget(target)
 	} else {
-		eventWriter = event.NewEventWriter(c.agentName, target)
+		eventWriter = event.NewEventWriter(c.agentName, target, logging.GetDefaultLogger().ModuleLogger("EventWriter"))
 		if s.metrics != nil {
 			// set function to call when an event is discarded
 			eventWriter.SetOnDiscard(func(eventType, resourceType string) {
