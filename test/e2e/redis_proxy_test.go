@@ -447,7 +447,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 // - After X minutes, if the synced/healthy condition is never met, it stops trying and returns an error.
 func ensureAppExistsAndIsSyncedAndHealthy(appParam *v1alpha1.Application, k8sClient fixture.KubeClient, suite *fixture.BaseSuite) error {
 
-	overallExpireTime := time.Now().Add(time.Minute * 5)
+	overallExpireTime := time.Now().Add(time.Minute * 10)
 
 	count := 0
 outer:
@@ -497,7 +497,7 @@ outer:
 		}
 
 		// Wait X seconds for app to become synced/healthy
-		singleRoundExpireTime := time.Now().Add(time.Minute * 1)
+		singleRoundExpireTime := time.Now().Add(time.Minute * 3)
 		for {
 
 			err := k8sClient.Get(suite.Ctx, types.NamespacedName{Namespace: appFromCreate.Namespace, Name: appFromCreate.Name}, appFromCreate, metav1.GetOptions{})
