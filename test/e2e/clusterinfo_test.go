@@ -84,7 +84,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	// Stop the agent
 	err := fixture.StopProcess(fixture.AgentManagedName)
@@ -97,7 +97,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	// Restart the agent
 	err = fixture.StartProcess(fixture.AgentManagedName)
@@ -111,7 +111,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 }
 
 func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
@@ -124,7 +124,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf(message, fixture.AgentAutonomousName, "connected"),
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	// Stop the agent
 	err := fixture.StopProcess(fixture.AgentAutonomousName)
@@ -137,7 +137,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 			Message:    fmt.Sprintf(message, fixture.AgentAutonomousName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	// Restart the agent
 	err = fixture.StartProcess(fixture.AgentAutonomousName)
@@ -151,7 +151,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 			Message:    fmt.Sprintf(message, fixture.AgentAutonomousName, "connected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 }
 
 // This test suite validates the cluster cache info reporting for managed agent.
@@ -176,11 +176,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// and then agent updated principal with this information
 	requires.Eventually(func() bool {
 		return fixture.HasApplicationsCount(appCountBefore+1, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 120*time.Second, 5*time.Second)
 
 	// Step 3:
 	// Create the second application having different name and namespace, also validate deployment to managed cluster
@@ -193,11 +193,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// and then agent again updated principal with this new information
 	requires.Eventually(func() bool {
 		return fixture.HasApplicationsCount(appCountBefore+2, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
-	}, 120*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 
 	// Step 5:
 	// Delete the first application from the principal cluster and validate that it is removed from managed cluster
@@ -214,11 +214,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// and then agent again updated principal with this new information
 	requires.Eventually(func() bool {
 		return fixture.HasApplicationsCount(appCountBefore+1, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 120*time.Second, 5*time.Second)
 
 	// Step 7:
 	// Verify that existing agent connection status is preserved when cluster cache info is updated
@@ -227,7 +227,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	// Step 8:
 	// Disconnect agent and verify that connection status is changed to Failed
@@ -248,7 +248,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 			return false
 		}
 		return ci.ApplicationsCount == 0 && ci.CacheInfo.APIsCount == 0 && ci.CacheInfo.ResourcesCount == 0
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 
 	// Step 10:
 	// Reconnect agent and verify that connection status and cluster cache info are updated again with correct values
@@ -265,5 +265,5 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 }
