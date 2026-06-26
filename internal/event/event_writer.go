@@ -10,7 +10,6 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
-	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
@@ -54,6 +53,9 @@ type EventWriter struct {
 	onDiscard func(eventType, resourceType string)
 
 	log *logrus.Entry
+
+	// baseLog is log Entry but without target field; baseLog is used to regenerate the 'log' field when the target changes via 'UpdateTarget'
+	baseLog *logrus.Entry
 }
 
 type eventMessage struct {
@@ -78,13 +80,14 @@ type eventMessage struct {
 // NewEventWriter creates a new EventWriter for the given target stream.
 // If you create an EventWriter targeting the principal, an empty agentName
 // should be used.
-func NewEventWriter(agentName string, target streamWriter) *EventWriter {
+func NewEventWriter(agentName string, target streamWriter, baseLog *logrus.Entry) *EventWriter {
 	return &EventWriter{
 		unsentEvents: map[string]*eventQueue{},
 		sentEvents:   map[string]*eventMessage{},
 		target:       target,
 		agentName:    agentName,
-		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).WithField(logfields.Agent, agentName),
+		baseLog:      baseLog,
+		log:          baseLog.WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).WithField(logfields.Agent, agentName),
 	}
 }
 
@@ -92,7 +95,7 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
 	ew.target = target
-	ew.log = logging.GetDefaultLogger().ModuleLogger("EventWriter").
+	ew.log = ew.baseLog.
 		WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).
 		WithField(logfields.Agent, ew.agentName)
 

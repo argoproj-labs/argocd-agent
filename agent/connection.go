@@ -190,7 +190,7 @@ func (a *Agent) handleStreamEvents() error {
 	}()
 
 	if a.eventWriter == nil {
-		a.eventWriter = event.NewEventWriter("", stream)
+		a.eventWriter = event.NewEventWriter("", stream, logging.GetDefaultLogger().ModuleLogger("EventWriter"))
 		if a.metrics != nil {
 			// set function to call when an event is discarded
 			a.eventWriter.SetOnDiscard(func(eventType, resourceType string) {

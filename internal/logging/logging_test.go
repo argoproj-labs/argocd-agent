@@ -508,6 +508,55 @@ func TestMarshalResource(t *testing.T) {
 		assert.Equal(t, "<redacted: Secret>", result)
 		assert.NotContains(t, result, "s3cret")
 	})
+
+	t.Run("managedFields is dropped", func(t *testing.T) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-cm",
+				Namespace: "default",
+				ManagedFields: []metav1.ManagedFieldsEntry{
+					{Manager: "kubectl", Operation: metav1.ManagedFieldsOperationUpdate},
+				},
+			},
+		}
+		result := marshalResource(cm)
+		assert.Contains(t, result, "test-cm")
+		assert.NotContains(t, result, "managedFields")
+		assert.NotContains(t, result, "kubectl")
+	})
+
+	t.Run("object without managedFields passes through unchanged", func(t *testing.T) {
+		cm := newConfigMap("plain-cm", "ns")
+		result := marshalResource(cm)
+		assert.Contains(t, result, "plain-cm")
+		assert.NotContains(t, result, "managedFields")
+	})
+}
+
+func TestDropMetadataManagedFields(t *testing.T) {
+	t.Run("strips managedFields from object", func(t *testing.T) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test",
+				ManagedFields: []metav1.ManagedFieldsEntry{
+					{Manager: "controller"},
+				},
+			},
+		}
+		dropped := dropMetadataManagedFields(cm)
+		// Original should not be modified
+		assert.Len(t, cm.ManagedFields, 1)
+		// Dropped copy should have no managedFields
+		droppedCM := dropped.(*corev1.ConfigMap)
+		assert.Nil(t, droppedCM.ManagedFields)
+		assert.Equal(t, "test", droppedCM.Name)
+	})
+
+	t.Run("returns original when no managedFields", func(t *testing.T) {
+		cm := newConfigMap("no-mf", "default")
+		result := dropMetadataManagedFields(cm)
+		assert.Same(t, cm, result)
+	})
 }
 
 func TestResourceMeta(t *testing.T) {
@@ -548,11 +597,20 @@ func TestIsMetaEvent(t *testing.T) {
 
 func TestIsSensitiveEvent(t *testing.T) {
 	assert.True(t, isSensitiveEvent(newCloudEvent("", "repository", "", nil)))
-	assert.True(t, isSensitiveEvent(newCloudEvent("", "redis", "", nil)))
-	assert.True(t, isSensitiveEvent(newCloudEvent("", "resource", "", nil)))
 	assert.False(t, isSensitiveEvent(newCloudEvent("", "application", "", nil)))
 	assert.False(t, isSensitiveEvent(newCloudEvent("", "appProject", "", nil)))
 	assert.False(t, isSensitiveEvent(newCloudEvent("", "gpgkey", "", nil)))
+
+	// Resource GET requests are safe to log; other methods are sensitive
+	assert.False(t, isSensitiveEvent(newCloudEvent("GET", "resource", "", nil)))
+	assert.True(t, isSensitiveEvent(newCloudEvent("PUT", "resource", "", nil)))
+	assert.True(t, isSensitiveEvent(newCloudEvent("POST", "resource", "", nil)))
+	assert.True(t, isSensitiveEvent(newCloudEvent("PATCH", "resource", "", nil)))
+	assert.True(t, isSensitiveEvent(newCloudEvent("DELETE", "resource", "", nil)))
+
+	// Redis requests are safe to log; responses are sensitive
+	assert.False(t, isSensitiveEvent(newCloudEvent("io.argoproj.argocd-agent.event.redis-request", "redis", "", nil)))
+	assert.True(t, isSensitiveEvent(newCloudEvent("io.argoproj.argocd-agent.event.redis-response", "redis", "", nil)))
 }
 
 func TestParseEventSubject(t *testing.T) {
