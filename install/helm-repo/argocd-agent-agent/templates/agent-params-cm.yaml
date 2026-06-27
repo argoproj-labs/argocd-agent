@@ -85,6 +85,9 @@ data:
   # agent.keep-alive.interval: The keep-alive interval for connections.
   # Default: "30s"
   agent.keep-alive.interval: {{ .Values.keepAliveInterval | quote }}
+  # agent.heartbeat.interval: Heartbeat ping interval for the Subscribe stream.
+  # Default: "" (disabled)
+  agent.heartbeat.interval: {{ .Values.heartbeatInterval | quote }}
   # agent.websocket.enabled: Whether to enable WebSocket connections.
   # Default: false
   agent.websocket.enabled: {{ .Values.enableWebSocket | quote }}

@@ -177,6 +177,12 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.keep-alive.interval
                 optional: true
+          - name: ARGOCD_AGENT_HEARTBEAT_INTERVAL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.heartbeat.interval
+                optional: true
           - name: REDIS_PASSWORD
             valueFrom:
               secretKeyRef:

@@ -171,6 +171,13 @@
       "title": "keepAliveInterval",
       "type": "string"
     },
+    "heartbeatInterval": {
+      "default": "",
+      "description": "Heartbeat ping interval for the gRPC Subscribe stream. Keeps connections alive through proxies that terminate idle TCP connections (e.g. Istio Ambient Mesh). Empty string disables heartbeats.",
+      "pattern": "^$|^[-+]?([0-9]*(\\.[0-9]+)?[a-z]+)+$",
+      "title": "heartbeatInterval",
+      "type": "string"
+    },
     "logFormat": {
       "default": "text",
       "description": "Log format for the agent (text or json).",
@@ -1060,6 +1067,7 @@
     "cacheRefreshInterval",
     "informerSyncTimeout",
     "keepAliveInterval",
+    "heartbeatInterval",
     "tlsClientKeyPath",
     "tlsClientCertPath",
     "tlsRootCAPath",
