@@ -173,9 +173,9 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 }
 
 // addAppErrorToQueue copies an application and adds error information and then puts it in the send queue
-func (a *Agent) addAppErrorToQueue(app *v1alpha1.Application, condition application.AppConditionType, message string) {
+func (a *Agent) addAppErrorToQueue(app *v1alpha1.Application, message string) {
 	logCtx := a.logGrpcEvent().WithField(logfields.Event, "AppError").WithField(logfields.Application, app.QualifiedName())
-	errorApp := application.SetErrorCondition(app, condition, message)
+	errorApp := application.SetErrorCondition(app, application.AppConditionAgentError, message)
 
 	ctx, span := a.startSpan("error", "Application", errorApp)
 	defer span.End()

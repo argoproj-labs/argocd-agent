@@ -246,7 +246,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfPolicyIsNever() {
 			return false
 		}
 
-		return principalApp.Status.Conditions[0].Type == application.AppConditionAdoptionError &&
+		return string(principalApp.Status.Conditions[0].Type) == string(application.AppConditionAgentError) &&
 			principalApp.Status.Conditions[0].Message != ""
 	}, 30*time.Second, 1*time.Second)
 

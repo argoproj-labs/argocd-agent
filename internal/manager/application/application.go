@@ -52,11 +52,8 @@ const LastUpdatedAnnotation = "argocd-agent.argoproj.io/last-updated"
 // principal's application
 type AppConditionType string
 
-const (
-	// AppConditionAdoptionError is for errors related to adoption, in most cases will be due to
-	// not allowing the adoption to happen
-	AppConditionAdoptionError = "AdoptionError"
-)
+// AppConditionAgentError is the error condition for errors on the Agent side
+const AppConditionAgentError AppConditionType = "AgentError"
 
 // ApplicationManager manages Argo CD application resources on a given backend.
 //

@@ -340,7 +340,16 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 			}
 		case manager.AdoptionPolicyNever:
 			logCtx.WithField(logfields.Application, incomingApp.GetName()).Info("Existing application is set to not be adopted")
-			a.addAppErrorToQueue(incomingApp, application.AppConditionAdoptionError, "Application that was to be created matches an existing application on the principal and the adoption policy is set to \"never\"")
+			targetNamespace := a.getTargetNamespaceForApp(incomingApp)
+			a.addAppErrorToQueue(
+				incomingApp,
+				fmt.Sprintf(
+					"Application %s already exists on cluster managed by agent %s and its adoption policy is set to \"never.\" Please delete the existing Application on the agent cluster in namespace %s or change the adoption policy then recreate this app.",
+					incomingApp.Name,
+					a.namespace,
+					targetNamespace,
+				),
+			)
 		}
 		return nil
 	default:
