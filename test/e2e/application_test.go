@@ -1,7 +1,9 @@
 package e2e
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -60,9 +62,21 @@ func (s *ApplicationTestSuite) Test_ApplicationManagementAPI() {
 		},
 	}
 
-	// 1. Create Application
-	createdApp, err := s.argoClient.CreateApplication(app)
-	requires.NoError(err)
+	// CreateApplication may fail if the server's project informer cache is not synced.
+	// Retry if the error is "project does not exist".
+	var createdApp *v1alpha1.Application
+	requires.Eventually(func() bool {
+		var createErr error
+		createdApp, createErr = s.argoClient.CreateApplication(app)
+		if createErr != nil {
+			if strings.Contains(createErr.Error(), "project does not exist") {
+				s.T().Logf("Project does not exist, retrying...")
+				return false
+			}
+			requires.NoError(createErr, "failed to create application")
+		}
+		return true
+	}, 60*time.Second, 2*time.Second)
 	asserts.Equal(appName, createdApp.Name)
 
 	// 2. Get Application and verify
