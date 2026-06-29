@@ -157,8 +157,11 @@ kubectl label namespace $NAMESPACE_NAME istio-injection=enabled --context kind-$
 ### Install Argo CD for Control Plane
 Install Principal-specific Argo CD configuration.
 
+!!! note "Server-side apply required"
+    The Argo CD principal manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+
 ```bash
-kubectl apply -n $NAMESPACE_NAME \
+kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/principal?ref=$RELEASE_BRANCH" \
   --context kind-$PRINCIPAL_CLUSTER_NAME
 ```

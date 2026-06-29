@@ -64,6 +64,9 @@ kubectl create namespace argocd --context <control-plane-context>
 
 Install a customized Argo CD instance that excludes components that will run on workload clusters replacing <release-branch> with the release you wish to use:
 
+!!! note "Server-side apply required"
+    The Argo CD principal manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+
 ```bash
 # Apply the principal-specific Argo CD configuration
 kubectl apply -n argocd \
@@ -165,6 +168,7 @@ Change <release-branch> to the release you wish to use:
 
 ```bash
 kubectl apply -n argocd \
+  --server-side \
   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/principal?ref=<release-branch>' \
   --context <control-plane-context>
 ```
@@ -242,7 +246,6 @@ Replace <release-branch> with the release you wish to use:
 ```bash
 # For managed agents
 kubectl apply -n argocd \
-  --server-side \
   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-managed?ref=<release-branch>' \
   --context <workload-cluster-context>
 
