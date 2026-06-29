@@ -23,11 +23,11 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
-	wqmock "github.com/argoproj-labs/argocd-agent/test/mocks/k8s-workqueue"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
@@ -37,6 +37,14 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 )
+
+// newTestRecvQueue creates a RecvQueue with a single event pre-loaded, for use in
+// tests that call processRecvQueue.
+func newTestRecvQueue(ev *cloudevents.Event) queue.RecvQueue {
+	q := queue.NewDedupeQueueForTest(1000)
+	q.Add(ev)
+	return q
+}
 
 func Test_EventProcessorRoutesACKToMatchingQueue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -98,9 +106,7 @@ func Test_InvalidEvents(t *testing.T) {
 	t.Run("Unknown event schema", func(t *testing.T) {
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("unknown")
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
@@ -112,9 +118,7 @@ func Test_InvalidEvents(t *testing.T) {
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType("application")
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
@@ -127,9 +131,7 @@ func Test_InvalidEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
 		ev.SetData(cloudevents.ApplicationJSON, "something")
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
@@ -143,9 +145,7 @@ func Test_CreateEvents(t *testing.T) {
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
@@ -182,9 +182,7 @@ func Test_CreateEvents(t *testing.T) {
 		// Update the application before sending the event
 		app.Spec.Source.TargetRevision = "test"
 		ev.SetData(cloudevents.ApplicationJSON, app)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil), WithRedisProxyDisabled())
 		s.Start(context.Background(), make(chan error))
 		s.clusterMgr.MapCluster("argocd", &v1alpha1.Cluster{Name: "argocd", Server: "https://argocd.com"})
@@ -236,9 +234,7 @@ func Test_CreateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
 		ev.SetData(cloudevents.ApplicationJSON, app)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.clusterMgr.MapCluster("foo", &v1alpha1.Cluster{Name: "foo", Server: "https://foo.com"})
@@ -305,9 +301,7 @@ func Test_CreateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
 		ev.SetData(cloudevents.ApplicationJSON, app)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithAutoNamespaceCreate(true, "", nil), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.clusterMgr.MapCluster("agent-staging", &v1alpha1.Cluster{Name: "agent-staging", Server: "https://staging.com"})
@@ -363,9 +357,7 @@ func Test_CreateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
 		ev.SetData(cloudevents.ApplicationJSON, app)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -745,9 +737,7 @@ func Test_UpdateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.SpecUpdate.String())
 		ev.SetData(cloudevents.ApplicationJSON, upApp)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -828,9 +818,7 @@ func Test_UpdateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.SpecUpdate.String())
 		ev.SetData(cloudevents.ApplicationJSON, upApp)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -889,9 +877,7 @@ func Test_UpdateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.SpecUpdate.String())
 		ev.SetData(cloudevents.ApplicationJSON, upApp)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeManaged)
@@ -957,9 +943,7 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 			ev.SetDataSchema("application")
 			ev.SetType(event.Delete.String())
 			ev.SetData(cloudevents.ApplicationJSON, delApp)
-			wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-			wq.On("Get").Return(&ev, false)
-			wq.On("Done", &ev)
+			wq := newTestRecvQueue(&ev)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -1054,9 +1038,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("appproject")
 		ev.SetType(event.Create.String())
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 		s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		got, err := s.processRecvQueue(context.Background(), "foo", wq)
@@ -1099,9 +1081,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		ev.SetType(event.Create.String())
 		ev.SetData(cloudevents.ApplicationJSON, project)
 
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
@@ -1160,9 +1140,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		updatedProject.Name = "test" // Use original name (will be prefixed)
 		ev.SetData(cloudevents.ApplicationJSON, updatedProject)
 
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
@@ -1205,9 +1183,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		ev.SetDataSchema("appproject")
 		ev.SetType(event.Delete.String())
 		ev.SetData(cloudevents.ApplicationJSON, upApp)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
-		wq.On("Get").Return(&ev, false)
-		wq.On("Done", &ev)
+		wq := newTestRecvQueue(&ev)
 		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		require.NoError(t, err)
 		s.setAgentMode("foo", types.AgentModeManaged)
