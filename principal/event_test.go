@@ -23,6 +23,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
@@ -1659,7 +1660,7 @@ func Test_processClusterCacheInfoUpdateEvent(t *testing.T) {
 	})
 }
 
-func Test_ErrorEvents(t *testing.T) {
+func Test_ErrorEvents_Applications(t *testing.T) {
 	t.Run("Status is set to degraded with error condition on managed agent", func(t *testing.T) {
 		principalNs := "argocd"
 		agentName := "managed-agent"
@@ -1685,15 +1686,12 @@ func Test_ErrorEvents(t *testing.T) {
 
 		fac := kube.NewKubernetesFakeClientWithApps(principalNs, existingApp)
 
-		incomingApp := existingApp.DeepCopy()
-		incomingApp.Status.Health.Status = health.HealthStatusDegraded
-		incomingApp.Status.Conditions = []v1alpha1.ApplicationCondition{
-			{
-				Type: v1alpha1.ApplicationConditionType("TestCondition"),
-				Message: "error message",
-			},
+		errData := event.ErrorData{
+			ResoureName: "test",
+			ResourceNamespace: agentName,
+			Message: "error message",
 		}
-
+		
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
@@ -1706,18 +1704,18 @@ func Test_ErrorEvents(t *testing.T) {
 		s.setAgentMode(agentName, types.AgentModeManaged)
 
 		ev := cloudevents.NewEvent()
-		ev.SetDataSchema("application")
-		ev.SetType(event.Error.String())
-		ev.SetData(cloudevents.ApplicationJSON, incomingApp)
+		ev.SetDataSchema(targets.Error.String())
+		ev.SetType(string(event.ApplicationError))
+		ev.SetData(cloudevents.ApplicationJSON, errData)
 
-		err = s.processApplicationEvent(ctx, agentName, &ev)
+		err = s.processErrorEvent(ctx, agentName, &ev)
 		assert.NoError(t, err)
 
 		currentApp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(agentName).Get(ctx, "test", v1.GetOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, health.HealthStatusDegraded, currentApp.Status.Health.Status)
 		assert.Len(t, currentApp.Status.Conditions, 1)
-		assert.Equal(t, v1alpha1.ApplicationConditionType("TestCondition"), currentApp.Status.Conditions[0].Type)
+		assert.Equal(t, v1alpha1.ApplicationConditionType(application.AppConditionAgentError), currentApp.Status.Conditions[0].Type)
 		assert.Equal(t, "error message", currentApp.Status.Conditions[0].Message)
 	})
 
@@ -1746,13 +1744,10 @@ func Test_ErrorEvents(t *testing.T) {
 
 		fac := kube.NewKubernetesFakeClientWithApps(principalNs, existingApp)
 
-		incomingApp := existingApp.DeepCopy()
-		incomingApp.Status.Health.Status = health.HealthStatusDegraded
-		incomingApp.Status.Conditions = []v1alpha1.ApplicationCondition{
-			{
-				Type: v1alpha1.ApplicationConditionType("TestCondition"),
-				Message: "error message",
-			},
+		errData := event.ErrorData{
+			ResoureName: "test",
+			ResourceNamespace: agentName,
+			Message: "error message",
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1767,11 +1762,11 @@ func Test_ErrorEvents(t *testing.T) {
 		s.setAgentMode(agentName, types.AgentModeAutonomous)
 
 		ev := cloudevents.NewEvent()
-		ev.SetDataSchema("application")
-		ev.SetType(event.Error.String())
-		ev.SetData(cloudevents.ApplicationJSON, incomingApp)
+		ev.SetDataSchema(targets.Error.String())
+		ev.SetType(event.ApplicationError.String())
+		ev.SetData(cloudevents.ApplicationJSON, errData)
 
-		err = s.processApplicationEvent(ctx, agentName, &ev)
+		err = s.processErrorEvent(ctx, agentName, &ev)
 		assert.Error(t, err)
 
 		currentApp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(agentName).Get(ctx, "test", v1.GetOptions{})

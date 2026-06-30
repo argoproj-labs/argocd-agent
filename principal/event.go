@@ -17,6 +17,7 @@ package principal
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
@@ -25,12 +26,14 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
@@ -131,6 +134,8 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		err = s.processClusterCacheInfoUpdateEvent(agentName, ev)
 	case targets.Heartbeat:
 		err = s.processHeartbeatEvent(agentName, ev)
+	case targets.Error:
+		err = s.processErrorEvent(ctx, agentName, ev)
 	default:
 		err = fmt.Errorf("unknown target: '%s'", target)
 	}
@@ -379,18 +384,6 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		} else {
 			return fmt.Errorf("unexpected agent mode")
 		}
-	// Application errors should only happen in managed mode
-	case event.Error.String():
-		if !agentMode.IsManaged() {
-			logCtx.Debug("Discarding event, because agent is not in managed mode")
-			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
-		}
-
-		_, err := s.appManager.UpdateStatus(ctx, agentName, incoming)
-		if err != nil {
-			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
-		}
-		logCtx.Infof("Error status set on application %s", incoming.QualifiedName())
 	default:
 		return fmt.Errorf("unable to process event of type %s", ev.Type())
 	}
@@ -644,6 +637,68 @@ func (s *Server) processResourceEventResponse(ctx context.Context, agentName str
 	err = safeSendCloudEvent(ctx, evChan, ev)
 
 	return err
+}
+
+func (s *Server) processErrorEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
+	errData := &event.ErrorData{}
+	err := ev.DataAs(errData)
+	if err != nil {
+		return err
+	}
+
+	agentMode := s.agentMode(agentName)
+
+	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
+		"module":   "QueueProcessor",
+		"client":   agentName,
+		"mode":     agentMode.String(),
+		"event":    ev.Type(),
+		"event_id": event.EventID(ev),
+	})
+
+	message := strings.ReplaceAll(errData.Message, event.ErrorMessageAgentNamePlaceholder, agentName)
+
+	switch ev.Type() {
+	case event.ApplicationError.String():
+		if !agentMode.IsManaged() {
+			logCtx.Debug("Discarding event, because agent is not in managed mode")
+			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
+		}
+
+		if s.destinationBasedMapping {
+			if errData.ResourceNamespace == s.agentNamespace(agentName) {
+				errData.ResourceNamespace = s.namespace
+			}
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      errData.ResoureName,
+				Namespace: errData.ResourceNamespace,
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Health: v1alpha1.AppHealthStatus{
+					Status: health.HealthStatusDegraded,
+				},
+				Conditions: []v1alpha1.ApplicationCondition{
+					{
+						Type:    string(application.AppConditionAgentError),
+						Message: message,
+					},
+				},
+			},
+		}
+
+		_, err := s.appManager.UpdateStatus(ctx, agentName, app)
+		if err != nil {
+			return fmt.Errorf("could not update application status for %s: %w", app.QualifiedName(), err)
+		}
+
+	default:
+		return fmt.Errorf("unable to process event of type %s", ev.Type())
+	}
+
+	return nil
 }
 
 // safeSendCloudEvent attempts to send a CloudEvent on a channel.

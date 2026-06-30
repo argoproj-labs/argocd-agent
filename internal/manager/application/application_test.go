@@ -32,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 
-	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	synccommon "github.com/argoproj/argo-cd/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
@@ -1199,24 +1198,4 @@ func Test_ClearOperationState(t *testing.T) {
 		assert.Contains(t, err.Error(), "patch failed")
 		mockedBackend.AssertExpectations(t)
 	})
-}
-
-func Test_SetErrorCondition(t *testing.T) {
-	app := &v1alpha1.Application{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      "guestbook",
-			Namespace: "argocd",
-		},
-		Status: v1alpha1.ApplicationStatus{
-			Health: v1alpha1.AppHealthStatus{
-				Status: health.HealthStatusHealthy,
-			},
-		},
-	}
-
-	errorApp := SetErrorCondition(app, "test", "test error message")
-	assert.Equal(t, health.HealthStatusDegraded, errorApp.Status.Health.Status, "returned app's health status should be degraded")
-	assert.Len(t, errorApp.Status.Conditions, 1, "conditions should have content")
-	assert.Equal(t, "test", errorApp.Status.Conditions[0].Type, "condition type was not set correctly")
-	assert.Equal(t, "test error message", errorApp.Status.Conditions[0].Message, "condition message was not set correctly")
 }

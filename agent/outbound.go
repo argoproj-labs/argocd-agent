@@ -22,7 +22,6 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
-	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -170,26 +169,6 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	tracing.InjectTraceContext(ctx, ev)
 	q.Add(ev)
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added app delete event to send queue")
-}
-
-// addAppErrorToQueue copies an application and adds error information and then puts it in the send queue
-func (a *Agent) addAppErrorToQueue(app *v1alpha1.Application, message string) {
-	logCtx := a.logGrpcEvent().WithField(logfields.Event, "AppError").WithField(logfields.Application, app.QualifiedName())
-	errorApp := application.SetErrorCondition(app, application.AppConditionAgentError, message)
-
-	ctx, span := a.startSpan("error", "Application", errorApp)
-	defer span.End()
-
-	q := a.queues.SendQ(defaultQueueName)
-	if q == nil {
-		logCtx.Error("Queue not found!")
-		return
-	}
-
-	ev := a.emitter.ApplicationEvent(event.Error, errorApp)
-	tracing.InjectTraceContext(ctx, ev)
-	q.Add(ev)
-	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added app error event to send queue")
 }
 
 // recreateTransform returns a pre-create transform that applies the configured
@@ -378,6 +357,25 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 	tracing.InjectTraceContext(ctx, ev)
 	q.Add(ev)
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject delete event to send queue")
+}
+
+// addErrorEventToQueue is used to report errors to the principal by putting an
+// error event on the send queue
+func (a *Agent) addErrorEventToQueue(errType event.EventType, errData *event.ErrorData) error {
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "Error").WithField("ErrorType", errType.String())
+
+	q := a.queues.SendQ(defaultQueueName)
+	if q == nil {
+		return fmt.Errorf("send queue not found")
+	}
+
+	ev, err := a.emitter.ErrorEvent(errType, errData)
+	if err != nil {
+		return err
+	}
+	q.Add(ev)
+	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added error event to send queue")
+	return nil
 }
 
 // addClusterCacheInfoUpdateToQueue processes a cluster cache info update event
