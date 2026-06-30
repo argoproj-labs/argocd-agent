@@ -470,6 +470,23 @@ func (a *Agent) getAvailableAPIs(ctx context.Context, group, version string) (*u
 	return &unstructured.Unstructured{Object: obj}, nil
 }
 
+// inferOwnerReferences returns synthetic owner references for resources where
+// Kubernetes ownerReferences are missing but the parent relationship is known
+// from other metadata. Mirrors gitops-engine's resolveResourceReferences logic.
+func inferOwnerReferences(res *unstructured.Unstructured) []v1.OwnerReference {
+	gvk := res.GroupVersionKind()
+	if gvk.Group == "operators.coreos.com" && gvk.Kind == "ClusterServiceVersion" {
+		if ogName := res.GetAnnotations()["olm.operatorGroup"]; ogName != "" {
+			return []v1.OwnerReference{{
+				APIVersion: "operators.coreos.com/v1",
+				Kind:       "OperatorGroup",
+				Name:       ogName,
+			}}
+		}
+	}
+	return nil
+}
+
 // isResourceManaged checks whether a given resource is considered to be
 // managed by an Argo CD application using the provided tracking reader.
 func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructured, maxRecurse int, trackingReader *ResourceTrackingReader) (bool, error) {
@@ -482,6 +499,7 @@ func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructur
 	// to be managed by Argo CD. At this point in time, we do not care about
 	// the particular details of the managing app.
 	refs := res.GetOwnerReferences()
+	refs = append(refs, inferOwnerReferences(res)...)
 	lbls := res.GetLabels()
 	annt := res.GetAnnotations()
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	agentkube "github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -22,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakediscovery "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -435,6 +437,127 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		assert.False(t, isOwned)
 		assert.NoError(t, err)
 	})
+
+	t.Run("OLM ClusterServiceVersion resolves via olm.operatorGroup annotation", func(t *testing.T) {
+		og := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1",
+			"kind":       "OperatorGroup",
+			"metadata": map[string]any{
+				"name":      "my-operator",
+				"namespace": "operators",
+				"labels": map[string]any{
+					"app.kubernetes.io/instance": "some-app",
+				},
+			},
+		}}
+		csv := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "my-operator.v1.0.0",
+				"namespace": "operators",
+				"annotations": map[string]any{
+					"olm.operatorGroup": "my-operator",
+				},
+			},
+		}}
+		kubeclient := newOLMFakeClient(og, csv)
+
+		isOwned, err := isResourceManaged(kubeclient, csv, 5, labelTrackingReader)
+		assert.True(t, isOwned)
+		assert.NoError(t, err)
+	})
+
+	t.Run("OLM descendant chain resolves through ClusterServiceVersion", func(t *testing.T) {
+		og := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1",
+			"kind":       "OperatorGroup",
+			"metadata": map[string]any{
+				"name":      "my-operator",
+				"namespace": "operators",
+				"labels": map[string]any{
+					"app.kubernetes.io/instance": "some-app",
+				},
+			},
+		}}
+		csv := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "my-operator.v1.0.0",
+				"namespace": "operators",
+				"annotations": map[string]any{
+					"olm.operatorGroup": "my-operator",
+				},
+			},
+		}}
+		depl := &appsv1.Deployment{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "my-operator-controller",
+				Namespace: "operators",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "operators.coreos.com/v1alpha1",
+						Kind:       "ClusterServiceVersion",
+						Name:       "my-operator.v1.0.0",
+					},
+				},
+			},
+		}
+		pod := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "my-operator-pod",
+				Namespace: "operators",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "Deployment",
+						Name:       "my-operator-controller",
+					},
+				},
+			},
+		}
+		kubeclient := newOLMFakeClient(og, csv, depl, pod)
+
+		isOwned, err := isResourceManaged(kubeclient, objToUnstructured(pod), 5, labelTrackingReader)
+		assert.True(t, isOwned)
+		assert.NoError(t, err)
+	})
+
+	t.Run("OLM ClusterServiceVersion without annotation is not managed", func(t *testing.T) {
+		csv := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "my-operator.v1.0.0",
+				"namespace": "operators",
+			},
+		}}
+		kubeclient := newOLMFakeClient(csv)
+
+		isOwned, err := isResourceManaged(kubeclient, csv, 5, labelTrackingReader)
+		assert.False(t, isOwned)
+		assert.NoError(t, err)
+	})
+
+	t.Run("OLM ClusterServiceVersion with missing OperatorGroup returns error", func(t *testing.T) {
+		csv := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "my-operator.v1.0.0",
+				"namespace": "operators",
+				"annotations": map[string]any{
+					"olm.operatorGroup": "missing-operator",
+				},
+			},
+		}}
+		kubeclient := newOLMFakeClient(csv)
+
+		isOwned, err := isResourceManaged(kubeclient, csv, 5, labelTrackingReader)
+		assert.False(t, isOwned)
+		assert.True(t, errors.IsNotFound(err))
+	})
 }
 
 func objToUnstructured(obj any) *unstructured.Unstructured {
@@ -443,6 +566,25 @@ func objToUnstructured(obj any) *unstructured.Unstructured {
 		panic(err)
 	}
 	return &unstructured.Unstructured{Object: unObj}
+}
+
+func newOLMFakeClient(objects ...runtime.Object) *agentkube.KubernetesClient {
+	c := kube.NewDynamicFakeClient(objects...)
+	fakeDiscovery := c.Clientset.Discovery().(*fakediscovery.FakeDiscovery)
+	olmResourceList := &v1.APIResourceList{
+		GroupVersion: "operators.coreos.com/v1",
+		APIResources: []v1.APIResource{
+			{Group: "operators.coreos.com", Version: "v1", Name: "operatorgroups", SingularName: "operatorgroup", Namespaced: true, Kind: "OperatorGroup", Verbs: []string{"get", "list", "watch"}},
+		},
+	}
+	olmAlphaResourceList := &v1.APIResourceList{
+		GroupVersion: "operators.coreos.com/v1alpha1",
+		APIResources: []v1.APIResource{
+			{Group: "operators.coreos.com", Version: "v1alpha1", Name: "clusterserviceversions", SingularName: "clusterserviceversion", Namespaced: true, Kind: "ClusterServiceVersion", Verbs: []string{"get", "list", "watch"}},
+		},
+	}
+	fakeDiscovery.Resources = append(fakeDiscovery.Resources, olmResourceList, olmAlphaResourceList)
+	return c
 }
 
 func Test_processIncomingResourceRequest(t *testing.T) {
