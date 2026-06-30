@@ -673,7 +673,7 @@ func (s *Server) processErrorEvent(ctx context.Context, agentName string, ev *cl
 
 		app := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
-				Name:      errData.ResoureName,
+				Name:      errData.ResourceName,
 				Namespace: errData.ResourceNamespace,
 			},
 			Status: v1alpha1.ApplicationStatus{

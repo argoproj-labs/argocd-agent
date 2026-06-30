@@ -343,7 +343,7 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 			targetNamespace := a.getTargetNamespaceForApp(incomingApp)
 			errData := &event.ErrorData{}
 			errData.ResourceNamespace = incomingApp.Namespace
-			errData.ResoureName = incomingApp.Name
+			errData.ResourceName = incomingApp.Name
 			errData.Message = fmt.Sprintf(
 				"Application %s already exists on cluster managed by agent %s and its adoption policy is set to \"never.\" Please delete the existing Application on the agent cluster in namespace %s or change the adoption policy then recreate this app.",
 				incomingApp.Name,

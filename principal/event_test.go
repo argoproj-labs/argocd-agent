@@ -1687,7 +1687,7 @@ func Test_ErrorEvents_Applications(t *testing.T) {
 		fac := kube.NewKubernetesFakeClientWithApps(principalNs, existingApp)
 
 		errData := event.ErrorData{
-			ResoureName: "test",
+			ResourceName: "test",
 			ResourceNamespace: agentName,
 			Message: "error message",
 		}
@@ -1745,7 +1745,7 @@ func Test_ErrorEvents_Applications(t *testing.T) {
 		fac := kube.NewKubernetesFakeClientWithApps(principalNs, existingApp)
 
 		errData := event.ErrorData{
-			ResoureName: "test",
+			ResourceName: "test",
 			ResourceNamespace: agentName,
 			Message: "error message",
 		}

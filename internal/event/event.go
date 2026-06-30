@@ -898,9 +898,9 @@ func (ev Event) TerminalRequest() (*ContainerTerminalRequest, error) {
 }
 
 type ErrorData struct {
-	ResoureName       string              `json:"resourceName"`
-	ResourceNamespace string              `json:"resourceNamespace"`
-	Message           string              `json:"message"`
+	ResourceName      string `json:"resourceName"`
+	ResourceNamespace string `json:"resourceNamespace"`
+	Message           string `json:"message"`
 }
 
 const ErrorMessageAgentNamePlaceholder = "$AN"
