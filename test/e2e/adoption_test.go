@@ -98,7 +98,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsAdoptedIfExists() {
 	app2 := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook-adopt",
-			Namespace: "agent-managed",
+			Namespace: fixture.AgentManagedName,
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -188,7 +188,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfPolicyIsNever() {
 	app2 := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook-dontadopt",
-			Namespace: "agent-managed",
+			Namespace: fixture.AgentManagedName,
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -198,7 +198,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfPolicyIsNever() {
 				Path:           "kustomize-guestbook",
 			},
 			Destination: argoapp.ApplicationDestination{
-				Name:      "agent-managed",
+				Name:      fixture.AgentManagedName,
 				Namespace: "adoption-test",
 			},
 		},

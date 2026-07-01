@@ -114,6 +114,13 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	case types.AgentModeAutonomous:
 		eventType = event.SpecUpdate
 	case types.AgentModeManaged:
+		// If resource does not have principal uuid annotation we do not need to send it
+		// because it would fail to update with not found and in an adoption never case
+		// would set the app to healthy and override the error
+		if !isResourceFromPrincipal(new) {
+			logCtx.Errorf("Application %s is not from the principal, not sending status update", new.Name)
+			return
+		}
 		eventType = event.StatusUpdate
 	}
 
