@@ -396,7 +396,7 @@ kubectl label namespace $NAMESPACE_NAME istio-injection=enabled --context kind-$
 ### Install Argo CD for Workload Cluster
 
 ```bash
-kubectl apply -n $NAMESPACE_NAME \
+kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-$AGENT_MODE?ref=$RELEASE_BRANCH" \
   --context kind-$AGENT_CLUSTER_NAME
 ```

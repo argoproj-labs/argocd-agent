@@ -335,7 +335,7 @@ kubectl create namespace $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
 ### Install Argo CD for Workload Cluster
 
 ```bash
-kubectl apply -n $NAMESPACE_NAME \
+kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-$AGENT_MODE?ref=$RELEASE_BRANCH" \
   --context kind-$AGENT_CLUSTER_NAME
 ```
@@ -354,10 +354,10 @@ This configuration includes:
 
 ### (Optional) Install Argo CD for Workload Cluster with ApplicationSet (Autonomous mode only)
 
-**Instead of the standard install above**, use the following command with `--server-side=true` (required due to the large ApplicationSet CRD):
+**Instead of the standard install above**, use the following command with `--server-side` (required due to the large ApplicationSet CRD):
 
 ```bash
-kubectl apply -n $NAMESPACE_NAME --server-side=true \
+kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous-appset?ref=$RELEASE_BRANCH" \
   --context kind-$AGENT_CLUSTER_NAME
 ```

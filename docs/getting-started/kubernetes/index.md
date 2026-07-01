@@ -168,7 +168,6 @@ Change <release-branch> to the release you wish to use:
 
 ```bash
 kubectl apply -n argocd \
-  --server-side \
   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/principal?ref=<release-branch>' \
   --context <control-plane-context>
 ```
@@ -246,6 +245,7 @@ Replace <release-branch> with the release you wish to use:
 ```bash
 # For managed agents
 kubectl apply -n argocd \
+  --server-side \
   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-managed?ref=<release-branch>' \
   --context <workload-cluster-context>
 
