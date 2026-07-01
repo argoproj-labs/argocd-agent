@@ -65,9 +65,12 @@ func Test_addAppCreationToQueue(t *testing.T) {
 		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
 		a.addAppCreationToQueue(app)
 
-		// Should not have an event in queue
+		// Should have an update event in queue (creation for already-managed app is forwarded as update)
 		items := a.queues.SendQ(defaultQueueName).Len()
-		assert.Equal(t, 0, items)
+		assert.Equal(t, 1, items)
+		ev, _ := a.queues.SendQ(defaultQueueName).Get()
+		assert.NotNil(t, ev)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
 
 		// App should be managed by now
 		assert.True(t, a.appManager.IsManaged("agent/guestbook"))
