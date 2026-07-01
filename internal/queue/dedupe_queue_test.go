@@ -1,0 +1,447 @@
+// Copyright 2026 The argocd-agent Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package queue
+
+import (
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	internalevent "github.com/argoproj-labs/argocd-agent/internal/event"
+	cloudevents "github.com/cloudevents/sdk-go/v2/event"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func newDedupableEvent(resourceID, data string) *cloudevents.Event {
+	ev := cloudevents.New()
+	ev.SetType(internalevent.SpecUpdate.String())
+	ev.SetExtension("resourceid", resourceID)
+	ev.SetExtension("eventid", fmt.Sprintf("%s_%s", resourceID, data))
+	_ = ev.SetData(cloudevents.TextPlain, data)
+	return &ev
+}
+
+func newStatusUpdateEvent(resourceID, data string) *cloudevents.Event {
+	ev := cloudevents.New()
+	ev.SetType(internalevent.StatusUpdate.String())
+	ev.SetExtension("resourceid", resourceID)
+	ev.SetExtension("eventid", fmt.Sprintf("%s_%s", resourceID, data))
+	_ = ev.SetData(cloudevents.TextPlain, data)
+	return &ev
+}
+
+func newNonDedupableEvent(resourceID, eventID, data string) *cloudevents.Event {
+	ev := cloudevents.New()
+	ev.SetType(internalevent.Create.String())
+	ev.SetExtension("resourceid", resourceID)
+	ev.SetExtension("eventid", eventID)
+	_ = ev.SetData(cloudevents.TextPlain, data)
+	return &ev
+}
+
+func TestDedupeQueue_DifferentResourcesNotDeduplicated(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	ev1 := newDedupableEvent("app1_uid1", "v1")
+	ev2 := newDedupableEvent("app2_uid2", "v1")
+
+	q.Add(ev1)
+	q.Add(ev2)
+
+	assert.Equal(t, 2, q.Len())
+}
+
+func TestDedupeQueue_DifferentTypesNotDeduplicated(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	ev1 := newDedupableEvent("app1_uid1", "v1")
+	ev2 := newStatusUpdateEvent("app1_uid1", "v1")
+
+	q.Add(ev1)
+	q.Add(ev2)
+
+	assert.Equal(t, 2, q.Len())
+}
+
+func TestDedupeQueue_NonDedupableEventsNeverCoalesce(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	ev1 := newNonDedupableEvent("app1_uid1", "evt-1", "data1")
+	ev2 := newNonDedupableEvent("app1_uid1", "evt-2", "data2")
+	ev3 := newNonDedupableEvent("app1_uid1", "evt-3", "data3")
+
+	q.Add(ev1)
+	q.Add(ev2)
+	q.Add(ev3)
+
+	assert.Equal(t, 3, q.Len())
+}
+
+func TestDedupeQueue_FIFOOrdering(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	ev1 := newNonDedupableEvent("app1", "evt-1", "first")
+	ev2 := newNonDedupableEvent("app2", "evt-2", "second")
+	ev3 := newNonDedupableEvent("app3", "evt-3", "third")
+
+	q.Add(ev1)
+	q.Add(ev2)
+	q.Add(ev3)
+
+	got1, _ := q.Get()
+	q.Done(got1)
+	got2, _ := q.Get()
+	q.Done(got2)
+	got3, _ := q.Get()
+	q.Done(got3)
+
+	var d1, d2, d3 string
+	_ = got1.DataAs(&d1)
+	_ = got2.DataAs(&d2)
+	_ = got3.DataAs(&d3)
+	assert.Equal(t, "first", d1)
+	assert.Equal(t, "second", d2)
+	assert.Equal(t, "third", d3)
+}
+
+func TestDedupeQueue_DedupeMovesToBack(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	ev1 := newDedupableEvent("app1_uid1", "v1")
+	ev2 := newDedupableEvent("app2_uid2", "v1")
+
+	q.Add(ev1)
+	q.Add(ev2)
+
+	// Re-add app1 with new data — should move to back
+	ev1Updated := newDedupableEvent("app1_uid1", "v2")
+	q.Add(ev1Updated)
+
+	assert.Equal(t, 2, q.Len())
+
+	// First out should be app2 (app1 moved to back)
+	got, _ := q.Get()
+	q.Done(got)
+	assert.Equal(t, "app2_uid2", internalevent.ResourceID(got))
+
+	got, _ = q.Get()
+	q.Done(got)
+	assert.Equal(t, "app1_uid1", internalevent.ResourceID(got))
+	var data string
+	_ = got.DataAs(&data)
+	assert.Equal(t, "v2", data, "should have latest payload")
+}
+
+func TestDedupeQueue_UnboundedGrowth(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	for i := 0; i < 100; i++ {
+		ev := newNonDedupableEvent(fmt.Sprintf("app%d", i), fmt.Sprintf("evt-%d", i), fmt.Sprintf("data%d", i))
+		q.Add(ev)
+	}
+	assert.Equal(t, 100, q.Len())
+}
+
+func TestDedupeQueue_GetReturnsLatestAfterMultipleUpdates(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	for i := 0; i < 10; i++ {
+		ev := newDedupableEvent("app1_uid1", fmt.Sprintf("version-%d", i))
+		q.Add(ev)
+	}
+
+	assert.Equal(t, 1, q.Len())
+
+	got, _ := q.Get()
+	var data string
+	_ = got.DataAs(&data)
+	assert.Equal(t, "version-9", data)
+}
+
+func TestDedupeQueue_Done(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	ev := newDedupableEvent("app1_uid1", "v1")
+	q.Add(ev)
+
+	got, _ := q.Get()
+	assert.Equal(t, 0, q.Len())
+	q.Done(got)
+
+	// After Done, adding a new event for the same resource should work fresh
+	ev2 := newDedupableEvent("app1_uid1", "v2")
+	q.Add(ev2)
+	assert.Equal(t, 1, q.Len())
+}
+
+func TestDedupeQueue_DoneDoesNotEvictNewerEvent(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	ev1 := newDedupableEvent("app1_uid1", "v1")
+	q.Add(ev1)
+
+	// Simulate processing: Get ev1
+	got, _ := q.Get()
+	assert.Equal(t, ev1, got)
+
+	// Add newer events for the same key
+	for i := 2; i <= 5; i++ {
+		ev := newDedupableEvent("app1_uid1", fmt.Sprintf("v%d", i))
+		q.Add(ev)
+	}
+
+	// The workqueue is empty because the latest event is being processed
+	// new events are deferred until the latest event is processed
+	assert.Equal(t, 0, q.Len())
+
+	// Done(ev1) must NOT destroy the pending latest event
+	q.Done(got)
+
+	assert.Equal(t, 1, q.Len())
+
+	// The workqueue re-queues the key (it was dirty), so Get should return the latest event
+	got2, shutdown := q.Get()
+	assert.False(t, shutdown)
+	require.NotNil(t, got2)
+
+	var data string
+	_ = got2.DataAs(&data)
+	assert.Equal(t, "v5", data)
+}
+
+func TestDedupeQueue_ShutDown(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	ev := newDedupableEvent("app1_uid1", "v1")
+	q.Add(ev)
+
+	q.ShutDown()
+
+	// Pending items are still returned after shutdown
+	got, shutdown := q.Get()
+	assert.False(t, shutdown)
+	assert.NotNil(t, got)
+	q.Done(got)
+
+	// Once drained, Get signals shutdown
+	_, shutdown = q.Get()
+	assert.True(t, shutdown)
+}
+
+func TestDedupeQueue_EmptyQueueLen(t *testing.T) {
+	q := NewDedupeQueue("test")
+	assert.Equal(t, 0, q.Len())
+}
+
+func TestDedupeQueue_MixedDedupableAndNonDedupable(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	spec1 := newDedupableEvent("app1_uid1", "spec-v1")
+	spec2 := newDedupableEvent("app1_uid1", "spec-v2")
+	create1 := newNonDedupableEvent("app1_uid1", "create-1", "create-data")
+
+	q.Add(spec1)
+	q.Add(create1)
+	q.Add(spec2)
+
+	// spec events coalesce (1 slot), create is separate (1 slot) = 2 total
+	assert.Equal(t, 2, q.Len())
+}
+
+func TestDedupeQueue_NotifyOnAdd(t *testing.T) {
+	dq := NewDedupeQueue("test").(*dedupeQueue)
+
+	ev := newDedupableEvent("app1_uid1", "v1")
+	q := dq
+	q.Add(ev)
+
+	select {
+	case <-dq.notify:
+		// expected
+	default:
+		t.Fatal("expected notification on Add")
+	}
+}
+
+func TestDedupeQueue_ConcurrentAdds(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ev := newDedupableEvent(fmt.Sprintf("app%d_uid%d", i, i), fmt.Sprintf("v%d", i))
+			q.Add(ev)
+		}(i)
+	}
+	wg.Wait()
+
+	assert.Equal(t, 100, q.Len())
+}
+
+func TestDedupeQueue_ConcurrentDeduplication(t *testing.T) {
+	q := NewDedupeQueue("test")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ev := newDedupableEvent("app1_uid1", fmt.Sprintf("v%d", i))
+			q.Add(ev)
+		}(i)
+	}
+	wg.Wait()
+
+	assert.Equal(t, 1, q.Len())
+
+	got, _ := q.Get()
+	require.NotNil(t, got)
+}
+
+func TestDedupeQueue_GetSkipsPhantomKey(t *testing.T) {
+	dq := NewDedupeQueue("test").(*dedupeQueue)
+
+	// Inject a phantom: add a key directly to the workqueue with no
+	// corresponding entry in latestEvents. This is the exact state produced
+	// by the dirty-set race between concurrent Add() and Get().
+	phantomKey := EventKey{ResourceID: "phantom_uid", EventType: internalevent.SpecUpdate.String()}
+	dq.queue.Add(phantomKey)
+
+	// Add a real event (different resource) that sits behind the phantom
+	realEv := newDedupableEvent("real_uid", "real-data")
+	dq.Add(realEv)
+
+	// Get must skip the phantom and return the real event
+	got, shutdown := dq.Get()
+	assert.False(t, shutdown)
+	require.NotNil(t, got, "Get() must skip phantom keys and return real events")
+
+	var data string
+	_ = got.DataAs(&data)
+	assert.Equal(t, "real-data", data)
+	dq.Done(got)
+}
+
+func TestDedupeQueue_PhantomKeyDoesNotBlockSameResource(t *testing.T) {
+	dq := NewDedupeQueue("test").(*dedupeQueue)
+
+	// Inject a phantom key for app1
+	phantomKey := EventKey{ResourceID: "app1_uid1", EventType: internalevent.SpecUpdate.String()}
+	dq.queue.Add(phantomKey)
+
+	// Start Get() in a goroutine — it will clean up the phantom and then
+	// block waiting for the next real item.
+	gotCh := make(chan *cloudevents.Event, 1)
+	go func() {
+		got, _ := dq.Get()
+		gotCh <- got
+	}()
+
+	// Give Get() time to encounter and clean up the phantom
+	time.Sleep(50 * time.Millisecond)
+
+	// Add a real event for the SAME resource. If the phantom key were stuck
+	// in the processing set, this Add would never be delivered.
+	realEv := newDedupableEvent("app1_uid1", "v1")
+	dq.Add(realEv)
+
+	select {
+	case got := <-gotCh:
+		require.NotNil(t, got, "Get() must not be stuck by a phantom key")
+		var data string
+		_ = got.DataAs(&data)
+		assert.Equal(t, "v1", data)
+		dq.Done(got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Get() is stuck — phantom key was not released from processing set")
+	}
+}
+
+func TestReorderQueue_Push_Pop(t *testing.T) {
+	q := newReorderQueue[string]()
+
+	q.Push("a")
+	q.Push("b")
+	q.Push("c")
+
+	assert.Equal(t, 3, q.Len())
+	assert.Equal(t, "a", q.Pop())
+	assert.Equal(t, "b", q.Pop())
+	assert.Equal(t, "c", q.Pop())
+	assert.Equal(t, 0, q.Len())
+}
+
+func TestReorderQueue_Touch_MovesToBack(t *testing.T) {
+	q := newReorderQueue[string]()
+
+	q.Push("a")
+	q.Push("b")
+	q.Push("c")
+
+	q.Touch("a")
+
+	assert.Equal(t, 3, q.Len())
+	assert.Equal(t, "b", q.Pop())
+	assert.Equal(t, "c", q.Pop())
+	assert.Equal(t, "a", q.Pop())
+}
+
+func TestReorderQueue_Touch_MiddleElement(t *testing.T) {
+	q := newReorderQueue[string]()
+
+	q.Push("a")
+	q.Push("b")
+	q.Push("c")
+	q.Push("d")
+
+	q.Touch("b")
+
+	assert.Equal(t, "a", q.Pop())
+	assert.Equal(t, "c", q.Pop())
+	assert.Equal(t, "d", q.Pop())
+	assert.Equal(t, "b", q.Pop())
+}
+
+func TestReorderQueue_Touch_LastElement(t *testing.T) {
+	q := newReorderQueue[string]()
+
+	q.Push("a")
+	q.Push("b")
+	q.Push("c")
+
+	q.Touch("c")
+
+	// "c" is already last — order shouldn't change
+	assert.Equal(t, "a", q.Pop())
+	assert.Equal(t, "b", q.Pop())
+	assert.Equal(t, "c", q.Pop())
+}
+
+func TestReorderQueue_Touch_NonExistent(t *testing.T) {
+	q := newReorderQueue[string]()
+
+	q.Push("a")
+	q.Push("b")
+
+	q.Touch("z") // should be a no-op
+
+	assert.Equal(t, 2, q.Len())
+	assert.Equal(t, "a", q.Pop())
+	assert.Equal(t, "b", q.Pop())
+}
