@@ -119,8 +119,11 @@ kubectl create namespace $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
 ### Install Argo CD for Control Plane
 Install Principal-specific Argo CD configuration.
 
+!!! note "Server-side apply required"
+    The Argo CD manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+
 ```bash
-kubectl apply -n $NAMESPACE_NAME \
+kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/principal?ref=$RELEASE_BRANCH" \
   --context kind-$PRINCIPAL_CLUSTER_NAME
 ```
@@ -331,8 +334,11 @@ kubectl create namespace $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
 
 ### Install Argo CD for Workload Cluster
 
+!!! note "Server-side apply required"
+    The Argo CD manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+
 ```bash
-kubectl apply -n $NAMESPACE_NAME \
+kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-$AGENT_MODE?ref=$RELEASE_BRANCH" \
   --context kind-$AGENT_CLUSTER_NAME
 ```
@@ -351,10 +357,10 @@ This configuration includes:
 
 ### (Optional) Install Argo CD for Workload Cluster with ApplicationSet (Autonomous mode only)
 
-**Instead of the standard install above**, use the following command with `--server-side=true` (required due to the large ApplicationSet CRD):
+**Instead of the standard install above**, use the following command with `--server-side` (required due to the large ApplicationSet CRD):
 
 ```bash
-kubectl apply -n $NAMESPACE_NAME --server-side=true \
+kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous-appset?ref=$RELEASE_BRANCH" \
   --context kind-$AGENT_CLUSTER_NAME
 ```
