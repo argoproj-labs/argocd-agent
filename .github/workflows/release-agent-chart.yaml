@@ -1,0 +1,41 @@
+name: Release agent Helm chart
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'install/helm-repo/argocd-agent-agent/**'
+
+permissions:
+  contents: read
+
+jobs:
+  release-chart:
+    name: Build and push agent Helm chart
+    if: github.repository == 'argoproj-labs/argocd-agent'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Release chart
+        uses: bitdeps/helm-oci-charts-releaser@caedceea2a5ab997c7e5469a999811dbb3d5b070 # v0.1.5
+        with:
+          charts_dir: install/helm-repo/argocd-agent-agent
+          oci_registry: ghcr.io/${{ github.repository }}
+          oci_username: ${{ github.actor }}
+          oci_password: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name_pattern: '{chartName}-chart'
