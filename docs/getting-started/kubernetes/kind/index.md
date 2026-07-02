@@ -334,6 +334,9 @@ kubectl create namespace $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
 
 ### Install Argo CD for Workload Cluster
 
+!!! note "Server-side apply required"
+    The Argo CD principal manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+
 ```bash
 kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-$AGENT_MODE?ref=$RELEASE_BRANCH" \
