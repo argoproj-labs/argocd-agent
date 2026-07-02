@@ -148,7 +148,9 @@ func stampLastUpdated(app *v1alpha1.Application) {
 }
 
 // Create creates the application app using the Manager's application backend.
-func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
+// - 'addChangeToIgnoreList' field controls whether or not the resourceVersion of the resource will be ignored if it is seen again (because it is considered to already have been processed). If true, the resource will be added to the ignore list. If false, it will not (false is useful for a few specific cases, like the 'a user deletes a managed agent Application resource, which needs to be reverted by agent' case)
+func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Application, addChangeToIgnoreList bool) (*v1alpha1.Application, error) {
+
 	// A new Application must neither specify ResourceVersion nor Generation
 	app.ResourceVersion = ""
 	app.Generation = 0
@@ -172,8 +174,10 @@ func (m *ApplicationManager) Create(ctx context.Context, app *v1alpha1.Applicati
 		if err := m.Manage(created.QualifiedName()); err != nil {
 			log().Warnf("Could not manage app %s: %v", created.QualifiedName(), err)
 		}
-		if err := m.IgnoreChange(created.QualifiedName(), created.ResourceVersion); err != nil {
-			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.QualifiedName(), err)
+		if addChangeToIgnoreList {
+			if err := m.IgnoreChange(created.QualifiedName(), created.ResourceVersion); err != nil {
+				log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.QualifiedName(), err)
+			}
 		}
 	}
 
@@ -190,13 +194,13 @@ func (m *ApplicationManager) CreateWithPrincipalUID(ctx context.Context, app *v1
 		}
 		app.Annotations[manager.PrincipalUIDAnnotation] = principalUID
 	}
-	return m.Create(ctx, app)
+	return m.Create(ctx, app, true)
 }
 
 // Upsert creates the application or updates it if it already exists.
 // Used by HA replication to write resources to the replica cluster.
 func (m *ApplicationManager) Upsert(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
-	created, err := m.Create(ctx, app)
+	created, err := m.Create(ctx, app, true)
 	if err == nil {
 		return created, nil
 	}
@@ -841,7 +845,7 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 		existing, ierr := m.applicationBackend.Get(ctxForUpdate, incoming.Name, incoming.Namespace)
 		if ierr != nil {
 			if errors.IsNotFound(ierr) && upsert {
-				updated, ierr = m.Create(ctx, incoming)
+				updated, ierr = m.Create(ctx, incoming, true)
 				return ierr
 			} else {
 				return fmt.Errorf("error updating application %s: %w", incoming.QualifiedName(), ierr)

@@ -211,7 +211,7 @@ Comma-separated list of TLS cipher suites to use. Use `--tls-ciphersuites=list` 
 | **Type** | String (comma-separated list) |
 | **Default** | `info` |
 | **Format** | `[<component>=]<level>` |
-| **Valid Values (component)** | `resource-proxy`, `redis-proxy`, `grpc-event` |
+| **Valid Values (component)** | `resource-proxy`, `redis-proxy`, `grpc-event`, `informer-event-buffer` |
 | **Valid Values (level)** | `trace`, `debug`, `info`, `warning`, `error` |
 
 The log level for the general logger and subsystem loggers for the agent.

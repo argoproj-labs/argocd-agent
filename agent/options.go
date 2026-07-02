@@ -114,6 +114,15 @@ func WithCacheRefreshInterval(interval time.Duration) AgentOption {
 		return nil
 	}
 }
+func WithApplicationInformerEventBufferInterval(interval time.Duration) AgentOption {
+	return func(o *Agent) error {
+		if interval < 0 {
+			return fmt.Errorf("application informer event buffer interval must be non-negative")
+		}
+		o.applicationInformerEventBufferInterval = interval
+		return nil
+	}
+}
 
 func WithInformerSyncTimeout(timeout time.Duration) AgentOption {
 	return func(o *Agent) error {
@@ -129,7 +138,7 @@ func WithHeartbeatInterval(interval time.Duration) AgentOption {
 	}
 }
 
-func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) AgentOption {
+func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent, informerEventBuffer *logrus.Logger) AgentOption {
 	return func(o *Agent) error {
 		if resourceProxy != nil {
 			o.resourceProxyLogger = logging.New(resourceProxy)
@@ -141,6 +150,10 @@ func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) A
 
 		if grpcEvent != nil {
 			o.grpcEventLogger = logging.New(grpcEvent)
+		}
+
+		if informerEventBuffer != nil {
+			o.informerEventBufferLogger = logging.New(informerEventBuffer)
 		}
 		return nil
 	}

@@ -171,9 +171,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			subLoggers := cmdutil.SubSystemLoggers{
-				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
-				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
-				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
+				ResourceProxyLogger:       cmdutil.CreateLogger(logFormat),
+				RedisProxyLogger:          cmdutil.CreateLogger(logFormat),
+				GrpcEventLogger:           cmdutil.CreateLogger(logFormat),
+				InformerEventBufferLogger: cmdutil.CreateLogger(logFormat),
 			}
 
 			if len(logLevels) == 0 {

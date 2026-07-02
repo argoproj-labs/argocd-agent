@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/clock"
+
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	kubeapp "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/application"
@@ -110,7 +112,11 @@ type Agent struct {
 
 	cacheRefreshInterval time.Duration
 	informerSyncTimeout  time.Duration
-	clusterCache         *appstatecache.Cache
+	// applicationInformerEventBufferInterval is the minimum time between processing
+	// Application informer update callbacks for the same object (e.g. only send
+	// Application .status update once every 10 seconds)
+	applicationInformerEventBufferInterval time.Duration
+	clusterCache                           *appstatecache.Cache
 
 	inflightMu sync.Mutex
 	// inflightLogs blocks starting a duplicate stream for the same request UUID (esp. follow=true).
@@ -128,9 +134,10 @@ type Agent struct {
 	trackingReader *ResourceTrackingReader
 
 	// below are loggers to control log levels of different subsystems
-	resourceProxyLogger *logging.CentralizedLogger
-	redisProxyLogger    *logging.CentralizedLogger
-	grpcEventLogger     *logging.CentralizedLogger
+	resourceProxyLogger       *logging.CentralizedLogger
+	redisProxyLogger          *logging.CentralizedLogger
+	grpcEventLogger           *logging.CentralizedLogger
+	informerEventBufferLogger *logging.CentralizedLogger
 
 	// destinationBasedMapping when true, the agent operates in destination-based
 	// mapping mode where:
@@ -246,6 +253,10 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		a.grpcEventLogger = logging.GetDefaultLogger()
 	}
 
+	if a.informerEventBufferLogger == nil {
+		a.informerEventBufferLogger = logging.GetDefaultLogger()
+	}
+
 	if a.createNamespace && !a.destinationBasedMapping {
 		return nil, fmt.Errorf("cannot create namespaces if destination based mapping is disabled")
 	}
@@ -302,12 +313,26 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		return client.ApplicationsClientset.ArgoprojV1alpha1().Applications(appNamespace).Watch(ctx, config.LabelSelector(a.labelSelector))
 	}
 
+	// Default to un-buffered handlers
+	applicationAddHandler := a.addAppCreationToQueue
+	applicationUpdateHandler := a.addAppUpdateToQueue
+	applicationDeleteHandler := a.addAppDeletionToQueue
+
+	// If buffer is enabled, add a buffered layer between handlers and k8s informer callbacks
+	if a.applicationInformerEventBufferInterval != 0 {
+		log().Infof("Buffering of Application events is enabled at %v", a.applicationInformerEventBufferInterval)
+		appBuffer := newInformerEventBuffer(a.addAppCreationToQueue, a.addAppUpdateToQueue, a.addAppDeletionToQueue, a.applicationInformerEventBufferInterval, clock.StandardClock(), 100*time.Millisecond, a.logInformerEventBuffer)
+		applicationAddHandler = appBuffer.receiveAddInformerEvent
+		applicationUpdateHandler = appBuffer.receiveUpdateInformerEvent
+		applicationDeleteHandler = appBuffer.receiveDeleteInformerEvent
+	}
+
 	appInformerOptions := []informer.InformerOption[*v1alpha1.Application]{
 		informer.WithListHandler[*v1alpha1.Application](appListFunc),
 		informer.WithWatchHandler[*v1alpha1.Application](appWatchFunc),
-		informer.WithAddHandler[*v1alpha1.Application](a.addAppCreationToQueue),
-		informer.WithUpdateHandler[*v1alpha1.Application](a.addAppUpdateToQueue),
-		informer.WithDeleteHandler[*v1alpha1.Application](a.addAppDeletionToQueue),
+		informer.WithAddHandler[*v1alpha1.Application](applicationAddHandler),
+		informer.WithUpdateHandler[*v1alpha1.Application](applicationUpdateHandler),
+		informer.WithDeleteHandler[*v1alpha1.Application](applicationDeleteHandler),
 		informer.WithFilters[*v1alpha1.Application](a.DefaultAppFilterChain()),
 		informer.WithNamespaceScope[*v1alpha1.Application](appNamespace),
 		informer.WithGroupResource[*v1alpha1.Application]("argoproj.io", "applications"),
@@ -702,6 +727,10 @@ func (a *Agent) logRedisProxy() *logrus.Entry {
 
 func (a *Agent) logGrpcEvent() *logrus.Entry {
 	return logging.SelectLogger(a.grpcEventLogger).ModuleLogger("GrpcEvent")
+}
+
+func (a *Agent) logInformerEventBuffer() *logrus.Entry {
+	return logging.SelectLogger(a.informerEventBufferLogger).ModuleLogger("InformerEventBuffer")
 }
 
 func (a *Agent) healthzHandler(w http.ResponseWriter, r *http.Request) {

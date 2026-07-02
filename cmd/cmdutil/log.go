@@ -26,12 +26,13 @@ import (
 	"github.com/sirupsen/logrus/hooks/writer"
 )
 
-const AvailableSubSystems = "resource-proxy, redis-proxy, grpc-event"
+const AvailableSubSystems = "resource-proxy, redis-proxy, grpc-event, informer-event-buffer"
 
 type SubSystemLoggers struct {
-	ResourceProxyLogger *logrus.Logger
-	RedisProxyLogger    *logrus.Logger
-	GrpcEventLogger     *logrus.Logger
+	ResourceProxyLogger       *logrus.Logger
+	RedisProxyLogger          *logrus.Logger
+	GrpcEventLogger           *logrus.Logger
+	InformerEventBufferLogger *logrus.Logger
 }
 
 func StringToLoglevel(l string) (logrus.Level, error) {
@@ -167,6 +168,9 @@ func ParseLogLevels(input []string, ss *SubSystemLoggers) {
 			if !slices.Contains(seen, "grpc-event") {
 				ss.GrpcEventLogger.SetLevel(level)
 			}
+			if !slices.Contains(seen, "informer-event-buffer") {
+				ss.InformerEventBufferLogger.SetLevel(level)
+			}
 			continue
 		}
 
@@ -188,6 +192,9 @@ func ParseLogLevels(input []string, ss *SubSystemLoggers) {
 		case "grpc-event":
 			ss.GrpcEventLogger.SetLevel(level)
 			seen = append(seen, "grpc-event")
+		case "informer-event-buffer":
+			ss.InformerEventBufferLogger.SetLevel(level)
+			seen = append(seen, "informer-event-buffer")
 		default:
 			logrus.Warnf("an invalid subsystem %s was specified. subsystems are %s, skipping", split[0], AvailableSubSystems)
 		}

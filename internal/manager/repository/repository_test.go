@@ -133,7 +133,7 @@ func Test_RepositoryManagerCreate(t *testing.T) {
 			ManagedResources:  manager.NewManagedResources(),
 			ObservedResources: manager.NewObservedResources(),
 		}
-		_, err := m.Create(context.Background(), repo)
+		_, err := m.Create(context.Background(), repo, true)
 		require.Error(t, err)
 		require.True(t, k8serrors.IsAlreadyExists(err))
 	})
@@ -170,7 +170,7 @@ func Test_RepositoryManagerCreate(t *testing.T) {
 			ObservedResources: manager.NewObservedResources(),
 		}
 
-		createdRepo, err := m.Create(context.Background(), repo)
+		createdRepo, err := m.Create(context.Background(), repo, true)
 		require.NoError(t, err)
 		require.NotNil(t, createdRepo)
 		require.Equal(t, "test-repo", createdRepo.Name)
@@ -211,7 +211,7 @@ func Test_RepositoryManagerCreate(t *testing.T) {
 			ObservedResources: manager.NewObservedResources(),
 		}
 
-		createdRepo, err := m.Create(context.Background(), repo)
+		createdRepo, err := m.Create(context.Background(), repo, true)
 		require.NoError(t, err)
 		require.Equal(t, "", repo.ResourceVersion)         // Original should be modified
 		require.Equal(t, int64(0), repo.Generation)        // Original should be modified
