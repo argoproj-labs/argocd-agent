@@ -114,6 +114,13 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	case types.AgentModeAutonomous:
 		eventType = event.SpecUpdate
 	case types.AgentModeManaged:
+		// If resource does not have principal uuid annotation we do not need to send it
+		// because it would fail to update with not found and in an adoption never case
+		// would set the app to healthy and override the error
+		if !isResourceFromPrincipal(new) {
+			logCtx.Errorf("Application %s is not from the principal, not sending status update", new.Name)
+			return
+		}
 		eventType = event.StatusUpdate
 	}
 
@@ -357,6 +364,25 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 	tracing.InjectTraceContext(ctx, ev)
 	q.Add(ev)
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject delete event to send queue")
+}
+
+// addErrorEventToQueue is used to report errors to the principal by putting an
+// error event on the send queue
+func (a *Agent) addErrorEventToQueue(errType event.EventType, errData *event.ErrorData) error {
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "Error").WithField("ErrorType", errType.String())
+
+	q := a.queues.SendQ(defaultQueueName)
+	if q == nil {
+		return fmt.Errorf("send queue not found")
+	}
+
+	ev, err := a.emitter.ErrorEvent(errType, errData)
+	if err != nil {
+		return err
+	}
+	q.Add(ev)
+	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added error event to send queue")
+	return nil
 }
 
 // addClusterCacheInfoUpdateToQueue processes a cluster cache info update event

@@ -107,7 +107,9 @@ func Test_addAppUpdateToQueue(t *testing.T) {
 	})
 
 	t.Run("Update event for managed agent", func(t *testing.T) {
-		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
+		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent", Annotations: map[string]string{
+			manager.SourceUIDAnnotation: "sourceuid",
+		}}}
 		// App must be already managed for event to be generated
 		_ = a.appManager.Manage("agent/guestbook")
 		a.mode = types.AgentModeManaged
@@ -126,6 +128,14 @@ func Test_addAppUpdateToQueue(t *testing.T) {
 		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
 	})
 
+	t.Run("Update event for managed agent where application has no source uid", func(t *testing.T) {
+		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
+		_ = a.appManager.Manage("agent/guestbook")
+		a.mode = types.AgentModeManaged
+		a.addAppUpdateToQueue(app, app)
+		defer a.appManager.Unmanage("agent/guestbook")
+		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+	})
 }
 
 func Test_addAppDeletionToQueue(t *testing.T) {

@@ -47,6 +47,13 @@ type (
 // when an update was last received for this Application
 const LastUpdatedAnnotation = "argocd-agent.argoproj.io/last-updated"
 
+// AppConditionType defines ApplicationConditionTypes to be used to report errors on the
+// principal's application
+type AppConditionType string
+
+// AppConditionAgentError is the error condition for errors on the Agent side
+const AppConditionAgentError AppConditionType = "AgentError"
+
 // ApplicationManager manages Argo CD application resources on a given backend.
 //
 // It provides primitives to create, update, upsert and delete applications.

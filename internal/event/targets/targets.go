@@ -40,4 +40,5 @@ const (
 	Heartbeat              EventTarget = "heartbeat"
 	Terminal               EventTarget = "terminal"
 	ApplicationSet         EventTarget = "applicationset"
+	Error                  EventTarget = "error"
 )

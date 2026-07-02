@@ -23,11 +23,13 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	wqmock "github.com/argoproj-labs/argocd-agent/test/mocks/k8s-workqueue"
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
@@ -1655,5 +1657,120 @@ func Test_processClusterCacheInfoUpdateEvent(t *testing.T) {
 		// as goal of this test is to verify only processClusterCacheInfoUpdateEvent logic
 		assert.Error(t, err)
 		assert.ErrorContains(t, err, "not mapped to any cluster")
+	})
+}
+
+func Test_ErrorEvents_Applications(t *testing.T) {
+	t.Run("Status is set to degraded with error condition on managed agent", func(t *testing.T) {
+		principalNs := "argocd"
+		agentName := "managed-agent"
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name: "test",
+				Namespace: agentName,
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL: "foo",
+					Path: ".",
+					TargetRevision: "HEAD",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Health: v1alpha1.AppHealthStatus{
+					Status: health.HealthStatusHealthy,
+				},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps(principalNs, existingApp)
+
+		errData := event.ErrorData{
+			ResourceName: "test",
+			ResourceNamespace: agentName,
+			Message: "error message",
+		}
+		
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, err := NewServer(ctx, fac, principalNs, WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
+		require.NoError(t, err)
+		defer func() { _ = s.Shutdown() }()
+		err = s.Start(ctx, make(chan error))
+		require.NoError(t, err)
+		
+		s.setAgentMode(agentName, types.AgentModeManaged)
+
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema(targets.Error.String())
+		ev.SetType(string(event.ApplicationError))
+		ev.SetData(cloudevents.ApplicationJSON, errData)
+
+		err = s.processErrorEvent(ctx, agentName, &ev)
+		assert.NoError(t, err)
+
+		currentApp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(agentName).Get(ctx, "test", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, health.HealthStatusDegraded, currentApp.Status.Health.Status)
+		assert.Len(t, currentApp.Status.Conditions, 1)
+		assert.Equal(t, v1alpha1.ApplicationConditionType(application.AppConditionAgentError), currentApp.Status.Conditions[0].Type)
+		assert.Equal(t, "error message", currentApp.Status.Conditions[0].Message)
+	})
+
+	t.Run("Status is not updated on autonomous agents", func(t *testing.T){
+		principalNs := "argocd"
+		agentName := "managed-agent"
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name: "test",
+				Namespace: agentName,
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL: "foo",
+					Path: ".",
+					TargetRevision: "HEAD",
+				},
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Health: v1alpha1.AppHealthStatus{
+					Status: health.HealthStatusHealthy,
+				},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps(principalNs, existingApp)
+
+		errData := event.ErrorData{
+			ResourceName: "test",
+			ResourceNamespace: agentName,
+			Message: "error message",
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, err := NewServer(ctx, fac, principalNs, WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
+		require.NoError(t, err)
+		defer func() { _ = s.Shutdown() }()
+		err = s.Start(ctx, make(chan error))
+		require.NoError(t, err)
+		
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema(targets.Error.String())
+		ev.SetType(event.ApplicationError.String())
+		ev.SetData(cloudevents.ApplicationJSON, errData)
+
+		err = s.processErrorEvent(ctx, agentName, &ev)
+		assert.Error(t, err)
+
+		currentApp, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(agentName).Get(ctx, "test", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, health.HealthStatusHealthy, currentApp.Status.Health.Status)	
 	})
 }
