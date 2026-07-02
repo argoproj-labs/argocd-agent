@@ -158,7 +158,7 @@ kubectl label namespace $NAMESPACE_NAME istio-injection=enabled --context kind-$
 Install Principal-specific Argo CD configuration.
 
 !!! note "Server-side apply required"
-    The Argo CD principal manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+    The Argo CD manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
 
 ```bash
 kubectl apply -n $NAMESPACE_NAME --server-side \
@@ -396,7 +396,7 @@ kubectl label namespace $NAMESPACE_NAME istio-injection=enabled --context kind-$
 ### Install Argo CD for Workload Cluster
 
 !!! note "Server-side apply required"
-    The Argo CD principal manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+    The Argo CD manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
 
 ```bash
 kubectl apply -n $NAMESPACE_NAME --server-side \
