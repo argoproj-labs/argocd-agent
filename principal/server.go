@@ -541,6 +541,12 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	if s.resourceProxyEnabled {
 		// TODO(jannfis): Enable fetching APIs and resource counts
 		s.resourceProxy, err = resourceproxy.New(s.resourceProxyListenAddr,
+			// Kubernetes API group discovery, for example /apis/apps
+			resourceproxy.WithRequestMatcher(
+				resourceGroupRequestRegexp,
+				[]string{"get"},
+				s.processResourceRequest,
+			),
 			// For matching resource requests from the Argo CD API
 			resourceproxy.WithRequestMatcher(
 				resourceRequestRegexp,
