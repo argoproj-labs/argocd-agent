@@ -20,6 +20,7 @@ jobs:
       docs: ${{ steps.filter.outputs.docs_any_changed }}
       helm: ${{ steps.filter.outputs.helm_any_changed }}
       agent-helm-chart: ${{ steps.filter.outputs.agent-helm-chart_any_changed }}
+      principal-helm-chart: ${{ steps.filter.outputs.principal-helm-chart_any_changed }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -39,6 +40,8 @@ jobs:
               - 'install/helm-repo/**'
             agent-helm-chart:
               - 'install/helm-repo/argocd-agent-agent/**'
+            principal-helm-chart:
+              - 'install/helm-repo/argocd-agent-principal/**'
 
   check-go:
     name: Check go modules synchronicity
@@ -349,6 +352,55 @@ jobs:
         run: |
           set -euo pipefail
           CHART_PATH="install/helm-repo/argocd-agent-agent/Chart.yaml"
+          BASE_VERSION=$(git show origin/${{ github.base_ref }}:${CHART_PATH} | yq '.version')
+          HEAD_VERSION=$(yq '.version' ${CHART_PATH})
+
+          echo "Base version: ${BASE_VERSION}"
+          echo "Head version: ${HEAD_VERSION}"
+
+          if [ "${BASE_VERSION}" = "${HEAD_VERSION}" ]; then
+            echo "::error::Chart files changed but chart version was not bumped. Please update the 'version' field in ${CHART_PATH} (current: ${HEAD_VERSION})."
+            exit 1
+          fi
+
+          LOWEST=$(printf '%s\n%s' "${BASE_VERSION}" "${HEAD_VERSION}" | sort -V | head -n1)
+          if [ "${LOWEST}" != "${BASE_VERSION}" ]; then
+            echo "::error::Chart version in ${CHART_PATH} must be strictly greater than the base branch (${BASE_VERSION}), but is ${HEAD_VERSION}. Please update the 'version' field in ${CHART_PATH}."
+            exit 1
+          fi
+
+          echo "Chart version in ${CHART_PATH} was bumped: ${BASE_VERSION} -> ${HEAD_VERSION}"
+
+  check-principal-chart-version:
+    name: Check principal chart version bump
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.principal-helm-chart == 'true' }}
+    runs-on: ubuntu-22.04
+    needs:
+      - changes
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install yq
+        env:
+          YQ_VERSION: v4.53.2
+          YQ_SHA256: d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            --output /tmp/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  /tmp/yq" | sha256sum --check --status
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+          rm -f /tmp/yq
+
+      - name: Check principal chart version was bumped
+        run: |
+          set -euo pipefail
+          CHART_PATH="install/helm-repo/argocd-agent-principal/Chart.yaml"
           BASE_VERSION=$(git show origin/${{ github.base_ref }}:${CHART_PATH} | yq '.version')
           HEAD_VERSION=$(yq '.version' ${CHART_PATH})
 
