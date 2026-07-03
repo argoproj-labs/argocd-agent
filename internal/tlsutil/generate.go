@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -46,7 +45,7 @@ const (
 // THIS CA FOR PRODUCTION PURPOSES. NEVER. YOU HAVE BEEN WARNED.
 //
 // And sorry for shouting.
-func GenerateCaCertificate(commonName string, validityDays int) (string, string, error) {
+func GenerateCaCertificate(commonName string, validityDays int, opts KeyGenOptions) (string, string, error) {
 	if err := validateValidityDays(validityDays); err != nil {
 		return "", "", err
 	}
@@ -63,11 +62,15 @@ func GenerateCaCertificate(commonName string, validityDays int) (string, string,
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 	}
-	key, err := rsa.GenerateKey(rand.Reader, 4096)
+	key, err := GeneratePrivateKey(opts)
 	if err != nil {
 		return "", "", err
 	}
-	certBytes, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
+	pub, err := publicKey(key)
+	if err != nil {
+		return "", "", err
+	}
+	certBytes, err := x509.CreateCertificate(rand.Reader, cert, cert, pub, key)
 	if err != nil {
 		return "", "", fmt.Errorf("error creating cert: %w", err)
 	}
@@ -81,16 +84,12 @@ func GenerateCaCertificate(commonName string, validityDays int) (string, string,
 		return "", "", fmt.Errorf("error encoding certificate: %w", err)
 	}
 
-	keyPem := new(bytes.Buffer)
-	err = pem.Encode(keyPem, &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	})
+	keyPem, err := PrivateKeyToPEM(key)
 	if err != nil {
 		return "", "", fmt.Errorf("error encoding key: %w", err)
 	}
 
-	return certPem.String(), keyPem.String(), nil
+	return certPem.String(), keyPem, nil
 }
 
 // GenerateClientCertificate generates a TLS certificate, signed with the
@@ -98,7 +97,7 @@ func GenerateCaCertificate(commonName string, validityDays int) (string, string,
 // authentication.
 //
 // It will return the certificate and its private key as PEM encoded strings.
-func GenerateClientCertificate(name string, signerCert *x509.Certificate, signerKey crypto.PrivateKey, validityDays int) (string, string, error) {
+func GenerateClientCertificate(name string, signerCert *x509.Certificate, signerKey crypto.PrivateKey, validityDays int, opts KeyGenOptions) (string, string, error) {
 	if err := validateValidityDays(validityDays); err != nil {
 		return "", "", err
 	}
@@ -116,7 +115,7 @@ func GenerateClientCertificate(name string, signerCert *x509.Certificate, signer
 		BasicConstraintsValid: true,
 	}
 
-	return GenerateCertificate(cert, signerCert, signerKey)
+	return GenerateCertificate(cert, signerCert, signerKey, opts)
 }
 
 // GenerateServerCertificate generates a TLS certificate, signed with the
@@ -124,7 +123,7 @@ func GenerateClientCertificate(name string, signerCert *x509.Certificate, signer
 // authentication.
 //
 // It will return the certificate and its private key as PEM encoded strings.
-func GenerateServerCertificate(name string, signerCert *x509.Certificate, signerKey crypto.PrivateKey, ips []string, dns []string, validityDays int) (string, string, error) {
+func GenerateServerCertificate(name string, signerCert *x509.Certificate, signerKey crypto.PrivateKey, ips []string, dns []string, validityDays int, opts KeyGenOptions) (string, string, error) {
 	if err := validateValidityDays(validityDays); err != nil {
 		return "", "", err
 	}
@@ -154,7 +153,7 @@ func GenerateServerCertificate(name string, signerCert *x509.Certificate, signer
 		IPAddresses:           ipAddresses,
 	}
 
-	return GenerateCertificate(cert, signerCert, signerKey)
+	return GenerateCertificate(cert, signerCert, signerKey, opts)
 }
 
 // ValidateLeafValidityDays returns an error if a leaf cert issued today for
@@ -185,12 +184,16 @@ func validateValidityDays(validityDays int) error {
 // using signerCert and signerKey.
 //
 // It will return the certificate and its private key as PEM encoded strings.
-func GenerateCertificate(cert *x509.Certificate, signerCert *x509.Certificate, signerKey crypto.PrivateKey) (string, string, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 4096)
+func GenerateCertificate(cert *x509.Certificate, signerCert *x509.Certificate, signerKey crypto.PrivateKey, opts KeyGenOptions) (string, string, error) {
+	key, err := GeneratePrivateKey(opts)
 	if err != nil {
 		return "", "", err
 	}
-	certBytes, err := x509.CreateCertificate(rand.Reader, cert, signerCert, &key.PublicKey, signerKey)
+	pub, err := publicKey(key)
+	if err != nil {
+		return "", "", err
+	}
+	certBytes, err := x509.CreateCertificate(rand.Reader, cert, signerCert, pub, signerKey)
 	if err != nil {
 		return "", "", fmt.Errorf("error creating cert: %w", err)
 	}
@@ -204,14 +207,10 @@ func GenerateCertificate(cert *x509.Certificate, signerCert *x509.Certificate, s
 		return "", "", fmt.Errorf("error encoding certificate: %w", err)
 	}
 
-	keyPem := new(bytes.Buffer)
-	err = pem.Encode(keyPem, &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	})
+	keyPem, err := PrivateKeyToPEM(key)
 	if err != nil {
 		return "", "", fmt.Errorf("error encoding key: %w", err)
 	}
 
-	return certPem.String(), keyPem.String(), nil
+	return certPem.String(), keyPem, nil
 }

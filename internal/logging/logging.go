@@ -32,7 +32,9 @@ import (
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 )
@@ -407,7 +409,7 @@ func LogActionUpdate(logCtx *logrus.Entry, resourceType string, oldObj, newObj a
 	// Include the diff in the log if full detail is enabled
 	if fullDetailConfig.Actions && oldObj != nil && newObj != nil && !isSecret(newObj) {
 		// Only include the diff if it is non-empty
-		if diff := cmp.Diff(oldObj, newObj); diff != "" {
+		if diff := cmp.Diff(dropMetadataManagedFields(oldObj), dropMetadataManagedFields(newObj)); diff != "" {
 			logCtx = logCtx.WithField(logfields.Detail, diff)
 		}
 	}
@@ -559,7 +561,7 @@ func LogInformerUpdate(logCtx *logrus.Entry, oldObj, newObj any) {
 	// Include the diff in the log if full detail is enabled
 	// but not for secret as they are confidential
 	if fullDetailConfig.Informers && !isSecret(newObj) {
-		if diff := cmp.Diff(oldObj, newObj); diff != "" {
+		if diff := cmp.Diff(dropMetadataManagedFields(oldObj), dropMetadataManagedFields(newObj)); diff != "" {
 			logCtx = logCtx.WithField(logfields.Detail, diff)
 		}
 	}
@@ -618,13 +620,17 @@ func hasEventData(data []byte) bool {
 }
 
 // isSensitiveEvent returns true if the event may carry sensitive data.
-// Repository events carry Secret objects directly. Redis and resource events
-// carry opaque payloads that could contain secrets (cached manifests, raw K8s
-// API responses), so they are treated as potentially sensitive.
+// Repository events carry Secret objects directly. Redis responses and resource
+// mutation events carry opaque payloads that could contain secrets.
+// Exceptions: resource GET requests and redis requests are safe to log.
 func isSensitiveEvent(ev *cloudevents.Event) bool {
 	switch targets.EventTarget(ev.DataSchema()) {
-	case targets.Repository, targets.Redis, targets.Resource:
+	case targets.Repository:
 		return true
+	case targets.Resource:
+		return ev.Type() != "GET"
+	case targets.Redis:
+		return !strings.HasSuffix(ev.Type(), event.RedisGenericRequest.String()) // only redis request is non-sensitive
 	}
 	return false
 }
@@ -658,13 +664,29 @@ func isSecret(obj any) bool {
 	return ok
 }
 
+// dropMetadataManagedFields returns a copy of obj after removing .metadata.managedFields.
+func dropMetadataManagedFields(obj any) any {
+	accessor, err := meta.Accessor(obj)
+	if err != nil || len(accessor.GetManagedFields()) == 0 {
+		return obj
+	}
+	if deepCopyable, ok := obj.(runtime.Object); ok {
+		cleaned := deepCopyable.DeepCopyObject()
+		if cleanedAccessor, err := meta.Accessor(cleaned); err == nil {
+			cleanedAccessor.SetManagedFields(nil)
+		}
+		return cleaned
+	}
+	return obj
+}
+
 // marshalResource marshals a resource to JSON string
 func marshalResource(obj any) string {
 	// Secrets are confidentials and should not log data
 	if isSecret(obj) {
 		return "<redacted: Secret>"
 	}
-	data, err := json.Marshal(obj)
+	data, err := json.Marshal(dropMetadataManagedFields(obj))
 	if err != nil {
 		return fmt.Sprintf("<error marshalling resource: %v>", err)
 	}

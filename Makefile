@@ -32,6 +32,7 @@ BIN_NAME_CLI?=argocd-agentctl
 BIN_ARCH?=$(shell go env GOARCH)
 BIN_OS?=$(shell go env GOOS)
 CGO_ENABLED?=0
+ENABLE_DATA_RACE_DETECTOR?=true
 GOEXPERIMENT?=
 GO_TAGS?=
 GO_MOD?=
@@ -52,7 +53,7 @@ BIN_DIR := $(current_dir)/build/bin
 
 PROTOC_GEN_GO_VERSION?=v1.28
 PROTOC_GEN_GO_GRPC_VERSION=v1.2
-GOLANG_CI_LINT_VERSION=v2.10.1
+GOLANG_CI_LINT_VERSION=v2.12.2
 MOCKERY_V2_VERSION?=v2.43.0
 HELM_DOCS_VERSION?=v1.14.2
 
@@ -94,7 +95,7 @@ teardown-e2e:
 
 .PHONY: start-e2e
 start-e2e: cli install-goreman
-	./hack/dev-env/start-e2e.sh
+	ENABLE_DATA_RACE_DETECTOR=$(ENABLE_DATA_RACE_DETECTOR) ./hack/dev-env/start-e2e.sh
 
 .PHONY: test-e2e
 test-e2e:

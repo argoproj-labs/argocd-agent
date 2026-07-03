@@ -64,6 +64,9 @@ kubectl create namespace argocd --context <control-plane-context>
 
 Install a customized Argo CD instance that excludes components that will run on workload clusters replacing <release-branch> with the release you wish to use:
 
+!!! note "Server-side apply required"
+    The Argo CD manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+
 ```bash
 # Apply the principal-specific Argo CD configuration
 kubectl apply -n argocd \

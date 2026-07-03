@@ -38,7 +38,12 @@ if [ -f "$E2E_ENV_FILE" ]; then
     export ARGOCD_AGENT_ON_APPLICATION_RECREATE=${ARGOCD_AGENT_ON_APPLICATION_RECREATE:-ignore}
 fi
 
-go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
+RACE_FLAG=""
+if [ "${ENABLE_DATA_RACE_DETECTOR}" = "true" ]; then
+    RACE_FLAG="-race"
+fi
+
+go run ${RACE_FLAG} github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode managed \
     --allowed-namespaces '*' \
     --creds "mtls:any" \

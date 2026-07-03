@@ -198,6 +198,8 @@ cacheRefreshInterval: "10s"
 informerSyncTimeout: "10s"
 # -- Keep-alive interval for connections.
 keepAliveInterval: "50s"
+# -- Heartbeat interval for the gRPC Subscribe stream. See docs for details.
+heartbeatInterval: ""
 # -- Path to the TLS client key.
 tlsClientKeyPath: ""
 # -- Path to the TLS client certificate.

@@ -25,8 +25,6 @@ import (
 
 	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -216,8 +214,12 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 		downgradingHandler := grpchttp1server.CreateDowngradingHandler(s.grpcServer, http.NotFoundHandler(), opts...)
 		downgradingServer := &http.Server{
 			TLSConfig: tlsConfig,
-			Handler:   h2c.NewHandler(downgradingHandler, &http2.Server{}),
+			Handler:   downgradingHandler,
 		}
+		downgradingServer.Protocols = new(http.Protocols)
+		downgradingServer.Protocols.SetHTTP1(true)
+		downgradingServer.Protocols.SetHTTP2(true)
+		downgradingServer.Protocols.SetUnencryptedHTTP2(true)
 
 		go func() {
 			// Use plaintext HTTP if TLS is disabled (e.g., behind Istio)

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	"github.com/sirupsen/logrus"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
@@ -53,9 +54,11 @@ func TestEventWriter(t *testing.T) {
 		},
 	}
 
+	eventWriterLogger := logrus.StandardLogger().WithField("module", "EventWriter")
+
 	t.Run("should add/update/remove events from the queue", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		ev := es.ApplicationEvent(Create, app1)
 		evSender.Add(ev)
@@ -96,7 +99,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle events from multiple resources", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		app1Events := []EventType{Create, SpecUpdate, Delete}
 		app2Events := []EventType{Create, SpecUpdate, SpecUpdate, Delete}
@@ -123,7 +126,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should send waiting events to the stream", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
@@ -152,7 +155,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should prioritize DELETE events and clear queue", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Add Create and SpecUpdate events
 		ev1 := es.ApplicationEvent(Create, app1)
@@ -183,7 +186,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle concurrent adds and removes", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		var wg sync.WaitGroup
 		numGoroutines := 10
@@ -238,7 +241,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should move events from unsent to sent on first send", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
@@ -258,7 +261,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should retry sent events with exponential backoff", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
@@ -290,7 +293,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should not send ACK events to sentEvents", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Create an ACK event
 		cev := cloudevents.NewEvent()
@@ -313,7 +316,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should not send heartbeat events to sentEvents (fire-and-forget)", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Create a heartbeat event using EventSource helper
 		heartbeatEv := es.HeartbeatEvent(Ping)
@@ -332,7 +335,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("heartbeat events should not accumulate in sentEvents over time", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Simulate multiple heartbeats being sent (like a real heartbeat interval)
 		for i := 0; i < 10; i++ {
@@ -348,7 +351,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle empty resource ID gracefully", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Create an event manually with empty resourceID extension
 		cev := cloudevents.NewEvent()
@@ -367,7 +370,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle Get for non-existent resource", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		result := evSender.Get("non-existent-resource-id")
 		require.Nil(t, result)
@@ -375,7 +378,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should return sent event before checking unsent queue in Get", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Reset app1 to version 1
 		app1.ResourceVersion = "1"
@@ -405,7 +408,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle SendWaitingEvents with context cancellation", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		ev := es.ApplicationEvent(Create, app1)
 		evSender.Add(ev)
@@ -436,7 +439,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should coalesce multiple updates for same resource", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter("test", fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		resID := createResourceID(app1.ObjectMeta)
 

@@ -138,9 +138,9 @@ For more information, refer to [Managing AppProjects](./appprojects.md#autonomou
 In autonomous mode, the agent is the source of truth:
 
 - **Agent → Principal**: Both spec and status changes
-- **Principal → Agent**: Read-only mirror (no modifications sent back)
+- **Principal → Agent**: Spec modifications are reverted; sync and terminate operations are forwarded
 
-The principal serves as a centralized view of all Applications across autonomous agents but doesn't control them.
+The principal serves as a centralized view of all Applications across autonomous agents but doesn't control their configuration.
 
 ### Lifecycle Management
 
