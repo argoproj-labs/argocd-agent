@@ -61,7 +61,7 @@ const (
 	EventRequestResourceResync EventType = targets.TypePrefix + ".request-resource-resync"
 	ClusterCacheInfoUpdate     EventType = targets.TypePrefix + ".cluster-cache-info-update"
 	TerminalRequest            EventType = targets.TypePrefix + ".terminal-request"
-	ApplicationError           EventType = targets.TypePrefix + ".application-error"
+	Error                      EventType = targets.TypePrefix + ".error"
 )
 
 const (
@@ -658,8 +658,6 @@ func Target(raw *cloudevents.Event) targets.EventTarget {
 		return targets.Terminal
 	case targets.ApplicationSet.String():
 		return targets.ApplicationSet
-	case targets.Error.String():
-		return targets.Error
 	}
 	return ""
 }
@@ -903,17 +901,15 @@ type ErrorData struct {
 	Message           string `json:"message"`
 }
 
-const ErrorMessageAgentNamePlaceholder = "$AN"
-
-func (evs EventSource) ErrorEvent(evType EventType, errData *ErrorData) (*cloudevents.Event, error) {
+func (evs EventSource) ErrorEvent(evTarget targets.EventTarget, errData *ErrorData) (*cloudevents.Event, error) {
 	reqUUID := uuid.NewString()
 	cev := cloudevents.NewEvent()
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
-	cev.SetType(evType.String())
+	cev.SetType(Error.String())
 	cev.SetExtension(eventID, reqUUID)
 	cev.SetExtension(resourceID, reqUUID)
-	cev.SetDataSchema(targets.Error.String())
+	cev.SetDataSchema(evTarget.String())
 	err := cev.SetData(cloudevents.ApplicationJSON, errData)
 	return &cev, err
 }

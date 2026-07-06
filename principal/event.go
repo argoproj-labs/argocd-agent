@@ -17,7 +17,6 @@ package principal
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
@@ -134,8 +133,6 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		err = s.processClusterCacheInfoUpdateEvent(agentName, ev)
 	case targets.Heartbeat:
 		err = s.processHeartbeatEvent(agentName, ev)
-	case targets.Error:
-		err = s.processErrorEvent(ctx, agentName, ev)
 	default:
 		err = fmt.Errorf("unknown target: '%s'", target)
 	}
@@ -347,9 +344,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			if !s.destinationBasedMapping {
 				incoming.SetNamespace(agentName)
 			}
-			app, err := s.appManager.Get(ctx, incoming.Name, incoming.Namespace)
-			if err != nil {
-				if kerrors.IsNotFound(err) {
+			app, err := s.appManager.Get(ctx, incoming.Name, incoming.Namespace) if err != nil { if kerrors.IsNotFound(err) {
 					return nil // ignore not found error: no need to delete app if it doesn't exist
 				}
 				logCtx.WithError(err).Error("unexpected error when attempting to retrieve deleted Application")
@@ -384,6 +379,41 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		} else {
 			return fmt.Errorf("unexpected agent mode")
 		}
+	case event.Error.String():
+		errData := &event.ErrorData{}
+		err := ev.DataAs(errData)
+		if err != nil {
+			return err
+		}
+
+		if !agentMode.IsManaged() {
+			logCtx.Debug("Discarding event, because agent is not in managed mode")
+			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      errData.ResourceName,
+				Namespace: errData.ResourceNamespace,
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Health: v1alpha1.AppHealthStatus{
+					Status: health.HealthStatusDegraded,
+				},
+				Conditions: []v1alpha1.ApplicationCondition{
+					{
+						Type:    application.AppConditionAgentError.String(),
+						Message: fmt.Sprintf("Error occured on cluster managed by agent: %s", agentName),
+					},
+				},
+			},
+		}
+
+		_, err = s.appManager.UpdateStatus(ctx, agentName, app)
+		if err != nil {
+			return fmt.Errorf("could not update application status for %s: %w", app.QualifiedName(), err)
+		}
+
 	default:
 		return fmt.Errorf("unable to process event of type %s", ev.Type())
 	}
@@ -637,68 +667,6 @@ func (s *Server) processResourceEventResponse(ctx context.Context, agentName str
 	err = safeSendCloudEvent(ctx, evChan, ev)
 
 	return err
-}
-
-func (s *Server) processErrorEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
-	errData := &event.ErrorData{}
-	err := ev.DataAs(errData)
-	if err != nil {
-		return err
-	}
-
-	agentMode := s.agentMode(agentName)
-
-	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
-		"module":   "QueueProcessor",
-		"client":   agentName,
-		"mode":     agentMode.String(),
-		"event":    ev.Type(),
-		"event_id": event.EventID(ev),
-	})
-
-	message := strings.ReplaceAll(errData.Message, event.ErrorMessageAgentNamePlaceholder, agentName)
-
-	switch ev.Type() {
-	case event.ApplicationError.String():
-		if !agentMode.IsManaged() {
-			logCtx.Debug("Discarding event, because agent is not in managed mode")
-			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
-		}
-
-		if s.destinationBasedMapping {
-			if errData.ResourceNamespace == s.agentNamespace(agentName) {
-				errData.ResourceNamespace = s.namespace
-			}
-		}
-
-		app := &v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      errData.ResourceName,
-				Namespace: errData.ResourceNamespace,
-			},
-			Status: v1alpha1.ApplicationStatus{
-				Health: v1alpha1.AppHealthStatus{
-					Status: health.HealthStatusDegraded,
-				},
-				Conditions: []v1alpha1.ApplicationCondition{
-					{
-						Type:    string(application.AppConditionAgentError),
-						Message: message,
-					},
-				},
-			},
-		}
-
-		_, err := s.appManager.UpdateStatus(ctx, agentName, app)
-		if err != nil {
-			return fmt.Errorf("could not update application status for %s: %w", app.QualifiedName(), err)
-		}
-
-	default:
-		return fmt.Errorf("unable to process event of type %s", ev.Type())
-	}
-
-	return nil
 }
 
 // safeSendCloudEvent attempts to send a CloudEvent on a channel.

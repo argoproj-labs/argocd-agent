@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
@@ -368,15 +369,15 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 
 // addErrorEventToQueue is used to report errors to the principal by putting an
 // error event on the send queue
-func (a *Agent) addErrorEventToQueue(errType event.EventType, errData *event.ErrorData) error {
-	logCtx := a.logGrpcEvent().WithField(logfields.Event, "Error").WithField("ErrorType", errType.String())
+func (a *Agent) addErrorEventToQueue(errTarget targets.EventTarget, errData *event.ErrorData) error {
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "Error").WithField("ErrorTarget", errTarget.String())
 
 	q := a.queues.SendQ(defaultQueueName)
 	if q == nil {
 		return fmt.Errorf("send queue not found")
 	}
 
-	ev, err := a.emitter.ErrorEvent(errType, errData)
+	ev, err := a.emitter.ErrorEvent(errTarget, errData)
 	if err != nil {
 		return err
 	}

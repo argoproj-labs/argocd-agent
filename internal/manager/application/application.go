@@ -988,3 +988,7 @@ func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app
 func log() *logrus.Entry {
 	return logrus.WithField("component", "AppManager")
 }
+
+func (c AppConditionType) String() string {
+	return string(c)
+}
