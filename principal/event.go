@@ -344,7 +344,9 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			if !s.destinationBasedMapping {
 				incoming.SetNamespace(agentName)
 			}
-			app, err := s.appManager.Get(ctx, incoming.Name, incoming.Namespace) if err != nil { if kerrors.IsNotFound(err) {
+			app, err := s.appManager.Get(ctx, incoming.Name, incoming.Namespace)
+			if err != nil {
+				if kerrors.IsNotFound(err) {
 					return nil // ignore not found error: no need to delete app if it doesn't exist
 				}
 				logCtx.WithError(err).Error("unexpected error when attempting to retrieve deleted Application")
