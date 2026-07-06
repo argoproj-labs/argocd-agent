@@ -1,0 +1,76 @@
+name: Release principal Helm chart
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'install/helm-repo/argocd-agent-principal/**'
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  release-principal-chart:
+    name: Package, push, and sign principal Helm chart
+    if: github.repository == 'argoproj-labs/argocd-agent'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.release.outputs.digest }}
+      chart_version: ${{ steps.release.outputs.chart_version }}
+      chart_ref: ${{ steps.release.outputs.chart_ref }}
+      pushed: ${{ steps.release.outputs.pushed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        with:
+          version: v3.20.2
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      - name: Login to GHCR
+        run: |
+          echo "${GITHUB_TOKEN}" | helm registry login ghcr.io --username "${GH_ACTOR}" --password-stdin
+          echo "${GITHUB_TOKEN}" | cosign login ghcr.io --username "${GH_ACTOR}" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+
+      - name: Build and push Helm chart
+        id: release
+        run: ./hack/release-helm-chart.sh install/helm-repo/argocd-agent-principal "ghcr.io/${{ github.repository }}"
+
+      - name: Sign Helm chart with Cosign
+        if: steps.release.outputs.pushed == 'true'
+        run: |
+          cosign sign \
+            -a "repo=${{ github.repository }}" \
+            -a "workflow=${GITHUB_WORKFLOW}" \
+            -a "sha=${{ github.sha }}" \
+            -y \
+            ${CHART_REF}@${DIGEST}
+        env:
+          CHART_REF: ${{ steps.release.outputs.chart_ref }}
+          DIGEST: ${{ steps.release.outputs.digest }}
+
+      - name: Upload chart package
+        if: steps.release.outputs.pushed == 'true'
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: helm-chart-package
+          path: ${{ steps.release.outputs.package }}
+          retention-days: 1
