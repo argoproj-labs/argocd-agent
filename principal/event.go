@@ -405,7 +405,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 				Conditions: []v1alpha1.ApplicationCondition{
 					{
 						Type:    application.AppConditionAgentError.String(),
-						Message: fmt.Sprintf("Error occured on cluster managed by agent: %s", agentName),
+						Message: fmt.Sprintf("Error occurred on cluster managed by agent: %s", agentName),
 					},
 				},
 			},
