@@ -48,11 +48,21 @@ if [[ ! -f "${PACKAGE_FILE}" ]]; then
 fi
 
 echo "==> Checking if ${CHART_NAME}:${CHART_VERSION} already exists in registry..."
-if helm show chart "oci://${REGISTRY}/${CHART_NAME}" --version "${CHART_VERSION}" >/dev/null 2>&1; then
+SHOW_STDERR=$(mktemp)
+if helm show chart "oci://${REGISTRY}/${CHART_NAME}" --version "${CHART_VERSION}" >/dev/null 2>"${SHOW_STDERR}"; then
 	echo "Chart ${CHART_NAME}:${CHART_VERSION} already exists in registry, skipping push"
 	echo "pushed=false" >> "${GITHUB_OUTPUT:-/dev/null}"
-	rm -rf "${PACKAGE_DIR}"
+	rm -rf "${PACKAGE_DIR}" "${SHOW_STDERR}"
 	exit 0
+fi
+SHOW_ERR=$(cat "${SHOW_STDERR}")
+rm -f "${SHOW_STDERR}"
+if echo "${SHOW_ERR}" | grep -qiE 'not found|404|manifest unknown|no such host.*no such chart'; then
+	echo "==> Chart not found in registry, proceeding with push"
+else
+	echo "Error: unexpected failure checking registry for ${CHART_NAME}:${CHART_VERSION}" >&2
+	echo "${SHOW_ERR}" >&2
+	exit 1
 fi
 
 echo "==> Pushing chart to oci://${REGISTRY}..."

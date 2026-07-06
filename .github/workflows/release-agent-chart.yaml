@@ -43,10 +43,11 @@ jobs:
 
       - name: Login to GHCR
         run: |
-          echo "${GITHUB_TOKEN}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
-          echo "${GITHUB_TOKEN}" | cosign login ghcr.io --username "${{ github.actor }}" --password-stdin
+          echo "${GITHUB_TOKEN}" | helm registry login ghcr.io --username "${GH_ACTOR}" --password-stdin
+          echo "${GITHUB_TOKEN}" | cosign login ghcr.io --username "${GH_ACTOR}" --password-stdin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
 
       - name: Build and push Helm chart
         id: release
