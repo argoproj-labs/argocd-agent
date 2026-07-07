@@ -506,6 +506,7 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	// Block until the client context is canceled.
 	<-c.ctx.Done()
 	c.logCtx.Info("Closing EventStream")
+	s.onDisconnect(c)
 
 	s.activeClientsMu.Lock()
 	if s.activeClients[c.agentName] == c {
