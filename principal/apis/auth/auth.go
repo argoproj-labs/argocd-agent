@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/issuer"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/principal/registration"
@@ -62,6 +63,7 @@ var errAuthenticationFailed = status.Error(codes.Unauthenticated, authFailedMess
 type ServerOptions struct {
 	agentRegistrationManager *registration.AgentRegistrationManager
 	onAuthenticated          func(agentName, agentNamespace string)
+	onCertificateSeen        func(agentName, fingerprint string)
 }
 
 type ServerOption func(o *ServerOptions) error
@@ -151,7 +153,15 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 		return nil, status.Errorf(codes.FailedPrecondition, "version mismatch")
 	}
 
-	logCtx.WithField("client", clientID).WithField("agent_version", agentVersion).Info("client authentication successful")
+	logFields := logrus.Fields{"client": clientID, "agent_version": agentVersion}
+	var fingerPrint string
+	if ar.Method == "mtls" {
+		fingerPrint = tlsutil.FingerprintFromContext(ctx)
+		if fingerPrint != "" {
+			logFields["fingerprint"] = fingerPrint
+		}
+	}
+	logCtx.WithFields(logFields).Info("client authentication successful")
 
 	// If self agent registration is enabled, register the agent and create cluster secret if it doesn't exist
 	if s.agentRegistrationManager != nil && s.agentRegistrationManager.IsSelfAgentRegistrationEnabled() {
@@ -176,6 +186,10 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 
 	if s.options.onAuthenticated != nil {
 		s.options.onAuthenticated(clientID, ar.AgentNamespace)
+	}
+
+	if s.options.onCertificateSeen != nil && fingerPrint != "" {
+		s.options.onCertificateSeen(clientID, fingerPrint)
 	}
 
 	return &authapi.AuthResponse{

@@ -28,6 +28,13 @@ const SecretNameAgentClientCert = "argocd-agent-client-tls"
 // for the principal.
 const SecretNameJWT = "argocd-agent-jwt"
 
+// ConfigMapNameTLSBlocklist is the name of the ConfigMap containing the
+// TLS certificate blocklist for the principal.
+const ConfigMapNameTLSBlocklist = "argocd-agent-tls-blocklist"
+
+// ConfigMapKeyBlocklistChecksums is the data key inside the TLS blocklist ConfigMap.
+const ConfigMapKeyBlocklistChecksums = "checksums"
+
 // SkipSyncLabel is the label used to skip sync for an application.
 const SkipSyncLabel = "argocd-agent.argoproj-labs.io/ignore-sync"
 

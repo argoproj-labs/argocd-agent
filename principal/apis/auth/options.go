@@ -31,3 +31,12 @@ func WithOnAuthenticated(fn func(name, namespace string)) ServerOption {
 		return nil
 	}
 }
+
+// WithOnCertificateSeen registers a callback that is invoked after a successful
+// mTLS authentication with the agent name and its certificate fingerprint.
+func WithOnCertificateSeen(fn func(agentName, fingerprint string)) ServerOption {
+	return func(o *ServerOptions) error {
+		o.onCertificateSeen = fn
+		return nil
+	}
+}
