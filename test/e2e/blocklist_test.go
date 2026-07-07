@@ -239,5 +239,8 @@ func (suite *BlocklistTestSuite) deleteBlocklistConfigMap() {
 			Namespace: fixture.PrincipalNamespace,
 		},
 	}
-	suite.Require().NoError(suite.PrincipalClient.Delete(suite.Ctx, cm, metav1.DeleteOptions{}))
+	err := suite.PrincipalClient.Delete(suite.Ctx, cm, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		suite.Require().NoError(err)
+	}
 }
