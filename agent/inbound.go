@@ -340,6 +340,11 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 			}
 		case manager.AdoptionPolicyNever:
 			logCtx.WithField(logfields.Application, incomingApp.GetName()).Info("Existing application is set to not be adopted")
+			errData := &event.ErrorData{}
+			errData.ResourceNamespace = incomingApp.Namespace
+			errData.ResourceName = incomingApp.Name
+			errData.Message = "Adoption policy for application is set to never. Either change the policy and recreate the app on the principal or delete the existing app on the agent."
+			return a.addErrorEventToQueue(targets.Application, errData)
 		}
 		return nil
 	default:

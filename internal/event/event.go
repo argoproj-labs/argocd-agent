@@ -61,6 +61,7 @@ const (
 	EventRequestResourceResync EventType = targets.TypePrefix + ".request-resource-resync"
 	ClusterCacheInfoUpdate     EventType = targets.TypePrefix + ".cluster-cache-info-update"
 	TerminalRequest            EventType = targets.TypePrefix + ".terminal-request"
+	Error                      EventType = targets.TypePrefix + ".error"
 )
 
 const (
@@ -892,4 +893,23 @@ func (ev Event) TerminalRequest() (*ContainerTerminalRequest, error) {
 	req := &ContainerTerminalRequest{}
 	err := ev.event.DataAs(req)
 	return req, err
+}
+
+type ErrorData struct {
+	ResourceName      string `json:"resourceName"`
+	ResourceNamespace string `json:"resourceNamespace"`
+	Message           string `json:"message"`
+}
+
+func (evs EventSource) ErrorEvent(evTarget targets.EventTarget, errData *ErrorData) (*cloudevents.Event, error) {
+	reqUUID := uuid.NewString()
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(Error.String())
+	cev.SetExtension(eventID, reqUUID)
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetDataSchema(evTarget.String())
+	err := cev.SetData(cloudevents.ApplicationJSON, errData)
+	return &cev, err
 }

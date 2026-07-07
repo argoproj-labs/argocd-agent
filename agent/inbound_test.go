@@ -2621,6 +2621,7 @@ func Test_getTargetNamespaceForApp(t *testing.T) {
 func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
 	a, _ := newAgent(t)
 	a.mode = types.AgentModeManaged
+	a.emitter = event.NewEventSource("test")
 	var be *backend_mocks.Application
 	var getMock, updateMock, patchMock *mock.Call
 	var updatedApp *v1alpha1.Application
