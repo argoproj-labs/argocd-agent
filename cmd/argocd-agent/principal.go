@@ -30,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth/header"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/mtls"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
@@ -314,8 +315,20 @@ func NewPrincipalRunCommand() *cobra.Command {
 					}
 				}
 				mtlsauth := mtls.NewMTLSAuthentication(regex, source)
+
+				blockList := blocklist.New()
+				fingerprints, err := blocklist.LoadFromConfigMap(ctx, kubeConfig.Clientset, namespace)
+				if err != nil {
+					logrus.Warnf("Could not load TLS blocklist: %v", err)
+				} else {
+					blockList.Replace(fingerprints)
+					logrus.Infof("Loaded TLS blocklist with %d entries", blockList.Len())
+				}
+				mtlsauth.Blocklist = blockList
+				opts = append(opts, principal.WithBlocklist(blockList))
+
 				logrus.Infof("Using mTLS authentication (source: %s, pattern: %s)", source, regexStr)
-				err := authMethods.RegisterMethod("mtls", mtlsauth)
+				err = authMethods.RegisterMethod("mtls", mtlsauth)
 				if err != nil {
 					cmdutil.Fatal("Could not register mtls auth method: %v", err)
 				}

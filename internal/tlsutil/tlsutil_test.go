@@ -15,18 +15,24 @@
 package tlsutil
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"path"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
 )
 
 func Test_LoadTlsCertFromFile(t *testing.T) {
@@ -422,5 +428,104 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
 		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion, "maxVersion should be preserved")
 		assert.Equal(t, []uint16{cs.ID}, cfg.CipherSuites, "cipherSuites should be preserved")
+	})
+}
+
+func Test_CertificateFingerprint(t *testing.T) {
+	t.Run("returns colon-separated uppercase SHA-256 hex", func(t *testing.T) {
+		key := testcerts.GeneratePrivateKey(t, "rsa")
+		raw, err := x509.CreateCertificate(rand.Reader, &testcerts.DefaultCertTempl, &testcerts.DefaultCertTempl, &key.(*rsa.PrivateKey).PublicKey, key)
+		require.NoError(t, err)
+		cert, err := x509.ParseCertificate(raw)
+		require.NoError(t, err)
+
+		fp := CertificateFingerprint(cert)
+		parts := strings.Split(fp, ":")
+		assert.Len(t, parts, sha256.Size)
+		for _, p := range parts {
+			assert.Len(t, p, 2)
+			assert.Equal(t, strings.ToUpper(p), p)
+		}
+	})
+
+	t.Run("same cert returns same fingerprint", func(t *testing.T) {
+		key := testcerts.GeneratePrivateKey(t, "rsa")
+		raw, err := x509.CreateCertificate(rand.Reader, &testcerts.DefaultCertTempl, &testcerts.DefaultCertTempl, &key.(*rsa.PrivateKey).PublicKey, key)
+		require.NoError(t, err)
+		cert, err := x509.ParseCertificate(raw)
+		require.NoError(t, err)
+
+		assert.Equal(t, CertificateFingerprint(cert), CertificateFingerprint(cert))
+	})
+
+	t.Run("different certs return different fingerprints", func(t *testing.T) {
+		key1 := testcerts.GeneratePrivateKey(t, "rsa")
+		raw1, err := x509.CreateCertificate(rand.Reader, &testcerts.DefaultCertTempl, &testcerts.DefaultCertTempl, &key1.(*rsa.PrivateKey).PublicKey, key1)
+		require.NoError(t, err)
+		cert1, err := x509.ParseCertificate(raw1)
+		require.NoError(t, err)
+
+		key2 := testcerts.GeneratePrivateKey(t, "rsa")
+		raw2, err := x509.CreateCertificate(rand.Reader, &testcerts.DefaultCertTempl, &testcerts.DefaultCertTempl, &key2.(*rsa.PrivateKey).PublicKey, key2)
+		require.NoError(t, err)
+		cert2, err := x509.ParseCertificate(raw2)
+		require.NoError(t, err)
+
+		assert.NotEqual(t, CertificateFingerprint(cert1), CertificateFingerprint(cert2))
+	})
+
+	t.Run("matches manual SHA-256 computation", func(t *testing.T) {
+		key := testcerts.GeneratePrivateKey(t, "rsa")
+		raw, err := x509.CreateCertificate(rand.Reader, &testcerts.DefaultCertTempl, &testcerts.DefaultCertTempl, &key.(*rsa.PrivateKey).PublicKey, key)
+		require.NoError(t, err)
+		cert, err := x509.ParseCertificate(raw)
+		require.NoError(t, err)
+
+		sum := sha256.Sum256(cert.Raw)
+		parts := make([]string, len(sum))
+		for i, b := range sum {
+			parts[i] = fmt.Sprintf("%02X", b)
+		}
+		expected := strings.Join(parts, ":")
+		assert.Equal(t, expected, CertificateFingerprint(cert))
+	})
+}
+
+func Test_FingerprintFromContext(t *testing.T) {
+	t.Run("returns empty string without peer", func(t *testing.T) {
+		assert.Empty(t, FingerprintFromContext(context.Background()))
+	})
+
+	t.Run("returns empty string without TLS info", func(t *testing.T) {
+		ctx := peer.NewContext(context.Background(), &peer.Peer{})
+		assert.Empty(t, FingerprintFromContext(ctx))
+	})
+
+	t.Run("returns empty string without verified chains", func(t *testing.T) {
+		ctx := peer.NewContext(context.Background(), &peer.Peer{
+			AuthInfo: credentials.TLSInfo{
+				State: tls.ConnectionState{},
+			},
+		})
+		assert.Empty(t, FingerprintFromContext(ctx))
+	})
+
+	t.Run("returns fingerprint from verified chain", func(t *testing.T) {
+		key := testcerts.GeneratePrivateKey(t, "rsa")
+		raw, err := x509.CreateCertificate(rand.Reader, &testcerts.DefaultCertTempl, &testcerts.DefaultCertTempl, &key.(*rsa.PrivateKey).PublicKey, key)
+		require.NoError(t, err)
+		cert, err := x509.ParseCertificate(raw)
+		require.NoError(t, err)
+
+		ctx := peer.NewContext(context.Background(), &peer.Peer{
+			AuthInfo: credentials.TLSInfo{
+				State: tls.ConnectionState{
+					VerifiedChains: [][]*x509.Certificate{{cert}},
+				},
+			},
+		})
+		fp := FingerprintFromContext(ctx)
+		assert.NotEmpty(t, fp)
+		assert.Equal(t, CertificateFingerprint(cert), fp)
 	})
 }

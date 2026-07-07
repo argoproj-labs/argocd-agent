@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -1145,4 +1147,77 @@ func (c *concurrentMap[K, V]) Delete(key K) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.m, key)
+}
+
+// trackAgentFingerprint records the mapping from a certificate fingerprint to
+// the connected agent name. This is used by the blocklist informer callback
+// to disconnect an agent by fingerprint without requiring an agent name in the
+// blocklist entry.
+func (s *Server) trackAgentFingerprint(agentName, fingerprint string) {
+	s.fingerprintToAgent.Set(fingerprint, agentName)
+}
+
+// addBlocklistCallback is called by the informer when the blocklist ConfigMap
+// is first added.
+func (s *Server) addBlocklistCallback(cm *corev1.ConfigMap) {
+	s.updateBlocklistCallback(nil, cm)
+}
+
+// updateBlocklistCallback is called by the informer when the blocklist
+// ConfigMap is updated. It replaces the in-memory blocklist with
+// the entries from the ConfigMap and disconnects any newly blocklisted agents.
+func (s *Server) updateBlocklistCallback(oldCM, newCM *corev1.ConfigMap) {
+	if s.blocklist == nil {
+		return
+	}
+	newFingerprints, err := blocklist.ParseFingerprints(newCM.Data[config.ConfigMapKeyBlocklistChecksums])
+	if err != nil {
+		log().WithError(err).Error("Failed to parse blocklist ConfigMap data")
+		return
+	}
+
+	oldFingerprints := make(map[string]bool)
+	if oldCM != nil {
+		oldList, _ := blocklist.ParseFingerprints(oldCM.Data[config.ConfigMapKeyBlocklistChecksums])
+		for _, fp := range oldList {
+			oldFingerprints[fp] = true
+		}
+	}
+
+	s.blocklist.Replace(newFingerprints)
+	log().Infof("Reloaded TLS blocklist: %d entries", s.blocklist.Len())
+
+	s.disconnectNewlyBlocklisted(newFingerprints, oldFingerprints)
+}
+
+// deleteBlocklistCallback is called by the informer when the blocklist
+// ConfigMap is deleted. It clears the in-memory blocklist so that previously
+// blocked agents can reconnect.
+func (s *Server) deleteBlocklistCallback(cm *corev1.ConfigMap) {
+	if s.blocklist == nil {
+		return
+	}
+	s.blocklist.Replace([]string{})
+	log().Info("Blocklist ConfigMap deleted, cleared in-memory blocklist")
+}
+
+// disconnectNewlyBlocklisted terminates active connections for any fingerprints
+// that were not present in the previous blocklist. It resolves the agent name
+// from the in-memory fingerprint-to-agent mapping.
+func (s *Server) disconnectNewlyBlocklisted(fingerprints []string, oldFingerprints map[string]bool) {
+	if s.eventStreamSrv == nil {
+		return
+	}
+	for _, fp := range fingerprints {
+		if oldFingerprints[fp] {
+			continue
+		}
+		agentName := s.fingerprintToAgent.Get(fp)
+		if agentName == "" {
+			continue
+		}
+		if s.eventStreamSrv.DisconnectAgent(agentName) {
+			log().Infof("Disconnected blocklisted agent %s (fingerprint: %s)", agentName, fp)
+		}
+	}
 }

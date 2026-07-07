@@ -37,6 +37,7 @@ import (
 	kubegpgkey "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/gpgkey"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -92,6 +93,11 @@ type Server struct {
 	server      *http.Server
 	grpcServer  *grpc.Server
 	authMethods *auth.Methods
+	blocklist   *blocklist.Blocklist
+	// blocklistInformer watches the TLS blocklist ConfigMap for changes
+	blocklistInformer *informer.Informer[*corev1.ConfigMap]
+	// fingerprintToAgent maps certificate fingerprints to connected agent names
+	fingerprintToAgent *concurrentMap[string, string]
 	// queues contains events that are EITHER queued to be sent to the agent ('outbox'), OR that have been received by the agent and are waiting to be processed ('inbox').
 	// Server uses clientID/namespace as a key, to refer to each specific agent's queue
 	queues *queue.SendRecvQueues
@@ -480,6 +486,30 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	gpgKeyBackend := kubegpgkey.NewKubernetesBackend(kubeClient.Clientset, namespace, gpgKeyInformer)
 	s.gpgKeyManager = gpgkey.NewManager(gpgKeyBackend, namespace)
 
+	if s.blocklist != nil {
+		fieldSelector := fmt.Sprintf("metadata.name=%s", config.ConfigMapNameTLSBlocklist)
+		blocklistInformerOpts := []informer.InformerOption[*corev1.ConfigMap]{
+			informer.WithListHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+				opts.FieldSelector = fieldSelector
+				return kubeClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, opts)
+			}),
+			informer.WithWatchHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+				opts.FieldSelector = fieldSelector
+				return kubeClient.Clientset.CoreV1().ConfigMaps(namespace).Watch(ctx, opts)
+			}),
+			informer.WithAddHandler[*corev1.ConfigMap](s.addBlocklistCallback),
+			informer.WithUpdateHandler[*corev1.ConfigMap](s.updateBlocklistCallback),
+			informer.WithDeleteHandler[*corev1.ConfigMap](s.deleteBlocklistCallback),
+			informer.WithGroupResource[*corev1.ConfigMap]("", "configmaps"),
+		}
+		blocklistInformer, err := informer.NewInformer(ctx, blocklistInformerOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("could not create blocklist informer: %w", err)
+		}
+		s.blocklistInformer = blocklistInformer
+	}
+
+	s.fingerprintToAgent = &concurrentMap[string, string]{m: make(map[string]string)}
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
 	}
@@ -861,6 +891,17 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		if err := s.serveGRPC(ctx, s.metrics, s.grpcServerMetrics, errch); err != nil {
 			return err
 		}
+	}
+
+	// Start the blocklist informer
+	if s.blocklistInformer != nil {
+		go func() {
+			if err := s.blocklistInformer.Start(s.ctx); err != nil {
+				log().WithError(err).Error("Blocklist informer has exited non-successfully")
+			} else {
+				log().Info("Blocklist informer has exited")
+			}
+		}()
 	}
 
 	return nil
