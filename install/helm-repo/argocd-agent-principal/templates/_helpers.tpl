@@ -31,6 +31,28 @@ Create chart name and version as used by the chart label.
 {{- end }}
 
 {{/*
+Produce a Kubernetes-compliant name (<= 63 chars, the DNS label limit).
+
+If the input already fits, it is returned unchanged. Otherwise it is
+truncated to 54 chars and suffixed with an 8-char hash derived from the
+full, untruncated input. This guarantees that two inputs which only differ
+in their tail (e.g. "<base>-metrics" vs "<base>-healthz") still produce
+distinct, deterministic names after truncation, instead of silently
+colliding once the differentiating suffix is cut off.
+
+Usage: {{ include "argocd-agent-principal.safeName" "some-long-candidate-name" }}
+*/}}
+{{- define "argocd-agent-principal.safeName" -}}
+{{- $name := . -}}
+{{- if le (len $name) 63 -}}
+{{- $name -}}
+{{- else -}}
+{{- $hash := $name | sha256sum | trunc 8 -}}
+{{- printf "%s-%s" ($name | trunc 54 | trimSuffix "-") $hash -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Create default image tag. Defaults to chart appVersion if not set.
 */}}
 {{- define "argocd-agent-principal.defaultTag" -}}
@@ -89,19 +111,19 @@ Create the name of the service account to use
 Resource name helpers
 */}}
 {{- define "argocd-agent-principal.configMapName" -}}
-{{- printf "%s-params" (include "argocd-agent-principal.fullname" .) }}
+{{- include "argocd-agent-principal.safeName" (printf "%s-params" (include "argocd-agent-principal.fullname" .)) }}
 {{- end }}
 
 {{- define "argocd-agent-principal.serviceName" -}}
-{{- include "argocd-agent-principal.fullname" . }}
+{{- include "argocd-agent-principal.safeName" (include "argocd-agent-principal.fullname" .) }}
 {{- end }}
 
 {{- define "argocd-agent-principal.metricsServiceName" -}}
-{{- printf "%s-metrics" (include "argocd-agent-principal.fullname" .) }}
+{{- include "argocd-agent-principal.safeName" (printf "%s-metrics" (include "argocd-agent-principal.fullname" .)) }}
 {{- end }}
 
 {{- define "argocd-agent-principal.healthzServiceName" -}}
-{{- printf "%s-healthz" (include "argocd-agent-principal.fullname" .) }}
+{{- include "argocd-agent-principal.safeName" (printf "%s-healthz" (include "argocd-agent-principal.fullname" .)) }}
 {{- end }}
 
 {{- define "argocd-agent-principal.redisProxyServiceName" -}}
@@ -113,7 +135,7 @@ argocd-agent-resource-proxy
 {{- end }}
 
 {{- define "argocd-agent-principal.serviceMonitorName" -}}
-{{- printf "%s-servicemonitor" (include "argocd-agent-principal.fullname" .) }}
+{{- include "argocd-agent-principal.safeName" (printf "%s-servicemonitor" (include "argocd-agent-principal.fullname" .)) }}
 {{- end }}
 
 {{- define "argocd-agent-principal.clusterRoleName" -}}
@@ -137,5 +159,5 @@ argocd-agent-resource-proxy
 {{- end }}
 
 {{- define "argocd-agent-principal.testResourceName" -}}
-{{- printf "%s-test" (include "argocd-agent-principal.fullname" .) }}
+{{- include "argocd-agent-principal.safeName" (printf "%s-test" (include "argocd-agent-principal.fullname" .)) }}
 {{- end }}
