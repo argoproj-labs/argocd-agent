@@ -63,6 +63,13 @@
       "title": "createNamespace",
       "type": "boolean"
     },
+    "deploymentAnnotations": {
+      "additionalProperties": true,
+      "description": "Additional annotations to add to the agent Deployment metadata.",
+      "required": [],
+      "title": "deploymentAnnotations",
+      "type": "object"
+    },
     "destinationBasedMapping": {
       "default": false,
       "description": "#\nWhether to enable destination-based mapping. When enabled, the agent\ncreates applications in their original namespace (preserving the namespace\nfrom the principal) instead of the agent's own namespace.",
@@ -1042,6 +1049,7 @@
     "nodeSelector",
     "affinity",
     "tolerations",
+    "deploymentAnnotations",
     "podAnnotations",
     "podLabels",
     "priorityClassName",
