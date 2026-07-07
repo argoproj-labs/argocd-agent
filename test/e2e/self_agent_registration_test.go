@@ -55,15 +55,15 @@ func (suite *SelfAgentRegistrationTestSuite) SetupSuite() {
 func (suite *SelfAgentRegistrationTestSuite) SetupTest() {
 	suite.BaseSuite.SetupTest()
 
-	if !fixture.IsProcessRunning(fixture.PrincipalName) {
-		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName))
+	if !fixture.IsProcessRunning(fixture.PrincipalName, suite.T()) {
+		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	} else {
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	}
 
-	if !fixture.IsProcessRunning(fixture.AgentManagedName) {
-		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName))
+	if !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T()) {
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	} else {
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
@@ -83,8 +83,8 @@ func (suite *SelfAgentRegistrationTestSuite) TearDownTest() {
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
 	// Ensure agent is running
-	if !fixture.IsProcessRunning(fixture.AgentManagedName) {
-		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName))
+	if !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T()) {
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 	}
 	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 
@@ -272,7 +272,7 @@ func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret(
 	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
 
 	// Stop the agent
-	err = fixture.StopProcess(fixture.AgentManagedName)
+	err = fixture.StopProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 
 	// Wait for agent to disconnect
@@ -348,11 +348,11 @@ func (suite *SelfAgentRegistrationTestSuite) Test_ManuallyCreatedAndSelfRegister
 	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
 
 	// Stop agent and delete manually created cluster secret
-	err = fixture.StopProcess(fixture.AgentManagedName)
+	err = fixture.StopProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.AgentManagedName)
+		return !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete manually created cluster secret
@@ -407,11 +407,11 @@ func (suite *SelfAgentRegistrationTestSuite) Test_NoSecretAndSelfRegistrationDis
 	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
 
 	// Stop agent to trigger agent disconnection
-	err = fixture.StopProcess(fixture.AgentManagedName)
+	err = fixture.StopProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.AgentManagedName)
+		return !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete manually created cluster secret

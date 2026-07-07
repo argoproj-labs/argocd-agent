@@ -62,6 +62,7 @@ deploy_principal() {
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
 		sed -i'' \
+			-e "s/  principal.listen.host:.*/  principal.listen.host: \"0.0.0.0\"/" \
 			-e "s/  principal.namespace:.*/  principal.namespace: \"${ARGOCD_PRINCIPAL_NAMESPACE}\"/" \
 			-e "s/  principal.allowed-namespaces:.*/  principal.allowed-namespaces: \"agent-*\"/" \
 			principal-params-cm.yaml
@@ -79,6 +80,45 @@ deploy_agent_managed() {
 			kustomize edit set namespace ${ARGOCD_MANAGED_NAMESPACE}
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
+		# Modify the ClusterRole to include RBAC required by E2E tests (which are written for the configuration where agent runs locally via goreman)
+		cat >> agent-clusterrole.yaml <<-'EOF'
+		- apiGroups:
+		  - ""
+		  resources:
+		  - configmaps
+		  verbs:
+		  - create
+		  - delete
+		  - get
+		  - list
+		  - update
+		  - watch
+		  - patch
+		- apiGroups:
+		  - ""
+		  resources:
+		  - pods
+		  - pods/log
+		  - pods/exec
+		  verbs:
+		  - create
+		  - get
+		  - list
+		  - watch
+		- apiGroups:
+		  - apps
+		  resources:
+		  - deployments
+		  - replicasets
+		  verbs:
+		  - create
+		  - update
+		  - delete
+		  - get
+		  - list
+		  - watch
+		  - patch
+		EOF
 		sed -i'' \
 			-e "s/  agent.namespace:.*/  agent.namespace: \"${ARGOCD_MANAGED_NAMESPACE}\"/" \
 			-e "s/  agent.mode:.*/  agent.mode: \"managed\"/" \
@@ -98,6 +138,45 @@ deploy_agent_autonomous() {
 			kustomize edit set namespace ${ARGOCD_AUTONOMOUS_NAMESPACE}
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
+		# Modify the ClusterRole to include RBAC required by E2E tests (which are written for the configuration where agent runs locally via goreman)
+		cat >> agent-clusterrole.yaml <<-'EOF'
+		- apiGroups:
+		  - ""
+		  resources:
+		  - configmaps
+		  verbs:
+		  - create
+		  - delete
+		  - get
+		  - list
+		  - update
+		  - watch
+		  - patch
+		- apiGroups:
+		  - ""
+		  resources:
+		  - pods
+		  - pods/log
+		  - pods/exec
+		  verbs:
+		  - create
+		  - get
+		  - list
+		  - watch
+		- apiGroups:
+		  - apps
+		  resources:
+		  - deployments
+		  - replicasets
+		  verbs:
+		  - create
+		  - update
+		  - delete
+		  - get
+		  - list
+		  - watch
+		  - patch
+		EOF
 		sed -i'' \
 			-e "s/  agent.namespace:.*/  agent.namespace: \"${ARGOCD_AUTONOMOUS_NAMESPACE}\"/" \
 			-e "s/  agent.mode:.*/  agent.mode: \"autonomous\"/" \
