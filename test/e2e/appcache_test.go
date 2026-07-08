@@ -43,18 +43,18 @@ func (suite *CacheTestSuite) TearDownTest() {
 }
 
 func (suite *CacheTestSuite) SetupTest() {
-	if !fixture.IsProcessRunning(fixture.PrincipalName) {
+	if !fixture.IsProcessRunning(fixture.PrincipalName, suite.T()) {
 		// Start the principal if it is not running and wait for it to be ready
-		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName))
+		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	} else {
 		// If principal is already running, verify that it is ready
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	}
 
-	if !fixture.IsProcessRunning(fixture.AgentManagedName) {
+	if !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T()) {
 		// Start the agent if it is not running and wait for it to be ready
-		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName))
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	} else {
 		// If agent is already running, verify that it is ready
@@ -108,16 +108,16 @@ func (suite *CacheTestSuite) Test_RevertDisconnectedManagedClusterChanges() {
 
 	// Case 1: Agent is disconnected with principal, now modify the application directly in the managed-cluster,
 	// but changes should be reverted, to be in sync with last known state of principal application
-	requires.NoError(fixture.StopProcess(fixture.PrincipalName))
+	requires.NoError(fixture.StopProcess(fixture.PrincipalName, suite.T()))
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.PrincipalName)
+		return !fixture.IsProcessRunning(fixture.PrincipalName, suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
 	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 
 	// Case 2: Agent is reconnected with principal and now changes done in principal should reflect in managed-cluster
-	requires.NoError(fixture.StartProcess(fixture.PrincipalName))
+	requires.NoError(fixture.StartProcess(fixture.PrincipalName, suite.T()))
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
 	updateAppInfo(suite.Ctx, suite.PrincipalClient, principalKey, []string{"a", "b"}, requires)
@@ -164,17 +164,17 @@ func (suite *CacheTestSuite) Test_RevertManagedClusterOfflineChanges() {
 	// Agent in not running, but still make changes in the managed-cluster application manifest.
 	// When agent is restarted, these changes should be reverted to be in sync with principal.
 	requires.Eventually(func() bool {
-		return fixture.IsProcessRunning(fixture.AgentManagedName)
+		return fixture.IsProcessRunning(fixture.AgentManagedName, suite.T())
 	}, 60*time.Second, 1*time.Second)
 
-	requires.NoError(fixture.StopProcess(fixture.AgentManagedName))
+	requires.NoError(fixture.StopProcess(fixture.AgentManagedName, suite.T()))
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.AgentManagedName)
+		return !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T())
 	}, 60*time.Second, 1*time.Second)
 
 	updateAppInfo(suite.Ctx, suite.ManagedAgentClient, agentKey, []string{"a", "b"}, requires)
 
-	requires.NoError(fixture.StartProcess(fixture.AgentManagedName))
+	requires.NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	validateAppReverted(suite.Ctx, suite.ManagedAgentClient, &app, agentKey, requires, suite.T())
 }

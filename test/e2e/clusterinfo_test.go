@@ -41,27 +41,27 @@ func TestClusterTestSuite(t *testing.T) {
 }
 
 func (suite *ClusterInfoTestSuite) SetupTest() {
-	if !fixture.IsProcessRunning(fixture.PrincipalName) {
+	if !fixture.IsProcessRunning(fixture.PrincipalName, suite.T()) {
 		// Start the principal if it is not running and wait for it to be ready
-		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName))
+		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	} else {
 		// If principal is already running, verify that it is ready
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	}
 
-	if !fixture.IsProcessRunning(fixture.AgentManagedName) {
+	if !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T()) {
 		// Start the agent if it is not running and wait for it to be ready
-		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName))
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	} else {
 		// If agent is already running, verify that it is ready
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	}
 
-	if !fixture.IsProcessRunning(fixture.AgentAutonomousName) {
+	if !fixture.IsProcessRunning(fixture.AgentAutonomousName, suite.T()) {
 		// Start the agent if it is not running and wait for it to be ready
-		suite.Require().NoError(fixture.StartProcess(fixture.AgentAutonomousName))
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentAutonomousName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.AgentAutonomousName)
 	} else {
 		// If agent is already running, verify that it is ready
@@ -87,7 +87,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 	}, 60*time.Second, 1*time.Second)
 
 	// Stop the agent
-	err := fixture.StopProcess(fixture.AgentManagedName)
+	err := fixture.StopProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 
 	// Verify that connection status is updated when agent is disconnected
@@ -100,7 +100,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 	}, 60*time.Second, 1*time.Second)
 
 	// Restart the agent
-	err = fixture.StartProcess(fixture.AgentManagedName)
+	err = fixture.StartProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 
@@ -127,7 +127,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 	}, 60*time.Second, 1*time.Second)
 
 	// Stop the agent
-	err := fixture.StopProcess(fixture.AgentAutonomousName)
+	err := fixture.StopProcess(fixture.AgentAutonomousName, suite.T())
 	requires.NoError(err)
 
 	// Verify that connection status is updated when agent is disconnected
@@ -140,7 +140,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 	}, 60*time.Second, 1*time.Second)
 
 	// Restart the agent
-	err = fixture.StartProcess(fixture.AgentAutonomousName)
+	err = fixture.StartProcess(fixture.AgentAutonomousName, suite.T())
 	requires.NoError(err)
 	fixture.CheckReadiness(suite.T(), fixture.AgentAutonomousName)
 
@@ -231,7 +231,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 
 	// Step 8:
 	// Disconnect agent and verify that connection status is changed to Failed
-	requires.NoError(fixture.StopProcess(fixture.AgentManagedName))
+	requires.NoError(fixture.StopProcess(fixture.AgentManagedName, suite.T()))
 	requires.Eventually(func() bool {
 		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
 			Status:     appv1.ConnectionStatusFailed,
@@ -252,7 +252,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 
 	// Step 10:
 	// Reconnect agent and verify that connection status and cluster cache info are updated again with correct values
-	requires.NoError(fixture.StartProcess(fixture.AgentManagedName))
+	requires.NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 
 	requires.Eventually(func() bool {

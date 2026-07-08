@@ -46,22 +46,22 @@ func (suite *ResyncTestSuite) TearDownTest() {
 	}
 
 	// Ensure that all the components are running after runnings the tests
-	if !fixture.IsProcessRunning("principal") {
-		err := fixture.StartProcess("principal")
+	if !fixture.IsProcessRunning("principal", suite.T()) {
+		err := fixture.StartProcess("principal", suite.T())
 		requires.NoError(err)
 	}
 
 	fixture.CheckReadiness(suite.T(), "principal")
 
-	if !fixture.IsProcessRunning("agent-managed") {
-		err := fixture.StartProcess("agent-managed")
+	if !fixture.IsProcessRunning("agent-managed", suite.T()) {
+		err := fixture.StartProcess("agent-managed", suite.T())
 		requires.NoError(err)
 	}
 
 	fixture.CheckReadiness(suite.T(), "agent-managed")
 
-	if !fixture.IsProcessRunning("agent-autonomous") {
-		err := fixture.StartProcess("agent-autonomous")
+	if !fixture.IsProcessRunning("agent-autonomous", suite.T()) {
+		err := fixture.StartProcess("agent-autonomous", suite.T())
 		requires.NoError(err)
 	}
 
@@ -77,11 +77,11 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnPrincipalStartupManaged() {
 	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Stop the principal and delete the app from the control-plane
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	err = suite.PrincipalClient.Delete(suite.Ctx, app, metav1.DeleteOptions{})
@@ -92,7 +92,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnPrincipalStartupManaged() {
 	requires.NoError(err)
 
 	// Start the principal and ensure that the app is deleted from the workload cluster
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -114,11 +114,11 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupManaged() {
 	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Stop the principal and update the app on the control-plane
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	err = suite.PrincipalClient.EnsureApplicationUpdate(suite.Ctx, principalKey, func(a *argoapp.Application) error {
@@ -133,7 +133,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupManaged() {
 	requires.Equal("kustomize-guestbook", app.Spec.Source.Path)
 
 	// Start the principal and ensure that the app is updated on the workload cluster
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -155,11 +155,11 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupManaged() {
 	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Stop the agent and delete the app
-	err := fixture.StopProcess("agent-managed")
+	err := fixture.StopProcess("agent-managed", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-managed")
+		return !fixture.IsProcessRunning("agent-managed", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	err = suite.ManagedAgentClient.Delete(suite.Ctx, &argoapp.Application{
@@ -171,7 +171,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupManaged() {
 	requires.NoError(err)
 
 	// Start the agent and ensure that the app is recreated on the agent side
-	err = fixture.StartProcess("agent-managed")
+	err = fixture.StartProcess("agent-managed", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-managed")
@@ -192,11 +192,11 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupManaged() {
 	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
 
 	// Stop the agent and update the app on the workload cluster
-	err := fixture.StopProcess("agent-managed")
+	err := fixture.StopProcess("agent-managed", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-managed")
+		return !fixture.IsProcessRunning("agent-managed", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	err = suite.ManagedAgentClient.EnsureApplicationUpdate(suite.Ctx, key, func(a *argoapp.Application) error {
@@ -206,7 +206,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupManaged() {
 	requires.NoError(err)
 
 	// Start the agent and ensure that the app is updated back on the agent side
-	err = fixture.StartProcess("agent-managed")
+	err = fixture.StartProcess("agent-managed", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-managed")
@@ -228,11 +228,11 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupAutonomous() {
 	principalKey := types.NamespacedName{Name: app.Name, Namespace: "agent-autonomous"}
 
 	// Stop the agent process and delete the app on the agent side
-	err := fixture.StopProcess("agent-autonomous")
+	err := fixture.StopProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-autonomous")
+		return !fixture.IsProcessRunning("agent-autonomous", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	err = suite.AutonomousAgentClient.Delete(suite.Ctx, app, metav1.DeleteOptions{})
@@ -243,7 +243,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupAutonomous() {
 	requires.NoError(err)
 
 	// Start the agent process and ensure that the app is deleted on the principal
-	err = fixture.StartProcess("agent-autonomous")
+	err = fixture.StartProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-autonomous")
@@ -265,11 +265,11 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupAutonomous() {
 	agentKey := fixture.ToNamespacedName(app)
 
 	// Stop the agent process and update the app on the agent side
-	err := fixture.StopProcess("agent-autonomous")
+	err := fixture.StopProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-autonomous")
+		return !fixture.IsProcessRunning("agent-autonomous", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	err = suite.AutonomousAgentClient.EnsureApplicationUpdate(suite.Ctx, agentKey, func(a *argoapp.Application) error {
@@ -284,7 +284,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupAutonomous() {
 	requires.Equal("kustomize-guestbook", app.Spec.Source.Path)
 
 	// Start the agent process and ensure that the app is updated on the principal
-	err = fixture.StartProcess("agent-autonomous")
+	err = fixture.StartProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-autonomous")
@@ -307,11 +307,11 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnPrincipalStartupAutonomous() 
 	agentKey := fixture.ToNamespacedName(app)
 
 	// Stop the principal process and delete the app on the principal side
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	principalApp := app.DeepCopy()
@@ -324,7 +324,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnPrincipalStartupAutonomous() 
 	requires.NoError(err)
 
 	// Start the principal process and ensure that the app is created on the principal
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -344,11 +344,11 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupAutonomous() {
 	principalKey := types.NamespacedName{Name: app.Name, Namespace: "agent-autonomous"}
 
 	// Stop the principal process and update the app on the principal side
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	principalApp := app.DeepCopy()
@@ -361,7 +361,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupAutonomous() {
 	requires.NoError(err)
 
 	// Start the principal process and ensure that the app is updated back on the principal
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -467,11 +467,11 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnAppProjectUpdate() {
 	keyManaged := managedClusterRepoKey(repo)
 
 	// Stop the principal and update the AppProject rules
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Update the AppProject rules to not match any agent
@@ -482,7 +482,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnAppProjectUpdate() {
 	requires.NoError(err)
 
 	// Start the principal and ensure that the repository and the appProject are deleted from the managed-agent
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -507,11 +507,11 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnCreation() {
 	requires := suite.Require()
 
 	// Stop the principal process
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Create an appProject on the control plane cluster
@@ -529,7 +529,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnCreation() {
 	requires.NoError(err)
 
 	// Start the principal and ensure that the repository is created on the workload cluster
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -563,11 +563,11 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnUpdate() {
 	keyManaged := managedClusterRepoKey(sourceRepo)
 
 	// Stop the principal and update the AppProject rules
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Update the repository secret
@@ -579,7 +579,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnUpdate() {
 	requires.NoError(err)
 
 	// Start the principal and ensure that the repository is updated on the workload cluster
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	// Wait for the principal to be ready
@@ -622,11 +622,11 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnDeletion() {
 	}, 30*time.Second, 1*time.Second, "GET repository from managed-agent")
 
 	// Stop the principal and update the AppProject rules
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the repository
@@ -634,7 +634,7 @@ func (suite *ResyncTestSuite) Test_RepositoryResync_OnDeletion() {
 	requires.NoError(err)
 
 	// Start the principal and ensure that the repository is deleted from the workload cluster
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -653,11 +653,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnCreate() {
 	requires := suite.Require()
 
 	// Stop the principal
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Create an appProject on the control plane cluster
@@ -667,7 +667,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnCreate() {
 	requires.NoError(err)
 
 	// Start the principal and ensure that the appProject is created on the workload cluster
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -694,11 +694,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnUpdate() {
 	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Stop the principal
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Update the appProject spec
@@ -710,7 +710,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnUpdate() {
 	requires.NoError(err)
 
 	// Start the principal and ensure that the appProject is updated on the workload cluster
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -733,11 +733,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnDeletion() {
 	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Stop the principal
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the appProject
@@ -745,7 +745,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_OnDeletion() {
 	requires.NoError(err)
 
 	// Start the principal and ensure that the appProject is deleted from the workload cluster
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -767,11 +767,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_DeleteOnAgentDelete() {
 	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Stop the agent
-	err := fixture.StopProcess("agent-managed")
+	err := fixture.StopProcess("agent-managed", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-managed")
+		return !fixture.IsProcessRunning("agent-managed", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the appProject from the control plane
@@ -783,7 +783,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_DeleteOnAgentDelete() {
 	requires.NoError(err)
 
 	// Start the agent and ensure that the appProject is deleted from the workload cluster
-	err = fixture.StartProcess("agent-managed")
+	err = fixture.StartProcess("agent-managed", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-managed")
@@ -802,11 +802,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_CreateOnAgentDelete() {
 	requires := suite.Require()
 
 	// Stop the agent
-	err := fixture.StopProcess("agent-managed")
+	err := fixture.StopProcess("agent-managed", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-managed")
+		return !fixture.IsProcessRunning("agent-managed", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Create an appProject on the control plane cluster
@@ -817,7 +817,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResync_CreateOnAgentDelete() {
 	projKeyManaged := managedClusterAppProjectKey(appProject)
 
 	// Start the agent and ensure that the appProject is created on the workload cluster
-	err = fixture.StartProcess("agent-managed")
+	err = fixture.StartProcess("agent-managed", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-managed")
@@ -840,15 +840,15 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestart_Autonomous
 	agentKey := types.NamespacedName{Name: appProject.Name, Namespace: fixture.AutonomousAgentNamespace}
 
 	// Restart the principal
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Start the principal and ensure that the appProject is still present on the workload cluster
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -890,15 +890,15 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestart_Autonomous() {
 	agentKey := types.NamespacedName{Name: appProject.Name, Namespace: fixture.AutonomousAgentNamespace}
 
 	// Restart the autonomous-agent
-	err := fixture.StopProcess("agent-autonomous")
+	err := fixture.StopProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-autonomous")
+		return !fixture.IsProcessRunning("agent-autonomous", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Start the agent and ensure that the appProject is still present on both the clusters
-	err = fixture.StartProcess("agent-autonomous")
+	err = fixture.StartProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-autonomous")
@@ -936,11 +936,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithUpdateO
 	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: fixture.PrincipalNamespace}
 
 	// Stop the principal
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Update the AppProject on the control-plane cluster
@@ -954,7 +954,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithUpdateO
 	requires.NoError(err)
 
 	// Restart the principal
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -976,11 +976,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithUpdateO
 	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: fixture.PrincipalNamespace}
 
 	// Stop the principal
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Update the AppProject on the agent's cluster
@@ -992,7 +992,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithUpdateO
 	requires.NoError(err)
 
 	// Restart the principal
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -1014,11 +1014,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithUpdateOnAge
 	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: fixture.PrincipalNamespace}
 
 	// Stop the autonomous-agent
-	err := fixture.StopProcess("agent-autonomous")
+	err := fixture.StopProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-autonomous")
+		return !fixture.IsProcessRunning("agent-autonomous", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Update the AppProject on the autonomous-agent's cluster
@@ -1029,7 +1029,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithUpdateOnAge
 	requires.NoError(err)
 
 	// Restart the autonomous-agent
-	err = fixture.StartProcess("agent-autonomous")
+	err = fixture.StartProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-autonomous")
@@ -1051,11 +1051,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithUpdateOnPri
 	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: fixture.PrincipalNamespace}
 
 	// Stop the autonomous-agent
-	err := fixture.StopProcess("agent-autonomous")
+	err := fixture.StopProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-autonomous")
+		return !fixture.IsProcessRunning("agent-autonomous", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Update the AppProject on the principal's cluster
@@ -1069,7 +1069,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithUpdateOnPri
 	requires.NoError(err)
 
 	// Restart the autonomous-agent
-	err = fixture.StartProcess("agent-autonomous")
+	err = fixture.StartProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-autonomous")
@@ -1091,11 +1091,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithDeleteO
 	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: fixture.PrincipalNamespace}
 
 	// Stop the principal
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the AppProject on the control-plane cluster
@@ -1106,7 +1106,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithDeleteO
 	requires.NoError(err)
 
 	// Restart the principal
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -1139,11 +1139,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithDeleteO
 	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: fixture.PrincipalNamespace}
 
 	// Stop the principal
-	err := fixture.StopProcess("principal")
+	err := fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the AppProject on the agent's cluster
@@ -1151,7 +1151,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithDeleteO
 	requires.NoError(err)
 
 	// Restart the principal
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")
@@ -1173,11 +1173,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithDeleteOnAge
 	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: fixture.PrincipalNamespace}
 
 	// Stop the autonomous-agent
-	err := fixture.StopProcess("agent-autonomous")
+	err := fixture.StopProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-autonomous")
+		return !fixture.IsProcessRunning("agent-autonomous", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the AppProject on the autonomous-agent's cluster
@@ -1186,7 +1186,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithDeleteOnAge
 	requires.NoError(err)
 
 	// Restart the autonomous-agent
-	err = fixture.StartProcess("agent-autonomous")
+	err = fixture.StartProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-autonomous")
@@ -1208,11 +1208,11 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithDeleteOnPri
 	principalKey := types.NamespacedName{Name: "agent-autonomous-" + appProject.Name, Namespace: fixture.PrincipalNamespace}
 
 	// Stop the autonomous-agent
-	err := fixture.StopProcess("agent-autonomous")
+	err := fixture.StopProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("agent-autonomous")
+		return !fixture.IsProcessRunning("agent-autonomous", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the AppProject on the principal's cluster
@@ -1223,7 +1223,7 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnAgentRestartWithDeleteOnPri
 	requires.NoError(err)
 
 	// Restart the autonomous-agent
-	err = fixture.StartProcess("agent-autonomous")
+	err = fixture.StartProcess("agent-autonomous", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "agent-autonomous")
@@ -1518,14 +1518,14 @@ func (suite *ResyncTestSuite) assertAppProjectSurvivesPrincipalRestart(projectNa
 	}, 30*time.Second, 1*time.Second, "AppProject should sync to principal")
 
 	// Restart the principal
-	err = fixture.StopProcess("principal")
+	err = fixture.StopProcess("principal", suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning("principal")
+		return !fixture.IsProcessRunning("principal", suite.T())
 	}, 30*time.Second, 1*time.Second)
 
-	err = fixture.StartProcess("principal")
+	err = fixture.StartProcess("principal", suite.T())
 	requires.NoError(err)
 
 	fixture.CheckReadiness(suite.T(), "principal")

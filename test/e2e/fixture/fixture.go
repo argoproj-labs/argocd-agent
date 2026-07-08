@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"testing"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -521,4 +522,12 @@ func resetManagedAgentClusterInfo(clusterDetails *ClusterDetails) error {
 		return err
 	}
 	return nil
+}
+
+// SkipIfAgentInClusterEnvVarIsSet should be called to verify that the test (or utility function) is running locally (that is, not on cluster). If the test is running on cluster, the correct step is to skip the test.
+func SkipIfAgentInClusterEnvVarIsSet(t *testing.T) {
+	t.Helper()
+	if os.Getenv("ARGOCD_AGENT_IN_CLUSTER") == "true" {
+		t.Skip("skipping because ARGOCD_AGENT_IN_CLUSTER=true")
+	}
 }

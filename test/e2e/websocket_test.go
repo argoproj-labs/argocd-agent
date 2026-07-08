@@ -43,26 +43,30 @@ func (suite *HTTP1DowngradeTestSuite) TearDownTest() {
 	}
 
 	// Ensure that all the components are running after runnings the tests
-	if !fixture.IsProcessRunning("process") {
-		err := fixture.StartProcess("principal")
+	if !fixture.IsProcessRunning("process", suite.T()) {
+		err := fixture.StartProcess("principal", suite.T())
 		requires.NoError(err)
 		fixture.CheckReadiness(suite.T(), "principal")
 	}
 
-	if !fixture.IsProcessRunning("agent-managed") {
-		err := fixture.StartProcess("agent-managed")
+	if !fixture.IsProcessRunning("agent-managed", suite.T()) {
+		err := fixture.StartProcess("agent-managed", suite.T())
 		requires.NoError(err)
 		fixture.CheckReadiness(suite.T(), "agent-managed")
 	}
 
-	if !fixture.IsProcessRunning("agent-autonomous") {
-		err := fixture.StartProcess("agent-autonomous")
+	if !fixture.IsProcessRunning("agent-autonomous", suite.T()) {
+		err := fixture.StartProcess("agent-autonomous", suite.T())
 		requires.NoError(err)
 		fixture.CheckReadiness(suite.T(), "agent-autonomous")
 	}
 }
 
 func (suite *HTTP1DowngradeTestSuite) Test_WithHTTP1Downgrade() {
+
+	// This test assumes that resource proxy is available at localhost, which is not true when agent is on cluster.
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+
 	requires := suite.Require()
 
 	// Verify that the agent has connected to the principal
