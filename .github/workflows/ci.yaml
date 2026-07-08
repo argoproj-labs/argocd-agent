@@ -235,7 +235,7 @@ jobs:
         run: |
           make setup-e2e
       - name: Set destination-based mapping env vars
-        if: ${{ matrix.mapping-mode == 'destination' }}
+        if: ${{ matrix.mapping-mode == 'destination-mapping' }}
         run: |
           echo "ARGOCD_AGENT_DESTINATION_BASED_MAPPING=true" >> $GITHUB_ENV
           echo "ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true" >> $GITHUB_ENV
