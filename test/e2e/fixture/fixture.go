@@ -214,10 +214,19 @@ func (suite *BaseSuite) setupDestinationBasedMapping() {
 	requires.NoError(err)
 
 	// Create the agent-test namespace on the principal so Application CRs can be
-	// placed there. The agent will create the namespace on its side
-	// automatically when create-namespace is enabled.
+	// placed there.
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: DestMappingAppNamespace}}
 	if createErr := suite.PrincipalClient.Create(suite.Ctx, ns, metav1.CreateOptions{}); createErr != nil {
+		if !errors.IsAlreadyExists(createErr) {
+			requires.NoError(createErr)
+		}
+	}
+
+	// Also create the namespace on the managed agent so that tests which
+	// directly create Application CRs on the agent (e.g. adoption tests)
+	// can do so before the agent's auto-create logic kicks in.
+	agentNs := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: DestMappingAppNamespace}}
+	if createErr := suite.ManagedAgentClient.Create(suite.Ctx, agentNs, metav1.CreateOptions{}); createErr != nil {
 		if !errors.IsAlreadyExists(createErr) {
 			requires.NoError(createErr)
 		}
