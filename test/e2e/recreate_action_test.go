@@ -15,7 +15,6 @@
 package e2e
 
 import (
-	"os"
 	"testing"
 	"time"
 
@@ -35,10 +34,8 @@ func (suite *RecreateActionTestSuite) TearDownTest() {
 	suite.BaseSuite.TearDownTest()
 	requires := suite.Require()
 
-	if _, err := os.Stat(fixture.EnvVariablesFromE2EFile); err == nil {
-		requires.NoError(os.Remove(fixture.EnvVariablesFromE2EFile))
-		fixture.RestartAgent(suite.T(), "agent-managed")
-	}
+	fixture.ClearEnvVarsFile()
+	fixture.RestartAgent(suite.T(), "agent-managed")
 
 	if !fixture.IsProcessRunning("agent-managed", suite.T()) {
 		err := fixture.StartProcess("agent-managed", suite.T())
@@ -53,8 +50,9 @@ func (suite *RecreateActionTestSuite) createAndDeleteApp(action, appName string)
 	t := suite.T()
 
 	t.Logf("Configure agent with --on-application-recreate=%s", action)
-	envVar := "ARGOCD_AGENT_ON_APPLICATION_RECREATE=" + action
-	err := os.WriteFile(fixture.EnvVariablesFromE2EFile, []byte(envVar+"\n"), 0644)
+	err := fixture.WriteEnvVarsToFile(map[string]string{
+		"ARGOCD_AGENT_ON_APPLICATION_RECREATE": action,
+	})
 	requires.NoError(err)
 
 	fixture.RestartAgent(t, "agent-managed")
@@ -64,7 +62,7 @@ func (suite *RecreateActionTestSuite) createAndDeleteApp(action, appName string)
 	app := &argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appName,
-			Namespace: fixture.AgentManagedName,
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 			// add resources-finalizer to produce the cascade delete scenario
 			Finalizers: []string{
 				"resources-finalizer.argocd.argoproj.io",
@@ -77,10 +75,7 @@ func (suite *RecreateActionTestSuite) createAndDeleteApp(action, appName string)
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Name:      fixture.AgentManagedName,
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &argoapp.SyncPolicy{
 				Automated: &argoapp.SyncPolicyAutomated{},
 				SyncOptions: argoapp.SyncOptions{
@@ -96,7 +91,7 @@ func (suite *RecreateActionTestSuite) createAndDeleteApp(action, appName string)
 	fixture.WaitForAppSyncedAndHealthy(t, suite.Ctx, suite.PrincipalClient, nil, app)
 
 	t.Log("Delete the application directly from the agent cluster (unauthorized)")
-	agentApp := &argoapp.Application{ObjectMeta: metav1.ObjectMeta{Name: appName, Namespace: fixture.ManagedAgentNamespace}}
+	agentApp := &argoapp.Application{ObjectMeta: metav1.ObjectMeta{Name: appName, Namespace: fixture.ManagedAgentAppNamespace()}}
 	err = suite.ManagedAgentClient.Delete(suite.Ctx, agentApp, metav1.DeleteOptions{})
 	requires.NoError(err)
 
@@ -122,7 +117,7 @@ func (suite *RecreateActionTestSuite) Test_UnauthorizedDeleteWithClearStatus() {
 	app := suite.createAndDeleteApp("clear-status", "recreate-clear-test")
 
 	suite.T().Log("Verify the application is recreated and returns to Synced and Healthy on the agent")
-	agentAppKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	agentAppKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 	suite.Require().Eventually(func() bool {
 		agentApp := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentAppKey, &agentApp, metav1.GetOptions{})

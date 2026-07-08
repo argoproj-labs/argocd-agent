@@ -40,7 +40,7 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_managed() {
 	app := &v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appName,
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
@@ -49,10 +49,7 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_managed() {
 				Path:           "kustomize-guestbook",
 				TargetRevision: "HEAD",
 			},
-			Destination: v1alpha1.ApplicationDestination{
-				Name:      "agent-managed",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &v1alpha1.SyncPolicy{
 				Automated: &v1alpha1.SyncPolicyAutomated{},
 				SyncOptions: v1alpha1.SyncOptions{
@@ -78,11 +75,13 @@ func (suite *LogsStreamingTestSuite) Test_logs_streaming_managed() {
 	err = argoClient.Login()
 	requires.NoError(err)
 
+	principalKey := types.NamespacedName{Namespace: app.Namespace, Name: appName}
+
 	// Wait until the app is synced and healthy
 	retries := 0
 	requires.Eventually(func() bool {
 		a := &v1alpha1.Application{}
-		if err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, a, metav1.GetOptions{}); err != nil {
+		if err := suite.PrincipalClient.Get(suite.Ctx, principalKey, a, metav1.GetOptions{}); err != nil {
 			return false
 		}
 		if a.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced &&

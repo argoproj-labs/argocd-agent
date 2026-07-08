@@ -68,7 +68,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -77,10 +77,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{
 					"CreateNamespace=true",
@@ -92,7 +89,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 	requires.NoError(err)
 
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the app has been pushed to the managed-agent
 	requires.Eventually(func() bool {
@@ -299,7 +296,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -308,10 +305,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 				TargetRevision: "HEAD",
 				Path:           "test/data/pre-sync",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{
 					"CreateNamespace=true",
@@ -323,7 +317,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.NoError(err)
 
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the app has been pushed to the managed-agent
 	requires.Eventually(func() bool {

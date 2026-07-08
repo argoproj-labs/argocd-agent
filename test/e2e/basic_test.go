@@ -37,7 +37,7 @@ func (suite *BasicTestSuite) Test_AgentManaged() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -46,10 +46,7 @@ func (suite *BasicTestSuite) Test_AgentManaged() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{
 					"CreateNamespace=true",
@@ -61,7 +58,7 @@ func (suite *BasicTestSuite) Test_AgentManaged() {
 	requires.NoError(err)
 
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the app has been pushed to the managed-agent
 	requires.Eventually(func() bool {

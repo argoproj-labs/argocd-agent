@@ -286,7 +286,13 @@ func (suite *RepositoryTestSuite) Test_Repository_AppProjectUpdate() {
 
 	// Update the appProject on the principal's cluster to no longer match the agent name
 	err = suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, projKeyPrincipal, func(appProject *argoapp.AppProject) error {
-		appProject.Spec.SourceNamespaces = []string{"random"}
+		if fixture.IsDestinationBased() {
+			appProject.Spec.Destinations = []argoapp.ApplicationDestination{
+				{Namespace: "*", Name: "no-match-*"},
+			}
+		} else {
+			appProject.Spec.SourceNamespaces = []string{"random"}
+		}
 		return nil
 	}, metav1.UpdateOptions{})
 	requires.NoError(err)
@@ -362,7 +368,13 @@ func (suite *RepositoryTestSuite) Test_Repository_Change_AppProject() {
 	appProject2 := appProject.DeepCopy()
 	appProject2.Name = "sample2"
 	appProject2.ResourceVersion = ""
-	appProject2.Spec.SourceNamespaces = []string{"random"}
+	if fixture.IsDestinationBased() {
+		appProject2.Spec.Destinations = []argoapp.ApplicationDestination{
+			{Namespace: "*", Name: "no-match-*"},
+		}
+	} else {
+		appProject2.Spec.SourceNamespaces = []string{"random"}
+	}
 
 	err = suite.PrincipalClient.Create(suite.Ctx, appProject2, metav1.CreateOptions{})
 	requires.NoError(err)

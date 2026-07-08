@@ -61,6 +61,9 @@ type DestinationMappingTestSuite struct {
 
 // SetupSuite runs before the tests in the suite are run.
 func (suite *DestinationMappingTestSuite) SetupSuite() {
+	if fixture.IsDestinationBased() {
+		suite.T().Skip("DestinationMappingTestSuite is redundant when all suites already run in destination-based mode")
+	}
 	suite.BaseSuite.SetupSuite()
 	var err error
 

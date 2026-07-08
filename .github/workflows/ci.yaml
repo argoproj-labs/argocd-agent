@@ -166,11 +166,15 @@ jobs:
           flags: unit-tests
 
   test-e2e:
-    name: Run end-to-end tests
+    name: Run end-to-end tests (${{ matrix.mapping-mode }})
     if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-22.04
     needs:
       - changes
+    strategy:
+      fail-fast: false
+      matrix:
+        mapping-mode: [namespaced-mapping, destination-mapping]
     env:
       GOPATH: /home/runner/go
     steps:
@@ -230,6 +234,13 @@ jobs:
       - name: Set up the test environment
         run: |
           make setup-e2e
+      - name: Set destination-based mapping env vars
+        if: ${{ matrix.mapping-mode == 'destination' }}
+        run: |
+          echo "ARGOCD_AGENT_DESTINATION_BASED_MAPPING=true" >> $GITHUB_ENV
+          echo "ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true" >> $GITHUB_ENV
+          echo "ARGOCD_AGENT_CREATE_NAMESPACE=true" >> $GITHUB_ENV
+          echo "E2E_DESTINATION_BASED_MAPPING=true" >> $GITHUB_ENV
       - name: Run the principal and agents
         run: |
           make all
@@ -250,31 +261,31 @@ jobs:
       - name: Upload e2e-argocd-agent logs
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: e2e-argocd-agent.log
+          name: e2e-argocd-agent-${{ matrix.mapping-mode }}.log
           path: /tmp/e2e-argocd-agent.log
         if: ${{ failure() }}
       - name: Upload test logs
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: test-e2e.log
+          name: test-e2e-${{ matrix.mapping-mode }}.log
           path: /tmp/test-e2e.log
         if: ${{ failure() }}
       - name: Upload vcluster-agent-autonomous-controller logs
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: vcluster-agent-autonomous-controller.log
+          name: vcluster-agent-autonomous-controller-${{ matrix.mapping-mode }}.log
           path: /tmp/vcluster-agent-autonomous-controller.log
         if: ${{ failure() }}
       - name: Upload vcluster-agent-managed-controller logs
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: vcluster-agent-managed-controller.log
+          name: vcluster-agent-managed-controller-${{ matrix.mapping-mode }}.log
           path: /tmp/vcluster-agent-managed-controller.log
         if: ${{ failure() }}
       - name: Upload vcluster-control-plane-server logs
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: vcluster-control-plane-server.log
+          name: vcluster-control-plane-server-${{ matrix.mapping-mode }}.log
           path: /tmp/vcluster-control-plane-server.log
         if: ${{ failure() }}
 

@@ -66,6 +66,7 @@ go run ${RACE_FLAG} github.com/argoproj-labs/argocd-agent/cmd/argocd-agent princ
 	--kubecontext vcluster-control-plane \
 	--log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} \
 	--namespace ${ARGOCD_PRINCIPAL_NAMESPACE} \
+    --destination-based-mapping=${ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING:-false}\
 	--auth "mtls:CN=([^,]+)" \
     --resource-proxy-address "${ARGOCD_AGENT_RESOURCE_PROXY}:9090" \
 	$ARGS

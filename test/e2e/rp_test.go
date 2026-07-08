@@ -182,7 +182,7 @@ func (suite *ResourceProxyTestSuite) validateResourceProxyViaArgoAPI(appName str
 	app := v1alpha1.Application{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      appName,
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
@@ -191,10 +191,7 @@ func (suite *ResourceProxyTestSuite) validateResourceProxyViaArgoAPI(appName str
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: v1alpha1.ApplicationDestination{
-				Name:      "agent-managed",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &v1alpha1.SyncPolicy{
 				Automated: &v1alpha1.SyncPolicyAutomated{},
 				SyncOptions: v1alpha1.SyncOptions{
@@ -215,7 +212,10 @@ func (suite *ResourceProxyTestSuite) validateResourceProxyViaArgoAPI(appName str
 	retries := 0
 	requires.Eventually(func() bool {
 		app := &v1alpha1.Application{}
-		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, app, v1.GetOptions{})
+		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
+			Name:      appName,
+		}, app, v1.GetOptions{})
 		if err != nil {
 			return false
 		}
@@ -400,7 +400,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	app := v1alpha1.Application{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      appName,
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
@@ -409,10 +409,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: v1alpha1.ApplicationDestination{
-				Name:      "agent-managed",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &v1alpha1.SyncPolicy{
 				Automated: &v1alpha1.SyncPolicyAutomated{},
 				SyncOptions: v1alpha1.SyncOptions{
@@ -429,7 +426,9 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	retries := 0
 	requires.Eventually(func() bool {
 		app := &v1alpha1.Application{}
-		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, app, v1.GetOptions{})
+		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{
+			Namespace: fixture.ManagedPrincipalAppNamespace(), Name: appName,
+		}, app, v1.GetOptions{})
 		if err != nil {
 			return false
 		}
