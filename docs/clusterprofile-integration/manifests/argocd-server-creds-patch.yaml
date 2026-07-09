@@ -1,0 +1,47 @@
+# Strategic-merge patch that injects the argocd-agent-creds exec credential
+# plugin binary into the argocd-server Pod via an init container + shared
+# emptyDir, so that client-go can exec it when building a REST client for a
+# cluster whose Secret was generated from a ClusterProfile with the
+# "argocd-agent" AccessProvider.
+#
+# Apply with:
+#   kubectl patch deployment argocd-server -n argocd --type strategic \
+#     --patch-file argocd-server-creds-patch.yaml --context kind-argocd-hub
+#
+# In a real (non-PoC) install, prefer baking this into the argocd-server
+# Deployment via Kustomize/Helm rather than a one-off "kubectl patch".
+spec:
+  template:
+    metadata:
+      labels:
+        # Required for the argocd-agent-redis-proxy NetworkPolicy on the
+        # principal, which only allows ingress on :6379 from pods labeled
+        # app.kubernetes.io/part-of=argocd. Our thin/raw-manifest argocd-server
+        # install doesn't carry this label by default (unlike the upstream
+        # Helm chart), so without it kindnet's NetworkPolicy enforcement
+        # silently drops every redis-proxy dial from argocd-server, and any
+        # live-resource/log/manifest view in the UI fails with a dial timeout
+        # even though Applications still sync fine (sync/health status is
+        # pushed over the separate agent<->principal gRPC stream, not through
+        # this Redis proxy path).
+        app.kubernetes.io/part-of: argocd
+    spec:
+      initContainers:
+        - name: install-argocd-agent-creds
+          image: localhost/argocd-agent-clusterprofile-driver:dev
+          imagePullPolicy: Never
+          command: ["cp", "/bin/argocd-agent-creds", "/custom-tools/argocd-agent-creds"]
+          volumeMounts:
+            - name: custom-tools
+              mountPath: /custom-tools
+      containers:
+        - name: argocd-server
+          env:
+            - name: ARGOCD_AGENT_CREDS_DEBUG
+              value: "1"
+          volumeMounts:
+            - name: custom-tools
+              mountPath: /custom-tools
+      volumes:
+        - name: custom-tools
+          emptyDir: {}

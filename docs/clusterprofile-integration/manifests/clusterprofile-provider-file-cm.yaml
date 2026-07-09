@@ -1,0 +1,39 @@
+# ConfigMap consumed by clusterprofile-integration-for-argocd via
+# --clusterprofile-provider-file. It tells the controller how to turn a
+# ClusterProfile AccessProvider named "argocd-agent" into an Argo CD
+# cluster Secret that uses an exec credential plugin.
+#
+# "command" is the absolute path at which the argocd-agent-creds binary is
+# made available inside the argocd-server Pod (see
+# argocd-server-creds-patch.yaml, which injects it via an init container).
+#
+# "profileSourcedEnvVarsPolicy": "AppendIfNotExists" turns on the KEP-5339
+# additional-envs extension mechanism (implemented in
+# sigs.k8s.io/cluster-inventory-api/pkg/access): clusterprofile-agent-driver
+# advertises per-cluster env vars (which agent, which companion token
+# Secret) via a "clusterprofiles.multicluster.x-k8s.io/exec/additional-envs"
+# cluster extension, and this policy tells clusterprofile-integration-for-argocd
+# to merge them into the exec plugin's process environment. This is the
+# PRIMARY channel argocd-agent-creds uses; it's more reliable than
+# provideClusterInfo/ExecCredential.Spec.Cluster.Config, which we found is
+# not populated by at least Argo CD v3.4.4's API-discovery-client code path.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clusterprofile-provider-file
+  namespace: argocd
+data:
+  clusterprofile-provider-file.json: |
+    {
+      "providers": [
+        {
+          "name": "argocd-agent",
+          "execConfig": {
+            "command": "/custom-tools/argocd-agent-creds",
+            "apiVersion": "client.authentication.k8s.io/v1beta1",
+            "provideClusterInfo": true
+          },
+          "profileSourcedEnvVarsPolicy": "AppendIfNotExists"
+        }
+      ]
+    }
