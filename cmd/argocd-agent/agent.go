@@ -85,6 +85,9 @@ func NewAgentRunCommand() *cobra.Command {
 		// Timeout for the initial informer sync at startup
 		informerSyncTimeout time.Duration
 
+		// Minimum time between Application informer update callbacks for the same Application (debouncing).
+		bufferK8sInformerEvents time.Duration
+
 		// Time interval for application-level heartbeats over the Subscribe stream.
 		// This is used to keep the connection alive through service meshes like Istio.
 		heartbeatInterval time.Duration
@@ -158,9 +161,10 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 
 			subLoggers := cmdutil.SubSystemLoggers{
-				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
-				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
-				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
+				ResourceProxyLogger:       cmdutil.CreateLogger(logFormat),
+				RedisProxyLogger:          cmdutil.CreateLogger(logFormat),
+				GrpcEventLogger:           cmdutil.CreateLogger(logFormat),
+				InformerEventBufferLogger: cmdutil.CreateLogger(logFormat),
 			}
 
 			if len(logLevels) == 0 {
@@ -170,7 +174,7 @@ func NewAgentRunCommand() *cobra.Command {
 				cmdutil.ParseLogLevels(logLevels, &subLoggers)
 			}
 
-			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
+			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger, subLoggers.InformerEventBufferLogger))
 
 			cmdutil.ParseFullDetail(fullDetailCategories)
 
@@ -312,6 +316,7 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
 			agentOpts = append(agentOpts, agent.WithInformerSyncTimeout(informerSyncTimeout))
+			agentOpts = append(agentOpts, agent.WithApplicationInformerEventBufferInterval(bufferK8sInformerEvents))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
 			agentOpts = append(agentOpts, agent.WithCreateNamespace(createNamespace))
 			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
@@ -449,6 +454,12 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&informerSyncTimeout, "informer-sync-timeout",
 		env.DurationWithDefault("ARGOCD_AGENT_INFORMER_SYNC_TIMEOUT", nil, 10*time.Second),
 		"Timeout to wait for Application/AppProject/Repository/GPG/Namespace informers to sync at startup")
+
+	// The advantage to this parameter is that buffering allows redundant events that occur closely together to be removed, thus reducing the cpu/bandwidth cost of processing 'update' events. The disadvantage is that it introduces a latency of up to X seconds for 'update' events, where X is the interval specified in the parameter. For example, with buffer-informer-event-interval=10s, an update event may be communicated from agent -> principal up to 10 seconds after it was first detected on workload cluster. (However, for infrequent events [those that occur >10s apart], there will be no delay.)
+	command.Flags().DurationVar(&bufferK8sInformerEvents, "buffer-informer-event-interval",
+		env.DurationWithDefault("ARGOCD_AGENT_BUFFER_INFORMER_EVENT_INTERVAL", nil, 0),
+		"Minimum interval in seconds that detected workload cluster Application resource 'update' events will wait in a buffer before being communicated by agent back to principal.")
+
 	command.Flags().DurationVar(&heartbeatInterval, "heartbeat-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_HEARTBEAT_INTERVAL", nil, 0),
 		"Interval for application-level heartbeats over the Subscribe stream (e.g., 30s). "+

@@ -116,7 +116,7 @@ func Test_ManagerCreate(t *testing.T) {
 			})
 		m, err := NewApplicationManager(mockedBackend, "")
 		require.NoError(t, err)
-		_, err = m.Create(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "existing", Namespace: "default"}})
+		_, err = m.Create(context.TODO(), &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "existing", Namespace: "default"}}, true)
 		assert.ErrorIs(t, err, appExistsError)
 	})
 
@@ -132,7 +132,7 @@ func Test_ManagerCreate(t *testing.T) {
 		m, err := NewApplicationManager(mockedBackend, "")
 		require.NoError(t, err)
 		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
-		rapp, err := m.Create(context.TODO(), app)
+		rapp, err := m.Create(context.TODO(), app, true)
 		assert.NoError(t, err)
 		assert.Equal(t, "test", rapp.Name)
 		assert.Equal(t, string(app.UID), rapp.Annotations[manager.SourceUIDAnnotation])
@@ -154,7 +154,7 @@ func Test_ManagerCreate(t *testing.T) {
 		require.NoError(t, err)
 		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
 
-		rapp, err := m.Create(context.TODO(), app)
+		rapp, err := m.Create(context.TODO(), app, true)
 		assert.NoError(t, err)
 		assert.Equal(t, "primary-uid", rapp.Annotations[manager.SourceUIDAnnotation])
 	})

@@ -55,9 +55,13 @@ type fakeManager[R kubeResource] struct {
 	retErr  error
 }
 
-func (f *fakeManager[R]) Create(ctx context.Context, obj R) (R, error) {
+func (f *fakeManager[R]) Create(ctx context.Context, obj R, ignoreChange bool) (R, error) {
 	f.created = obj
 	return obj, f.retErr
+}
+
+func (f *fakeManager[R]) Get(ctx context.Context, name, namespace string) (R, error) {
+	return f.created, nil
 }
 
 func newLogger() *logrus.Entry {
