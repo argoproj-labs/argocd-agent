@@ -256,7 +256,10 @@ type kubeResource interface {
 }
 
 type resourceManager[R kubeResource] interface {
-	Create(ctx context.Context, obj R) (R, error)
+
+	// Create creates the resource using the Manager's backend.
+	// - 'ignoreChange' field controls whether or not the resourceVersion of the resource will be ignored if it is seen again (because it is considered to already have been processed). If true, the resource will be added to the ignore list. If false, it will not (false is useful for a few specific cases, like the 'a user deletes a managed agent Application resource, which needs to be reverted by agent' case)
+	Create(ctx context.Context, obj R, ignoreChange bool) (R, error)
 }
 
 // RevertUserInitiatedDeletion detects if a resource deletion was unauthorized and recreates the resource.
@@ -296,7 +299,7 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 		transform(resource)
 	}
 
-	_, err := mgr.Create(ctx, resource)
+	_, err := mgr.Create(ctx, resource, false)
 	if err != nil {
 		return false, err
 	} else {

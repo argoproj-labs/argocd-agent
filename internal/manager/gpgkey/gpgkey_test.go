@@ -131,7 +131,7 @@ func Test_GPGKeyManagerCreate(t *testing.T) {
 			ManagedResources:  manager.NewManagedResources(),
 			ObservedResources: manager.NewObservedResources(),
 		}
-		_, err := m.Create(context.Background(), cm)
+		_, err := m.Create(context.Background(), cm, true)
 		require.Error(t, err)
 		require.True(t, k8serrors.IsAlreadyExists(err))
 	})
@@ -166,7 +166,7 @@ func Test_GPGKeyManagerCreate(t *testing.T) {
 			ObservedResources: manager.NewObservedResources(),
 		}
 
-		createdCM, err := m.Create(context.Background(), cm)
+		createdCM, err := m.Create(context.Background(), cm, true)
 		require.NoError(t, err)
 		require.NotNil(t, createdCM)
 		require.Equal(t, "argocd-gpg-keys-cm", createdCM.Name)
@@ -206,7 +206,7 @@ func Test_GPGKeyManagerCreate(t *testing.T) {
 			ObservedResources: manager.NewObservedResources(),
 		}
 
-		createdCM, err := m.Create(context.Background(), cm)
+		createdCM, err := m.Create(context.Background(), cm, true)
 		require.NoError(t, err)
 		require.Equal(t, "", cm.ResourceVersion)
 		require.Equal(t, int64(0), cm.Generation)

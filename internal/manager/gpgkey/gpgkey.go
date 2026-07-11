@@ -75,7 +75,9 @@ func (m *GPGKeyManager) CompareSourceUID(ctx context.Context, incoming *corev1.C
 	return true, string(incoming.UID) == sourceUID, nil
 }
 
-func (m *GPGKeyManager) Create(ctx context.Context, cm *corev1.ConfigMap) (*corev1.ConfigMap, error) {
+// Create creates the ConfigMap using the Manager's backend.
+// - 'ignoreChange' field controls whether or not the resourceVersion of the resource will be ignored if it is seen again (because it is considered to already have been processed). If true, the resource will be added to the ignore list. If false, it will not (false is useful for a few specific cases, like the 'a user deletes a managed agent Application resource, which needs to be reverted by agent' case)
+func (m *GPGKeyManager) Create(ctx context.Context, cm *corev1.ConfigMap, ignoreChange bool) (*corev1.ConfigMap, error) {
 	cm.ResourceVersion = ""
 	cm.Generation = 0
 
@@ -90,8 +92,10 @@ func (m *GPGKeyManager) Create(ctx context.Context, cm *corev1.ConfigMap) (*core
 		if err := m.Manage(created.Name); err != nil {
 			log().Warnf("Could not manage GPG keys configmap %s: %v", created.Name, err)
 		}
-		if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
-			log().Warnf("Could not ignore change %s for GPG keys configmap %s: %v", created.ResourceVersion, created.Name, err)
+		if ignoreChange {
+			if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
+				log().Warnf("Could not ignore change %s for GPG keys configmap %s: %v", created.ResourceVersion, created.Name, err)
+			}
 		}
 		return created, nil
 	}
@@ -115,7 +119,7 @@ func (m *GPGKeyManager) UpdateManagedGPGKey(ctx context.Context, incoming *corev
 	existing, err := m.backend.Get(ctx, incoming.Name, incoming.Namespace)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return m.Create(ctx, incoming)
+			return m.Create(ctx, incoming, true)
 		}
 		return nil, err
 	}

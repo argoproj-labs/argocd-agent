@@ -83,6 +83,10 @@ func (suite *ResourceProxyTestSuite) getRpClient(agentName string) *http.Client 
 }
 
 func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
+
+	// This test assumes that resource proxy is available at 127.0.0.1, which is not true when agent is on cluster.
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+
 	requires := suite.Require()
 
 	rpClient := suite.getRpClient("agent-managed")
@@ -163,6 +167,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_HTTP() {
 }
 
 func (suite *ResourceProxyTestSuite) validateResourceProxyViaArgoAPI(appName string) {
+
 	requires := suite.Require()
 
 	// Get the Argo server endpoint to use
@@ -256,6 +261,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Argo() {
 
 // Test_SelfRegisteredSecret_ResourceProxy tests resource proxy via Argo CD API with self-registered cluster secret
 func (suite *ResourceProxyTestSuite) Test_SelfRegisteredSecret_ResourceProxy() {
+
 	requires := suite.Require()
 
 	// Get original secret before any modifications for restoration later
@@ -284,10 +290,10 @@ func (suite *ResourceProxyTestSuite) Test_SelfRegisteredSecret_ResourceProxy() {
 	}()
 
 	// Stop agent
-	err = fixture.StopProcess(fixture.AgentManagedName)
+	err = fixture.StopProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.AgentManagedName)
+		return !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete manual secret
@@ -529,6 +535,9 @@ func getCustomResourceAction() string {
 }
 
 func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
+	// This test assumes that resource proxy is available at 127.0.0.1, which is not true when agent is on cluster.
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+
 	requires := suite.Require()
 
 	rpClient := suite.getRpClient("agent-managed")

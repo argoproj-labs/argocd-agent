@@ -40,15 +40,15 @@ func (suite *AdoptionTestSuite) SetupTest() {
 	suite.BaseSuite.SetupTest()
 
 	// Ensure principal and managed agent are running
-	if !fixture.IsProcessRunning(fixture.PrincipalName) {
-		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName))
+	if !fixture.IsProcessRunning(fixture.PrincipalName, suite.T()) {
+		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	} else {
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	}
 
-	if !fixture.IsProcessRunning(fixture.AgentManagedName) {
-		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName))
+	if !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T()) {
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	} else {
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)

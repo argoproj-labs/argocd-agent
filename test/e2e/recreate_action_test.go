@@ -40,8 +40,8 @@ func (suite *RecreateActionTestSuite) TearDownTest() {
 		fixture.RestartAgent(suite.T(), "agent-managed")
 	}
 
-	if !fixture.IsProcessRunning("agent-managed") {
-		err := fixture.StartProcess("agent-managed")
+	if !fixture.IsProcessRunning("agent-managed", suite.T()) {
+		err := fixture.StartProcess("agent-managed", suite.T())
 		requires.NoError(err)
 	}
 

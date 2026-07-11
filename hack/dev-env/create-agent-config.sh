@@ -38,7 +38,12 @@ if test "${ARGOCD_AGENT_IN_CLUSTER}" = ""; then
 	ARGOCD_AGENT_RESOURCE_PROXY_SAN="--ip 127.0.0.1,${IPADDR}"
 else
 	ARGOCD_AGENT_GRPC_SVC=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} ${ARGOCD_PRINCIPAL_NAMESPACE} argocd-agent-principal)
-	ARGOCD_AGENT_GRPC_SAN="--ip 127.0.0.1,$ARGOCD_AGENT_GRPC_SVC"
+	# OpenShift/AWS LoadBalancers often expose a hostname instead of an IP.
+	if [[ "$ARGOCD_AGENT_GRPC_SVC" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+		ARGOCD_AGENT_GRPC_SAN="--ip 127.0.0.1,${ARGOCD_AGENT_GRPC_SVC}"
+	else
+		ARGOCD_AGENT_GRPC_SAN="--ip 127.0.0.1 --dns ${ARGOCD_AGENT_GRPC_SVC}"
+	fi
 	ARGOCD_AGENT_RESOURCE_PROXY=argocd-agent-resource-proxy
 	ARGOCD_AGENT_RESOURCE_PROXY_SAN="--dns ${ARGOCD_AGENT_RESOURCE_PROXY}"
 fi
