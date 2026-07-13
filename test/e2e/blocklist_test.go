@@ -42,8 +42,8 @@ func TestBlocklistTestSuite(t *testing.T) {
 
 func (suite *BlocklistTestSuite) SetupTest() {
 	for _, proc := range []string{fixture.PrincipalName, fixture.AgentManagedName, fixture.AgentAutonomousName} {
-		if !fixture.IsProcessRunning(proc) {
-			suite.Require().NoError(fixture.StartProcess(proc))
+		if !fixture.IsProcessRunning(proc, suite.T()) {
+			suite.Require().NoError(fixture.StartProcess(proc, suite.T()))
 		}
 		fixture.CheckReadiness(suite.T(), proc)
 	}
@@ -100,11 +100,11 @@ func (suite *BlocklistTestSuite) Test_BlocklistPrincipalRestart() {
 
 	// Restart the principal while the blocklist ConfigMap still exists
 	t.Log("Restarting principal")
-	requires.NoError(fixture.StopProcess(fixture.PrincipalName))
+	requires.NoError(fixture.StopProcess(fixture.PrincipalName, t))
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.PrincipalName)
+		return !fixture.IsProcessRunning(fixture.PrincipalName, t)
 	}, 30*time.Second, 1*time.Second)
-	requires.NoError(fixture.StartProcess(fixture.PrincipalName))
+	requires.NoError(fixture.StartProcess(fixture.PrincipalName, t))
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
 	// The agent should still be blocked after principal restart
