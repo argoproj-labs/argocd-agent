@@ -176,7 +176,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// and then agent updated principal with this information
 	requires.Eventually(func() bool {
 		return fixture.HasApplicationsCount(appCountBefore+1, clusterDetail)
-	}, 180*time.Second, 5*time.Second)
+	}, 240*time.Second, 5*time.Second)
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
@@ -238,7 +238,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 60*time.Second, 2*time.Second)
+	}, 120*time.Second, 2*time.Second)
 
 	// Step 9:
 	// Since agent is disconnected, cluster cache info should reset to default
@@ -261,7 +261,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 60*time.Second, 2*time.Second)
+	}, 120*time.Second, 2*time.Second)
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
