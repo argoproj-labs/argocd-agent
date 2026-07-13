@@ -24,10 +24,10 @@ The principal also logs each agent's fingerprint on successful authentication.
 
 ```bash
 # Add a fingerprint
-argocd-agentctl blocklist add "A1:2B:3C:4D:..."
+argocd-agentctl blocklist add "A12B3C4D..."
 
 # Remove a fingerprint
-argocd-agentctl blocklist remove "A1:2B:3C:4D:..."
+argocd-agentctl blocklist remove "A12B3C4D..."
 
 # List all blocked fingerprints
 argocd-agentctl blocklist list
@@ -42,7 +42,8 @@ metadata:
   name: argocd-agent-tls-blocklist
   namespace: argocd
 data:
-  checksums: '["A1:2B:3C:4D:...","E5:F6:7G:8H:..."]'
+  A12B3C4D...: ""
+  E5F67G8H...: ""
 ```
 
-The `checksums` value is a JSON array of SHA-256 fingerprints in colon-separated uppercase hex format.
+Each key in the `data` map is a SHA-256 fingerprint in uppercase hex format. Values are ignored.

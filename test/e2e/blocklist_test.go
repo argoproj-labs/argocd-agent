@@ -16,7 +16,6 @@ package e2e
 
 import (
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"testing"
@@ -203,30 +202,31 @@ func (suite *BlocklistTestSuite) getAgentFingerprint(secretName, namespace strin
 }
 
 // saveBlocklistConfigMap creates or updates the blocklist ConfigMap on the
-// principal cluster with the given fingerprints.
+// principal cluster with the given fingerprints. Each fingerprint is stored
+// as its own key in the ConfigMap data.
 func (suite *BlocklistTestSuite) saveBlocklistConfigMap(fingerprints []string) {
-	data, err := json.Marshal(fingerprints)
-	suite.Require().NoError(err)
+	cmData := make(map[string]string, len(fingerprints))
+	for _, fp := range fingerprints {
+		cmData[fp] = ""
+	}
 
 	cm := &corev1.ConfigMap{}
 	key := types.NamespacedName{Name: config.ConfigMapNameTLSBlocklist, Namespace: fixture.PrincipalNamespace}
-	err = suite.PrincipalClient.Get(suite.Ctx, key, cm, metav1.GetOptions{})
+	err := suite.PrincipalClient.Get(suite.Ctx, key, cm, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		cm = &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      config.ConfigMapNameTLSBlocklist,
 				Namespace: fixture.PrincipalNamespace,
 			},
-			Data: map[string]string{
-				config.ConfigMapKeyBlocklistChecksums: string(data),
-			},
+			Data: cmData,
 		}
 		suite.Require().NoError(suite.PrincipalClient.Create(suite.Ctx, cm, metav1.CreateOptions{}))
 		return
 	}
 	suite.Require().NoError(err)
 
-	cm.Data[config.ConfigMapKeyBlocklistChecksums] = string(data)
+	cm.Data = cmData
 	suite.Require().NoError(suite.PrincipalClient.Update(suite.Ctx, cm, metav1.UpdateOptions{}))
 }
 

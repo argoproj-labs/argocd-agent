@@ -15,22 +15,8 @@
 package blocklist
 
 import (
-	"encoding/json"
 	"sync"
 )
-
-// ParseFingerprints parses a JSON-encoded list of fingerprint strings.
-// Returns an empty slice for empty input.
-func ParseFingerprints(data string) ([]string, error) {
-	if data == "" {
-		return []string{}, nil
-	}
-	var fingerprints []string
-	if err := json.Unmarshal([]byte(data), &fingerprints); err != nil {
-		return nil, err
-	}
-	return fingerprints, nil
-}
 
 // Blocklist is a thread-safe set of blocked certificate fingerprints.
 type Blocklist struct {

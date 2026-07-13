@@ -440,12 +440,8 @@ func Test_CertificateFingerprint(t *testing.T) {
 		require.NoError(t, err)
 
 		fp := CertificateFingerprint(cert)
-		parts := strings.Split(fp, ":")
-		assert.Len(t, parts, sha256.Size)
-		for _, p := range parts {
-			assert.Len(t, p, 2)
-			assert.Equal(t, strings.ToUpper(p), p)
-		}
+		assert.Len(t, fp, sha256.Size*2)
+		assert.Equal(t, strings.ToUpper(fp), fp)
 	})
 
 	t.Run("same cert returns same fingerprint", func(t *testing.T) {
@@ -486,7 +482,7 @@ func Test_CertificateFingerprint(t *testing.T) {
 		for i, b := range sum {
 			parts[i] = fmt.Sprintf("%02X", b)
 		}
-		expected := strings.Join(parts, ":")
+		expected := strings.Join(parts, "")
 		assert.Equal(t, expected, CertificateFingerprint(cert))
 	})
 }

@@ -18,33 +18,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-func TestParseFingerprints(t *testing.T) {
-	t.Run("empty string returns empty slice", func(t *testing.T) {
-		fps, err := ParseFingerprints("")
-		require.NoError(t, err)
-		assert.Empty(t, fps)
-	})
-
-	t.Run("valid JSON array", func(t *testing.T) {
-		fps, err := ParseFingerprints(`["AA:BB","CC:DD"]`)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"AA:BB", "CC:DD"}, fps)
-	})
-
-	t.Run("empty JSON array", func(t *testing.T) {
-		fps, err := ParseFingerprints(`[]`)
-		require.NoError(t, err)
-		assert.Empty(t, fps)
-	})
-
-	t.Run("invalid JSON returns error", func(t *testing.T) {
-		_, err := ParseFingerprints(`not-json`)
-		assert.Error(t, err)
-	})
-}
 
 func TestBlocklist(t *testing.T) {
 	t.Run("new blocklist is empty", func(t *testing.T) {

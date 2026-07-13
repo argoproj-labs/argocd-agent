@@ -20,7 +20,6 @@ import (
 	"sync"
 
 	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
-	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -1170,16 +1169,11 @@ func (s *Server) updateBlocklistCallback(oldCM, newCM *corev1.ConfigMap) {
 	if s.blocklist == nil {
 		return
 	}
-	newFingerprints, err := blocklist.ParseFingerprints(newCM.Data[config.ConfigMapKeyBlocklistChecksums])
-	if err != nil {
-		log().WithError(err).Error("Failed to parse blocklist ConfigMap data")
-		return
-	}
+	newFingerprints := blocklist.FingerprintsFromConfigMapData(newCM.Data)
 
 	oldFingerprints := make(map[string]bool)
 	if oldCM != nil {
-		oldList, _ := blocklist.ParseFingerprints(oldCM.Data[config.ConfigMapKeyBlocklistChecksums])
-		for _, fp := range oldList {
+		for _, fp := range blocklist.FingerprintsFromConfigMapData(oldCM.Data) {
 			oldFingerprints[fp] = true
 		}
 	}

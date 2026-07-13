@@ -137,14 +137,14 @@ func KeyDataToPEM(k crypto.PrivateKey) (string, error) {
 }
 
 // CertificateFingerprint returns the SHA-256 fingerprint of a certificate as
-// a colon-separated uppercase hex string (e.g., "A1:2B:3C:...").
+// an uppercase hex string.
 func CertificateFingerprint(cert *x509.Certificate) string {
 	sum := sha256.Sum256(cert.Raw)
 	parts := make([]string, len(sum))
 	for i, b := range sum {
 		parts[i] = fmt.Sprintf("%02X", b)
 	}
-	return strings.Join(parts, ":")
+	return strings.Join(parts, "")
 }
 
 // FingerprintFromContext extracts the client certificate from a gRPC TLS
