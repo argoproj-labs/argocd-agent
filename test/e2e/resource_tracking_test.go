@@ -159,7 +159,10 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 				TargetRevision: "HEAD",
 				Path:           "guestbook",
 			},
-			Destination: fixture.ManagedDestination(suite.getTestNamespace()),
+			Destination: argoapp.ApplicationDestination{
+				Name:      "agent-managed",
+				Namespace: suite.getTestNamespace(),
+			},
 			SyncPolicy: &argoapp.SyncPolicy{
 				Automated: &argoapp.SyncPolicyAutomated{
 					Prune:    ptr.To(true),

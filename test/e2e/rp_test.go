@@ -191,7 +191,10 @@ func (suite *ResourceProxyTestSuite) validateResourceProxyViaArgoAPI(appName str
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: fixture.ManagedDestination("guestbook"),
+			Destination: v1alpha1.ApplicationDestination{
+				Name:      "agent-managed",
+				Namespace: "guestbook",
+			},
 			SyncPolicy: &v1alpha1.SyncPolicy{
 				Automated: &v1alpha1.SyncPolicyAutomated{},
 				SyncOptions: v1alpha1.SyncOptions{
@@ -409,7 +412,10 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: fixture.ManagedDestination("guestbook"),
+			Destination: v1alpha1.ApplicationDestination{
+				Name:      "agent-managed",
+				Namespace: "guestbook",
+			},
 			SyncPolicy: &v1alpha1.SyncPolicy{
 				Automated: &v1alpha1.SyncPolicyAutomated{},
 				SyncOptions: v1alpha1.SyncOptions{
