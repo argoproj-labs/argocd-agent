@@ -150,6 +150,9 @@ ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true`)
 }
 
 func (suite *DestinationMappingTestSuite) TearDownSuite() {
+	if fixture.IsDestinationBased() {
+		return
+	}
 	suite.BaseSuite.TearDownTest()
 	requires := suite.Require()
 

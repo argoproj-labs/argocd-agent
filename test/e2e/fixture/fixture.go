@@ -294,6 +294,7 @@ func (suite *BaseSuite) RestartApplicationController() {
 	requires.NoError(err)
 	requires.True(len(podList.Items) > 0, "expected at least one application controller pod")
 
+	oldUID := podList.Items[0].UID
 	err = suite.ManagedAgentClient.Delete(suite.Ctx, &podList.Items[0], metav1.DeleteOptions{})
 	requires.NoError(err)
 
@@ -305,6 +306,12 @@ func (suite *BaseSuite) RestartApplicationController() {
 		if err != nil {
 			return false
 		}
+
+		if oldUID == pod.UID {
+			suite.T().Log("Old application controller pod still terminating...")
+			return false
+		}
+
 		for _, cond := range pod.Status.Conditions {
 			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
 				return true
@@ -506,8 +513,12 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 				return err
 			}
 
-			// Wait for the app to be deleted from the managed cluster
-			app.SetNamespace(ManagedAgentAppNamespace())
+			// Wait for the app to be deleted from the managed cluster.
+			agentNs := ManagedAgentNamespace
+			if principalNs == DestMappingAppNamespace {
+				agentNs = DestMappingAppNamespace
+			}
+			app.SetNamespace(agentNs)
 			err = WaitForDeletion(ctx, managedAgentClient, &app, "managed agent")
 			if err != nil {
 				return err
