@@ -43,7 +43,7 @@ metadata:
   namespace: argocd
 data:
   A12B3C4D...: ""
-  E5F67G8H...: ""
+  E5F6A7B8...: ""
 ```
 
 Each key in the `data` map is a SHA-256 fingerprint in uppercase hex format. Values are ignored.
