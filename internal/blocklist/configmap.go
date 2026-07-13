@@ -16,7 +16,6 @@ package blocklist
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/argoproj-labs/argocd-agent/internal/config"
@@ -25,6 +24,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
+
+// FingerprintsFromConfigMapData extracts the blocklist fingerprints from a
+// ConfigMap's Data map. Each key in the map is a fingerprint.
+func FingerprintsFromConfigMapData(data map[string]string) []string {
+	fps := make([]string, 0, len(data))
+	for fp := range data {
+		fps = append(fps, fp)
+	}
+	return fps
+}
 
 // LoadFromConfigMap reads the blocklist fingerprints from the Kubernetes ConfigMap.
 // Returns an empty slice if the ConfigMap does not exist yet.
@@ -37,20 +46,15 @@ func LoadFromConfigMap(ctx context.Context, client kubernetes.Interface, namespa
 		return nil, fmt.Errorf("failed to get blocklist ConfigMap: %w", err)
 	}
 
-	data := cm.Data[config.ConfigMapKeyBlocklistChecksums]
-	fingerPrints, err := ParseFingerprints(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal blocklist data: %w", err)
-	}
-	return fingerPrints, nil
+	return FingerprintsFromConfigMapData(cm.Data), nil
 }
 
 // SaveToConfigMap writes the given fingerprints to the Kubernetes ConfigMap.
 // Creates the ConfigMap if it does not exist.
 func SaveToConfigMap(ctx context.Context, client kubernetes.Interface, namespace string, fingerprints []string) error {
-	data, err := json.Marshal(fingerprints)
-	if err != nil {
-		return fmt.Errorf("failed to marshal blocklist data: %w", err)
+	cmData := make(map[string]string, len(fingerprints))
+	for _, fp := range fingerprints {
+		cmData[fp] = ""
 	}
 
 	cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, config.ConfigMapNameTLSBlocklist, metav1.GetOptions{})
@@ -63,9 +67,7 @@ func SaveToConfigMap(ctx context.Context, client kubernetes.Interface, namespace
 				Name:      config.ConfigMapNameTLSBlocklist,
 				Namespace: namespace,
 			},
-			Data: map[string]string{
-				config.ConfigMapKeyBlocklistChecksums: string(data),
-			},
+			Data: cmData,
 		}
 		if _, err := client.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
 			return fmt.Errorf("failed to create blocklist ConfigMap: %w", err)
@@ -73,10 +75,7 @@ func SaveToConfigMap(ctx context.Context, client kubernetes.Interface, namespace
 		return nil
 	}
 
-	if cm.Data == nil {
-		cm.Data = make(map[string]string)
-	}
-	cm.Data[config.ConfigMapKeyBlocklistChecksums] = string(data)
+	cm.Data = cmData
 	if _, err := client.CoreV1().ConfigMaps(namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("failed to update blocklist ConfigMap: %w", err)
 	}

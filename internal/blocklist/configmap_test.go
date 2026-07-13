@@ -26,6 +26,23 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+func TestFingerprintsFromConfigMapData(t *testing.T) {
+	t.Run("nil data returns empty slice", func(t *testing.T) {
+		fps := FingerprintsFromConfigMapData(nil)
+		assert.Empty(t, fps)
+	})
+
+	t.Run("empty data returns empty slice", func(t *testing.T) {
+		fps := FingerprintsFromConfigMapData(map[string]string{})
+		assert.Empty(t, fps)
+	})
+
+	t.Run("returns all keys", func(t *testing.T) {
+		fps := FingerprintsFromConfigMapData(map[string]string{"AABB": "", "CCDD": ""})
+		assert.ElementsMatch(t, []string{"AABB", "CCDD"}, fps)
+	})
+}
+
 func TestLoadFromConfigMap(t *testing.T) {
 	ns := "argocd"
 
@@ -39,25 +56,15 @@ func TestLoadFromConfigMap(t *testing.T) {
 	t.Run("returns fingerprints from existing ConfigMap", func(t *testing.T) {
 		cm := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapNameTLSBlocklist, Namespace: ns},
-			Data:       map[string]string{config.ConfigMapKeyBlocklistChecksums: `["AA:BB","CC:DD"]`},
+			Data:       map[string]string{"AABB": "", "CCDD": ""},
 		}
 		client := fake.NewSimpleClientset(cm)
 		fps, err := LoadFromConfigMap(context.Background(), client, ns)
 		require.NoError(t, err)
-		assert.Equal(t, []string{"AA:BB", "CC:DD"}, fps)
+		assert.ElementsMatch(t, []string{"AABB", "CCDD"}, fps)
 	})
 
-	t.Run("returns error for malformed JSON", func(t *testing.T) {
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapNameTLSBlocklist, Namespace: ns},
-			Data:       map[string]string{config.ConfigMapKeyBlocklistChecksums: `not-json`},
-		}
-		client := fake.NewSimpleClientset(cm)
-		_, err := LoadFromConfigMap(context.Background(), client, ns)
-		assert.Error(t, err)
-	})
-
-	t.Run("returns empty for missing data key", func(t *testing.T) {
+	t.Run("returns empty for empty data", func(t *testing.T) {
 		cm := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapNameTLSBlocklist, Namespace: ns},
 			Data:       map[string]string{},
@@ -74,26 +81,26 @@ func TestSaveToConfigMap(t *testing.T) {
 
 	t.Run("creates ConfigMap when it does not exist", func(t *testing.T) {
 		client := fake.NewSimpleClientset()
-		err := SaveToConfigMap(context.Background(), client, ns, []string{"AA:BB"})
+		err := SaveToConfigMap(context.Background(), client, ns, []string{"AABB"})
 		require.NoError(t, err)
 
 		cm, err := client.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapNameTLSBlocklist, metav1.GetOptions{})
 		require.NoError(t, err)
-		assert.Equal(t, `["AA:BB"]`, cm.Data[config.ConfigMapKeyBlocklistChecksums])
+		assert.Equal(t, map[string]string{"AABB": ""}, cm.Data)
 	})
 
 	t.Run("updates existing ConfigMap", func(t *testing.T) {
 		cm := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: config.ConfigMapNameTLSBlocklist, Namespace: ns},
-			Data:       map[string]string{config.ConfigMapKeyBlocklistChecksums: `["AA:BB"]`},
+			Data:       map[string]string{"AABB": ""},
 		}
 		client := fake.NewSimpleClientset(cm)
-		err := SaveToConfigMap(context.Background(), client, ns, []string{"AA:BB", "CC:DD"})
+		err := SaveToConfigMap(context.Background(), client, ns, []string{"AABB", "CCDD"})
 		require.NoError(t, err)
 
 		updated, err := client.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapNameTLSBlocklist, metav1.GetOptions{})
 		require.NoError(t, err)
-		assert.Equal(t, `["AA:BB","CC:DD"]`, updated.Data[config.ConfigMapKeyBlocklistChecksums])
+		assert.Equal(t, map[string]string{"AABB": "", "CCDD": ""}, updated.Data)
 	})
 
 	t.Run("saves empty list", func(t *testing.T) {
@@ -103,6 +110,6 @@ func TestSaveToConfigMap(t *testing.T) {
 
 		cm, err := client.CoreV1().ConfigMaps(ns).Get(context.Background(), config.ConfigMapNameTLSBlocklist, metav1.GetOptions{})
 		require.NoError(t, err)
-		assert.Equal(t, `[]`, cm.Data[config.ConfigMapKeyBlocklistChecksums])
+		assert.Equal(t, map[string]string{}, cm.Data)
 	})
 }
