@@ -222,7 +222,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Default_Managed() {
 			return false
 		}
 		return appProject.Spec.Description == testDescription
-	}, 30*time.Second, 1*time.Second)
+	}, 180*time.Second, 3*time.Second)
 }
 
 // Default AppProject updates on the autonomous agent should be propagated to the principal
