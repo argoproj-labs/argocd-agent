@@ -40,7 +40,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "skip-sync-app",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 			Labels: map[string]string{
 				config.SkipSyncLabel: "true",
 			},
@@ -51,10 +51,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync() {
 				RepoURL: "https://github.com/argoproj/argocd-example-apps.git",
 				Path:    "guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Name:      "agent-managed",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 		},
 	}
 
@@ -62,7 +59,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync() {
 	requires.NoError(err)
 
 	appKeyPrincipal := fixture.ToNamespacedName(&app)
-	appKeyAgent := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	appKeyAgent := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the Application is NOT pushed to the managed-agent (should be filtered out)
 	suite.Require().Never(func() bool {
@@ -85,7 +82,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_False() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "no-skip-sync-app",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 			Labels: map[string]string{
 				config.SkipSyncLabel: "false",
 			},
@@ -96,17 +93,14 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_False() {
 				RepoURL: "https://github.com/argoproj/argocd-example-apps.git",
 				Path:    "guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "default",
-			},
+			Destination: fixture.ManagedDestination("default"),
 		},
 	}
 
 	err := suite.PrincipalClient.Create(suite.Ctx, &app, metav1.CreateOptions{})
 	requires.NoError(err)
 
-	appKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	appKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the Application IS pushed to the managed-agent (skip sync is false)
 	requires.Eventually(func() bool {
@@ -234,7 +228,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_Update() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "update-skip-sync-app",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -242,10 +236,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_Update() {
 				RepoURL: "https://github.com/argoproj/argocd-example-apps.git",
 				Path:    "guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Name:      "agent-managed",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 		},
 	}
 
@@ -253,7 +244,7 @@ func (suite *SkipSyncTestSuite) Test_Application_SkipSync_Update() {
 	requires.NoError(err)
 
 	appKeyPrincipal := fixture.ToNamespacedName(&app)
-	appKeyAgent := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	appKeyAgent := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the Application IS pushed to the managed-agent initially
 	requires.Eventually(func() bool {

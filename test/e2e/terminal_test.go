@@ -36,7 +36,7 @@ func (suite *TerminalStreamingTestSuite) validateTerminalStreaming() {
 	app := &v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",

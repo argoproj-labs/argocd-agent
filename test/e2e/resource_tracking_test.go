@@ -150,7 +150,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appName,
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -185,7 +185,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 		agentApp := &argoapp.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      app.Name,
-				Namespace: fixture.ManagedAgentNamespace,
+				Namespace: fixture.ManagedAgentAppNamespace(),
 			},
 		}
 		if err := fixture.WaitForDeletion(suite.Ctx, suite.ManagedAgentClient, agentApp, "managed agent"); err != nil {
@@ -193,7 +193,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 		}
 	})
 
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the app has been pushed to the managed-agent
 	requires.Eventually(func() bool {
@@ -237,7 +237,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 	requires.Eventually(func() bool {
 		err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{
 			Name:      appName,
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		}, &principalApp, metav1.GetOptions{})
 		if err != nil || principalApp.Status.Health.Status != health.HealthStatusHealthy {
 			return false

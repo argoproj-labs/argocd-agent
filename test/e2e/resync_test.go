@@ -16,7 +16,6 @@ package e2e
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -39,11 +38,7 @@ func (suite *ResyncTestSuite) TearDownTest() {
 	suite.BaseSuite.TearDownTest()
 	requires := suite.Require()
 
-	if _, err := os.Stat(fixture.EnvVariablesFromE2EFile); err == nil {
-		requires.NoError(os.Remove(fixture.EnvVariablesFromE2EFile))
-		fixture.RestartAgent(suite.T(), "agent-managed")
-		fixture.RestartAgent(suite.T(), "agent-autonomous")
-	}
+	fixture.ClearEnvVarsFile()
 
 	// Ensure that all the components are running after runnings the tests
 	if !fixture.IsProcessRunning("principal", suite.T()) {
@@ -74,7 +69,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnPrincipalStartupManaged() {
 	requires := suite.Require()
 
 	app := suite.createManagedApp()
-	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Stop the principal and delete the app from the control-plane
 	err := fixture.StopProcess("principal", suite.T())
@@ -111,7 +106,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnPrincipalStartupManaged() {
 
 	app := suite.createManagedApp()
 	principalKey := fixture.ToNamespacedName(app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Stop the principal and update the app on the control-plane
 	err := fixture.StopProcess("principal", suite.T())
@@ -152,7 +147,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupManaged() {
 	requires := suite.Require()
 
 	app := suite.createManagedApp()
-	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Stop the agent and delete the app
 	err := fixture.StopProcess("agent-managed", suite.T())
@@ -165,7 +160,7 @@ func (suite *ResyncTestSuite) Test_ResyncDeletionOnAgentStartupManaged() {
 	err = suite.ManagedAgentClient.Delete(suite.Ctx, &argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      app.Name,
-			Namespace: fixture.ManagedAgentNamespace,
+			Namespace: fixture.ManagedAgentAppNamespace(),
 		},
 	}, metav1.DeleteOptions{})
 	requires.NoError(err)
@@ -189,7 +184,7 @@ func (suite *ResyncTestSuite) Test_ResyncUpdatesOnAgentStartupManaged() {
 	requires := suite.Require()
 
 	app := suite.createManagedApp()
-	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Stop the agent and update the app on the workload cluster
 	err := fixture.StopProcess("agent-managed", suite.T())
@@ -390,7 +385,7 @@ func (suite *ResyncTestSuite) Test_ResyncOnConnectionLostManagedMode() {
 	// Create a managed app
 	app := suite.createManagedApp()
 	requires.NotNil(app)
-	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Disable the connection between the agent and the principal
 	requires.NoError(proxy.Disable())
@@ -1315,7 +1310,7 @@ func (suite *ResyncTestSuite) createManagedApp() *argoapp.Application {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -1324,10 +1319,7 @@ func (suite *ResyncTestSuite) createManagedApp() *argoapp.Application {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{
 					"CreateNamespace=true",
@@ -1339,7 +1331,7 @@ func (suite *ResyncTestSuite) createManagedApp() *argoapp.Application {
 	requires.NoError(err)
 
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentNamespace}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the app has been pushed to the workload cluster
 	requires.Eventually(func() bool {

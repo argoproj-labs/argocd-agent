@@ -101,6 +101,14 @@ start-e2e: cli install-goreman
 test-e2e:
 	./test/run-e2e.sh
 
+.PHONY: test-e2e-destmap
+test-e2e-destmap:
+	E2E_DESTINATION_BASED_MAPPING=true ./test/run-e2e.sh
+
+.PHONY: start-e2e-destmap
+start-e2e-destmap: cli install-goreman
+	ARGOCD_AGENT_DESTINATION_BASED_MAPPING=true ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true ARGOCD_AGENT_CREATE_NAMESPACE=true ENABLE_DATA_RACE_DETECTOR=$(ENABLE_DATA_RACE_DETECTOR) ./hack/dev-env/start-e2e.sh
+
 .PHONY: test
 test:
 	mkdir -p test/out

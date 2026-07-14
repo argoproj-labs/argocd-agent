@@ -21,6 +21,7 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
     exit 1
 fi
 
+E2E_DESTINATION_BASED_MAPPING="${E2E_DESTINATION_BASED_MAPPING:-}" \
 go test -count=1 -v -race -timeout 45m github.com/argoproj-labs/argocd-agent/test/e2e
 
 # If we detect a data race in the 'make start-e2e' output, then fail here to cause the overall test job to fail.
