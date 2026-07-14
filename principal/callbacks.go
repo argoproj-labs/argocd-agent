@@ -310,15 +310,6 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 	ctx, span := s.startSpan(operationcreate, "AppProject", outbound)
 	defer span.End()
 
-	// Return early if no interested agent is connected
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		if err := s.queues.Create(outbound.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing namespace")
-	}
-
 	if s.metrics != nil {
 		s.metrics.AppProjectCreated.Inc()
 	}
@@ -400,13 +391,6 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
 		return
 	}
-	if !s.queues.HasQueuePair(old.Namespace) {
-		if err := s.queues.Create(old.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing agent namespace")
-	}
 
 	s.syncAppProjectUpdatesToAgents(ctx, old, new, logCtx)
 
@@ -458,19 +442,6 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 	ctx, span := s.startSpan(operationdelete, "AppProject", outbound)
 	defer span.End()
-
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		if err := s.queues.Create(outbound.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing agent namespace")
-	}
-	q := s.queues.SendQ(outbound.Namespace)
-	if q == nil {
-		logCtx.Error("Help! Queue pair has disappeared!")
-		return
-	}
 
 	agents := s.mapAppProjectToAgents(*outbound)
 	for agent := range agents {
@@ -761,26 +732,10 @@ func (s *Server) syncGPGKeyToManagedAgents(ctx context.Context, cm *corev1.Confi
 // deleteNamespaceCallback is called when the user deletes the agent namespace.
 // Since there is no namespace we can remove the queue associated with this agent.
 func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {
-	logCtx := log().WithFields(logrus.Fields{
-		"component":      "EventCallback",
-		"queue":          outbound.Name,
-		"event":          "namespace_delete",
-		"namespace_name": outbound.Name,
-	})
-
 	if !s.queues.HasQueuePair(outbound.Name) {
 		return
 	}
-
-	if err := s.queues.Delete(outbound.Name, true); err != nil {
-		logCtx.WithError(err).Error("failed to remove the queue pair for a deleted agent namespace")
-		return
-	}
-
-	// Remove eventwriter associated with this agent
-	s.eventWriters.Remove(outbound.Name)
-
-	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
+	s.cleanupAgentState(outbound.Name)
 }
 
 // mapAppProjectToAgents returns the set of managed agents that should receive this AppProject.
@@ -1145,4 +1100,15 @@ func (c *concurrentMap[K, V]) Delete(key K) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.m, key)
+}
+
+// DeleteByValue removes all entries whose value equals the given value.
+func (c *concurrentMap[K, V]) DeleteByValue(value V, eq func(a, b V) bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, v := range c.m {
+		if eq(v, value) {
+			delete(c.m, k)
+		}
+	}
 }

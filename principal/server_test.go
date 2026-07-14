@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
@@ -33,7 +34,9 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/argoproj/argo-cd/v3/common"
@@ -693,6 +696,142 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		assert.Equal(t, 2, sendQ.Len())
 	})
 
+}
+
+func Test_cleanupAgentState(t *testing.T) {
+	t.Run("cleans up all agent state for namespace-based mapping", func(t *testing.T) {
+		s := &Server{
+			queues:       queue.NewSendRecvQueues(),
+			eventWriters: event.NewEventWritersMap(),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeAutonomous,
+				"agent3": types.AgentModeManaged,
+			},
+			agentNamespaces: map[string]string{"agent1": "ns1", "agent2": "ns2"},
+			resources:       resources.NewAgentResources(),
+			resyncStatus:    newResyncStatus(),
+			appToAgent:      newConcurrentStringMap(),
+			repoToAgents:    NewMapToSet(),
+			projectToRepos:  NewMapToSet(),
+			eventStreamSrv:  eventstream.NewServer(queue.NewSendRecvQueues(), event.NewEventWritersMap(), nil, &cluster.Manager{}),
+		}
+
+		// Set up state for agent1
+		require.NoError(t, s.queues.Create("agent1"))
+		require.NoError(t, s.queues.Create("agent2"))
+		s.resources.Add("agent1", resources.ResourceKey{Name: "app1", Namespace: "agent1"})
+		s.resyncStatus.resynced("agent1")
+		s.repoToAgents.Add("repo-a", "agent1")
+		s.repoToAgents.Add("repo-a", "agent2")
+		s.repoToAgents.Add("repo-b", "agent1")
+
+		// Clean up agent1
+		s.cleanupAgentState("agent1")
+
+		// Verify agent1 state is removed
+		assert.False(t, s.queues.HasQueuePair("agent1"))
+		_, agent1Exists := s.namespaceMap["agent1"]
+		assert.False(t, agent1Exists)
+		_, agent1NsExists := s.agentNamespaces["agent1"]
+		assert.False(t, agent1NsExists)
+		assert.Empty(t, s.resources.GetAllResources("agent1"))
+		assert.False(t, s.resyncStatus.isResynced("agent1"))
+
+		// Verify agent1 removed from repo-to-agents mapping
+		repoAAgents := s.repoToAgents.Get("repo-a")
+		assert.False(t, repoAAgents["agent1"])
+		assert.True(t, repoAAgents["agent2"])
+		assert.Nil(t, s.repoToAgents.Get("repo-b"))
+
+		// Verify agent2 state is untouched
+		assert.True(t, s.queues.HasQueuePair("agent2"))
+		assert.Equal(t, types.AgentModeAutonomous, s.namespaceMap["agent2"])
+		assert.Equal(t, "ns2", s.agentNamespaces["agent2"])
+	})
+
+	t.Run("cleans up all state for destination-based mapping", func(t *testing.T) {
+		s := &Server{
+			queues:       queue.NewSendRecvQueues(),
+			eventWriters: event.NewEventWritersMap(),
+			namespaceMap: map[string]types.AgentMode{
+				"target-cluster": types.AgentModeManaged,
+				"other-cluster":  types.AgentModeAutonomous,
+				"agent3":         types.AgentModeManaged,
+			},
+			agentNamespaces: map[string]string{
+				"target-cluster": "target-ns",
+				"other-cluster":  "other-ns",
+				"agent3":         "agent3-ns",
+			},
+			resources:               resources.NewAgentResources(),
+			resyncStatus:            newResyncStatus(),
+			appToAgent:              newConcurrentStringMap(),
+			repoToAgents:            NewMapToSet(),
+			projectToRepos:          NewMapToSet(),
+			destinationBasedMapping: true,
+			eventStreamSrv:          eventstream.NewServer(queue.NewSendRecvQueues(), event.NewEventWritersMap(), nil, &cluster.Manager{}),
+		}
+
+		require.NoError(t, s.queues.Create("target-cluster"))
+		require.NoError(t, s.queues.Create("other-cluster"))
+		require.NoError(t, s.queues.Create("agent3"))
+		s.resources.Add("target-cluster", resources.ResourceKey{Name: "app1", Namespace: "argocd"})
+		s.resyncStatus.resynced("target-cluster")
+		s.repoToAgents.Add("repo1", "target-cluster")
+		s.repoToAgents.Add("repo1", "other-cluster")
+		s.repoToAgents.Add("repo1", "agent3")
+
+		// Simulate destination-based app-to-agent mappings
+		s.appToAgent.Set("argocd/app1", "target-cluster")
+		s.appToAgent.Set("argocd/app2", "target-cluster")
+		s.appToAgent.Set("argocd/app3", "other-cluster")
+
+		s.cleanupAgentState("target-cluster")
+
+		// Verify target-cluster state is fully removed
+		assert.False(t, s.queues.HasQueuePair("target-cluster"))
+		_, targetExists := s.namespaceMap["target-cluster"]
+		assert.False(t, targetExists)
+		_, targetNsExists := s.agentNamespaces["target-cluster"]
+		assert.False(t, targetNsExists)
+		assert.Empty(t, s.resources.GetAllResources("target-cluster"))
+		assert.False(t, s.resyncStatus.isResynced("target-cluster"))
+		assert.Empty(t, s.appToAgent.Get("argocd/app1"))
+		assert.Empty(t, s.appToAgent.Get("argocd/app2"))
+		repo1Agents := s.repoToAgents.Get("repo1")
+		assert.False(t, repo1Agents["target-cluster"])
+
+		// Verify other-cluster state is untouched
+		assert.True(t, s.queues.HasQueuePair("other-cluster"))
+		assert.True(t, s.queues.HasQueuePair("agent3"))
+		assert.Equal(t, types.AgentModeAutonomous, s.namespaceMap["other-cluster"])
+		assert.Equal(t, types.AgentModeManaged, s.namespaceMap["agent3"])
+		assert.Equal(t, "other-ns", s.agentNamespaces["other-cluster"])
+		assert.Equal(t, "agent3-ns", s.agentNamespaces["agent3"])
+		assert.Equal(t, "other-cluster", s.appToAgent.Get("argocd/app3"))
+		assert.True(t, repo1Agents["other-cluster"])
+		assert.True(t, repo1Agents["agent3"])
+	})
+
+	t.Run("handles non-existent agent gracefully", func(t *testing.T) {
+		s := &Server{
+			queues:          queue.NewSendRecvQueues(),
+			eventWriters:    event.NewEventWritersMap(),
+			namespaceMap:    map[string]types.AgentMode{},
+			agentNamespaces: map[string]string{},
+			resources:       resources.NewAgentResources(),
+			resyncStatus:    newResyncStatus(),
+			appToAgent:      newConcurrentStringMap(),
+			repoToAgents:    NewMapToSet(),
+			projectToRepos:  NewMapToSet(),
+			eventStreamSrv:  eventstream.NewServer(queue.NewSendRecvQueues(), event.NewEventWritersMap(), nil, &cluster.Manager{}),
+		}
+
+		assert.NotPanics(t, func() {
+			s.cleanupAgentState("nonexistent-agent")
+		})
+	})
 }
 
 func init() {

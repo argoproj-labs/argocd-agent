@@ -52,6 +52,10 @@ const LabelValueManagerName = "argocd-agent"
 // syncTimeout is the duration to wait until the manager's informer has synced
 const syncTimeout = 30 * time.Second
 
+// ClusterDeletedCallback is invoked after a cluster secret is deleted and unmapped.
+// The agentName parameter is the value of the agent-mapping label from the deleted secret.
+type ClusterDeletedCallback func(agentName string)
+
 // Manager manages Argo CD cluster secrets on the principal
 type Manager struct {
 	mutex      sync.RWMutex
@@ -66,6 +70,18 @@ type Manager struct {
 	filters *filter.Chain[*v1.Secret]
 
 	clusterCache *appstatecache.Cache
+
+	// clusterDeletedCb is a callback invoked after a cluster secret
+	// is deleted and unmapped. Used by the principal to clean up per-agent state.
+	clusterDeletedCb ClusterDeletedCallback
+}
+
+// SetOnClusterDeleted registers a callback that fires after a cluster secret
+// is deleted and the agent mapping is removed.
+func (m *Manager) SetOnClusterDeleted(fn ClusterDeletedCallback) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.clusterDeletedCb = fn
 }
 
 // NewManager instantiates and initializes a new Manager.
