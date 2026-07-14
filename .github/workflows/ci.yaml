@@ -289,6 +289,22 @@ jobs:
           path: /tmp/vcluster-control-plane-server.log
         if: ${{ failure() }}
 
+  test-e2e-result:
+    name: Run end-to-end tests
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - test-e2e
+    steps:
+      - run: |
+          if [ "${{ needs.test-e2e.result }}" = "success" ] || [ "${{ needs.test-e2e.result }}" = "skipped" ]; then
+            exit 0
+          else
+            echo "One or more e2e test jobs failed"
+            exit 1
+          fi
+
   validate-helm-charts:
     name: Validate Helm charts
     if: ${{ needs.changes.outputs.helm == 'true' }}
