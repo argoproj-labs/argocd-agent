@@ -35,7 +35,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 )
 
 func Test_EventProcessorRoutesACKToMatchingQueue(t *testing.T) {
@@ -947,7 +946,7 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 			}
 
 			if test.deletionTimestampSetOnPrincipal {
-				delApp.DeletionTimestamp = ptr.To(v1.Time{Time: time.Now()})
+				delApp.DeletionTimestamp = new(v1.Time{Time: time.Now()})
 			}
 
 			// Create fake client with the application already in it
@@ -979,7 +978,7 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 			s.setAgentMode("foo", types.AgentModeManaged)
 
 			var cachedApp *v1alpha1.Application
-			for i := 0; i < 20; i++ {
+			for range 20 {
 				cachedApp, err = s.appManager.Get(ctx, delApp.Name, delApp.Namespace)
 				if err == nil {
 					break

@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -460,12 +461,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 		actions, err := argoClient.ListResourceActions(&app, "apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
 		requires.NoError(err)
 
-		for _, action := range actions {
-			if action == "Test" {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(actions, "Test")
 	}, 30*time.Second, 1*time.Second)
 
 	argocdCM := &corev1.ConfigMap{}
@@ -593,7 +589,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	resp.Body.Close()
 	requires.NoError(err)
 	// The scale response should be a Scale object, not a Deployment
-	var scale map[string]interface{}
+	var scale map[string]any
 	err = json.Unmarshal(resource, &scale)
 	requires.NoError(err)
 	requires.Contains(scale, "kind")
@@ -611,7 +607,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	// This test verifies that POST requests to subresources work correctly
 	// We'll test with a pod eviction endpoint - it should fail with 404 since the pod doesn't exist,
 	// but this proves the subresource routing works
-	postData := []byte(fmt.Sprintf(`{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"test-pod","namespace":"%s"}}`, fixture.ManagedAgentNamespace))
+	postData := fmt.Appendf(nil, `{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"test-pod","namespace":"%s"}}`, fixture.ManagedAgentNamespace)
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://127.0.0.1:9090/api/v1/namespaces/%s/pods/test-pod/eviction", fixture.ManagedAgentNamespace),
 		io.NopCloser(strings.NewReader(string(postData))))
 	requires.NoError(err)

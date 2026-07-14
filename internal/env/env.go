@@ -129,7 +129,7 @@ func StringSlice(key string, validator func(string) error) ([]string, error) {
 		return []string{}, os.ErrNotExist //fmt.Errorf("environment '%s' not set", key)
 	}
 	ret := []string{}
-	for _, s := range strings.Split(ev, ",") {
+	for s := range strings.SplitSeq(ev, ",") {
 		s = strings.TrimSpace(s)
 		if validator != nil {
 			if err := validator(s); err != nil {

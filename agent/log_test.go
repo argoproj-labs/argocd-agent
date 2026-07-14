@@ -75,11 +75,11 @@ func (m *MockLogStreamClient) Trailer() metadata.MD {
 	return metadata.New(nil)
 }
 
-func (m *MockLogStreamClient) SendMsg(msg interface{}) error {
+func (m *MockLogStreamClient) SendMsg(msg any) error {
 	return nil
 }
 
-func (m *MockLogStreamClient) RecvMsg(msg interface{}) error {
+func (m *MockLogStreamClient) RecvMsg(msg any) error {
 	return nil
 }
 
@@ -179,17 +179,17 @@ func TestExtractTimestamp(t *testing.T) {
 		{
 			name:     "RFC3339 with nanoseconds",
 			input:    "2025-12-07T10:30:45.123456789Z some log message",
-			expected: timePtr(time.Date(2025, 12, 7, 10, 30, 45, 123456789, time.UTC)),
+			expected: new(time.Date(2025, 12, 7, 10, 30, 45, 123456789, time.UTC)),
 		},
 		{
 			name:     "RFC3339 without nanoseconds",
 			input:    "2025-12-07T10:30:45Z some log message",
-			expected: timePtr(time.Date(2025, 12, 7, 10, 30, 45, 0, time.UTC)),
+			expected: new(time.Date(2025, 12, 7, 10, 30, 45, 0, time.UTC)),
 		},
 		{
 			name:     "RFC3339 with milliseconds",
 			input:    "2025-12-07T10:30:45.123Z some log message",
-			expected: timePtr(time.Date(2025, 12, 7, 10, 30, 45, 123000000, time.UTC)),
+			expected: new(time.Date(2025, 12, 7, 10, 30, 45, 123000000, time.UTC)),
 		},
 		{
 			name:     "no timestamp",
@@ -199,7 +199,7 @@ func TestExtractTimestamp(t *testing.T) {
 		{
 			name:     "timestamp with tab separator",
 			input:    "2025-12-07T10:30:45Z\tsome log message",
-			expected: timePtr(time.Date(2025, 12, 7, 10, 30, 45, 0, time.UTC)),
+			expected: new(time.Date(2025, 12, 7, 10, 30, 45, 0, time.UTC)),
 		},
 	}
 
@@ -362,9 +362,4 @@ func TestStreamLogs(t *testing.T) {
 		require.Greater(t, len(sentData), 0, "expected a send attempt before failure")
 		assert.Equal(t, testData, string(sentData[0].Data))
 	})
-}
-
-// Helper function to create time pointer
-func timePtr(t time.Time) *time.Time {
-	return &t
 }

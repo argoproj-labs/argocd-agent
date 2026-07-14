@@ -248,11 +248,11 @@ func (m *MockTerminalStreamClient) Context() context.Context {
 	return m.ctx
 }
 
-func (m *MockTerminalStreamClient) SendMsg(msg interface{}) error {
+func (m *MockTerminalStreamClient) SendMsg(msg any) error {
 	return nil
 }
 
-func (m *MockTerminalStreamClient) RecvMsg(msg interface{}) error {
+func (m *MockTerminalStreamClient) RecvMsg(msg any) error {
 	return nil
 }
 

@@ -43,7 +43,7 @@ type messageSizeLoggerClientStream struct {
 
 // protoSize returns the serialized size of a message if it implements
 // proto.Message, or -1 if the size cannot be determined.
-func protoSize(msg interface{}) int {
+func protoSize(msg any) int {
 	if pm, ok := msg.(proto.Message); ok {
 		return proto.Size(pm)
 	}
@@ -52,7 +52,7 @@ func protoSize(msg interface{}) int {
 
 // warnIfExceedsThreshold logs a warning when the serialized size of msg meets
 // or exceeds x% of maxSize.
-func warnIfExceedsThreshold(method string, msg interface{}, maxSize int, direction string) {
+func warnIfExceedsThreshold(method string, msg any, maxSize int, direction string) {
 	if maxSize <= 0 {
 		return
 	}
@@ -78,12 +78,12 @@ func warnIfExceedsThreshold(method string, msg interface{}, maxSize int, directi
 	logrus.WithFields(fields).Warnf("gRPC message size (%d bytes) is %d%% of max (%d bytes)", size, pct, maxSize)
 }
 
-func (s *messageSizeLoggerStream) SendMsg(m interface{}) error {
+func (s *messageSizeLoggerStream) SendMsg(m any) error {
 	warnIfExceedsThreshold(s.method, m, s.maxSize, "send")
 	return s.ServerStream.SendMsg(m)
 }
 
-func (s *messageSizeLoggerStream) RecvMsg(m interface{}) error {
+func (s *messageSizeLoggerStream) RecvMsg(m any) error {
 	err := s.ServerStream.RecvMsg(m)
 	if err != nil {
 		return err
@@ -92,12 +92,12 @@ func (s *messageSizeLoggerStream) RecvMsg(m interface{}) error {
 	return nil
 }
 
-func (s *messageSizeLoggerClientStream) SendMsg(m interface{}) error {
+func (s *messageSizeLoggerClientStream) SendMsg(m any) error {
 	warnIfExceedsThreshold(s.method, m, s.maxSize, "send")
 	return s.ClientStream.SendMsg(m)
 }
 
-func (s *messageSizeLoggerClientStream) RecvMsg(m interface{}) error {
+func (s *messageSizeLoggerClientStream) RecvMsg(m any) error {
 	err := s.ClientStream.RecvMsg(m)
 	if err != nil {
 		return err
@@ -110,7 +110,7 @@ func (s *messageSizeLoggerClientStream) RecvMsg(m interface{}) error {
 // logs a warning when any message sent or received on a stream exceeds x% of
 // maxGRPCMessageSize.
 func StreamServerMsgSizeInterceptor(maxGRPCMessageSize int) grpc.StreamServerInterceptor {
-	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		wrapped := &messageSizeLoggerStream{
 			ServerStream: ss,
 			maxSize:      maxGRPCMessageSize,
@@ -141,7 +141,7 @@ func StreamClientMsgSizeInterceptor(maxGRPCMessageSize int) grpc.StreamClientInt
 // logs a warning when the request or response message exceeds x% of
 // maxGRPCMessageSize.
 func UnaryServerMsgSizeInterceptor(maxGRPCMessageSize int) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		warnIfExceedsThreshold(info.FullMethod, req, maxGRPCMessageSize, "recv")
 		resp, err := handler(ctx, req)
 		if err != nil {
@@ -156,7 +156,7 @@ func UnaryServerMsgSizeInterceptor(maxGRPCMessageSize int) grpc.UnaryServerInter
 // logs a warning when the request or response message exceeds x% of
 // maxGRPCMessageSize.
 func UnaryClientMsgSizeInterceptor(maxGRPCMessageSize int) grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		warnIfExceedsThreshold(method, req, maxGRPCMessageSize, "send")
 		err := invoker(ctx, method, req, reply, cc, opts...)
 		if err != nil {

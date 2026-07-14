@@ -14,7 +14,10 @@
 
 package principal
 
-import "sync"
+import (
+	"maps"
+	"sync"
+)
 
 // MapToSet is a map of keys to a set of unique values.
 type MapToSet struct {
@@ -36,9 +39,7 @@ func (m *MapToSet) Get(key string) map[string]bool {
 		return nil
 	}
 	cp := make(map[string]bool, len(s))
-	for k, v := range s {
-		cp[k] = v
-	}
+	maps.Copy(cp, s)
 	return cp
 }
 

@@ -599,7 +599,7 @@ func TestConcurrentTerminalOperations(t *testing.T) {
 		numGoroutines := 50
 
 		// Concurrent adds
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()

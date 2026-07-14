@@ -55,7 +55,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -86,7 +86,7 @@ func Test_resourceRequester(t *testing.T) {
 		s := newResourceTestServer(t)
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -108,7 +108,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{{}},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -135,7 +135,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -163,7 +163,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -188,7 +188,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -227,7 +227,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1

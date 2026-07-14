@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
@@ -173,10 +174,8 @@ func (s *Server) authenticateReplication(ctx context.Context) error {
 
 	allowed := s.ha.Controller.Options().AllowedReplicationClients
 	if len(allowed) > 0 {
-		for _, c := range allowed {
-			if identity == c {
-				return nil
-			}
+		if slices.Contains(allowed, identity) {
+			return nil
 		}
 		log().WithField("identity", identity).Warn("Replication request rejected: identity not in allowed clients")
 		return status.Errorf(codes.PermissionDenied, "identity %q not in allowed replication clients", identity)
