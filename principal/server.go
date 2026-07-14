@@ -596,6 +596,8 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
+	s.clusterMgr.SetOnClusterDeleted(s.cleanupAgentState)
+
 	s.resources = resources.NewAgentResources()
 	s.logStream = logstream.NewServer()
 	s.terminalStreamServer = terminalstream.NewServer()
@@ -716,6 +718,15 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}()
 	}
 
+	syncTimeout := s.options.informerSyncTimeout
+	if syncTimeout == 0 {
+		syncTimeout = waitForSyncedDuration
+	}
+
+	if err := s.clusterMgr.Start(); err != nil {
+		return fmt.Errorf("unable to start cluster manager with informer sync timeout %v: %w", syncTimeout, err)
+	}
+
 	go s.RunHandlersOnConnect(s.ctx)
 
 	if err = s.StartEventProcessor(s.ctx); err != nil {
@@ -790,11 +801,6 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}()
 
-	syncTimeout := s.options.informerSyncTimeout
-	if syncTimeout == 0 {
-		syncTimeout = waitForSyncedDuration
-	}
-
 	if err := s.appManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Application informer: %w", err)
 	}
@@ -833,9 +839,6 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("Resource proxy is disabled")
 	}
 
-	if err := s.clusterMgr.Start(); err != nil {
-		return fmt.Errorf("unable to start cluster manager with informer sync timeout %v: %w", syncTimeout, err)
-	}
 	if err := s.namespaceManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Namespace informer: %w", err)
 	}
@@ -893,6 +896,13 @@ func (rs *resyncStatus) resynced(agentName string) {
 	defer rs.mu.Unlock()
 
 	rs.resync[agentName] = true
+}
+
+func (rs *resyncStatus) remove(agentName string) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+
+	delete(rs.resync, agentName)
 }
 
 // RunHandlersOnConnect runs the registered handlers when an agent connects to the principal
@@ -1271,6 +1281,19 @@ func (s *Server) defaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 			return name != "" && name != "in-cluster"
 		})
 	}
+
+	// Filter out apps that target an invalid agent i.e agents without cluster secret
+	c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
+		if s.clusterMgr == nil {
+			return true
+		}
+		agentName := s.getAgentNameForApp(res)
+		if agentName == "" {
+			return false
+		}
+		return s.clusterMgr.HasMapping(agentName)
+	})
+
 	return c
 }
 
@@ -1423,6 +1446,52 @@ func (s *Server) GetHAStatus() *HAStatus {
 		return nil
 	}
 	return s.ha.GetHAStatus()
+}
+
+// cleanupAgentState removes all principal-side state for an agent whose cluster
+// secret has been deleted.
+func (s *Server) cleanupAgentState(agentName string) {
+	logCtx := log().WithField("agent", agentName).WithField("component", "AgentCleanup")
+	logCtx.Info("Cleaning up agent state after cluster secret deletion")
+
+	// 1. Disconnect the agent if it is still streaming
+	if s.eventStreamSrv != nil {
+		if s.eventStreamSrv.DisconnectAgent(agentName) {
+			logCtx.Info("Disconnected active agent stream")
+		}
+	}
+
+	// 2. Delete the queue pair
+	if s.queues.HasQueuePair(agentName) {
+		if err := s.queues.Delete(agentName, true); err != nil {
+			logCtx.WithError(err).Error("Failed to delete queue pair")
+		}
+	}
+
+	// 3. Remove event writer
+	s.eventWriters.Remove(agentName)
+
+	// 4. Remove from namespaceMap and agentNamespaces
+	s.clientLock.Lock()
+	delete(s.namespaceMap, agentName)
+	delete(s.agentNamespaces, agentName)
+	s.clientLock.Unlock()
+
+	// 5. Remove tracked resources
+	s.resources.RemoveAgent(agentName)
+
+	// 6. Remove resync status
+	s.resyncStatus.remove(agentName)
+
+	// 7. Clean up routing maps
+	// For destination-based mapping: remove all appToAgent entries pointing to this agent
+	if s.destinationBasedMapping && s.appToAgent != nil {
+		s.appToAgent.DeleteByValue(agentName, func(a, b string) bool { return a == b })
+	}
+	// Remove agent from repo-to-agents mapping (agent could be a value in any repo key)
+	s.repoToAgents.DeleteFromAll(agentName)
+
+	logCtx.Info("Agent state cleanup complete")
 }
 
 func (s *Server) isAgentConnected(agentName string) bool {
