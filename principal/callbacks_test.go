@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -1346,6 +1347,39 @@ func TestServer_deleteAppCallback(t *testing.T) {
 		agents := s.appToAgent.Get(app.QualifiedName())
 		assert.Empty(t, agents)
 	})
+
+	t.Run("skips queue creation for agent without cluster mapping", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		clusterMgr := &cluster.Manager{}
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			appManager: appManager,
+			clusterMgr: clusterMgr,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "deregistered-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		s.deleteAppCallback(app)
+
+		// No queue should be created for deregistered agent
+		assert.False(t, s.queues.HasQueuePair("deregistered-agent"))
+	})
 }
 
 func TestServer_newAppCallback(t *testing.T) {
@@ -1467,6 +1501,73 @@ func TestServer_newAppCallback(t *testing.T) {
 
 		// Should not process the app
 		assert.Zero(t, s.queues.Len())
+	})
+
+	t.Run("skips app targeting agent without cluster mapping", func(t *testing.T) {
+		clusterMgr := &cluster.Manager{}
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			clusterMgr: clusterMgr,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "deregistered-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		s.newAppCallback(app)
+
+		// No queue should be created
+		assert.False(t, s.queues.HasQueuePair("deregistered-agent"))
+		// No resource tracking
+		assert.Empty(t, s.resources.GetAllResources("deregistered-agent"))
+		// No app-to-agent tracking
+		assert.Empty(t, s.appToAgent.Get("deregistered-agent/test-app"))
+	})
+
+	t.Run("processes app when cluster mapping exists", func(t *testing.T) {
+		clusterMgr, err := cluster.NewManager(context.Background(), "argocd", "", "", "", kubefake.NewSimpleClientset(), nil)
+		require.NoError(t, err)
+		require.NoError(t, clusterMgr.MapCluster("registered-agent", &v1alpha1.Cluster{Name: "registered-agent", Server: "https://registered.example.com"}))
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			clusterMgr: clusterMgr,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "registered-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		s.newAppCallback(app)
+
+		// Queue should be created and event added
+		assert.True(t, s.queues.HasQueuePair("registered-agent"))
+		sendQ := s.queues.SendQ("registered-agent")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+		// Resource tracking should be populated
+		assert.Len(t, s.resources.GetAllResources("registered-agent"), 1)
 	})
 }
 
@@ -2153,6 +2254,41 @@ func TestServer_updateAppCallback(t *testing.T) {
 		// Verify resource tracking was removed
 		agentResources1 := s.resources.GetAllResources("cluster-1")
 		assert.Len(t, agentResources1, 0, "Old cluster should have no resources")
+	})
+
+	t.Run("skips queue creation for agent without cluster mapping", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+		mockBackend.On("IsChangeIgnored", mock.Anything, mock.Anything).Return(false)
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		clusterMgr := &cluster.Manager{}
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			appManager: appManager,
+			clusterMgr: clusterMgr,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "deregistered-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		s.updateAppCallback(app, app)
+
+		// No queue should be created for deregistered agent
+		assert.False(t, s.queues.HasQueuePair("deregistered-agent"))
 	})
 }
 
