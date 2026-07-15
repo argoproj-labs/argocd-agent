@@ -72,13 +72,15 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		return
 	}
 
-	s.resources.Add(agentName, resources.NewResourceKeyFromApp(outbound))
-	s.trackAppToAgent(outbound, agentName)
-
 	ctx, span := s.startSpan(operationcreate, "Application", outbound)
 	defer span.End()
 
 	logCtx = logCtx.WithField("queue", agentName)
+
+	if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+		logCtx.Error("Application is targeting an invalid agent, skipping creation")
+		return
+	}
 
 	if !s.queues.HasQueuePair(agentName) {
 		if err := s.queues.Create(agentName); err != nil {
@@ -92,6 +94,10 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		logCtx.Errorf("Help! queue pair for agent %s disappeared!", agentName)
 		return
 	}
+
+	s.resources.Add(agentName, resources.NewResourceKeyFromApp(outbound))
+	s.trackAppToAgent(outbound, agentName)
+
 	ev := s.events.ApplicationEvent(event.Create, outbound)
 	// Inject trace context into the event for propagation to agent
 	s.stampEvent(ctx, ev)
@@ -165,6 +171,10 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 	if !s.queues.HasQueuePair(agentName) {
+		if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+			logCtx.Warn("Application is targeting an invalid agent, skipping update")
+			return
+		}
 		if err := s.queues.Create(agentName); err != nil {
 			logCtx.WithError(err).Error("failed to create a queue pair for agent")
 			return
@@ -255,6 +265,10 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 	}
 
 	if !s.queues.HasQueuePair(agentName) {
+		if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+			logCtx.Warn("Application is targeting an invalid agent, skipping deletion")
+			return
+		}
 		if err := s.queues.Create(agentName); err != nil {
 			logCtx.WithError(err).Error("failed to create a queue pair for agent")
 			return
@@ -748,6 +762,11 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 			continue
 		}
 
+		// Skip agents that don't have a valid agent cluster secret
+		if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+			continue
+		}
+
 		if appproject.DoesAgentMatchWithProject(agentName, appProject, s.destinationBasedMapping) {
 			agents[agentName] = true
 		}
@@ -1027,8 +1046,10 @@ func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Ap
 		s.resources.Remove(oldAgentName, resources.NewResourceKeyFromApp(old))
 
 		if !s.queues.HasQueuePair(oldAgentName) {
-			if err := s.queues.Create(oldAgentName); err != nil {
-				logCtx.WithError(err).Error("failed to create queue pair for old agent")
+			if s.clusterMgr == nil || s.clusterMgr.HasMapping(oldAgentName) {
+				if err := s.queues.Create(oldAgentName); err != nil {
+					logCtx.WithError(err).Error("failed to create queue pair for old agent")
+				}
 			}
 		}
 		if oldQ := s.queues.SendQ(oldAgentName); oldQ != nil {

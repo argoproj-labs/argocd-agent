@@ -1281,19 +1281,6 @@ func (s *Server) defaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 			return name != "" && name != "in-cluster"
 		})
 	}
-
-	// Filter out apps that target an invalid agent i.e agents without cluster secret
-	c.AppendAdmitFilter(func(res *v1alpha1.Application) bool {
-		if s.clusterMgr == nil {
-			return true
-		}
-		agentName := s.getAgentNameForApp(res)
-		if agentName == "" {
-			return false
-		}
-		return s.clusterMgr.HasMapping(agentName)
-	})
-
 	return c
 }
 
