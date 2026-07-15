@@ -170,6 +170,16 @@ type Server struct {
 	resources *resources.AgentResources
 	// resyncStatus indicates whether an agent has been resyned after the principal restarts
 	resyncStatus *resyncStatus
+
+	// resyncMinInterval is the global minimum interval the principal enforces
+	// between resync rounds requested by any single agent. Resync requests
+	// arriving more often are refused. A zero value disables the enforcement.
+	resyncMinInterval time.Duration
+	// lastResyncRound tracks when each agent's last accepted resync round
+	// happened (key: agent name). lastResyncRoundMu must be held when
+	// accessing it.
+	lastResyncRound   map[string]time.Time
+	lastResyncRoundMu sync.Mutex
 	// notifyOnConnect will notify to run the handlers when an agent connects to the principal
 	notifyOnConnect chan types.Agent
 	// handlers to run when an agent connects to the principal
@@ -251,6 +261,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		deletions:       manager.NewDeletionTracker(),
 		appToAgent:      newConcurrentStringMap(),
 		agentNamespaces: make(map[string]string),
+		lastResyncRound: make(map[string]time.Time),
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(ctx)

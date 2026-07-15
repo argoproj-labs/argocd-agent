@@ -82,6 +82,9 @@ func NewAgentRunCommand() *cobra.Command {
 		// Time interval for agent to refresh cluster cache info in principal
 		cacheRefreshInterval time.Duration
 
+		// Time interval for the agent to periodically resync resources with the principal
+		resyncInterval time.Duration
+
 		// Timeout for the initial informer sync at startup
 		informerSyncTimeout time.Duration
 
@@ -315,6 +318,7 @@ func NewAgentRunCommand() *cobra.Command {
 
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
+			agentOpts = append(agentOpts, agent.WithResyncInterval(resyncInterval))
 			agentOpts = append(agentOpts, agent.WithInformerSyncTimeout(informerSyncTimeout))
 			agentOpts = append(agentOpts, agent.WithApplicationInformerEventBufferInterval(bufferK8sInformerEvents))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
@@ -451,6 +455,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&cacheRefreshInterval, "cache-refresh-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_CACHE_REFRESH_INTERVAL", nil, 10*time.Second),
 		"Interval to refresh cluster cache info in principal")
+	command.Flags().DurationVar(&resyncInterval, "resync-interval",
+		env.DurationWithDefault("ARGOCD_AGENT_RESYNC_INTERVAL", nil, 0),
+		"Interval for periodic resync of resources with the principal (0 disables periodic resync)")
 	command.Flags().DurationVar(&informerSyncTimeout, "informer-sync-timeout",
 		env.DurationWithDefault("ARGOCD_AGENT_INFORMER_SYNC_TIMEOUT", nil, 10*time.Second),
 		"Timeout to wait for Application/AppProject/Repository/GPG/Namespace informers to sync at startup")

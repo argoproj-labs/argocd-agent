@@ -308,6 +308,18 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 		return nil
 	}
 
+	if err := a.requestResync(logCtx); err != nil {
+		return err
+	}
+
+	a.resyncedOnStart = true
+	return nil
+}
+
+// requestResync asks the principal for a resync of resources, using the
+// mechanism appropriate for the agent's mode. It is called once on startup
+// and, if a resync interval is configured, periodically thereafter.
+func (a *Agent) requestResync(logCtx *logrus.Entry) error {
 	sendQ := a.queues.SendQ(defaultQueueName)
 	if sendQ == nil {
 		return fmt.Errorf("no send queue found for the default queue pair")
@@ -352,6 +364,5 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 		sendQ.Add(ev)
 		logCtx.Trace("Sent a request for SyncedResourceList")
 	}
-	a.resyncedOnStart = true
 	return nil
 }

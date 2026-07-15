@@ -727,6 +727,11 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 			return fmt.Errorf("principal can only handle SyncedResourceList request in the managed mode")
 		}
 
+		if !s.resyncRoundAllowed(agentName) {
+			logCtx.Warnf("Refusing resync request: minimum resync interval of %v has not elapsed", s.resyncMinInterval)
+			return nil
+		}
+
 		incoming := &event.RequestSyncedResourceList{}
 		if err := ev.DataAs(incoming); err != nil {
 			return err
@@ -774,6 +779,11 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 			return fmt.Errorf("principal can only handle ResourceResync request in autonomous mode")
 		}
 
+		if !s.resyncRoundAllowed(agentName) {
+			logCtx.Warnf("Refusing resync request: minimum resync interval of %v has not elapsed", s.resyncMinInterval)
+			return nil
+		}
+
 		incoming := &event.RequestResourceResync{}
 		if err := ev.DataAs(incoming); err != nil {
 			return err
@@ -783,6 +793,26 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 	default:
 		return fmt.Errorf("invalid type of resource resync: %s", ev.Type())
 	}
+}
+
+// resyncRoundAllowed reports whether a new resync round requested by the
+// given agent respects the globally enforced minimum resync interval. When
+// the round is allowed, its time is recorded. Refused rounds must be dropped
+// by the caller. Rounds are always allowed when no minimum interval is
+// configured.
+func (s *Server) resyncRoundAllowed(agentName string) bool {
+	if s.resyncMinInterval <= 0 {
+		return true
+	}
+
+	s.lastResyncRoundMu.Lock()
+	defer s.lastResyncRoundMu.Unlock()
+
+	if last, ok := s.lastResyncRound[agentName]; ok && time.Since(last) < s.resyncMinInterval {
+		return false
+	}
+	s.lastResyncRound[agentName] = time.Now()
+	return true
 }
 
 // eventProcessor is the main loop to process event from the receiver queue,
