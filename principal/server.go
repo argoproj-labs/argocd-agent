@@ -597,6 +597,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	s.clusterMgr.SetOnClusterDeleted(s.cleanupAgentState)
+	s.clusterMgr.SetOnClusterAdded(s.resyncAppsForAgent)
 
 	s.resources = resources.NewAgentResources()
 	s.logStream = logstream.NewServer()
@@ -1479,6 +1480,38 @@ func (s *Server) cleanupAgentState(agentName string) {
 	s.repoToAgents.DeleteFromAll(agentName)
 
 	logCtx.Info("Agent state cleanup complete")
+}
+
+// resyncAppsForAgent reconciles all the applications for a given agent
+// This is called when a cluster secret is created and all applications for the agent are resynced.
+func (s *Server) resyncAppsForAgent(agentName string) {
+	logCtx := log().WithField("agent", agentName).WithField("component", "AgentResync")
+	logCtx.Info("Resyncing applications after cluster secret creation")
+
+	var selector backend.ApplicationSelector
+	if s.destinationBasedMapping {
+		// In destination-based mapping, apps can live in any namespace.
+		selector = backend.ApplicationSelector{}
+	} else {
+		// In namespace-based mapping, the agent name is the namespace.
+		selector = backend.ApplicationSelector{Namespaces: []string{agentName}}
+	}
+
+	appList, err := s.appManager.List(s.ctx, selector)
+	if err != nil {
+		logCtx.WithError(err).Error("Failed to list applications for resync")
+		return
+	}
+
+	count := 0
+	for _, app := range appList {
+		if s.getAgentNameForApp(&app) == agentName {
+			s.newAppCallback(&app)
+			count++
+		}
+	}
+
+	logCtx.Infof("Resynced %d applications for agent", count)
 }
 
 func (s *Server) isAgentConnected(agentName string) bool {

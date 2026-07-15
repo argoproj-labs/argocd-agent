@@ -30,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
@@ -49,6 +50,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -831,6 +833,131 @@ func Test_cleanupAgentState(t *testing.T) {
 		assert.NotPanics(t, func() {
 			s.cleanupAgentState("nonexistent-agent")
 		})
+	})
+}
+
+func Test_resyncAppsForAgent(t *testing.T) {
+	t.Run("resyncs applications targeting the agent (namespace-based)", func(t *testing.T) {
+		mockAppBackend := &mocks.Application{}
+		appMgr, err := application.NewApplicationManager(mockAppBackend, "argocd")
+		require.NoError(t, err)
+
+		clusterMgr, err := cluster.NewManager(context.Background(), "argocd", "", "", "", kubefake.NewSimpleClientset(), nil)
+		require.NoError(t, err)
+		require.NoError(t, clusterMgr.MapCluster("agent1", &v1alpha1.Cluster{Name: "agent1", Server: "https://agent1.example.com"}))
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			appManager: appMgr,
+			clusterMgr: clusterMgr,
+			options:    &ServerOptions{namespaces: []string{"agent1", "agent2"}},
+		}
+
+		apps := []v1alpha1.Application{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "app1", Namespace: "agent1"},
+				Spec:       v1alpha1.ApplicationSpec{Project: "default"},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "app2", Namespace: "agent2"},
+				Spec:       v1alpha1.ApplicationSpec{Project: "default"},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "app3", Namespace: "agent1"},
+				Spec:       v1alpha1.ApplicationSpec{Project: "default"},
+			},
+		}
+		mockAppBackend.On("List", mock.Anything, mock.Anything).Return(apps, nil)
+
+		s.resyncAppsForAgent("agent1")
+
+		// Only apps targeting agent1 should be dispatched
+		assert.True(t, s.queues.HasQueuePair("agent1"))
+		sendQ := s.queues.SendQ("agent1")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 2, sendQ.Len())
+
+		// agent2 should have no queue
+		assert.False(t, s.queues.HasQueuePair("agent2"))
+	})
+
+	t.Run("resyncs applications targeting the agent (destination-based)", func(t *testing.T) {
+		mockAppBackend := &mocks.Application{}
+		appMgr, err := application.NewApplicationManager(mockAppBackend, "argocd")
+		require.NoError(t, err)
+
+		clusterMgr, err := cluster.NewManager(context.Background(), "argocd", "", "", "", kubefake.NewSimpleClientset(), nil)
+		require.NoError(t, err)
+		require.NoError(t, clusterMgr.MapCluster("target-cluster", &v1alpha1.Cluster{Name: "target-cluster", Server: "https://target.example.com"}))
+
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			resources:               resources.NewAgentResources(),
+			appToAgent:              newConcurrentStringMap(),
+			appManager:              appMgr,
+			clusterMgr:              clusterMgr,
+			destinationBasedMapping: true,
+			namespace:               "argocd",
+			options:                 &ServerOptions{namespaces: []string{}},
+		}
+
+		apps := []v1alpha1.Application{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "app1", Namespace: "argocd"},
+				Spec:       v1alpha1.ApplicationSpec{Project: "default", Destination: v1alpha1.ApplicationDestination{Name: "target-cluster"}},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "app2", Namespace: "argocd"},
+				Spec:       v1alpha1.ApplicationSpec{Project: "default", Destination: v1alpha1.ApplicationDestination{Name: "other-cluster"}},
+			},
+		}
+		mockAppBackend.On("List", mock.Anything, mock.Anything).Return(apps, nil)
+
+		s.resyncAppsForAgent("target-cluster")
+
+		// Only app1 targets the agent
+		assert.True(t, s.queues.HasQueuePair("target-cluster"))
+		sendQ := s.queues.SendQ("target-cluster")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+
+		// Verify app-to-agent tracking was populated
+		assert.Equal(t, "target-cluster", s.appToAgent.Get("argocd/app1"))
+	})
+
+	t.Run("handles empty app list gracefully", func(t *testing.T) {
+		mockAppBackend := &mocks.Application{}
+		appMgr, err := application.NewApplicationManager(mockAppBackend, "argocd")
+		require.NoError(t, err)
+
+		clusterMgr, err := cluster.NewManager(context.Background(), "argocd", "", "", "", kubefake.NewSimpleClientset(), nil)
+		require.NoError(t, err)
+		require.NoError(t, clusterMgr.MapCluster("agent1", &v1alpha1.Cluster{Name: "agent1", Server: "https://agent1.example.com"}))
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			appManager: appMgr,
+			clusterMgr: clusterMgr,
+			options:    &ServerOptions{namespaces: []string{"agent1"}},
+		}
+
+		mockAppBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.Application{}, nil)
+
+		assert.NotPanics(t, func() {
+			s.resyncAppsForAgent("agent1")
+		})
+
+		assert.False(t, s.queues.HasQueuePair("agent1"))
 	})
 }
 

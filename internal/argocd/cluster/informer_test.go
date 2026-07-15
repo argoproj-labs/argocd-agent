@@ -82,6 +82,72 @@ func Test_onClusterAdded(t *testing.T) {
 	})
 }
 
+func Test_onClusterAdded_InvokesCallback(t *testing.T) {
+	t.Run("Callback invoked on successful add", func(t *testing.T) {
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
+		require.NoError(t, err)
+
+		var callbackAgent atomic.Value
+		m.SetOnClusterAdded(func(agentName string) {
+			callbackAgent.Store(agentName)
+		})
+
+		s := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping: "agent1",
+					common.LabelKeySecretType:   common.LabelValueSecretTypeCluster,
+				},
+			},
+		}
+		m.onClusterAdded(s)
+		assert.Len(t, m.clusters, 1)
+		assert.Equal(t, "agent1", callbackAgent.Load())
+	})
+
+	t.Run("Callback not invoked on malformed secret", func(t *testing.T) {
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
+		require.NoError(t, err)
+
+		callbackCalled := atomic.Bool{}
+		m.SetOnClusterAdded(func(agentName string) {
+			callbackCalled.Store(true)
+		})
+
+		s := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping: "agent1",
+					common.LabelKeySecretType:   common.LabelValueSecretTypeCluster,
+				},
+			},
+			Data: map[string][]byte{
+				"config": []byte("invalid json"),
+			},
+		}
+		m.onClusterAdded(s)
+		assert.False(t, callbackCalled.Load())
+	})
+
+	t.Run("No callback registered does not panic", func(t *testing.T) {
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
+		require.NoError(t, err)
+
+		s := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping: "agent1",
+					common.LabelKeySecretType:   common.LabelValueSecretTypeCluster,
+				},
+			},
+		}
+		assert.NotPanics(t, func() {
+			m.onClusterAdded(s)
+		})
+		assert.Len(t, m.clusters, 1)
+	})
+}
+
 func Test_onClusterUpdated(t *testing.T) {
 	t.Run("Successfully remap a cluster to another agent", func(t *testing.T) {
 		old := &v1.Secret{
