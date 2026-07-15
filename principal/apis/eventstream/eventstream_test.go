@@ -105,6 +105,24 @@ func Test_Subscribe(t *testing.T) {
 		assert.Equal(t, 0, int(st.NumRecv.Load()))
 		assert.Equal(t, 2, int(st.NumSent.Load()))
 	})
+	t.Run("OnConnect callback is invoked when an agent subscribes", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("default")
+		connected := ""
+		s := NewServer(qs, event.NewEventWritersMap(), metric, cluster,
+			WithOnConnect(func(agentName string) { connected = agentName }))
+		st := &mock.MockEventServer{
+			AgentName: "default",
+			AgentMode: string(types.AgentModeManaged),
+		}
+		st.AddRecvHook(func(s *mock.MockEventServer) error {
+			return io.EOF
+		})
+		err := s.Subscribe(st)
+		assert.Nil(t, err)
+		assert.Equal(t, "default", connected)
+	})
+
 	t.Run("Test recv from subscription stream", func(t *testing.T) {
 		qs := queue.NewSendRecvQueues()
 		qs.Create("default")

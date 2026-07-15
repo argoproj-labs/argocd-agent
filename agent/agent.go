@@ -101,6 +101,9 @@ type Agent struct {
 
 	// determines if a resync check is done with the principal when the agent restarts.
 	resyncedOnStart bool
+	// resyncInFlight ensures that at most one resync round is in progress at
+	// a time, so periodic resync ticks cannot pile up.
+	resyncInFlight atomic.Bool
 	// resources is a list of all the resources that are currently being managed by the agent
 	resources *resources.Resources
 

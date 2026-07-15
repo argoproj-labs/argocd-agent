@@ -1503,6 +1503,14 @@ func Test_resyncRoundAllowed(t *testing.T) {
 		s.lastResyncRound["agent"] = time.Now().Add(-2 * time.Hour)
 		assert.True(t, s.resyncRoundAllowed("agent"))
 	})
+
+	t.Run("a reset allows the next round immediately", func(t *testing.T) {
+		s := &Server{lastResyncRound: make(map[string]time.Time), resyncMinInterval: time.Hour}
+		require.True(t, s.resyncRoundAllowed("agent"))
+		require.False(t, s.resyncRoundAllowed("agent"))
+		s.resetResyncRound("agent")
+		assert.True(t, s.resyncRoundAllowed("agent"))
+	})
 }
 
 func Test_processIncomingResourceResyncEvent(t *testing.T) {

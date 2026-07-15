@@ -815,6 +815,17 @@ func (s *Server) resyncRoundAllowed(agentName string) bool {
 	return true
 }
 
+// resetResyncRound clears the recorded resync round of the given agent. It is
+// called when an agent (re)connects to the event stream, so that the resync
+// an agent performs on startup is never refused because of a round accepted
+// during a previous connection. The minimum resync interval thereby only
+// throttles rounds within the lifetime of a single connection.
+func (s *Server) resetResyncRound(agentName string) {
+	s.lastResyncRoundMu.Lock()
+	defer s.lastResyncRoundMu.Unlock()
+	delete(s.lastResyncRound, agentName)
+}
+
 // eventProcessor is the main loop to process event from the receiver queue,
 // i.e. events coming from the connect agents. It will process events from
 // different agents in parallel, but it will not parallelize processing of

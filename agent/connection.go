@@ -17,6 +17,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -318,16 +319,30 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 
 // requestResync asks the principal for a resync of resources, using the
 // mechanism appropriate for the agent's mode. It is called once on startup
-// and, if a resync interval is configured, periodically thereafter.
+// and, if a resync interval is configured, periodically thereafter. Only one
+// resync round can be in flight at a time: while a previous round is still
+// running, requestResync is a no-op.
 func (a *Agent) requestResync(logCtx *logrus.Entry) error {
+	if !a.resyncInFlight.CompareAndSwap(false, true) {
+		logCtx.Debug("Skipping resync request: a previous resync round is still in progress")
+		return nil
+	}
+	// The managed mode branch keeps the in-flight flag held by a goroutine
+	// that outlives this function; OnceFunc makes releasing on the error
+	// paths of both branches safe.
+	release := sync.OnceFunc(func() { a.resyncInFlight.Store(false) })
+
 	sendQ := a.queues.SendQ(defaultQueueName)
 	if sendQ == nil {
+		release()
 		return fmt.Errorf("no send queue found for the default queue pair")
 	}
 
 	// Agent is the source of truth in autonomous mode. So, the agent must request resource
 	// resync with the principal
 	if a.mode == types.AgentModeAutonomous {
+		defer release()
+
 		ev, err := a.emitter.RequestResourceResyncEvent()
 		if err != nil {
 			return fmt.Errorf("failed to create RequestResourceResync event: %w", err)
@@ -342,6 +357,7 @@ func (a *Agent) requestResync(logCtx *logrus.Entry) error {
 		// from the Principal to detect any updates on the agent side.
 		dynClient, err := dynamic.NewForConfig(a.kubeClient.RestConfig)
 		if err != nil {
+			release()
 			return err
 		}
 
@@ -349,7 +365,10 @@ func (a *Agent) requestResync(logCtx *logrus.Entry) error {
 			WithDestinationBasedMapping(a.destinationBasedMapping).
 			WithIgnoreUnmanagedApps(a.ignoreUnmanagedApps).
 			WithPeerNamespace(a.principalNS())
-		go resyncHandler.SendRequestUpdates(a.context)
+		go func() {
+			defer release()
+			resyncHandler.SendRequestUpdates(a.context)
+		}()
 
 		// Agent should request SyncedResourceList from the principal to detect deleted
 		// resources on the agent side.
