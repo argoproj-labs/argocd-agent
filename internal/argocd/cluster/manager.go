@@ -56,6 +56,10 @@ const syncTimeout = 30 * time.Second
 // The agentName parameter is the value of the agent-mapping label from the deleted secret.
 type ClusterDeletedCallback func(agentName string)
 
+// ClusterAddedCallback is invoked after a cluster secret is added and mapped.
+// The agentName parameter is the agent that was mapped.
+type ClusterAddedCallback func(agentName string)
+
 // Manager manages Argo CD cluster secrets on the principal
 type Manager struct {
 	mutex      sync.RWMutex
@@ -74,6 +78,10 @@ type Manager struct {
 	// clusterDeletedCb is a callback invoked after a cluster secret
 	// is deleted and unmapped. Used by the principal to clean up per-agent state.
 	clusterDeletedCb ClusterDeletedCallback
+
+	// clusterAddedCb is a callback invoked after a cluster secret is added
+	// and mapped. Used by the principal to resync applications for the agent.
+	clusterAddedCb ClusterAddedCallback
 }
 
 // SetOnClusterDeleted registers a callback that fires after a cluster secret
@@ -82,6 +90,14 @@ func (m *Manager) SetOnClusterDeleted(fn ClusterDeletedCallback) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.clusterDeletedCb = fn
+}
+
+// SetOnClusterAdded registers a callback that fires after a cluster secret
+// is added and the agent mapping is created.
+func (m *Manager) SetOnClusterAdded(fn ClusterAddedCallback) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.clusterAddedCb = fn
 }
 
 // NewManager instantiates and initializes a new Manager.

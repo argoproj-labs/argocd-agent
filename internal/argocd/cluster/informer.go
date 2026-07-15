@@ -19,16 +19,17 @@ that are used for the Manager's informer on add/update/delete events.
 func (m *Manager) onClusterAdded(res *v1.Secret) {
 	log().Tracef("Executing cluster add handler for secret %s/%s", res.Namespace, res.Name)
 	m.mutex.Lock()
-	defer m.mutex.Unlock()
 
 	// The informer filter should have already ensured that the following
 	// labels are set. But we check again just to be sure.
 	agent, ok := res.Labels[LabelKeyClusterAgentMapping]
 	if !ok || agent == "" {
+		m.mutex.Unlock()
 		log().Warnf("Processing invalid cluster secret (missing labels): %s", res.Name)
 		return
 	}
 	if v, ok := res.Labels[common.LabelKeySecretType]; !ok || v != common.LabelValueSecretTypeCluster {
+		m.mutex.Unlock()
 		log().Warnf("Processing invalid cluster secret (missing labels): %s", res.Name)
 		return
 	}
@@ -36,6 +37,7 @@ func (m *Manager) onClusterAdded(res *v1.Secret) {
 	// Check if we already have a mapping for the requested agent
 	existing := m.mapping(agent)
 	if existing != nil {
+		m.mutex.Unlock()
 		log().Errorf("Agent %s is already mapped to cluster %s", agent, existing.Name)
 		return
 	}
@@ -43,20 +45,27 @@ func (m *Manager) onClusterAdded(res *v1.Secret) {
 	// Unmarshal the cluster from the secret
 	cluster, err := db.SecretToCluster(res)
 	if err != nil {
+		m.mutex.Unlock()
 		log().WithError(err).Error("Not a cluster secret or malformed data")
 		return
 	}
 
-	// TODO(jannfis): Do we want to validate cluster configuration here?
-
 	// Map the cluster to the agent
 	err = m.mapCluster(agent, cluster)
 	if err != nil {
+		m.mutex.Unlock()
 		log().WithError(err).Infof("Error mapping cluster %s to agent %s", cluster.Name, agent)
 		return
 	}
 
+	clusterAddedCb := m.clusterAddedCb
+	m.mutex.Unlock()
+
 	log().Infof("Mapped cluster %s to agent %s", cluster.Name, agent)
+
+	if clusterAddedCb != nil {
+		clusterAddedCb(agent)
+	}
 }
 
 // onClusterUpdated is called by the informer whenever there is a change to a
