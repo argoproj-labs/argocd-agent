@@ -96,7 +96,7 @@ With Destination-based mapping, the principal uses the Application's `spec.desti
 
 ### How It Works
 
-1. **Application Creation**: Create Applications in any namespace. Set `spec.destination.name` to the target agent's name.
+1. **Application Creation**: Create Applications in the `argocd` namespace by default. Other namespaces are optional and require Argo CD's apps-in-any-namespace configuration. Set `spec.destination.name` to the target agent's name.
 
 2. **Routing**: The principal maintains a lookup table (`appToAgent`) mapping applications to agents based on `destination.name`.
 
