@@ -92,7 +92,7 @@ graph TB
 
 ## Destination-Based Mapping
 
-With Destination-based mapping, the principal uses the Application's `spec.destination.name` field to determine the target agent. This enables more flexible routing and better multi-tenancy support.
+With Destination-based mapping, the principal uses the Application's `spec.destination.name` field to determine the target agent. Routing only depends on this field, not on the Application's namespace, so no special namespace configuration is required to use this mode.
 
 ### How It Works
 
@@ -128,7 +128,7 @@ graph TB
     app1 -.->|"routed by destination.name"| agent1
 ```
 
-Destination-based mapping also supports per-team namespace isolation, matching Argo CD's apps-in-any-namespace feature. Multiple namespaces can route to the same agent, and each namespace is preserved on the agent side. The diagram below shows two teams (`team-a`, `team-b`) both targeting `agent-prod`:
+Namespace isolation is an optional extension, not a requirement. If you also want per-team namespaces, destination-based mapping supports that too, matching Argo CD's apps-in-any-namespace feature: multiple namespaces can route to the same agent, and each namespace is preserved on the agent side. This requires enabling apps-in-any-namespace (`application.namespaces`) for those namespaces. The diagram below shows two teams (`team-a`, `team-b`) both targeting `agent-prod`:
 
 ```mermaid
 graph TB
@@ -222,7 +222,7 @@ spec:
 
 ## AppProject Configuration
 
-Destination-based mapping requires the AppProject on the agent to allow applications in any namespace:
+If your Applications stay in the `argocd` namespace, no AppProject changes are needed. `sourceNamespaces` is only required for the optional namespace isolation described above, to let the AppProject on the agent allow Applications in those other namespaces:
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -232,11 +232,11 @@ metadata:
   namespace: argocd
 spec:
   sourceNamespaces:
-    - <namespaces>  # Required for destination-based mapping
+    - <namespaces>  # Only needed for Applications outside the argocd namespace
   # ... other configuration
 ```
 
-Unlike the namespace-based mapping where the `sourceNamespaces` field is removed, the `sourceNamespaces` field on AppProject is preserved when using destination-based mapping.
+Unlike namespace-based mapping, where the `sourceNamespaces` field is removed, this field is preserved when using destination-based mapping, so it can list any additional namespaces you choose to allow.
 
 ## Migration Guide
 
