@@ -35,7 +35,7 @@ require (
 	golang.org/x/sync v0.22.0
 	golang.stackrox.io/grpc-http1 v0.5.1
 	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478
-	google.golang.org/grpc v1.82.0
+	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
