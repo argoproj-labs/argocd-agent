@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"path"
+	"slices"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
@@ -222,11 +223,8 @@ func Test_ValidateTLSConfig(t *testing.T) {
 		// Find a cipher that supports TLS 1.2
 		var tls12Cipher *tls.CipherSuite
 		for _, cs := range tls.CipherSuites() {
-			for _, v := range cs.SupportedVersions {
-				if v == tls.VersionTLS12 {
-					tls12Cipher = cs
-					break
-				}
+			if slices.Contains(cs.SupportedVersions, tls.VersionTLS12) {
+				tls12Cipher = cs
 			}
 			if tls12Cipher != nil {
 				break
@@ -242,13 +240,7 @@ func Test_ValidateTLSConfig(t *testing.T) {
 		// Find a cipher that does NOT support TLS 1.3 (TLS 1.2 only ciphers)
 		var tls12OnlyCipher *tls.CipherSuite
 		for _, cs := range tls.CipherSuites() {
-			supportsTLS13 := false
-			for _, v := range cs.SupportedVersions {
-				if v == tls.VersionTLS13 {
-					supportsTLS13 = true
-					break
-				}
-			}
+			supportsTLS13 := slices.Contains(cs.SupportedVersions, tls.VersionTLS13)
 			if !supportsTLS13 {
 				tls12OnlyCipher = cs
 				break
@@ -357,12 +349,9 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 		var cipherName string
 		var cipherID uint16
 		for _, cs := range ciphers {
-			for _, v := range cs.SupportedVersions {
-				if v == tls.VersionTLS12 {
-					cipherName = cs.Name
-					cipherID = cs.ID
-					break
-				}
+			if slices.Contains(cs.SupportedVersions, tls.VersionTLS12) {
+				cipherName = cs.Name
+				cipherID = cs.ID
 			}
 			if cipherName != "" {
 				break

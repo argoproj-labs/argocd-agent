@@ -1345,12 +1345,12 @@ func Test_getAvailableAPIs(t *testing.T) {
 		// Check that resources array exists and has content
 		resources, exists := result.Object["resources"]
 		assert.True(t, exists)
-		resourcesList, ok := resources.([]interface{})
+		resourcesList, ok := resources.([]any)
 		assert.True(t, ok)
 		assert.Greater(t, len(resourcesList), 0)
 
 		// Check that the first resource has the expected fields
-		firstResource, ok := resourcesList[0].(map[string]interface{})
+		firstResource, ok := resourcesList[0].(map[string]any)
 		assert.True(t, ok)
 		assert.Contains(t, firstResource, "name")
 		assert.Contains(t, firstResource, "kind")
@@ -1378,12 +1378,12 @@ func Test_getAvailableAPIs(t *testing.T) {
 		// Check that resources array exists and has content
 		resources, exists := result.Object["resources"]
 		assert.True(t, exists)
-		resourcesList, ok := resources.([]interface{})
+		resourcesList, ok := resources.([]any)
 		assert.True(t, ok)
 		assert.Greater(t, len(resourcesList), 0)
 
 		// Check that the first resource has the expected fields
-		firstResource, ok := resourcesList[0].(map[string]interface{})
+		firstResource, ok := resourcesList[0].(map[string]any)
 		assert.True(t, ok)
 		assert.Contains(t, firstResource, "name")
 		assert.Contains(t, firstResource, "kind")
@@ -1406,12 +1406,12 @@ func Test_getAvailableAPIs(t *testing.T) {
 		// Check that groups array exists and has content
 		groups, exists := result.Object["groups"]
 		assert.True(t, exists)
-		groupsList, ok := groups.([]interface{})
+		groupsList, ok := groups.([]any)
 		assert.True(t, ok)
 		assert.Greater(t, len(groupsList), 0)
 
 		// Check that the first group has the expected fields
-		firstGroup, ok := groupsList[0].(map[string]interface{})
+		firstGroup, ok := groupsList[0].(map[string]any)
 		assert.True(t, ok)
 		assert.Contains(t, firstGroup, "name")
 		assert.Contains(t, firstGroup, "versions")
@@ -1420,12 +1420,12 @@ func Test_getAvailableAPIs(t *testing.T) {
 		// Check that versions array exists and has content
 		versions, exists := firstGroup["versions"]
 		assert.True(t, exists)
-		versionsList, ok := versions.([]interface{})
+		versionsList, ok := versions.([]any)
 		assert.True(t, ok)
 		assert.Greater(t, len(versionsList), 0)
 
 		// Check that the first version has the expected fields
-		firstVersion, ok := versionsList[0].(map[string]interface{})
+		firstVersion, ok := versionsList[0].(map[string]any)
 		assert.True(t, ok)
 		assert.Contains(t, firstVersion, "groupVersion")
 		assert.Contains(t, firstVersion, "version")

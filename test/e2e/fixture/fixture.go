@@ -17,8 +17,10 @@ package fixture
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -132,9 +134,7 @@ func WriteEnvVarsToFile(vars map[string]string) error {
 		allVars["ARGOCD_AGENT_CREATE_NAMESPACE"] = "true"
 		allVars["ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING"] = "true"
 	}
-	for k, v := range vars {
-		allVars[k] = v
-	}
+	maps.Copy(allVars, vars)
 	if len(allVars) == 0 {
 		os.Remove(EnvVariablesFromE2EFile)
 		return nil
@@ -254,12 +254,7 @@ func (suite *BaseSuite) setupDestinationBasedMapping() {
 		if err != nil {
 			return false
 		}
-		for _, ns := range proj.Spec.SourceNamespaces {
-			if ns == "*" {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(proj.Spec.SourceNamespaces, "*")
 	}, 30*time.Second, 1*time.Second, "SourceNamespaces should propagate to managed agent")
 
 	// Update argocd-cmd-params-cm to allow applications in any namespace.
@@ -359,7 +354,7 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 	// Wait for the object to be deleted for 180 seconds
 	// - Primarily this will be waiting for the finalizer to be removed, so that the object is deleted
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 180; count++ {
+	for range 180 {
 		err := kclient.Delete(ctx, obj, metav1.DeleteOptions{})
 		if errors.IsNotFound(err) {
 			// object is already deleted
@@ -390,7 +385,7 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 
 	// Continue waiting for object to be deleted, now that finalizers have been removed.
 	key = types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 180; count++ {
+	for range 180 {
 		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return nil
@@ -407,7 +402,7 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 // WaitForDeletion will wait for a resource to be deleted
 func WaitForDeletion(ctx context.Context, kclient KubeClient, obj KubeObject, debugContext string) error {
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 180; count++ {
+	for range 180 {
 		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {

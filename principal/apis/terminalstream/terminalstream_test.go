@@ -425,7 +425,7 @@ func TestConcurrentSessionOperations(t *testing.T) {
 		numSessions := 100
 
 		// Add sessions concurrently
-		for i := 0; i < numSessions; i++ {
+		for i := range numSessions {
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()
@@ -439,7 +439,7 @@ func TestConcurrentSessionOperations(t *testing.T) {
 		}
 
 		// Get sessions concurrently
-		for i := 0; i < numSessions; i++ {
+		for i := range numSessions {
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()
@@ -459,7 +459,7 @@ func TestConcurrentSessionOperations(t *testing.T) {
 		numSessions := 100
 
 		// Add sessions
-		for i := 0; i < numSessions; i++ {
+		for i := range numSessions {
 			session := &TerminalSession{
 				UUID:      fmt.Sprintf("uuid-%d", i),
 				AgentName: "agent",
@@ -469,7 +469,7 @@ func TestConcurrentSessionOperations(t *testing.T) {
 		}
 
 		// Remove sessions concurrently
-		for i := 0; i < numSessions; i++ {
+		for i := range numSessions {
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()

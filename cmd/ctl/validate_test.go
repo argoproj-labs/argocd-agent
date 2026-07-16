@@ -174,15 +174,15 @@ func createCertWithEmptyCN(t *testing.T, signerCert *x509.Certificate, signerKey
 // Helper that returns an unstructured that represents a fake application
 func createFakeApp() *unstructured.Unstructured {
 	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "argoproj.io/v1alpha1",
 			"kind":       "Application",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "fake-app",
 				"namespace": "argocd",
 			},
-			"spec": map[string]interface{}{
-				"destination": map[string]interface{}{
+			"spec": map[string]any{
+				"destination": map[string]any{
 					"server":    "https://kubernetes.default.svc",
 					"namespace": "default",
 				},
@@ -383,7 +383,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		route.SetKind("Route")
 		route.SetName("argocd-server")
 		route.SetNamespace(principalNS)
-		route.Object["spec"] = map[string]interface{}{
+		route.Object["spec"] = map[string]any{
 			"host": "localhost", // matches the cert IPS/DNS
 		}
 		_, err = dynCl.Resource(schema.GroupVersionResource{Group: "route.openshift.io", Version: "v1", Resource: "routes"}).Namespace(principalNS).Create(context.TODO(), route, metav1.CreateOptions{})
@@ -885,7 +885,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 		route.SetKind("Route")
 		route.SetName("argocd-server")
 		route.SetNamespace(principalNS)
-		route.Object["spec"] = map[string]interface{}{
+		route.Object["spec"] = map[string]any{
 			"host": "mismatched-host.example.com", // Doesn't match cert DNS
 		}
 		_, err = dynCl.Resource(schema.GroupVersionResource{Group: "route.openshift.io", Version: "v1", Resource: "routes"}).Namespace(principalNS).Create(context.TODO(), route, metav1.CreateOptions{})

@@ -206,11 +206,9 @@ func (s *Server) Subscribe(stream replicationapi.Replication_SubscribeServer) er
 		return fmt.Errorf("flushing buffered events: %w", err)
 	}
 
-	client.wg.Add(1)
-	go func() {
-		defer client.wg.Done()
+	client.wg.Go(func() {
 		s.receiveAcks(client)
-	}()
+	})
 
 	<-ctx.Done()
 

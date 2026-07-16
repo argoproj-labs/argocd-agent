@@ -484,8 +484,8 @@ func (suite *FixtureTestSuite) Test_Patch_Application() {
 			Namespace: "test-argocd-agent",
 		},
 	}
-	err = kclient.Patch(ctx, &app, []interface{}{
-		map[string]interface{}{
+	err = kclient.Patch(ctx, &app, []any{
+		map[string]any{
 			"op":    "replace",
 			"path":  "/spec/source/targetRevision",
 			"value": "TAIL",

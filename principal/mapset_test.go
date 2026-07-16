@@ -239,7 +239,7 @@ func Test_mapToSet_PanicPrevention(t *testing.T) {
 	t.Run("Rapid add/delete cycles do not panic", func(t *testing.T) {
 		ms := NewMapToSet()
 		assert.NotPanics(t, func() {
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				ms.Add("key", "value")
 				ms.Delete("key", "value")
 			}
