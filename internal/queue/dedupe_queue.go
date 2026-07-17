@@ -195,8 +195,21 @@ func (q *dedupeQueue) Len() int {
 	return q.queue.Len()
 }
 
+// deduplicationDisabled controls whether event deduplication is globally
+// disabled. Set via SetDeduplicationDisabled before any queues are created.
+var deduplicationDisabled bool
+
+// SetDeduplicationDisabled is used to globally disable queue-level event deduplication.
+func SetDeduplicationDisabled(disabled bool) {
+	deduplicationDisabled = disabled
+}
+
 // canDedupe returns true if the event type supports de-duplication.
 func canDedupe(ev *event.Event) bool {
+	if deduplicationDisabled {
+		return false
+	}
+
 	evType := ev.Type()
 	return evType == internalevent.SpecUpdate.String() || evType == internalevent.StatusUpdate.String()
 }
