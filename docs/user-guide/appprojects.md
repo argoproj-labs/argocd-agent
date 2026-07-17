@@ -133,6 +133,11 @@ spec:
   - argocd
   sourceRepos:
   - "*"
+  roles:
+  - name: read-only
+    policies:
+    - "p, proj:my-project:read-only, applications, get, my-project/*, allow"
+  # (...)
 ```
 
 When this AppProject is created on an autonomous agent named `agent-production`, it will be transformed and appear on the principal as:
@@ -155,6 +160,11 @@ spec:
   - agent-production                 # Agent's namespace on principal
   sourceRepos:
   - "*"
+  roles:
+  - name: read-only
+    policies:
+    - "p, proj:agent-production-my-project:read-only, applications, get, agent-production-my-project/agent-production/*, allow" # Since the project '.name' was prefixed with the agent name above, the agent logic performs the same translation here. We also update the 5th field, including updating the namespace to principal cluster namespace.
+  # (...)
 ```
 
 ### Principal-Side Transformation
@@ -189,6 +199,17 @@ When an AppProject is received from an autonomous agent, the principal applies t
 
 4. **Namespace Mapping**: The project is placed in the Argo CD namespace on the principal (same as where other AppProjects reside)
 
+5. **Roles**: Role policies are translated so that RBAC references remain valid on the principal. For each policy line in `.spec.roles[].policies[]`:
+   - The `proj:<project>:<role>` subject is updated to use the prefixed project name
+   - The object field is transformed from `<project>/<app>` to `<project>/<agent-namespace>/<app>` (since Application-in-any-namespace is enabled on the principal for autonomous agents)
+   - Only policies targeting supported resource types (`applications`, `applicationsets`, `logs`, `exec`) are transformed; others are preserved as-is
+```
+   # Original (on agent):
+   p, proj:my-project:read-only, applications, get, my-project/*, allow
+   # Transformed (on principal):
+   p, proj:agent-production-my-project:read-only, applications, get, agent-production-my-project/agent-production/*, allow
+```
+
 ## Key Transformation Differences
 
 The transformation logic differs significantly between managed and autonomous agents:
@@ -206,6 +227,7 @@ The transformation logic differs significantly between managed and autonomous ag
 - **Destinations**: All destinations are transformed to point to the agent cluster (name = agent name, server = "*")
 - **Source Namespaces**: Replaced with the agent's namespace on the principal
 - **Name**: Prefixed with agent name to avoid conflicts
+- **Roles**: Policy lines are translated — project references are prefixed and object fields gain the agent namespace (`<project>/<app>` → `<project>/<agent-ns>/<app>`)
 
 ### Lifecycle Management
 

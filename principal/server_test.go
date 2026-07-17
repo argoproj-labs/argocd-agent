@@ -356,7 +356,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
@@ -385,7 +385,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
@@ -402,7 +402,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
@@ -419,7 +419,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
@@ -436,7 +436,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
@@ -460,7 +460,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		}).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		// 1 project event + 1 repository event
@@ -499,7 +499,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		}).Return([]corev1.Secret{repoCreds}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		// 1 project event + 1 repo-creds event
@@ -527,7 +527,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		}).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		// Only 1 project event, no repository event
@@ -560,7 +560,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		}).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
@@ -585,7 +585,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		}).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
@@ -611,7 +611,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		}).Return([]corev1.Secret{}, nil)
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
@@ -648,7 +648,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
 		s.gpgKeyManager = gpgkey.NewManager(mockGPGBackend, ns)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		// 1 project + 1 repo + 1 GPG key
@@ -685,7 +685,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 
 		s := newServer(t, mockProjBackend, mockRepoBackend)
 		s.gpgKeyManager = gpgkey.NewManager(mockGPGBackend, ns)
-		err := s.sendCurrentStateToAgent(agentName)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
 		// 1 project + 1 repo, GPG key skipped
