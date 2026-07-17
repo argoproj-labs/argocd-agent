@@ -314,23 +314,23 @@ func TestDedupeQueue_ConcurrentDeduplication(t *testing.T) {
 	require.NotNil(t, got)
 }
 
-func TestDedupeQueue_GetSkipsPhantomKey(t *testing.T) {
+func TestDedupeQueue_GetSkipsOrphanedKey(t *testing.T) {
 	dq := NewDedupeQueue("test").(*dedupeQueue)
 
-	// Inject a phantom: add a key directly to the workqueue with no
-	// corresponding entry in latestEvents. This is the exact state produced
-	// by the dirty-set race between concurrent Add() and Get().
-	phantomKey := EventKey{ResourceID: "phantom_uid", EventType: internalevent.SpecUpdate.String()}
-	dq.queue.Add(phantomKey)
+	// Inject a key directly into the workqueue with no corresponding
+	// entry in latestEvents, simulating the race where Get() consumed
+	// an event placed by a concurrent Add().
+	orphanedKey := EventKey{ResourceID: "orphan_uid", EventType: internalevent.SpecUpdate.String()}
+	dq.queue.Add(orphanedKey)
 
-	// Add a real event (different resource) that sits behind the phantom
+	// Add a real event (different resource) behind the orphan.
 	realEv := newDedupableEvent("real_uid", "real-data")
 	dq.Add(realEv)
 
-	// Get must skip the phantom and return the real event
+	// Get must release the orphaned key and return the real event.
 	got, shutdown := dq.Get()
 	assert.False(t, shutdown)
-	require.NotNil(t, got, "Get() must skip phantom keys and return real events")
+	require.NotNil(t, got)
 
 	var data string
 	_ = got.DataAs(&data)
@@ -338,38 +338,37 @@ func TestDedupeQueue_GetSkipsPhantomKey(t *testing.T) {
 	dq.Done(got)
 }
 
-func TestDedupeQueue_PhantomKeyDoesNotBlockSameResource(t *testing.T) {
+func TestDedupeQueue_OrphanedKeyReleasedFromProcessingSet(t *testing.T) {
 	dq := NewDedupeQueue("test").(*dedupeQueue)
 
-	// Inject a phantom key for app1
-	phantomKey := EventKey{ResourceID: "app1_uid1", EventType: internalevent.SpecUpdate.String()}
-	dq.queue.Add(phantomKey)
+	// Inject an orphaned key for app1. If popOne does not call
+	// queue.Done(key), this key stays in the processing set and
+	// a subsequent Add for the same resource can never be delivered.
+	orphanedKey := EventKey{ResourceID: "app1_uid1", EventType: internalevent.SpecUpdate.String()}
+	dq.queue.Add(orphanedKey)
 
-	// Start Get() in a goroutine — it will clean up the phantom and then
-	// block waiting for the next real item.
 	gotCh := make(chan *cloudevents.Event, 1)
 	go func() {
 		got, _ := dq.Get()
 		gotCh <- got
 	}()
 
-	// Give Get() time to encounter and clean up the phantom
+	// Give Get() time to encounter and release the orphan.
 	time.Sleep(50 * time.Millisecond)
 
-	// Add a real event for the SAME resource. If the phantom key were stuck
-	// in the processing set, this Add would never be delivered.
+	// Add a real event for the SAME resource.
 	realEv := newDedupableEvent("app1_uid1", "v1")
 	dq.Add(realEv)
 
 	select {
 	case got := <-gotCh:
-		require.NotNil(t, got, "Get() must not be stuck by a phantom key")
+		require.NotNil(t, got)
 		var data string
 		_ = got.DataAs(&data)
 		assert.Equal(t, "v1", data)
 		dq.Done(got)
 	case <-time.After(5 * time.Second):
-		t.Fatal("Get() is stuck — phantom key was not released from processing set")
+		t.Fatal("Get() is stuck — orphaned key was not released from processing set")
 	}
 }
 

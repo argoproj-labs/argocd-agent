@@ -162,16 +162,23 @@ func GetWithContext(q WorkQueue, ctx context.Context) (*event.Event, bool) {
 	}
 
 	for {
-		if bq.Len() > 0 {
-			return bq.Get()
+		if ctx.Err() != nil {
+			return nil, false
 		}
 
-		// Suspend until an item is available or context is cancelled
+		if bq.Len() > 0 {
+			ev, shutdown := bq.popOne()
+			if shutdown || ev != nil {
+				return ev, shutdown
+			}
+			// Race produced a nil event, continue to re-check the queue
+			continue
+		}
+
 		select {
 		case <-ctx.Done():
 			return nil, false
 		case <-bq.notify:
-			// Wake up and re-check if an item is available
 		}
 	}
 }
