@@ -146,27 +146,35 @@ func (q *dedupeQueue) Add(item *event.Event) {
 	}
 }
 
+// popOne pops one key from the workqueue (blocking if empty) and returns
+// the associated event. ev is nil when a concurrent Add() races between
+// queue.Get() returning and mu.Lock() acquiring: Get() reads and deletes
+// the event the racing Add() just placed, so the subsequent dirty-triggered
+// pop finds nothing. The orphaned key is released so it does not get stuck
+// in the processing set.
+func (q *dedupeQueue) popOne() (ev *event.Event, shutdown bool) {
+	key, shutdown := q.queue.Get()
+	if shutdown {
+		return nil, true
+	}
+
+	q.mu.Lock()
+	ev = q.latestEvents[key]
+	delete(q.latestEvents, key)
+	q.mu.Unlock()
+
+	if ev == nil {
+		q.queue.Done(key)
+	}
+	return ev, false
+}
+
 func (q *dedupeQueue) Get() (*event.Event, bool) {
 	for {
-		key, shutdown := q.queue.Get()
-		if shutdown {
-			return nil, true
+		ev, shutdown := q.popOne()
+		if shutdown || ev != nil {
+			return ev, shutdown
 		}
-
-		q.mu.Lock()
-		ev := q.latestEvents[key]
-		delete(q.latestEvents, key)
-		q.mu.Unlock()
-
-		if ev != nil {
-			return ev, false
-		}
-
-		// Phantom key: the workqueue's dirty-set re-pushed this key after
-		// Done(), but the event data was already consumed by a prior Get()
-		// that raced with a concurrent Add() for the same dedup key.
-		// Release the key from the processing set so it doesn't get stuck.
-		q.queue.Done(key)
 	}
 }
 
