@@ -16,6 +16,7 @@ package principal
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1416,6 +1417,134 @@ func Test_processAppProjectEvent(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, principalNamespace, createdProject.Namespace, "Project should be created in principal namespace, not agent namespace")
 	})
+
+	t.Run("Create AppProject in autonomous mode translates role policies", func(t *testing.T) {
+		agentName := "agent-auto"
+
+		project := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "my-project",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceRepos: []string{"*"},
+				Destinations: []v1alpha1.ApplicationDestination{
+					{Name: "cluster", Server: "https://cluster.example.com"},
+				},
+				Roles: []v1alpha1.ProjectRole{
+					{
+						Name: "read-only",
+						Policies: []string{
+							"p, proj:my-project:read-only, applications, get, my-project/*, allow",
+							"p, proj:my-project:read-only, logs, get, my-project/*, allow",
+						},
+					},
+					{
+						Name: "deployer",
+						Policies: []string{
+							"p, proj:my-project:deployer, applications, sync, my-project/my-app, allow",
+						},
+					},
+				},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps("argocd")
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
+		require.NoError(t, err)
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("appproject")
+		ev.SetType(event.Create.String())
+		err = ev.SetData(cloudevents.ApplicationJSON, project)
+		require.NoError(t, err)
+
+		err = s.processAppProjectEvent(context.Background(), agentName, &ev)
+		assert.NoError(t, err)
+
+		prefixedName, err := agentPrefixedProjectName("my-project", agentName)
+		require.NoError(t, err)
+
+		created, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("argocd").Get(context.Background(), prefixedName, v1.GetOptions{})
+		require.NoError(t, err)
+
+		require.Len(t, created.Spec.Roles, 2)
+
+		readOnly := created.Spec.Roles[0]
+		assert.Equal(t, "read-only", readOnly.Name)
+		require.Len(t, readOnly.Policies, 2)
+		assert.Equal(t, "p, proj:"+prefixedName+":read-only, applications, get, agent-auto-my-project/"+agentName+"/*, allow", readOnly.Policies[0])
+		assert.Equal(t, "p, proj:"+prefixedName+":read-only, logs, get, agent-auto-my-project/"+agentName+"/*, allow", readOnly.Policies[1])
+
+		deployer := created.Spec.Roles[1]
+		assert.Equal(t, "deployer", deployer.Name)
+		require.Len(t, deployer.Policies, 1)
+		assert.Equal(t, "p, proj:"+prefixedName+":deployer, applications, sync, agent-auto-my-project/"+agentName+"/my-app, allow", deployer.Policies[0])
+	})
+
+	t.Run("Update AppProject in autonomous mode translates role policies", func(t *testing.T) {
+		agentName := "agent-auto"
+		prefixedName, err := agentPrefixedProjectName("my-project", agentName)
+		require.NoError(t, err)
+
+		existingProject := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      prefixedName,
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceRepos:      []string{"*"},
+				SourceNamespaces: []string{agentName},
+				Destinations: []v1alpha1.ApplicationDestination{
+					{Name: agentName, Server: "*"},
+				},
+			},
+		}
+
+		fac := kube.NewKubernetesFakeClientWithApps("argocd", existingProject)
+		s, err := NewServer(context.Background(), fac, "argocd", WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
+		require.NoError(t, err)
+		s.setAgentMode(agentName, types.AgentModeAutonomous)
+
+		updatedProject := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "my-project",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.AppProjectSpec{
+				SourceRepos: []string{"*"},
+				Destinations: []v1alpha1.ApplicationDestination{
+					{Name: "cluster", Server: "https://cluster.example.com"},
+				},
+				Roles: []v1alpha1.ProjectRole{
+					{
+						Name: "admin",
+						Policies: []string{
+							"p, proj:my-project:admin, applications, *, my-project/*, allow",
+						},
+					},
+				},
+			},
+		}
+
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("appproject")
+		ev.SetType(event.SpecUpdate.String())
+		err = ev.SetData(cloudevents.ApplicationJSON, updatedProject)
+		require.NoError(t, err)
+
+		err = s.processAppProjectEvent(context.Background(), agentName, &ev)
+		assert.NoError(t, err)
+
+		got, err := fac.ApplicationsClientset.ArgoprojV1alpha1().AppProjects("argocd").Get(context.Background(), prefixedName, v1.GetOptions{})
+		require.NoError(t, err)
+
+		require.Len(t, got.Spec.Roles, 1)
+		assert.Equal(t, "admin", got.Spec.Roles[0].Name)
+		require.Len(t, got.Spec.Roles[0].Policies, 1)
+		assert.Equal(t, "p, proj:"+prefixedName+":admin, applications, *, agent-auto-my-project/"+agentName+"/*, allow", got.Spec.Roles[0].Policies[0])
+	})
 }
 
 func Test_processResourceEventResponse(t *testing.T) {
@@ -1583,6 +1712,79 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 		assert.Equal(t, expected, err.Error())
 	})
+}
+
+func Test_processAppProjectEventRoleLine(t *testing.T) {
+
+	for _, resourceType := range []string{"applications", "applicationsets", "logs", "exec"} {
+		t.Run(fmt.Sprintf("Supported resource type %s is translated", resourceType), func(t *testing.T) {
+			input := fmt.Sprintf("p, proj:my-project:read-only, %s, get, my-project/*, allow", resourceType)
+			expected := fmt.Sprintf("p, proj:agent-my-project:read-only, %s, get, agent-my-project/agent-ns/*, allow", resourceType)
+			result := processAppProjectEventRoleLine(input, "read-only", "agent-my-project", "my-project", "agent-ns")
+			assert.Equal(t, expected, result)
+		})
+	}
+
+	t.Run("Unsupported resource type is returned as-is", func(t *testing.T) {
+		input := "p, proj:my-project:read-only, repositories, get, my-project/*, allow"
+		result := processAppProjectEventRoleLine(input, "read-only", "agent-my-project", "my-project", "agent-ns")
+		assert.Equal(t, input, result)
+	})
+
+	t.Run("Wrong number of fields returns input as-is", func(t *testing.T) {
+		input := "p, proj:my-project:read-only, applications, get, my-project/*"
+		result := processAppProjectEventRoleLine(input, "read-only", "agent-my-project", "my-project", "agent-ns")
+		assert.Equal(t, input, result)
+	})
+
+	t.Run("Non-p policy type returns input as-is", func(t *testing.T) {
+		input := "g, admin, role:admin"
+		result := processAppProjectEventRoleLine(input, "read-only", "agent-my-project", "my-project", "agent-ns")
+		assert.Equal(t, input, result)
+	})
+
+	t.Run("Project name mismatch in field 1 returns input as-is", func(t *testing.T) {
+		input := "p, proj:other-project:read-only, applications, get, my-project/*, allow"
+		result := processAppProjectEventRoleLine(input, "read-only", "agent-my-project", "my-project", "agent-ns")
+		assert.Equal(t, input, result)
+	})
+
+	t.Run("Role name mismatch in field 1 returns input as-is", func(t *testing.T) {
+		input := "p, proj:my-project:admin, applications, get, my-project/*, allow"
+		result := processAppProjectEventRoleLine(input, "read-only", "agent-my-project", "my-project", "agent-ns")
+		assert.Equal(t, input, result)
+	})
+
+	t.Run("Non-proj prefix in field 1 leaves it unchanged", func(t *testing.T) {
+		input := "p, role:my-role, applications, get, my-project/*, allow"
+		result := processAppProjectEventRoleLine(input, "read-only", "agent-my-project", "my-project", "agent-ns")
+		assert.Equal(t, "p, role:my-role, applications, get, my-project/*, allow", result)
+	})
+
+	t.Run("Field 4 with three parts is not transformed", func(t *testing.T) {
+		input := "p, proj:my-project:read-only, applications, get, my-project/ns/app, allow"
+		result := processAppProjectEventRoleLine(input, "read-only", "agent-my-project", "my-project", "agent-ns")
+		assert.Equal(t, "p, proj:agent-my-project:read-only, applications, get, my-project/ns/app, allow", result)
+	})
+
+	t.Run("Field 4 with single value is not transformed", func(t *testing.T) {
+		input := "p, proj:my-project:read-only, applications, get, *, allow"
+		result := processAppProjectEventRoleLine(input, "read-only", "agent-my-project", "my-project", "agent-ns")
+		assert.Equal(t, "p, proj:agent-my-project:read-only, applications, get, *, allow", result)
+	})
+
+	t.Run("Deny action is preserved", func(t *testing.T) {
+		input := "p, proj:my-project:read-only, applications, get, my-project/*, deny"
+		result := processAppProjectEventRoleLine(input, "read-only", "agent-my-project", "my-project", "agent-ns")
+		assert.Equal(t, "p, proj:agent-my-project:read-only, applications, get, agent-my-project/agent-ns/*, deny", result)
+	})
+
+	t.Run("Specific app name in field 4 is preserved", func(t *testing.T) {
+		input := "p, proj:my-project:deployer, applications, sync, my-project/my-app, allow"
+		result := processAppProjectEventRoleLine(input, "deployer", "agent-my-project", "my-project", "agent-ns")
+		assert.Equal(t, "p, proj:agent-my-project:deployer, applications, sync, agent-my-project/agent-ns/my-app, allow", result)
+	})
+
 }
 
 func Test_agentPrefixedProjectName(t *testing.T) {
