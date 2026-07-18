@@ -1,0 +1,35 @@
+# Example: declares that the argocd-agent agent named "agent-a" should be
+# registered with Argo CD, entirely declaratively.
+#
+# Creating this object (with no argocd-agentctl invocation at all) causes:
+#   1. clusterprofile-agent-driver to mint a resource-proxy token and write
+#      it into Secret agent-a-argocd-agent-token (same namespace).
+#   2. clusterprofile-agent-driver to publish status.accessProviders[0]
+#      (name=argocd-agent) with the resource-proxy server URL + CA + the
+#      exec extension pointing at that token Secret.
+#   3. clusterprofile-integration-for-argocd to notice the AccessProvider,
+#      look up the "argocd-agent" provider in its provider file, and create
+#      Secret cluster-agent-a in the argocd namespace: a normal Argo CD
+#      cluster Secret, using argocd-agent-creds as its exec credential
+#      plugin.
+#
+# The ClusterProfile name MUST equal the argocd-agent agent name.
+#
+# The argocd-agent.argoproj-labs.io/agent-name label below is required by
+# the argocd-agent principal's *own* cluster informer (a component that
+# predates and is unrelated to ClusterProfile) to map a connecting agent to
+# its Argo CD cluster Secret. clusterprofile-agent-driver self-heals this
+# label onto the ClusterProfile if it is missing or wrong, but setting it
+# explicitly up front avoids one extra reconcile round-trip.
+apiVersion: multicluster.x-k8s.io/v1alpha1
+kind: ClusterProfile
+metadata:
+  name: agent-a
+  namespace: argocd
+  labels:
+    x-k8s.io/cluster-manager: argocd-agent
+    argocd-agent.argoproj-labs.io/agent-name: agent-a
+spec:
+  clusterManager:
+    name: argocd-agent
+  displayName: agent-a

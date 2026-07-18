@@ -1,0 +1,28 @@
+# Deployed against the Argo CD "agent-a" destination that was created
+# entirely declaratively from a ClusterProfile (see sample-clusterprofile.yaml
+# and ../README.md). Confirms the whole chain works end-to-end: ClusterProfile
+# -> clusterprofile-agent-driver -> clusterprofile-integration-for-argocd ->
+# Argo CD cluster Secret -> argocd-agent-creds exec plugin -> resource proxy ->
+# agent on the spoke cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook
+  # Must be in the "agent-a" namespace: principal.allowed-namespaces on the
+  # argocd-agent-principal ConfigMap restricts which Application namespaces
+  # are associated with the "agent-a" agent (see setup-kind-poc.sh step 5).
+  namespace: agent-a
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps
+    targetRevision: HEAD
+    path: kustomize-guestbook
+  destination:
+    name: agent-a
+    namespace: guestbook
+  syncPolicy:
+    automated:
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
