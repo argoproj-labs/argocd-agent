@@ -1199,3 +1199,63 @@ func Test_ClearOperationState(t *testing.T) {
 		mockedBackend.AssertExpectations(t)
 	})
 }
+
+// Test_UpdateStatus_FallbackOnPatchRejection verifies that UpdateStatus falls
+// back to the full-update path when the API server rejects the granular status
+// patch with 400 or 422. Such rejections can occur when the diff source
+// carries zero-valued non-pointer structs (encoding/json ignores omitempty on
+// e.g. SyncStatus.ComparedTo), producing patch operations that target parents
+// absent on the sparse live status. Without the fallback, the same patch is
+// rebuilt and rejected on every retry and status updates for the application
+// stop flowing.
+func Test_UpdateStatus_FallbackOnPatchRejection(t *testing.T) {
+	newInvalid := func() error {
+		return errors.NewInvalid(schema.GroupKind{Group: "argoproj.io", Kind: "Application"}, "foobar", nil)
+	}
+	newBadRequest := func() error { return errors.NewBadRequest("the request is invalid") }
+	for name, rejection := range map[string]error{"422-invalid": newInvalid(), "400-bad-request": newBadRequest()} {
+		t.Run("granular patch rejected with "+name+" falls back to full update", func(t *testing.T) {
+			mockedBackend := appmock.NewApplication(t)
+			existing := &v1alpha1.Application{
+				ObjectMeta: v1.ObjectMeta{Name: "foobar", Namespace: "argocd"},
+			}
+			incoming := existing.DeepCopy()
+			incoming.Status = v1alpha1.ApplicationStatus{
+				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeSynced},
+			}
+			updatedApp := incoming.DeepCopy()
+
+			mockedBackend.On("SupportsPatch").Return(true)
+			mockedBackend.On("Get", mock.Anything, "foobar", "argocd").Return(existing, nil)
+			mockedBackend.On("Patch", mock.Anything, "foobar", "argocd", mock.Anything).Return(nil, rejection)
+			mockedBackend.On("Update", mock.Anything, mock.Anything).Return(updatedApp, nil)
+
+			mgr, err := NewApplicationManager(mockedBackend, "argocd",
+				WithRole(manager.ManagerRolePrincipal))
+			require.NoError(t, err)
+
+			updated, err := mgr.UpdateStatus(context.TODO(), "argocd", incoming)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			require.Equal(t, v1alpha1.SyncStatusCodeSynced, updated.Status.Sync.Status)
+			mockedBackend.AssertCalled(t, "Update", mock.Anything, mock.Anything)
+		})
+	}
+	t.Run("non-4xx patch errors do NOT fall back", func(t *testing.T) {
+		mockedBackend := appmock.NewApplication(t)
+		existing := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "foobar", Namespace: "argocd"}}
+		incoming := existing.DeepCopy()
+		mockedBackend.On("SupportsPatch").Return(true)
+		mockedBackend.On("Get", mock.Anything, "foobar", "argocd").Return(existing, nil)
+		mockedBackend.On("Patch", mock.Anything, "foobar", "argocd", mock.Anything).
+			Return(nil, errors.NewInternalError(fmt.Errorf("boom")))
+
+		mgr, err := NewApplicationManager(mockedBackend, "argocd",
+			WithRole(manager.ManagerRolePrincipal))
+		require.NoError(t, err)
+
+		_, err = mgr.UpdateStatus(context.TODO(), "argocd", incoming)
+		require.Error(t, err)
+		mockedBackend.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
+	})
+}
