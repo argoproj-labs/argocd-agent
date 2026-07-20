@@ -5,6 +5,8 @@ metadata:
   namespace: {{ include "argocd-agent-agent.namespace" . }}
   labels:
     {{- include "argocd-agent-agent.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml .Values.deploymentAnnotations | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
