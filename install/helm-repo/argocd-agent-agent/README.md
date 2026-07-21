@@ -1,6 +1,6 @@
 # argocd-agent-agent
 
-![Version: 0.2.5](https://img.shields.io/badge/Version-0.2.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
+![Version: 0.2.6](https://img.shields.io/badge/Version-0.2.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
 
 Argo CD Agent for connecting managed clusters to a Principal
 
@@ -32,6 +32,7 @@ Kubernetes: `>=1.24.0-0`
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |
 | cacheRefreshInterval | string | `"10s"` | Cache refresh interval. |
 | createNamespace | bool | `false` | Whether to create target namespaces automatically when they don't exist. Used with destination-based mapping. |
+| deploymentAnnotations | object | `{}` | Additional annotations to add to the agent Deployment metadata (e.g. Stakater Reloader trigger annotations, which are read from workload metadata only). |
 | destinationBasedMapping | bool | `false` | Whether to enable destination-based mapping. When enabled, the agent creates applications in their original namespace (preserving the namespace from the principal) instead of the agent's own namespace. |
 | dnsConfig | object | `{}` | DNS config for the Pod. Only honored when `dnsPolicy` is "None". |
 | dnsPolicy | string | `""` | DNS policy for the Pod (e.g. ClusterFirst, None). Empty leaves the default. |

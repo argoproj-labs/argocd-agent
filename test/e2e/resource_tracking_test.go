@@ -28,7 +28,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 )
 
 // ResourceTrackingTestSuite tests that the argocd-agent correctly identifies
@@ -165,8 +164,8 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 			},
 			SyncPolicy: &argoapp.SyncPolicy{
 				Automated: &argoapp.SyncPolicyAutomated{
-					Prune:    ptr.To(true),
-					SelfHeal: ptr.To(true),
+					Prune:    new(true),
+					SelfHeal: new(true),
 				},
 			},
 		},

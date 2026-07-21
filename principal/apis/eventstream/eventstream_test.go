@@ -278,7 +278,6 @@ func TestDisconnectAll(t *testing.T) {
 		gate := make(chan struct{})
 
 		for _, name := range []string{"agent-a", "agent-b"} {
-			name := name
 			st := &mock.MockEventServer{AgentName: name}
 			st.AddRecvHook(func(_ *mock.MockEventServer) error {
 				<-gate

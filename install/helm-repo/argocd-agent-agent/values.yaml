@@ -109,6 +109,10 @@ affinity: {}
 tolerations: []
 # -- Topology spread constraints for the agent Pod.
 topologySpreadConstraints: []
+# -- Additional annotations to add to the agent Deployment metadata
+# (e.g. Stakater Reloader trigger annotations, which are read from workload metadata only).
+deploymentAnnotations: {}
+
 # -- Additional annotations to add to the agent Pod.
 podAnnotations: {}
 # -- Additional labels to add to the agent Pod.

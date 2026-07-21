@@ -115,7 +115,7 @@ func TestComponentLogger(t *testing.T) {
 	logger := defaultLogger.ComponentLogger("TestComponent")
 	logger.Info("test message")
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -132,7 +132,7 @@ func TestModuleLogger(t *testing.T) {
 	logger := defaultLogger.ModuleLogger("TestModule")
 	logger.Info("test message")
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -148,7 +148,7 @@ func TestMethodLogger(t *testing.T) {
 	logger := defaultLogger.MethodLogger("TestModule", "TestMethod")
 	logger.Info("test message")
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -164,7 +164,7 @@ func TestRequestLogger(t *testing.T) {
 	logger := defaultLogger.RequestLogger("TestModule", "TestMethod", "test-request-id")
 	logger.Info("test message")
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -181,7 +181,7 @@ func TestApplicationLogger(t *testing.T) {
 	logger := defaultLogger.ApplicationLogger("TestModule", "test-app")
 	logger.Info("test message")
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -197,7 +197,7 @@ func TestKubernetesResourceLogger(t *testing.T) {
 	logger := defaultLogger.KubernetesResourceLogger("TestModule", "Pod", "default", "test-pod")
 	logger.Info("test message")
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -215,7 +215,7 @@ func TestRedisLogger(t *testing.T) {
 	logger := defaultLogger.RedisLogger("TestModule", "GET", "test-key")
 	logger.Info("test message")
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -232,7 +232,7 @@ func TestGRPCLogger(t *testing.T) {
 	logger := defaultLogger.GRPCLogger("TestModule", "/test.Service/Method")
 	logger.Info("test message")
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -248,7 +248,7 @@ func TestHTTPLogger(t *testing.T) {
 	logger := defaultLogger.HTTPLogger("TestModule", "GET", "/api/v1/test")
 	logger.Info("test message")
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -282,7 +282,7 @@ func TestJSONFormat(t *testing.T) {
 	// Should contain the debug message since we set level to debug
 	assert.NotEmpty(t, buf.String())
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -355,7 +355,7 @@ func TestWithContext(t *testing.T) {
 	err := defaultLogger.SetupLogging(LogLevelInfo, LogFormatJSON, &buf)
 	require.NoError(t, err)
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		logfields.Username:  "testuser",
 		logfields.RequestID: "req-123",
 	}
@@ -363,7 +363,7 @@ func TestWithContext(t *testing.T) {
 	logger := defaultLogger.WithContext("TestModule", fields)
 	logger.Info("test message")
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	err = json.Unmarshal(buf.Bytes(), &logEntry)
 	require.NoError(t, err)
 
@@ -464,9 +464,9 @@ func newTestEntry(buf *bytes.Buffer) *logrus.Entry {
 	return logrus.NewEntry(logger)
 }
 
-func parseLogLine(t *testing.T, buf *bytes.Buffer) map[string]interface{} {
+func parseLogLine(t *testing.T, buf *bytes.Buffer) map[string]any {
 	t.Helper()
-	var entry map[string]interface{}
+	var entry map[string]any
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &entry))
 	return entry
 }

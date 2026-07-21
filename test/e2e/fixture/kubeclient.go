@@ -245,7 +245,7 @@ func (c KubeClient) Update(ctx context.Context, object KubeObject, options metav
 // Patch patches the given object in the cluster using the JSONPatch patch type.
 // object must be a struct pointer so that it can be updated with the result
 // returned by the server.
-func (c KubeClient) Patch(ctx context.Context, object KubeObject, jsonPatch []interface{}, options metav1.PatchOptions) error {
+func (c KubeClient) Patch(ctx context.Context, object KubeObject, jsonPatch []any, options metav1.PatchOptions) error {
 	resource, err := c.resourceFor(object)
 	if err != nil {
 		return err

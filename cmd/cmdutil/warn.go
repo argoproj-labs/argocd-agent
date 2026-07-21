@@ -19,7 +19,7 @@ import (
 	"os"
 )
 
-func Warn(msg string, args ...interface{}) {
+func Warn(msg string, args ...any) {
 	fmt.Fprintf(os.Stderr, "[WARN]: ")
 	fmt.Fprintf(os.Stderr, msg, args...)
 	fmt.Fprintf(os.Stderr, "\n")

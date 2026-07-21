@@ -589,8 +589,8 @@ func streamFromEventSourceNew(ctx context.Context, eventSourceAPIURL string, ses
 					return strings.Contains(err.Error(), "context canceled")
 				}
 
-				if strings.HasPrefix(line, "data:") {
-					data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				if after, ok := strings.CutPrefix(line, "data:"); ok {
+					data := strings.TrimSpace(after)
 					select {
 					case <-ctx.Done():
 						t.Log("Context is complete")
