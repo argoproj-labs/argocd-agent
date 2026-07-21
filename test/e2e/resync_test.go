@@ -15,8 +15,12 @@
 package e2e
 
 import (
+	"bufio"
 	"fmt"
+	"net/http"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1533,6 +1537,83 @@ func (suite *ResyncTestSuite) assertAppProjectSurvivesPrincipalRestart(projectNa
 		proj := argoapp.AppProject{}
 		return suite.PrincipalClient.Get(suite.Ctx, principalKey, &proj, metav1.GetOptions{}) == nil
 	}, 30*time.Second, 1*time.Second, "AppProject should still exist on principal after principal restart")
+}
+
+// Periodic resync: the agent re-runs resync rounds at --resync-interval, and
+// the principal refuses rounds that arrive more often than
+// --resync-min-interval. Both behaviors are observed via the principal's
+// resync request metrics.
+func (suite *ResyncTestSuite) Test_PeriodicResyncRounds() {
+	requires := suite.Require()
+
+	// Restart the principal and the managed agent with periodic resync
+	// enabled on the agent, and a minimum resync interval on the principal
+	// that refuses most of the periodic rounds.
+	err := fixture.WriteEnvVarsToFile(map[string]string{
+		"ARGOCD_AGENT_RESYNC_INTERVAL":         "5s",
+		"ARGOCD_PRINCIPAL_RESYNC_MIN_INTERVAL": "30s",
+	})
+	requires.NoError(err)
+
+	restart := func() {
+		fixture.RestartAgent(suite.T(), "principal")
+		fixture.CheckReadiness(suite.T(), "principal")
+		fixture.RestartAgent(suite.T(), "agent-managed")
+		fixture.CheckReadiness(suite.T(), "agent-managed")
+	}
+	restart()
+
+	// Restore the default configuration when the test is done.
+	defer func() {
+		fixture.ClearEnvVarsFile()
+		restart()
+	}()
+
+	// A managed app must keep syncing normally while periodic rounds run.
+	app := suite.createManagedApp()
+	requires.NotNil(app)
+	key := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
+
+	// The startup round is accepted; the periodic rounds that follow within
+	// the minimum interval must be refused.
+	requires.Eventually(func() bool {
+		return resyncRequestsMetric("agent-managed", "refused") >= 1
+	}, 30*time.Second, 2*time.Second, "principal should refuse resync rounds within the minimum interval")
+
+	// Once the minimum interval has elapsed, a periodic round is accepted
+	// again, without any reconnect.
+	accepted := resyncRequestsMetric("agent-managed", "accepted")
+	requires.GreaterOrEqual(accepted, float64(1), "the startup resync round should have been accepted")
+	requires.Eventually(func() bool {
+		return resyncRequestsMetric("agent-managed", "accepted") > accepted
+	}, 60*time.Second, 2*time.Second, "principal should accept a periodic resync round after the minimum interval")
+
+	// The app must still exist on the workload cluster.
+	err = suite.ManagedAgentClient.Get(suite.Ctx, key, app, metav1.GetOptions{})
+	requires.NoError(err)
+}
+
+// resyncRequestsMetric scrapes the principal's metrics endpoint and returns
+// the current value of the resync requests counter for the given agent and
+// result. It returns 0 if the metric has not been reported yet.
+func resyncRequestsMetric(agentName, result string) float64 {
+	resp, err := http.Get("http://localhost:8000/metrics")
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+
+	prefix := fmt.Sprintf(`argocd_principal_resync_requests_total{agent_name=%q,result=%q}`, agentName, result)
+	sc := bufio.NewScanner(resp.Body)
+	for sc.Scan() {
+		if rest, ok := strings.CutPrefix(sc.Text(), prefix); ok {
+			value, err := strconv.ParseFloat(strings.TrimSpace(rest), 64)
+			if err == nil {
+				return value
+			}
+		}
+	}
+	return 0
 }
 
 func TestResyncTestSuite(t *testing.T) {

@@ -515,6 +515,24 @@ Drop agent connections that send keepalive pings more often than specified inter
 
 **Example:** `30s`
 
+### Resync Minimum Interval
+
+| | |
+|---|---|
+| **CLI Flag** | `--resync-min-interval` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_RESYNC_MIN_INTERVAL` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Duration |
+| **Default** | `0` (disabled) |
+
+Global minimum interval enforced between resync rounds requested by a single agent. Resync requests arriving more often than this interval are refused with a warning in the principal's logs. This protects the principal from agents configured with an overly aggressive `--resync-interval`.
+
+The enforcement applies within the lifetime of a single agent connection: when an agent (re)connects, its allowance is reset, so the resync an agent performs on startup is always accepted.
+
+It should be set to a lower value than the resync interval configured on the agents.
+
+**Example:** `1m`
+
 ### Event Processors
 
 | | |
