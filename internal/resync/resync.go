@@ -26,6 +26,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevent "github.com/cloudevents/sdk-go/v2/event"
@@ -37,7 +38,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/util/workqueue"
 )
 
 // ErrSourceUIDNotFound is returned when a resource does not have the source UID annotation.
@@ -49,7 +49,7 @@ var ErrSourceUIDNotFound = errors.New("source UID annotation not found")
 type RequestHandler struct {
 	dynClient dynamic.Interface
 
-	sendQ workqueue.TypedRateLimitingInterface[*cloudevent.Event]
+	sendQ queue.WorkQueue
 
 	events *event.EventSource
 
@@ -80,7 +80,7 @@ type RequestHandler struct {
 	peerNamespace string
 }
 
-func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLimitingInterface[*cloudevent.Event], events *event.EventSource, resources *resources.Resources, log *logrus.Entry, role manager.ManagerRole, namespace string) *RequestHandler {
+func NewRequestHandler(dynClient dynamic.Interface, queue queue.WorkQueue, events *event.EventSource, resources *resources.Resources, log *logrus.Entry, role manager.ManagerRole, namespace string) *RequestHandler {
 	return &RequestHandler{
 		dynClient: dynClient,
 		sendQ:     queue,

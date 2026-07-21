@@ -34,6 +34,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
+	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -118,6 +119,8 @@ func NewAgentRunCommand() *cobra.Command {
 
 		// Adoption options
 		adoptionPolicy string
+
+		enableQueueDedupe bool
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -331,6 +334,11 @@ func NewAgentRunCommand() *cobra.Command {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
 			}
 
+			if enableQueueDedupe {
+				logrus.Info("Queue event deduplication is enabled")
+				queue.SetDeduplicationEnabled(true)
+			}
+
 			ag, err := agent.NewAgent(ctx, kubeConfig, namespace, agentOpts...)
 			if err != nil {
 				cmdutil.Fatal("Could not create a new agent instance: %v", err)
@@ -502,6 +510,10 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringVar(&adoptionPolicy, "adoption-policy",
 		env.StringWithDefault("ARGOCD_AGENT_ADOPTION_POLICY", nil, "always"),
 		"Set the adoption policy for applications that already exist on a managed agent (always or never)")
+
+	command.Flags().BoolVar(&enableQueueDedupe, "enable-queue-dedupe",
+		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_QUEUE_DEDUPE", false),
+		"Enable event deduplication in the internal send/receive queues (experimental)")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

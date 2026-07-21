@@ -27,13 +27,24 @@ import (
 
 var _ QueuePair = &SendRecvQueues{}
 
+// WorkQueue is the minimal interface used by workqueue consumers. It covers only
+// the methods actually called on workqueues (Add, Get, Done, Len,
+// ShutDown), avoiding a dependency on the full workqueue interface.
+type WorkQueue interface {
+	Add(item *event.Event)
+	Get() (*event.Event, bool)
+	Done(item *event.Event)
+	Len() int
+	ShutDown()
+}
+
 // QueuePair maintains a map (indexed by name) of send/receive queue pairs
 type QueuePair interface {
 	Names() []string
 	HasQueuePair(name string) bool
 	Len() int
-	SendQ(name string) workqueue.TypedRateLimitingInterface[*event.Event]
-	RecvQ(name string) workqueue.TypedRateLimitingInterface[*event.Event]
+	SendQ(name string) WorkQueue
+	RecvQ(name string) WorkQueue
 	Create(name string) error
 	Delete(name string, shutdown bool) error
 }
@@ -43,17 +54,14 @@ const (
 	defaultMaxQueueSize int = 1000
 )
 
-type queuepair struct {
-	recvq *boundedQueue
-	sendq *boundedQueue
-}
-
 type boundedQueue struct {
 	workqueue.TypedRateLimitingInterface[*event.Event]
 	maxSize int
 	notify  chan struct{}
 	name    string
 }
+
+var _ WorkQueue = (*boundedQueue)(nil)
 
 func newBoundedQueue(maxSize int, name string) *boundedQueue {
 	rateLimiter := workqueue.DefaultTypedControllerRateLimiter[*event.Event]()
@@ -81,6 +89,11 @@ func (bq *boundedQueue) Add(item *event.Event) {
 		// We don't want to block the caller if the notify channel is full.
 		return
 	}
+}
+
+type queuepair struct {
+	recvq WorkQueue
+	sendq WorkQueue
 }
 
 type SendRecvQueues struct {
@@ -125,7 +138,7 @@ func (q *SendRecvQueues) Len() int {
 
 // SendQ will return the send queue from the queue pair named name. If no such
 // queue pair exists, returns nil
-func (q *SendRecvQueues) SendQ(name string) workqueue.TypedRateLimitingInterface[*event.Event] {
+func (q *SendRecvQueues) SendQ(name string) WorkQueue {
 	q.queuelock.RLock()
 	defer q.queuelock.RUnlock()
 	qp, ok := q.queues[name]
@@ -137,7 +150,7 @@ func (q *SendRecvQueues) SendQ(name string) workqueue.TypedRateLimitingInterface
 
 // RecvQ will return the receive queue from the queue pair named name. If no
 // such queue pair exists, returns nil
-func (q *SendRecvQueues) RecvQ(name string) workqueue.TypedRateLimitingInterface[*event.Event] {
+func (q *SendRecvQueues) RecvQ(name string) WorkQueue {
 	q.queuelock.RLock()
 	defer q.queuelock.RUnlock()
 	qp, ok := q.queues[name]
@@ -157,22 +170,27 @@ func (q *SendRecvQueues) Create(name string) error {
 	if ok {
 		return fmt.Errorf("cannot initialize queue for %s: queue already exists", name)
 	}
-	recvQueueSize := env.NumWithDefault(config.EnvRecvQueueSize, func(size int) error {
-		if size <= 0 {
-			return fmt.Errorf("queue size must be greater than 0")
-		}
-		return nil
-	}, defaultMaxQueueSize)
-	sendQueueSize := env.NumWithDefault(config.EnvSendQueueSize, func(size int) error {
-		if size <= 0 {
-			return fmt.Errorf("queue size must be greater than 0")
-		}
-		return nil
-	}, defaultMaxQueueSize)
 	qp := &queuepair{}
 
-	qp.sendq = newBoundedQueue(sendQueueSize, name+"-send")
-	qp.recvq = newBoundedQueue(recvQueueSize, name+"-recv")
+	if deduplicationEnabled {
+		qp.sendq = NewDedupeQueue(name + "-send")
+		qp.recvq = NewDedupeQueue(name + "-recv")
+	} else {
+		recvQueueSize := env.NumWithDefault(config.EnvRecvQueueSize, func(size int) error {
+			if size <= 0 {
+				return fmt.Errorf("queue size must be greater than 0")
+			}
+			return nil
+		}, defaultMaxQueueSize)
+		sendQueueSize := env.NumWithDefault(config.EnvSendQueueSize, func(size int) error {
+			if size <= 0 {
+				return fmt.Errorf("queue size must be greater than 0")
+			}
+			return nil
+		}, defaultMaxQueueSize)
+		qp.sendq = newBoundedQueue(sendQueueSize, name+"-send")
+		qp.recvq = newBoundedQueue(recvQueueSize, name+"-recv")
+	}
 	q.queues[name] = qp
 
 	return nil
@@ -198,19 +216,48 @@ func (q *SendRecvQueues) Delete(name string, shutdown bool) error {
 }
 
 // GetWithContext is a wrapper around the workqueue's Get method.
-// It waits until an item is available in the queue or the context is Done
-func GetWithContext(q workqueue.TypedRateLimitingInterface[*event.Event], ctx context.Context) (*event.Event, bool) {
-	bq, ok := q.(*boundedQueue)
-	if !ok {
+// It waits until an item is available in the queue or the context is Done.
+func GetWithContext(q WorkQueue, ctx context.Context) (*event.Event, bool) {
+	switch bq := q.(type) {
+	case *dedupeQueue:
+		return getWithContextDedupe(bq, ctx)
+	case *boundedQueue:
+		return getWithContextBounded(bq, ctx)
+	default:
 		return nil, false
 	}
+}
 
+func getWithContextDedupe(bq *dedupeQueue, ctx context.Context) (*event.Event, bool) {
+	for {
+		if ctx.Err() != nil {
+			return nil, false
+		}
+
+		if bq.Len() > 0 {
+			ev, shutdown := bq.popOne()
+			if shutdown || ev != nil {
+				return ev, shutdown
+			}
+			// Race produced a nil event, continue to re-check the queue
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-bq.notify:
+		}
+	}
+}
+
+func getWithContextBounded(bq *boundedQueue, ctx context.Context) (*event.Event, bool) {
 	for {
 		if bq.Len() > 0 {
 			return bq.Get()
 		}
 
-		// Suspend until an item is available or context is cancelled
+		// Suspend until an item is available or context is done.
 		select {
 		case <-ctx.Done():
 			return nil, false
