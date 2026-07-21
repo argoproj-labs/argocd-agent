@@ -160,7 +160,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		}
 
 		// Revert modifications on autonomous agent applications
-		if s.appManager.RevertAutonomousAppChanges(s.ctx, new, s.sourceCache.Application) {
+		if s.appManager.RevertAutonomousAppChanges(s.ctx, new.DeepCopy(), s.sourceCache.Application) {
 			logCtx.Trace("Modifications to the application are reverted")
 			return
 		}

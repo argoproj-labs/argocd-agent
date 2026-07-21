@@ -724,6 +724,8 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		syncTimeout = waitForSyncedDuration
 	}
 
+	s.events = event.NewEventSource(s.options.serverName)
+
 	if err := s.clusterMgr.Start(); err != nil {
 		return fmt.Errorf("unable to start cluster manager with informer sync timeout %v: %w", syncTimeout, err)
 	}
@@ -733,8 +735,6 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	if err = s.StartEventProcessor(s.ctx); err != nil {
 		return err
 	}
-
-	s.events = event.NewEventSource(s.options.serverName)
 
 	if s.options.labelSelector != "" {
 		log().Infof("Principal informers are using the label selector: %s", s.options.labelSelector)
