@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
@@ -447,6 +448,14 @@ func WithMetricsPort(port int) ServerOption {
 func WithAuthMethods(am *auth.Methods) ServerOption {
 	return func(o *Server) error {
 		o.authMethods = am
+		return nil
+	}
+}
+
+// WithBlocklist sets the TLS certificate blocklist for the server.
+func WithBlocklist(bl *blocklist.Blocklist) ServerOption {
+	return func(o *Server) error {
+		o.blocklist = bl
 		return nil
 	}
 }

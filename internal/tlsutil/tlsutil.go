@@ -16,18 +16,24 @@ package tlsutil
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
+
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
 )
 
 // TLSCertFromFile loads a TLS certificate and RSA private key from the
@@ -128,6 +134,32 @@ func KeyDataToPEM(k crypto.PrivateKey) (string, error) {
 
 	return keyPem.String(), err
 
+}
+
+// CertificateFingerprint returns the SHA-256 fingerprint of a certificate as
+// an uppercase hex string.
+func CertificateFingerprint(cert *x509.Certificate) string {
+	sum := sha256.Sum256(cert.Raw)
+	parts := make([]string, len(sum))
+	for i, b := range sum {
+		parts[i] = fmt.Sprintf("%02X", b)
+	}
+	return strings.Join(parts, "")
+}
+
+// FingerprintFromContext extracts the client certificate from a gRPC TLS
+// context and returns its SHA-256 fingerprint. Returns empty string if the
+// certificate cannot be extracted.
+func FingerprintFromContext(ctx context.Context) string {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return ""
+	}
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok || len(tlsInfo.State.VerifiedChains) < 1 {
+		return ""
+	}
+	return CertificateFingerprint(tlsInfo.State.VerifiedChains[0][0])
 }
 
 // supportedTLSVersions maps TLS version names to their constants.

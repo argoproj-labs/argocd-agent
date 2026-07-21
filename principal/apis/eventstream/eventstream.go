@@ -109,7 +109,6 @@ type client struct {
 	cancelFn  context.CancelFunc
 	logCtx    *logrus.Entry
 	agentName string
-	wg        *sync.WaitGroup
 	start     time.Time
 	// lock must be owned before read/writing to 'end' var
 	end            time.Time
@@ -166,7 +165,6 @@ func NewServer(queues queue.QueuePair, eventWriters *event.EventWritersMap, metr
 // send to the subscription stream.
 func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration) (*client, error) {
 	c := &client{}
-	c.wg = &sync.WaitGroup{}
 
 	agentName, err := session.ClientIDFromContext(ctx)
 	if err != nil {
@@ -236,8 +234,6 @@ func (s *Server) onDisconnect(c *client) {
 		}
 		s.activeClientsMu.Unlock()
 	})
-
-	c.wg.Done()
 }
 
 // recvFunc retrieves exactly one message from the client c on the event stream
@@ -460,7 +456,6 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}
 
 	// We receive events in a dedicated go routine
-	c.wg.Add(1)
 	go func() {
 		defer s.onDisconnect(c)
 		c.logCtx.Trace("Starting event receiver routine")
@@ -485,7 +480,6 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}()
 
 	// We send events in a dedicated go routine
-	c.wg.Add(1)
 	go func() {
 		defer s.onDisconnect(c)
 		c.logCtx.Tracef("Starting event sender routine")
@@ -509,8 +503,10 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		}
 	}()
 
-	c.wg.Wait()
+	// Block until the client context is canceled.
+	<-c.ctx.Done()
 	c.logCtx.Info("Closing EventStream")
+	s.onDisconnect(c)
 
 	s.activeClientsMu.Lock()
 	if s.activeClients[c.agentName] == c {
@@ -521,7 +517,6 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	if s.metrics != nil {
 		// decrease counter when an agent is disconnected with principal
 		s.metrics.AgentConnected.Dec()
-
 		// remove connection time of agent
 		metrics.DeleteAgentConnectionTime(c.agentName)
 	}
@@ -548,6 +543,26 @@ func (s *Server) DisconnectAll() {
 		s.clusterMgr.SetAgentConnectionStatus(name, v1alpha1.ConnectionStatusFailed, time.Now())
 		c.cancelFn()
 	}
+}
+
+// DisconnectAgent disconnects a single agent by name. Returns true if the
+// agent was connected and has been disconnected, false otherwise.
+func (s *Server) DisconnectAgent(agentName string) bool {
+	s.activeClientsMu.Lock()
+	c, ok := s.activeClients[agentName]
+	if ok {
+		delete(s.activeClients, agentName)
+	}
+	s.activeClientsMu.Unlock()
+
+	if !ok {
+		return false
+	}
+
+	logrus.WithField("agent", agentName).Info("Disconnecting agent (blocklisted)")
+	s.clusterMgr.SetAgentConnectionStatus(agentName, v1alpha1.ConnectionStatusFailed, time.Now())
+	c.cancelFn()
+	return true
 }
 
 // Push implements a client-side stream to receive updates for the client's

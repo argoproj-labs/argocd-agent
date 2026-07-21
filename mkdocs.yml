@@ -72,6 +72,7 @@ nav:
     - Metrics: operations/metrics.md
     - Profiling: operations/profiling.md
     - High availability: operations/ha-failover.md
+    - TLS Certificate Blocklist: operations/blocklist.md
     - Verifying artifacts: operations/provenance.md
   - Contributing:
     - Overview: contributing/index.md
