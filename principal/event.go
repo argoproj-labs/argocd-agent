@@ -17,6 +17,7 @@ package principal
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
@@ -423,6 +424,83 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	return nil
 }
 
+// processAppProjectEventRoleLine processes Argo CD RBAC line from AppProject resource of 'spec.roles[].policies[]', and returns a version of that line that has been translated for the target environment (for example, translating an autonomous agent AppProject to principal Argo CD)
+// - If we can't translate the line (for example, it's not applicable or doesn't have the expected format), it is returned as-is
+// - Only used for translating AppProjects from autonomous mode agents.
+// params:
+// - policyLineInputParam - As above
+// - roleName - Value from .spec.roles[x].name
+// - newAppprojectName - translated AppProject resource name
+// - oldAppprojectName - untranslated AppProject resource name
+// - autonomousAgentApplicationNamespace is the namespace (on principal cluster) within which Applications from autonomous agent cluster are stored.
+// For reference:
+// - https://argo-cd.readthedocs.io/en/stable/user-guide/projects/#configuring-rbac-with-projects
+// - https://argo-cd.readthedocs.io/en/stable/operator-manual/rbac/
+func processAppProjectEventRoleLine(policyLineInputParam string, roleName string, newAppprojectName string, oldAppprojectName string, autonomousAgentApplicationNamespace string) string {
+	// Example policy line:
+	// p, proj:my-project:read-only, applications, get, my-project/*, allow
+	fields := strings.Split(policyLineInputParam, ",")
+	if len(fields) != 6 {
+		return policyLineInputParam
+	}
+
+	if strings.TrimSpace(fields[0]) != "p" { // Sanity test
+		return policyLineInputParam
+	}
+
+	// We only attempt to transform these resources, return for any other resource
+	resourceType := strings.TrimSpace(fields[2])
+	switch resourceType {
+	case "applications", "applicationsets", "logs", "exec":
+	default:
+		return policyLineInputParam
+	}
+
+	// Only process 'proj:' prefixed lines
+	roleNameScopedToProject := strings.TrimSpace(fields[1])
+	if !strings.HasPrefix(roleNameScopedToProject, "proj:") {
+		return policyLineInputParam // This function doesn't touch non-'proj:' lines, so just return
+	}
+
+	// Replace field 1 if it's targeting a project (has 'proj:' prefix), AND that project matches oldAppprojectName, AND the role matches rolename
+	parts := strings.SplitN(roleNameScopedToProject, ":", 3)
+	if len(parts) == 3 {
+		if parts[1] != oldAppprojectName {
+			return policyLineInputParam // Unexpected value, return the line unmodified
+		}
+		if parts[2] != roleName {
+			return policyLineInputParam // Unexpected value, return the line unmodified
+		}
+		// We've verified it matches 'proj:(proj name):(role name)', so we are safe to replace the proj value.
+		parts[1] = newAppprojectName
+		fields[1] = strings.Replace(fields[1], roleNameScopedToProject, strings.Join(parts, ":"), 1)
+	}
+
+	// Since Application in any namespace is enabled on principal in the autonomous case, the field must have this form:
+	// <app-project>/<app-ns>/<app-name>
+	// e.g. example-project/app-namespace/my-app
+	//
+	// We expect it will have this value pre-transform:
+	// <app-project>/<app-name>
+	objectValue := strings.TrimSpace(fields[4])
+
+	// Replace field 4, from <app-project>/<app-name> -> <app-project>/<app-ns>/<app-name>, where app-ns is 'autonomousAgentApplicationNamespace'
+	if parts := strings.Split(objectValue, "/"); len(parts) == 2 {
+		projPart := parts[0]
+
+		if projPart == oldAppprojectName { // Update appProject only value only if it matches
+			projPart = newAppprojectName // appproject name on autonomous cluster -> appproject name on principal cluster
+		} else {
+			return policyLineInputParam // No match, so return the line unmodified
+		}
+
+		fields[4] = " " + projPart + "/" + autonomousAgentApplicationNamespace + "/" + parts[1]
+	}
+
+	return strings.Join(fields, ",")
+
+}
+
 func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
 	incoming := &v1alpha1.AppProject{}
 	err := ev.DataAs(incoming)
@@ -440,6 +518,8 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 		"resource_id": event.ResourceID(ev),
 		"event_id":    event.EventID(ev),
 	})
+
+	eventAppProjectIncomingName := incoming.Name
 
 	// AppProjects coming from different autonomous agents could have the same name,
 	// so we prefix the project name with the agent name
@@ -460,6 +540,22 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 			incoming.Spec.Destinations[i].Name = agentName
 			incoming.Spec.Destinations[i].Server = "*"
 		}
+
+		// Translate ProjectRole policies from autonomous context to principal context (see processAppProjectEventRoleLine for details)
+		newRoles := make([]v1alpha1.ProjectRole, 0)
+		for _, role := range incoming.Spec.Roles {
+
+			newPolicies := make([]string, 0)
+			for _, policy := range role.Policies {
+
+				policy = processAppProjectEventRoleLine(policy, role.Name, incoming.Name, eventAppProjectIncomingName, agentName)
+				newPolicies = append(newPolicies, policy)
+			}
+			role.Policies = newPolicies
+
+			newRoles = append(newRoles, role)
+		}
+		incoming.Spec.Roles = newRoles
 	}
 
 	switch ev.Type() {
@@ -768,7 +864,7 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 			incoming.Name = prefixedName
 		}
 
-		return resyncHandler.ProcessRequestUpdateEvent(ctx, agentName, incoming)
+		return resyncHandler.ProcessRequestUpdateEvent(ctx, agentName, agentMode, incoming)
 	case event.EventRequestResourceResync.String():
 		if agentMode != types.AgentModeAutonomous {
 			return fmt.Errorf("principal can only handle ResourceResync request in autonomous mode")

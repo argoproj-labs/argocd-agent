@@ -15,6 +15,7 @@
 package e2e
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -110,11 +111,113 @@ func (suite *AppProjectTestSuite) Test_AppProject_Managed() {
 	}, 30*time.Second, 1*time.Second)
 }
 
+// Ensure that when an (autonomous) AppProject is created with roles already defined, that these are correctly to principal
+func (suite *AppProjectTestSuite) Test_AppProject_Autonomous_CreateWithProjectRole() {
+	requires := suite.Require()
+
+	// Create an autonomousAppProject on the autonomous-agent's cluster with project roles included from creation
+	autonomousAppProject := argoapp.AppProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sample",
+			Namespace: fixture.AutonomousAgentNamespace,
+		},
+		Spec: argoapp.AppProjectSpec{
+			Destinations: []argoapp.ApplicationDestination{
+				{
+					Namespace: "*",
+					Name:      "agent-*",
+				},
+			},
+			SourceNamespaces: []string{"agent-*"},
+			Roles: []argoapp.ProjectRole{
+				{
+					Name:        "read-only",
+					Description: "Read-only access",
+					Policies: []string{
+						// 1) we expect proj: field and object field to be modified
+						"p, proj:sample:read-only, applications, get, sample/*, allow",
+						// 2) Since 'extensions' is not one of the resource we touch, this should not be modified.
+						"p, example-user, extensions, invoke, httpbin, allow",
+						// 3) Since 'differentrole' doesn't match the name of the Role field, this should not be modified. (In real world this would be user config error)
+						"p, proj:sample:differentrole, applications, get, sample/*, allow",
+						// 4) Since 'diffproject' does match the name of the AppProject, this should not be modified.  (In real world this would be user config error)
+						"p, proj:diffproject:read-only, applications, get, sample/*, allow",
+					},
+				},
+			},
+		},
+	}
+
+	err := suite.AutonomousAgentClient.Create(suite.Ctx, &autonomousAppProject, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	principalKey := types.NamespacedName{
+		Name:      "agent-autonomous-sample",
+		Namespace: fixture.PrincipalNamespace,
+	}
+
+	// Verify that roles are synced to the corresponding AppProject on principal, with policies transformed for the autonomous agent context:
+	requires.Eventually(func() bool {
+		principalAppProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalAppProject, metav1.GetOptions{})
+		if err != nil {
+			suite.T().Logf("failed to get appProject from principal: %v", err)
+			return false
+		}
+		if len(principalAppProject.Spec.Roles) != 1 {
+			suite.T().Logf("expected 1 role, got %d", len(principalAppProject.Spec.Roles))
+			return false
+		}
+		role := principalAppProject.Spec.Roles[0]
+		if role.Name != "read-only" {
+			suite.T().Logf("expected role name 'read-only', got %q", role.Name)
+			return false
+		}
+		if len(role.Policies) != 4 {
+			suite.T().Logf("expected 4 policies, got %d", len(role.Policies))
+			return false
+		}
+		expectedPolicy := "p, proj:agent-autonomous-sample:read-only, applications, get, agent-autonomous-sample/agent-autonomous/*, allow"
+		if role.Policies[0] != expectedPolicy {
+			suite.T().Logf("policy[0] mismatch: got %q, expected %q", role.Policies[0], expectedPolicy)
+			return false
+		}
+		expectedPolicy = "p, example-user, extensions, invoke, httpbin, allow"
+		if role.Policies[1] != expectedPolicy {
+			suite.T().Logf("policy[1] mismatch: got %q, expected %q", role.Policies[1], expectedPolicy)
+			return false
+		}
+		expectedPolicy = "p, proj:sample:differentrole, applications, get, " + autonomousAppProject.Name + "/*, allow"
+		if role.Policies[2] != expectedPolicy {
+			suite.T().Logf("policy[2] mismatch: got %q, expected %q", role.Policies[2], expectedPolicy)
+			return false
+		}
+		expectedPolicy = "p, proj:diffproject:read-only, applications, get, " + autonomousAppProject.Name + "/*, allow"
+		if role.Policies[3] != expectedPolicy {
+			suite.T().Logf("policy[3] mismatch: got %q, expected %q", role.Policies[3], expectedPolicy)
+			return false
+		}
+		suite.T().Logf("policies match: %v", strings.Join(role.Policies, "  |  "))
+		return true
+	}, 30*time.Second, 1*time.Second)
+
+	// Delete the appProject from the autonomous-agent
+	err = suite.AutonomousAgentClient.Delete(suite.Ctx, &autonomousAppProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// Ensure the appProject has been deleted from the principal
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		return errors.IsNotFound(err)
+	}, 30*time.Second, 1*time.Second)
+}
+
 func (suite *AppProjectTestSuite) Test_AppProject_Autonomous() {
 	requires := suite.Require()
 
-	// Create an appProject on the autonomous-agent's cluster
-	appProject := argoapp.AppProject{
+	// Create an autonomousAppProject on the autonomous-agent's cluster
+	autonomousAppProject := argoapp.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sample",
 			Namespace: fixture.AutonomousAgentNamespace,
@@ -130,7 +233,7 @@ func (suite *AppProjectTestSuite) Test_AppProject_Autonomous() {
 		},
 	}
 
-	err := suite.AutonomousAgentClient.Create(suite.Ctx, &appProject, metav1.CreateOptions{})
+	err := suite.AutonomousAgentClient.Create(suite.Ctx, &autonomousAppProject, metav1.CreateOptions{})
 	requires.NoError(err)
 
 	principalKey := types.NamespacedName{
@@ -138,34 +241,106 @@ func (suite *AppProjectTestSuite) Test_AppProject_Autonomous() {
 		Namespace: fixture.PrincipalNamespace,
 	}
 	agentKey := types.NamespacedName{
-		Name:      appProject.Name,
+		Name:      autonomousAppProject.Name,
 		Namespace: fixture.AutonomousAgentNamespace,
 	}
 
 	// Ensure the appProject has been pushed to the principal
 	requires.Eventually(func() bool {
-		appProject := argoapp.AppProject{}
-		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		principalAppProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalAppProject, metav1.GetOptions{})
 		return err == nil
 	}, 30*time.Second, 1*time.Second)
 
 	// Modify the appProject on the autonomous-agent and ensure the change is
 	// propagated to the principal
-	err = suite.AutonomousAgentClient.EnsureAppProjectUpdate(suite.Ctx, agentKey, func(appProject *argoapp.AppProject) error {
-		appProject.Spec.Description = "sample description"
+	err = suite.AutonomousAgentClient.EnsureAppProjectUpdate(suite.Ctx, agentKey, func(appProjectParam *argoapp.AppProject) error {
+		appProjectParam.Spec.Description = "sample description"
 		return nil
 	}, metav1.UpdateOptions{})
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		appProject := argoapp.AppProject{}
-		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &appProject, metav1.GetOptions{})
+		principalAppProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalAppProject, metav1.GetOptions{})
 		return err == nil &&
-			appProject.Spec.Description == "sample description"
+			principalAppProject.Spec.Description == "sample description"
+	}, 30*time.Second, 1*time.Second)
+
+	// Update autonomous agent AppProject .spec.roles to add a new role with policies
+	err = suite.AutonomousAgentClient.EnsureAppProjectUpdate(suite.Ctx, agentKey, func(appProjectParam *argoapp.AppProject) error {
+		appProjectParam.Spec.Roles = []argoapp.ProjectRole{
+			{
+				Name:        "read-only",
+				Description: "Read-only access",
+				Policies: []string{
+					// 1) we expect proj: field and object field to be modified
+					"p, proj:sample:read-only, applications, get, " + appProjectParam.Name + "/*, allow",
+					// 2) Since 'extensions' is not one of the resource we touch, this should not be modified.
+					"p, example-user, extensions, invoke, httpbin, allow",
+					// 3) Since 'differentrole' doesn't match the name of the Role field, this should not be modified. (In real world this would be user config error)
+					"p, proj:sample:differentrole, applications, get, " + appProjectParam.Name + "/*, allow",
+					// 4) Since 'diffproject' does match the name of the AppProject, this should not be modified.  (In real world this would be user config error)
+					"p, proj:diffproject:read-only, applications, get, " + appProjectParam.Name + "/*, allow",
+				},
+			},
+		}
+		return nil
+	}, metav1.UpdateOptions{})
+	requires.NoError(err)
+
+	// Verify that roles are synced to the corresponding AppProject on principal, with policies transformed for the autonomous agent context:
+	// policy at 0:
+	// - Role project reference is prefixed: proj:sample:read-only -> proj:agent-autonomous-sample:read-only
+	// - Object field gains agent namespace: sample/* -> sample/agent-autonomous/*
+	// policy at 1:
+	// - unchanged
+	requires.Eventually(func() bool {
+		principalAppProject := argoapp.AppProject{}
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalAppProject, metav1.GetOptions{})
+		if err != nil {
+			suite.T().Logf("failed to get appProject from principal: %v", err)
+			return false
+		}
+		if len(principalAppProject.Spec.Roles) != 1 {
+			suite.T().Logf("expected 1 role, got %d", len(principalAppProject.Spec.Roles))
+			return false
+		}
+		role := principalAppProject.Spec.Roles[0]
+		if role.Name != "read-only" {
+			suite.T().Logf("expected role name 'read-only', got %q", role.Name)
+			return false
+		}
+		if len(role.Policies) != 4 {
+			suite.T().Logf("expected 4 policies, got %d", len(role.Policies))
+			return false
+		}
+		expectedPolicy := "p, proj:agent-autonomous-sample:read-only, applications, get, agent-autonomous-sample/agent-autonomous/*, allow"
+		if role.Policies[0] != expectedPolicy {
+			suite.T().Logf("policy[0] mismatch: got %q, expected %q", role.Policies[0], expectedPolicy)
+			return false
+		}
+		expectedPolicy = "p, example-user, extensions, invoke, httpbin, allow"
+		if role.Policies[1] != expectedPolicy {
+			suite.T().Logf("policy[1] mismatch: got %q, expected %q", role.Policies[1], expectedPolicy)
+			return false
+		}
+		expectedPolicy = "p, proj:sample:differentrole, applications, get, " + autonomousAppProject.Name + "/*, allow"
+		if role.Policies[2] != expectedPolicy {
+			suite.T().Logf("policy[2] mismatch: got %q, expected %q", role.Policies[2], expectedPolicy)
+			return false
+		}
+		expectedPolicy = "p, proj:diffproject:read-only, applications, get, " + autonomousAppProject.Name + "/*, allow"
+		if role.Policies[3] != expectedPolicy {
+			suite.T().Logf("policy[3] mismatch: got %q, expected %q", role.Policies[3], expectedPolicy)
+			return false
+		}
+		suite.T().Logf("policies match: %v", strings.Join(role.Policies, "  |  "))
+		return true
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete the appProject from the autonomous-agent
-	err = suite.AutonomousAgentClient.Delete(suite.Ctx, &appProject, metav1.DeleteOptions{})
+	err = suite.AutonomousAgentClient.Delete(suite.Ctx, &autonomousAppProject, metav1.DeleteOptions{})
 	requires.NoError(err)
 
 	// Ensure the appProject has been deleted from the principal

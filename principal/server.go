@@ -941,7 +941,7 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 			// When the agent is down, the informer could've dropped events since it doesn't know anything about the agent.
 			// So, we send the current state of AppProjects/Repositories to the agent after it reconnects.
 			logCtx.Trace("Sending current state of AppProjects and Repositories to the agent")
-			if err := s.sendCurrentStateToAgent(agent.Name()); err != nil {
+			if err := s.sendCurrentStateToAgent(agent); err != nil {
 				return fmt.Errorf("failed to send current state to agent: %w", err)
 			}
 		}
@@ -984,11 +984,11 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 		sendQ.Add(ev)
 		logCtx.Trace("Sent a request for SyncedResourceList")
 	} else {
-		// When the principal restarts, the infomer might start processing the events before the agent is connected.
+		// When the principal restarts, the informer might start processing the events before the agent is connected.
 		// This may lead to principal dropping those events since it doesn't know anything about the agent yet.
 		// So, we send the current state of AppProjects and Repositories to the agent. This ensures that the agent is in sync with the principal.
 		logCtx.Trace("Sending current state of AppProjects and Repositories to the agent")
-		if err := s.sendCurrentStateToAgent(agent.Name()); err != nil {
+		if err := s.sendCurrentStateToAgent(agent); err != nil {
 			return fmt.Errorf("failed to send current state to agent: %w", err)
 		}
 
@@ -1008,15 +1008,22 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 	return nil
 }
 
-func (s *Server) sendCurrentStateToAgent(agent string) error {
+func (s *Server) sendCurrentStateToAgent(agentParam types.Agent) error {
+
+	if agentParam.Mode() == types.AgentModeAutonomous.String() {
+		return fmt.Errorf("sending current state to autonomous agent is not supported")
+	}
+
+	agentName := agentParam.Name()
+
 	ctx, span := tracing.Tracer().Start(s.ctx, "sendCurrentStateToAgent", trace.WithAttributes(
-		tracing.AttrAgentName.String(agent),
+		tracing.AttrAgentName.String(agentName),
 		tracing.AttrComponentType.String("principal"),
 		tracing.AttrEventType.String(event.SpecUpdate.String()),
 	))
 	defer span.End()
 
-	sendQ := s.queues.SendQ(agent)
+	sendQ := s.queues.SendQ(agentName)
 	// Send all the AppProjects to the agent
 	appProjects, err := s.projectManager.List(s.ctx, backend.AppProjectSelector{Namespace: s.namespace})
 	if err != nil {
@@ -1031,7 +1038,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			}
 		}
 
-		if !appproject.DoesAgentMatchWithProject(agent, appProject, s.destinationBasedMapping) {
+		if !appproject.DoesAgentMatchWithProject(agentName, appProject, s.destinationBasedMapping) {
 			continue
 		}
 
@@ -1040,7 +1047,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(appProject, agentName, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		tracing.PopulateSpanFromObject(span, &appProject)
 		tracing.InjectTraceContext(ctx, ev)
@@ -1077,12 +1084,12 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 				continue
 			}
 
-			if !appproject.DoesAgentMatchWithProject(agent, project, s.destinationBasedMapping) {
+			if !appproject.DoesAgentMatchWithProject(agentName, project, s.destinationBasedMapping) {
 				continue
 			}
 
 			s.projectToRepos.Add(projectName, repository.Name)
-			s.repoToAgents.Add(repository.Name, agent)
+			s.repoToAgents.Add(repository.Name, agentName)
 
 			ev := s.events.RepositoryEvent(event.SpecUpdate, &repository)
 			tracing.PopulateSpanFromObject(span, &repository)

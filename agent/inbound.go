@@ -707,7 +707,7 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 			}
 		}
 
-		return resyncHandler.ProcessRequestUpdateEvent(a.context, agentName, incoming)
+		return resyncHandler.ProcessRequestUpdateEvent(a.context, agentName, a.mode, incoming)
 	case event.EventRequestResourceResync:
 		if a.mode != types.AgentModeManaged {
 			return fmt.Errorf("agent can only handle ResourceResync request in the managed mode")
