@@ -24,39 +24,7 @@ import (
 
 	internalevent "github.com/argoproj-labs/argocd-agent/internal/event"
 	cloudevents "github.com/cloudevents/sdk-go/v2/event"
-	"k8s.io/client-go/util/workqueue"
 )
-
-// ---------------------------------------------------------------------------
-// Old boundedQueue (from pre-dedupe era) re-created here for benchmarking.
-// Wraps a rate-limiting workqueue keyed by *event.Event pointers — every Add
-// is unique, there is no deduplication. The cap is set high enough that no
-// events are dropped, so the consumer must process every single event.
-// ---------------------------------------------------------------------------
-
-type oldBoundedQueue struct {
-	workqueue.TypedRateLimitingInterface[*cloudevents.Event]
-	maxSize int
-}
-
-var _ WorkQueue = (*oldBoundedQueue)(nil)
-
-func newOldBoundedQueue(maxSize int, name string) *oldBoundedQueue {
-	rateLimiter := workqueue.DefaultTypedControllerRateLimiter[*cloudevents.Event]()
-	return &oldBoundedQueue{
-		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig(rateLimiter,
-			workqueue.TypedRateLimitingQueueConfig[*cloudevents.Event]{Name: name}),
-		maxSize: maxSize,
-	}
-}
-
-func (bq *oldBoundedQueue) Add(item *cloudevents.Event) {
-	if bq.Len() >= bq.maxSize {
-		old, _ := bq.Get()
-		bq.Done(old)
-	}
-	bq.TypedRateLimitingInterface.Add(item)
-}
 
 // ---------------------------------------------------------------------------
 // Event helpers
@@ -174,11 +142,11 @@ func reportSim(b *testing.B, r simResult) {
 // 2000 spec-update events spread across numResources apps.
 // Consumer takes 1 ms per event (scaled from 100 ms — ratios are identical).
 //
-// OldBoundedQueue (cap = totalEvents, no drops):
+// BoundedQueue (cap = totalEvents, no drops):
 //   Every event stays in the queue → consumer must grind through all 2000 →
 //   high wait-memory, long wall-clock time.
 //
-// NewDedupeQueue:
+// DedupeQueue:
 //   Coalesces to numResources items → consumer processes only the latest
 //   version of each resource → low wait-memory, fast completion.
 // ---------------------------------------------------------------------------
@@ -192,15 +160,17 @@ func BenchmarkSimulation_DedupableEvents(b *testing.B) {
 	for _, numResources := range []int{10, 100} {
 		events := pregenMultiResourceDedupEvents(totalEvents, numResources)
 
-		b.Run(fmt.Sprintf("OldBoundedQueue/%d_resources", numResources), func(b *testing.B) {
+		b.Run(fmt.Sprintf("BoundedQueue/%d_resources", numResources), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				q := newOldBoundedQueue(totalEvents, "bench")
+				q := newBoundedQueue(totalEvents, "bench")
 				r := runSimulation(q, events, processTime)
 				reportSim(b, r)
 			}
 		})
 
-		b.Run(fmt.Sprintf("NewDedupeQueue/%d_resources", numResources), func(b *testing.B) {
+		b.Run(fmt.Sprintf("DedupeQueue/%d_resources", numResources), func(b *testing.B) {
+			SetDeduplicationEnabled(true)
+			b.Cleanup(func() { SetDeduplicationEnabled(false) })
 			for i := 0; i < b.N; i++ {
 				q := NewDedupeQueue("bench")
 				r := runSimulation(q, events, processTime)

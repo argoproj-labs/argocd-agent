@@ -132,7 +132,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		haAllowedReplClients           []string
 		haReplicationInitialAckTimeout time.Duration
 
-		disableQueueDedupe bool
+		enableQueueDedupe bool
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -463,9 +463,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
 			}
 
-			if disableQueueDedupe {
-				logrus.Info("Queue event deduplication is disabled")
-				queue.SetDeduplicationDisabled(true)
+			if enableQueueDedupe {
+				logrus.Info("Queue event deduplication is enabled")
+				queue.SetDeduplicationEnabled(true)
 			}
 
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
@@ -700,9 +700,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_INITIAL_ACK_TIMEOUT", nil, 0),
 		"How long the primary waits for the replica's initial ACK after snapshot fetch (default: 5m)")
 
-	command.Flags().BoolVar(&disableQueueDedupe, "disable-queue-dedupe",
-		env.BoolWithDefault("ARGOCD_PRINCIPAL_DISABLE_QUEUE_DEDUPE", false),
-		"Disable event deduplication in the internal send/receive queues")
+	command.Flags().BoolVar(&enableQueueDedupe, "enable-queue-dedupe",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_ENABLE_QUEUE_DEDUPE", false),
+		"Enable event deduplication in the internal send/receive queues (experimental)")
 
 	return command
 }

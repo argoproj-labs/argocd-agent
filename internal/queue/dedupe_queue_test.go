@@ -26,6 +26,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func enableDedup(t *testing.T) {
+	t.Helper()
+	SetDeduplicationEnabled(true)
+	t.Cleanup(func() { SetDeduplicationEnabled(false) })
+}
+
 func newDedupableEvent(resourceID, data string) *cloudevents.Event {
 	ev := cloudevents.New()
 	ev.SetType(internalevent.SpecUpdate.String())
@@ -119,6 +125,7 @@ func TestDedupeQueue_FIFOOrdering(t *testing.T) {
 }
 
 func TestDedupeQueue_DedupeMovesToBack(t *testing.T) {
+	enableDedup(t)
 	q := NewDedupeQueue("test")
 
 	ev1 := newDedupableEvent("app1_uid1", "v1")
@@ -157,6 +164,7 @@ func TestDedupeQueue_UnboundedGrowth(t *testing.T) {
 }
 
 func TestDedupeQueue_GetReturnsLatestAfterMultipleUpdates(t *testing.T) {
+	enableDedup(t)
 	q := NewDedupeQueue("test")
 
 	for i := 0; i < 10; i++ {
@@ -189,6 +197,7 @@ func TestDedupeQueue_Done(t *testing.T) {
 }
 
 func TestDedupeQueue_DoneDoesNotEvictNewerEvent(t *testing.T) {
+	enableDedup(t)
 	q := NewDedupeQueue("test")
 
 	ev1 := newDedupableEvent("app1_uid1", "v1")
@@ -248,6 +257,7 @@ func TestDedupeQueue_EmptyQueueLen(t *testing.T) {
 }
 
 func TestDedupeQueue_MixedDedupableAndNonDedupable(t *testing.T) {
+	enableDedup(t)
 	q := NewDedupeQueue("test")
 
 	spec1 := newDedupableEvent("app1_uid1", "spec-v1")
@@ -295,6 +305,7 @@ func TestDedupeQueue_ConcurrentAdds(t *testing.T) {
 }
 
 func TestDedupeQueue_ConcurrentDeduplication(t *testing.T) {
+	enableDedup(t)
 	q := NewDedupeQueue("test")
 
 	var wg sync.WaitGroup

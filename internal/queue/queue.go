@@ -19,7 +19,10 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/argoproj-labs/argocd-agent/internal/config"
+	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/cloudevents/sdk-go/v2/event"
+	"k8s.io/client-go/util/workqueue"
 )
 
 var _ QueuePair = &SendRecvQueues{}
@@ -44,6 +47,48 @@ type QueuePair interface {
 	RecvQ(name string) WorkQueue
 	Create(name string) error
 	Delete(name string, shutdown bool) error
+}
+
+const (
+	// defaultMaxQueueSize is the max number of items that the workqueue can hold.
+	defaultMaxQueueSize int = 1000
+)
+
+type boundedQueue struct {
+	workqueue.TypedRateLimitingInterface[*event.Event]
+	maxSize int
+	notify  chan struct{}
+	name    string
+}
+
+var _ WorkQueue = (*boundedQueue)(nil)
+
+func newBoundedQueue(maxSize int, name string) *boundedQueue {
+	rateLimiter := workqueue.DefaultTypedControllerRateLimiter[*event.Event]()
+	return &boundedQueue{
+		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig(rateLimiter,
+			workqueue.TypedRateLimitingQueueConfig[*event.Event]{Name: name}),
+		maxSize: maxSize,
+		notify:  make(chan struct{}, 10),
+		name:    name,
+	}
+}
+
+func (bq *boundedQueue) Add(item *event.Event) {
+	// We pop the oldest item if the size is going to exceed maxSize.
+	if bq.Len() == bq.maxSize {
+		old, _ := bq.Get()
+		bq.Done(old)
+	}
+	bq.TypedRateLimitingInterface.Add(item)
+
+	// Notify any waiting goroutines that an item has been added to the queue.
+	select {
+	case bq.notify <- struct{}{}:
+	default:
+		// We don't want to block the caller if the notify channel is full.
+		return
+	}
 }
 
 type queuepair struct {
@@ -127,8 +172,25 @@ func (q *SendRecvQueues) Create(name string) error {
 	}
 	qp := &queuepair{}
 
-	qp.sendq = NewDedupeQueue(name + "-send")
-	qp.recvq = NewDedupeQueue(name + "-recv")
+	if deduplicationEnabled {
+		qp.sendq = NewDedupeQueue(name + "-send")
+		qp.recvq = NewDedupeQueue(name + "-recv")
+	} else {
+		recvQueueSize := env.NumWithDefault(config.EnvRecvQueueSize, func(size int) error {
+			if size <= 0 {
+				return fmt.Errorf("queue size must be greater than 0")
+			}
+			return nil
+		}, defaultMaxQueueSize)
+		sendQueueSize := env.NumWithDefault(config.EnvSendQueueSize, func(size int) error {
+			if size <= 0 {
+				return fmt.Errorf("queue size must be greater than 0")
+			}
+			return nil
+		}, defaultMaxQueueSize)
+		qp.sendq = newBoundedQueue(sendQueueSize, name+"-send")
+		qp.recvq = newBoundedQueue(recvQueueSize, name+"-recv")
+	}
 	q.queues[name] = qp
 
 	return nil
@@ -154,13 +216,19 @@ func (q *SendRecvQueues) Delete(name string, shutdown bool) error {
 }
 
 // GetWithContext is a wrapper around the workqueue's Get method.
-// It waits until an item is available in the queue or the context is Done
+// It waits until an item is available in the queue or the context is Done.
 func GetWithContext(q WorkQueue, ctx context.Context) (*event.Event, bool) {
-	bq, ok := q.(*dedupeQueue)
-	if !ok {
+	switch bq := q.(type) {
+	case *dedupeQueue:
+		return getWithContextDedupe(bq, ctx)
+	case *boundedQueue:
+		return getWithContextBounded(bq, ctx)
+	default:
 		return nil, false
 	}
+}
 
+func getWithContextDedupe(bq *dedupeQueue, ctx context.Context) (*event.Event, bool) {
 	for {
 		if ctx.Err() != nil {
 			return nil, false
@@ -179,6 +247,22 @@ func GetWithContext(q WorkQueue, ctx context.Context) (*event.Event, bool) {
 		case <-ctx.Done():
 			return nil, false
 		case <-bq.notify:
+		}
+	}
+}
+
+func getWithContextBounded(bq *boundedQueue, ctx context.Context) (*event.Event, bool) {
+	for {
+		if bq.Len() > 0 {
+			return bq.Get()
+		}
+
+		// Suspend until an item is available or context is done.
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-bq.notify:
+			// Wake up and re-check if an item is available
 		}
 	}
 }

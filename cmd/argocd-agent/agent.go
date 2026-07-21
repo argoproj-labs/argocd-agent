@@ -117,7 +117,7 @@ func NewAgentRunCommand() *cobra.Command {
 		// Adoption options
 		adoptionPolicy string
 
-		disableQueueDedupe bool
+		enableQueueDedupe bool
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -329,9 +329,9 @@ func NewAgentRunCommand() *cobra.Command {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
 			}
 
-			if disableQueueDedupe {
-				logrus.Info("Queue event deduplication is disabled")
-				queue.SetDeduplicationDisabled(true)
+			if enableQueueDedupe {
+				logrus.Info("Queue event deduplication is enabled")
+				queue.SetDeduplicationEnabled(true)
 			}
 
 			ag, err := agent.NewAgent(ctx, kubeConfig, namespace, agentOpts...)
@@ -500,9 +500,9 @@ func NewAgentRunCommand() *cobra.Command {
 		env.StringWithDefault("ARGOCD_AGENT_ADOPTION_POLICY", nil, "always"),
 		"Set the adoption policy for applications that already exist on a managed agent (always or never)")
 
-	command.Flags().BoolVar(&disableQueueDedupe, "disable-queue-dedupe",
-		env.BoolWithDefault("ARGOCD_AGENT_DISABLE_QUEUE_DEDUPE", false),
-		"Disable event deduplication in the internal send/receive queues")
+	command.Flags().BoolVar(&enableQueueDedupe, "enable-queue-dedupe",
+		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_QUEUE_DEDUPE", false),
+		"Enable event deduplication in the internal send/receive queues (experimental)")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
