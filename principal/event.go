@@ -799,20 +799,27 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 // given agent respects the globally enforced minimum resync interval. When
 // the round is allowed, its time is recorded. Refused rounds must be dropped
 // by the caller. Rounds are always allowed when no minimum interval is
-// configured.
+// configured. The outcome is recorded in the resync request metrics.
 func (s *Server) resyncRoundAllowed(agentName string) bool {
-	if s.resyncMinInterval <= 0 {
-		return true
+	allowed := true
+	if s.resyncMinInterval > 0 {
+		s.lastResyncRoundMu.Lock()
+		if last, ok := s.lastResyncRound[agentName]; ok && time.Since(last) < s.resyncMinInterval {
+			allowed = false
+		} else {
+			s.lastResyncRound[agentName] = time.Now()
+		}
+		s.lastResyncRoundMu.Unlock()
 	}
 
-	s.lastResyncRoundMu.Lock()
-	defer s.lastResyncRoundMu.Unlock()
-
-	if last, ok := s.lastResyncRound[agentName]; ok && time.Since(last) < s.resyncMinInterval {
-		return false
+	if s.metrics != nil {
+		result := "accepted"
+		if !allowed {
+			result = "refused"
+		}
+		s.metrics.ResyncRequests.WithLabelValues(agentName, result).Inc()
 	}
-	s.lastResyncRound[agentName] = time.Now()
-	return true
+	return allowed
 }
 
 // resetResyncRound clears the recorded resync round of the given agent. It is
