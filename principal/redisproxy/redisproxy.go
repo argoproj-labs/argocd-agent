@@ -575,12 +575,6 @@ func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, arg
 
 		responseBytes := response.Get.Bytes
 
-		// The resource tree cache is built by the agent using its own (local) namespace
-		// for every Application-kind node, since that's genuinely where those objects
-		// live on the agent's cluster. The UI uses this data verbatim to build links in
-		// the resource tree, so for agent-owned Application nodes we rewrite Namespace to
-		// the agent's namespace on the principal, mirroring the same rewrite that's
-		// already applied to Application.status.resources in event.go.
 		if strings.HasPrefix(key, "app|resources-tree|") {
 			if rewritten, err := rewriteResourcesTreeNamespace(responseBytes, agentName); err != nil {
 				logCtx.WithError(err).Warn("unable to rewrite namespace in cached resource tree, forwarding as-is")
@@ -601,22 +595,9 @@ func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, arg
 	}
 }
 
-// rewriteResourcesTreeNamespace rewrites the Namespace field of every Application- and
-// ApplicationSet-kind node in a cached resource tree to the agent's namespace on the
-// principal. The cached tree is built by the agent using its own local namespace for
-// these nodes, which is correct on the agent's cluster but not where the mirrored
-// Application actually lives on the principal, so links built from this data in the UI
-// need it rewritten the same way Application.status.resources already is (see
-// principal/event.go).
-//
-// ApplicationSet nodes are included alongside Application nodes (not just the latter,
-// which is all Application.status.resources itself needs) because the UI's resource-tree
-// renderer only draws a connecting edge between a parent and child node when their
-// Namespace fields are equal (see ui/.../application-resource-tree.tsx). Rewriting only
-// the Application-kind children of an ApplicationSet, and not the ApplicationSet itself,
-// leaves them with mismatched namespaces and visually disconnected from their parent,
-// even though the grouping itself (keyed by UID, not namespace) and the per-node links
-// are both already correct.
+// rewriteResourcesTreeNamespace rewrites Namespace on Application/ApplicationSet nodes
+// in a cached resource tree to the agent's namespace, mirroring the same rewrite already
+// done for Application.status.resources in principal/event.go.
 func rewriteResourcesTreeNamespace(data []byte, agentName string) ([]byte, error) {
 	gzipped := len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b
 
