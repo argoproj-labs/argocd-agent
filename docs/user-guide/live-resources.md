@@ -152,7 +152,8 @@ The principal needs the address of the actual Redis server for non-agent request
 
 ## RBAC Requirements
 
-**IMPORTANT**: By default, agents are installed with minimal RBAC permissions that only allow access to Argo CD's own resources (Applications, AppProjects, etc.), basic resources like Secrets and ConfigMaps
+**IMPORTANT**: By default, agents are installed with RBAC permissions that only allow access to Argo CD's own resources (Applications, AppProjects, etc.), basic resources like Secrets and ConfigMaps. The default
+ClusterRole also has permission to read all resources in the cluster to enable basic reading with the resource proxy.
  For the resource proxy to work correctly with live application resources, **agents need enhanced RBAC permissions**.
 
 ### Default Agent Permissions
@@ -164,6 +165,9 @@ The default agent installation includes these limited permissions:
 - apiGroups: [""]
   resources: ["namespaces"]
   verbs: ["list", "watch"]
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["get", "list"]
 
 # Role permissions (namespace-scoped)
 - apiGroups: ["argoproj.io"]
@@ -175,9 +179,6 @@ The default agent installation includes these limited permissions:
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["create", "list"]
-- apiGroups: ["*"]
-  resources: ["*"]
-  verbs: ["get", "list"]
 ```
 
 ### Enhanced RBAC for Resource Proxy
