@@ -17,10 +17,12 @@ package redisproxy
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -33,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/principal/tracker"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -570,16 +573,92 @@ func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, arg
 
 		// Cache hit: there was data for that key in agent redis, so forward back to principal Argo CD
 
+		responseBytes := response.Get.Bytes
+
+		// The resource tree cache is built by the agent using its own (local) namespace
+		// for every Application-kind node, since that's genuinely where those objects
+		// live on the agent's cluster. The UI uses this data verbatim to build links in
+		// the resource tree, so for agent-owned Application nodes we rewrite Namespace to
+		// the agent's namespace on the principal, mirroring the same rewrite that's
+		// already applied to Application.status.resources in event.go.
+		if strings.HasPrefix(key, "app|resources-tree|") {
+			if rewritten, err := rewriteResourcesTreeNamespace(responseBytes, agentName); err != nil {
+				logCtx.WithError(err).Warn("unable to rewrite namespace in cached resource tree, forwarding as-is")
+			} else {
+				responseBytes = rewritten
+			}
+		}
+
 		// We sanitize the log string because it may contain confidential data, which we don't want to log.
-		logCtx.Tracef("Wrote GET response to argo cd: '%s' '%s'", key, sanitizeStringIfNonASCII(string(response.Get.Bytes)))
+		logCtx.Tracef("Wrote GET response to argo cd: '%s' '%s'", key, sanitizeStringIfNonASCII(string(responseBytes)))
 
 		// Get response format is as described above
-		if err := argocdWriter.writeToArgoCDRedisSocket(logCtx, fmt.Appendf(nil, "$%d\r\n%s\r\n", len(response.Get.Bytes), response.Get.Bytes)); err != nil {
+		if err := argocdWriter.writeToArgoCDRedisSocket(logCtx, fmt.Appendf(nil, "$%d\r\n%s\r\n", len(responseBytes), responseBytes)); err != nil {
 			return err
 		}
 
 		return nil
 	}
+}
+
+// rewriteResourcesTreeNamespace rewrites the Namespace field of every Application-kind
+// node in a cached resource tree to the agent's namespace on the principal. The cached
+// tree is built by the agent using its own local namespace for these nodes, which is
+// correct on the agent's cluster but not where the mirrored Application actually lives
+// on the principal, so links built from this data in the UI need it rewritten the same
+// way Application.status.resources already is (see principal/event.go).
+func rewriteResourcesTreeNamespace(data []byte, agentName string) ([]byte, error) {
+	gzipped := len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b
+
+	raw := data
+	if gzipped {
+		gzipReader, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("unable to create gzip reader: %w", err)
+		}
+		defer gzipReader.Close()
+		raw, err = io.ReadAll(gzipReader)
+		if err != nil {
+			return nil, fmt.Errorf("unable to decompress cached resource tree: %w", err)
+		}
+	}
+
+	var tree v1alpha1.ApplicationTree
+	if err := json.Unmarshal(raw, &tree); err != nil {
+		return nil, fmt.Errorf("unable to unmarshal cached resource tree: %w", err)
+	}
+
+	rewritten := false
+	for i, node := range tree.Nodes {
+		if node.Group == "argoproj.io" && node.Kind == "Application" && node.Namespace != agentName {
+			tree.Nodes[i].Namespace = agentName
+			rewritten = true
+		}
+	}
+	if !rewritten {
+		// Nothing to change: forward the original bytes untouched.
+		return data, nil
+	}
+
+	newRaw, err := json.Marshal(&tree)
+	if err != nil {
+		return nil, fmt.Errorf("unable to marshal rewritten resource tree: %w", err)
+	}
+
+	if !gzipped {
+		return newRaw, nil
+	}
+
+	buf := &bytes.Buffer{}
+	gzipWriter := gzip.NewWriter(buf)
+	if _, err := gzipWriter.Write(newRaw); err != nil {
+		return nil, fmt.Errorf("unable to compress rewritten resource tree: %w", err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		return nil, fmt.Errorf("unable to close gzip writer: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 // handleAgentSubscribe handles a subscription request from Argo CD to be forwarded to agent redis

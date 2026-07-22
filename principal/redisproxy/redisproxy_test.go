@@ -15,12 +15,17 @@
 package redisproxy
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -454,5 +459,90 @@ func Test_handleAgentSubscribe(t *testing.T) {
 
 		// Check that ping routine was started
 		require.True(t, connState.pingRoutineStarted[agentName])
+	})
+}
+
+func Test_rewriteResourcesTreeNamespace(t *testing.T) {
+	t.Run("rewrites namespace for Application-kind nodes, gzip'd", func(t *testing.T) {
+		tree := &v1alpha1.ApplicationTree{
+			Nodes: []v1alpha1.ResourceNode{
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "Application", Namespace: "argocd", Name: "child-app",
+					},
+				},
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "apps", Kind: "Deployment", Namespace: "default", Name: "some-deployment",
+					},
+				},
+			},
+		}
+		raw, err := json.Marshal(tree)
+		require.NoError(t, err)
+
+		buf := &bytes.Buffer{}
+		gzipWriter := gzip.NewWriter(buf)
+		_, err = gzipWriter.Write(raw)
+		require.NoError(t, err)
+		require.NoError(t, gzipWriter.Close())
+
+		rewritten, err := rewriteResourcesTreeNamespace(buf.Bytes(), "agent-staging")
+		require.NoError(t, err)
+
+		gzipReader, err := gzip.NewReader(bytes.NewReader(rewritten))
+		require.NoError(t, err)
+		decompressed, err := io.ReadAll(gzipReader)
+		require.NoError(t, err)
+
+		var got v1alpha1.ApplicationTree
+		require.NoError(t, json.Unmarshal(decompressed, &got))
+
+		require.Equal(t, "agent-staging", got.Nodes[0].Namespace, "Application node namespace should be rewritten")
+		require.Equal(t, "default", got.Nodes[1].Namespace, "non-Application node namespace should be untouched")
+	})
+
+	t.Run("rewrites namespace for Application-kind nodes, uncompressed", func(t *testing.T) {
+		tree := &v1alpha1.ApplicationTree{
+			Nodes: []v1alpha1.ResourceNode{
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "Application", Namespace: "argocd", Name: "child-app",
+					},
+				},
+			},
+		}
+		raw, err := json.Marshal(tree)
+		require.NoError(t, err)
+
+		rewritten, err := rewriteResourcesTreeNamespace(raw, "agent-staging")
+		require.NoError(t, err)
+
+		var got v1alpha1.ApplicationTree
+		require.NoError(t, json.Unmarshal(rewritten, &got))
+		require.Equal(t, "agent-staging", got.Nodes[0].Namespace)
+	})
+
+	t.Run("no Application nodes: returns original bytes untouched", func(t *testing.T) {
+		tree := &v1alpha1.ApplicationTree{
+			Nodes: []v1alpha1.ResourceNode{
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "apps", Kind: "Deployment", Namespace: "default", Name: "some-deployment",
+					},
+				},
+			},
+		}
+		raw, err := json.Marshal(tree)
+		require.NoError(t, err)
+
+		rewritten, err := rewriteResourcesTreeNamespace(raw, "agent-staging")
+		require.NoError(t, err)
+		require.Equal(t, raw, rewritten)
+	})
+
+	t.Run("invalid data: returns an error", func(t *testing.T) {
+		_, err := rewriteResourcesTreeNamespace([]byte("not json"), "agent-staging")
+		require.Error(t, err)
 	})
 }
