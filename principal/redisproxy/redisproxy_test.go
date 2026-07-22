@@ -463,12 +463,17 @@ func Test_handleAgentSubscribe(t *testing.T) {
 }
 
 func Test_rewriteResourcesTreeNamespace(t *testing.T) {
-	t.Run("rewrites namespace for Application-kind nodes, gzip'd", func(t *testing.T) {
+	t.Run("rewrites namespace for Application- and ApplicationSet-kind nodes, gzip'd", func(t *testing.T) {
 		tree := &v1alpha1.ApplicationTree{
 			Nodes: []v1alpha1.ResourceNode{
 				{
 					ResourceRef: v1alpha1.ResourceRef{
 						Group: "argoproj.io", Kind: "Application", Namespace: "argocd", Name: "child-app",
+					},
+				},
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "ApplicationSet", Namespace: "argocd", Name: "generator",
 					},
 				},
 				{
@@ -499,7 +504,8 @@ func Test_rewriteResourcesTreeNamespace(t *testing.T) {
 		require.NoError(t, json.Unmarshal(decompressed, &got))
 
 		require.Equal(t, "agent-staging", got.Nodes[0].Namespace, "Application node namespace should be rewritten")
-		require.Equal(t, "default", got.Nodes[1].Namespace, "non-Application node namespace should be untouched")
+		require.Equal(t, "agent-staging", got.Nodes[1].Namespace, "ApplicationSet node namespace should be rewritten")
+		require.Equal(t, "default", got.Nodes[2].Namespace, "non-argoproj.io node namespace should be untouched")
 	})
 
 	t.Run("rewrites namespace for Application-kind nodes, uncompressed", func(t *testing.T) {
@@ -523,7 +529,36 @@ func Test_rewriteResourcesTreeNamespace(t *testing.T) {
 		require.Equal(t, "agent-staging", got.Nodes[0].Namespace)
 	})
 
-	t.Run("no Application nodes: returns original bytes untouched", func(t *testing.T) {
+	t.Run("ApplicationSet-generated child ends up with the same namespace as its ApplicationSet parent", func(t *testing.T) {
+		tree := &v1alpha1.ApplicationTree{
+			Nodes: []v1alpha1.ResourceNode{
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "ApplicationSet", Namespace: "argocd", Name: "generator", UID: "appset-uid",
+					},
+				},
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "Application", Namespace: "argocd", Name: "generated-app",
+					},
+					ParentRefs: []v1alpha1.ResourceRef{
+						{Group: "argoproj.io", Kind: "ApplicationSet", Namespace: "argocd", Name: "generator", UID: "appset-uid"},
+					},
+				},
+			},
+		}
+		raw, err := json.Marshal(tree)
+		require.NoError(t, err)
+
+		rewritten, err := rewriteResourcesTreeNamespace(raw, "agent-staging")
+		require.NoError(t, err)
+
+		var got v1alpha1.ApplicationTree
+		require.NoError(t, json.Unmarshal(rewritten, &got))
+		require.Equal(t, got.Nodes[0].Namespace, got.Nodes[1].Namespace, "ApplicationSet and its generated child must end up with matching namespaces so the UI draws the connecting edge between them")
+	})
+
+	t.Run("no Application/ApplicationSet nodes: returns original bytes untouched", func(t *testing.T) {
 		tree := &v1alpha1.ApplicationTree{
 			Nodes: []v1alpha1.ResourceNode{
 				{

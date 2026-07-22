@@ -601,12 +601,22 @@ func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, arg
 	}
 }
 
-// rewriteResourcesTreeNamespace rewrites the Namespace field of every Application-kind
-// node in a cached resource tree to the agent's namespace on the principal. The cached
-// tree is built by the agent using its own local namespace for these nodes, which is
-// correct on the agent's cluster but not where the mirrored Application actually lives
-// on the principal, so links built from this data in the UI need it rewritten the same
-// way Application.status.resources already is (see principal/event.go).
+// rewriteResourcesTreeNamespace rewrites the Namespace field of every Application- and
+// ApplicationSet-kind node in a cached resource tree to the agent's namespace on the
+// principal. The cached tree is built by the agent using its own local namespace for
+// these nodes, which is correct on the agent's cluster but not where the mirrored
+// Application actually lives on the principal, so links built from this data in the UI
+// need it rewritten the same way Application.status.resources already is (see
+// principal/event.go).
+//
+// ApplicationSet nodes are included alongside Application nodes (not just the latter,
+// which is all Application.status.resources itself needs) because the UI's resource-tree
+// renderer only draws a connecting edge between a parent and child node when their
+// Namespace fields are equal (see ui/.../application-resource-tree.tsx). Rewriting only
+// the Application-kind children of an ApplicationSet, and not the ApplicationSet itself,
+// leaves them with mismatched namespaces and visually disconnected from their parent,
+// even though the grouping itself (keyed by UID, not namespace) and the per-node links
+// are both already correct.
 func rewriteResourcesTreeNamespace(data []byte, agentName string) ([]byte, error) {
 	gzipped := len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b
 
@@ -630,7 +640,7 @@ func rewriteResourcesTreeNamespace(data []byte, agentName string) ([]byte, error
 
 	rewritten := false
 	for i, node := range tree.Nodes {
-		if node.Group == "argoproj.io" && node.Kind == "Application" && node.Namespace != agentName {
+		if node.Group == "argoproj.io" && (node.Kind == "Application" || node.Kind == "ApplicationSet") && node.Namespace != agentName {
 			tree.Nodes[i].Namespace = agentName
 			rewritten = true
 		}
