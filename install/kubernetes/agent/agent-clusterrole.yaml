@@ -28,3 +28,10 @@ rules:
   - update
   - delete
   - patch
+- apiGroups:
+  - "*"
+  resources:
+  - "*"
+  verbs:
+  - get
+  - list

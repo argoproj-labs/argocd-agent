@@ -13,7 +13,7 @@ The resource proxy is a core feature of argocd-agent that enables transparent ac
 - **Transparency**: Users interact with resources exactly as they would in a standard Argo CD installation
 - **Performance**: Efficient proxying with request timeouts and proper error handling
 
-**⚠️ Important**: By default, agents have minimal RBAC permissions. For the resource proxy to work with your application resources, **enhanced RBAC permissions are required**. See the [RBAC Requirements](#rbac-requirements) section for details.
+**⚠️ Important**: By default, agents have minimal RBAC permissions for the resources they will manage (applications and namespaces) along with broad read permissions (`get` and `list` for all resources) to support the resource proxy. For more strict permissions, see the [RBAC Requirements](#rbac-requirements) section for details.
 
 ## How It Works
 
@@ -152,7 +152,9 @@ The principal needs the address of the actual Redis server for non-agent request
 
 ## RBAC Requirements
 
-**IMPORTANT**: By default, agents are installed with minimal RBAC permissions that only allow access to Argo CD's own resources (Applications, AppProjects, etc.) and basic resources like Secrets and ConfigMaps. For the resource proxy to work correctly with live application resources, **agents need enhanced RBAC permissions**.
+**IMPORTANT**: By default, agents are installed with RBAC permissions that only allow access to Argo CD's own resources (Applications, AppProjects, etc.), basic resources like Secrets and ConfigMaps. The default
+ClusterRole also has permission to read all resources in the cluster to enable basic reading with the resource proxy.
+ For the resource proxy to work correctly with live application resources, **agents need enhanced RBAC permissions**.
 
 ### Default Agent Permissions
 
@@ -163,6 +165,9 @@ The default agent installation includes these limited permissions:
 - apiGroups: [""]
   resources: ["namespaces"]
   verbs: ["list", "watch"]
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["get", "list"]
 
 # Role permissions (namespace-scoped)
 - apiGroups: ["argoproj.io"]
