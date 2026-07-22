@@ -34,6 +34,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -42,6 +43,8 @@ import (
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus"
+	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -834,6 +837,48 @@ func Test_cleanupAgentState(t *testing.T) {
 			s.cleanupAgentState("nonexistent-agent")
 		})
 	})
+
+	t.Run("deletes per-agent metric series", func(t *testing.T) {
+		m := metrics.NewPrincipalMetrics()
+		s := &Server{
+			queues:          queue.NewSendRecvQueues(),
+			eventWriters:    event.NewEventWritersMap(),
+			namespaceMap:    map[string]types.AgentMode{},
+			agentNamespaces: map[string]string{},
+			resources:       resources.NewAgentResources(),
+			resyncStatus:    newResyncStatus(),
+			appToAgent:      newConcurrentStringMap(),
+			repoToAgents:    NewMapToSet(),
+			projectToRepos:  NewMapToSet(),
+			eventStreamSrv:  eventstream.NewServer(queue.NewSendRecvQueues(), event.NewEventWritersMap(), nil, &cluster.Manager{}),
+			metrics:         m,
+		}
+
+		// Simulate metric activity for two agents
+		for _, agent := range []string{"ephemeral-agent", "persistent-agent"} {
+			m.AgentConnectionCount.WithLabelValues(agent).Inc()
+			m.ResourceProxyRequests.WithLabelValues(agent).Inc()
+			m.ResourceProxyErrors.WithLabelValues(agent, "timeout").Inc()
+			m.ResourceProxyErrors.WithLabelValues(agent, "not_connected").Inc()
+			m.RedisProxyRequests.WithLabelValues(agent, "GET").Inc()
+			m.RedisProxyRequests.WithLabelValues(agent, "SET").Inc()
+			m.RedisProxyErrors.WithLabelValues(agent, "GET").Inc()
+		}
+
+		s.cleanupAgentState("ephemeral-agent")
+
+		allMetrics := []*prometheus.CounterVec{
+			m.AgentConnectionCount,
+			m.ResourceProxyRequests,
+			m.ResourceProxyErrors,
+			m.RedisProxyRequests,
+			m.RedisProxyErrors,
+		}
+		for _, cv := range allMetrics {
+			assert.Equal(t, 0, collectAgentMetrics(cv, "ephemeral-agent"))
+			assert.Greater(t, collectAgentMetrics(cv, "persistent-agent"), 0)
+		}
+	})
 }
 
 func Test_resyncAppsForAgent(t *testing.T) {
@@ -963,4 +1008,26 @@ func Test_resyncAppsForAgent(t *testing.T) {
 
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
+}
+
+// collectAgentMetrics returns the number of series in the CounterVec that have
+// agent_name matching the given value.
+func collectAgentMetrics(cv *prometheus.CounterVec, agentName string) int {
+	ch := make(chan prometheus.Metric, 100)
+	go func() {
+		cv.Collect(ch)
+		close(ch)
+	}()
+	count := 0
+	for m := range ch {
+		dto := &io_prometheus_client.Metric{}
+		_ = m.Write(dto)
+		for _, lp := range dto.GetLabel() {
+			if lp.GetName() == "agent_name" && lp.GetValue() == agentName {
+				count++
+				break
+			}
+		}
+	}
+	return count
 }
