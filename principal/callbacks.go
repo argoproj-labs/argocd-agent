@@ -746,10 +746,20 @@ func (s *Server) syncGPGKeyToManagedAgents(ctx context.Context, cm *corev1.Confi
 // deleteNamespaceCallback is called when the user deletes the agent namespace.
 // Since there is no namespace we can remove the queue associated with this agent.
 func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {
+	logCtx := log().WithFields(logrus.Fields{
+		"component":      "EventCallback",
+		"queue":          outbound.Name,
+		"event":          "namespace_delete",
+		"namespace_name": outbound.Name,
+	})
+
 	if !s.queues.HasQueuePair(outbound.Name) {
 		return
 	}
+
 	s.cleanupAgentState(outbound.Name)
+
+	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
 }
 
 // mapAppProjectToAgents returns the set of managed agents that should receive this AppProject.
