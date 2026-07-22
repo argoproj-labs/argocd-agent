@@ -558,6 +558,33 @@ func Test_rewriteResourcesTreeNamespace(t *testing.T) {
 		require.Equal(t, got.Nodes[0].Namespace, got.Nodes[1].Namespace, "ApplicationSet and its generated child must end up with matching namespaces so the UI draws the connecting edge between them")
 	})
 
+	t.Run("rewrites namespace for orphaned Application/ApplicationSet nodes", func(t *testing.T) {
+		tree := &v1alpha1.ApplicationTree{
+			OrphanedNodes: []v1alpha1.ResourceNode{
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "Application", Namespace: "argocd", Name: "orphaned-app",
+					},
+				},
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "apps", Kind: "Deployment", Namespace: "default", Name: "orphaned-deployment",
+					},
+				},
+			},
+		}
+		raw, err := json.Marshal(tree)
+		require.NoError(t, err)
+
+		rewritten, err := rewriteResourcesTreeNamespace(raw, "agent-staging")
+		require.NoError(t, err)
+
+		var got v1alpha1.ApplicationTree
+		require.NoError(t, json.Unmarshal(rewritten, &got))
+		require.Equal(t, "agent-staging", got.OrphanedNodes[0].Namespace, "orphaned Application node namespace should be rewritten")
+		require.Equal(t, "default", got.OrphanedNodes[1].Namespace, "non-argoproj.io orphaned node namespace should be untouched")
+	})
+
 	t.Run("no Application/ApplicationSet nodes: returns original bytes untouched", func(t *testing.T) {
 		tree := &v1alpha1.ApplicationTree{
 			Nodes: []v1alpha1.ResourceNode{

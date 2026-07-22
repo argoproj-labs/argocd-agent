@@ -620,12 +620,16 @@ func rewriteResourcesTreeNamespace(data []byte, agentName string) ([]byte, error
 	}
 
 	rewritten := false
-	for i, node := range tree.Nodes {
-		if node.Group == "argoproj.io" && (node.Kind == "Application" || node.Kind == "ApplicationSet") && node.Namespace != agentName {
-			tree.Nodes[i].Namespace = agentName
-			rewritten = true
+	rewriteNodes := func(nodes []v1alpha1.ResourceNode) {
+		for i, node := range nodes {
+			if node.Group == "argoproj.io" && (node.Kind == "Application" || node.Kind == "ApplicationSet") && node.Namespace != agentName {
+				nodes[i].Namespace = agentName
+				rewritten = true
+			}
 		}
 	}
+	rewriteNodes(tree.Nodes)
+	rewriteNodes(tree.OrphanedNodes)
 	if !rewritten {
 		// Nothing to change: forward the original bytes untouched.
 		return data, nil
