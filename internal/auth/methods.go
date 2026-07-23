@@ -26,6 +26,8 @@ const (
 	MethodUserPass = "userpass"
 	// MethodHeader is the name of the header-based authentication method.
 	MethodHeader = "header"
+	// MethodSPIFFEJWT is the name of the SPIFFE JWT-SVID authentication method.
+	MethodSPIFFEJWT = "spiffe-jwt"
 )
 
 // Methods provide a thread-safe way to register and look up available auth
