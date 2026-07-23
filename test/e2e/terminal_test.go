@@ -204,6 +204,53 @@ func (suite *TerminalStreamingTestSuite) Test_SelfRegisteredSecret_Terminal() {
 	suite.validateTerminalStreaming()
 }
 
+// Test_SPIRE_Terminal tests terminal streaming when SPIRE is used for
+// agent-to-principal mTLS, verifying the resource proxy path is unaffected.
+func (suite *TerminalStreamingTestSuite) Test_SPIRE_Terminal() {
+	requires := suite.Require()
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+
+	// Backup static TLS secrets
+	tlsBackups, err := fixture.BackupAndDeleteStaticTLSSecrets(
+		suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient)
+	requires.NoError(err)
+
+	suite.T().Log("Creating fake SPIRE environment")
+	spireEnv, err := fixture.NewFakeSpireEnvironment()
+	requires.NoError(err)
+	requires.NoError(spireEnv.Start())
+	requires.NoError(spireEnv.WriteEnvVars())
+
+	// Restore static TLS secrets after test
+	defer func() {
+		spireEnv.Stop()
+		fixture.ClearEnvVarsFile()
+		_ = fixture.RestoreStaticTLSSecrets(
+			suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, suite.AutonomousAgentClient, tlsBackups)
+
+		fixture.RestartAgent(suite.T(), fixture.PrincipalName)
+		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+		fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
+		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
+		fixture.RestartAgent(suite.T(), fixture.AgentAutonomousName)
+		fixture.CheckReadiness(suite.T(), fixture.AgentAutonomousName)
+	}()
+
+	// Restart processes to pick up SPIRE configuration
+	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
+	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+	fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
+	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
+	fixture.RestartAgent(suite.T(), fixture.AgentAutonomousName)
+	fixture.CheckReadiness(suite.T(), fixture.AgentAutonomousName)
+
+	suite.T().Log("Verifying agents connected via SPIRE before testing terminal")
+	fixture.VerifyAgentConnected(suite.T(), fixture.AgentManagedName, suite.ClusterDetails)
+
+	suite.T().Log("SPIRE environment active, testing terminal streaming")
+	suite.validateTerminalStreaming()
+}
+
 func TestTerminalStreamingTestSuite(t *testing.T) {
 	t.Run("terminal_streaming", func(t *testing.T) {
 		suite.Run(t, new(TerminalStreamingTestSuite))

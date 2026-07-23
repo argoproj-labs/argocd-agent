@@ -369,6 +369,7 @@ func NewPKIIssueCommand() *cobra.Command {
 	command.AddCommand(NewPKIIssuePrincipalCommand())
 	command.AddCommand(NewPKIIssueResourceProxyCommand())
 	command.AddCommand(NewPKIIssueAgentClientCert())
+	command.AddCommand(NewPKIIssueSharedClientCert())
 	return command
 }
 
@@ -515,6 +516,38 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
 	command.Flags().BoolVar(&sameContext, "same-context", false, "Use when the PKI and agent use the same context")
 	command.Flags().StringVar(&agentNamespace, "agent-namespace", "argocd", "The namespace the agent is installed to")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize)
+	return command
+}
+
+func NewPKIIssueSharedClientCert() *cobra.Command {
+	var (
+		upsert       bool
+		days         int
+		keyAlgorithm string
+		keySize      int
+	)
+	command := &cobra.Command{
+		Use:   "shared-client",
+		Short: "Issue a shared client certificate for self-registration",
+		Long: `Issues a TLS client certificate and stores it in the principal namespace.
+This certificate is used by self-registration: when an agent self-registers,
+the principal copies this shared cert into the agent's cluster secret so that
+ArgoCD's application controller can authenticate to the resource proxy.
+
+Only the principal context is required. No agent context needed.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			if principalCfg.KubeContext == "" {
+				cmdutil.Fatal("Principal kubecontext must be set.")
+			}
+			keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+			issueAndSaveSecret(principalCfg.KubeContext, config.SecretNameSharedClientCert, principalCfg.Namespace, upsert, days, keyOpts, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateClientCertificate("argocd-agent-shared-client", c, pk, days, keyOpts)
+			})
+		},
+	}
+	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
 	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
 	addKeyGenFlags(command, &keyAlgorithm, &keySize)
 	return command

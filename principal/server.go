@@ -1183,6 +1183,24 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 		return nil, nil
 	}
 
+	// When SPIRE is configured, use dynamic SVID-based TLS instead of static certs
+	if s.options.spireSource != nil {
+		log().Infof("Using SPIRE for TLS credentials")
+		bundle, err := s.options.spireSource.TrustBundle()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get SPIRE trust bundle: %w", err)
+		}
+		tlsConfig := &tls.Config{
+			GetCertificate: s.options.spireSource.GetCertificate(),
+			ClientAuth:     tls.RequireAndVerifyClientCert,
+			ClientCAs:      bundle,
+			MinVersion:     s.options.tlsMinVersion,
+			MaxVersion:     s.options.tlsMaxVersion,
+			CipherSuites:   s.options.tlsCiphers,
+		}
+		return tlsConfig, nil
+	}
+
 	var cert tls.Certificate
 	var err error
 

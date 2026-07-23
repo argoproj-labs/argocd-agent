@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -157,4 +158,14 @@ func Test_WithRedisProxyDisabled(t *testing.T) {
 	err := WithRedisProxyDisabled()(s)
 	assert.NoError(t, err)
 	assert.True(t, s.options.redisProxyDisabled)
+}
+
+func Test_WithSPIRESource(t *testing.T) {
+	t.Run("Sets SPIRE source on server options", func(t *testing.T) {
+		s := &Server{options: &ServerOptions{}}
+		source := &spire.Source{}
+		err := WithSPIRESource(source)(s)
+		assert.NoError(t, err)
+		assert.Equal(t, source, s.options.spireSource)
+	})
 }

@@ -1,6 +1,6 @@
 # argocd-agent-principal
 
-![Version: 0.3.2](https://img.shields.io/badge/Version-0.3.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
+![Version: 0.3.3](https://img.shields.io/badge/Version-0.3.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
 
 Argo CD Agent Principal component for multi-cluster application management
 
@@ -59,7 +59,7 @@ Kubernetes: `>=1.24.0-0`
 | podSecurityContext | object | `{"fsGroup":999,"fsGroupChangePolicy":"OnRootMismatch","runAsGroup":999,"runAsNonRoot":true,"runAsUser":999,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level securityContext. Applied to the Pod spec. |
 | principal.additionalArgs | list | `[]` | Extra CLI arguments to pass to the principal binary. |
 | principal.allowedNamespaces | string | `""` | Comma-separated list of additional namespaces the principal watches. Supports glob patterns. |
-| principal.auth | string | `"mtls:CN=([^,]+)"` | Authentication method. Formats: "mtls:CN=([^,]+)", "userpass:/path/to/creds", "header:x-forwarded-client-cert:^.*URI=spiffe://...". |
+| principal.auth | string | `"mtls:CN=([^,]+)"` | Authentication method. Formats: "mtls:CN=([^,]+)", "userpass:/path/to/creds", "mtls:uri:spiffe://...". |
 | principal.destinationBasedMapping | bool | `false` | Enable destination-based mapping (deploys apps into their declared namespace instead of the agent namespace). |
 | principal.eventProcessors | string | `"10"` | Number of concurrent event processors. |
 | principal.healthz.port | int | `8003` | Health check server port. |
@@ -95,6 +95,14 @@ Kubernetes: `>=1.24.0-0`
 | principal.resourceProxy.secretName | string | `"argocd-agent-resource-proxy-tls"` | Name of the Secret containing the resource proxy TLS cert/key. |
 | principal.resourceProxy.tls.certPath | string | `""` | Path to the resource proxy TLS certificate inside the container. |
 | principal.resourceProxy.tls.keyPath | string | `""` | Path to the resource proxy TLS key inside the container. |
+| principal.resourceProxyAddress | string | `"argocd-agent-resource-proxy:9090"` | Address of the resource proxy as seen by ArgoCD's application controller. |
+| principal.selfRegistration | object | `{"clientCertSecretName":"","enabled":false}` | Self-registration allows agents to auto-create their cluster secret on the principal when they first connect with valid credentials. |
+| principal.selfRegistration.clientCertSecretName | string | `""` | Name of a Secret (in the principal namespace) containing a shared TLS client cert that gets copied into every self-registered cluster secret. |
+| principal.selfRegistration.enabled | bool | `false` | Enable self-registration. Requires resourceProxy.enabled=true. |
+| principal.spire | object | `{"enabled":false,"hostSocketDir":"/run/spire/agent-sockets","mountMethod":"hostPath","socketPath":"unix:///run/spire/agent-sockets/spire-agent.sock"}` | SPIRE integration for automatic mTLS certificate provisioning. |
+| principal.spire.enabled | bool | `false` | Enable SPIRE-based TLS. When enabled, TLS credentials are obtained from the SPIRE Workload API instead of static Kubernetes secrets. |
+| principal.spire.hostSocketDir | string | `"/run/spire/agent-sockets"` | Path to the SPIRE Agent socket directory. Used as the container mountPath and host path. |
+| principal.spire.mountMethod | string | `"hostPath"` | How to mount the SPIRE Agent socket into the pod. "hostPath" mounts the socket directory from the host. |
 | principal.tls.ciphersuites | string | `""` | Comma-separated list of TLS cipher suites. Empty uses Go defaults. |
 | principal.tls.clientCert.matchSubject | bool | `false` | Match the subject field in the client certificate to the agent's registered name. |
 | principal.tls.clientCert.require | bool | `false` | Require agents to present a client certificate upon connection. |

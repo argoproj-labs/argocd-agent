@@ -135,3 +135,6 @@ data:
   # agent.redis.tls.insecure: INSECURE: Do not verify Redis TLS certificate.
   # Default: false
   agent.redis.tls.insecure: {{ .Values.redisTLS.insecure | quote }}
+  # agent.spire.socket-path: SPIRE Agent socket URI for obtaining TLS credentials.
+  # Default: ""
+  agent.spire.socket-path: {{ ternary .Values.spire.socketPath "" .Values.spire.enabled | quote }}

@@ -1029,6 +1029,40 @@
       "description": "Name of the Secret containing agent username/password (if used).",
       "title": "userPasswordSecretName",
       "type": "string"
+    },
+    "spire": {
+      "additionalProperties": false,
+      "description": "SPIRE integration for automatic mTLS certificate provisioning.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable SPIRE-based TLS. When enabled, TLS credentials are obtained from the SPIRE Workload API instead of static Kubernetes secrets.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "socketPath": {
+          "default": "unix:///run/spire/agent-sockets/spire-agent.sock",
+          "description": "SPIRE Agent socket URI passed to --spire-agent-socket.",
+          "title": "socketPath",
+          "type": "string"
+        },
+        "mountMethod": {
+          "default": "hostPath",
+          "description": "How to mount the SPIRE Agent socket into the pod.",
+          "title": "mountMethod",
+          "type": "string",
+          "enum": ["hostPath", "csi"]
+        },
+        "hostSocketDir": {
+          "default": "/run/spire/agent-sockets",
+          "description": "Path to the SPIRE Agent socket directory. Used as the container mountPath and host path.",
+          "title": "hostSocketDir",
+          "type": "string"
+        }
+      },
+      "required": ["enabled", "socketPath", "mountMethod", "hostSocketDir"],
+      "title": "spire",
+      "type": "object"
     }
   },
   "required": [

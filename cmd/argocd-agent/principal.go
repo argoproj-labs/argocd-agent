@@ -35,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
+	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
@@ -130,6 +131,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 		haAdminPort                    int
 		haAllowedReplClients           []string
 		haReplicationInitialAckTimeout time.Duration
+
+		// SPIRE integration
+		spireAgentSocket string
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -212,8 +216,20 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			opts = append(opts, principal.WithNamespaces(allowedNamespaces...))
 
-			// Configure TLS or plaintext mode
-			if insecurePlaintext {
+			// Configure TLS: SPIRE, plaintext, or static certs
+			if spireAgentSocket != "" {
+				logrus.Infof("Using SPIRE for TLS credentials (socket: %s)", spireAgentSocket)
+				spireSource, err := spire.New(ctx, spireAgentSocket)
+				if err != nil {
+					cmdutil.Fatal("Failed to connect to SPIRE Agent: %v", err)
+				}
+				defer spireSource.Close()
+				opts = append(opts, principal.WithSPIRESource(spireSource))
+				opts = append(opts, principal.WithRequireClientCerts(true))
+				if authMethod == "" {
+					authMethod = `mtls:uri:spiffe://[^/]+/(.+)`
+				}
+			} else if insecurePlaintext {
 				logrus.Warn("INSECURE: Running in plaintext mode - ensure Istio or similar service mesh provides mTLS")
 				opts = append(opts, principal.WithInsecurePlaintext())
 			} else if allowTLSGenerate {
@@ -229,8 +245,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 				opts = append(opts, principal.WithTLSKeyPairFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
 			}
 
-			// Only load root CA if not in plaintext mode
-			if !insecurePlaintext {
+			// Only load root CA if not in plaintext or SPIRE mode
+			if !insecurePlaintext && spireAgentSocket == "" {
 				if rootCaPath != "" {
 					logrus.Infof("Loading root CA certificate from file %s", rootCaPath)
 					opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
@@ -660,6 +676,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&labelSelector, "label-selector",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LABEL_SELECTOR", nil, ""),
 		"Kubernetes label selector to restrict which resources the principal watches")
+
+	command.Flags().StringVar(&spireAgentSocket, "spire-agent-socket",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_SPIRE_AGENT_SOCKET", nil, ""),
+		"SPIRE Agent socket URI (e.g., unix:///run/spire/sockets/agent.sock). When set, TLS credentials are obtained from SPIRE instead of static certs")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")

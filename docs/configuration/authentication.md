@@ -9,6 +9,7 @@ argocd-agent supports three authentication methods:
 | Method | Security Level | Use Case | Status |
 |--------|---------------|----------|--------|
 | **mTLS** | High | Direct agent-to-principal connections | Recommended |
+| **mTLS + SPIRE** | High | Multi-cluster with automated cert management | Recommended for SPIRE environments |
 | **Header-based** | High | Service mesh deployments (Istio, Linkerd) | Recommended for mesh |
 | **UserPass** | Low | Development only | **Deprecated** |
 
@@ -229,8 +230,31 @@ argocd-agent agent --creds="header:"
 |-----------------|--------------|-------|-------|
 | `--insecure-plaintext=true` + `--auth=header:...` | `--creds=header:` | Yes | Service mesh handles mTLS |
 | `--insecure-plaintext=false` + `--auth=mtls:...` | `--creds=mtls:` | Yes | Direct mTLS to principal |
+| `--spire-agent-socket=...` | `--spire-agent-socket=...` | Yes | SPIRE provides mTLS credentials |
 | `--insecure-plaintext=true` + `--auth=mtls:...` | Any | **No** | No client certs in plaintext mode |
 | `--insecure-plaintext=false` + `--auth=header:...` | Any | **No** | Headers not injected without mesh |
+
+## mTLS with SPIRE
+
+When SPIRE is enabled (`--spire-agent-socket`), mTLS authentication works the same way but certificates are provided by SPIRE instead of static Kubernetes secrets. The principal uses `mtls:uri:` mode to extract the agent identity from the SPIFFE URI in the SVID.
+
+### Principal Configuration
+
+```yaml
+# ConfigMap (argocd-agent-params)
+principal.spire.socket-path: "unix:///run/spire/agent-sockets/spire-agent.sock"
+# Auth defaults to mtls:uri:spiffe://[^/]+/(.+) when SPIRE is enabled
+```
+
+### Agent Configuration
+
+```yaml
+# ConfigMap (argocd-agent-params)
+agent.spire.socket-path: "unix:///run/spire/agent-sockets/spire-agent.sock"
+# Creds defaults to mtls: when SPIRE is enabled
+```
+
+No static certificate secrets are needed on the agent cluster. See [TLS & Certificates](tls-certificates.md#using-spire-automated-certificate-management) for full setup instructions.
 
 ## UserPass Authentication (Deprecated)
 

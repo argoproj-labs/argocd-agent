@@ -146,6 +146,10 @@ data:
   principal.redis.proxy.server.tls.cert-path: {{ .Values.principal.redis.proxy.server.tls.certPath | quote }}
   principal.redis.proxy.server.tls.key-path: {{ .Values.principal.redis.proxy.server.tls.keyPath | quote }}
   principal.redis.proxy.server.tls.secret-name: {{ .Values.principal.redis.proxy.server.tls.secretName | quote }}
+  principal.spire.socket-path: {{ ternary .Values.principal.spire.socketPath "" .Values.principal.spire.enabled | quote }}
+  principal.self-registration.enabled: {{ .Values.principal.selfRegistration.enabled | quote }}
+  principal.self-registration.client-cert-secret: {{ .Values.principal.selfRegistration.clientCertSecretName | quote }}
+  principal.resource-proxy.address: {{ .Values.principal.resourceProxyAddress | quote }}
   {{- range $key, $value := .Values.configMapData }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}
