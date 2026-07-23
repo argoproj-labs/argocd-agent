@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/issuer"
 	"github.com/redis/go-redis/v9"
@@ -347,7 +348,8 @@ func UpdateClusterTLSFromSecret(ctx context.Context, kubeclient kubernetes.Inter
 }
 
 // readClientCertFromSecret reads TLS credentials from an existing Kubernetes TLS secret.
-// The secret should contain tls.crt, tls.key, and ca.crt keys.
+// If secret contains tls.crt and tls.key, it returns the credentials. If ca.crt is not present in the
+// secret, it is read from the principal CA secret in the same namespace.
 func readClientCertFromSecret(ctx context.Context, kubeclient kubernetes.Interface, namespace, secretName string) (clientCert, clientKey, caData string, err error) {
 	secret, err := kubeclient.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {
@@ -366,7 +368,14 @@ func readClientCertFromSecret(ctx context.Context, kubeclient kubernetes.Interfa
 
 	caBytes, ok := secret.Data["ca.crt"]
 	if !ok {
-		return "", "", "", fmt.Errorf("secret %s/%s missing ca.crt", namespace, secretName)
+		caSecret, err := kubeclient.CoreV1().Secrets(namespace).Get(ctx, config.SecretNamePrincipalCA, metav1.GetOptions{})
+		if err != nil {
+			return "", "", "", fmt.Errorf("secret %s/%s missing ca.crt and could not read CA from %s: %w", namespace, secretName, config.SecretNamePrincipalCA, err)
+		}
+		caBytes, ok = caSecret.Data["tls.crt"]
+		if !ok {
+			return "", "", "", fmt.Errorf("CA secret %s/%s missing tls.crt", namespace, config.SecretNamePrincipalCA)
+		}
 	}
 
 	return string(certData), string(keyData), string(caBytes), nil
