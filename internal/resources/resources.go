@@ -148,6 +148,13 @@ func (r *AgentResources) Remove(agent string, key ResourceKey) {
 	}
 }
 
+// RemoveAgent removes all tracked resources for the given agent.
+func (r *AgentResources) RemoveAgent(agent string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.resources, agent)
+}
+
 func (r *AgentResources) GetAllResources(agent string) []ResourceKey {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

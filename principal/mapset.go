@@ -65,3 +65,16 @@ func (m *MapToSet) Delete(key string, value string) {
 		}
 	}
 }
+
+// DeleteFromAll removes the given value from every key's set.
+// Keys whose sets become empty are removed entirely.
+func (m *MapToSet) DeleteFromAll(value string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, s := range m.m {
+		delete(s, value)
+		if len(s) == 0 {
+			delete(m.m, key)
+		}
+	}
+}

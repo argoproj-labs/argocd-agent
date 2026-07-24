@@ -23,21 +23,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus"
+	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -46,6 +53,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -695,6 +703,331 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 
 }
 
+func Test_cleanupAgentState(t *testing.T) {
+	t.Run("cleans up all agent state for namespace-based mapping", func(t *testing.T) {
+		s := &Server{
+			queues:       queue.NewSendRecvQueues(),
+			eventWriters: event.NewEventWritersMap(),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeAutonomous,
+				"agent3": types.AgentModeManaged,
+			},
+			agentNamespaces: map[string]string{"agent1": "ns1", "agent2": "ns2"},
+			resources:       resources.NewAgentResources(),
+			resyncStatus:    newResyncStatus(),
+			appToAgent:      newConcurrentStringMap(),
+			repoToAgents:    NewMapToSet(),
+			projectToRepos:  NewMapToSet(),
+			eventStreamSrv:  eventstream.NewServer(queue.NewSendRecvQueues(), event.NewEventWritersMap(), nil, &cluster.Manager{}),
+		}
+
+		// Set up state for agent1
+		require.NoError(t, s.queues.Create("agent1"))
+		require.NoError(t, s.queues.Create("agent2"))
+		s.resources.Add("agent1", resources.ResourceKey{Name: "app1", Namespace: "agent1"})
+		s.resyncStatus.resynced("agent1")
+		s.repoToAgents.Add("repo-a", "agent1")
+		s.repoToAgents.Add("repo-a", "agent2")
+		s.repoToAgents.Add("repo-b", "agent1")
+
+		// Clean up agent1
+		s.cleanupAgentState("agent1")
+
+		// Verify agent1 state is removed
+		assert.False(t, s.queues.HasQueuePair("agent1"))
+		_, agent1Exists := s.namespaceMap["agent1"]
+		assert.False(t, agent1Exists)
+		_, agent1NsExists := s.agentNamespaces["agent1"]
+		assert.False(t, agent1NsExists)
+		assert.Empty(t, s.resources.GetAllResources("agent1"))
+		assert.False(t, s.resyncStatus.isResynced("agent1"))
+
+		// Verify agent1 removed from repo-to-agents mapping
+		repoAAgents := s.repoToAgents.Get("repo-a")
+		assert.False(t, repoAAgents["agent1"])
+		assert.True(t, repoAAgents["agent2"])
+		assert.Nil(t, s.repoToAgents.Get("repo-b"))
+
+		// Verify agent2 state is untouched
+		assert.True(t, s.queues.HasQueuePair("agent2"))
+		assert.Equal(t, types.AgentModeAutonomous, s.namespaceMap["agent2"])
+		assert.Equal(t, "ns2", s.agentNamespaces["agent2"])
+	})
+
+	t.Run("cleans up all state for destination-based mapping", func(t *testing.T) {
+		s := &Server{
+			queues:       queue.NewSendRecvQueues(),
+			eventWriters: event.NewEventWritersMap(),
+			namespaceMap: map[string]types.AgentMode{
+				"target-cluster": types.AgentModeManaged,
+				"other-cluster":  types.AgentModeAutonomous,
+				"agent3":         types.AgentModeManaged,
+			},
+			agentNamespaces: map[string]string{
+				"target-cluster": "target-ns",
+				"other-cluster":  "other-ns",
+				"agent3":         "agent3-ns",
+			},
+			resources:               resources.NewAgentResources(),
+			resyncStatus:            newResyncStatus(),
+			appToAgent:              newConcurrentStringMap(),
+			repoToAgents:            NewMapToSet(),
+			projectToRepos:          NewMapToSet(),
+			destinationBasedMapping: true,
+			eventStreamSrv:          eventstream.NewServer(queue.NewSendRecvQueues(), event.NewEventWritersMap(), nil, &cluster.Manager{}),
+		}
+
+		require.NoError(t, s.queues.Create("target-cluster"))
+		require.NoError(t, s.queues.Create("other-cluster"))
+		require.NoError(t, s.queues.Create("agent3"))
+		s.resources.Add("target-cluster", resources.ResourceKey{Name: "app1", Namespace: "argocd"})
+		s.resyncStatus.resynced("target-cluster")
+		s.repoToAgents.Add("repo1", "target-cluster")
+		s.repoToAgents.Add("repo1", "other-cluster")
+		s.repoToAgents.Add("repo1", "agent3")
+
+		// Simulate destination-based app-to-agent mappings
+		s.appToAgent.Set("argocd/app1", "target-cluster")
+		s.appToAgent.Set("argocd/app2", "target-cluster")
+		s.appToAgent.Set("argocd/app3", "other-cluster")
+
+		s.cleanupAgentState("target-cluster")
+
+		// Verify target-cluster state is fully removed
+		assert.False(t, s.queues.HasQueuePair("target-cluster"))
+		_, targetExists := s.namespaceMap["target-cluster"]
+		assert.False(t, targetExists)
+		_, targetNsExists := s.agentNamespaces["target-cluster"]
+		assert.False(t, targetNsExists)
+		assert.Empty(t, s.resources.GetAllResources("target-cluster"))
+		assert.False(t, s.resyncStatus.isResynced("target-cluster"))
+		assert.Empty(t, s.appToAgent.Get("argocd/app1"))
+		assert.Empty(t, s.appToAgent.Get("argocd/app2"))
+		repo1Agents := s.repoToAgents.Get("repo1")
+		assert.False(t, repo1Agents["target-cluster"])
+
+		// Verify other-cluster state is untouched
+		assert.True(t, s.queues.HasQueuePair("other-cluster"))
+		assert.True(t, s.queues.HasQueuePair("agent3"))
+		assert.Equal(t, types.AgentModeAutonomous, s.namespaceMap["other-cluster"])
+		assert.Equal(t, types.AgentModeManaged, s.namespaceMap["agent3"])
+		assert.Equal(t, "other-ns", s.agentNamespaces["other-cluster"])
+		assert.Equal(t, "agent3-ns", s.agentNamespaces["agent3"])
+		assert.Equal(t, "other-cluster", s.appToAgent.Get("argocd/app3"))
+		assert.True(t, repo1Agents["other-cluster"])
+		assert.True(t, repo1Agents["agent3"])
+	})
+
+	t.Run("handles non-existent agent gracefully", func(t *testing.T) {
+		s := &Server{
+			queues:          queue.NewSendRecvQueues(),
+			eventWriters:    event.NewEventWritersMap(),
+			namespaceMap:    map[string]types.AgentMode{},
+			agentNamespaces: map[string]string{},
+			resources:       resources.NewAgentResources(),
+			resyncStatus:    newResyncStatus(),
+			appToAgent:      newConcurrentStringMap(),
+			repoToAgents:    NewMapToSet(),
+			projectToRepos:  NewMapToSet(),
+			eventStreamSrv:  eventstream.NewServer(queue.NewSendRecvQueues(), event.NewEventWritersMap(), nil, &cluster.Manager{}),
+		}
+
+		assert.NotPanics(t, func() {
+			s.cleanupAgentState("nonexistent-agent")
+		})
+	})
+
+	t.Run("deletes per-agent metric series", func(t *testing.T) {
+		m := metrics.NewPrincipalMetrics()
+		s := &Server{
+			queues:          queue.NewSendRecvQueues(),
+			eventWriters:    event.NewEventWritersMap(),
+			namespaceMap:    map[string]types.AgentMode{},
+			agentNamespaces: map[string]string{},
+			resources:       resources.NewAgentResources(),
+			resyncStatus:    newResyncStatus(),
+			appToAgent:      newConcurrentStringMap(),
+			repoToAgents:    NewMapToSet(),
+			projectToRepos:  NewMapToSet(),
+			eventStreamSrv:  eventstream.NewServer(queue.NewSendRecvQueues(), event.NewEventWritersMap(), nil, &cluster.Manager{}),
+			metrics:         m,
+		}
+
+		// Simulate metric activity for two agents
+		for _, agent := range []string{"ephemeral-agent", "persistent-agent"} {
+			m.AgentConnectionCount.WithLabelValues(agent).Inc()
+			m.ResourceProxyRequests.WithLabelValues(agent).Inc()
+			m.ResourceProxyErrors.WithLabelValues(agent, "timeout").Inc()
+			m.ResourceProxyErrors.WithLabelValues(agent, "not_connected").Inc()
+			m.RedisProxyRequests.WithLabelValues(agent, "GET").Inc()
+			m.RedisProxyRequests.WithLabelValues(agent, "SET").Inc()
+			m.RedisProxyErrors.WithLabelValues(agent, "GET").Inc()
+		}
+
+		s.cleanupAgentState("ephemeral-agent")
+
+		allMetrics := []*prometheus.CounterVec{
+			m.AgentConnectionCount,
+			m.ResourceProxyRequests,
+			m.ResourceProxyErrors,
+			m.RedisProxyRequests,
+			m.RedisProxyErrors,
+		}
+		for _, cv := range allMetrics {
+			assert.Equal(t, 0, collectAgentMetrics(cv, "ephemeral-agent"))
+			assert.Greater(t, collectAgentMetrics(cv, "persistent-agent"), 0)
+		}
+	})
+}
+
+func Test_resyncAppsForAgent(t *testing.T) {
+	t.Run("resyncs applications targeting the agent (namespace-based)", func(t *testing.T) {
+		mockAppBackend := &mocks.Application{}
+		appMgr, err := application.NewApplicationManager(mockAppBackend, "argocd")
+		require.NoError(t, err)
+
+		clusterMgr, err := cluster.NewManager(context.Background(), "argocd", "", "", "", kubefake.NewSimpleClientset(), nil)
+		require.NoError(t, err)
+		require.NoError(t, clusterMgr.MapCluster("agent1", &v1alpha1.Cluster{Name: "agent1", Server: "https://agent1.example.com"}))
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			appManager: appMgr,
+			clusterMgr: clusterMgr,
+			options:    &ServerOptions{namespaces: []string{"agent1", "agent2"}},
+		}
+
+		apps := []v1alpha1.Application{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "app1", Namespace: "agent1"},
+				Spec:       v1alpha1.ApplicationSpec{Project: "default"},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "app2", Namespace: "agent2"},
+				Spec:       v1alpha1.ApplicationSpec{Project: "default"},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "app3", Namespace: "agent1"},
+				Spec:       v1alpha1.ApplicationSpec{Project: "default"},
+			},
+		}
+		mockAppBackend.On("List", mock.Anything, mock.Anything).Return(apps, nil)
+
+		s.resyncAppsForAgent("agent1")
+
+		// Only apps targeting agent1 should be dispatched
+		assert.True(t, s.queues.HasQueuePair("agent1"))
+		sendQ := s.queues.SendQ("agent1")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 2, sendQ.Len())
+
+		// agent2 should have no queue
+		assert.False(t, s.queues.HasQueuePair("agent2"))
+	})
+
+	t.Run("resyncs applications targeting the agent (destination-based)", func(t *testing.T) {
+		mockAppBackend := &mocks.Application{}
+		appMgr, err := application.NewApplicationManager(mockAppBackend, "argocd")
+		require.NoError(t, err)
+
+		clusterMgr, err := cluster.NewManager(context.Background(), "argocd", "", "", "", kubefake.NewSimpleClientset(), nil)
+		require.NoError(t, err)
+		require.NoError(t, clusterMgr.MapCluster("target-cluster", &v1alpha1.Cluster{Name: "target-cluster", Server: "https://target.example.com"}))
+
+		s := &Server{
+			ctx:                     context.Background(),
+			queues:                  queue.NewSendRecvQueues(),
+			events:                  event.NewEventSource("test"),
+			resources:               resources.NewAgentResources(),
+			appToAgent:              newConcurrentStringMap(),
+			appManager:              appMgr,
+			clusterMgr:              clusterMgr,
+			destinationBasedMapping: true,
+			namespace:               "argocd",
+			options:                 &ServerOptions{namespaces: []string{}},
+		}
+
+		apps := []v1alpha1.Application{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "app1", Namespace: "argocd"},
+				Spec:       v1alpha1.ApplicationSpec{Project: "default", Destination: v1alpha1.ApplicationDestination{Name: "target-cluster"}},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "app2", Namespace: "argocd"},
+				Spec:       v1alpha1.ApplicationSpec{Project: "default", Destination: v1alpha1.ApplicationDestination{Name: "other-cluster"}},
+			},
+		}
+		mockAppBackend.On("List", mock.Anything, mock.Anything).Return(apps, nil)
+
+		s.resyncAppsForAgent("target-cluster")
+
+		// Only app1 targets the agent
+		assert.True(t, s.queues.HasQueuePair("target-cluster"))
+		sendQ := s.queues.SendQ("target-cluster")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+
+		// Verify app-to-agent tracking was populated
+		assert.Equal(t, "target-cluster", s.appToAgent.Get("argocd/app1"))
+	})
+
+	t.Run("handles empty app list gracefully", func(t *testing.T) {
+		mockAppBackend := &mocks.Application{}
+		appMgr, err := application.NewApplicationManager(mockAppBackend, "argocd")
+		require.NoError(t, err)
+
+		clusterMgr, err := cluster.NewManager(context.Background(), "argocd", "", "", "", kubefake.NewSimpleClientset(), nil)
+		require.NoError(t, err)
+		require.NoError(t, clusterMgr.MapCluster("agent1", &v1alpha1.Cluster{Name: "agent1", Server: "https://agent1.example.com"}))
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			appManager: appMgr,
+			clusterMgr: clusterMgr,
+			options:    &ServerOptions{namespaces: []string{"agent1"}},
+		}
+
+		mockAppBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.Application{}, nil)
+
+		assert.NotPanics(t, func() {
+			s.resyncAppsForAgent("agent1")
+		})
+
+		assert.False(t, s.queues.HasQueuePair("agent1"))
+	})
+}
+
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
+}
+
+// collectAgentMetrics returns the number of series in the CounterVec that have
+// agent_name matching the given value.
+func collectAgentMetrics(cv *prometheus.CounterVec, agentName string) int {
+	ch := make(chan prometheus.Metric, 100)
+	go func() {
+		cv.Collect(ch)
+		close(ch)
+	}()
+	count := 0
+	for m := range ch {
+		dto := &io_prometheus_client.Metric{}
+		_ = m.Write(dto)
+		for _, lp := range dto.GetLabel() {
+			if lp.GetName() == "agent_name" && lp.GetValue() == agentName {
+				count++
+				break
+			}
+		}
+	}
+	return count
 }

@@ -596,6 +596,9 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		return nil, err
 	}
 
+	s.clusterMgr.SetOnClusterDeleted(s.cleanupAgentState)
+	s.clusterMgr.SetOnClusterAdded(s.resyncAppsForAgent)
+
 	s.resources = resources.NewAgentResources()
 	s.logStream = logstream.NewServer()
 	s.terminalStreamServer = terminalstream.NewServer()
@@ -716,13 +719,22 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}()
 	}
 
+	syncTimeout := s.options.informerSyncTimeout
+	if syncTimeout == 0 {
+		syncTimeout = waitForSyncedDuration
+	}
+
+	s.events = event.NewEventSource(s.options.serverName)
+
+	if err := s.clusterMgr.Start(); err != nil {
+		return fmt.Errorf("unable to start cluster manager with informer sync timeout %v: %w", syncTimeout, err)
+	}
+
 	go s.RunHandlersOnConnect(s.ctx)
 
 	if err = s.StartEventProcessor(s.ctx); err != nil {
 		return err
 	}
-
-	s.events = event.NewEventSource(s.options.serverName)
 
 	if s.options.labelSelector != "" {
 		log().Infof("Principal informers are using the label selector: %s", s.options.labelSelector)
@@ -790,11 +802,6 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}()
 
-	syncTimeout := s.options.informerSyncTimeout
-	if syncTimeout == 0 {
-		syncTimeout = waitForSyncedDuration
-	}
-
 	if err := s.appManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Application informer: %w", err)
 	}
@@ -833,9 +840,6 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("Resource proxy is disabled")
 	}
 
-	if err := s.clusterMgr.Start(); err != nil {
-		return fmt.Errorf("unable to start cluster manager with informer sync timeout %v: %w", syncTimeout, err)
-	}
 	if err := s.namespaceManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Namespace informer: %w", err)
 	}
@@ -893,6 +897,13 @@ func (rs *resyncStatus) resynced(agentName string) {
 	defer rs.mu.Unlock()
 
 	rs.resync[agentName] = true
+}
+
+func (rs *resyncStatus) remove(agentName string) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+
+	delete(rs.resync, agentName)
 }
 
 // RunHandlersOnConnect runs the registered handlers when an agent connects to the principal
@@ -1423,6 +1434,97 @@ func (s *Server) GetHAStatus() *HAStatus {
 		return nil
 	}
 	return s.ha.GetHAStatus()
+}
+
+// cleanupAgentState removes all principal-side state for an agent whose cluster
+// secret has been deleted.
+func (s *Server) cleanupAgentState(agentName string) {
+	logCtx := log().WithField("agent", agentName).WithField("component", "AgentCleanup")
+	logCtx.Info("Cleaning up agent state after cluster secret deletion")
+
+	// Disconnect the agent if it is still streaming
+	if s.eventStreamSrv != nil {
+		if s.eventStreamSrv.DisconnectAgent(agentName) {
+			logCtx.Info("Disconnected active agent stream")
+		}
+	}
+
+	// Delete the queue pair
+	if s.queues.HasQueuePair(agentName) {
+		if err := s.queues.Delete(agentName, true); err != nil {
+			logCtx.WithError(err).Error("Failed to delete queue pair")
+		}
+	}
+
+	// Remove event writer
+	s.eventWriters.Remove(agentName)
+
+	// Remove from namespaceMap and agentNamespaces
+	s.clientLock.Lock()
+	delete(s.namespaceMap, agentName)
+	delete(s.agentNamespaces, agentName)
+	s.clientLock.Unlock()
+
+	// Remove tracked resources
+	s.resources.RemoveAgent(agentName)
+
+	// Remove resync status
+	s.resyncStatus.remove(agentName)
+
+	// Clean up routing maps
+	// For destination-based mapping: remove all appToAgent entries pointing to this agent
+	if s.destinationBasedMapping && s.appToAgent != nil {
+		s.appToAgent.DeleteByValue(agentName, func(a, b string) bool { return a == b })
+	}
+	// Remove agent from repo-to-agents mapping (agent could be a value in any repo key)
+	s.repoToAgents.DeleteFromAll(agentName)
+
+	// Delete per-agent metric series to stop cardinality growth
+	if s.metrics != nil {
+		agentLabel := prometheus.Labels{"agent_name": agentName}
+		s.metrics.AgentConnectionCount.DeletePartialMatch(agentLabel)
+		s.metrics.ResourceProxyRequests.DeletePartialMatch(agentLabel)
+		s.metrics.ResourceProxyErrors.DeletePartialMatch(agentLabel)
+		s.metrics.RedisProxyRequests.DeletePartialMatch(agentLabel)
+		s.metrics.RedisProxyErrors.DeletePartialMatch(agentLabel)
+		s.metrics.EventProcessingTime.DeletePartialMatch(agentLabel)
+		s.metrics.EventWriterSendErrors.DeletePartialMatch(agentLabel)
+		s.metrics.EventWriterEventsDiscarded.DeletePartialMatch(agentLabel)
+	}
+
+	logCtx.Info("Agent state cleanup complete")
+}
+
+// resyncAppsForAgent reconciles all the applications for a given agent
+// This is called when a cluster secret is created and all applications for the agent are resynced.
+func (s *Server) resyncAppsForAgent(agentName string) {
+	logCtx := log().WithField("agent", agentName).WithField("component", "AgentResync")
+	logCtx.Info("Resyncing applications after cluster secret creation")
+
+	var selector backend.ApplicationSelector
+	if s.destinationBasedMapping {
+		// In destination-based mapping, apps can live in any namespace.
+		selector = backend.ApplicationSelector{}
+	} else {
+		// In namespace-based mapping, the agent name is the namespace.
+		selector = backend.ApplicationSelector{Namespaces: []string{agentName}}
+	}
+
+	appList, err := s.appManager.List(s.ctx, selector)
+	if err != nil {
+		logCtx.WithError(err).Error("Failed to list applications for resync")
+		return
+	}
+
+	count := 0
+	for _, app := range appList {
+		if s.getAgentNameForApp(&app) == agentName {
+			s.newAppCallback(&app)
+			count++
+		}
+	}
+
+	logCtx.Infof("Resynced %d applications for agent", count)
 }
 
 func (s *Server) isAgentConnected(agentName string) bool {
