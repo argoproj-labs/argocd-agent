@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	issuermocks "github.com/argoproj-labs/argocd-agent/internal/issuer/mocks"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
@@ -503,7 +504,36 @@ func Test_readClientCertFromSecret(t *testing.T) {
 		require.Contains(t, err.Error(), "missing tls.key")
 	})
 
-	t.Run("Returns error when ca.crt is missing", func(t *testing.T) {
+	t.Run("Falls back to principal CA when ca.crt is missing", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-client-cert",
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("test-cert-data"),
+				"tls.key": []byte("test-key-data"),
+			},
+		}
+		caSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      config.SecretNamePrincipalCA,
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("principal-ca-data"),
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret, caSecret)
+
+		clientCert, clientKey, caData, err := readClientCertFromSecret(context.Background(), kubeclient, testNamespace, "test-client-cert")
+		require.NoError(t, err)
+		require.Equal(t, "test-cert-data", clientCert)
+		require.Equal(t, "test-key-data", clientKey)
+		require.Equal(t, "principal-ca-data", caData)
+	})
+
+	t.Run("Returns error when ca.crt missing and principal CA secret not found", func(t *testing.T) {
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-client-cert",
@@ -519,6 +549,33 @@ func Test_readClientCertFromSecret(t *testing.T) {
 		_, _, _, err := readClientCertFromSecret(context.Background(), kubeclient, testNamespace, "test-client-cert")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "missing ca.crt")
+		require.Contains(t, err.Error(), "could not read CA from")
+	})
+
+	t.Run("Returns error when ca.crt missing and principal CA secret has no tls.crt", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-client-cert",
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("test-cert-data"),
+				"tls.key": []byte("test-key-data"),
+			},
+		}
+		caSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      config.SecretNamePrincipalCA,
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret, caSecret)
+
+		_, _, _, err := readClientCertFromSecret(context.Background(), kubeclient, testNamespace, "test-client-cert")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "CA secret")
+		require.Contains(t, err.Error(), "missing tls.crt")
 	})
 }
 

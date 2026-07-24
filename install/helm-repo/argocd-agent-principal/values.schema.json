@@ -464,6 +464,67 @@
           },
           "title": "resourceProxy",
           "type": "object"
+        },
+        "resourceProxyAddress": {
+          "default": "argocd-agent-resource-proxy:9090",
+          "description": "Address of the resource proxy as seen by ArgoCD's application controller.",
+          "title": "resourceProxyAddress",
+          "type": "string"
+        },
+        "spire": {
+          "additionalProperties": false,
+          "description": "SPIRE integration for automatic mTLS certificate provisioning.",
+          "properties": {
+            "enabled": {
+              "default": false,
+              "description": "Enable SPIRE-based TLS. When enabled, TLS credentials are obtained from the SPIRE Workload API instead of static Kubernetes secrets.",
+              "title": "enabled",
+              "type": "boolean"
+            },
+            "socketPath": {
+              "default": "unix:///run/spire/agent-sockets/spire-agent.sock",
+              "description": "SPIRE Agent socket URI passed to --spire-agent-socket.",
+              "title": "socketPath",
+              "type": "string"
+            },
+            "mountMethod": {
+              "default": "hostPath",
+              "description": "How to mount the SPIRE Agent socket into the pod.",
+              "title": "mountMethod",
+              "type": "string",
+              "enum": ["hostPath", "csi"]
+            },
+            "hostSocketDir": {
+              "default": "/run/spire/agent-sockets",
+              "description": "Path to the SPIRE Agent socket directory. Used as the container mountPath and host path.",
+              "title": "hostSocketDir",
+              "type": "string"
+            }
+          },
+          "required": ["enabled", "socketPath", "mountMethod", "hostSocketDir"],
+          "title": "spire",
+          "type": "object"
+        },
+        "selfRegistration": {
+          "additionalProperties": false,
+          "description": "Self-registration allows agents to auto-create their cluster secret on the principal when they first connect with valid credentials.",
+          "properties": {
+            "enabled": {
+              "default": false,
+              "description": "Enable self-registration. Requires resourceProxy.enabled=true.",
+              "title": "enabled",
+              "type": "boolean"
+            },
+            "clientCertSecretName": {
+              "default": "",
+              "description": "Name of a Secret (in the principal namespace) containing a shared TLS client cert that gets copied into every self-registered cluster secret.",
+              "title": "clientCertSecretName",
+              "type": "string"
+            }
+          },
+          "required": ["enabled", "clientCertSecretName"],
+          "title": "selfRegistration",
+          "type": "object"
         }
       },
       "required": ["listen", "log", "tls", "jwt", "namespaceCreate", "websocket", "redisProxy", "resourceProxy"],

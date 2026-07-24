@@ -30,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
@@ -37,6 +38,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	grpchttp1client "golang.stackrox.io/grpc-http1/client"
 	"google.golang.org/grpc"
@@ -189,6 +191,17 @@ func WithTLSClientCertFromSecret(kube kubernetes.Interface, namespace, name stri
 			return fmt.Errorf("unable to read TLS client from secret: %w", err)
 		}
 		r.tlsConfig.Certificates = append(r.tlsConfig.Certificates, c)
+		return nil
+	}
+}
+
+// WithSPIRE configures the Remote to use SPIRE-issued SVIDs and trust bundles for TLS.
+func WithSPIRE(source *spire.Source) RemoteOption {
+	return func(r *Remote) error {
+		// NOTE: AuthorizeAny is used here to validate the principal's identity by trust domain.
+		// We trust any SVID from the trust domain instead of validating principal's actual SPIFFE ID.
+		// To validate the principal's actual SPIFFE ID, we will need to use AuthorizeID and provide the principal's SPIFFE ID to agent.
+		tlsconfig.HookMTLSClientConfig(r.tlsConfig, source.X509Source(), source.X509Source(), tlsconfig.AuthorizeAny())
 		return nil
 	}
 }

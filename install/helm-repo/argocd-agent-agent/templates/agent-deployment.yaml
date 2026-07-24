@@ -281,6 +281,12 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.label-selector
                 optional: true
+          - name: ARGOCD_AGENT_SPIRE_AGENT_SOCKET
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.spire.socket-path
+                optional: true
           ports:
             - name: metrics
               containerPort: {{ .Values.metricsPort }}
@@ -318,6 +324,11 @@ spec:
             - name: userpass-passwd
               mountPath: /app/config/creds
               readOnly: true
+            {{- if .Values.spire.enabled }}
+            - name: spire-agent-socket
+              mountPath: {{ .Values.spire.hostSocketDir }}
+              readOnly: true
+            {{- end }}
       volumes:
         - name: userpass-passwd
           secret:
@@ -326,6 +337,18 @@ spec:
               - key: credentials
                 path: userpass.creds
             optional: true
+        {{- if .Values.spire.enabled }}
+        - name: spire-agent-socket
+          {{- if eq .Values.spire.mountMethod "csi" }}
+          csi:
+            driver: "csi.spiffe.io"
+            readOnly: true
+          {{- else }}
+          hostPath:
+            path: {{ .Values.spire.hostSocketDir }}
+            type: DirectoryOrCreate
+          {{- end }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -33,6 +33,9 @@ fi
 E2E_ENV_FILE="/tmp/argocd-agent-e2e"
 if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
+    if [ -n "$ARGOCD_AUTONOMOUS_AGENT_SPIRE_AGENT_SOCKET" ]; then
+        export ARGOCD_AGENT_SPIRE_AGENT_SOCKET="$ARGOCD_AUTONOMOUS_AGENT_SPIRE_AGENT_SOCKET"
+    fi
 fi
 
 RACE_FLAG=""

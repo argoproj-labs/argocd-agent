@@ -46,6 +46,154 @@ graph TB
     ProxyCert --> ArgoCD[Argo CD Server]
 ```
 
+## Using SPIRE (Automated Certificate Management)
+
+[SPIRE](https://spiffe.io/docs/latest/spire-about/) can replace static certificate management for agent-to-principal mTLS. When enabled, TLS credentials are obtained automatically from the SPIRE Workload API — no per-agent certificate generation, no secret copying between clusters.
+
+!!! note "What SPIRE replaces"
+    SPIRE replaces only the **agent-to-principal gRPC mTLS** certificates (principal server cert, agent client certs, and agent CA certs). The resource proxy, JWT signing key, and CA secret on the principal are still managed via static secrets.
+
+### Prerequisites
+
+- SPIRE Server and Agent deployed on your clusters (see [SPIRE Getting Started](https://spiffe.io/docs/latest/try/getting-started-linux/))
+- Workload registration entries created for the principal and each agent
+
+### Step 1: Create one-time secrets on the principal
+
+These secrets are still required because the resource proxy uses static TLS:
+
+```bash
+# Initialize the CA
+argocd-agentctl pki init \
+  --principal-context <control-plane-context> \
+  --principal-namespace argocd
+
+# Issue the resource proxy server certificate
+argocd-agentctl pki issue resource-proxy \
+  --principal-context <control-plane-context> \
+  --principal-namespace argocd \
+  --dns argocd-agent-resource-proxy.argocd.svc.cluster.local \
+  --upsert
+
+# Issue a shared client certificate for self-registration
+argocd-agentctl pki issue shared-client \
+  --principal-context <control-plane-context> \
+  --principal-namespace argocd
+```
+
+### Step 2: Configure the principal
+
+Enable SPIRE by setting the `--spire-agent-socket` flag or the `ARGOCD_PRINCIPAL_SPIRE_AGENT_SOCKET` environment variable:
+
+```yaml
+# ConfigMap (argocd-agent-params)
+principal.spire.socket-path: "unix:///run/spire/agent-sockets/spire-agent.sock"
+```
+
+When SPIRE is enabled, the principal automatically:
+
+- Uses SPIRE SVIDs for its server certificate (instead of `argocd-agent-principal-tls`)
+- Requires and validates client certificates from the SPIRE trust bundle
+- Defaults `--auth` to `mtls:uri:spiffe://[^/]+/(.+)` if not explicitly set
+
+**Helm values:**
+
+```yaml
+principal:
+  spire:
+    enabled: true
+    mountMethod: hostPath
+```
+
+### Step 3: Configure the agent
+
+```yaml
+# ConfigMap (argocd-agent-params)
+agent.spire.socket-path: "unix:///run/spire/agent-sockets/spire-agent.sock"
+```
+
+When SPIRE is enabled, the agent automatically:
+
+- Uses SPIRE SVIDs for its client certificate (instead of `argocd-agent-client-tls`)
+- Defaults `--creds` to `mtls:` if not explicitly set
+- Skips loading static CA and client cert secrets
+
+**Helm values:**
+
+```yaml
+spire:
+  enabled: true
+  mountMethod: hostPath  # or "csi" for the SPIFFE CSI driver
+```
+
+### Step 4: Create SPIRE registration entries
+
+Register the principal and each agent with the SPIRE Server. The SPIFFE IDs must match the auth regex on the principal.
+
+```bash
+# Register the principal
+spire-server entry create \
+  -spiffeID spiffe://example.org/argocd/principal \
+  -parentID <spire-agent-id> \
+  -selector k8s:ns:<principal-host-namespace>
+
+# Register an agent
+spire-server entry create \
+  -spiffeID spiffe://example.org/argocd/agent/cluster-01 \
+  -parentID <spire-agent-id> \
+  -selector k8s:ns:<agent-host-namespace>
+```
+
+With the default auth regex `mtls:uri:spiffe://[^/]+/(.+)`, the agent name extracted from `spiffe://example.org/argocd/agent/cluster-01` would be `argocd/agent/cluster-01`.
+
+### Verification
+
+Check the principal logs for SPIRE connection:
+
+```bash
+kubectl logs deploy/argocd-agent-principal -n argocd | grep -i spire
+```
+
+Expected output:
+
+```
+Using SPIRE for TLS credentials (socket: unix:///run/spire/agent-sockets/spire-agent.sock)
+Connecting to SPIRE Agent at unix:///run/spire/agent-sockets/spire-agent.sock
+Connected to SPIRE Agent, SVID obtained
+Using SPIRE for TLS credentials
+Now listening on [::]:8443
+```
+
+Check agent logs:
+
+```bash
+kubectl logs deploy/argocd-agent-agent -n argocd | grep -iE "spire|auth"
+```
+
+Expected output:
+
+```
+Connecting to SPIRE Agent at unix:///run/spire/agent-sockets/spire-agent.sock
+Connected to SPIRE Agent, SVID obtained
+Authentication successful
+```
+
+### Configuration Reference
+
+| Parameter | Environment Variable | Description |
+|-----------|---------------------|-------------|
+| `principal.spire.socket-path` | `ARGOCD_PRINCIPAL_SPIRE_AGENT_SOCKET` | SPIRE Agent socket URI on the principal |
+| `agent.spire.socket-path` | `ARGOCD_AGENT_SPIRE_AGENT_SOCKET` | SPIRE Agent socket URI on the agent |
+
+### Comparison with Static Certificates
+
+| | Static Certs | SPIRE |
+|---|---|---|
+| **Per-agent setup** | Generate cert, copy CA, copy cert, register agent | Create SPIRE entry, deploy agent |
+| **Certificate rotation** | Manual (re-issue and redistribute) | Automatic (SPIRE rotates SVIDs) |
+| **Secrets on agent cluster** | `argocd-agent-ca`, `argocd-agent-client-tls` | None (SPIRE provides credentials) |
+| **Secrets on principal cluster** | CA, principal TLS, resource proxy, JWT | CA, resource proxy, JWT, shared client cert |
+
 ## Using argocd-agentctl CLI (Recommended)
 
 The `argocd-agentctl` CLI provides the simplest way to manage the entire PKI lifecycle.
@@ -621,6 +769,7 @@ kubectl get secret argocd-agent-client-tls -n argocd -o jsonpath='{.data.tls\.cr
 5. **Monitor Expiration**: Set up alerts for certificate expiration
 6. **Restrict CA Access**: Only the principal cluster should have the CA private key
 7. **Use Strong TLS Settings**: Enable TLS 1.3 and disable weak cipher suites
+8. **Consider SPIRE for multi-cluster**: For deployments with many clusters, SPIRE eliminates per-agent certificate management
 
 ## Related Documentation
 

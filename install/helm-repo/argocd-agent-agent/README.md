@@ -1,6 +1,6 @@
 # argocd-agent-agent
 
-![Version: 0.2.6](https://img.shields.io/badge/Version-0.2.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
+![Version: 0.2.7](https://img.shields.io/badge/Version-0.2.7-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
 
 Argo CD Agent for connecting managed clusters to a Principal
 
@@ -112,6 +112,10 @@ Kubernetes: `>=1.24.0-0`
 | serviceMonitor.scheme | string | `""` | Prometheus ServiceMonitor scheme |
 | serviceMonitor.scrapeTimeout | string | `"10s"` | Prometheus scrape timeout. Must be a valid duration string (e.g. "10s"). |
 | serviceMonitor.tlsConfig | object | `{}` | Prometheus ServiceMonitor tlsConfig |
+| spire | object | `{"enabled":false,"hostSocketDir":"/run/spire/agent-sockets","mountMethod":"hostPath","socketPath":"unix:///run/spire/agent-sockets/spire-agent.sock"}` | SPIRE integration for automatic mTLS certificate provisioning. |
+| spire.enabled | bool | `false` | Enable SPIRE-based TLS. When enabled, TLS credentials are obtained from the SPIRE Workload API instead of static Kubernetes secrets. |
+| spire.hostSocketDir | string | `"/run/spire/agent-sockets"` | Path to the SPIRE Agent socket directory. Used as the container mountPath and host path. |
+| spire.mountMethod | string | `"hostPath"` | How to mount the SPIRE Agent socket into the pod. "hostPath" mounts the socket directory from the host. |
 | terminationGracePeriodSeconds | int | `30` | Grace period for Pod termination (seconds). |
 | tests | object | `{"enabled":false,"image":"bitnamilegacy/kubectl","tag":"1.33.4"}` | Configuration for helm-chart tests. |
 | tests.enabled | bool | `false` | By default, chart tests are disabled. |

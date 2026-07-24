@@ -236,6 +236,20 @@ createNamespace: false
 # Only matching resources will be listed, watched, and processed.
 labelSelector: ""
 
+## @section SPIRE Integration
+# -- SPIRE integration for automatic mTLS certificate provisioning.
+spire:
+  # -- Enable SPIRE-based TLS. When enabled, TLS credentials are obtained from
+  # the SPIRE Workload API instead of static Kubernetes secrets.
+  enabled: false
+  # -- SPIRE Agent socket URI passed to --spire-agent-socket.
+  socketPath: "unix:///run/spire/agent-sockets/spire-agent.sock"
+  # -- How to mount the SPIRE Agent socket into the pod.
+  # "hostPath" mounts the socket directory from the host.
+  mountMethod: "hostPath"
+  # -- Path to the SPIRE Agent socket directory. Used as the container mountPath and host path.
+  hostSocketDir: "/run/spire/agent-sockets"
+
 ## @section Redis TLS
 # -- Redis TLS configuration.
 redisTLS:

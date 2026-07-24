@@ -351,6 +351,30 @@ spec:
                 name: {{ include "argocd-agent-principal.configMapName" . }}
                 key: principal.event-processors
                 optional: true
+          - name: ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.self-registration.enabled
+                optional: true
+          - name: ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.self-registration.client-cert-secret
+                optional: true
+          - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_ADDRESS
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.resource-proxy.address
+                optional: true
+          - name: ARGOCD_PRINCIPAL_SPIRE_AGENT_SOCKET
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.spire.socket-path
+                optional: true
           - name: REDIS_PASSWORD
             valueFrom:
               secretKeyRef:
@@ -412,6 +436,11 @@ spec:
             - name: redis-tls-ca
               mountPath: /app/config/redis-tls
               readOnly: true
+            {{- if .Values.principal.spire.enabled }}
+            - name: spire-agent-socket
+              mountPath: {{ .Values.principal.spire.hostSocketDir }}
+              readOnly: true
+            {{- end }}
       volumes:
       - name: userpass-passwd
         secret:
@@ -445,6 +474,18 @@ spec:
           - key: ca.crt
             path: ca.crt
           optional: true
+      {{- if .Values.principal.spire.enabled }}
+      - name: spire-agent-socket
+        {{- if eq .Values.principal.spire.mountMethod "csi" }}
+        csi:
+          driver: "csi.spiffe.io"
+          readOnly: true
+        {{- else }}
+        hostPath:
+          path: {{ .Values.principal.spire.hostSocketDir }}
+          type: DirectoryOrCreate
+        {{- end }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

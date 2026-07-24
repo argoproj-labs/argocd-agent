@@ -43,6 +43,7 @@ fi
 
 # Point the principal to the e2e test configuration if it exists
 E2E_ENV_FILE="/tmp/argocd-agent-e2e"
+PRINCIPAL_AUTH='mtls:CN=([^,]+)'
 if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
     export ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=${ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET:-false}
@@ -50,6 +51,10 @@ if [ -f "$E2E_ENV_FILE" ]; then
     export ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION=${ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION:-false}
     if [ -n "$ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET" ]; then
         export ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET
+    fi
+    if [ -n "$ARGOCD_PRINCIPAL_SPIRE_AGENT_SOCKET" ]; then
+        export ARGOCD_PRINCIPAL_SPIRE_AGENT_SOCKET
+        PRINCIPAL_AUTH='mtls:uri:spiffe://[^/]+/(.+)'
     fi
 fi
 
@@ -67,6 +72,6 @@ go run ${RACE_FLAG} github.com/argoproj-labs/argocd-agent/cmd/argocd-agent princ
 	--log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} \
 	--namespace ${ARGOCD_PRINCIPAL_NAMESPACE} \
     --destination-based-mapping=${ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING:-false}\
-	--auth "mtls:CN=([^,]+)" \
+	--auth "${PRINCIPAL_AUTH}" \
     --resource-proxy-address "${ARGOCD_AGENT_RESOURCE_PROXY}:9090" \
 	$ARGS

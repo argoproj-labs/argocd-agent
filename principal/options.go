@@ -34,6 +34,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
@@ -105,6 +106,9 @@ type ServerOptions struct {
 	redisTLSCA                  *x509.CertPool
 	redisTLSCAPath              string
 	redisTLSInsecure            bool
+
+	// SPIRE configuration
+	spireSource *spire.Source
 
 	// haOptions contains HA configuration options
 	haOptions []ha.Option
@@ -270,6 +274,14 @@ func WithTLSRootCaFromSecret(kube kubernetes.Interface, namespace, name string, 
 func WithRequireClientCerts(require bool) ServerOption {
 	return func(o *Server) error {
 		o.options.requireClientCerts = require
+		return nil
+	}
+}
+
+// WithSPIRESource configures the server to use SPIRE-issued SVIDs and trust bundles for TLS.
+func WithSPIRESource(source *spire.Source) ServerOption {
+	return func(o *Server) error {
+		o.options.spireSource = source
 		return nil
 	}
 }
