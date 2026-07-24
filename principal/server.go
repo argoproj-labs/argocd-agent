@@ -1487,6 +1487,9 @@ func (s *Server) cleanupAgentState(agentName string) {
 		s.metrics.ResourceProxyErrors.DeletePartialMatch(agentLabel)
 		s.metrics.RedisProxyRequests.DeletePartialMatch(agentLabel)
 		s.metrics.RedisProxyErrors.DeletePartialMatch(agentLabel)
+		s.metrics.EventProcessingTime.DeletePartialMatch(agentLabel)
+		s.metrics.EventWriterSendErrors.DeletePartialMatch(agentLabel)
+		s.metrics.EventWriterEventsDiscarded.DeletePartialMatch(agentLabel)
 	}
 
 	logCtx.Info("Agent state cleanup complete")

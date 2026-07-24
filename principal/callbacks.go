@@ -136,10 +136,15 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 
+	logCtx = logCtx.WithField("queue", agentName)
+
+	if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+		logCtx.Warn("Application is targeting an invalid agent, skipping update")
+		return
+	}
+
 	s.resources.Add(agentName, resources.NewResourceKeyFromApp(new))
 	s.trackAppToAgent(new, agentName)
-
-	logCtx = logCtx.WithField("queue", agentName)
 
 	if s.isResourceFromAutonomousAgent(new) {
 		// Remove finalizers from autonomous agent applications if it is being deleted
@@ -171,10 +176,6 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 	if !s.queues.HasQueuePair(agentName) {
-		if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
-			logCtx.Warn("Application is targeting an invalid agent, skipping update")
-			return
-		}
 		if err := s.queues.Create(agentName); err != nil {
 			logCtx.WithError(err).Error("failed to create a queue pair for agent")
 			return
