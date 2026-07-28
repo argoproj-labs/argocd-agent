@@ -24,7 +24,7 @@ When choosing a name, consider the following:
 
 * Naming rules for an agent are equal to [naming rules for Kubernetes namespaces](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names), and must follow the [DNS label standard](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names).
 * The name of an agent should clearly identify the agent, and the cluster it is running on. The name of an agent will be visible as the destination cluster in Argo CD.
-* For each agent, a namespace with the same name will be created on the control plane cluster. These namespaces must be accessible by the Argo CD API server on the control plane through apps-in-any-namespace configuration.
+* With namespace-based mapping (the default), a namespace with the same name as the agent will be created on the control plane cluster. These namespaces must be accessible by the Argo CD API server on the control plane through apps-in-any-namespace configuration. With destination-based mapping, per-agent namespaces are not required.
 * The name of the agent must be part of its TLS client certificate's subject
 
 ## Choosing the right operational mode for each agent

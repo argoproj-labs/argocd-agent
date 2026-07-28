@@ -258,7 +258,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: my-app
-  namespace: argocd  # Can be any namespace
+  namespace: argocd  # Or another namespace if apps-in-any-namespace, allowed-namespaces, and AppProject sourceNamespaces are configured
 spec:
   # ... application specification
   destination:

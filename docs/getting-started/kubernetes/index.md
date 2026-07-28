@@ -477,7 +477,26 @@ kubectl rollout restart deployment argocd-agent-agent -n argocd --context <workl
 
 ### Test Application Synchronization (Destination-Based Mapping)
 
-With destination-based mapping, create a test application that uses `spec.destination.name` to target the agent:
+With destination-based mapping, Applications can live in any namespace. Before creating the test Application, prepare the namespace and ensure the principal is allowed to operate in it:
+
+```bash
+# Create the namespace for the test Application on the control plane
+kubectl create namespace team-ns --context <control-plane-context>
+
+# Allow the principal to operate in team-ns (in addition to the agent namespace)
+kubectl patch configmap argocd-agent-params -n argocd --context <control-plane-context> \
+  --patch '{"data":{
+    "principal.allowed-namespaces":"my-first-agent,team-ns"
+  }}'
+
+# Restart the principal to apply the updated allowed-namespaces
+kubectl rollout restart deployment argocd-agent-principal -n argocd --context <control-plane-context>
+```
+
+!!! tip
+    The `default` AppProject was already patched with `sourceNamespaces: ["*"]` in [Step 6.4](#64-test-application-synchronization-managed-mode), so it already permits Applications from `team-ns`.
+
+Now create a test application that uses `spec.destination.name` to target the agent:
 
 ```bash
 cat <<EOF | kubectl apply -f - --context <control-plane-context>

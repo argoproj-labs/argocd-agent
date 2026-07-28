@@ -88,7 +88,7 @@ argocd-agent agent --destination-based-mapping
 |---|---|
 | **CLI Flag** | `--create-namespace` |
 | **Environment Variable** | `ARGOCD_AGENT_CREATE_NAMESPACE` |
-| **ConfigMap Entry** | N/A |
+| **ConfigMap Entry** | `agent.create-namespace` |
 | **Type** | Boolean |
 | **Default** | `false` |
 

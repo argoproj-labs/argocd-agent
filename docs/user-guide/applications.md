@@ -149,16 +149,16 @@ If an Application is modified directly on the managed agent cluster (outside of 
 
 ### Lifecycle Management
 
-- **Creation**: Create Applications on the principal in the agent's namespace
+- **Creation**: Create Applications on the principal — in the agent's namespace (namespace-based mapping) or with `spec.destination.name` set to the agent (destination-based mapping)
 - **Updates**: Modify Applications on the principal; changes are automatically propagated
 - **Deletion**: Delete Applications on the principal; they're automatically removed from the agent
-- **Agent Connection**: When an agent connects, it receives all Applications in its namespace
+- **Agent Connection**: When an agent connects, it receives all Applications that are mapped to it
 
 ## Autonomous Agent Mode
 
 ### Creating Applications
 
-In autonomous mode, Applications are created directly on the **agent cluster**. The agent then synchronizes these Applications to the principal, where they appear in a namespace named after the agent.
+In autonomous mode, Applications are created directly on the **agent cluster**. The agent then synchronizes these Applications to the principal, where they appear in a dedicated namespace named after the agent on the control plane.
 
 ### Example: Creating an Application on an Autonomous Agent
 
@@ -402,7 +402,7 @@ This Application will remain only on the autonomous agent cluster and will not b
 
 2. **Label Removal**: If you remove the skip sync label from an existing Application, it will begin synchronizing according to the normal rules for your agent mode.
 
-3. **Namespace Rules Still Apply**: The skip sync label doesn't override namespace-based filtering. Applications must still be in allowed namespaces to be processed.
+3. **Routing Rules Still Apply**: The skip sync label doesn't override the normal mapping mode rules. Applications must still be in allowed namespaces to be processed.
 
 ### Use Cases
 
