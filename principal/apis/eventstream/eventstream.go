@@ -629,11 +629,12 @@ recvloop:
 // Returns true if the agent was connected and disconnected, false if it was not connected.
 func (s *Server) DisconnectAgent(agentName string) bool {
 	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
 	c, found := s.activeClients[agentName]
-	s.activeClientsMu.Unlock()
 	if !found || c == nil {
 		return false
 	}
+	delete(s.activeClients, agentName)
 	if c.cancelFn != nil {
 		c.cancelFn()
 	}
