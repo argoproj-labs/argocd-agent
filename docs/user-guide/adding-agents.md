@@ -114,12 +114,15 @@ This command:
 Create the required namespace for the agent on the principal cluster:
 
 ```bash
-# Create namespace for managed agents
+# Create namespace for managed agents (namespace-based mapping)
 kubectl create namespace <agent-name> --context <control-plane-context>
 
 # For autonomous agents, the namespace is typically created automatically
 # but you can create it manually if needed
 ```
+
+!!! tip "Destination-Based Mapping"
+    If you are using **destination-based mapping**, you do not need to create a namespace per agent on the principal. Applications can live in any namespace. Skip this step and instead ensure `--destination-based-mapping` is enabled on both the principal and agent. See [Agent Mapping Modes](../concepts/agent-mapping.md) for details.
 
 ## Step 5: Deploy Agent to Workload Cluster
 
@@ -193,6 +196,28 @@ data:
   # Logging
   agent.log.level: "info"
 ```
+
+### Destination-Based Mapping Configuration
+
+If you are using destination-based mapping instead of the default namespace-based mapping, add the following to the agent's ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-agent-params
+  namespace: argocd
+data:
+  # ... connection and auth settings as above ...
+  
+  # Destination-based mapping settings
+  agent.destination-based-mapping: "true"
+  agent.create-namespace: "true"  # Recommended: auto-create target namespaces
+  agent.allowed-namespaces: "argocd,team-*"  # Optional: restrict managed namespaces
+```
+
+!!! important "Both Sides Must Match"
+    Destination-based mapping must be enabled on **both** the principal and agent. Ensure the principal also has `--destination-based-mapping` set. See the [Configuration Reference](../configuration/reference/principal.md#destination-based-mapping) for principal-side configuration.
 
 ### Authentication Methods
 
@@ -358,12 +383,13 @@ kubectl delete -n argocd \
 
 After successfully adding agents:
 
-1. **Configure Applications**: Create Applications in the appropriate namespaces
+1. **Configure Applications**: Create Applications in the appropriate namespaces (or with `destination.name` for DBM)
 2. **Set up AppProjects**: Define project boundaries and access controls
 3. **Monitor Resources**: Use the live resources feature to view cluster state
 4. **Implement GitOps**: Configure your deployment pipelines
 
 For more information, refer to:
+- [Agent Mapping Modes](../concepts/agent-mapping.md) - Namespace-based vs destination-based mapping
 - [Application Synchronization](./applications.md)
 - [AppProject Synchronization](./appprojects.md)
 - [Live Resources](./live-resources.md) 

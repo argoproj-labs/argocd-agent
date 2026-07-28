@@ -35,6 +35,18 @@ It's perfectly fine to run a mixed-mode scenario, where some of the agents run i
 
 If in doubt, it's recommended to start using the [managed mode](../concepts/agent-modes/managed.md) for your agents.
 
+## Choosing the agent mapping mode
+
+In addition to the operational mode, you must choose how Applications are routed to managed agents. argocd-agent supports two [mapping modes](../concepts/agent-mapping.md):
+
+* **Namespace-based mapping** (default): Each agent has a dedicated namespace on the control plane. Applications placed in that namespace are routed to the agent. Simple to set up but limited multi-tenancy.
+
+* **Destination-based mapping**: Applications use `spec.destination.name` to specify the target agent, regardless of their namespace. Provides better multi-tenancy support and matches traditional Argo CD's routing model.
+
+If you are migrating from a traditional multi-cluster Argo CD setup, destination-based mapping provides the most familiar experience since it uses the same `spec.destination.name` field.
+
+See [Agent Mapping Modes](../concepts/agent-mapping.md) for a detailed comparison.
+
 ## Argo CD Component Placement
 
 The *argocd-agent* architecture requires specific Argo CD components to be deployed on different clusters. Understanding this placement is crucial for a successful setup.

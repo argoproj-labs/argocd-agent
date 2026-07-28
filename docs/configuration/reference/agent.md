@@ -60,6 +60,62 @@ Mode of operation for the agent.
 
 Namespace to manage applications in.
 
+### Destination-Based Mapping
+
+| | |
+|---|---|
+| **CLI Flag** | `--destination-based-mapping` |
+| **Environment Variable** | `ARGOCD_AGENT_DESTINATION_BASED_MAPPING` |
+| **ConfigMap Entry** | `agent.destination-based-mapping` |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Enable destination-based mapping mode. When enabled, the agent creates Applications in their original namespace (preserving the namespace from the principal) instead of the agent's configured namespace. The agent also watches for Applications in all allowed namespaces rather than only its own namespace.
+
+Both the principal and agent must have this flag enabled for destination-based mapping to work correctly.
+
+See [Agent Mapping Modes](../../concepts/agent-mapping.md) for a detailed comparison of namespace-based and destination-based mapping.
+
+**Example:**
+
+```bash
+argocd-agent agent --destination-based-mapping
+```
+
+### Create Namespace
+
+| | |
+|---|---|
+| **CLI Flag** | `--create-namespace` |
+| **Environment Variable** | `ARGOCD_AGENT_CREATE_NAMESPACE` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Automatically create target namespaces on the agent cluster when they do not exist. This is used with destination-based mapping to ensure that namespaces referenced by Applications exist before the Application is created.
+
+Without this flag, Applications targeting non-existent namespaces will fail to be created on the agent.
+
+**Example:**
+
+```bash
+argocd-agent agent --destination-based-mapping --create-namespace
+```
+
+### Allowed Namespaces
+
+| | |
+|---|---|
+| **CLI Flag** | `--allowed-namespaces` |
+| **Environment Variable** | `ARGOCD_AGENT_ALLOWED_NAMESPACES` |
+| **ConfigMap Entry** | `agent.allowed-namespaces` |
+| **Type** | String slice (comma-separated) |
+| **Default** | `[]` (empty - all namespaces allowed) |
+
+List of namespaces the agent is allowed to operate in. Supports shell-style wildcards.
+
+**Example:** `argocd,team-a-*,team-b-*`
+
 ### Credentials
 
 | | |
