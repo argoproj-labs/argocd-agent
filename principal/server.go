@@ -94,10 +94,6 @@ type Server struct {
 	grpcServer  *grpc.Server
 	authMethods *auth.Methods
 	blocklist   *blocklist.Blocklist
-	// blocklistInformer watches the TLS blocklist ConfigMap for changes
-	blocklistInformer *informer.Informer[*corev1.ConfigMap]
-	// fingerprintToAgent maps certificate fingerprints to connected agent names
-	fingerprintToAgent *concurrentMap[string, string]
 	// queues contains events that are EITHER queued to be sent to the agent ('outbox'), OR that have been received by the agent and are waiting to be processed ('inbox').
 	// Server uses clientID/namespace as a key, to refer to each specific agent's queue
 	queues *queue.SendRecvQueues
@@ -506,10 +502,8 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		if err != nil {
 			return nil, fmt.Errorf("could not create blocklist informer: %w", err)
 		}
-		s.blocklistInformer = blocklistInformer
+		s.blocklist.Informer = blocklistInformer
 	}
-
-	s.fingerprintToAgent = &concurrentMap[string, string]{m: make(map[string]string)}
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
 	}
@@ -898,10 +892,11 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 
 	// Start the blocklist informer
-	if s.blocklistInformer != nil {
+	if s.blocklist != nil && s.blocklist.Informer != nil {
 		go func() {
-			if err := s.blocklistInformer.Start(s.ctx); err != nil {
+			if err := s.blocklist.Informer.Start(s.ctx); err != nil {
 				log().WithError(err).Error("Blocklist informer has exited non-successfully")
+				errch <- fmt.Errorf("blocklist informer failed: %w", err)
 			} else {
 				log().Info("Blocklist informer has exited")
 			}

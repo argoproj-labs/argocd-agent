@@ -82,4 +82,22 @@ func TestBlocklist(t *testing.T) {
 		bl.Add("AA:BB")
 		assert.Equal(t, 1, bl.Len())
 	})
+
+	t.Run("track and lookup agent by fingerprint", func(t *testing.T) {
+		bl := New()
+		bl.TrackAgent("AABB", "agent-managed")
+		assert.Equal(t, "agent-managed", bl.AgentForFingerprint("AABB"))
+	})
+
+	t.Run("lookup unknown fingerprint returns empty", func(t *testing.T) {
+		bl := New()
+		assert.Empty(t, bl.AgentForFingerprint("UNKNOWN"))
+	})
+
+	t.Run("track overwrites previous agent", func(t *testing.T) {
+		bl := New()
+		bl.TrackAgent("AABB", "agent-old")
+		bl.TrackAgent("AABB", "agent-new")
+		assert.Equal(t, "agent-new", bl.AgentForFingerprint("AABB"))
+	})
 }

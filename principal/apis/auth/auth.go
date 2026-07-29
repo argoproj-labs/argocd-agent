@@ -154,11 +154,11 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 	}
 
 	logFields := logrus.Fields{"client": clientID, "agent_version": agentVersion}
-	var fingerPrint string
-	if ar.Method == "mtls" {
-		fingerPrint = tlsutil.FingerprintFromContext(ctx)
-		if fingerPrint != "" {
-			logFields["fingerprint"] = fingerPrint
+	var fingerprint string
+	if ar.Method == auth.MethodMTLS {
+		fingerprint = tlsutil.FingerprintFromContext(ctx)
+		if fingerprint != "" {
+			logFields["fingerprint"] = fingerprint
 		}
 	}
 	logCtx.WithFields(logFields).Info("client authentication successful")
@@ -188,8 +188,8 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 		s.options.onAuthenticated(clientID, ar.AgentNamespace)
 	}
 
-	if s.options.onCertificateSeen != nil && fingerPrint != "" {
-		s.options.onCertificateSeen(clientID, fingerPrint)
+	if s.options.onCertificateSeen != nil && fingerprint != "" {
+		s.options.onCertificateSeen(clientID, fingerprint)
 	}
 
 	return &authapi.AuthResponse{
