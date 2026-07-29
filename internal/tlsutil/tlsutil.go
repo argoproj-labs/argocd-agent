@@ -156,7 +156,7 @@ func FingerprintFromContext(ctx context.Context) string {
 		return ""
 	}
 	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
-	if !ok || len(tlsInfo.State.VerifiedChains) < 1 {
+	if !ok || len(tlsInfo.State.VerifiedChains) < 1 || len(tlsInfo.State.VerifiedChains[0]) < 1 {
 		return ""
 	}
 	return CertificateFingerprint(tlsInfo.State.VerifiedChains[0][0])

@@ -44,7 +44,7 @@ func Test_Authenticate(t *testing.T) {
 		auths, err := NewServer(queues, "argocd", nil, nil)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
+			Method:      auth.MethodUserPass,
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
 			Version:     testVersion,
@@ -57,12 +57,12 @@ func Test_Authenticate(t *testing.T) {
 		am := authmock.NewMethod(t)
 		// Mock authentication to succeed so we reach version validation
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
-		ams.RegisterMethod("userpass", am)
+		ams.RegisterMethod(auth.MethodUserPass, am)
 
 		auths, err := NewServer(queues, "argocd", ams, nil)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
+			Method:      auth.MethodUserPass,
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
 			Version:     "",
@@ -75,12 +75,12 @@ func Test_Authenticate(t *testing.T) {
 		am := authmock.NewMethod(t)
 		// Mock authentication to succeed so we reach version validation
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
-		ams.RegisterMethod("userpass", am)
+		ams.RegisterMethod(auth.MethodUserPass, am)
 
 		auths, err := NewServer(queues, "argocd", ams, nil)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
+			Method:      auth.MethodUserPass,
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
 			Version:     testVersion + "-mismatch",
@@ -92,7 +92,7 @@ func Test_Authenticate(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
-		ams.RegisterMethod("userpass", am)
+		ams.RegisterMethod(auth.MethodUserPass, am)
 
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
@@ -101,7 +101,7 @@ func Test_Authenticate(t *testing.T) {
 		auths, err := NewServer(queues, "argocd", ams, iss)
 		require.NoError(t, err)
 		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:         "userpass",
+			Method:         auth.MethodUserPass,
 			Credentials:    map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:           "managed",
 			Version:        testVersion,
@@ -119,11 +119,11 @@ func Test_Authenticate(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("", errAuthenticationFailed)
-		ams.RegisterMethod("userpass", am)
+		ams.RegisterMethod(auth.MethodUserPass, am)
 		auths, err := NewServer(queues, "argocd", ams, nil)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
+			Method:      auth.MethodUserPass,
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "wordpass"},
 			Mode:        "managed",
 			Version:     testVersion,
@@ -135,13 +135,13 @@ func Test_Authenticate(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
-		ams.RegisterMethod("userpass", am)
+		ams.RegisterMethod(auth.MethodUserPass, am)
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("", fmt.Errorf("oops"))
 		auths, err := NewServer(queues, "argocd", ams, iss)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
+			Method:      auth.MethodUserPass,
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "wordpass"},
 			Mode:        "managed",
 			Version:     testVersion,
@@ -153,14 +153,14 @@ func Test_Authenticate(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
-		ams.RegisterMethod("userpass", am)
+		ams.RegisterMethod(auth.MethodUserPass, am)
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
 		iss.On("IssueRefreshToken", encodedSubject, mock.Anything).Return("", fmt.Errorf("oops"))
 		auths, err := NewServer(queues, "argocd", ams, iss)
 		require.NoError(t, err)
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
+			Method:      auth.MethodUserPass,
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "wordpass"},
 			Mode:        "managed",
 			Version:     testVersion,
@@ -172,7 +172,7 @@ func Test_Authenticate(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
-		ams.RegisterMethod("userpass", am)
+		ams.RegisterMethod(auth.MethodUserPass, am)
 
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
@@ -185,7 +185,7 @@ func Test_Authenticate(t *testing.T) {
 		auths, err := NewServer(queues, "argocd", ams, iss, WithAgentRegistrationManager(mgr))
 		require.NoError(t, err)
 		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
+			Method:      auth.MethodUserPass,
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
 			Version:     testVersion,
@@ -200,7 +200,7 @@ func Test_Authenticate(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
-		ams.RegisterMethod("userpass", am)
+		ams.RegisterMethod(auth.MethodUserPass, am)
 
 		// Create manager with agent registration enabled but no CA cert path to make it fail
 		kubeclient := kube.NewFakeClientsetWithResources()
@@ -212,7 +212,7 @@ func Test_Authenticate(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
+			Method:      auth.MethodUserPass,
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
 			Version:     testVersion,
@@ -224,7 +224,7 @@ func Test_Authenticate(t *testing.T) {
 		ams := auth.NewMethods()
 		am := authmock.NewMethod(t)
 		am.On("Authenticate", mock.Anything, mock.Anything).Return("user1", nil)
-		ams.RegisterMethod("userpass", am)
+		ams.RegisterMethod(auth.MethodUserPass, am)
 
 		iss := issuermock.NewIssuer(t)
 		iss.On("IssueAccessToken", encodedSubject, mock.Anything).Return("access", nil)
@@ -234,7 +234,7 @@ func Test_Authenticate(t *testing.T) {
 		auths, err := NewServer(queues, "argocd", ams, iss)
 		require.NoError(t, err)
 		r, err := auths.Authenticate(context.TODO(), &authapi.AuthRequest{
-			Method:      "userpass",
+			Method:      auth.MethodUserPass,
 			Credentials: map[string]string{userpass.ClientIDField: "user1", userpass.ClientSecretField: "password"},
 			Mode:        "managed",
 			Version:     testVersion,

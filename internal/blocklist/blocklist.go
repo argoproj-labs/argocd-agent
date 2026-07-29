@@ -16,17 +16,28 @@ package blocklist
 
 import (
 	"sync"
+
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/argoproj-labs/argocd-agent/internal/informer"
 )
 
 // Blocklist is a thread-safe set of blocked certificate fingerprints.
+// It also tracks which agent is using which fingerprint, for active
+// disconnects and holds the ConfigMap informer that watches for changes.
 type Blocklist struct {
-	entries map[string]bool
-	mu      sync.RWMutex
+	entries  map[string]bool
+	mu       sync.RWMutex
+	agents   map[string]string
+	agentsMu sync.RWMutex
+	// Informer watches the blocklist ConfigMap for changes.
+	Informer *informer.Informer[*corev1.ConfigMap]
 }
 
 func New() *Blocklist {
 	return &Blocklist{
 		entries: make(map[string]bool),
+		agents:  make(map[string]string),
 	}
 }
 
@@ -77,4 +88,19 @@ func (b *Blocklist) Len() int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return len(b.entries)
+}
+
+// TrackAgent records that the given agent is using the given fingerprint.
+func (b *Blocklist) TrackAgent(fingerprint, agentName string) {
+	b.agentsMu.Lock()
+	defer b.agentsMu.Unlock()
+	b.agents[fingerprint] = agentName
+}
+
+// AgentForFingerprint returns the agent name associated with the given
+// fingerprint, or empty string if not tracked.
+func (b *Blocklist) AgentForFingerprint(fingerprint string) string {
+	b.agentsMu.RLock()
+	defer b.agentsMu.RUnlock()
+	return b.agents[fingerprint]
 }

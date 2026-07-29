@@ -1151,7 +1151,7 @@ func (c *concurrentMap[K, V]) DeleteByValue(value V, eq func(a, b V) bool) {
 // to disconnect an agent by fingerprint without requiring an agent name in the
 // blocklist entry.
 func (s *Server) trackAgentFingerprint(agentName, fingerprint string) {
-	s.fingerprintToAgent.Set(fingerprint, agentName)
+	s.blocklist.TrackAgent(fingerprint, agentName)
 }
 
 // addBlocklistCallback is called by the informer when the blocklist ConfigMap
@@ -1162,24 +1162,15 @@ func (s *Server) addBlocklistCallback(cm *corev1.ConfigMap) {
 
 // updateBlocklistCallback is called by the informer when the blocklist
 // ConfigMap is updated. It replaces the in-memory blocklist with
-// the entries from the ConfigMap and disconnects any newly blocklisted agents.
+// the entries from the ConfigMap and disconnects all blocklisted agents.
 func (s *Server) updateBlocklistCallback(oldCM, newCM *corev1.ConfigMap) {
 	if s.blocklist == nil {
 		return
 	}
-	newFingerprints := blocklist.FingerprintsFromConfigMapData(newCM.Data)
-
-	oldFingerprints := make(map[string]bool)
-	if oldCM != nil {
-		for _, fp := range blocklist.FingerprintsFromConfigMapData(oldCM.Data) {
-			oldFingerprints[fp] = true
-		}
-	}
-
-	s.blocklist.Replace(newFingerprints)
+	fingerprints := blocklist.FingerprintsFromConfigMapData(newCM.Data)
+	s.blocklist.Replace(fingerprints)
 	log().Infof("Reloaded TLS blocklist: %d entries", s.blocklist.Len())
-
-	s.disconnectNewlyBlocklisted(newFingerprints, oldFingerprints)
+	s.disconnectBlocklisted(fingerprints)
 }
 
 // deleteBlocklistCallback is called by the informer when the blocklist
@@ -1193,18 +1184,15 @@ func (s *Server) deleteBlocklistCallback(cm *corev1.ConfigMap) {
 	log().Info("Blocklist ConfigMap deleted, cleared in-memory blocklist")
 }
 
-// disconnectNewlyBlocklisted terminates active connections for any fingerprints
-// that were not present in the previous blocklist. It resolves the agent name
-// from the in-memory fingerprint-to-agent mapping.
-func (s *Server) disconnectNewlyBlocklisted(fingerprints []string, oldFingerprints map[string]bool) {
+// disconnectBlocklisted terminates active connections for all blocklisted
+// fingerprints. It resolves the agent name from the in-memory
+// fingerprint-to-agent mapping.
+func (s *Server) disconnectBlocklisted(fingerprints []string) {
 	if s.eventStreamSrv == nil {
 		return
 	}
 	for _, fp := range fingerprints {
-		if oldFingerprints[fp] {
-			continue
-		}
-		agentName := s.fingerprintToAgent.Get(fp)
+		agentName := s.blocklist.AgentForFingerprint(fp)
 		if agentName == "" {
 			continue
 		}

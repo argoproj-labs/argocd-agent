@@ -550,12 +550,15 @@ func (s *Server) DisconnectAll() {
 // disconnected, false otherwise.
 func (s *Server) DisconnectAgent(agentName string) bool {
 	s.activeClientsMu.Lock()
-	defer s.activeClientsMu.Unlock()
 	c, found := s.activeClients[agentName]
 	if !found || c == nil {
+		s.activeClientsMu.Unlock()
 		return false
 	}
 	delete(s.activeClients, agentName)
+	s.activeClientsMu.Unlock()
+
+	s.clusterMgr.SetAgentConnectionStatus(agentName, v1alpha1.ConnectionStatusFailed, time.Now())
 	if c.cancelFn != nil {
 		c.cancelFn()
 	}
