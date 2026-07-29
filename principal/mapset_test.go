@@ -246,3 +246,44 @@ func Test_mapToSet_PanicPrevention(t *testing.T) {
 		})
 	})
 }
+
+func TestMapToSet_DeleteFromAll(t *testing.T) {
+	t.Run("removes value from all keys", func(t *testing.T) {
+		ms := NewMapToSet()
+		ms.Add("repo1", "agent1")
+		ms.Add("repo1", "agent2")
+		ms.Add("repo2", "agent1")
+		ms.Add("repo3", "agent3")
+
+		ms.DeleteFromAll("agent1")
+
+		repo1 := ms.Get("repo1")
+		require.NotNil(t, repo1)
+		assert.False(t, repo1["agent1"])
+		assert.True(t, repo1["agent2"])
+
+		assert.Nil(t, ms.Get("repo2"))
+
+		repo3 := ms.Get("repo3")
+		require.NotNil(t, repo3)
+		assert.True(t, repo3["agent3"])
+	})
+
+	t.Run("no-op for non-existent value", func(t *testing.T) {
+		ms := NewMapToSet()
+		ms.Add("key1", "value1")
+
+		assert.NotPanics(t, func() {
+			ms.DeleteFromAll("nonexistent")
+		})
+
+		assert.Equal(t, map[string]bool{"value1": true}, ms.Get("key1"))
+	})
+
+	t.Run("works on empty map", func(t *testing.T) {
+		ms := NewMapToSet()
+		assert.NotPanics(t, func() {
+			ms.DeleteFromAll("value")
+		})
+	})
+}
