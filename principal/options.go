@@ -510,6 +510,20 @@ func WithKeepAliveMinimumInterval(interval time.Duration) ServerOption {
 	}
 }
 
+// WithResyncMinInterval sets the global minimum interval the principal
+// enforces between resync rounds requested by any single agent. Resync
+// requests arriving more often are refused. An interval of 0 disables the
+// enforcement.
+func WithResyncMinInterval(interval time.Duration) ServerOption {
+	return func(o *Server) error {
+		if interval < 0 {
+			return fmt.Errorf("resync minimum interval must be non-negative")
+		}
+		o.resyncMinInterval = interval
+		return nil
+	}
+}
+
 func WithRedis(redisAddress, redisPassword, redisCompressionTypeStr string) ServerOption {
 	return func(o *Server) error {
 		redisCompressionType, err := cacheutil.CompressionTypeFromString(redisCompressionTypeStr)

@@ -268,6 +268,7 @@ func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
 
 	opts := []eventstream.ServerOption{}
 	opts = append(opts, eventstream.WithNotifyOnConnect(s.notifyOnConnect))
+	opts = append(opts, eventstream.WithOnConnect(s.resetResyncRound))
 	opts = append(opts, eventstream.WithLogger(s.options.grpcEventLogger))
 	if s.ha != nil {
 		opts = append(opts, eventstream.WithAcceptCheck(func(agentName string) error {

@@ -727,6 +727,11 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 			return fmt.Errorf("principal can only handle SyncedResourceList request in the managed mode")
 		}
 
+		if !s.resyncRoundAllowed(agentName) {
+			logCtx.Warnf("Refusing resync request: minimum resync interval of %v has not elapsed", s.resyncMinInterval)
+			return nil
+		}
+
 		incoming := &event.RequestSyncedResourceList{}
 		if err := ev.DataAs(incoming); err != nil {
 			return err
@@ -774,6 +779,11 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 			return fmt.Errorf("principal can only handle ResourceResync request in autonomous mode")
 		}
 
+		if !s.resyncRoundAllowed(agentName) {
+			logCtx.Warnf("Refusing resync request: minimum resync interval of %v has not elapsed", s.resyncMinInterval)
+			return nil
+		}
+
 		incoming := &event.RequestResourceResync{}
 		if err := ev.DataAs(incoming); err != nil {
 			return err
@@ -783,6 +793,44 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 	default:
 		return fmt.Errorf("invalid type of resource resync: %s", ev.Type())
 	}
+}
+
+// resyncRoundAllowed reports whether a new resync round requested by the
+// given agent respects the globally enforced minimum resync interval. When
+// the round is allowed, its time is recorded. Refused rounds must be dropped
+// by the caller. Rounds are always allowed when no minimum interval is
+// configured. The outcome is recorded in the resync request metrics.
+func (s *Server) resyncRoundAllowed(agentName string) bool {
+	allowed := true
+	if s.resyncMinInterval > 0 {
+		s.lastResyncRoundMu.Lock()
+		if last, ok := s.lastResyncRound[agentName]; ok && time.Since(last) < s.resyncMinInterval {
+			allowed = false
+		} else {
+			s.lastResyncRound[agentName] = time.Now()
+		}
+		s.lastResyncRoundMu.Unlock()
+	}
+
+	if s.metrics != nil {
+		result := "accepted"
+		if !allowed {
+			result = "refused"
+		}
+		s.metrics.ResyncRequests.WithLabelValues(agentName, result).Inc()
+	}
+	return allowed
+}
+
+// resetResyncRound clears the recorded resync round of the given agent. It is
+// called when an agent (re)connects to the event stream, so that the resync
+// an agent performs on startup is never refused because of a round accepted
+// during a previous connection. The minimum resync interval thereby only
+// throttles rounds within the lifetime of a single connection.
+func (s *Server) resetResyncRound(agentName string) {
+	s.lastResyncRoundMu.Lock()
+	defer s.lastResyncRoundMu.Unlock()
+	delete(s.lastResyncRound, agentName)
 }
 
 // eventProcessor is the main loop to process event from the receiver queue,

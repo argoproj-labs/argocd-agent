@@ -98,6 +98,9 @@ type ServerOptions struct {
 	MaxStreamDuration time.Duration
 	notifyOnConnect   chan types.Agent
 	acceptCheck       AcceptCheck
+	// onConnect, if set, is called synchronously when an agent subscribes to
+	// the event stream, before any event from that connection is received.
+	onConnect func(agentName string)
 
 	logger *logging.CentralizedLogger
 }
@@ -126,6 +129,15 @@ func WithMaxStreamDuration(d time.Duration) ServerOption {
 func WithNotifyOnConnect(notify chan types.Agent) ServerOption {
 	return func(o *ServerOptions) {
 		o.notifyOnConnect = notify
+	}
+}
+
+// WithOnConnect sets a callback that is invoked synchronously whenever an
+// agent subscribes to the event stream, before any event from that
+// connection is received.
+func WithOnConnect(fn func(agentName string)) ServerOption {
+	return func(o *ServerOptions) {
+		o.onConnect = fn
 	}
 }
 
@@ -419,6 +431,10 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	s.activeClientsMu.Lock()
 	s.activeClients[c.agentName] = c
 	s.activeClientsMu.Unlock()
+
+	if s.options.onConnect != nil {
+		s.options.onConnect(c.agentName)
+	}
 
 	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
 

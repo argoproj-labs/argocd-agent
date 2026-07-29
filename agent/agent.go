@@ -101,6 +101,9 @@ type Agent struct {
 
 	// determines if a resync check is done with the principal when the agent restarts.
 	resyncedOnStart bool
+	// resyncInFlight ensures that at most one resync round is in progress at
+	// a time, so periodic resync ticks cannot pile up.
+	resyncInFlight atomic.Bool
 	// resources is a list of all the resources that are currently being managed by the agent
 	resources *resources.Resources
 
@@ -112,6 +115,10 @@ type Agent struct {
 
 	cacheRefreshInterval time.Duration
 	informerSyncTimeout  time.Duration
+	// resyncInterval is the interval at which the agent periodically resyncs
+	// its resources with the principal to recover from lost events. A zero
+	// value disables periodic resync.
+	resyncInterval time.Duration
 	// applicationInformerEventBufferInterval is the minimum time between processing
 	// Application informer update callbacks for the same object (e.g. only send
 	// Application .status update once every 10 seconds)
@@ -643,6 +650,29 @@ func (a *Agent) Start(ctx context.Context) error {
 				select {
 				case <-ticker.C:
 					a.addClusterCacheInfoUpdateToQueue()
+				case <-a.context.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	// Periodically resync resources with the principal to recover from events
+	// that may have been lost, e.g. while the agent was disconnected.
+	if a.resyncInterval > 0 {
+		log().Infof("Periodic resync is enabled with an interval of %v", a.resyncInterval)
+		go func() {
+			ticker := time.NewTicker(a.resyncInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if !a.IsConnected() {
+						continue
+					}
+					if err := a.requestResync(log()); err != nil {
+						log().WithError(err).Error("Failed to request resync with the principal")
+					}
 				case <-a.context.Done():
 					return
 				}

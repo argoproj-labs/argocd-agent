@@ -288,6 +288,24 @@ Increase this value on large clusters or clusters under high API server load whe
 
 **Example:** `30s`
 
+### Resync Interval
+
+| | |
+|---|---|
+| **CLI Flag** | `--resync-interval` |
+| **Environment Variable** | `ARGOCD_AGENT_RESYNC_INTERVAL` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Duration |
+| **Default** | `0` (disabled) |
+
+Interval at which the agent periodically resyncs its resources with the principal, in addition to the resync that happens once on startup. Periodic resync recovers state that would otherwise stay out of sync when an event is lost, for example while the agent was disconnected.
+
+The resync mechanism is checksum-based: when both sides are already in sync, a resync round only exchanges request messages and does not re-transmit resource contents.
+
+Note that the principal may refuse resync rounds that arrive more often than its configured `--resync-min-interval`, so this interval should be set to a higher value than the principal's minimum.
+
+**Example:** `5m`
+
 ## Network and Performance
 
 ### Enable WebSocket

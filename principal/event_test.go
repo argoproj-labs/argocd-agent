@@ -1477,6 +1477,41 @@ func Test_processResourceEventResponse(t *testing.T) {
 	})
 }
 
+func Test_resyncRoundAllowed(t *testing.T) {
+	t.Run("all rounds are allowed when no minimum interval is set", func(t *testing.T) {
+		s := &Server{lastResyncRound: make(map[string]time.Time)}
+		assert.True(t, s.resyncRoundAllowed("agent"))
+		assert.True(t, s.resyncRoundAllowed("agent"))
+	})
+
+	t.Run("rounds within the minimum interval are refused", func(t *testing.T) {
+		s := &Server{lastResyncRound: make(map[string]time.Time), resyncMinInterval: time.Hour}
+		assert.True(t, s.resyncRoundAllowed("agent"))
+		assert.False(t, s.resyncRoundAllowed("agent"))
+	})
+
+	t.Run("agents are rate limited independently", func(t *testing.T) {
+		s := &Server{lastResyncRound: make(map[string]time.Time), resyncMinInterval: time.Hour}
+		assert.True(t, s.resyncRoundAllowed("agent-a"))
+		assert.True(t, s.resyncRoundAllowed("agent-b"))
+	})
+
+	t.Run("rounds are allowed again after the interval has elapsed", func(t *testing.T) {
+		s := &Server{lastResyncRound: make(map[string]time.Time), resyncMinInterval: time.Hour}
+		require.True(t, s.resyncRoundAllowed("agent"))
+		s.lastResyncRound["agent"] = time.Now().Add(-2 * time.Hour)
+		assert.True(t, s.resyncRoundAllowed("agent"))
+	})
+
+	t.Run("a reset allows the next round immediately", func(t *testing.T) {
+		s := &Server{lastResyncRound: make(map[string]time.Time), resyncMinInterval: time.Hour}
+		require.True(t, s.resyncRoundAllowed("agent"))
+		require.False(t, s.resyncRoundAllowed("agent"))
+		s.resetResyncRound("agent")
+		assert.True(t, s.resyncRoundAllowed("agent"))
+	})
+}
+
 func Test_processIncomingResourceResyncEvent(t *testing.T) {
 	ctx := context.Background()
 	agentName := "test"
@@ -1510,6 +1545,55 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
 		assert.Nil(t, err)
+	})
+
+	t.Run("refuse SyncedResourceList rounds within the minimum resync interval", func(t *testing.T) {
+		s.resyncMinInterval = time.Hour
+		defer func() { s.resyncMinInterval = 0 }()
+
+		throttled := "test-throttled-managed"
+		require.NoError(t, s.queues.Create(throttled))
+		s.setAgentMode(throttled, types.AgentModeManaged)
+
+		ev, err := s.events.RequestSyncedResourceListEvent([]byte{})
+		assert.Nil(t, err)
+
+		// The first round is accepted and its time is recorded.
+		err = s.processIncomingResourceResyncEvent(ctx, throttled, ev)
+		assert.Nil(t, err)
+		first, ok := s.lastResyncRound[throttled]
+		assert.True(t, ok)
+
+		// A follow-up round within the interval is dropped without an error,
+		// and the recorded time of the last accepted round does not change.
+		err = s.processIncomingResourceResyncEvent(ctx, throttled, ev)
+		assert.Nil(t, err)
+		assert.Equal(t, first, s.lastResyncRound[throttled])
+
+		// Once the minimum interval has elapsed, rounds are accepted again.
+		s.lastResyncRound[throttled] = time.Now().Add(-2 * time.Hour)
+		assert.True(t, s.resyncRoundAllowed(throttled))
+	})
+
+	t.Run("refuse ResourceResync rounds within the minimum resync interval", func(t *testing.T) {
+		s.resyncMinInterval = time.Hour
+		defer func() { s.resyncMinInterval = 0 }()
+
+		throttled := "test-throttled-autonomous"
+		require.NoError(t, s.queues.Create(throttled))
+		s.setAgentMode(throttled, types.AgentModeAutonomous)
+
+		ev, err := s.events.RequestResourceResyncEvent()
+		assert.Nil(t, err)
+
+		err = s.processIncomingResourceResyncEvent(ctx, throttled, ev)
+		assert.Nil(t, err)
+		first, ok := s.lastResyncRound[throttled]
+		assert.True(t, ok)
+
+		err = s.processIncomingResourceResyncEvent(ctx, throttled, ev)
+		assert.Nil(t, err)
+		assert.Equal(t, first, s.lastResyncRound[throttled])
 	})
 
 	t.Run("process SyncedResource in autonomous mode", func(t *testing.T) {

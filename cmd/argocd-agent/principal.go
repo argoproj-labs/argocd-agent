@@ -93,6 +93,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
 		keepAliveMinimumInterval time.Duration
 
+		// Minimum time duration the principal enforces between resync rounds
+		// requested by a single agent. Requests arriving more often are refused.
+		resyncMinInterval time.Duration
+
 		redisAddress         string
 		redisPassword        string
 		redisCredsDirPath    string
@@ -364,6 +368,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			opts = append(opts, principal.WithWebSocket(enableWebSocket))
 			opts = append(opts, principal.WithKeepAliveMinimumInterval(keepAliveMinimumInterval))
+			opts = append(opts, principal.WithResyncMinInterval(resyncMinInterval))
 			_, redisPassword, err := redisCreds(redisCredsDirPath, "", redisPassword)
 			if err != nil {
 				cmdutil.Fatal("Failed loading Redis credentials: %s", err.Error())
@@ -592,6 +597,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&keepAliveMinimumInterval, "keepalive-min-interval",
 		env.DurationWithDefault("ARGOCD_PRINCIPAL_KEEP_ALIVE_MIN_INTERVAL", nil, 0),
 		"Drop agent connections that send keepalive pings more often than the specified interval") // It should be less than "keep-alive-ping-interval" of agent
+
+	command.Flags().DurationVar(&resyncMinInterval, "resync-min-interval",
+		env.DurationWithDefault("ARGOCD_PRINCIPAL_RESYNC_MIN_INTERVAL", nil, 0),
+		"Refuse resync requests from an agent that arrive more often than the specified interval (0 disables the enforcement)") // It should be less than "resync-interval" of agent
 
 	command.Flags().StringVar(&redisAddress, "redis-server-address",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS", nil, "argocd-redis:6379"),
