@@ -432,7 +432,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 }
 
 func Test_CertificateFingerprint(t *testing.T) {
-	t.Run("returns colon-separated uppercase SHA-256 hex", func(t *testing.T) {
+	t.Run("returns uppercase SHA-256 hex without separators", func(t *testing.T) {
 		key := testcerts.GeneratePrivateKey(t, "rsa")
 		raw, err := x509.CreateCertificate(rand.Reader, &testcerts.DefaultCertTempl, &testcerts.DefaultCertTempl, &key.(*rsa.PrivateKey).PublicKey, key)
 		require.NoError(t, err)

@@ -1173,7 +1173,7 @@ func (s *Server) addBlocklistCallback(cm *corev1.ConfigMap) {
 // updateBlocklistCallback is called by the informer when the blocklist
 // ConfigMap is updated. It replaces the in-memory blocklist with
 // the entries from the ConfigMap and disconnects all blocklisted agents.
-func (s *Server) updateBlocklistCallback(oldCM, newCM *corev1.ConfigMap) {
+func (s *Server) updateBlocklistCallback(_, newCM *corev1.ConfigMap) {
 	if s.blocklist == nil {
 		return
 	}
