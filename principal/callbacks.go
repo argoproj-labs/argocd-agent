@@ -1073,9 +1073,12 @@ func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Ap
 	}
 
 	if newAgentName != "" {
-		// Add mapping for the new agent
-		s.trackAppToAgent(new, newAgentName)
-		s.resources.Add(newAgentName, resources.NewResourceKeyFromApp(new))
+		// Only map to the new agent if it's actually a connected agent, otherwise we'd
+		// poison the Redis proxy routing for an app that isn't agent-managed.
+		if s.clusterMgr == nil || s.clusterMgr.HasMapping(newAgentName) {
+			s.trackAppToAgent(new, newAgentName)
+			s.resources.Add(newAgentName, resources.NewResourceKeyFromApp(new))
+		}
 	}
 }
 
