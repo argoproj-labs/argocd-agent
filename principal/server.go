@@ -895,8 +895,7 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	if s.blocklist != nil && s.blocklist.Informer != nil {
 		go func() {
 			if err := s.blocklist.Informer.Start(s.ctx); err != nil {
-				log().WithError(err).Error("Blocklist informer has exited non-successfully")
-				errch <- fmt.Errorf("blocklist informer failed: %w", err)
+				logrus.Fatalf("Blocklist informer has exited non-successfully: %v", err)
 			} else {
 				log().Info("Blocklist informer has exited")
 			}

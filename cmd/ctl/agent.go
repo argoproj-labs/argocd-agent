@@ -359,6 +359,9 @@ func NewAgentInspectCommand() *cobra.Command {
 			if len(cert.Certificate) == 0 {
 				cmdutil.Fatal("Certificate chain is empty")
 			}
+			if len(cert.Certificate) > 1 {
+				cmdutil.Fatal("Certificate chain contains %d entries, but only 1 is expected. Please ensure the secret contains a single certificate.", len(cert.Certificate))
+			}
 			certObj, parseErr := x509.ParseCertificate(cert.Certificate[0])
 			if parseErr != nil {
 				cmdutil.Fatal("Could not parse certificate: %v", parseErr)
