@@ -132,6 +132,7 @@ func (suite *SpireTestSuite) Test_AgentsConnectWhenSPIREIsEnabled() {
 	managedApp := newSpireGuestbookApplication(
 		fixture.ManagedPrincipalAppNamespace(),
 		"managed",
+		suite.authMethod,
 	)
 	requires.NoError(suite.PrincipalClient.Create(suite.Ctx, &managedApp, metav1.CreateOptions{}))
 
@@ -160,6 +161,7 @@ func (suite *SpireTestSuite) Test_AgentsConnectWhenSPIREIsEnabled() {
 	autonomousApp := newSpireGuestbookApplication(
 		fixture.AutonomousAgentNamespace,
 		"autonomous",
+		suite.authMethod,
 	)
 	requires.NoError(suite.AutonomousAgentClient.Create(suite.Ctx, &autonomousApp, metav1.CreateOptions{}))
 
@@ -214,10 +216,10 @@ func TestSpireMTLSTestSuite(t *testing.T) {
 	suite.Run(t, &SpireTestSuite{authMethod: "mtls"})
 }
 
-func newSpireGuestbookApplication(namespace string, mode string) argoapp.Application {
+func newSpireGuestbookApplication(namespace string, mode string, authMethod string) argoapp.Application {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "spire-guestbook",
+			Name:      fmt.Sprintf("spire-%s-guestbook", authMethod),
 			Namespace: namespace,
 		},
 		Spec: argoapp.ApplicationSpec{

@@ -509,6 +509,12 @@
             }
           },
           "required": ["enabled", "authMethod", "socketPath", "mountMethod", "hostSocketDir"],
+          "if": {
+            "properties": { "enabled": { "const": true } }
+          },
+          "then": {
+            "properties": { "authMethod": { "enum": ["jwt", "mtls"] } }
+          },
           "title": "spire",
           "type": "object"
         },
@@ -535,6 +541,12 @@
         }
       },
       "required": ["listen", "log", "tls", "jwt", "namespaceCreate", "websocket", "redisProxy", "resourceProxy"],
+      "if": {
+        "properties": { "selfRegistration": { "properties": { "enabled": { "const": true } } } }
+      },
+      "then": {
+        "properties": { "resourceProxy": { "properties": { "enabled": { "const": true } } } }
+      },
       "title": "principal",
       "type": "object"
     },

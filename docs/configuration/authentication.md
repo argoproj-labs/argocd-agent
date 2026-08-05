@@ -230,7 +230,9 @@ argocd-agent agent --creds="header:"
 |-----------------|--------------|-------|-------|
 | `--insecure-plaintext=true` + `--auth=header:...` | `--creds=header:` | Yes | Service mesh handles mTLS |
 | `--insecure-plaintext=false` + `--auth=mtls:...` | `--creds=mtls:` | Yes | Direct mTLS to principal |
-| `--spire-agent-socket=...` | `--spire-agent-socket=...` | Yes | SPIRE provides mTLS credentials |
+| `--spire-agent-socket=...` + `--spire-auth-method=jwt` | `--spire-agent-socket=...` + `--spire-auth-method=jwt` | Yes | SPIRE JWT-SVID authentication |
+| `--spire-agent-socket=...` + `--spire-auth-method=mtls` | `--spire-agent-socket=...` + `--spire-auth-method=mtls` | Yes | SPIRE X.509-SVID mTLS authentication |
+| `--spire-agent-socket=...` (no `--spire-auth-method`) | Any | **No** | `--spire-auth-method` is required when SPIRE is enabled |
 | `--insecure-plaintext=true` + `--auth=mtls:...` | Any | **No** | No client certs in plaintext mode |
 | `--insecure-plaintext=false` + `--auth=header:...` | Any | **No** | Headers not injected without mesh |
 
