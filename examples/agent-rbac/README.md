@@ -8,3 +8,5 @@ The first example is a ClusterRole for that allows for permissions on common cor
 configuration, and RBAC, and networking.
 
 The second example ClusterRole shows how RBAC could be configured for CustomResources that an application might deploy. Examples are shown for cert-manager, istio, and the monitoring stack.
+
+Both examples provide a `ClusterRoleBinding` that must be edited with the namespace the agent lives in to be applied.
