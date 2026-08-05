@@ -17,7 +17,9 @@ data:
   # - "mtls:_agent_id_regex_" where _agent_id_regex_ is the regex pattern for
   #   extracting the agent ID from client cert subject.
   # Default: ""
-  agent.creds: {{ .Values.auth | quote }}
+  # When SPIRE is enabled, creds is left empty so the runtime auto-derives
+  # "mtls:" or "spiffe-jwt:" from agent.spire.auth-method.
+  agent.creds: {{ if .Values.spire.enabled }}""{{ else }}{{ .Values.auth | quote }}{{ end }}
   # agent.tls.secret-name: Name of the secret containing the TLS certificate.
   # Default: "argocd-agent-client-tls"
   agent.tls.secret-name: {{ .Values.tlsSecretName | quote }}

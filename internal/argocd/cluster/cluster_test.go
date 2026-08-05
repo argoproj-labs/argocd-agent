@@ -575,7 +575,65 @@ func Test_readClientCertFromSecret(t *testing.T) {
 		_, _, _, err := readClientCertFromSecret(context.Background(), kubeclient, testNamespace, "test-client-cert")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "CA secret")
-		require.Contains(t, err.Error(), "missing tls.crt")
+		require.Contains(t, err.Error(), "missing or empty tls.crt")
+	})
+
+	t.Run("Returns error when ca.crt missing and principal CA secret has empty tls.crt", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-client-cert",
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("test-cert-data"),
+				"tls.key": []byte("test-key-data"),
+			},
+		}
+		caSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      config.SecretNamePrincipalCA,
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte(""),
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret, caSecret)
+
+		_, _, _, err := readClientCertFromSecret(context.Background(), kubeclient, testNamespace, "test-client-cert")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "CA secret")
+		require.Contains(t, err.Error(), "missing or empty tls.crt")
+	})
+
+	t.Run("Falls back to principal CA when ca.crt is present but empty", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-client-cert",
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("test-cert-data"),
+				"tls.key": []byte("test-key-data"),
+				"ca.crt":  []byte(""),
+			},
+		}
+		caSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      config.SecretNamePrincipalCA,
+				Namespace: testNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("principal-ca-data"),
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret, caSecret)
+
+		clientCert, clientKey, caData, err := readClientCertFromSecret(context.Background(), kubeclient, testNamespace, "test-client-cert")
+		require.NoError(t, err)
+		require.Equal(t, "test-cert-data", clientCert)
+		require.Equal(t, "test-key-data", clientKey)
+		require.Equal(t, "principal-ca-data", caData)
 	})
 }
 

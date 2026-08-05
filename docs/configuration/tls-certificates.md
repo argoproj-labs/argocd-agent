@@ -175,13 +175,15 @@ Register the principal and each agent with the SPIRE Server. The SPIFFE IDs must
 spire-server entry create \
   -spiffeID spiffe://example.org/argocd/principal \
   -parentID <spire-agent-spiffe-id> \
-  -selector k8s:ns:<principal-namespace>
+  -selector k8s:ns:<principal-namespace> \
+  -selector k8s:sa:<principal-service-account>
 
 # Register an agent (on the SPIRE Server that serves the agent's cluster)
 spire-server entry create \
   -spiffeID spiffe://example.org/argocd/agent/cluster-01 \
   -parentID <spire-agent-spiffe-id> \
-  -selector k8s:ns:<agent-namespace>
+  -selector k8s:ns:<agent-namespace> \
+  -selector k8s:sa:<agent-service-account>
 ```
 
 **Agent name extraction:** The principal's auth regex extracts the agent name from the SPIFFE ID. With the default regex `spiffe://[^/]+/(.+)`, the agent name from `spiffe://example.org/argocd/agent/cluster-01` would be `argocd/agent/cluster-01`. A namespace with this name must exist on the principal's cluster for Applications to be routed to this agent.
@@ -199,7 +201,7 @@ kubectl logs deploy/argocd-agent-principal -n argocd | grep -iE "spire|mtls|jwt|
 
 Expected output (JWT mode):
 
-```
+```text
 Using SPIRE for TLS credentials (socket: unix:///run/spire/agent-sockets/spire-agent.sock)
 Connected to SPIRE Agent, X.509 and JWT sources ready
 Using SPIRE for server TLS credentials
@@ -209,7 +211,7 @@ Now listening on [::]:8443
 
 Expected output (mTLS mode):
 
-```
+```text
 Using SPIRE for TLS credentials (socket: unix:///run/spire/agent-sockets/spire-agent.sock)
 Connected to SPIRE Agent, X.509 and JWT sources ready
 Using SPIRE for server TLS credentials

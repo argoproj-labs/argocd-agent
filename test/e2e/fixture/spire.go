@@ -87,7 +87,8 @@ func BackupAndDeleteStaticTLSSecrets(ctx context.Context, principalClient, manag
 
 	for _, spec := range specs {
 		if err := deleteSecret(ctx, spec.client, spec.name, spec.namespace); err != nil {
-			return nil, fmt.Errorf("delete secret %s/%s: %w", spec.namespace, spec.name, err)
+			// Return backups even on error so callers can still restore
+			return backups, fmt.Errorf("delete secret %s/%s: %w", spec.namespace, spec.name, err)
 		}
 	}
 

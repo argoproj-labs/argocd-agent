@@ -367,14 +367,14 @@ func readClientCertFromSecret(ctx context.Context, kubeclient kubernetes.Interfa
 	}
 
 	caBytes, ok := secret.Data["ca.crt"]
-	if !ok {
+	if !ok || len(caBytes) == 0 {
 		caSecret, err := kubeclient.CoreV1().Secrets(namespace).Get(ctx, config.SecretNamePrincipalCA, metav1.GetOptions{})
 		if err != nil {
 			return "", "", "", fmt.Errorf("secret %s/%s missing ca.crt and could not read CA from %s: %w", namespace, secretName, config.SecretNamePrincipalCA, err)
 		}
 		caBytes, ok = caSecret.Data["tls.crt"]
-		if !ok {
-			return "", "", "", fmt.Errorf("CA secret %s/%s missing tls.crt", namespace, config.SecretNamePrincipalCA)
+		if !ok || len(caBytes) == 0 {
+			return "", "", "", fmt.Errorf("CA secret %s/%s has missing or empty tls.crt", namespace, config.SecretNamePrincipalCA)
 		}
 	}
 
