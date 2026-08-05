@@ -85,11 +85,18 @@ func BackupAndDeleteStaticTLSSecrets(ctx context.Context, principalClient, manag
 		*spec.backup = secret
 	}
 
+	var deleted []spireSecretSpec
 	for _, spec := range specs {
 		if err := deleteSecret(ctx, spec.client, spec.name, spec.namespace); err != nil {
-			// Return backups even on error so callers can still restore
+			// Roll back already-deleted secrets before returning
+			for _, d := range deleted {
+				if restoreErr := restoreSecret(ctx, d.client, *d.backup); restoreErr != nil {
+					fmt.Printf("WARNING: rollback restore %s/%s failed: %v\n", d.namespace, d.name, restoreErr)
+				}
+			}
 			return backups, fmt.Errorf("delete secret %s/%s: %w", spec.namespace, spec.name, err)
 		}
+		deleted = append(deleted, spec)
 	}
 
 	return backups, nil
