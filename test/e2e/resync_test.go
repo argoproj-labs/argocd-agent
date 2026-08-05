@@ -956,17 +956,19 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithRoleUpd
 		"p, proj:sample:differentrole, applications, get, " + autonomousAppProject.Name + "/*, allow",
 		"p, proj:diffproject:read-only, applications, get, " + autonomousAppProject.Name + "/*, allow",
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+
+	requires.Never(func() bool {
 		principalAppProject := argoapp.AppProject{}
-		err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalAppProject, metav1.GetOptions{})
-		requires.NoError(err, "AppProject should still exist on principal")
-		requires.Len(principalAppProject.Spec.Roles, 1, "should still have exactly 1 role")
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalAppProject, metav1.GetOptions{})
+		if err != nil {
+			return true
+		}
+		if len(principalAppProject.Spec.Roles) != 1 {
+			return true
+		}
 		role := principalAppProject.Spec.Roles[0]
-		requires.Equal("read-only", role.Name)
-		requires.Equal(expectedPoliciesConsistent, role.Policies, "policies should remain correctly transformed")
-		time.Sleep(1 * time.Second)
-	}
+		return role.Name != "read-only" || !reflect.DeepEqual(expectedPoliciesConsistent, role.Policies)
+	}, 10*time.Second, 1*time.Second, "policies should remain correctly transformed")
 
 	// Delete the appProject from the autonomous-agent
 	err = suite.AutonomousAgentClient.Delete(suite.Ctx, &autonomousAppProject, metav1.DeleteOptions{})
@@ -1080,17 +1082,18 @@ func (suite *ResyncTestSuite) Test_AppProjectResyncOnPrincipalRestartWithRoleCre
 		"p, proj:sample-with-roles:differentrole, applications, get, " + agentAppProject.Name + "/*, allow",
 		"p, proj:diffproject:read-only, applications, get, " + agentAppProject.Name + "/*, allow",
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	requires.Never(func() bool {
 		principalAppProject := argoapp.AppProject{}
-		err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalAppProject, metav1.GetOptions{})
-		requires.NoError(err, "AppProject should still exist on principal")
-		requires.Len(principalAppProject.Spec.Roles, 1, "should still have exactly 1 role")
+		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &principalAppProject, metav1.GetOptions{})
+		if err != nil {
+			return true
+		}
+		if len(principalAppProject.Spec.Roles) != 1 {
+			return true
+		}
 		role := principalAppProject.Spec.Roles[0]
-		requires.Equal("read-only", role.Name)
-		requires.Equal(expectedPoliciesConsistent, role.Policies, "policies should remain correctly transformed")
-		time.Sleep(1 * time.Second)
-	}
+		return role.Name != "read-only" || !reflect.DeepEqual(expectedPoliciesConsistent, role.Policies)
+	}, 10*time.Second, 1*time.Second, "policies should remain correctly transformed")
 }
 
 // AppProjects on both the agent and the principal must be synchronized when the principal is restarted
