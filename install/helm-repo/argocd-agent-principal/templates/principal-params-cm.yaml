@@ -10,7 +10,7 @@ data:
   # for all interfaces.
   # Default: ""
   # When SPIRE is enabled, listen on all interfaces since agents connect remotely.
-  principal.listen.host: {{ if .Values.spire.enabled }}""{{ else }}{{ .Values.principal.listen.host | quote }}{{ end }}
+  principal.listen.host: {{ if .Values.principal.spire.enabled }}""{{ else }}{{ .Values.principal.listen.host | quote }}{{ end }}
   # principal.listen.port: The port the gRPC server should listen on.
   # Default: 8443
   principal.listen.port: {{ .Values.principal.listen.port | quote }}
@@ -125,7 +125,7 @@ data:
   # Default: userpass:_path_to_encrypted_creds_
   # When SPIRE is enabled, auth is left empty so the runtime auto-derives
   # "spiffe-jwt:..." or "mtls:uri:..." from principal.spire.auth-method.
-  principal.auth: {{ if .Values.spire.enabled }}""{{ else }}{{ .Values.principal.auth | quote }}{{ end }}
+  principal.auth: {{ if .Values.principal.spire.enabled }}""{{ else }}{{ .Values.principal.auth | quote }}{{ end }}
   # principal.websocket.enable: Whether to use the websocket to stream events to the
   # agent.
   # Default: false
