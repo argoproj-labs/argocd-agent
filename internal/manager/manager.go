@@ -45,6 +45,16 @@ const (
 	// It is added to the resources managed on the target.
 	SourceUIDAnnotation = "argocd.argoproj.io/source-uid"
 
+	// NotifiedAnnotation is the annotation used by Argo CD's notifications
+	// engine to track which notifications have already been delivered for an
+	// application. When a notifications controller runs on the principal, it
+	// stores this state on the principal's copy of the application, and it
+	// must survive updates that mirror the application from the agent: the
+	// agent's copy never carries this annotation, so inheriting the agent's
+	// annotation set verbatim deletes the delivery state on every update and
+	// makes the notifications controller re-send every matching notification.
+	NotifiedAnnotation = "notified.notifications.argoproj.io"
+
 	// PrincipalUIDAnnotation is an annotation stamped by the agent on managed resources
 	// to track which principal identity last wrote the resource. This survives
 	// principal failovers and allows the agent to distinguish a true source-uid
