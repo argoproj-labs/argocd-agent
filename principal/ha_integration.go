@@ -703,7 +703,7 @@ func (h *HAComponents) handleReplicatedEvent(ev *replication.ReplicatedEvent) er
 		key := resources.NewResourceKeyFromRepository(repo)
 		switch evType {
 		case event.Create, event.SpecUpdate:
-			if _, err := server.repoManager.Create(ctx, repo); err != nil {
+			if _, err := server.repoManager.Create(ctx, repo, true); err != nil {
 				if k8serrors.IsAlreadyExists(err) {
 					if _, err := server.repoManager.UpdateManagedRepository(ctx, repo); err != nil {
 						h.recordResourceError("Repository", "update")
@@ -908,7 +908,7 @@ func (h *HAComponents) upsertResourceFromSnapshot(ctx context.Context, server *S
 		if err := json.Unmarshal(res.Data, &repo); err != nil {
 			return fmt.Errorf("unmarshal repository: %w", err)
 		}
-		if _, err := server.repoManager.Create(ctx, &repo); err != nil {
+		if _, err := server.repoManager.Create(ctx, &repo, true); err != nil {
 			if !k8serrors.IsAlreadyExists(err) {
 				h.recordResourceError("Repository", "create")
 				return fmt.Errorf("upsert repository: %w", err)

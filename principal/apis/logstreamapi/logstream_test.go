@@ -543,7 +543,7 @@ func TestConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	numGoroutines := 10
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -565,7 +565,7 @@ func TestConcurrentAccess(t *testing.T) {
 }
 
 func TestWaitForCompletion_RaceWithFinalizeSession(t *testing.T) {
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		server := NewServer()
 		reqID := "race-test"
 

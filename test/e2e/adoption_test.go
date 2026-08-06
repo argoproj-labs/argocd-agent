@@ -62,7 +62,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsAdoptedIfExists() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook-adopt",
-			Namespace: fixture.ManagedAgentNamespace,
+			Namespace: fixture.ManagedAgentAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -71,10 +71,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsAdoptedIfExists() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "adoption-test",
-			},
+			Destination: fixture.ManagedDestination("adoption-test"),
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{
 					"CreateNamespace=true",
@@ -98,7 +95,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsAdoptedIfExists() {
 	app2 := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook-adopt",
-			Namespace: fixture.AgentManagedName,
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -107,10 +104,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsAdoptedIfExists() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Name:      "agent-managed",
-				Namespace: "adoption-test",
-			},
+			Destination: fixture.ManagedDestination("adoption-test"),
 		},
 	}
 
@@ -149,7 +143,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfPolicyIsNever() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook-dontadopt",
-			Namespace: fixture.ManagedAgentNamespace,
+			Namespace: fixture.ManagedAgentAppNamespace(),
 			Annotations: map[string]string{
 				manager.AdoptionPolicyAnnotation: string(manager.AdoptionPolicyNever),
 			},
@@ -161,10 +155,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfPolicyIsNever() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "adoption-test",
-			},
+			Destination: fixture.ManagedDestination("adoption-test"),
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{
 					"CreateNamespace=true",
@@ -188,7 +179,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfPolicyIsNever() {
 	app2 := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook-dontadopt",
-			Namespace: fixture.AgentManagedName,
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -197,10 +188,7 @@ func (suite *AdoptionTestSuite) Test_ApplicationIsNotAdoptedIfPolicyIsNever() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Name:      fixture.AgentManagedName,
-				Namespace: "adoption-test",
-			},
+			Destination: fixture.ManagedDestination("adoption-test"),
 		},
 	}
 

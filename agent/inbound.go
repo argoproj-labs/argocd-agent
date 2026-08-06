@@ -926,7 +926,7 @@ func (a *Agent) createAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		delete(incoming.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 	}
 
-	created, err := a.projectManager.Create(a.context, incoming)
+	created, err := a.projectManager.Create(a.context, incoming, true)
 	if apierrors.IsAlreadyExists(err) {
 		logCtx.Debug("appProject already exists")
 	}
@@ -1040,7 +1040,7 @@ func (a *Agent) createRepository(incoming *corev1.Secret) (*corev1.Secret, error
 	// Get rid of some fields that we do not want to have on the repository as we start fresh.
 	delete(incoming.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 
-	created, err := a.repoManager.Create(a.context, incoming)
+	created, err := a.repoManager.Create(a.context, incoming, true)
 	if apierrors.IsAlreadyExists(err) {
 		logCtx.Debug("repository already exists")
 		return created, nil
@@ -1237,7 +1237,7 @@ func (a *Agent) createGPGKey(incoming *corev1.ConfigMap) (*corev1.ConfigMap, err
 	}
 	a.sourceCache.GPGKey.Set(incoming.UID, incoming.Data)
 
-	created, err := a.gpgKeyManager.Create(a.context, incoming)
+	created, err := a.gpgKeyManager.Create(a.context, incoming, true)
 	if apierrors.IsAlreadyExists(err) {
 		logCtx.Debug("GPG key already exists, updating the existing GPG key")
 		if manageErr := a.gpgKeyManager.Manage(incoming.Name); manageErr != nil {

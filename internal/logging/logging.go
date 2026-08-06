@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"reflect"
 	"strings"
 
@@ -322,11 +323,9 @@ func (l *CentralizedLogger) GetLogLevel() logrus.Level {
 }
 
 // WithContext creates a logger entry with common context fields
-func (l *CentralizedLogger) WithContext(module string, fields map[string]interface{}) *logrus.Entry {
+func (l *CentralizedLogger) WithContext(module string, fields map[string]any) *logrus.Entry {
 	logFields := logrus.Fields{logfields.Module: module}
-	for k, v := range fields {
-		logFields[k] = v
-	}
+	maps.Copy(logFields, fields)
 	return l.logger.WithFields(logFields)
 }
 

@@ -61,6 +61,9 @@ type DestinationMappingTestSuite struct {
 
 // SetupSuite runs before the tests in the suite are run.
 func (suite *DestinationMappingTestSuite) SetupSuite() {
+	if fixture.IsDestinationBased() {
+		suite.T().Skip("DestinationMappingTestSuite is redundant when all suites already run in destination-based mode")
+	}
 	suite.BaseSuite.SetupSuite()
 	var err error
 
@@ -147,6 +150,9 @@ ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true`)
 }
 
 func (suite *DestinationMappingTestSuite) TearDownSuite() {
+	if fixture.IsDestinationBased() {
+		return
+	}
 	suite.BaseSuite.TearDownTest()
 	requires := suite.Require()
 

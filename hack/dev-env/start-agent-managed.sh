@@ -50,6 +50,8 @@ go run ${RACE_FLAG} github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent
     --server-address 127.0.0.1 \
     --kubecontext vcluster-agent-managed \
     --namespace ${ARGOCD_MANAGED_NAMESPACE} \
+    --destination-based-mapping=${ARGOCD_AGENT_DESTINATION_BASED_MAPPING:-false} \
+    --create-namespace=${ARGOCD_AGENT_CREATE_NAMESPACE:-false} \
     --log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} $ARGS \
     --healthz-port 8001 \
     #--enable-compression true

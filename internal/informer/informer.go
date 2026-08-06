@@ -208,7 +208,7 @@ func (i *Informer[T]) installEventHandlers() error {
 					i.onAdd(res)
 				}
 			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
+			UpdateFunc: func(oldObj, newObj any) {
 				oldRes, oldOk := oldObj.(T)
 				newRes, newOk := newObj.(T)
 				if !oldOk || !newOk {
@@ -219,7 +219,7 @@ func (i *Informer[T]) installEventHandlers() error {
 					i.onUpdate(oldRes, newRes)
 				}
 			},
-			DeleteFunc: func(obj interface{}) {
+			DeleteFunc: func(obj any) {
 				res, ok := obj.(T)
 				if !ok {
 					return

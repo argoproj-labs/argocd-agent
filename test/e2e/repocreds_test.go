@@ -213,9 +213,17 @@ func (suite *RepoCredsTestSuite) Test_RepoCreds_AppProjectUpdate() {
 	appProjectKeyPrincipal := fixture.ToNamespacedName(appProjectPrincipal)
 	repoCredsKeyAgent := types.NamespacedName{Name: repoCredsPrincipal.Name, Namespace: fixture.ManagedAgentNamespace}
 
-	// Update the appProject on the principal's cluster to no longer match the agent name
+	// Update the appProject on the principal's cluster to no longer match the agent name.
+	// In destination-based mapping mode, agent matching ignores SourceNamespaces and
+	// only checks Destinations, so we must change Destinations instead.
 	err := suite.PrincipalClient.EnsureAppProjectUpdate(suite.Ctx, appProjectKeyPrincipal, func(ap *argoapp.AppProject) error {
-		ap.Spec.SourceNamespaces = []string{"random"}
+		if fixture.IsDestinationBased() {
+			ap.Spec.Destinations = []argoapp.ApplicationDestination{
+				{Namespace: "*", Name: "no-match-*"},
+			}
+		} else {
+			ap.Spec.SourceNamespaces = []string{"random"}
+		}
 		return nil
 	}, metav1.UpdateOptions{})
 	requires.NoError(err)

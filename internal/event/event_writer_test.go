@@ -193,11 +193,11 @@ func TestEventWriter(t *testing.T) {
 		numOpsPerGoroutine := 100
 
 		// Concurrent adds
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
-				for j := 0; j < numOpsPerGoroutine; j++ {
+				for j := range numOpsPerGoroutine {
 					app := &v1alpha1.Application{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:            fmt.Sprintf("app-%d", id),
@@ -338,7 +338,7 @@ func TestEventWriter(t *testing.T) {
 		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Simulate multiple heartbeats being sent (like a real heartbeat interval)
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			heartbeatEv := es.HeartbeatEvent(Ping)
 			resID := ResourceID(heartbeatEv)
 			evSender.Add(heartbeatEv)

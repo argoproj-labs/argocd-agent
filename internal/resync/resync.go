@@ -599,14 +599,14 @@ func getGroupVersionResource(kind string) (schema.GroupVersionResource, error) {
 func generateSpecChecksum(resObj *unstructured.Unstructured) ([]byte, error) {
 	res := resObj.DeepCopy()
 
-	var resSpec interface{}
+	var resSpec any
 	var ok bool
 	if res.GetKind() == "Secret" || res.GetKind() == "ConfigMap" {
 		resSpec, ok = res.Object["data"]
 		if !ok {
 			if res.GetKind() == "ConfigMap" {
 				logrus.Debugf("ConfigMap %s has no data field, using empty map for checksum", res.GetName())
-				resSpec = map[string]interface{}{}
+				resSpec = map[string]any{}
 			} else {
 				return nil, fmt.Errorf("data field not found for resource: %s", res.GetName())
 			}
@@ -618,7 +618,7 @@ func generateSpecChecksum(resObj *unstructured.Unstructured) ([]byte, error) {
 		}
 	}
 
-	specMap, ok := resSpec.(map[string]interface{})
+	specMap, ok := resSpec.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("unable to convert the spec object of %s:%s to a map", res.GetKind(), res.GetName())
 	}

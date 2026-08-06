@@ -430,7 +430,7 @@ func (r *Remote) retriable(err error) bool {
 	return true
 }
 
-func (r *Remote) unaryAuthInterceptor(ctx context.Context, method string, req interface{}, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+func (r *Remote) unaryAuthInterceptor(ctx context.Context, method string, req any, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 	log().Infof("Outgoing unary call to %s", method)
 
 	// Auth methods do not need token refresh, so we can call the invoker directly

@@ -193,7 +193,7 @@ func (c *ArgoRestClient) RunResourceAction(app *v1alpha1.Application, action, gr
 	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions/v2", app.Name)
 
 	// Based on Argo CD Swagger: https://cd.apps.argoproj.io/swagger-ui#tag/ApplicationService/operation/ApplicationService_RunResourceActionV2
-	requestBody := map[string]interface{}{
+	requestBody := map[string]any{
 		"action":       action,
 		"appNamespace": app.Namespace,
 		"group":        group,
@@ -305,11 +305,11 @@ func (c *ArgoRestClient) GetApplicationLogs(app *v1alpha1.Application, namespace
 	}
 
 	type logResult struct {
-		Content      string      `json:"content"`
-		TimeStamp    interface{} `json:"timeStamp"`
-		Last         bool        `json:"last"`
-		TimeStampStr string      `json:"timeStampStr"`
-		PodName      string      `json:"podName"`
+		Content      string `json:"content"`
+		TimeStamp    any    `json:"timeStamp"`
+		Last         bool   `json:"last"`
+		TimeStampStr string `json:"timeStampStr"`
+		PodName      string `json:"podName"`
 	}
 	type logError struct {
 		GRPCCode   int    `json:"grpc_code"`

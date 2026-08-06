@@ -126,7 +126,8 @@ func (m *AppProjectManager) StartBackend(ctx context.Context) error {
 }
 
 // Create creates the AppProject using the Manager's AppProject backend.
-func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+// - 'ignoreChange' field controls whether or not the resourceVersion of the resource will be ignored if it is seen again (because it is considered to already have been processed). If true, the resource will be added to the ignore list. If false, it will not (false is useful for a few specific cases, like the 'a user deletes a managed agent Application resource, which needs to be reverted by agent' case)
+func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppProject, ignoreChange bool) (*v1alpha1.AppProject, error) {
 	// A new AppProject must neither specify ResourceVersion nor Generation
 	project.ResourceVersion = ""
 	project.Generation = 0
@@ -144,22 +145,24 @@ func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppPro
 	// AppProject must be created in the agent's namespace, which should be the
 	// same as ArgoCD's namespace.
 	project.Namespace = m.namespace
-	created, err := createAppProject(ctx, m, project)
+	created, err := createAppProject(ctx, m, project, ignoreChange)
 	if err != nil {
 		return nil, err
 	}
 	return created, nil
 }
 
-func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alpha1.AppProject, ignoreChange bool) (*v1alpha1.AppProject, error) {
 	created, err := m.appprojectBackend.Create(ctx, project)
 	if err == nil {
 		logging.LogActionCreate(log().WithField("appProject", project.Name), "appproject", created)
 		if err := m.Manage(created.Name); err != nil {
 			log().Warnf("Could not manage app %s: %v", created.Name, err)
 		}
-		if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
-			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
+		if ignoreChange {
+			if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
+				log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
+			}
 		}
 		return created, nil
 	}
@@ -169,7 +172,7 @@ func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alph
 // Upsert creates the AppProject or updates it if it already exists.
 // Used by HA replication to write resources to the replica cluster.
 func (m *AppProjectManager) Upsert(ctx context.Context, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
-	created, err := m.Create(ctx, project)
+	created, err := m.Create(ctx, project, true)
 	if err == nil {
 		return created, nil
 	}
@@ -298,7 +301,7 @@ func (m *AppProjectManager) update(ctx context.Context, upsert bool, incoming *v
 		existing, ierr := m.appprojectBackend.Get(ctx, incoming.Name, incoming.Namespace)
 		if ierr != nil {
 			if errors.IsNotFound(ierr) && upsert {
-				updated, ierr = m.Create(ctx, incoming)
+				updated, ierr = m.Create(ctx, incoming, true)
 				return ierr
 			} else {
 				return fmt.Errorf("error updating app-project %s: %w", incoming.Name, ierr)

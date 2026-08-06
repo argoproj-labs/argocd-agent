@@ -51,7 +51,7 @@ func Test_ProcessIncomingSyncedResourceList(t *testing.T) {
 	})
 
 	t.Run("return nil if checksum matches", func(t *testing.T) {
-		for i := 0; i < resNum; i++ {
+		for i := range resNum {
 			name := fmt.Sprintf("test-%d", i)
 			testResource := resources.ResourceKey{
 				Name:      name,
@@ -76,7 +76,7 @@ func Test_ProcessIncomingSyncedResourceList(t *testing.T) {
 
 	t.Run("send SyncedResource event for all resources if the checksum doesn't match", func(t *testing.T) {
 		testResources := make([]resources.ResourceKey, resNum)
-		for i := 0; i < resNum; i++ {
+		for i := range resNum {
 			name := fmt.Sprintf("test-%d", i)
 			testResource := resources.ResourceKey{
 				Name:      name,
@@ -97,7 +97,7 @@ func Test_ProcessIncomingSyncedResourceList(t *testing.T) {
 
 		assert.Equal(t, handler.sendQ.Len(), resNum)
 
-		for i := 0; i < resNum; i++ {
+		for range resNum {
 			ev, shutdown := handler.sendQ.Get()
 			assert.False(t, shutdown)
 			assert.Equal(t, event.ResponseSyncedResource.String(), ev.Type())
@@ -289,7 +289,7 @@ func Test_generateSpecChecksum(t *testing.T) {
 
 	t.Run("generate checksum for resource with destination field", func(t *testing.T) {
 		resource := fakeUnresApp()
-		resource.Object["spec"] = map[string]interface{}{
+		resource.Object["spec"] = map[string]any{
 			"project":     "default",
 			"destination": "in-cluster",
 		}
@@ -526,7 +526,7 @@ func Test_SendRequestUpdates(t *testing.T) {
 		gvr, err := getGroupVersionResource("Application")
 		assert.Nil(t, err)
 
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			resource := fakeUnresApp()
 			resource.SetName(fmt.Sprintf("unmanaged-app-%d", i))
 			_, err = handler.dynClient.Resource(gvr).Namespace("default").
@@ -1029,7 +1029,7 @@ func fakeUnresApp() *unstructured.Unstructured {
 	resource.SetName("test-app")
 	resource.SetNamespace("default")
 	resource.SetUID("test-uid")
-	resource.Object["spec"] = map[string]interface{}{
+	resource.Object["spec"] = map[string]any{
 		"project": "default",
 	}
 	return resource
@@ -1045,7 +1045,7 @@ func fakeUnresGPGKey() *unstructured.Unstructured {
 	resource.SetName("argocd-gpg-keys-cm")
 	resource.SetNamespace("argocd")
 	resource.SetUID("gpg-uid")
-	resource.Object["data"] = map[string]interface{}{
+	resource.Object["data"] = map[string]any{
 		"7AEE18F83AFDEB23": "test-gpg-key-data",
 	}
 	return resource

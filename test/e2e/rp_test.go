@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -182,7 +183,7 @@ func (suite *ResourceProxyTestSuite) validateResourceProxyViaArgoAPI(appName str
 	app := v1alpha1.Application{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      appName,
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
@@ -215,7 +216,10 @@ func (suite *ResourceProxyTestSuite) validateResourceProxyViaArgoAPI(appName str
 	retries := 0
 	requires.Eventually(func() bool {
 		app := &v1alpha1.Application{}
-		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, app, v1.GetOptions{})
+		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
+			Name:      appName,
+		}, app, v1.GetOptions{})
 		if err != nil {
 			return false
 		}
@@ -400,7 +404,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	app := v1alpha1.Application{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      appName,
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
@@ -429,7 +433,9 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	retries := 0
 	requires.Eventually(func() bool {
 		app := &v1alpha1.Application{}
-		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{Namespace: "agent-managed", Name: appName}, app, v1.GetOptions{})
+		err = suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{
+			Namespace: fixture.ManagedPrincipalAppNamespace(), Name: appName,
+		}, app, v1.GetOptions{})
 		if err != nil {
 			return false
 		}
@@ -455,12 +461,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 		actions, err := argoClient.ListResourceActions(&app, "apps", "v1", "Deployment", "guestbook", "kustomize-guestbook-ui")
 		requires.NoError(err)
 
-		for _, action := range actions {
-			if action == "Test" {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(actions, "Test")
 	}, 30*time.Second, 1*time.Second)
 
 	argocdCM := &corev1.ConfigMap{}
@@ -588,7 +589,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	resp.Body.Close()
 	requires.NoError(err)
 	// The scale response should be a Scale object, not a Deployment
-	var scale map[string]interface{}
+	var scale map[string]any
 	err = json.Unmarshal(resource, &scale)
 	requires.NoError(err)
 	requires.Contains(scale, "kind")
@@ -606,7 +607,7 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_Subresources() {
 	// This test verifies that POST requests to subresources work correctly
 	// We'll test with a pod eviction endpoint - it should fail with 404 since the pod doesn't exist,
 	// but this proves the subresource routing works
-	postData := []byte(fmt.Sprintf(`{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"test-pod","namespace":"%s"}}`, fixture.ManagedAgentNamespace))
+	postData := fmt.Appendf(nil, `{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"test-pod","namespace":"%s"}}`, fixture.ManagedAgentNamespace)
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://127.0.0.1:9090/api/v1/namespaces/%s/pods/test-pod/eviction", fixture.ManagedAgentNamespace),
 		io.NopCloser(strings.NewReader(string(postData))))
 	requires.NoError(err)

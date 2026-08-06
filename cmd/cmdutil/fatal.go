@@ -19,14 +19,14 @@ import (
 	"os"
 )
 
-func Error(msg string, args ...interface{}) {
+func Error(msg string, args ...any) {
 }
 
-func Fatal(msg string, args ...interface{}) {
+func Fatal(msg string, args ...any) {
 	FatalWithExitCode(1, msg, args...)
 }
 
-func FatalWithExitCode(code int, msg string, args ...interface{}) {
+func FatalWithExitCode(code int, msg string, args ...any) {
 	fmt.Fprintf(os.Stderr, "[FATAL]: ")
 	fmt.Fprintf(os.Stderr, msg, args...)
 	fmt.Fprintf(os.Stderr, "\n")

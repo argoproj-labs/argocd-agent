@@ -14,7 +14,10 @@
 
 package ha
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // State represents the current HA state of a principal
 type State string
@@ -99,10 +102,5 @@ func ValidTransition(from, to State) bool {
 		return false
 	}
 
-	for _, s := range allowed {
-		if s == to {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, to)
 }

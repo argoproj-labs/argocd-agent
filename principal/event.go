@@ -254,7 +254,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		s.sourceCache.Application.Set(incoming.UID, incoming.Spec)
 
 		incoming.SetNamespace(agentName)
-		_, err := s.appManager.Create(ctx, incoming)
+		_, err := s.appManager.Create(ctx, incoming, true)
 		if err != nil {
 			if !kerrors.IsAlreadyExists(err) {
 				return fmt.Errorf("could not create application %s: %w", incoming.QualifiedName(), err)
@@ -471,7 +471,7 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 
 			s.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
 
-			_, err := s.projectManager.Create(ctx, incoming)
+			_, err := s.projectManager.Create(ctx, incoming, true)
 			if err != nil {
 				return fmt.Errorf("could not create app-project %s: %w", incoming.Name, err)
 			}

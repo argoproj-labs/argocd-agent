@@ -58,7 +58,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	appOnPrincipal := v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-app",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
@@ -67,10 +67,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: v1alpha1.ApplicationDestination{
-				Name:      "agent-managed",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &v1alpha1.SyncPolicy{
 				Automated: &v1alpha1.SyncPolicyAutomated{},
 				SyncOptions: v1alpha1.SyncOptions{
@@ -592,8 +589,8 @@ func streamFromEventSourceNew(ctx context.Context, eventSourceAPIURL string, ses
 					return strings.Contains(err.Error(), "context canceled")
 				}
 
-				if strings.HasPrefix(line, "data:") {
-					data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				if after, ok := strings.CutPrefix(line, "data:"); ok {
+					data := strings.TrimSpace(after)
 					select {
 					case <-ctx.Done():
 						t.Log("Context is complete")

@@ -742,12 +742,13 @@ func (prc *parsedRedisCommand) generateParsedCommandDebugString() string {
 		return fmt.Sprintf("internal message: %v", prc.internalMsg)
 	}
 
-	res := "(a->r) "
+	var res strings.Builder
+	res.WriteString("(a->r) ")
 	for _, str := range prc.parsedReceived {
-		res += fmt.Sprintf("'%s' | ", sanitizeStringIfNonASCII(str))
+		fmt.Fprintf(&res, "'%s' | ", sanitizeStringIfNonASCII(str))
 	}
 
-	return res
+	return res.String()
 }
 
 // sanitizeStringIfNonASCII: if the string is non-ascii (likely because it includes binary data), then only return the number of bytes of the string rather than the string itself

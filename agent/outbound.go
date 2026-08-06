@@ -46,9 +46,10 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 	a.resources.Add(resources.NewResourceKeyFromApp(app))
 
 	// Update events trigger a new event sometimes, too. If we've already seen
-	// the app, we just ignore the request then.
+	// the app, send it as an update event.
 	if a.appManager.IsManaged(app.QualifiedName()) {
-		logCtx.Warn("Ignoring new app event for already managed app")
+		a.addAppUpdateToQueue(app, app)
+
 		return
 	}
 
@@ -76,8 +77,8 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 
 // addAppUpdateToQueue processes an application update event originating from
 // the AppInformer and puts it in the agent's send queue.
-func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.Application) {
-	logCtx := a.logGrpcEvent().WithField(logfields.Event, "UpdateApp").WithField(logfields.Application, old.QualifiedName())
+func (a *Agent) addAppUpdateToQueue(_ *v1alpha1.Application, new *v1alpha1.Application) {
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "UpdateApp").WithField(logfields.Application, new.QualifiedName())
 	a.watchLock.Lock()
 	defer a.watchLock.Unlock()
 

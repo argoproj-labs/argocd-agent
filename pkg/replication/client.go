@@ -641,17 +641,13 @@ func (c *Client) runEventStream(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		c.sendAcks(streamCtx, stream, ackCh)
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		c.runReconcileLoop(streamCtx)
-	}()
+	})
 
 	err = c.receiveEvents(streamCtx, stream, ackCh)
 

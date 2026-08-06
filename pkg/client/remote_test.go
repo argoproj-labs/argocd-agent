@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"net"
 	"path"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -322,13 +323,7 @@ func Test_validateTLSConfig(t *testing.T) {
 		// Find a cipher that does NOT support TLS 1.3 (TLS 1.2 only ciphers)
 		var tls12OnlyCipher *tls.CipherSuite
 		for _, cs := range tls.CipherSuites() {
-			supportsTLS13 := false
-			for _, v := range cs.SupportedVersions {
-				if v == tls.VersionTLS13 {
-					supportsTLS13 = true
-					break
-				}
-			}
+			supportsTLS13 := slices.Contains(cs.SupportedVersions, tls.VersionTLS13)
 			if !supportsTLS13 {
 				tls12OnlyCipher = cs
 				break

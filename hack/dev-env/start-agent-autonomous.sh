@@ -46,6 +46,8 @@ go run ${RACE_FLAG} github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent
     --server-address 127.0.0.1 \
     --kubecontext vcluster-agent-autonomous \
     --namespace ${ARGOCD_AUTONOMOUS_NAMESPACE} \
+    --destination-based-mapping=false \
+    --create-namespace=false \
     --log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} $ARGS \
     --metrics-port 8182 \
     --healthz-port 8002 \

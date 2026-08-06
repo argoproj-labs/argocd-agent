@@ -75,7 +75,7 @@ The secret will be created in the principal's namespace on the principal's conte
 				if err != nil {
 					cmdutil.Fatal("Error getting JWT secret: %v", err)
 				} else if !upsert {
-					cmdutil.Fatal("JWT secret already exists. Use --force to recreate it.")
+					cmdutil.Fatal("JWT secret already exists. Use --upsert to recreate it.")
 				}
 				exists = true
 			}

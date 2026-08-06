@@ -358,14 +358,14 @@ func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error
 
 	appName := components[2]
 
-	underscoreIndex := strings.Index(appName, "_")
-	if underscoreIndex == -1 {
+	_, after, ok := strings.Cut(appName, "_")
+	if !ok {
 		err := fmt.Errorf("unexpected key format, missing '_': '%s'", key)
 		logCtx.WithError(err).Error("Unable to reply to redis get request")
 		return "", err
 
 	}
-	components[2] = appName[underscoreIndex+1:]
+	components[2] = after
 
 	key = strings.Join(components, "|")
 

@@ -72,13 +72,15 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		return
 	}
 
-	s.resources.Add(agentName, resources.NewResourceKeyFromApp(outbound))
-	s.trackAppToAgent(outbound, agentName)
-
 	ctx, span := s.startSpan(operationcreate, "Application", outbound)
 	defer span.End()
 
 	logCtx = logCtx.WithField("queue", agentName)
+
+	if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+		logCtx.Error("Application is targeting an invalid agent, skipping creation")
+		return
+	}
 
 	if !s.queues.HasQueuePair(agentName) {
 		if err := s.queues.Create(agentName); err != nil {
@@ -92,6 +94,10 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		logCtx.Errorf("Help! queue pair for agent %s disappeared!", agentName)
 		return
 	}
+
+	s.resources.Add(agentName, resources.NewResourceKeyFromApp(outbound))
+	s.trackAppToAgent(outbound, agentName)
+
 	ev := s.events.ApplicationEvent(event.Create, outbound)
 	// Inject trace context into the event for propagation to agent
 	s.stampEvent(ctx, ev)
@@ -130,10 +136,15 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 
+	logCtx = logCtx.WithField("queue", agentName)
+
+	if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+		logCtx.Warn("Application is targeting an invalid agent, skipping update")
+		return
+	}
+
 	s.resources.Add(agentName, resources.NewResourceKeyFromApp(new))
 	s.trackAppToAgent(new, agentName)
-
-	logCtx = logCtx.WithField("queue", agentName)
 
 	if s.isResourceFromAutonomousAgent(new) {
 		// Remove finalizers from autonomous agent applications if it is being deleted
@@ -154,7 +165,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		}
 
 		// Revert modifications on autonomous agent applications
-		if s.appManager.RevertAutonomousAppChanges(s.ctx, new, s.sourceCache.Application) {
+		if s.appManager.RevertAutonomousAppChanges(s.ctx, new.DeepCopy(), s.sourceCache.Application) {
 			logCtx.Trace("Modifications to the application are reverted")
 			return
 		}
@@ -255,6 +266,10 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 	}
 
 	if !s.queues.HasQueuePair(agentName) {
+		if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+			logCtx.Warn("Application is targeting an invalid agent, skipping deletion")
+			return
+		}
 		if err := s.queues.Create(agentName); err != nil {
 			logCtx.WithError(err).Error("failed to create a queue pair for agent")
 			return
@@ -309,15 +324,6 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 	ctx, span := s.startSpan(operationcreate, "AppProject", outbound)
 	defer span.End()
-
-	// Return early if no interested agent is connected
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		if err := s.queues.Create(outbound.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing namespace")
-	}
 
 	if s.metrics != nil {
 		s.metrics.AppProjectCreated.Inc()
@@ -400,13 +406,6 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
 		return
 	}
-	if !s.queues.HasQueuePair(old.Namespace) {
-		if err := s.queues.Create(old.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing agent namespace")
-	}
 
 	s.syncAppProjectUpdatesToAgents(ctx, old, new, logCtx)
 
@@ -458,19 +457,6 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 
 	ctx, span := s.startSpan(operationdelete, "AppProject", outbound)
 	defer span.End()
-
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		if err := s.queues.Create(outbound.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing agent namespace")
-	}
-	q := s.queues.SendQ(outbound.Namespace)
-	if q == nil {
-		logCtx.Error("Help! Queue pair has disappeared!")
-		return
-	}
 
 	agents := s.mapAppProjectToAgents(*outbound)
 	for agent := range agents {
@@ -772,13 +758,7 @@ func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {
 		return
 	}
 
-	if err := s.queues.Delete(outbound.Name, true); err != nil {
-		logCtx.WithError(err).Error("failed to remove the queue pair for a deleted agent namespace")
-		return
-	}
-
-	// Remove eventwriter associated with this agent
-	s.eventWriters.Remove(outbound.Name)
+	s.cleanupAgentState(outbound.Name)
 
 	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
 }
@@ -790,6 +770,11 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 	defer s.clientLock.RUnlock()
 	for agentName, mode := range s.namespaceMap {
 		if mode != types.AgentModeManaged {
+			continue
+		}
+
+		// Skip agents that don't have a valid agent cluster secret
+		if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
 			continue
 		}
 
@@ -1072,8 +1057,10 @@ func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Ap
 		s.resources.Remove(oldAgentName, resources.NewResourceKeyFromApp(old))
 
 		if !s.queues.HasQueuePair(oldAgentName) {
-			if err := s.queues.Create(oldAgentName); err != nil {
-				logCtx.WithError(err).Error("failed to create queue pair for old agent")
+			if s.clusterMgr == nil || s.clusterMgr.HasMapping(oldAgentName) {
+				if err := s.queues.Create(oldAgentName); err != nil {
+					logCtx.WithError(err).Error("failed to create queue pair for old agent")
+				}
 			}
 		}
 		if oldQ := s.queues.SendQ(oldAgentName); oldQ != nil {
@@ -1145,4 +1132,15 @@ func (c *concurrentMap[K, V]) Delete(key K) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.m, key)
+}
+
+// DeleteByValue removes all entries whose value equals the given value.
+func (c *concurrentMap[K, V]) DeleteByValue(value V, eq func(a, b V) bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, v := range c.m {
+		if eq(v, value) {
+			delete(c.m, k)
+		}
+	}
 }

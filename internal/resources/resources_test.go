@@ -135,7 +135,7 @@ func Test_AgentResources(t *testing.T) {
 	res := NewAgentResources()
 
 	resKeys := make([]ResourceKey, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		app := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      fmt.Sprintf("test-%d", i),
@@ -162,11 +162,11 @@ func Test_AgentResources(t *testing.T) {
 		}
 
 		freq := map[ResourceKey]int{}
-		for i := 0; i < len(a); i++ {
+		for i := range a {
 			freq[a[i]]++
 		}
 
-		for i := 0; i < len(b); i++ {
+		for i := range b {
 			if freq[b[i]] == 0 {
 				return false
 			}
@@ -201,4 +201,30 @@ func Test_AgentResources(t *testing.T) {
 
 	assert.Empty(t, res.Checksum("first"))
 	assert.Empty(t, res.Checksum("second"))
+}
+
+func Test_AgentResources_RemoveAgent(t *testing.T) {
+	res := NewAgentResources()
+
+	res.Add("agent1", ResourceKey{Name: "app1", Namespace: "ns1"})
+	res.Add("agent1", ResourceKey{Name: "app2", Namespace: "ns1"})
+	res.Add("agent2", ResourceKey{Name: "app3", Namespace: "ns2"})
+
+	assert.Equal(t, 2, res.Len())
+
+	res.RemoveAgent("agent1")
+
+	assert.Equal(t, 1, res.Len())
+	assert.Empty(t, res.GetAllResources("agent1"))
+	assert.Len(t, res.GetAllResources("agent2"), 1)
+}
+
+func Test_AgentResources_RemoveAgent_NonExistent(t *testing.T) {
+	res := NewAgentResources()
+	res.Add("agent1", ResourceKey{Name: "app1", Namespace: "ns1"})
+
+	assert.NotPanics(t, func() {
+		res.RemoveAgent("nonexistent")
+	})
+	assert.Equal(t, 1, res.Len())
 }
