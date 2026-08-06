@@ -97,7 +97,7 @@ argocd-agent supports two mapping modes for routing Applications to managed agen
 - **Namespace-based mapping** (default): Each agent has a dedicated namespace on the control plane. Applications placed in that namespace are routed to the agent. No additional configuration required.
 - **Destination-based mapping**: Applications use `spec.destination.name` to target an agent, regardless of their namespace. Better multi-tenancy support and familiar to traditional Argo CD users.
 
-To enable destination-based mapping, set the corresponding fields in the ArgoCD CR on both clusters. Both sides must have it enabled.
+To enable destination-based mapping, set the corresponding fields in the ArgoCD CR on both clusters. Both sides must have it enabled. These CR fields require **argocd-operator v0.18.0** or later.
 
 **Hub cluster** — add `destinationBasedMapping: true` under the principal spec:
 
