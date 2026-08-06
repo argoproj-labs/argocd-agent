@@ -635,6 +635,61 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 		assert.Equal(t, `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`, updated.Annotations[manager.NotifiedAnnotation])
 		assert.Equal(t, "foo", updated.Annotations["bar"])
 	})
+
+	t.Run("Retain principal-owned annotations without patch support", func(t *testing.T) {
+		// The non-patch update path inherits the incoming annotation set the
+		// same way; the incoming application carries no annotations at all,
+		// which also exercises the nil-map initialization.
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "12345",
+					manager.NotifiedAnnotation:  `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`,
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		be := application.NewKubernetesBackend(appC, "", ai, false)
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.role = manager.ManagerRolePrincipal
+		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, "12345", updated.Annotations[manager.SourceUIDAnnotation])
+		assert.Equal(t, `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`, updated.Annotations[manager.NotifiedAnnotation])
+	})
 }
 
 func Test_ManagerUpdateOperation(t *testing.T) {
