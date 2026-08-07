@@ -46,7 +46,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	kubefake "k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/util/workqueue"
 )
 
 func TestMapAppProjectToAgents(t *testing.T) {
@@ -2809,7 +2808,7 @@ func TestServer_deleteGPGKeyCallback(t *testing.T) {
 	})
 }
 
-func drainQueue(t *testing.T, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) {
+func drainQueue(t *testing.T, q queue.WorkQueue) {
 	for q.Len() > 0 {
 		ev, shutdown := q.Get()
 		if shutdown {

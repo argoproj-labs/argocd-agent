@@ -18,7 +18,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/stretchr/testify/assert"
 )
@@ -60,55 +59,21 @@ func Test_Queue(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("Ensure that the max queue size is respected", func(t *testing.T) {
+	t.Run("Queue grows without dropping events", func(t *testing.T) {
 		q := NewSendRecvQueues()
 		err := q.Create("agent1")
 		assert.NoError(t, err)
 		queue := q.RecvQ("agent1")
 
-		for i := 1; i <= defaultMaxQueueSize; i++ {
+		count := 200
+		for i := 1; i <= count; i++ {
 			ev := event.New()
-			ev.SetID(strconv.Itoa(i))
+			ev.SetExtension("eventid", strconv.Itoa(i))
+			ev.SetExtension("resourceid", strconv.Itoa(i))
 			queue.Add(&ev)
 		}
 
-		// Since the queue is full, check if the oldest item is popped before adding a new item.
-		ev := event.New()
-		ev.SetID(strconv.Itoa(defaultMaxQueueSize + 1))
-		queue.Add(&ev)
-		assert.Equal(t, defaultMaxQueueSize, queue.Len())
-		front, _ := queue.Get()
-		assert.Equal(t, "2", front.ID())
-	})
-
-	t.Run("Ensure that the queue sizes can be configured via environment variable", func(t *testing.T) {
-		queueSize := 100
-		t.Setenv(config.EnvRecvQueueSize, strconv.Itoa(queueSize))
-		t.Setenv(config.EnvSendQueueSize, strconv.Itoa(queueSize+20))
-		q := NewSendRecvQueues()
-		err := q.Create("agent1")
-		assert.NoError(t, err)
-		recvQueue := q.RecvQ("agent1")
-		sendQueue := q.SendQ("agent1")
-
-		for i := 1; i <= queueSize+20; i++ {
-			ev := event.New()
-			ev.SetID(strconv.Itoa(i))
-			recvQueue.Add(&ev)
-			sendQueue.Add(&ev)
-		}
-
-		// Since the queue is full, check if the oldest item is popped before adding a new item.
-		ev := event.New()
-		ev.SetID(strconv.Itoa(queueSize + 1))
-		recvQueue.Add(&ev)
-		sendQueue.Add(&ev)
-		assert.Equal(t, queueSize, recvQueue.Len())
-		assert.Equal(t, queueSize+20, sendQueue.Len())
-		front, _ := recvQueue.Get()
-		assert.Equal(t, "22", front.ID())
-		front, _ = sendQueue.Get()
-		assert.Equal(t, "2", front.ID())
+		assert.Equal(t, count, queue.Len())
 	})
 
 }

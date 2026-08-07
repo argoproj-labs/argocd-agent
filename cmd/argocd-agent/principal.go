@@ -35,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
+	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
@@ -130,6 +131,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		haAdminPort                    int
 		haAllowedReplClients           []string
 		haReplicationInitialAckTimeout time.Duration
+
+		enableQueueDedupe bool
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -461,6 +464,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
 			}
 
+			if enableQueueDedupe {
+				logrus.Info("Queue event deduplication is enabled")
+				queue.SetDeduplicationEnabled(true)
+			}
+
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
 			if err != nil {
 				cmdutil.Fatal("Could not create new server instance: %v", err)
@@ -692,6 +700,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&haReplicationInitialAckTimeout, "ha-replication-initial-ack-timeout",
 		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_INITIAL_ACK_TIMEOUT", nil, 0),
 		"How long the primary waits for the replica's initial ACK after snapshot fetch (default: 5m)")
+
+	command.Flags().BoolVar(&enableQueueDedupe, "enable-queue-dedupe",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_ENABLE_QUEUE_DEDUPE", false),
+		"Enable event deduplication in the internal send/receive queues (experimental)")
 
 	return command
 }
