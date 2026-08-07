@@ -160,11 +160,17 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 	}
 
 	// Send an ACK if the event is processed successfully.
-	sendQ := a.queues.SendQ(defaultQueueName)
-	if sendQ == nil {
-		return fmt.Errorf("no send queue found for the default queue pair")
+	//
+	// ACKs are sent directly on the stream instead of through the normal send
+	// queue / EventWriter. The ACK shares the inbound event's resourceID, so
+	// routing it through the per-resource EventWriter queue would let it be
+	// coalesced or blocked behind normal status-update traffic for the same
+	// application. Under heavy status churn that delayed the ACK long enough for
+	// the principal to retry the original event, causing replay loops (see #839).
+	if err := a.eventWriter.SendDirect(a.emitter.ProcessedEvent(event.EventProcessed, ev)); err != nil {
+		logCtx.Errorf("Could not send ACK for event: %v", err)
+		return nil
 	}
-	sendQ.Add(a.emitter.ProcessedEvent(event.EventProcessed, ev))
 	logCtx.Trace("Sent an ACK for an event")
 
 	return nil

@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"strings"
@@ -32,6 +33,12 @@ type streamWriter interface {
 // It resends the event with exponential backoff until the event is ACK'd and removed from its list.
 type EventWriter struct {
 	mu sync.RWMutex
+
+	// sendMu serializes all writes to the underlying gRPC stream. A gRPC stream
+	// does not support concurrent Send calls, and events may be written both by
+	// the SendWaitingEvents loop and by SendDirect, so every send must hold it.
+	// It is a leaf lock: never acquire mu or an eventMessage lock while holding it.
+	sendMu sync.Mutex
 
 	// key: resource name + UID
 	// value: queue of unsent events for a resource
@@ -236,6 +243,36 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 	}
 }
 
+// sendOnStream serializes all writes to the underlying gRPC stream, which does
+// not support concurrent Send calls.
+func (ew *EventWriter) sendOnStream(target streamWriter, ev *eventstreamapi.Event) error {
+	ew.sendMu.Lock()
+	defer ew.sendMu.Unlock()
+	return target.Send(ev)
+}
+
+// SendDirect sends an event immediately on the stream, bypassing the per-resource
+// queue and coalescing logic. It is intended for control-plane traffic such as
+// processed-event ACKs, which must not be delayed behind normal resource updates
+// for the same resource (see issue #839). The event is fire-and-forget: it is not
+// tracked for retries.
+func (ew *EventWriter) SendDirect(ev *cloudevents.Event) error {
+	pev, err := format.ToProto(ev)
+	if err != nil {
+		return fmt.Errorf("could not wire event: %w", err)
+	}
+
+	ew.mu.RLock()
+	target := ew.target
+	ew.mu.RUnlock()
+
+	if target == nil {
+		return fmt.Errorf("no target stream available")
+	}
+
+	return ew.sendOnStream(target, &eventstreamapi.Event{Event: pev})
+}
+
 // SendWaitingEvents will periodically send the events waiting in the EventWriter.
 // Note: This function will never return unless the context is done, and therefore
 // should be started in a separate goroutine.
@@ -362,7 +399,7 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 		return
 	}
 
-	err = target.Send(&eventstreamapi.Event{Event: pev})
+	err = ew.sendOnStream(target, &eventstreamapi.Event{Event: pev})
 	sentMsg.mu.Unlock()
 
 	if err != nil {
@@ -445,7 +482,7 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	}
 
 	// A Send() on the stream is actually not blocking.
-	err = sendTarget.Send(&eventstreamapi.Event{Event: pev})
+	err = ew.sendOnStream(sendTarget, &eventstreamapi.Event{Event: pev})
 	if err != nil {
 		logCtx.Errorf("Error while sending: %v\n", err)
 		return
