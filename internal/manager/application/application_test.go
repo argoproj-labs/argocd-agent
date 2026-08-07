@@ -440,6 +440,71 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		require.NotNil(t, updated.Operation)
 		require.Equal(t, incoming.Operation, updated.Operation)
 	})
+
+	t.Run("Retain principal-owned annotations across an agent status update", func(t *testing.T) {
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					"bar": "foo",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Annotations: map[string]string{
+					// State written on the principal's copy only: the agent's
+					// incoming application does not carry these annotations.
+					manager.SourceUIDAnnotation: "12345",
+					manager.NotifiedAnnotation:  `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`,
+					// A stale value the agent has since changed: the incoming
+					// value must win for annotations the agent owns.
+					"bar": "baz",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		// usePatch=false exercises the update path, which inherits the
+		// incoming annotation set and is where preservation must happen; the
+		// patch path never touches annotations except the refresh marker.
+		be := application.NewKubernetesBackend(appC, "", ai, false)
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.mode = manager.ManagerModeManaged
+		mgr.role = manager.ManagerRolePrincipal
+		updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, "12345", updated.Annotations[manager.SourceUIDAnnotation])
+		assert.Equal(t, `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`, updated.Annotations[manager.NotifiedAnnotation])
+		assert.Equal(t, "foo", updated.Annotations["bar"])
+	})
 }
 
 func Test_ManagerUpdateAutonomous(t *testing.T) {
@@ -509,6 +574,121 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 		assert.Equal(t, "cluster-1", updated.Namespace)
 		require.NotContains(t, updated.ObjectMeta.Annotations, "argocd.argoproj.io/refresh")
 		require.Equal(t, map[string]string{"foo": "bar"}, updated.Labels)
+	})
+	t.Run("Retain principal-owned annotations across an agent update", func(t *testing.T) {
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					"bar": "foo",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Annotations: map[string]string{
+					// State written on the principal's copy only: the agent's
+					// incoming application does not carry these annotations.
+					manager.SourceUIDAnnotation: "12345",
+					manager.NotifiedAnnotation:  `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`,
+					// A stale value the agent has since changed: the incoming
+					// value must win for annotations the agent owns.
+					"bar": "baz",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.role = manager.ManagerRolePrincipal
+		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, "12345", updated.Annotations[manager.SourceUIDAnnotation])
+		assert.Equal(t, `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`, updated.Annotations[manager.NotifiedAnnotation])
+		assert.Equal(t, "foo", updated.Annotations["bar"])
+	})
+
+	t.Run("Retain principal-owned annotations without patch support", func(t *testing.T) {
+		// The non-patch update path inherits the incoming annotation set the
+		// same way; the incoming application carries no annotations at all,
+		// which also exercises the nil-map initialization.
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "12345",
+					manager.NotifiedAnnotation:  `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`,
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		be := application.NewKubernetesBackend(appC, "", ai, false)
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.role = manager.ManagerRolePrincipal
+		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, "12345", updated.Annotations[manager.SourceUIDAnnotation])
+		assert.Equal(t, `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`, updated.Annotations[manager.NotifiedAnnotation])
 	})
 }
 
