@@ -33,8 +33,10 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	synccommon "github.com/argoproj/argo-cd/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -2292,11 +2294,19 @@ func TestServer_updateAppCallback(t *testing.T) {
 	})
 }
 
+func newTestClusterManager(t *testing.T) *cluster.Manager {
+	t.Helper()
+	m, err := cluster.NewManager(context.Background(), "default", "", "", cacheutil.RedisCompressionGZip, fakekube.NewFakeKubeClient("default"), nil)
+	require.NoError(t, err)
+	return m
+}
+
 func TestServer_handleAppAgentChange(t *testing.T) {
 	tests := []struct {
 		name                    string
 		destinationBasedMapping bool
 		namespaceMap            map[string]types.AgentMode
+		clusterMgr              *cluster.Manager
 		oldApp                  *v1alpha1.Application
 		newApp                  *v1alpha1.Application
 		expectedDeleteAgent     string
@@ -2488,10 +2498,76 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 			expectedAddAgent:    "",
 			shouldTrackApp:      false,
 		},
+		{
+			name:                    "new agent has no cluster mapping - does not poison appToAgent",
+			destinationBasedMapping: true,
+			clusterMgr:              newTestClusterManager(t),
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "local-cluster",
+					},
+				},
+			},
+			expectedDeleteAgent: "old-agent",
+			expectedDeleteEvent: true,
+			expectedAddAgent:    "",
+			shouldTrackApp:      false,
+		},
+		{
+			name:                    "new agent has a live cluster mapping - tracks normally",
+			destinationBasedMapping: true,
+			clusterMgr:              newTestClusterManager(t),
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "new-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "old-agent",
+			expectedDeleteEvent: true,
+			expectedAddAgent:    "new-agent",
+			shouldTrackApp:      true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.clusterMgr != nil && tt.expectedAddAgent != "" && tt.shouldTrackApp {
+				require.NoError(t, tt.clusterMgr.MapCluster(tt.expectedAddAgent, &v1alpha1.Cluster{Name: tt.expectedAddAgent}))
+			}
+
 			s := &Server{
 				ctx:                     context.Background(),
 				queues:                  queue.NewSendRecvQueues(),
@@ -2500,6 +2576,7 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 				appToAgent:              newConcurrentStringMap(),
 				destinationBasedMapping: tt.destinationBasedMapping,
 				namespaceMap:            tt.namespaceMap,
+				clusterMgr:              tt.clusterMgr,
 			}
 
 			// Create queues for agents involved
