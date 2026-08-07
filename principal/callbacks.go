@@ -337,7 +337,7 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.Create, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
@@ -407,7 +407,9 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		return
 	}
 
-	s.syncAppProjectUpdatesToAgents(ctx, old, new, logCtx)
+	if !s.isAppProjectFromAutonomousAgent(new) {
+		s.syncAppProjectUpdatesToAgents(ctx, old, new, logCtx)
+	} // For the autonomous case, on principal, there is no need to send AppProject updates to autonomous agents.
 
 	ev := s.events.AppProjectEvent(event.SpecUpdate, new)
 	s.ha.ForwardEventForReplication(event.New(ev, targets.AppProject), new.Namespace, replication.DirectionOutbound)
@@ -466,7 +468,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
@@ -789,6 +791,11 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 // syncAppProjectUpdatesToAgents sends the AppProject update events to the relevant clusters.
 // It sends delete events to the clusters that no longer match the given AppProject.
 func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1alpha1.AppProject, logCtx *logrus.Entry) {
+
+	if s.isAppProjectFromAutonomousAgent(new) || s.isAppProjectFromAutonomousAgent(old) {
+		return
+	}
+
 	oldAgents := s.mapAppProjectToAgents(*old)
 	newAgents := s.mapAppProjectToAgents(*new)
 
@@ -806,7 +813,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
@@ -827,7 +834,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)

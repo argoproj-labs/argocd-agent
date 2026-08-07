@@ -27,13 +27,14 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -437,7 +438,7 @@ func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project
 		return false, fmt.Errorf("source UID annotation not found for resource")
 	}
 
-	if cachedSpec, ok := projectCache.Get(types.UID(sourceUID)); ok {
+	if cachedSpec, ok := projectCache.Get(ktypes.UID(sourceUID)); ok {
 		logCtx.Debugf("AppProject %s is available in agent cache", project.Name)
 
 		if isEqual := reflect.DeepEqual(cachedSpec, project.Spec); !isEqual {
@@ -519,7 +520,8 @@ func isDenyPattern(pattern string) bool {
 // AgentSpecificAppProject returns an agent specific version of the given AppProject
 // We don't have to check for deny patterns because we only construct the agent specific AppProject
 // if the agent name matches the AppProject's destinations.
-func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string, dstMapping bool) v1alpha1.AppProject {
+func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string, dstMapping bool, mode types.AgentMode) v1alpha1.AppProject {
+
 	// Only keep the destinations that are relevant to the given agent
 	filteredDst := []v1alpha1.ApplicationDestination{}
 	for _, dst := range appProject.Spec.Destinations {
@@ -553,8 +555,10 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string, dstMa
 		appProject.Spec.SourceNamespaces = nil
 	}
 
-	// Remove the roles since they are not relevant on the workload cluster
-	appProject.Spec.Roles = []v1alpha1.ProjectRole{}
+	if !mode.IsAutonomous() {
+		// Remove the roles since they are not relevant on the workload cluster
+		appProject.Spec.Roles = []v1alpha1.ProjectRole{}
+	}
 
 	return appProject
 }
