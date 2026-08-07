@@ -1,4 +1,4 @@
-# Namespaces
+# Namespaces (namespace-based mapping)
 
 This document explains how the principal handles namespaces, how to configure namespace access control, and how to enable automatic namespace creation for autonomous agents.
 

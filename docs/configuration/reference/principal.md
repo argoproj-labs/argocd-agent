@@ -97,6 +97,30 @@ Labels to apply to auto-created namespaces.
 
 **Example:** `managed-by=argocd-agent,environment=production`
 
+## Agent Mapping
+
+### Destination-Based Mapping
+
+| | |
+|---|---|
+| **CLI Flag** | `--destination-based-mapping` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING` |
+| **ConfigMap Entry** | `principal.destination-based-mapping` |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Enable destination-based mapping mode. When enabled, the principal routes Applications to agents based on `spec.destination.name` instead of the Application's namespace. This allows applications from multiple namespaces to be synced to the same agent.
+
+Both the principal and agent must have this flag enabled for destination-based mapping to work correctly.
+
+See [Agent Mapping Modes](../../concepts/agent-mapping.md) for a detailed comparison of namespace-based and destination-based mapping.
+
+**Example:**
+
+```bash
+argocd-agent principal --destination-based-mapping
+```
+
 ## Resource Filtering
 
 ### Label Selector

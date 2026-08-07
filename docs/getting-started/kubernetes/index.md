@@ -316,11 +316,14 @@ kubectl get secret argocd-agent-ca -n argocd --context <workload-cluster-context
 
 ### 5.5 Create Agent Namespace on Principal
 
-For managed agents, create a namespace on the principal where the agent's Applications will be created and managed:
+For managed agents using **namespace-based mapping** (the default), create a namespace on the principal where the agent's Applications will be created and managed:
 
 ```bash
 kubectl create namespace my-first-agent --context <control-plane-context>
 ```
+
+!!! tip "Using Destination-Based Mapping Instead?"
+    If you plan to use **destination-based mapping**, you can skip this step. Destination-based mapping routes Applications to agents via `spec.destination.name` and does not require per-agent namespaces. Continue to [Step 5.6](#56-deploy-agent) and see [Configuring Destination-Based Mapping](#configuring-destination-based-mapping) below for the additional configuration needed.
 
 ### 5.6 Deploy Agent
 
@@ -434,6 +437,101 @@ kubectl get applications -n argocd --context <workload-cluster-context>
 ```
 
 Access the Argo CD UI to see your agent and its applications!
+
+## Configuring Destination-Based Mapping
+
+If you prefer to use destination-based mapping instead of the default namespace-based mapping, follow these additional steps after completing the basic setup above.
+
+### Why Use Destination-Based Mapping?
+
+- Multiple teams can share an agent without needing separate namespaces per team
+- Applications can live in any namespace on the principal
+- Familiar to users of traditional Argo CD's `destination.name` cluster targeting
+- Recommended for ApplicationSets that target multiple agents from a single resource
+- Better multi-tenancy support
+
+### Enable on Principal
+
+```bash
+kubectl patch configmap argocd-agent-params -n argocd --context <control-plane-context> \
+  --patch '{"data":{
+    "principal.destination-based-mapping":"true"
+  }}'
+
+# Restart the principal to apply changes
+kubectl rollout restart deployment argocd-agent-principal -n argocd --context <control-plane-context>
+```
+
+### Enable on Agent
+
+```bash
+kubectl patch configmap argocd-agent-params -n argocd --context <workload-cluster-context> \
+  --patch '{"data":{
+    "agent.destination-based-mapping":"true",
+    "agent.create-namespace":"true"
+  }}'
+
+# Restart the agent to apply changes
+kubectl rollout restart deployment argocd-agent-agent -n argocd --context <workload-cluster-context>
+```
+
+### Test Application Synchronization (Destination-Based Mapping)
+
+With destination-based mapping, Applications can live in any namespace. Before creating the test Application, prepare the namespace and ensure the principal is allowed to operate in it:
+
+```bash
+# Create the namespace for the test Application on the control plane
+kubectl create namespace team-ns --context <control-plane-context>
+
+# Allow the principal to operate in team-ns (in addition to the agent namespace)
+kubectl patch configmap argocd-agent-params -n argocd --context <control-plane-context> \
+  --patch '{"data":{
+    "principal.allowed-namespaces":"my-first-agent,team-ns"
+  }}'
+
+# Restart the principal to apply the updated allowed-namespaces
+kubectl rollout restart deployment argocd-agent-principal -n argocd --context <control-plane-context>
+```
+
+!!! tip
+    The `default` AppProject was already patched with `sourceNamespaces: ["*"]` in [Step 6.4](#64-test-application-synchronization-managed-mode), so it already permits Applications from `team-ns`.
+
+Now create a test application that uses `spec.destination.name` to target the agent:
+
+```bash
+cat <<EOF | kubectl apply -f - --context <control-plane-context>
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: test-app-dbm
+  namespace: team-ns  # Applications can live in any namespace
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    name: my-first-agent  # Routes to agent by name
+    namespace: guestbook
+  syncPolicy:
+    syncOptions:
+    - CreateNamespace=true
+EOF
+```
+
+Verify the application is synchronized to the agent:
+
+```bash
+# Check that the application exists on the principal
+kubectl get applications -n team-ns --context <control-plane-context>
+
+# Check that the application appears on the workload cluster (in its original namespace)
+kubectl get applications -n team-ns --context <workload-cluster-context>
+```
+
+!!! note "Namespace Preservation"
+    With destination-based mapping, the Application's namespace from the principal is preserved on the agent side. If your Application is in namespace `team-ns` on the principal, it will also be in namespace `team-ns` on the agent (unlike namespace-based mapping where it's always placed in the agent's configured namespace).
 
 ## Next Steps
 
