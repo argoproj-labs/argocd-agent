@@ -46,6 +46,208 @@ graph TB
     ProxyCert --> ArgoCD[Argo CD Server]
 ```
 
+## Using SPIRE (Automated Certificate Management)
+
+[SPIRE](https://spiffe.io/docs/latest/spire-about/) can replace static certificate management for agent-to-principal communication. When enabled, TLS credentials are obtained automatically from the SPIRE Workload API — no per-agent certificate generation, no secret copying between clusters.
+
+!!! note "What SPIRE replaces and what it does not"
+    SPIRE replaces the **agent-to-principal gRPC TLS** certificates (principal server cert, agent client certs, and CA certs) and **agent authentication** (identity comes from SPIFFE IDs instead of certificate CNs). The resource proxy TLS, JWT signing key, and CA secret on the principal are still managed via static secrets.
+
+### Prerequisites
+
+- A SPIFFE-compatible Workload API (e.g., SPIRE) deployed on your clusters
+- A SPIRE Agent socket accessible to principal and agent pods (via hostPath or CSI driver)
+- argocd-agent is **not responsible** for SPIRE infrastructure setup — it only consumes the Workload API
+
+### Step 1: Choose the authentication method
+
+Two authentication methods are supported. Choose based on what your SPIRE setup provides:
+
+| Method | `--spire-auth-method` | How it works | Use when |
+|---|---|---|---|
+| **JWT** | `jwt` | Agent fetches a JWT-SVID from its local SPIRE Agent and sends it as a bearer token. Principal validates the JWT using its SPIRE JWT bundle source. | Each cluster has its own SPIRE Server (separate trust domains). Both sides need JWT-SVID support. This is the most common setup with federated SPIRE. |
+| **mTLS** | `mtls` | Agent presents its X.509-SVID as a TLS client certificate. Principal verifies the cert chain against the SPIRE trust bundle and extracts identity from the SPIFFE URI in the certificate SAN. | All clusters share a single SPIRE Server (same trust domain). Uses only X.509-SVIDs, which are the core SPIFFE standard — works with any SPIFFE-compatible provider, even those that don't support JWT-SVIDs. |
+
+!!! tip "Which method should I choose?"
+    - If your clusters each have their own SPIRE Server and trust domain → use **JWT**
+    - If all clusters share a single SPIRE Server → use **mTLS**
+
+### Step 2: Create one-time secrets on the principal
+
+These static secrets are still required because the resource proxy and JWT signing use static TLS, and self-registration needs a shared client certificate:
+
+```bash
+# Initialize the CA
+argocd-agentctl pki init \
+  --principal-context <control-plane-context> \
+  --principal-namespace argocd
+
+# Issue the resource proxy server certificate
+argocd-agentctl pki issue resource-proxy \
+  --principal-context <control-plane-context> \
+  --principal-namespace argocd \
+  --dns argocd-agent-resource-proxy.argocd.svc.cluster.local \
+  --upsert
+
+# Issue a shared client certificate for self-registration
+argocd-agentctl pki issue shared-client \
+  --principal-context <control-plane-context> \
+  --principal-namespace argocd \
+  --upsert
+
+# Create the JWT signing key
+argocd-agentctl jwt create-key \
+  --principal-context <control-plane-context> \
+  --principal-namespace argocd \
+  --upsert
+```
+
+### Step 3: Enable self-registration on the principal
+
+!!! important "Self-registration is required with SPIRE"
+    With static certificates, you manually run `argocd-agentctl pki issue agent <name>` for each agent — this creates the agent's cluster secret on the principal. With SPIRE, there are no per-agent certificate steps. Instead, **self-registration** must be enabled so the principal automatically creates the agent's cluster secret when the agent connects for the first time.
+
+Enable self-registration by setting these environment variables (or CLI flags) on the principal:
+
+| Environment Variable | Value | Description |
+|---|---|---|
+| `ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION` | `true` | Enables automatic cluster secret creation when a new agent connects |
+| `ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET` | `argocd-agent-shared-client-tls` | Name of the shared client cert secret (created in Step 2). The principal copies this into the agent's cluster secret so the ArgoCD application controller can authenticate to the resource proxy. |
+
+### Step 4: Configure the principal
+
+```yaml
+# ConfigMap (argocd-agent-params)
+principal.spire.socket-path: "unix:///run/spire/agent-sockets/spire-agent.sock"
+principal.spire.auth-method: "jwt"   # or "mtls"
+```
+
+When SPIRE is enabled, the principal automatically:
+
+- Uses SPIRE X.509-SVIDs for its server TLS certificate (replaces `argocd-agent-principal-tls`)
+- Skips loading the static principal TLS secret and root CA
+- With `jwt`: validates agent JWT-SVIDs, defaults `--auth` to `spiffe-jwt:spiffe://[^/]+/(.+)`
+- With `mtls`: requires client X.509-SVIDs verified against SPIRE trust bundle, defaults `--auth` to `mtls:uri:spiffe://[^/]+/(.+)`
+
+**Helm values:**
+
+```yaml
+principal:
+  spire:
+    enabled: true
+    authMethod: "jwt"   # or "mtls"
+    mountMethod: hostPath  # or "csi" for the SPIFFE CSI driver
+```
+
+### Step 5: Configure the agent
+
+```yaml
+# ConfigMap (argocd-agent-params)
+agent.spire.socket-path: "unix:///run/spire/agent-sockets/spire-agent.sock"
+agent.spire.auth-method: "jwt"   # or "mtls"
+```
+
+When SPIRE is enabled, the agent automatically:
+
+- Uses SPIRE X.509-SVIDs for TLS (replaces `argocd-agent-client-tls`)
+- Skips loading static CA and client cert secrets — **no secrets needed on the agent cluster**
+- With `jwt`: fetches a JWT-SVID and sends it as a bearer token, defaults `--creds` to `spiffe-jwt:`
+- With `mtls`: presents X.509-SVID as a client certificate, defaults `--creds` to `mtls:`
+
+**Helm values:**
+
+```yaml
+spire:
+  enabled: true
+  authMethod: "jwt"   # or "mtls"
+  mountMethod: hostPath  # or "csi" for the SPIFFE CSI driver
+```
+
+### Step 6: Create SPIRE registration entries
+
+Register the principal and each agent with the SPIRE Server. The SPIFFE IDs must follow the pattern that matches the principal's auth regex.
+
+!!! warning "One entry per SPIRE Agent (per node)"
+    Each node runs its own SPIRE Agent with a unique SPIFFE ID. A registration entry only applies to workloads attested by the specific agent in its `parentID`. Since pods can be scheduled on any node, create one entry **per SPIRE Agent** in the cluster.
+
+```bash
+# Register the principal (on the SPIRE Server that serves the principal's cluster)
+spire-server entry create \
+  -spiffeID spiffe://example.org/argocd/principal \
+  -parentID <spire-agent-spiffe-id> \
+  -selector k8s:ns:<principal-namespace> \
+  -selector k8s:sa:<principal-service-account>
+
+# Register an agent (on the SPIRE Server that serves the agent's cluster)
+spire-server entry create \
+  -spiffeID spiffe://example.org/argocd/agent/cluster-01 \
+  -parentID <spire-agent-spiffe-id> \
+  -selector k8s:ns:<agent-namespace> \
+  -selector k8s:sa:<agent-service-account>
+```
+
+**Agent name extraction:** The principal's auth regex extracts the agent name from the SPIFFE ID. With the default regex `spiffe://[^/]+/(.+)`, the agent name from `spiffe://example.org/argocd/agent/cluster-01` would be `argocd/agent/cluster-01`. A namespace with this name must exist on the principal's cluster for Applications to be routed to this agent.
+
+!!! note "Federated entries (JWT mode with separate trust domains)"
+    If hub and spoke have different trust domains, add `-federatesWith spiffe://<other-trust-domain>` to each entry so the SVID includes the federated trust bundle.
+
+### Verification
+
+Check the principal logs:
+
+```bash
+kubectl logs deploy/argocd-agent-principal -n argocd | grep -iE "spire|mtls|jwt|listen"
+```
+
+Expected output (JWT mode):
+
+```text
+Using SPIRE for TLS credentials (socket: unix:///run/spire/agent-sockets/spire-agent.sock)
+Connected to SPIRE Agent, X.509 and JWT sources ready
+Using SPIRE for server TLS credentials
+Using SPIFFE JWT authentication
+Now listening on [::]:8443
+```
+
+Expected output (mTLS mode):
+
+```text
+Using SPIRE for TLS credentials (socket: unix:///run/spire/agent-sockets/spire-agent.sock)
+Connected to SPIRE Agent, X.509 and JWT sources ready
+Using SPIRE for server TLS credentials
+SPIRE mTLS: requiring client certificates verified against SPIRE trust bundle
+Using mTLS authentication (source: uri, pattern: spiffe://[^/]+/(.+))
+Now listening on [::]:8443
+```
+
+Check agent logs:
+
+```bash
+kubectl logs deploy/argocd-agent-agent -n argocd | grep -iE "spire|auth|jwt|svid"
+```
+
+### Configuration Reference
+
+| Parameter | Environment Variable | Description |
+|-----------|---------------------|-------------|
+| `principal.spire.socket-path` | `ARGOCD_PRINCIPAL_SPIRE_AGENT_SOCKET` | SPIRE Workload API socket URI on the principal |
+| `principal.spire.auth-method` | `ARGOCD_PRINCIPAL_SPIRE_AUTH_METHOD` | Authentication method: `jwt` or `mtls` |
+| `agent.spire.socket-path` | `ARGOCD_AGENT_SPIRE_AGENT_SOCKET` | SPIRE Workload API socket URI on the agent |
+| `agent.spire.auth-method` | `ARGOCD_AGENT_SPIRE_AUTH_METHOD` | Authentication method: `jwt` or `mtls` |
+| — | `ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION` | Enable self-registration (required for SPIRE) |
+| — | `ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET` | Shared client cert secret name for self-registration |
+
+### Comparison with Static Certificates
+
+| | Static Certs | SPIRE |
+|---|---|---|
+| **Per-agent setup** | `pki issue agent`, copy CA, copy cert | Create SPIRE registration entry only |
+| **Certificate rotation** | Manual (re-issue and redistribute) | Automatic (SPIRE rotates SVIDs) |
+| **Agent registration** | Manual (`pki issue agent` creates cluster secret) | Automatic (self-registration on first connect) |
+| **Secrets on agent cluster** | `argocd-agent-ca`, `argocd-agent-client-tls` | None (SPIRE provides all credentials) |
+| **Secrets on principal cluster** | CA, principal TLS, resource proxy, JWT | CA, resource proxy, shared client cert, JWT |
+| **Self-registration** | Optional | Required |
+
 ## Using argocd-agentctl CLI (Recommended)
 
 The `argocd-agentctl` CLI provides the simplest way to manage the entire PKI lifecycle.
@@ -621,6 +823,7 @@ kubectl get secret argocd-agent-client-tls -n argocd -o jsonpath='{.data.tls\.cr
 5. **Monitor Expiration**: Set up alerts for certificate expiration
 6. **Restrict CA Access**: Only the principal cluster should have the CA private key
 7. **Use Strong TLS Settings**: Enable TLS 1.3 and disable weak cipher suites
+8. **Consider SPIRE for multi-cluster**: For deployments with many clusters, SPIRE eliminates per-agent certificate management
 
 ## Related Documentation
 
