@@ -35,6 +35,10 @@ import (
 // capture groups. It also supports Kubernetes subresources.
 const resourceRequestRegexp = `^/(?:api|apis|(?:api|apis/(?P<group>[^\/]+))/(?P<version>v[^\/]+)(?:/(?:namespaces/(?P<namespace>[^\/]+)/)?)?(?:(?P<resource>[^\/]+)(?:/(?P<name>[^\/]+)(?:/(?P<subresource>[^\/]+))?)?)?)$`
 
+// resourceGroupRequestRegexp matches API group discovery requests such as
+// /apis/apps, which do not include an explicit version.
+const resourceGroupRequestRegexp = `^/apis/(?P<group>[^\/]+)$`
+
 // requestTimeout is the timeout that's being applied to requests for any live
 // resource.
 //
