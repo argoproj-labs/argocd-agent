@@ -1,0 +1,28 @@
+# Helm values for charts/argocd-clusterprofile-controller (from the
+# clusterprofile-integration-for-argocd repo, main branch, UNMODIFIED) that
+# wire in the "argocd-agent" provider file produced by this PoC.
+#
+# Install with (from the clusterprofile-integration-for-argocd repo root):
+#   helm install argocd-clusterprofile-controller \
+#     ./charts/argocd-clusterprofile-controller \
+#     -n argocd -f clusterprofile-integration-values.yaml
+image:
+  repository: localhost/clusterprofile-integration-for-argocd
+  tag: dev
+  pullPolicy: Never
+
+controller:
+  # Only watch ClusterProfiles co-located with the Argo CD control plane
+  # namespace, per the "secrets live next to their source ClusterProfile"
+  # design (see ../README.md, "Why a single watched namespace").
+  clusterProfileNamespaces:
+    - argocd
+  clusterProfileProvidersFile: /etc/clusterprofile-provider/clusterprofile-provider-file.json
+  extraVolumeMounts:
+    - name: clusterprofile-provider-file
+      mountPath: /etc/clusterprofile-provider
+      readOnly: true
+  extraVolumes:
+    - name: clusterprofile-provider-file
+      configMap:
+        name: clusterprofile-provider-file

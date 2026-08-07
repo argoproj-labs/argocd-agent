@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+#
+# Builds the two OPTIONAL binaries that make up the declarative
+# ClusterProfile <-> argocd-agent integration PoC:
+#   - /bin/clusterprofile-agent-driver: standalone controller
+#   - /bin/argocd-agent-creds: client-go exec credential plugin
+#
+# See docs/clusterprofile-integration/README.md.
+FROM docker.io/library/golang:1.26 AS builder
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 go build -o dist/clusterprofile-agent-driver ./cmd/clusterprofile-agent-driver
+RUN CGO_ENABLED=0 go build -o dist/argocd-agent-creds ./cmd/argocd-agent-creds
+
+FROM docker.io/library/alpine:3.23
+RUN apk upgrade --no-cache
+COPY --from=builder /src/dist/clusterprofile-agent-driver /bin/clusterprofile-agent-driver
+COPY --from=builder /src/dist/argocd-agent-creds /bin/argocd-agent-creds
+USER 999
+ENTRYPOINT ["/bin/clusterprofile-agent-driver"]

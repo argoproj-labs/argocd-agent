@@ -1,0 +1,14 @@
+resources:
+- ../../../install/kubernetes/principal
+images:
+- name: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
+  newName: localhost/argocd-agent
+  newTag: dev
+patches:
+- target:
+    kind: Deployment
+    name: argocd-agent-principal
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/imagePullPolicy
+      value: Never

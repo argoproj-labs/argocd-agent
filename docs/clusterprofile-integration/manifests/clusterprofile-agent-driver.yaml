@@ -1,0 +1,116 @@
+# clusterprofile-agent-driver: watches ClusterProfile objects with
+# spec.clusterManager.name=argocd-agent in the argocd namespace, mints a
+# resource-proxy bearer token per agent, and publishes the corresponding
+# AccessProvider on ClusterProfile.status. See ../README.md.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: clusterprofile-agent-driver
+  namespace: argocd
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: clusterprofile-agent-driver
+  namespace: argocd
+rules:
+  - apiGroups: ["multicluster.x-k8s.io"]
+    resources: ["clusterprofiles"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["multicluster.x-k8s.io"]
+    resources: ["clusterprofiles/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: clusterprofile-agent-driver
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: clusterprofile-agent-driver
+subjects:
+  - kind: ServiceAccount
+    name: clusterprofile-agent-driver
+    namespace: argocd
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clusterprofile-agent-driver
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: clusterprofile-agent-driver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clusterprofile-agent-driver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: clusterprofile-agent-driver
+    spec:
+      serviceAccountName: clusterprofile-agent-driver
+      containers:
+        - name: driver
+          image: localhost/argocd-agent-clusterprofile-driver:dev
+          imagePullPolicy: Never
+          args:
+            - --resource-proxy-address=argocd-agent-resource-proxy.argocd.svc.cluster.local:9090
+            - --jwt-key-path=/app/config/jwt/jwt.key
+            - --resource-proxy-ca-path=/app/config/ca/ca.crt
+            - --watch-namespace=argocd
+          ports:
+            - containerPort: 8080
+              name: metrics
+            - containerPort: 8081
+              name: probe
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probe
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probe
+            initialDelaySeconds: 5
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: jwt-secret
+              mountPath: /app/config/jwt
+              readOnly: true
+            - name: ca-secret
+              mountPath: /app/config/ca
+              readOnly: true
+      volumes:
+        - name: jwt-secret
+          secret:
+            secretName: argocd-agent-jwt
+            items:
+              - key: jwt.key
+                path: jwt.key
+        - name: ca-secret
+          secret:
+            secretName: argocd-agent-ca
+            items:
+              # argocd-agentctl pki init stores the CA as a standard TLS
+              # secret (tls.crt/tls.key), not as ca.crt. Re-key it here so
+              # the mounted file is still named ca.crt for the driver flag.
+              - key: tls.crt
+                path: ca.crt

@@ -1,0 +1,42 @@
+# Grants the unmodified argocd-agent-agent ServiceAccount read-only access
+# (via the Kubernetes builtin 'view' ClusterRole) to core/apps/batch/etc.
+# resources on the workload (spoke) cluster.
+#
+# Why this is needed: upstream argocd-agent's shipped
+# install/kubernetes/agent/agent-clusterrole.yaml intentionally only grants
+# RBAC on "namespaces" and "applications.argoproj.io" - just enough for the
+# agent to mirror Application objects and manage its own namespaces. It does
+# NOT grant get/list/watch on Pods, Deployments, ReplicaSets, Services, etc.
+#
+# The principal's resource-proxy (used by Argo CD UI's "live manifest",
+# "logs", "events", and "exec" views, reached through
+# argocd-agent-creds + the ClusterProfile-advertised mTLS cert/JWT) forwards
+# those requests to the agent process, which then does a real, live
+# `a.kubeClient.DynamicClient.Resource(gvr).Get(...)` call against its own
+# in-cluster config - i.e. as the argocd-agent-agent ServiceAccount. Without
+# this binding, that call (and the ownership-chain walk in
+# agent/resource.go's isResourceManaged, which recursively looks up owning
+# ReplicaSets/Deployments) fails with a genuine Kubernetes 403 Forbidden,
+# which Argo CD's server surfaces as "error getting resource: " with an
+# empty underlying message (see README.md "Proving the resource-proxy...").
+#
+# This is deployment-specific RBAC that any real argocd-agent deployer would
+# need to size to their own live-view requirements; it does not modify any
+# argocd-agent or clusterprofile-integration-for-argocd manifest or source
+# file, and only touches the workload/spoke cluster (not the principal/hub).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-agent-agent-resource-proxy-view
+  labels:
+    app.kubernetes.io/part-of: argocd-agent
+    app.kubernetes.io/component: resource-proxy-rbac
+    app.kubernetes.io/managed-by: clusterprofile-integration-poc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: argocd-agent-agent
+    namespace: argocd
