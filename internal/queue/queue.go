@@ -27,13 +27,24 @@ import (
 
 var _ QueuePair = &SendRecvQueues{}
 
+// RecvQueue is the minimal interface used by RecvQ consumers. It covers only
+// the methods actually called on receive queues (Add, Get, Done, Len,
+// ShutDown), avoiding a dependency on the full workqueue interface.
+type RecvQueue interface {
+	Add(item *event.Event)
+	Get() (*event.Event, bool)
+	Done(item *event.Event)
+	Len() int
+	ShutDown()
+}
+
 // QueuePair maintains a map (indexed by name) of send/receive queue pairs
 type QueuePair interface {
 	Names() []string
 	HasQueuePair(name string) bool
 	Len() int
 	SendQ(name string) workqueue.TypedRateLimitingInterface[*event.Event]
-	RecvQ(name string) workqueue.TypedRateLimitingInterface[*event.Event]
+	RecvQ(name string) RecvQueue
 	Create(name string) error
 	Delete(name string, shutdown bool) error
 }
@@ -44,7 +55,7 @@ const (
 )
 
 type queuepair struct {
-	recvq *boundedQueue
+	recvq *dedupeQueue
 	sendq *boundedQueue
 }
 
@@ -137,7 +148,7 @@ func (q *SendRecvQueues) SendQ(name string) workqueue.TypedRateLimitingInterface
 
 // RecvQ will return the receive queue from the queue pair named name. If no
 // such queue pair exists, returns nil
-func (q *SendRecvQueues) RecvQ(name string) workqueue.TypedRateLimitingInterface[*event.Event] {
+func (q *SendRecvQueues) RecvQ(name string) RecvQueue {
 	q.queuelock.RLock()
 	defer q.queuelock.RUnlock()
 	qp, ok := q.queues[name]
@@ -172,7 +183,7 @@ func (q *SendRecvQueues) Create(name string) error {
 	qp := &queuepair{}
 
 	qp.sendq = newBoundedQueue(sendQueueSize, name+"-send")
-	qp.recvq = newBoundedQueue(recvQueueSize, name+"-recv")
+	qp.recvq = newDedupeQueue(recvQueueSize, name+"-recv")
 	q.queues[name] = qp
 
 	return nil
