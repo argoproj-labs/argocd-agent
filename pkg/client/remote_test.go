@@ -60,7 +60,7 @@ func Test_Connect(t *testing.T) {
 
 	am := userpass.NewUserPassAuthentication("")
 	am.UpsertUser("default", "password")
-	s.AuthMethodsForE2EOnly().RegisterMethod("userpass", am)
+	s.AuthMethodsForE2EOnly().RegisterMethod(auth.MethodUserPass, am)
 	require.NoError(t, err)
 	errch := make(chan error)
 	err = s.Start(context.Background(), errch)
@@ -75,7 +75,7 @@ func Test_Connect(t *testing.T) {
 	t.Run("Connect to a server", func(t *testing.T) {
 		r, err := NewRemote("127.0.0.1", s.ListenerForE2EOnly().Port(),
 			WithInsecureSkipTLSVerify(),
-			WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "default", userpass.ClientSecretField: "password"}),
+			WithAuth(auth.MethodUserPass, auth.Credentials{userpass.ClientIDField: "default", userpass.ClientSecretField: "password"}),
 			WithClientMode(types.AgentModeManaged),
 		)
 		require.NoError(t, err)
@@ -98,7 +98,7 @@ func Test_Connect(t *testing.T) {
 	t.Run("Invalid auth and context deadline reached", func(t *testing.T) {
 		r, err := NewRemote("127.0.0.1", s.ListenerForE2EOnly().Port(),
 			WithInsecureSkipTLSVerify(),
-			WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "default", userpass.ClientSecretField: "passwor"}),
+			WithAuth(auth.MethodUserPass, auth.Credentials{userpass.ClientIDField: "default", userpass.ClientSecretField: "passwor"}),
 		)
 		require.NoError(t, err)
 		require.NotNil(t, r)
@@ -429,7 +429,7 @@ func Test_TokenRefresh(t *testing.T) {
 
 	am := userpass.NewUserPassAuthentication("")
 	am.UpsertUser("default", "password")
-	s.AuthMethodsForE2EOnly().RegisterMethod("userpass", am)
+	s.AuthMethodsForE2EOnly().RegisterMethod(auth.MethodUserPass, am)
 
 	errch := make(chan error)
 	err = s.Start(context.Background(), errch)
@@ -441,7 +441,7 @@ func Test_TokenRefresh(t *testing.T) {
 	t.Run("token refresh succeeds with valid connection", func(t *testing.T) {
 		r, err := NewRemote("127.0.0.1", s.ListenerForE2EOnly().Port(),
 			WithInsecureSkipTLSVerify(),
-			WithAuth("userpass", auth.Credentials{userpass.ClientIDField: "default", userpass.ClientSecretField: "password"}),
+			WithAuth(auth.MethodUserPass, auth.Credentials{userpass.ClientIDField: "default", userpass.ClientSecretField: "password"}),
 			WithClientMode(types.AgentModeManaged),
 		)
 		require.NoError(t, err)

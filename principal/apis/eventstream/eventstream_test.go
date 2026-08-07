@@ -288,6 +288,75 @@ func TestDisconnectAll(t *testing.T) {
 	})
 }
 
+func TestDisconnectAgent(t *testing.T) {
+	t.Run("returns false for unknown agent", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		s := NewServer(qs, event.NewEventWritersMap(), nil, &fakeStatusUpdater{})
+		assert.False(t, s.DisconnectAgent("unknown"))
+	})
+
+	t.Run("disconnects a connected agent", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("agent-a")
+		statusUpdater := &fakeStatusUpdater{}
+		s := NewServer(qs, event.NewEventWritersMap(), nil, statusUpdater)
+
+		gate := make(chan struct{})
+		done := make(chan struct{})
+		st := &mock.MockEventServer{AgentName: "agent-a"}
+		st.AddRecvHook(func(_ *mock.MockEventServer) error {
+			<-gate
+			return io.EOF
+		})
+		go func() {
+			_ = s.Subscribe(st)
+			close(done)
+		}()
+
+		require.Eventually(t, func() bool {
+			return s.ConnectedAgentCount() == 1
+		}, time.Second, 10*time.Millisecond)
+
+		assert.True(t, s.DisconnectAgent("agent-a"))
+		close(gate)
+
+		require.Eventually(t, func() bool {
+			return s.ConnectedAgentCount() == 0
+		}, time.Second, 10*time.Millisecond)
+		<-done
+
+		statuses := statusUpdater.statusesFor("agent-a")
+		assert.Contains(t, statuses, v1alpha1.ConnectionStatusFailed)
+	})
+
+	t.Run("returns false after agent already disconnected", func(t *testing.T) {
+		qs := queue.NewSendRecvQueues()
+		qs.Create("agent-a")
+		s := NewServer(qs, event.NewEventWritersMap(), nil, &fakeStatusUpdater{})
+
+		gate := make(chan struct{})
+		done := make(chan struct{})
+		st := &mock.MockEventServer{AgentName: "agent-a"}
+		st.AddRecvHook(func(_ *mock.MockEventServer) error {
+			<-gate
+			return io.EOF
+		})
+		go func() {
+			_ = s.Subscribe(st)
+			close(done)
+		}()
+
+		require.Eventually(t, func() bool {
+			return s.ConnectedAgentCount() == 1
+		}, time.Second, 10*time.Millisecond)
+
+		assert.True(t, s.DisconnectAgent("agent-a"))
+		assert.False(t, s.DisconnectAgent("agent-a"))
+		close(gate)
+		<-done
+	})
+}
+
 func TestAcceptCheck(t *testing.T) {
 	clusterMgr := &cluster.Manager{}
 

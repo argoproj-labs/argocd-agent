@@ -161,7 +161,7 @@ func isReplicationMethod(fullMethod string) bool {
 // server's mTLS auth method (same as agent auth) and optionally checks
 // the extracted identity against the allowed replication clients list.
 func (s *Server) authenticateReplication(ctx context.Context) error {
-	mtlsMethod := s.authMethods.Method("mtls")
+	mtlsMethod := s.authMethods.Method(auth.MethodMTLS)
 	if mtlsMethod == nil {
 		return status.Errorf(codes.Unauthenticated, "replication requires mTLS auth but no mtls method configured")
 	}

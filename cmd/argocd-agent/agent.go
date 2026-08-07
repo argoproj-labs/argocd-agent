@@ -516,17 +516,17 @@ func parseCreds(credStr string) (string, auth.Credentials, error) {
 	var creds auth.Credentials
 	var err error
 	switch p[0] {
-	case "userpass":
+	case auth.MethodUserPass:
 		creds, err = loadCreds(p[1])
 		if err != nil {
 			return "", nil, err
 		}
-		return "userpass", creds, nil
-	case "mtls":
-		return "mtls", auth.Credentials{}, nil
-	case "header":
+		return auth.MethodUserPass, creds, nil
+	case auth.MethodMTLS:
+		return auth.MethodMTLS, auth.Credentials{}, nil
+	case auth.MethodHeader:
 		// Header-based auth doesn't require credentials - the sidecar/proxy injects the header
-		return "header", auth.Credentials{}, nil
+		return auth.MethodHeader, auth.Credentials{}, nil
 	default:
 		return "", nil, fmt.Errorf("unknown auth method: %s", p[0])
 	}
