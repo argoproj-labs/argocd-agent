@@ -589,12 +589,13 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		return nil, fmt.Errorf("UpdateStatus should only be called on principal")
 	}
 
-	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+	updateFn := func(existing, incoming *v1alpha1.Application) {
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Status = *incoming.Status.DeepCopy()
 		existing.Operation = incoming.Operation
-	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
+	}
+	patchFn := func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		refresh, incomingRefresh := incoming.Annotations["argocd.argoproj.io/refresh"]
 		_, existingRefresh := existing.Annotations["argocd.argoproj.io/refresh"]
 		target := &v1alpha1.Application{
@@ -627,7 +628,22 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		}
 
 		return patch, err
-	})
+	}
+	updated, err = m.update(ctx, false, incoming, updateFn, patchFn)
+	// The granular patch built above can be rejected by the API server with
+	// 400/422 when the diff source carries zero-valued non-pointer structs that
+	// the sparse live status doesn't have (encoding/json ignores omitempty on
+	// non-pointer structs, e.g. SyncStatus.ComparedTo) — the resulting patch
+	// operations then target parents that don't exist on the live object.
+	// Without a fallback, the same patch is rebuilt and rejected on every
+	// retry, and status updates for the application stop flowing. When that
+	// happens, retry via the full-update path (patchFn=nil), which replaces
+	// status/annotations/labels/operation wholesale and involves no JSON
+	// diffing.
+	if err != nil && (errors.IsInvalid(err) || errors.IsBadRequest(err)) {
+		logCtx.WithError(err).Warn("granular status patch rejected by API server, falling back to full update")
+		updated, err = m.update(ctx, false, incoming, updateFn, nil)
+	}
 	if err == nil {
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
