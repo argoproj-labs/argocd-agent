@@ -97,6 +97,23 @@ Labels to apply to auto-created namespaces.
 
 **Example:** `managed-by=argocd-agent,environment=production`
 
+## Resource Filtering
+
+### Label Selector
+
+| | |
+|---|---|
+| **CLI Flag** | `--label-selector` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_LABEL_SELECTOR` |
+| **ConfigMap Entry** | `principal.label-selector` |
+| **Type** | String |
+| **Default** | `""` (no additional filtering) |
+
+Kubernetes label selector that restricts which resources the principal
+watches. Only resources matching this selector will be listed, watched, and
+processed by the principal. This is combined with the default selector that
+already excludes resources with the ignore sync label.
+
 ## TLS Configuration
 
 ### TLS Secret Name
@@ -527,6 +544,19 @@ Drop agent connections that send keepalive pings more often than specified inter
 
 **Example:** `30s`
 
+### Event Processors
+
+| | |
+|---|---|
+| **CLI Flag** | `--event-processors` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_EVENT_PROCESSORS` |
+| **ConfigMap Entry** | `principal.event-processors` |
+| **Type** | Integer |
+| **Default** | `10` |
+| **Range** | > 0 |
+
+Number of concurrent event processors. Increasing this value allows the principal to handle more agent events in parallel at the cost of higher resource usage.
+
 ## Redis Configuration
 
 ### Redis Server Address
@@ -553,6 +583,33 @@ Redis server hostname and port.
 | **Valid Values** | `gzip`, `none` |
 
 Compression algorithm required by Redis.
+
+### Redis Credentials directory path
+
+| | |
+|---|---|
+| **CLI Flag** | `--redis-creds-dir-path` |
+| **Environment Variable** | `REDIS_CREDS_DIR_PATH` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+The directory with `auth` file for Redis password.
+In kubernetes, this is intended to read a Secret mounted as a directory.
+
+Cannot be used together with `--redis-password`, or its respective environment variables.
+
+### Redis Password
+
+| | |
+|---|---|
+| **CLI Flag** | `--redis-password` |
+| **Environment Variable** | `REDIS_PASSWORD` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+The password to connect to redis with. Prefer `--redis-creds-dir-path` for added security benefits.
 
 ## Kubernetes Configuration
 

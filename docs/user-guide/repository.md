@@ -1,19 +1,32 @@
 # Repository Management
 
-This document explains how Argo CD `Repository` secrets are synchronized between the principal (control plane) and agents (workload clusters).
+This document explains how Argo CD `Repository` secrets and `Repository Credential Templates` (repo-creds) are synchronized between the principal (control plane) and agents (workload clusters).
 
 ## Overview
 
-In Argo CD Agent, Git repository credentials are stored as Kubernetes Secrets with the label `argocd.argoproj.io/secret-type: repository`. Repository management varies by agent mode:
+In Argo CD Agent, two types of secrets govern Git repository access:
 
-- **Managed agents**: Repositories are created on the control plane and distributed to agents that need them.
-- **Autonomous agents**: Repositories are created and managed locally on the workload cluster. The agents will not sync them back to the control plane.
+- **Repository secrets** (`argocd.argoproj.io/secret-type: repository`): credentials scoped to a single repository URL.
+- **Repository credential templates** (`argocd.argoproj.io/secret-type: repo-creds`): credentials applied automatically to any repository whose URL matches a given prefix, useful for granting access to all repositories under an organisation or host in a single secret.
+
+Both types follow the same synchronization model based on agent mode:
+
+- **Managed agents**: Secrets are created on the control plane and distributed to agents based on AppProject configuration and agent matching patterns.
+- **Autonomous agents**: Secrets are created and managed locally on the workload cluster; they are not synced back to the principal.
+
+| Aspect | Repository Secret | Repo-Creds |
+|--------|------------------|------------|
+| Label | `secret-type: repository` | `secret-type: repo-creds` |
+| Scope | Specific repository URL | URL prefix pattern |
+| Use case | Credentials for a single repo | Credentials for all repos under an org or host |
+
+## Repository Secrets
 
 ### Managed Agent Mode
 
-In managed mode, repositories are created on the **control plane** and automatically distributed to workload clusters based on AppProject configuration and agent matching patterns. Only project-scoped repositories are reconciled by the principal.
+In managed mode, repository secrets are created on the **control plane** and automatically distributed to workload clusters based on AppProject configuration and agent matching patterns. Only project-scoped repositories are reconciled by the principal.
 
-### Creating Repositories
+#### Creating Repositories
 
 Repository secrets must be created in the argocd installation namespace on the control plane cluster with proper project association to enable distribution to managed agents.
 
@@ -23,7 +36,7 @@ Requirements for a repository secret to be reconciled by the principal:
 - The secret contains a non-empty `project` field in `.data`/`stringData`
 - The secret resides in the Argo CD installation namespace (e.g., `argocd`)
 
-### Repository-to-Agent Distribution Logic
+#### Repository-to-Agent Distribution Logic
 
 The principal distributes a repository secret to a managed agent using a **two-step matching process**:
 
@@ -34,7 +47,7 @@ The principal distributes a repository secret to a managed agent using a **two-s
 
 Learn more about AppProject matching logic in the [AppProjects guide](./appprojects.md).
 
-### Example: Repository Distribution Setup
+#### Example: Repository Distribution Setup
 
 First, create an AppProject that defines which agents should receive repositories:
 
@@ -89,7 +102,7 @@ But **not** to agents like:
 - `frontend-prod` (doesn't match any patterns above)
 - `ops-eu` (doesn't match any patterns above)
 
-### Agent-Side Repository Processing
+#### Agent-Side Repository Processing
 
 When a repository secret is sent to a managed agent, it undergoes processing:
 
@@ -99,7 +112,7 @@ When a repository secret is sent to a managed agent, it undergoes processing:
 4. **Source UID Tracking**: Agent adds a source UID annotation to track the principal as source
 5. **Change Reconciliation**: Manual changes to managed repositories on agents are reverted to match the principal
 
-### Repository Lifecycle in Managed Mode
+#### Repository Lifecycle in Managed Mode
 
 - **Creation**: Repository secrets created on the principal are automatically sent to matching agents
 - **Updates**: Changes to repository secrets on the principal are propagated to all agents that received them
@@ -120,13 +133,13 @@ When a repository secret is sent to a managed agent, it undergoes processing:
 
 ### Autonomous Agent Mode
 
-In autonomous mode, repositories are created and managed **locally on the workload cluster**. Repository credentials remain completely isolated to each agent cluster with no synchronization to the principal.
+In autonomous mode, repository secrets are created and managed **locally on the workload cluster**. Repository credentials remain completely isolated to each agent cluster with no synchronization to the principal.
 
-### Creating Repositories for Autonomous Agents
+#### Creating Repositories for Autonomous Agents
 
 Repository secrets are created directly in the argocd installation namespace on the autonomous agent cluster. These repositories are immediately available to local Argo CD Applications and do not require project scoping for basic functionality.
 
-### Local Repository Management
+#### Local Repository Management
 
 Autonomous agents handle repository secrets entirely within their local cluster:
 
@@ -135,7 +148,7 @@ Autonomous agents handle repository secrets entirely within their local cluster:
 3. **No Distribution**: Repositories remain isolated to the specific agent cluster
 4. **Independent Management**: Each agent manages its own set of repository credentials
 
-### Example: Creating a Repository on an Autonomous Agent
+#### Example: Creating a Repository on an Autonomous Agent
 
 ```yaml
 apiVersion: v1
@@ -155,7 +168,7 @@ stringData:
   # Only needed if associating with local AppProjects
 ```
 
-### Local Project Association
+#### Local Project Association
 
 While not required for basic functionality, repositories on autonomous agents can still be associated with local AppProjects:
 
@@ -165,14 +178,14 @@ stringData:
   project: local-frontend-project  # References local AppProject
 ```
 
-### Repository Lifecycle in Autonomous Mode
+#### Repository Lifecycle in Autonomous Mode
 
 - **Creation**: Create repository secrets directly on the agent cluster
 - **Updates**: Modify repository secrets on the agent cluster; changes take effect immediately
 - **Deletion**: Delete repository secrets on the agent cluster; Applications using the repository will lose access
 - **Isolation**: Repository changes on one autonomous agent do not affect other agents or the principal
 
-### Security Considerations for Autonomous Agents
+#### Security Considerations for Autonomous Agents
 
 Since repository credentials remain local to each agent cluster:
 
@@ -184,17 +197,66 @@ Since repository credentials remain local to each agent cluster:
 !!! note "Repository Independence"
     Repository credentials on autonomous agents are completely independent. The same repository URL can use different credentials on different agent clusters.
 
+## Repository Credential Templates
+
+Repository credential templates (repo-creds) let you define credentials once and have them automatically applied to any repository whose URL starts with a given prefix. This is useful when you manage many repositories under the same organisation or host and want to avoid duplicating credentials.
+
+Repo-creds are stored as Kubernetes Secrets with the label `argocd.argoproj.io/secret-type: repo-creds` and follow the same synchronization model as repository secrets.
+
+### Creating Repo-Creds (Managed Mode)
+
+Requirements for a repo-creds secret to be reconciled by the principal:
+
+- The secret has label `argocd.argoproj.io/secret-type: repo-creds`
+- The secret contains a non-empty `project` field in `.data`/`stringData`
+- The secret resides in the Argo CD installation namespace (e.g., `argocd`)
+
+#### Example
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-creds
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repo-creds
+type: Opaque
+stringData:
+  type: git
+  url: https://github.com/myorg
+  username: deploy-user
+  password: ghp_xyz789token
+  project: my-project  # Must reference an existing AppProject
+```
+
+Any repository URL starting with `https://github.com/myorg` will automatically use these credentials on agents matching the AppProject's patterns.
+
+The distribution logic (AppProject matching, agent pattern matching) is identical to repository secrets — refer to the [Repository-to-Agent Distribution Logic](#repository-to-agent-distribution-logic) section above for details.
+
+### Creating Repo-Creds (Autonomous Mode)
+
+For autonomous agents, repo-creds are created and managed locally on the workload cluster. They follow the same steps and patterns described in [Autonomous Agent Mode](`#autonomous-agent-mode`) above.
+
+### Repo-Creds Lifecycle
+
+- **Creation**: Repo-creds created on the principal are sent to matching agents
+- **Updates**: Changes are propagated to all agents that received them
+- **Deletion**: Deleting repo-creds on the principal removes them from all agents
+- **Project Update**: Agents that no longer match updated AppProject patterns have repo-creds removed
+- **Project Deletion**: Deleting an AppProject removes all associated repo-creds from agents
+
 ## Troubleshooting
 
-### Repository Not Distributed to Agents (Managed Mode)
+### Repository or Repo-Creds Not Distributed to Agents (Managed Mode)
 
-If a repository secret created on the principal doesn't appear on managed agents:
+If a repository or repo-creds secret created on the principal doesn't appear on managed agents:
 
 #### Check Label, Namespace and Project Association
 
-Ensure the repository:
+Ensure the secret:
 
-- Has label `argocd.argoproj.io/secret-type=repository`
+- Has the correct label (`argocd.argoproj.io/secret-type=repository` or `argocd.argoproj.io/secret-type=repo-creds`)
 - Lives in the Argo CD namespace on the principal (e.g., `argocd`)
 - Has a valid, non-empty `project` field:
 
@@ -202,7 +264,7 @@ Ensure the repository:
 # Check if project field exists
 kubectl get secret my-repo -n argocd -o jsonpath='{.data.project}' | base64 -d
 
-# If no output, the repository is missing the project field
+# If no output, the secret is missing the project field
 # Add it using:
 kubectl patch secret my-repo -n argocd --type merge -p '{
   "stringData": {
@@ -222,7 +284,7 @@ kubectl get appproject my-project -n argocd -o yaml
 
 Verify that:
 
-- The AppProject referenced by the repository exists
+- The AppProject referenced by the secret exists
 - Agent names match patterns in both `.spec.destinations` (either `name` or `server` with `?agentName=`) and `.spec.sourceNamespaces`
 - Patterns use correct glob syntax, including any deny patterns (`!pattern`) you intend
 

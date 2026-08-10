@@ -50,64 +50,67 @@ func (r checkResult) String() string {
 	return fmt.Sprintf("* %s: ❌\nERROR: %v", r.name, r.err)
 }
 
-func NewCheckConfigCommand() *cobra.Command {
+func NewValidateCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "check-config",
-		Short: "Validate principal and agent configuration",
+		Use:     "validate",
+		Aliases: []string{"check-config"},
+		Short:   "Validate principal and agent installations",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},
 		GroupID: "config",
 	}
-	cmd.AddCommand(NewCheckConfigPrincipalCommand())
-	cmd.AddCommand(NewCheckConfigAgentCommand())
+	cmd.AddCommand(NewValidatePrincipalCommand())
+	cmd.AddCommand(NewValidateAgentCommand())
 	return cmd
 }
 
-func NewCheckConfigPrincipalCommand() *cobra.Command {
+func NewValidatePrincipalCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "principal",
-		Short: "Validate principal configuration",
+		Short: "Validate principal installation",
 		Run: func(cmd *cobra.Command, args []string) {
 			if strings.TrimSpace(globalOpts.principalNamespace) == "" {
 				cmdutil.Fatal("--principal-namespace is required")
 			}
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 			}
-			results := RunPrincipalChecks(ctx, clt, globalOpts.principalNamespace)
+			results := RunPrincipalChecks(ctx, clt, principalCfg.Namespace)
 			printResultsAndExit(results)
 		},
 	}
 	return command
 }
 
-func NewCheckConfigAgentCommand() *cobra.Command {
+func NewValidateAgentCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "agent",
-		Short: "Validate agent configuration (and principal cross-checks)",
+		Short: "Validate agent installation (and principal cross-checks)",
 		Run: func(cmd *cobra.Command, args []string) {
-			if strings.TrimSpace(globalOpts.agentContext) == "" ||
-				strings.TrimSpace(globalOpts.agentNamespace) == "" ||
-				strings.TrimSpace(globalOpts.principalContext) == "" ||
-				strings.TrimSpace(globalOpts.principalNamespace) == "" {
-				cmdutil.Fatal("--agent-context, --agent-namespace, --principal-context, --principal-namespace are all required")
+			if principalCfg.KubeContext == "" ||
+				principalCfg.Namespace == "" ||
+				agentCfg.KubeContext == "" ||
+				agentCfg.Namespace == "" {
+				cmdutil.Fatal("An agent and principal must be provided for this command, use -h flag to see ways to provide them")
 			}
+
 			ctx := context.TODO()
-			agentClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.agentNamespace, "", globalOpts.agentContext)
+			agentClt, err := kube.NewKubernetesClientFromConfig(ctx, agentCfg.Namespace, "", agentCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create agent Kubernetes client: %v", err)
 			}
-			principalClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			principalClt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create principal Kubernetes client: %v", err)
 			}
 			// Run principal checks as part of agent checks
 			results := []checkResult{}
-			results = append(results, RunPrincipalChecks(ctx, principalClt, globalOpts.principalNamespace)...)
-			results = append(results, RunAgentChecks(ctx, agentClt, globalOpts.agentNamespace, principalClt, globalOpts.principalNamespace)...)
+			results = append(results, RunPrincipalChecks(ctx, principalClt, principalCfg.Namespace)...)
+			results = append(results, RunAgentChecks(ctx, agentClt, agentCfg.Namespace, principalClt, principalCfg.Namespace)...)
 			printResultsAndExit(results)
 		},
 	}
@@ -588,7 +591,7 @@ func principalNoApplicationCRs(ctx context.Context, kc *kube.KubernetesClient, n
 	gvr := schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
 	apps, err := kc.DynamicClient.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to list applications in namespace %s: %v", ns, err)
+		return fmt.Errorf("failed to list applications in namespace %s: %w", ns, err)
 	}
 
 	if len(apps.Items) > 0 {
@@ -861,8 +864,9 @@ func namespaceMatchesAgentSubject(ctx context.Context, agentKube kubernetes.Inte
 	return nil
 }
 
-// x509FromTLSSecret retrieves a Kubernetes TLS secret and parses the certificate
-// into an *x509.Certificate. The secret must contain exactly one certificate.
+// x509FromTLSSecret retrieves a Kubernetes TLS secret and parses the leaf certificate
+// into an *x509.Certificate. If the secret contains a certificate chain (e.g. leaf +
+// intermediate CA), only the first (leaf) certificate is returned.
 func x509FromTLSSecret(ctx context.Context, kubeClient kubernetes.Interface, ns, name string) (*x509.Certificate, error) {
 	cert, err := tlsutil.TLSCertFromSecret(ctx, kubeClient, ns, name)
 	if err != nil {
@@ -870,9 +874,6 @@ func x509FromTLSSecret(ctx context.Context, kubeClient kubernetes.Interface, ns,
 	}
 	if len(cert.Certificate) == 0 || cert.Certificate[0] == nil {
 		return nil, fmt.Errorf("%s/%s: secret does not contain certificate data", ns, name)
-	}
-	if len(cert.Certificate) > 1 {
-		return nil, fmt.Errorf("%s/%s: secret contains %d certificates, expected exactly one", ns, name, len(cert.Certificate))
 	}
 	parsed, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {

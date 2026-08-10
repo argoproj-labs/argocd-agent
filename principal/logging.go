@@ -50,7 +50,7 @@ func InterceptorLogger(l logrus.FieldLogger) logging.Logger {
 }
 
 func (s *Server) unaryRequestLogger() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 		s.logGrpcEvent().WithFields(logrus.Fields{
 			"method":      info.FullMethod,
 			"client_addr": grpcutil.AddressFromContext(ctx),
@@ -60,7 +60,7 @@ func (s *Server) unaryRequestLogger() grpc.UnaryServerInterceptor {
 }
 
 func (s *Server) streamRequestLogger() grpc.StreamServerInterceptor {
-	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		s.logGrpcEvent().WithFields(logrus.Fields{
 			"method":      info.FullMethod,
 			"client_addr": grpcutil.AddressFromContext(ss.Context()),

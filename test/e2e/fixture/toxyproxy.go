@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"testing"
 	"time"
 
 	toxiproxy "github.com/Shopify/toxiproxy/v2"
@@ -14,7 +15,7 @@ import (
 
 // SetupToxiproxy configures and starts a Toxiproxy server on the specified host and port. It also sets the environment
 // variable for the remote port and provides a cleanup function to stop the server and remove the variable.
-func SetupToxiproxy(t require.TestingT, agentName string, proxyAddress string) (*toxiproxyClient.Proxy, func(), error) {
+func SetupToxiproxy(t *testing.T, agentName string, proxyAddress string) (*toxiproxyClient.Proxy, func(), error) {
 
 	// Start the Toxiproxy server
 	proxyServer, err := startToxiproxyServer("localhost", "8474")
@@ -90,19 +91,19 @@ func startToxiproxyServer(host, port string) (*http.Server, error) {
 	return proxyServer, nil
 }
 
-func RestartAgent(t require.TestingT, agentName string) {
-	err := StopProcess(agentName)
+func RestartAgent(t *testing.T, agentName string) {
+	err := StopProcess(agentName, t)
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		return !IsProcessRunning(agentName)
+		return !IsProcessRunning(agentName, t)
 	}, 30*time.Second, 1*time.Second)
 
-	err = StartProcess(agentName)
+	err = StartProcess(agentName, t)
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		return IsProcessRunning(agentName)
+		return IsProcessRunning(agentName, t)
 	}, 30*time.Second, 1*time.Second)
 }
 

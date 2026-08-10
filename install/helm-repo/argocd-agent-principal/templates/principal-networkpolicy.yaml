@@ -1,0 +1,51 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "argocd-agent-principal.fullname" . }}
+  namespace: {{ include "argocd-agent-principal.namespace" . }}
+  labels:
+    {{- include "argocd-agent-principal.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "argocd-agent-principal.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if .Values.networkPolicy.ingress.grpc.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: argocd-agent
+              app.kubernetes.io/component: agent
+          namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.principal.listen.port }}
+    {{- end }}
+    {{- if and .Values.principal.redisProxy.enabled .Values.networkPolicy.ingress.redisProxy.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: argocd
+          namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+    {{- if .Values.networkPolicy.ingress.metrics.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingress.metrics.namespaceSelector }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.principal.metrics.port }}
+        - protocol: TCP
+          port: {{ .Values.principal.healthz.port }}
+    {{- end }}
+    {{- with .Values.networkPolicy.ingress.extraRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

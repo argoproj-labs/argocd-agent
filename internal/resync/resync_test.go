@@ -23,8 +23,10 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -50,7 +52,7 @@ func Test_ProcessIncomingSyncedResourceList(t *testing.T) {
 	})
 
 	t.Run("return nil if checksum matches", func(t *testing.T) {
-		for i := 0; i < resNum; i++ {
+		for i := range resNum {
 			name := fmt.Sprintf("test-%d", i)
 			testResource := resources.ResourceKey{
 				Name:      name,
@@ -75,7 +77,7 @@ func Test_ProcessIncomingSyncedResourceList(t *testing.T) {
 
 	t.Run("send SyncedResource event for all resources if the checksum doesn't match", func(t *testing.T) {
 		testResources := make([]resources.ResourceKey, resNum)
-		for i := 0; i < resNum; i++ {
+		for i := range resNum {
 			name := fmt.Sprintf("test-%d", i)
 			testResource := resources.ResourceKey{
 				Name:      name,
@@ -96,7 +98,7 @@ func Test_ProcessIncomingSyncedResourceList(t *testing.T) {
 
 		assert.Equal(t, handler.sendQ.Len(), resNum)
 
-		for i := 0; i < resNum; i++ {
+		for range resNum {
 			ev, shutdown := handler.sendQ.Get()
 			assert.False(t, shutdown)
 			assert.Equal(t, event.ResponseSyncedResource.String(), ev.Type())
@@ -161,6 +163,62 @@ func Test_ProcessIncomingSyncedResource(t *testing.T) {
 		checksum, err := generateSpecChecksum(resource)
 		assert.Nil(t, err)
 		assert.Equal(t, checksum, got.Checksum)
+	})
+}
+
+func Test_ProcessIncomingSyncedResource_MissingSourceUID(t *testing.T) {
+	gvr, err := getGroupVersionResource("Application")
+	require.Nil(t, err)
+
+	newHandlerWithFlag := func(t *testing.T, ignore bool) *RequestHandler {
+		t.Helper()
+		h := createFakeHandler(t)
+		h.WithIgnoreUnmanagedApps(ignore)
+		return h
+	}
+
+	setupApp := func(t *testing.T, h *RequestHandler, withAnnotation bool) {
+		t.Helper()
+		resource := fakeUnresApp()
+		if withAnnotation {
+			resource.SetAnnotations(map[string]string{manager.SourceUIDAnnotation: "source-uid"})
+		}
+		_, err := h.dynClient.Resource(gvr).Namespace("default").Create(context.Background(), resource, v1.CreateOptions{})
+		require.Nil(t, err)
+	}
+
+	incoming := &event.SyncedResource{
+		Name:      "test-app",
+		Namespace: "default",
+		Kind:      "Application",
+		UID:       "test-uid",
+	}
+
+	t.Run("flag disabled: missing source-uid returns wrapped sentinel error", func(t *testing.T) {
+		h := newHandlerWithFlag(t, false)
+		setupApp(t, h, false)
+
+		err := h.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
+		assert.ErrorIs(t, err, ErrSourceUIDNotFound)
+		assert.Equal(t, 0, h.sendQ.Len())
+	})
+
+	t.Run("flag enabled: missing source-uid suppresses error and sends nothing", func(t *testing.T) {
+		h := newHandlerWithFlag(t, true)
+		setupApp(t, h, false)
+
+		err := h.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
+		assert.Nil(t, err)
+		assert.Equal(t, 0, h.sendQ.Len())
+	})
+
+	t.Run("flag enabled: present source-uid still sends request update", func(t *testing.T) {
+		h := newHandlerWithFlag(t, true)
+		setupApp(t, h, true)
+
+		err := h.ProcessIncomingSyncedResource(context.Background(), incoming, testAgentName)
+		assert.Nil(t, err)
+		assert.Equal(t, 1, h.sendQ.Len())
 	})
 }
 
@@ -232,7 +290,7 @@ func Test_generateSpecChecksum(t *testing.T) {
 
 	t.Run("generate checksum for resource with destination field", func(t *testing.T) {
 		resource := fakeUnresApp()
-		resource.Object["spec"] = map[string]interface{}{
+		resource.Object["spec"] = map[string]any{
 			"project":     "default",
 			"destination": "in-cluster",
 		}
@@ -240,6 +298,253 @@ func Test_generateSpecChecksum(t *testing.T) {
 		checksum, err := generateSpecChecksum(resource)
 		assert.Nil(t, err)
 		assert.NotNil(t, checksum)
+	})
+}
+
+func Test_newRequestUpdateFromObject(t *testing.T) {
+	t.Run("return ErrSourceUIDNotFound when annotation missing", func(t *testing.T) {
+		resource := fakeUnresApp()
+
+		_, err := newRequestUpdateFromObject(resource, "Application", "argocd")
+		assert.ErrorIs(t, err, ErrSourceUIDNotFound)
+	})
+
+	t.Run("return ErrSourceUIDNotFound when annotations nil", func(t *testing.T) {
+		resource := fakeUnresApp()
+		resource.SetAnnotations(nil)
+
+		_, err := newRequestUpdateFromObject(resource, "Application", "argocd")
+		assert.ErrorIs(t, err, ErrSourceUIDNotFound)
+	})
+
+	t.Run("return request update when annotation present", func(t *testing.T) {
+		resource := fakeUnresApp()
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid-123",
+		})
+
+		reqUpdate, err := newRequestUpdateFromObject(resource, "Application", "argocd")
+		assert.Nil(t, err)
+		assert.NotNil(t, reqUpdate)
+		assert.Equal(t, "test-app", reqUpdate.Name)
+		assert.Equal(t, "default", reqUpdate.Namespace)
+		assert.Equal(t, "Application", reqUpdate.Kind)
+		assert.Equal(t, "source-uid-123", reqUpdate.UID)
+		assert.NotEmpty(t, reqUpdate.Checksum)
+	})
+
+	t.Run("no remap without peerNamespace", func(t *testing.T) {
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation:         "source-uid-123",
+			manager.NamespaceRemappedAnnotation: "true",
+		})
+
+		reqUpdate, err := newRequestUpdateFromObject(resource, "Application", "")
+		assert.NotNil(t, err)
+		assert.Nil(t, reqUpdate)
+		assert.Contains(t, err.Error(), "peer namespace is not set, cannot remap application test-app")
+	})
+
+	t.Run("remaps namespace when peerNamespace and annotation present", func(t *testing.T) {
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation:         "source-uid-123",
+			manager.NamespaceRemappedAnnotation: "true",
+		})
+
+		reqUpdate, err := newRequestUpdateFromObject(resource, "Application", "argocd")
+		assert.Nil(t, err)
+		assert.NotNil(t, reqUpdate)
+		assert.Equal(t, "argocd", reqUpdate.Namespace, "should remap to peerNamespace")
+	})
+
+	t.Run("no remap for non-Application kind even with annotation", func(t *testing.T) {
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation:         "source-uid-123",
+			manager.NamespaceRemappedAnnotation: "true",
+		})
+
+		reqUpdate, err := newRequestUpdateFromObject(resource, "AppProject", "argocd")
+		assert.Nil(t, err)
+		assert.NotNil(t, reqUpdate)
+		assert.Equal(t, "argocd-agent", reqUpdate.Namespace, "non-Application kinds should not be remapped")
+	})
+}
+
+func Test_sendRequestUpdate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("skip resource without source UID annotation when ignore flag enabled", func(t *testing.T) {
+		handler := createFakeHandler(t).WithIgnoreUnmanagedApps(true)
+
+		resource := fakeUnresApp()
+
+		gvr, err := getGroupVersionResource("Application")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("default").
+			Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		err = handler.sendRequestUpdate(ctx, resources.ResourceKey{
+			Name:      "test-app",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "test-uid",
+		})
+
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len())
+	})
+
+	t.Run("error on resource without source UID annotation when ignore flag disabled", func(t *testing.T) {
+		handler := createFakeHandler(t)
+
+		resource := fakeUnresApp()
+
+		gvr, err := getGroupVersionResource("Application")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("default").
+			Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		err = handler.sendRequestUpdate(ctx, resources.ResourceKey{
+			Name:      "test-app",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "test-uid",
+		})
+
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "source UID annotation not found")
+	})
+
+	t.Run("send request update for resource with source UID annotation", func(t *testing.T) {
+		handler := createFakeHandler(t)
+
+		resource := fakeUnresApp()
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+
+		gvr, err := getGroupVersionResource("Application")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("default").
+			Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		err = handler.sendRequestUpdate(ctx, resources.ResourceKey{
+			Name:      "test-app",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "test-uid",
+		})
+
+		assert.Nil(t, err)
+		assert.Equal(t, 1, handler.sendQ.Len())
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestUpdate.String(), ev.Type())
+	})
+
+	t.Run("return error for non-existent resource", func(t *testing.T) {
+		handler := createFakeHandler(t)
+
+		err := handler.sendRequestUpdate(ctx, resources.ResourceKey{
+			Name:      "non-existent",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "test-uid",
+		})
+
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "failed to get resource")
+	})
+}
+
+func Test_SendRequestUpdates(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("skip resources without source UID when ignore flag enabled", func(t *testing.T) {
+		handler := createFakeHandler(t).WithIgnoreUnmanagedApps(true)
+
+		gvr, err := getGroupVersionResource("Application")
+		assert.Nil(t, err)
+
+		resourceWithAnnotation := fakeUnresApp()
+		resourceWithAnnotation.SetName("app-with-annotation")
+		resourceWithAnnotation.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err = handler.dynClient.Resource(gvr).Namespace("default").
+			Create(ctx, resourceWithAnnotation, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		resourceWithoutAnnotation := fakeUnresApp()
+		resourceWithoutAnnotation.SetName("app-without-annotation")
+		_, err = handler.dynClient.Resource(gvr).Namespace("default").
+			Create(ctx, resourceWithoutAnnotation, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		handler.resources.Add(resources.ResourceKey{
+			Name:      "app-with-annotation",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "uid-1",
+		})
+		handler.resources.Add(resources.ResourceKey{
+			Name:      "app-without-annotation",
+			Namespace: "default",
+			Kind:      "Application",
+			UID:       "uid-2",
+		})
+
+		handler.SendRequestUpdates(ctx)
+
+		assert.Equal(t, 1, handler.sendQ.Len())
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestUpdate.String(), ev.Type())
+
+		got := &event.RequestUpdate{}
+		err = ev.DataAs(got)
+		assert.Nil(t, err)
+		assert.Equal(t, "app-with-annotation", got.Name)
+	})
+
+	t.Run("skip all unmanaged resources when ignore flag enabled", func(t *testing.T) {
+		handler := createFakeHandler(t).WithIgnoreUnmanagedApps(true)
+
+		gvr, err := getGroupVersionResource("Application")
+		assert.Nil(t, err)
+
+		for i := range 3 {
+			resource := fakeUnresApp()
+			resource.SetName(fmt.Sprintf("unmanaged-app-%d", i))
+			_, err = handler.dynClient.Resource(gvr).Namespace("default").
+				Create(ctx, resource, v1.CreateOptions{})
+			assert.Nil(t, err)
+
+			handler.resources.Add(resources.ResourceKey{
+				Name:      fmt.Sprintf("unmanaged-app-%d", i),
+				Namespace: "default",
+				Kind:      "Application",
+				UID:       fmt.Sprintf("uid-%d", i),
+			})
+		}
+
+		handler.SendRequestUpdates(ctx)
+
+		assert.Zero(t, handler.sendQ.Len())
 	})
 }
 
@@ -267,7 +572,7 @@ func Test_ProcessRequestUpdateEvent(t *testing.T) {
 			Checksum:  checksum,
 		}
 
-		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
 		assert.Nil(t, err)
 		assert.Zero(t, handler.sendQ.Len())
 
@@ -282,7 +587,7 @@ func Test_ProcessRequestUpdateEvent(t *testing.T) {
 			Kind:      "Application",
 		}
 
-		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
 		assert.Nil(t, err)
 
 		ev, shutdown := handler.sendQ.Get()
@@ -306,7 +611,7 @@ func Test_ProcessRequestUpdateEvent(t *testing.T) {
 			Checksum:  []byte("invalid-checksum"),
 		}
 
-		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
 		assert.Nil(t, err)
 
 		ev, shutdown := handler.sendQ.Get()
@@ -315,6 +620,389 @@ func Test_ProcessRequestUpdateEvent(t *testing.T) {
 
 		err = handler.dynClient.Resource(gvr).Namespace("default").Delete(ctx, resource.GetName(), v1.DeleteOptions{})
 		assert.Nil(t, err)
+	})
+}
+
+func Test_generateSpecChecksum_ConfigMap(t *testing.T) {
+	t.Run("generate checksum for ConfigMap using data field", func(t *testing.T) {
+		resource := fakeUnresGPGKey()
+
+		checksum, err := generateSpecChecksum(resource)
+		assert.Nil(t, err)
+		assert.NotNil(t, checksum)
+	})
+
+	t.Run("generate checksum for ConfigMap with no data field", func(t *testing.T) {
+		resource := fakeUnresGPGKey()
+		delete(resource.Object, "data")
+
+		checksum, err := generateSpecChecksum(resource)
+		assert.Nil(t, err)
+		assert.NotNil(t, checksum)
+	})
+
+	t.Run("return error if data field is missing for Secret", func(t *testing.T) {
+		resource := &unstructured.Unstructured{}
+		resource.SetGroupVersionKind(schema.GroupVersionKind{
+			Group: "", Version: "v1", Kind: "Secret",
+		})
+		resource.SetName("test-secret")
+		resource.SetNamespace("argocd")
+
+		_, err := generateSpecChecksum(resource)
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "data field not found")
+	})
+}
+
+func Test_sendRequestUpdate_GPGKey(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("send request update for GPGKey resource", func(t *testing.T) {
+		handler := createFakeHandler(t)
+
+		resource := fakeUnresGPGKey()
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+
+		gvr, err := getGroupVersionResource("GPGKey")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("argocd").
+			Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		err = handler.sendRequestUpdate(ctx, resources.ResourceKey{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			Kind:      "GPGKey",
+			UID:       "gpg-uid",
+		})
+
+		assert.Nil(t, err)
+		assert.Equal(t, 1, handler.sendQ.Len())
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestUpdate.String(), ev.Type())
+	})
+}
+
+func Test_ProcessRequestUpdateEvent_GPGKey(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("return nil if GPGKey exists and checksum matches", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd"
+
+		resource := fakeUnresGPGKey()
+
+		gvr, err := getGroupVersionResource("GPGKey")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("argocd").Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		checksum, err := generateSpecChecksum(resource)
+		assert.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			Kind:      "GPGKey",
+			Checksum:  checksum,
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len())
+	})
+
+	t.Run("send delete event if GPGKey does not exist", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd"
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "non-existent-gpg-keys",
+			Namespace: "argocd",
+			Kind:      "GPGKey",
+		}
+
+		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type())
+	})
+
+	t.Run("send spec update event if GPGKey checksum does not match", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd"
+
+		resource := fakeUnresGPGKey()
+
+		gvr, err := getGroupVersionResource("GPGKey")
+		assert.Nil(t, err)
+
+		_, err = handler.dynClient.Resource(gvr).Namespace("argocd").Create(ctx, resource, v1.CreateOptions{})
+		assert.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			Kind:      "GPGKey",
+			Checksum:  []byte("invalid-checksum"),
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+	})
+}
+
+func Test_ProcessRequestUpdateEvent_PeerNamespaceRemap(t *testing.T) {
+	ctx := context.Background()
+	gvr, err := getGroupVersionResource("Application")
+	require.Nil(t, err)
+
+	t.Run("annotation-resolved namespace finds app on principal", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd-agent"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("argocd").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		checksum, err := generateSpecChecksum(resource)
+		require.Nil(t, err)
+
+		// newRequestUpdateFromObject resolves the original-namespace annotation,
+		// so the RequestUpdate already carries the correct principal namespace.
+		reqUpdate := &event.RequestUpdate{
+			Name:      "test-app",
+			Namespace: "argocd",
+			Kind:      "Application",
+			Checksum:  checksum,
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len(), "checksum matches, nothing to send")
+	})
+
+	t.Run("principal sends delete when app truly missing after remap", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd-agent"
+
+		// The agent's newRequestUpdateFromObject resolves the
+		// OriginalNamespaceAnnotation, so the RequestUpdate arrives with
+		// the principal-side namespace ("argocd"), not the agent's local one.
+		reqUpdate := &event.RequestUpdate{
+			Name:      "missing-app",
+			Namespace: "argocd",
+			Kind:      "Application",
+		}
+
+		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type())
+	})
+
+	t.Run("principal does not remap tenant namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd-agent"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("tenant-apps")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("tenant-apps").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		checksum, err := generateSpecChecksum(resource)
+		require.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "test-app",
+			Namespace: "tenant-apps",
+			Kind:      "Application",
+			Checksum:  checksum,
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len(), "checksum matches in tenant namespace, nothing to send")
+	})
+
+	t.Run("principal does not remap app in agent namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd-agent"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("argocd-agent").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		checksum, err := generateSpecChecksum(resource)
+		require.Nil(t, err)
+
+		// An app that genuinely lives in the agent's namespace on both
+		// sides (no remapping occurred, no annotation) must be looked up
+		// in the agent's namespace, not remapped to the principal's.
+		reqUpdate := &event.RequestUpdate{
+			Name:      "test-app",
+			Namespace: "argocd-agent",
+			Kind:      "Application",
+			Checksum:  checksum,
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len(), "checksum matches in agent namespace, nothing to send")
+	})
+}
+
+func Test_ProcessIncomingSyncedResource_PeerNamespaceRemap(t *testing.T) {
+	ctx := context.Background()
+	gvr, err := getGroupVersionResource("Application")
+	require.Nil(t, err)
+
+	t.Run("agent remaps principal namespace to its own namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd-agent"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation:         "source-uid",
+			manager.NamespaceRemappedAnnotation: "true",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("argocd-agent").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		incoming := &event.SyncedResource{
+			Name:      "test-app",
+			Namespace: "argocd",
+			Kind:      "Application",
+			UID:       "test-uid",
+		}
+
+		err = handler.ProcessIncomingSyncedResource(ctx, incoming, testAgentName)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestUpdate.String(), ev.Type())
+
+		got := &event.RequestUpdate{}
+		err = ev.DataAs(got)
+		assert.Nil(t, err)
+		assert.NotEmpty(t, got.Checksum, "should have checksum because app was found after remap")
+		assert.Equal(t, "argocd", got.Namespace, "emitted RequestUpdate must carry the principal namespace via the annotation")
+	})
+
+	t.Run("agent does not remap tenant namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd-agent"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd"
+
+		resource := fakeUnresApp()
+		resource.SetNamespace("tenant-apps")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("tenant-apps").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		incoming := &event.SyncedResource{
+			Name:      "test-app",
+			Namespace: "tenant-apps",
+			Kind:      "Application",
+			UID:       "test-uid",
+		}
+
+		err = handler.ProcessIncomingSyncedResource(ctx, incoming, testAgentName)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+
+		got := &event.RequestUpdate{}
+		err = ev.DataAs(got)
+		assert.Nil(t, err)
+		assert.NotEmpty(t, got.Checksum, "should have checksum because app was found in tenant namespace")
+	})
+}
+
+func Test_ProcessIncomingSyncedResource_NonAppKindUsesLocalNamespace(t *testing.T) {
+	ctx := context.Background()
+	gvr, err := getGroupVersionResource("GPGKey")
+	require.Nil(t, err)
+
+	t.Run("GPGKey lookup uses local namespace even when peer reports different namespace", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.namespace = "argocd-agent"
+
+		resource := fakeUnresGPGKey()
+		resource.SetNamespace("argocd-agent")
+		resource.SetAnnotations(map[string]string{
+			manager.SourceUIDAnnotation: "source-uid",
+		})
+		_, err := handler.dynClient.Resource(gvr).Namespace("argocd-agent").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		// The principal reports the GPG key under its own namespace ("argocd"),
+		// but on the agent it lives in "argocd-agent". The lookup must use
+		// r.namespace, not the incoming namespace.
+		incoming := &event.SyncedResource{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			Kind:      "GPGKey",
+			UID:       "gpg-uid",
+		}
+
+		err = handler.ProcessIncomingSyncedResource(ctx, incoming, testAgentName)
+		assert.Nil(t, err)
+
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.EventRequestUpdate.String(), ev.Type())
+
+		got := &event.RequestUpdate{}
+		err = ev.DataAs(got)
+		assert.Nil(t, err)
+		assert.NotEmpty(t, got.Checksum, "should have checksum because GPG key was found in local namespace")
 	})
 }
 
@@ -342,8 +1030,24 @@ func fakeUnresApp() *unstructured.Unstructured {
 	resource.SetName("test-app")
 	resource.SetNamespace("default")
 	resource.SetUID("test-uid")
-	resource.Object["spec"] = map[string]interface{}{
+	resource.Object["spec"] = map[string]any{
 		"project": "default",
+	}
+	return resource
+}
+
+func fakeUnresGPGKey() *unstructured.Unstructured {
+	resource := &unstructured.Unstructured{}
+	resource.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "",
+		Version: "v1",
+		Kind:    "ConfigMap",
+	})
+	resource.SetName("argocd-gpg-keys-cm")
+	resource.SetNamespace("argocd")
+	resource.SetUID("gpg-uid")
+	resource.Object["data"] = map[string]any{
+		"7AEE18F83AFDEB23": "test-gpg-key-data",
 	}
 	return resource
 }

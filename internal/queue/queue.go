@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/argoproj-labs/argocd-agent/internal/config"
+	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -49,16 +51,18 @@ type queuepair struct {
 type boundedQueue struct {
 	workqueue.TypedRateLimitingInterface[*event.Event]
 	maxSize int
-
-	notify chan struct{}
+	notify  chan struct{}
+	name    string
 }
 
-func newBoundedQueue(maxSize int) *boundedQueue {
+func newBoundedQueue(maxSize int, name string) *boundedQueue {
 	rateLimiter := workqueue.DefaultTypedControllerRateLimiter[*event.Event]()
 	return &boundedQueue{
-		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueue(rateLimiter),
-		maxSize:                    maxSize,
-		notify:                     make(chan struct{}, 10),
+		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig(rateLimiter,
+			workqueue.TypedRateLimitingQueueConfig[*event.Event]{Name: name}),
+		maxSize: maxSize,
+		notify:  make(chan struct{}, 10),
+		name:    name,
 	}
 }
 
@@ -68,7 +72,6 @@ func (bq *boundedQueue) Add(item *event.Event) {
 		old, _ := bq.Get()
 		bq.Done(old)
 	}
-
 	bq.TypedRateLimitingInterface.Add(item)
 
 	// Notify any waiting goroutines that an item has been added to the queue.
@@ -154,9 +157,22 @@ func (q *SendRecvQueues) Create(name string) error {
 	if ok {
 		return fmt.Errorf("cannot initialize queue for %s: queue already exists", name)
 	}
+	recvQueueSize := env.NumWithDefault(config.EnvRecvQueueSize, func(size int) error {
+		if size <= 0 {
+			return fmt.Errorf("queue size must be greater than 0")
+		}
+		return nil
+	}, defaultMaxQueueSize)
+	sendQueueSize := env.NumWithDefault(config.EnvSendQueueSize, func(size int) error {
+		if size <= 0 {
+			return fmt.Errorf("queue size must be greater than 0")
+		}
+		return nil
+	}, defaultMaxQueueSize)
 	qp := &queuepair{}
-	qp.sendq = newBoundedQueue(defaultMaxQueueSize)
-	qp.recvq = newBoundedQueue(defaultMaxQueueSize)
+
+	qp.sendq = newBoundedQueue(sendQueueSize, name+"-send")
+	qp.recvq = newBoundedQueue(recvQueueSize, name+"-recv")
 	q.queues[name] = qp
 
 	return nil

@@ -14,7 +14,7 @@ import (
 func Test_MarshalStruct(t *testing.T) {
 	type good struct {
 		Visible   string `json:"visible" yaml:"visible" text:"Visible"`
-		invisible string `json:"invisible" yaml:"invisible" text:"Invisible"`
+		invisible string
 	}
 	t.Run("Marshal to JSON", func(t *testing.T) {
 		s := &good{"visible", "invisible"}

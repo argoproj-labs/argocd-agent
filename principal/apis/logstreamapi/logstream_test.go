@@ -543,7 +543,7 @@ func TestConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	numGoroutines := 10
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -562,6 +562,32 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestWaitForCompletion_RaceWithFinalizeSession(t *testing.T) {
+	for range 100 {
+		server := NewServer()
+		reqID := "race-test"
+
+		w := mock.NewMockHTTPResponseWriter()
+		r := httptest.NewRequest("GET", "/logs", nil)
+		require.NoError(t, server.RegisterHTTP(reqID, w, r))
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			server.WaitForCompletion(reqID, 50*time.Millisecond)
+		}()
+
+		go func() {
+			defer wg.Done()
+			server.finalizeSession(reqID)
+		}()
+
+		wg.Wait()
+	}
 }
 
 func init() {

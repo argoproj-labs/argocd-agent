@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	fakeclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,7 @@ import (
 	"github.com/wI2L/jsondiff"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func Test_NewKubernetes(t *testing.T) {
@@ -41,7 +43,16 @@ func Test_NewKubernetes(t *testing.T) {
 		assert.NotNil(t, k)
 		assert.False(t, k.SupportsPatch())
 	})
-
+	t.Run("New with label selector option", func(t *testing.T) {
+		k := NewKubernetesBackend(nil, "", nil, true, WithLabelSelector("env=prod"))
+		assert.NotNil(t, k)
+		assert.Equal(t, "env=prod", k.labelSelector)
+	})
+	t.Run("New with empty label selector option", func(t *testing.T) {
+		k := NewKubernetesBackend(nil, "", nil, true, WithLabelSelector(""))
+		assert.NotNil(t, k)
+		assert.Empty(t, k.labelSelector)
+	})
 }
 
 func mkAppProjects() []runtime.Object {
@@ -161,6 +172,27 @@ func Test_List(t *testing.T) {
 		projectList, err := be.List(context.TODO(), backend.AppProjectSelector{})
 		require.NoError(t, err)
 		assert.Len(t, projectList, 10)
+
+		actions := fakeAppClient.Actions()
+		require.NotEmpty(t, actions)
+		listAction, ok := actions[0].(k8stesting.ListAction)
+		require.True(t, ok)
+		restrictions := listAction.GetListRestrictions()
+		expected := config.LabelSelector("")
+		assert.Equal(t, expected.LabelSelector, restrictions.Labels.String())
 	})
 
+	t.Run("List uses custom label selector", func(t *testing.T) {
+		fakeAppClient := fakeclient.NewSimpleClientset()
+		be := NewKubernetesBackend(fakeAppClient, "argocd", nil, true, WithLabelSelector("env=prod"))
+		_, err := be.List(context.TODO(), backend.AppProjectSelector{})
+		require.NoError(t, err)
+		actions := fakeAppClient.Actions()
+		require.NotEmpty(t, actions)
+		listAction, ok := actions[0].(k8stesting.ListAction)
+		require.True(t, ok)
+		restrictions := listAction.GetListRestrictions()
+		expected := config.LabelSelector("env=prod")
+		assert.Equal(t, expected.LabelSelector, restrictions.Labels.String())
+	})
 }

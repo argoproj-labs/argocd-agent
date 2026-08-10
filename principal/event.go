@@ -17,18 +17,23 @@ package principal
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/checkpoint"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
+	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
@@ -41,6 +46,18 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/workqueue"
 )
+
+// skipReplication returns true for event targets that are operational noise and
+// should not be forwarded to HA replicas. Replicas get fresh data from agents
+// on promotion.
+func skipReplication(target targets.EventTarget) bool {
+	switch target {
+	case targets.Heartbeat, targets.ClusterCacheInfoUpdate:
+		return true
+	default:
+		return false
+	}
+}
 
 // processRecvQueue processes an entry from the receiver queue, which holds the
 // events received by agents. It will trigger updates of resources in the
@@ -85,13 +102,13 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	logCtx.Debugf("Processing event %s", target)
 
 	switch target {
-	case event.TargetApplication:
+	case targets.Application:
 		err = s.processApplicationEvent(ctx, agentName, ev)
-	case event.TargetAppProject:
+	case targets.AppProject:
 		err = s.processAppProjectEvent(ctx, agentName, ev)
-	case event.TargetResource:
+	case targets.Resource:
 		err = s.processResourceEventResponse(ctx, agentName, ev)
-	case event.TargetRedis:
+	case targets.Redis:
 		resReq := &event.RedisResponse{}
 		err := ev.DataAs(resReq)
 		if err == nil {
@@ -111,11 +128,11 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 			}
 		}()
 
-	case event.TargetResourceResync:
+	case targets.ResourceResync:
 		err = s.processIncomingResourceResyncEvent(ctx, agentName, ev)
-	case event.TargetClusterCacheInfoUpdate:
+	case targets.ClusterCacheInfoUpdate:
 		err = s.processClusterCacheInfoUpdateEvent(agentName, ev)
-	case event.TargetHeartbeat:
+	case targets.Heartbeat:
 		err = s.processHeartbeatEvent(agentName, ev)
 	default:
 		err = fmt.Errorf("unknown target: '%s'", target)
@@ -123,6 +140,12 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 
 	// Mark event as processed
 	q.Done(ev)
+
+	// Forward successfully processed events to replicas, skipping operational
+	// noise that replicas don't need. Replicas get fresh data from agents on promotion.
+	if err == nil && s.ha != nil && !skipReplication(target) {
+		s.ha.ForwardEventForReplication(event.New(ev, target), agentName, replication.DirectionInbound)
+	}
 
 	// Stop and log checkpoint information
 	cp.End()
@@ -198,6 +221,26 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		}
 		incoming.Spec.Destination.Name = cluster.Name
 		incoming.Spec.Destination.Server = ""
+
+		// Rewrite namespace for child Application entries in status.resources
+		// so the UI navigates to child apps using the principal-side namespace
+		for i, res := range incoming.Status.Resources {
+			if res.Group == "argoproj.io" && res.Kind == "Application" {
+				incoming.Status.Resources[i].Namespace = agentName
+			}
+		}
+	}
+
+	// When destination-based mapping is active, the agent may send apps under
+	// its own installation namespace. The NamespaceRemappedAnnotation is a
+	// boolean marker stamped by the agent when it remapped the app.
+	if s.destinationBasedMapping && agentMode.IsManaged() {
+		if _, ok := incoming.Annotations[manager.NamespaceRemappedAnnotation]; ok {
+			if incoming.Namespace == s.agentNamespace(agentName) {
+				incoming.SetNamespace(s.namespace)
+			}
+			delete(incoming.Annotations, manager.NamespaceRemappedAnnotation)
+		}
 	}
 
 	switch ev.Type() {
@@ -212,7 +255,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		s.sourceCache.Application.Set(incoming.UID, incoming.Spec)
 
 		incoming.SetNamespace(agentName)
-		_, err := s.appManager.Create(ctx, incoming)
+		_, err := s.appManager.Create(ctx, incoming, true)
 		if err != nil {
 			if !kerrors.IsAlreadyExists(err) {
 				return fmt.Errorf("could not create application %s: %w", incoming.QualifiedName(), err)
@@ -339,11 +382,123 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		} else {
 			return fmt.Errorf("unexpected agent mode")
 		}
+	case event.Error.String():
+		errData := &event.ErrorData{}
+		err := ev.DataAs(errData)
+		if err != nil {
+			return err
+		}
+
+		if !agentMode.IsManaged() {
+			logCtx.Debug("Discarding event, because agent is not in managed mode")
+			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      errData.ResourceName,
+				Namespace: errData.ResourceNamespace,
+			},
+			Status: v1alpha1.ApplicationStatus{
+				Health: v1alpha1.AppHealthStatus{
+					Status: health.HealthStatusDegraded,
+				},
+				Conditions: []v1alpha1.ApplicationCondition{
+					{
+						Type:    application.AppConditionAgentError.String(),
+						Message: fmt.Sprintf("Error occurred on cluster managed by agent %s: %s", agentName, errData.Message),
+					},
+				},
+			},
+		}
+
+		_, err = s.appManager.UpdateStatus(ctx, agentName, app)
+		if err != nil {
+			return fmt.Errorf("could not update application status for %s: %w", app.QualifiedName(), err)
+		}
+
 	default:
 		return fmt.Errorf("unable to process event of type %s", ev.Type())
 	}
 
 	return nil
+}
+
+// processAppProjectEventRoleLine processes Argo CD RBAC line from AppProject resource of 'spec.roles[].policies[]', and returns a version of that line that has been translated for the target environment (for example, translating an autonomous agent AppProject to principal Argo CD)
+// - If we can't translate the line (for example, it's not applicable or doesn't have the expected format), it is returned as-is
+// - Only used for translating AppProjects from autonomous mode agents.
+// params:
+// - policyLineInputParam - As above
+// - roleName - Value from .spec.roles[x].name
+// - newAppprojectName - translated AppProject resource name
+// - oldAppprojectName - untranslated AppProject resource name
+// - autonomousAgentApplicationNamespace is the namespace (on principal cluster) within which Applications from autonomous agent cluster are stored.
+// For reference:
+// - https://argo-cd.readthedocs.io/en/stable/user-guide/projects/#configuring-rbac-with-projects
+// - https://argo-cd.readthedocs.io/en/stable/operator-manual/rbac/
+func processAppProjectEventRoleLine(policyLineInputParam string, roleName string, newAppprojectName string, oldAppprojectName string, autonomousAgentApplicationNamespace string) string {
+	// Example policy line:
+	// p, proj:my-project:read-only, applications, get, my-project/*, allow
+	fields := strings.Split(policyLineInputParam, ",")
+	if len(fields) != 6 {
+		return policyLineInputParam
+	}
+
+	if strings.TrimSpace(fields[0]) != "p" { // Sanity test
+		return policyLineInputParam
+	}
+
+	// We only attempt to transform these resources, return for any other resource
+	resourceType := strings.TrimSpace(fields[2])
+	switch resourceType {
+	case "applications", "applicationsets", "logs", "exec":
+	default:
+		return policyLineInputParam
+	}
+
+	// Only process 'proj:' prefixed lines
+	roleNameScopedToProject := strings.TrimSpace(fields[1])
+	if !strings.HasPrefix(roleNameScopedToProject, "proj:") {
+		return policyLineInputParam // This function doesn't touch non-'proj:' lines, so just return
+	}
+
+	// Replace field 1 if it's targeting a project (has 'proj:' prefix), AND that project matches oldAppprojectName, AND the role matches rolename
+	parts := strings.SplitN(roleNameScopedToProject, ":", 3)
+	if len(parts) == 3 {
+		if parts[1] != oldAppprojectName {
+			return policyLineInputParam // Unexpected value, return the line unmodified
+		}
+		if parts[2] != roleName {
+			return policyLineInputParam // Unexpected value, return the line unmodified
+		}
+		// We've verified it matches 'proj:(proj name):(role name)', so we are safe to replace the proj value.
+		parts[1] = newAppprojectName
+		fields[1] = strings.Replace(fields[1], roleNameScopedToProject, strings.Join(parts, ":"), 1)
+	}
+
+	// Since Application in any namespace is enabled on principal in the autonomous case, the field must have this form:
+	// <app-project>/<app-ns>/<app-name>
+	// e.g. example-project/app-namespace/my-app
+	//
+	// We expect it will have this value pre-transform:
+	// <app-project>/<app-name>
+	objectValue := strings.TrimSpace(fields[4])
+
+	// Replace field 4, from <app-project>/<app-name> -> <app-project>/<app-ns>/<app-name>, where app-ns is 'autonomousAgentApplicationNamespace'
+	if parts := strings.Split(objectValue, "/"); len(parts) == 2 {
+		projPart := parts[0]
+
+		if projPart == oldAppprojectName { // Update appProject only value only if it matches
+			projPart = newAppprojectName // appproject name on autonomous cluster -> appproject name on principal cluster
+		} else {
+			return policyLineInputParam // No match, so return the line unmodified
+		}
+
+		fields[4] = " " + projPart + "/" + autonomousAgentApplicationNamespace + "/" + parts[1]
+	}
+
+	return strings.Join(fields, ",")
+
 }
 
 func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, ev *cloudevents.Event) error {
@@ -364,6 +519,8 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 		"event_id":    event.EventID(ev),
 	})
 
+	eventAppProjectIncomingName := incoming.Name
+
 	// AppProjects coming from different autonomous agents could have the same name,
 	// so we prefix the project name with the agent name
 	if agentMode.IsAutonomous() {
@@ -383,6 +540,22 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 			incoming.Spec.Destinations[i].Name = agentName
 			incoming.Spec.Destinations[i].Server = "*"
 		}
+
+		// Translate ProjectRole policies from autonomous context to principal context (see processAppProjectEventRoleLine for details)
+		newRoles := make([]v1alpha1.ProjectRole, 0)
+		for _, role := range incoming.Spec.Roles {
+
+			newPolicies := make([]string, 0)
+			for _, policy := range role.Policies {
+
+				policy = processAppProjectEventRoleLine(policy, role.Name, incoming.Name, eventAppProjectIncomingName, agentName)
+				newPolicies = append(newPolicies, policy)
+			}
+			role.Policies = newPolicies
+
+			newRoles = append(newRoles, role)
+		}
+		incoming.Spec.Roles = newRoles
 	}
 
 	switch ev.Type() {
@@ -394,7 +567,7 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 
 			s.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
 
-			_, err := s.projectManager.Create(ctx, incoming)
+			_, err := s.projectManager.Create(ctx, incoming, true)
 			if err != nil {
 				return fmt.Errorf("could not create app-project %s: %w", incoming.Name, err)
 			}
@@ -464,7 +637,7 @@ func (s *Server) processClusterCacheInfoUpdateEvent(agentName string, ev *cloude
 		"event":       ev.Type(),
 		"resource_id": event.ResourceID(ev),
 		"event_id":    event.EventID(ev),
-	}).Infof("Processing clusterCacheInfoUpdate event")
+	}).Debug("Processing clusterCacheInfoUpdate event")
 
 	return s.clusterMgr.SetClusterCacheStats(clusterInfo, agentName)
 }
@@ -640,7 +813,9 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 	}
 
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx, manager.ManagerRolePrincipal, s.namespace).
-		WithDestinationBasedMapping(s.destinationBasedMapping)
+		WithDestinationBasedMapping(s.destinationBasedMapping).
+		WithPrincipalUID(s.principalUID).
+		WithPeerNamespace(s.agentNamespace(agentName))
 
 	switch ev.Type() {
 	case event.SyncedResourceList.String():
@@ -689,7 +864,7 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 			incoming.Name = prefixedName
 		}
 
-		return resyncHandler.ProcessRequestUpdateEvent(ctx, agentName, incoming)
+		return resyncHandler.ProcessRequestUpdateEvent(ctx, agentName, agentMode, incoming)
 	case event.EventRequestResourceResync.String():
 		if agentMode != types.AgentModeAutonomous {
 			return fmt.Errorf("principal can only handle ResourceResync request in autonomous mode")
@@ -714,20 +889,20 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 func (s *Server) eventProcessor(ctx context.Context) error {
 	sem := semaphore.NewWeighted(s.options.eventProcessors)
 	queueLock := namedlock.NewNamedLock()
-	logCtx := s.logGrpcEvent().WithField("module", "EventProcessor")
+	baseLogCtx := s.logGrpcEvent().WithField("module", "EventProcessor")
 	for {
 		queuesProcessed := 0
 		for _, queueName := range s.queues.Names() {
 			select {
 			case <-ctx.Done():
-				logCtx.Infof("Shutting down event processor")
+				baseLogCtx.Infof("Shutting down event processor")
 				return nil
 			default:
 				// Though unlikely, the agent might have disconnected, and
 				// the queue will be gone. In this case, we'll just skip.
 				q := s.queues.RecvQ(queueName)
 				if q == nil {
-					logCtx.Debugf("Queue disappeared -- client probably has disconnected")
+					baseLogCtx.WithField("queueName", queueName).Debugf("Queue disappeared -- client probably has disconnected")
 					break
 				}
 
@@ -748,22 +923,22 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					break
 				}
 
-				logCtx = logCtx.WithField("queueName", queueName)
+				queueLogCtx := baseLogCtx.WithField("queueName", queueName)
 
 				queuesProcessed += 1
 
-				logCtx.Trace("Acquired queue lock")
+				queueLogCtx.Trace("Acquired queue lock")
 
 				err := sem.Acquire(ctx, 1)
 				if err != nil {
-					logCtx.Tracef("Error acquiring semaphore: %v", err)
+					queueLogCtx.Tracef("Error acquiring semaphore: %v", err)
 					queueLock.Unlock(queueName)
 					break
 				}
 
-				logCtx.Trace("Acquired semaphore")
+				queueLogCtx.Trace("Acquired semaphore")
 
-				go func(agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) {
+				go func(agentName string, q workqueue.TypedRateLimitingInterface[*cloudevents.Event], logCtx *logrus.Entry) {
 					defer func() {
 						sem.Release(1)
 						queueLock.Unlock(agentName)
@@ -780,7 +955,7 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					}
 
 					// Send an ACK if the event is processed successfully.
-					sendQ := s.queues.SendQ(queueName)
+					sendQ := s.queues.SendQ(agentName)
 					if sendQ == nil {
 						logCtx.Debugf("Queue disappeared -- client probably has disconnected")
 						return
@@ -792,8 +967,8 @@ func (s *Server) eventProcessor(ctx context.Context) error {
 					})
 
 					logCtx.Trace("sending an ACK for an event")
-					sendQ.Add(s.events.ProcessedEvent(event.EventProcessed, event.New(ev, event.TargetEventAck)))
-				}(queueName, q)
+					sendQ.Add(s.events.ProcessedEvent(event.EventProcessed, event.New(ev, targets.EventAck)))
+				}(queueName, q, queueLogCtx)
 			}
 		}
 		// Give the CPU a little rest when no agents are connected

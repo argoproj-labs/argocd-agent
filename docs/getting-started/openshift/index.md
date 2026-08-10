@@ -212,15 +212,12 @@ time="2025-07-30T14:58:33Z" level=warning msg="INSECURE: Not verifying remote TL
 time="2025-07-30T14:58:33Z" level=info msg="Loading client TLS certificate from secret argocd/argocd-agent-client-tls"
 [FATAL]: Error creating remote: unable to read TLS client from secret: could not read TLS secret argocd/argocd-agent-client-tls: secrets "argocd-agent-client-tls" is forbidden: User "system:serviceaccount:argocd:argocd-agent-agent" cannot get resource "secrets" in API group "" in the namespace "argocd"
 ```
-
 update the ClusterRoleBinding to update the subject namespace to workload-namespace.
-
 ```
 kubectl patch clusterrolebinding argocd-agent-agent --type='json' -p='[{"op": "replace", "path": "/subjects/0/namespace", "value": "<workload-namespace>"}]'
 ```
 
 2. If facing error with appProject
-
 ```
 Unable to create application: app is not allowed in project "default", or the project does not exist
 ```

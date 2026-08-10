@@ -23,11 +23,13 @@ package cluster
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"sync"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -50,6 +52,14 @@ const LabelValueManagerName = "argocd-agent"
 // syncTimeout is the duration to wait until the manager's informer has synced
 const syncTimeout = 30 * time.Second
 
+// ClusterDeletedCallback is invoked after a cluster secret is deleted and unmapped.
+// The agentName parameter is the value of the agent-mapping label from the deleted secret.
+type ClusterDeletedCallback func(agentName string)
+
+// ClusterAddedCallback is invoked after a cluster secret is added and mapped.
+// The agentName parameter is the agent that was mapped.
+type ClusterAddedCallback func(agentName string)
+
 // Manager manages Argo CD cluster secrets on the principal
 type Manager struct {
 	mutex      sync.RWMutex
@@ -64,10 +74,34 @@ type Manager struct {
 	filters *filter.Chain[*v1.Secret]
 
 	clusterCache *appstatecache.Cache
+
+	// clusterDeletedCb is a callback invoked after a cluster secret
+	// is deleted and unmapped. Used by the principal to clean up per-agent state.
+	clusterDeletedCb ClusterDeletedCallback
+
+	// clusterAddedCb is a callback invoked after a cluster secret is added
+	// and mapped. Used by the principal to resync applications for the agent.
+	clusterAddedCb ClusterAddedCallback
+}
+
+// SetOnClusterDeleted registers a callback that fires after a cluster secret
+// is deleted and the agent mapping is removed.
+func (m *Manager) SetOnClusterDeleted(fn ClusterDeletedCallback) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.clusterDeletedCb = fn
+}
+
+// SetOnClusterAdded registers a callback that fires after a cluster secret
+// is added and the agent mapping is created.
+func (m *Manager) SetOnClusterAdded(fn ClusterAddedCallback) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.clusterAddedCb = fn
 }
 
 // NewManager instantiates and initializes a new Manager.
-func NewManager(ctx context.Context, namespace, redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType, kubeclient kubernetes.Interface) (*Manager, error) {
+func NewManager(ctx context.Context, namespace, redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType, kubeclient kubernetes.Interface, tlsConfig *tls.Config) (*Manager, error) {
 	var err error
 	m := &Manager{
 		clusters:   make(map[string]*v1alpha1.Cluster),
@@ -77,9 +111,9 @@ func NewManager(ctx context.Context, namespace, redisAddress, redisPassword stri
 		filters:    filter.NewFilterChain[*v1.Secret](),
 	}
 
-	m.clusterCache, err = NewClusterCacheInstance(redisAddress, redisPassword, redisCompressionType)
+	m.clusterCache, err = NewClusterCacheInstance(redisAddress, redisPassword, redisCompressionType, tlsConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create cluster cache instance: %v", err)
+		return nil, fmt.Errorf("failed to create cluster cache instance: %w", err)
 	}
 
 	// We are only interested in secrets that have both, Argo CD's label for
@@ -163,4 +197,45 @@ func (m *Manager) Stop() error {
 
 func log() *logrus.Entry {
 	return logging.GetDefaultLogger().ComponentLogger("ClusterManager")
+}
+
+// GetClusterSecrets lists all agent-managed cluster secrets from K8s.
+func (m *Manager) GetClusterSecrets(ctx context.Context) ([]*v1.Secret, error) {
+	selector := fmt.Sprintf("%s=%s,%s=true",
+		common.LabelKeySecretType, common.LabelValueSecretTypeCluster,
+		LabelKeySelfRegisteredCluster)
+	list, err := m.kubeclient.CoreV1().Secrets(m.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: selector,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*v1.Secret, len(list.Items))
+	for i := range list.Items {
+		result[i] = &list.Items[i]
+	}
+	return result, nil
+}
+
+// CreateOrUpdateClusterSecret writes a cluster secret to K8s, creating or updating as needed.
+func (m *Manager) CreateOrUpdateClusterSecret(ctx context.Context, secret *v1.Secret) error {
+	toCreate := secret.DeepCopy()
+	toCreate.ResourceVersion = ""
+	toCreate.UID = ""
+	toCreate.Namespace = m.namespace
+	_, err := m.kubeclient.CoreV1().Secrets(m.namespace).Create(ctx, toCreate, metav1.CreateOptions{})
+	if err == nil {
+		return nil
+	}
+	if !errors.IsAlreadyExists(err) {
+		return err
+	}
+	existing, err := m.kubeclient.CoreV1().Secrets(m.namespace).Get(ctx, secret.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	toCreate.ResourceVersion = existing.ResourceVersion
+	toCreate.UID = existing.UID
+	_, err = m.kubeclient.CoreV1().Secrets(m.namespace).Update(ctx, toCreate, metav1.UpdateOptions{})
+	return err
 }

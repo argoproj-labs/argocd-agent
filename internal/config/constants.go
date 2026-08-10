@@ -30,3 +30,15 @@ const SecretNameJWT = "argocd-agent-jwt"
 
 // SkipSyncLabel is the label used to skip sync for an application.
 const SkipSyncLabel = "argocd-agent.argoproj-labs.io/ignore-sync"
+
+// EnvKubeQPS is the name of the environment variable for setting the Kubernetes API QPS.
+const EnvKubeQPS = "ARGOCD_AGENT_KUBE_QPS"
+
+// EnvKubeBurst is the name of the environment variable for setting the Kubernetes API Burst.
+const EnvKubeBurst = "ARGOCD_AGENT_KUBE_BURST"
+
+// EnvRecvQueueSize is the name of the environment variable for setting the size of the queue.
+const EnvRecvQueueSize = "ARGOCD_AGENT_RECV_QUEUE_SIZE"
+
+// EnvSendQueueSize is the name of the environment variable for setting the size of the queue.
+const EnvSendQueueSize = "ARGOCD_AGENT_SEND_QUEUE_SIZE"

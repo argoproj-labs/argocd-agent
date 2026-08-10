@@ -25,6 +25,8 @@ import (
 	"strings"
 	"syscall"
 
+	conf "github.com/argoproj-labs/argocd-agent/internal/config"
+	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -69,6 +71,9 @@ func NewKubernetesClientFromConfig(ctx context.Context, namespace string, kubeco
 	if err != nil {
 		return nil, err
 	}
+
+	config.QPS = float32(env.NumWithDefault(conf.EnvKubeQPS, nil, 100))
+	config.Burst = int(env.NumWithDefault(conf.EnvKubeBurst, nil, 300))
 
 	if namespace == "" {
 		namespace, _, err = clientConfig.Namespace()

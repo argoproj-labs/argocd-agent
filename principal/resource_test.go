@@ -12,7 +12,9 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -28,6 +30,9 @@ func newResourceTestServer(t *testing.T) *Server {
 	require.NoError(t, err)
 	s.queues.Create("agent")
 	s.events = event.NewEventSource("principal")
+	s.eventStreamSrv = eventstream.NewServer(
+		s.queues, event.NewEventWritersMap(), nil, &cluster.Manager{},
+	)
 	rp, err := resourceproxy.New("127.0.0.1:0")
 	require.NoError(t, err)
 	s.resourceProxy = rp
@@ -37,6 +42,8 @@ func newResourceTestServer(t *testing.T) *Server {
 func Test_resourceRequester(t *testing.T) {
 	t.Run("Successfully request a resource", func(t *testing.T) {
 		s := newResourceTestServer(t)
+		s.eventStreamSrv.MarkConnected("agent")
+		defer s.eventStreamSrv.MarkDisconnected("agent")
 		// Create a certificate with agent name in CN
 		cert := &x509.Certificate{
 			Subject: pkix.Name{
@@ -48,7 +55,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -79,7 +86,7 @@ func Test_resourceRequester(t *testing.T) {
 		s := newResourceTestServer(t)
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -101,7 +108,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{{}},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -128,7 +135,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -143,7 +150,8 @@ func Test_resourceRequester(t *testing.T) {
 
 	t.Run("Agent not connected", func(t *testing.T) {
 		s := newResourceTestServer(t)
-		s.queues.Delete("agent", false)
+		assert.NotNil(t, s.queues.SendQ("agent"))
+		assert.False(t, s.eventStreamSrv.IsAgentConnected("agent"))
 		// Create a certificate with agent name in CN
 		cert := &x509.Certificate{
 			Subject: pkix.Name{
@@ -155,7 +163,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -167,6 +175,8 @@ func Test_resourceRequester(t *testing.T) {
 
 	t.Run("Receiving a different resource", func(t *testing.T) {
 		s := newResourceTestServer(t)
+		s.eventStreamSrv.MarkConnected("agent")
+		defer s.eventStreamSrv.MarkDisconnected("agent")
 		// Create a certificate with agent name in CN
 		cert := &x509.Certificate{
 			Subject: pkix.Name{
@@ -178,7 +188,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1
@@ -204,6 +214,8 @@ func Test_resourceRequester(t *testing.T) {
 
 	t.Run("Receiving a different event", func(t *testing.T) {
 		s := newResourceTestServer(t)
+		s.eventStreamSrv.MarkConnected("agent")
+		defer s.eventStreamSrv.MarkDisconnected("agent")
 		// Create a certificate with agent name in CN
 		cert := &x509.Certificate{
 			Subject: pkix.Name{
@@ -215,7 +227,7 @@ func Test_resourceRequester(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{cert},
 		}
 		w := httptest.NewRecorder()
-		ch := make(chan interface{})
+		ch := make(chan any)
 		go func() {
 			s.processResourceRequest(w, r, resourceproxy.NewParams())
 			ch <- 1

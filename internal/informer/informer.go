@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/filter"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -202,25 +203,28 @@ func (i *Informer[T]) installEventHandlers() error {
 				if !ok {
 					return
 				}
+				logging.LogInformerAdd(i.logger, obj)
 				if i.onAdd != nil {
 					i.onAdd(res)
 				}
 			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
+			UpdateFunc: func(oldObj, newObj any) {
 				oldRes, oldOk := oldObj.(T)
 				newRes, newOk := newObj.(T)
 				if !oldOk || !newOk {
 					return
 				}
+				logging.LogInformerUpdate(i.logger, oldObj, newObj)
 				if i.onUpdate != nil {
 					i.onUpdate(oldRes, newRes)
 				}
 			},
-			DeleteFunc: func(obj interface{}) {
+			DeleteFunc: func(obj any) {
 				res, ok := obj.(T)
 				if !ok {
 					return
 				}
+				logging.LogInformerDelete(i.logger, obj)
 				if i.onDelete != nil {
 					i.onDelete(res)
 				}
@@ -275,7 +279,7 @@ func (i *Informer[T]) Stop() error {
 
 // HasSynced returns true if the informer is synced
 func (i *Informer[T]) HasSynced() bool {
-	return i.evHandler.HasSynced()
+	return i.informer.HasSynced()
 }
 
 // WaitForSync blocks until either the informer has synced, or the context ctx

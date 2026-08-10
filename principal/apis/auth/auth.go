@@ -43,6 +43,8 @@ type Server struct {
 
 	// principalVersion is the version of the principal, used for handshake validation
 	principalVersion string
+	// namespace is the Kubernetes namespace the principal is running in.
+	namespace string
 }
 
 const (
@@ -59,14 +61,17 @@ var errAuthenticationFailed = status.Error(codes.Unauthenticated, authFailedMess
 
 type ServerOptions struct {
 	agentRegistrationManager *registration.AgentRegistrationManager
+	onAuthenticated          func(agentName, agentNamespace string)
 }
 
 type ServerOption func(o *ServerOptions) error
 
 // NewServer creates a new instance of an authentication server with the given
 // authentication methods and options.
-func NewServer(queues *queue.SendRecvQueues, authMethods *auth.Methods, iss issuer.Issuer, opts ...ServerOption) (*Server, error) {
-	s := &Server{}
+func NewServer(queues *queue.SendRecvQueues, namespace string, authMethods *auth.Methods, iss issuer.Issuer, opts ...ServerOption) (*Server, error) {
+	s := &Server{
+		namespace: namespace,
+	}
 	s.options = &ServerOptions{}
 	if authMethods != nil {
 		s.authMethods = authMethods
@@ -168,10 +173,16 @@ func (s *Server) Authenticate(ctx context.Context, ar *authapi.AuthRequest) (*au
 			return nil, err
 		}
 	}
+
+	if s.options.onAuthenticated != nil {
+		s.options.onAuthenticated(clientID, ar.AgentNamespace)
+	}
+
 	return &authapi.AuthResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		Version:      s.principalVersion,
+		AccessToken:        accessToken,
+		RefreshToken:       refreshToken,
+		Version:            s.principalVersion,
+		PrincipalNamespace: s.namespace,
 	}, nil
 }
 

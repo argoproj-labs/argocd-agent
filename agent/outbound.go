@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
@@ -45,9 +46,10 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 	a.resources.Add(resources.NewResourceKeyFromApp(app))
 
 	// Update events trigger a new event sometimes, too. If we've already seen
-	// the app, we just ignore the request then.
+	// the app, send it as an update event.
 	if a.appManager.IsManaged(app.QualifiedName()) {
-		logCtx.Error("Cannot manage app that is already managed")
+		a.addAppUpdateToQueue(app, app)
+
 		return
 	}
 
@@ -75,8 +77,8 @@ func (a *Agent) addAppCreationToQueue(app *v1alpha1.Application) {
 
 // addAppUpdateToQueue processes an application update event originating from
 // the AppInformer and puts it in the agent's send queue.
-func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.Application) {
-	logCtx := a.logGrpcEvent().WithField(logfields.Event, "UpdateApp").WithField(logfields.Application, old.QualifiedName())
+func (a *Agent) addAppUpdateToQueue(_ *v1alpha1.Application, new *v1alpha1.Application) {
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "UpdateApp").WithField(logfields.Application, new.QualifiedName())
 	a.watchLock.Lock()
 	defer a.watchLock.Unlock()
 
@@ -114,6 +116,13 @@ func (a *Agent) addAppUpdateToQueue(old *v1alpha1.Application, new *v1alpha1.App
 	case types.AgentModeAutonomous:
 		eventType = event.SpecUpdate
 	case types.AgentModeManaged:
+		// If resource does not have principal uuid annotation we do not need to send it
+		// because it should fail to update with not found but in an error case would overwrite
+		// the error conditions on the principal application
+		if !isResourceFromPrincipal(new) {
+			logCtx.Debugf("Application %s does not have source uid annotation, status update not needed", new.Name)
+			return
+		}
 		eventType = event.StatusUpdate
 	}
 
@@ -136,13 +145,16 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	defer span.End()
 
 	if isResourceFromPrincipal(app) {
-		reverted, err := manager.RevertUserInitiatedDeletion(a.context, app, a.deletions, a.appManager, logCtx)
+		var transforms []func(*v1alpha1.Application)
+		if a.mode == types.AgentModeManaged {
+			transforms = append(transforms, a.recreateTransform(logCtx))
+		}
+		reverted, err := manager.RevertUserInitiatedDeletion(a.context, app, a.deletions, a.appManager, logCtx, transforms...)
 		if err != nil {
 			logCtx.WithError(err).Error("failed to revert invalid deletion of application")
 			return
 		}
 		if reverted {
-			logCtx.Trace("Deleted application is recreated")
 			return
 		}
 	}
@@ -166,6 +178,23 @@ func (a *Agent) addAppDeletionToQueue(app *v1alpha1.Application) {
 	tracing.InjectTraceContext(ctx, ev)
 	q.Add(ev)
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added app delete event to send queue")
+}
+
+// recreateTransform returns a pre-create transform that applies the configured
+// recreateAction to the application before it is created.
+func (a *Agent) recreateTransform(logCtx *logrus.Entry) func(*v1alpha1.Application) {
+	return func(app *v1alpha1.Application) {
+		switch a.recreateAction {
+		case manager.RecreateActionClearStatus:
+			app.Status.OperationState = nil
+			logCtx.Info("Cleared operationState on recreated application to allow auto-sync")
+		case manager.RecreateActionResync:
+			app.Operation = &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{},
+			}
+			logCtx.Info("Triggered resync on recreated application")
+		}
+	}
 }
 
 // deleteNamespaceCallback is called when the user deletes the agent namespace.
@@ -339,6 +368,25 @@ func (a *Agent) addAppProjectDeletionToQueue(appProject *v1alpha1.AppProject) {
 	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added appProject delete event to send queue")
 }
 
+// addErrorEventToQueue is used to report errors to the principal by putting an
+// error event on the send queue
+func (a *Agent) addErrorEventToQueue(errTarget targets.EventTarget, errData *event.ErrorData) error {
+	logCtx := a.logGrpcEvent().WithField(logfields.Event, "Error").WithField("ErrorTarget", errTarget.String())
+
+	q := a.queues.SendQ(defaultQueueName)
+	if q == nil {
+		return fmt.Errorf("send queue not found")
+	}
+
+	ev, err := a.emitter.ErrorEvent(errTarget, errData)
+	if err != nil {
+		return err
+	}
+	q.Add(ev)
+	logCtx.WithField(logfields.SendQueueLen, q.Len()).Debugf("Added error event to send queue")
+	return nil
+}
+
 // addClusterCacheInfoUpdateToQueue processes a cluster cache info update event
 // and puts it in the send queue.
 func (a *Agent) addClusterCacheInfoUpdateToQueue() {
@@ -373,7 +421,7 @@ func (a *Agent) addClusterCacheInfoUpdateToQueue() {
 			"applicationsCount": clusterInfo.ApplicationsCount,
 			"apisCount":         clusterInfo.CacheInfo.APIsCount,
 			"resourcesCount":    clusterInfo.CacheInfo.ResourcesCount,
-		}).Infof("Added ClusterCacheInfoUpdate event to send queue")
+		}).Debug("Added ClusterCacheInfoUpdate event to send queue")
 	} else {
 		logCtx.Error("Default queue not found, unable to send ClusterCacheInfoUpdate event")
 	}
@@ -470,6 +518,95 @@ func (a *Agent) handleRepositoryDeletion(repo *corev1.Secret) {
 	if err := a.repoManager.Unmanage(repo.Name); err != nil {
 		logCtx.Errorf("Could not unmanage repository: %v", err)
 		return
+	}
+}
+
+func (a *Agent) handleGPGKeyCreation(cm *corev1.ConfigMap) {
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"event": "NewGPGKey",
+		"name":  cm.Name,
+	})
+
+	logCtx.Debugf("Processing new GPG key event")
+
+	if a.mode.IsAutonomous() {
+		logCtx.Debug("Skipping GPG key event because the agent is not in managed mode")
+		return
+	}
+
+	a.resources.Add(resources.NewResourceKeyFromGPGKey(cm))
+
+	if a.gpgKeyManager.IsManaged(cm.Name) {
+		logCtx.Debug("Skipping GPG key event because it is already managed")
+		return
+	}
+
+	if err := a.gpgKeyManager.Manage(cm.Name); err != nil {
+		logCtx.Errorf("Could not manage GPG key ConfigMap: %v", err)
+	}
+}
+
+func (a *Agent) handleGPGKeyUpdate(old, new *corev1.ConfigMap) {
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"event": "UpdateGPGKey",
+		"name":  new.Name,
+	})
+
+	logCtx.Debug("Processing update GPG key event")
+
+	a.watchLock.Lock()
+	defer a.watchLock.Unlock()
+
+	if a.gpgKeyManager.RevertGPGKeyChanges(a.context, new, a.sourceCache.GPGKey) {
+		logCtx.Debug("Modifications done to GPG keys ConfigMap are reverted")
+		return
+	}
+
+	if a.mode.IsAutonomous() {
+		logCtx.Debug("Skipping GPG key event because the agent is not in managed mode")
+		return
+	}
+
+	if !a.gpgKeyManager.IsManaged(new.Name) {
+		logCtx.Debug("Skipping GPG key event because the GPG key is not managed")
+		return
+	}
+}
+
+func (a *Agent) handleGPGKeyDeletion(cm *corev1.ConfigMap) {
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"event": "DeleteGPGKey",
+		"name":  cm.Name,
+	})
+
+	logCtx.Debug("Processing delete GPG key event")
+
+	if isResourceFromPrincipal(cm) {
+		reverted, err := manager.RevertUserInitiatedDeletion(a.context, cm, a.deletions, a.gpgKeyManager, logCtx)
+		if err != nil {
+			logCtx.WithError(err).Error("failed to revert invalid deletion of GPG keys ConfigMap")
+			return
+		}
+		if reverted {
+			logCtx.Trace("Deleted GPG keys ConfigMap is recreated")
+			return
+		}
+	}
+
+	if a.mode.IsAutonomous() {
+		logCtx.Debug("Skipping GPG key event because the agent is not in managed mode")
+		return
+	}
+
+	a.resources.Remove(resources.NewResourceKeyFromGPGKey(cm))
+
+	if !a.gpgKeyManager.IsManaged(cm.Name) {
+		logCtx.Debug("Skipping GPG key event because the GPG key is not managed")
+		return
+	}
+
+	if err := a.gpgKeyManager.Unmanage(cm.Name); err != nil {
+		logCtx.Errorf("Could not unmanage GPG key ConfigMap: %v", err)
 	}
 }
 

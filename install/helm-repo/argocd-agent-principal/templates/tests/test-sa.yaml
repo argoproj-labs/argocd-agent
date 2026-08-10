@@ -1,0 +1,95 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "argocd-agent-principal.testResourceName" . }}
+  namespace: {{ include "argocd-agent-principal.namespace" . }}
+  labels:
+    app.kubernetes.io/name: argocd-agent-principal
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "argocd-agent-principal.testResourceName" . }}
+  namespace: {{ include "argocd-agent-principal.namespace" . }}
+  labels:
+    app.kubernetes.io/name: argocd-agent-principal
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps", "secrets", "serviceaccounts"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "argocd-agent-principal.testResourceName" . }}
+  namespace: {{ include "argocd-agent-principal.namespace" . }}
+  labels:
+    app.kubernetes.io/name: argocd-agent-principal
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "argocd-agent-principal.testResourceName" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "argocd-agent-principal.testResourceName" . }}
+  namespace: {{ include "argocd-agent-principal.namespace" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "argocd-agent-principal.testResourceName" . }}
+  labels:
+    app.kubernetes.io/name: argocd-agent-principal
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps", "secrets", "serviceaccounts"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "argocd-agent-principal.testResourceName" . }}
+  labels:
+    app.kubernetes.io/name: argocd-agent-principal
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "argocd-agent-principal.testResourceName" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "argocd-agent-principal.testResourceName" . }}
+  namespace: {{ include "argocd-agent-principal.namespace" . }}
+{{- end }}

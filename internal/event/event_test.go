@@ -16,9 +16,15 @@ package event
 
 import (
 	"testing"
+	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
 )
 
 func TestResourceRequest_IsEmpty(t *testing.T) {
@@ -386,7 +392,7 @@ func TestNewTerminalRequestEvent(t *testing.T) {
 
 		// Verify event type and schema
 		require.Equal(t, TerminalRequest.String(), ev.Type())
-		require.Equal(t, TargetTerminal.String(), ev.DataSchema())
+		require.Equal(t, targets.Terminal.String(), ev.DataSchema())
 
 		// Verify extensions
 		resID, err := ev.Context.GetExtension(resourceID)
@@ -436,7 +442,7 @@ func TestTerminalRequestFromEvent(t *testing.T) {
 		require.NoError(t, err)
 
 		// Wrap in Event type
-		ev := New(cloudEvent, TargetTerminal)
+		ev := New(cloudEvent, targets.Terminal)
 
 		// Extract terminal request
 		extractedReq, err := ev.TerminalRequest()
@@ -466,7 +472,7 @@ func TestTerminalRequestFromEvent(t *testing.T) {
 		cloudEvent, err := es.NewTerminalRequestEvent(originalReq)
 		require.NoError(t, err)
 
-		ev := New(cloudEvent, TargetTerminal)
+		ev := New(cloudEvent, targets.Terminal)
 		extractedReq, err := ev.TerminalRequest()
 		require.NoError(t, err)
 		require.Empty(t, extractedReq.Command)
@@ -487,15 +493,80 @@ func TestTargetTerminal(t *testing.T) {
 		require.NoError(t, err)
 
 		target := Target(ev)
-		require.Equal(t, TargetTerminal, target)
+		require.Equal(t, targets.Terminal, target)
 	})
 
 	t.Run("TargetTerminal string representation", func(t *testing.T) {
-		require.Equal(t, "terminal", TargetTerminal.String())
+		require.Equal(t, "terminal", targets.Terminal.String())
 	})
 
 	t.Run("TerminalRequest event type string representation", func(t *testing.T) {
 		require.Equal(t, "io.argoproj.argocd-agent.event.terminal-request", TerminalRequest.String())
+	})
+}
+
+func TestSentAt(t *testing.T) {
+	t.Run("SentAt returns nil when extension not set", func(t *testing.T) {
+		ev := cloudevents.NewEvent()
+		require.Nil(t, SentAt(&ev))
+	})
+
+	t.Run("SetSentAt and SentAt round-trip", func(t *testing.T) {
+		before := time.Now().UTC().Truncate(time.Nanosecond)
+		ev := cloudevents.NewEvent()
+		SetSentAt(&ev)
+		after := time.Now().UTC()
+
+		ts := SentAt(&ev)
+		require.NotNil(t, ts)
+		require.False(t, ts.Before(before), "sentat should not be before SetSentAt was called")
+		require.False(t, ts.After(after), "sentat should not be after SetSentAt returned")
+	})
+
+	t.Run("SentAt returns nil for malformed extension", func(t *testing.T) {
+		ev := cloudevents.NewEvent()
+		ev.SetExtension(sentAt, "not-a-timestamp")
+		require.Nil(t, SentAt(&ev))
+	})
+}
+
+func TestApplicationSetEventRoundtrip(t *testing.T) {
+	es := NewEventSource("test-source")
+	appSet := &v1alpha1.ApplicationSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-appset",
+			Namespace: "argocd",
+			UID:       ktypes.UID("test-uid-123"),
+		},
+		Spec: v1alpha1.ApplicationSetSpec{
+			Generators: []v1alpha1.ApplicationSetGenerator{},
+		},
+	}
+
+	t.Run("Create event roundtrip", func(t *testing.T) {
+		cev := es.ApplicationSetEvent(Create, appSet)
+		require.NotNil(t, cev)
+		require.Equal(t, Create.String(), cev.Type())
+		require.Equal(t, targets.ApplicationSet.String(), cev.DataSchema())
+
+		wrapped := New(cev, targets.ApplicationSet)
+		require.Equal(t, targets.ApplicationSet, wrapped.Target())
+
+		decoded, err := wrapped.ApplicationSet()
+		require.NoError(t, err)
+		require.Equal(t, "my-appset", decoded.Name)
+		require.Equal(t, "argocd", decoded.Namespace)
+	})
+
+	t.Run("Delete event roundtrip", func(t *testing.T) {
+		cev := es.ApplicationSetEvent(Delete, appSet)
+		require.NotNil(t, cev)
+		require.Equal(t, Delete.String(), cev.Type())
+
+		wrapped := New(cev, targets.ApplicationSet)
+		decoded, err := wrapped.ApplicationSet()
+		require.NoError(t, err)
+		require.Equal(t, appSet.Name, decoded.Name)
 	})
 }
 
@@ -523,5 +594,26 @@ func TestContainerTerminalRequestFields(t *testing.T) {
 		require.True(t, req.Stdin)
 		require.True(t, req.Stdout)
 		require.True(t, req.Stderr)
+	})
+}
+
+func TestSetPrincipalUID(t *testing.T) {
+	ev := cloudevents.NewEvent()
+	SetPrincipalUID(&ev, "test-uid-123")
+	val, ok := ev.Extensions()[principalUID].(string)
+	require.True(t, ok)
+	require.Equal(t, "test-uid-123", val)
+}
+
+func TestPrincipalUID(t *testing.T) {
+	t.Run("returns uid that was set", func(t *testing.T) {
+		ev := cloudevents.NewEvent()
+		SetPrincipalUID(&ev, "abc-def")
+		require.Equal(t, "abc-def", PrincipalUID(&ev))
+	})
+
+	t.Run("returns empty when not set", func(t *testing.T) {
+		ev := cloudevents.NewEvent()
+		require.Equal(t, "", PrincipalUID(&ev))
 	})
 }

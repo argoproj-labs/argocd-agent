@@ -14,18 +14,19 @@
 # limitations under the License.
 
 set -ex -o pipefail
+SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+source ${SCRIPTPATH}/namespaces.sh
 ARGS=$*
 if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^vcluster-agent-autonomous$'; then
     echo "kube context vcluster-agent-autonomous is not configured; missing setup?" >&2
     exit 1
 fi
-SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 echo $ARGOCD_AGENT_REMOTE_PORT
 export ARGOCD_AGENT_REMOTE_PORT=${ARGOCD_AGENT_REMOTE_PORT:-8443}
 
 if test "${REDIS_PASSWORD}" = ""; then
-    export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-autonomous -n argocd -o jsonpath='{.data.auth}' | base64 --decode)
+    export REDIS_PASSWORD=$(kubectl get secret argocd-redis --context=vcluster-agent-autonomous -n ${ARGOCD_AUTONOMOUS_NAMESPACE} -o jsonpath='{.data.auth}' | base64 --decode)
 fi
 
 # Point the agent to the toxiproxy server if it is configured from the e2e tests
@@ -34,12 +35,19 @@ if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
 fi
 
-go run github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
+RACE_FLAG=""
+if [ "${ENABLE_DATA_RACE_DETECTOR}" = "true" ]; then
+    RACE_FLAG="-race"
+fi
+
+go run ${RACE_FLAG} github.com/argoproj-labs/argocd-agent/cmd/argocd-agent agent \
     --agent-mode autonomous \
     --creds mtls:any \
     --server-address 127.0.0.1 \
     --kubecontext vcluster-agent-autonomous \
-    --namespace argocd \
+    --namespace ${ARGOCD_AUTONOMOUS_NAMESPACE} \
+    --destination-based-mapping=false \
+    --create-namespace=false \
     --log-level ${ARGOCD_AGENT_LOG_LEVEL:-trace} $ARGS \
     --metrics-port 8182 \
     --healthz-port 8002 \

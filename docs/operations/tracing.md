@@ -112,7 +112,7 @@ The following custom attributes are added to spans to provide context:
 
 ### Event Attributes
 
-- `argocd.event.type`: Type of event (Create, Update, Delete, etc.)
+- `argocd.event.type`: Type of event (Create, SpecUpdate, Delete, etc.)
 - `argocd.event.id`: Unique event identifier
 - `argocd.operation.type`: Operation type (create, update, delete, get, list, etc.)
 

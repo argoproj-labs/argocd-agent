@@ -22,6 +22,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -95,11 +96,46 @@ func Test_NewResourceKey(t *testing.T) {
 	})
 }
 
+func Test_NewResourceKeyFromGPGKey(t *testing.T) {
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			UID:       "gpg-uid-123",
+		},
+	}
+
+	t.Run("resource key for a GPG key ConfigMap without sourceUID annotation", func(t *testing.T) {
+		expected := ResourceKey{
+			Kind:      gpgKeyKind,
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			UID:       "gpg-uid-123",
+		}
+		got := NewResourceKeyFromGPGKey(cm)
+		assert.Equal(t, expected, got)
+	})
+
+	t.Run("resource key for a GPG key ConfigMap with sourceUID annotation", func(t *testing.T) {
+		cm.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "source-uid-gpg-789",
+		}
+		expected := ResourceKey{
+			Kind:      gpgKeyKind,
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+			UID:       "source-uid-gpg-789",
+		}
+		got := NewResourceKeyFromGPGKey(cm)
+		assert.Equal(t, expected, got)
+	})
+}
+
 func Test_AgentResources(t *testing.T) {
 	res := NewAgentResources()
 
 	resKeys := make([]ResourceKey, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		app := &v1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      fmt.Sprintf("test-%d", i),
@@ -126,11 +162,11 @@ func Test_AgentResources(t *testing.T) {
 		}
 
 		freq := map[ResourceKey]int{}
-		for i := 0; i < len(a); i++ {
+		for i := range a {
 			freq[a[i]]++
 		}
 
-		for i := 0; i < len(b); i++ {
+		for i := range b {
 			if freq[b[i]] == 0 {
 				return false
 			}
@@ -165,4 +201,30 @@ func Test_AgentResources(t *testing.T) {
 
 	assert.Empty(t, res.Checksum("first"))
 	assert.Empty(t, res.Checksum("second"))
+}
+
+func Test_AgentResources_RemoveAgent(t *testing.T) {
+	res := NewAgentResources()
+
+	res.Add("agent1", ResourceKey{Name: "app1", Namespace: "ns1"})
+	res.Add("agent1", ResourceKey{Name: "app2", Namespace: "ns1"})
+	res.Add("agent2", ResourceKey{Name: "app3", Namespace: "ns2"})
+
+	assert.Equal(t, 2, res.Len())
+
+	res.RemoveAgent("agent1")
+
+	assert.Equal(t, 1, res.Len())
+	assert.Empty(t, res.GetAllResources("agent1"))
+	assert.Len(t, res.GetAllResources("agent2"), 1)
+}
+
+func Test_AgentResources_RemoveAgent_NonExistent(t *testing.T) {
+	res := NewAgentResources()
+	res.Add("agent1", ResourceKey{Name: "app1", Namespace: "ns1"})
+
+	assert.NotPanics(t, func() {
+		res.RemoveAgent("nonexistent")
+	})
+	assert.Equal(t, 1, res.Len())
 }

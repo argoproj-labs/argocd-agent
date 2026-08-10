@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"crypto"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
@@ -89,19 +88,22 @@ OR TO PROTECT ANY KIND OF DATA.
 
 func NewPKIInitCommand() *cobra.Command {
 	var (
-		force bool
+		force        bool
+		days         int
+		keyAlgorithm string
+		keySize      int
 	)
 	command := &cobra.Command{
 		Short: "NON-PROD!! Initialize the PKI for use with argocd-agent",
 		Use:   "init",
 		Run: func(c *cobra.Command, args []string) {
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
 			exists := false
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
 			if !errors.IsNotFound(err) {
 				if err != nil {
 					cmdutil.Fatal("Error getting secret: %v", err)
@@ -111,7 +113,8 @@ func NewPKIInitCommand() *cobra.Command {
 				exists = true
 			}
 			fmt.Println("Generating CA and storing it in secret")
-			cert, key, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA)
+			keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+			cert, key, err := tlsutil.GenerateCaCertificate(config.SecretNamePrincipalCA, days, keyOpts)
 			if err != nil {
 				cmdutil.Fatal("Could not generate certificate: %v", err)
 			}
@@ -119,7 +122,7 @@ func NewPKIInitCommand() *cobra.Command {
 			sec := &corev1.Secret{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      config.SecretNamePrincipalCA,
-					Namespace: globalOpts.principalNamespace,
+					Namespace: principalCfg.Namespace,
 				},
 				Type: corev1.SecretTypeTLS,
 				Data: map[string][]byte{
@@ -129,51 +132,51 @@ func NewPKIInitCommand() *cobra.Command {
 			}
 
 			if !exists {
-				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Create(ctx, sec, v1.CreateOptions{})
+				_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Create(ctx, sec, v1.CreateOptions{})
 			} else {
-				_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Update(ctx, sec, v1.UpdateOptions{})
+				_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Update(ctx, sec, v1.UpdateOptions{})
 			}
 			if err != nil {
 				cmdutil.Fatal("Could not write to secret: %v", err)
 			}
-			fmt.Printf("Success. CA data stored in secret %s/%s\n", globalOpts.principalNamespace, config.SecretNamePrincipalCA)
+			fmt.Printf("Success. CA data stored in secret %s/%s\n", principalCfg.Namespace, config.SecretNamePrincipalCA)
 		},
 	}
 
 	command.Flags().BoolVarP(&force, "force", "f", false, "Force regeneration of PKI if it exists")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultCACertValidityDays, "Number of days the certificate is valid for")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize)
 	return command
 }
 
 func NewPKIPropagateCommand() *cobra.Command {
-	var (
-		force bool
-	)
+	var force bool
 	command := &cobra.Command{
 		Short: "NON-PROD!! Propagate the PKI to the agent",
 		Use:   "propagate",
 		Run: func(cmd *cobra.Command, args []string) {
-			if globalOpts.principalContext == globalOpts.agentContext {
+			if principalCfg.KubeContext == agentCfg.KubeContext {
 				cmdutil.Fatal("PKI and agent cannot reside within the same context.")
-			} else if globalOpts.principalContext == "" || globalOpts.agentContext == "" {
+			} else if principalCfg.KubeContext == "" || agentCfg.KubeContext == "" {
 				cmdutil.Fatal("Must specify both principal and agent contexts.")
 			}
 			ctx := context.TODO()
-			principalClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			principalClt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
-			agentClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.agentNamespace, "", globalOpts.agentContext)
+			agentClt, err := kube.NewKubernetesClientFromConfig(ctx, agentCfg.Namespace, "", agentCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
-			caSecret, err := principalClt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			caSecret, err := principalClt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
 			if err != nil {
 				cmdutil.Fatal("Error getting CA secret from principal: %v", err)
 			}
 			agentSecret := &corev1.Secret{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      config.SecretNameAgentCA,
-					Namespace: globalOpts.agentNamespace,
+					Namespace: agentCfg.Namespace,
 				},
 				Type: corev1.SecretTypeOpaque,
 				Data: map[string][]byte{
@@ -181,7 +184,7 @@ func NewPKIPropagateCommand() *cobra.Command {
 				},
 			}
 			exists := false
-			_, err = agentClt.Clientset.CoreV1().Secrets(globalOpts.agentNamespace).Get(ctx, config.SecretNameAgentCA, v1.GetOptions{})
+			_, err = agentClt.Clientset.CoreV1().Secrets(agentCfg.Namespace).Get(ctx, config.SecretNameAgentCA, v1.GetOptions{})
 			if err != nil {
 				if !errors.IsNotFound(err) {
 					cmdutil.Fatal("Error getting agent CA secret: %v", err)
@@ -193,14 +196,14 @@ func NewPKIPropagateCommand() *cobra.Command {
 				exists = true
 			}
 			if !exists {
-				_, err = agentClt.Clientset.CoreV1().Secrets(globalOpts.agentNamespace).Create(ctx, agentSecret, v1.CreateOptions{})
+				_, err = agentClt.Clientset.CoreV1().Secrets(agentCfg.Namespace).Create(ctx, agentSecret, v1.CreateOptions{})
 			} else {
-				_, err = agentClt.Clientset.CoreV1().Secrets(globalOpts.agentNamespace).Update(ctx, agentSecret, v1.UpdateOptions{})
+				_, err = agentClt.Clientset.CoreV1().Secrets(agentCfg.Namespace).Update(ctx, agentSecret, v1.UpdateOptions{})
 			}
 			if err != nil {
 				cmdutil.Fatal("Error updating agent CA secret: %v", err)
 			}
-			fmt.Printf("Agent CA secret %s/%s created\n", globalOpts.agentNamespace, config.SecretNameAgentCA)
+			fmt.Printf("Agent CA secret %s/%s created\n", agentCfg.Namespace, config.SecretNameAgentCA)
 		},
 	}
 	command.Flags().BoolVarP(&force, "force", "f", false, "Force regeneration of PKI if it exists")
@@ -223,20 +226,20 @@ func NewPKIInspectCommand() *cobra.Command {
 		Use:   "inspect",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.TODO()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
 
-			caSum, err := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, config.SecretNamePrincipalCA, true)
+			caSum, err := readAndSummarizeCertificate(ctx, clt, principalCfg.Namespace, config.SecretNamePrincipalCA, true)
 			if err != nil {
 				cmdutil.Fatal("CA is not initialized: %v", err)
 			}
-			resourceProxySum, err := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, "argocd-agent-resource-proxy-tls", false)
+			resourceProxySum, err := readAndSummarizeCertificate(ctx, clt, principalCfg.Namespace, "argocd-agent-resource-proxy-tls", false)
 			if err != nil && !errors.IsNotFound(err) {
 				cmdutil.Fatal("Error reading resource proxy certificate: %v", err)
 			}
-			principalSum, err := readAndSummarizeCertificate(ctx, clt, globalOpts.principalNamespace, "argocd-agent-principal-tls", false)
+			principalSum, err := readAndSummarizeCertificate(ctx, clt, principalCfg.Namespace, "argocd-agent-principal-tls", false)
 			if err != nil && !errors.IsNotFound(err) {
 				cmdutil.Fatal("Error reading principal certificate: %v", err)
 			}
@@ -266,11 +269,11 @@ func NewPKIDeleteCommand() *cobra.Command {
 		Use:   "delete",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.Background()
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("%v", err)
 			}
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) {
 					cmdutil.Fatal("CA not configured.")
@@ -283,7 +286,7 @@ func NewPKIDeleteCommand() *cobra.Command {
 				cmdutil.Fatal("%v", err)
 			}
 			if answer == "YES" {
-				err := clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Delete(ctx, config.SecretNamePrincipalCA, v1.DeleteOptions{})
+				err := clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Delete(ctx, config.SecretNamePrincipalCA, v1.DeleteOptions{})
 				if err != nil {
 					cmdutil.Fatal("Could not delete secret %s: %v", config.SecretNamePrincipalCA, err)
 				}
@@ -307,10 +310,8 @@ func NewPKIPrintCommand() *cobra.Command {
 	command := &cobra.Command{
 		Short: "Print PKI's CA data in PEM format to stdout",
 		Long: `
-Prints the RSA private key, the public cert or both from the CA to stdout.
+Prints the private key, the public cert or both from the CA to stdout.
 Output format is PEM.
-
-Only private keys of type RSA are currently supported.
 		`,
 		Use: "dump",
 		Run: func(cmd *cobra.Command, args []string) {
@@ -323,11 +324,11 @@ Only private keys of type RSA are currently supported.
 				_ = cmd.Help()
 				cmdutil.Fatal("One of --all, --key or --cert must be specified.")
 			}
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("%v", err)
 			}
-			cert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
+			cert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, principalCfg.Namespace, config.SecretNamePrincipalCA)
 			if errors.IsNotFound(err) {
 				cmdutil.Fatal("CA not configured.")
 			}
@@ -340,16 +341,7 @@ Only private keys of type RSA are currently supported.
 				cmdutil.Fatal("Could not encode cert: %v", err)
 			}
 
-			// We expect and only support RSA as the key type for now
-			key, ok := cert.PrivateKey.(*rsa.PrivateKey)
-			if !ok {
-				cmdutil.Fatal("Private key is not in RSA format.")
-			}
-			keyPem := new(bytes.Buffer)
-			err = pem.Encode(keyPem, &pem.Block{
-				Type:  "RSA PRIVATE KEY",
-				Bytes: x509.MarshalPKCS1PrivateKey(key),
-			})
+			keyPemStr, err := tlsutil.KeyDataToPEM(cert.PrivateKey)
 			if err != nil {
 				cmdutil.Fatal("Could not encode key: %v", err)
 			}
@@ -358,7 +350,7 @@ Only private keys of type RSA are currently supported.
 				fmt.Print(certPem.String())
 			}
 			if printKey {
-				fmt.Print(keyPem.String())
+				fmt.Print(keyPemStr)
 			}
 		},
 	}
@@ -382,42 +374,52 @@ func NewPKIIssueCommand() *cobra.Command {
 
 func NewPKIIssuePrincipalCommand() *cobra.Command {
 	var (
-		ips    []string
-		dns    []string
-		upsert bool
+		ips          []string
+		dns          []string
+		upsert       bool
+		days         int
+		keyAlgorithm string
+		keySize      int
 	)
 	command := &cobra.Command{
 		Short: "Issue a TLS certificate for the principal",
 		Use:   "principal",
 		Run: func(cmd *cobra.Command, args []string) {
-			issueAndSaveSecret(globalOpts.principalContext, "argocd-agent-principal-tls", globalOpts.principalNamespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
-				return tlsutil.GenerateServerCertificate("argocd-agent-principal", c, pk, ips, dns)
+			keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+			issueAndSaveSecret(principalCfg.KubeContext, "argocd-agent-principal-tls", principalCfg.Namespace, upsert, days, keyOpts, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateServerCertificate("argocd-agent-principal", c, pk, ips, dns, days, keyOpts)
 			})
 		},
 	}
 	command.Flags().StringSliceVar(&ips, "ip", []string{"127.0.0.1"}, "The IP addresses this certificate is valid for")
 	command.Flags().StringSliceVar(&dns, "dns", []string{"localhost"}, "The DNS names this certificate is valid for")
 	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize)
 	return command
 }
 
 func NewPKIIssueResourceProxyCommand() *cobra.Command {
 	var (
-		ips    []string
-		dns    []string
-		upsert bool
-		noSAN  bool
+		ips          []string
+		dns          []string
+		upsert       bool
+		noSAN        bool
+		days         int
+		keyAlgorithm string
+		keySize      int
 	)
 	command := &cobra.Command{
 		Short: "Issue a TLS certificate for the resource proxy",
 		Use:   "resource-proxy",
 		Run: func(cmd *cobra.Command, args []string) {
-			if len(ips) == 0 && len(dns) == 0 {
-				fmt.Println("Please pass at least one of --ips or --dns options or use --no-san to create certificate without SAN")
+			if len(ips) == 0 && len(dns) == 0 && !noSAN {
+				fmt.Println("Please pass at least one of --ip or --dns options or use --no-san to create certificate without SAN")
 				os.Exit(1)
 			}
-			issueAndSaveSecret(globalOpts.principalContext, "argocd-agent-resource-proxy-tls", globalOpts.principalNamespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
-				return tlsutil.GenerateServerCertificate("argocd-agent-resource-proxy", c, pk, ips, dns)
+			keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+			issueAndSaveSecret(principalCfg.KubeContext, "argocd-agent-resource-proxy-tls", principalCfg.Namespace, upsert, days, keyOpts, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateServerCertificate("argocd-agent-resource-proxy", c, pk, ips, dns, days, keyOpts)
 			})
 		},
 	}
@@ -425,6 +427,8 @@ func NewPKIIssueResourceProxyCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&dns, "dns", []string{}, "The DNS names this certificate is valid for")
 	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
 	command.Flags().BoolVar(&noSAN, "no-san", false, "Do not add SAN information to the certificate")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize)
 	return command
 }
 
@@ -433,6 +437,9 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 		upsert         bool
 		sameContext    bool
 		agentNamespace string
+		days           int
+		keyAlgorithm   string
+		keySize        int
 	)
 	command := &cobra.Command{
 		Use:   "agent <name>",
@@ -444,28 +451,30 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 				os.Exit(1)
 			}
 			agentName := args[0]
-			if (globalOpts.principalContext == globalOpts.agentContext) ||
-				(globalOpts.principalContext != "" && globalOpts.agentContext == "") &&
-					!sameContext {
-				fmt.Println("PKI and agent usually do not reside within the same context. Use --same-context if you really mean it.")
-				os.Exit(1)
+			if principalCfg.KubeContext == "" || agentCfg.KubeContext == "" {
+				cmdutil.Fatal("Both principal and agent kubecontext must be set.")
 			}
-			issueAndSaveSecret(globalOpts.agentContext, config.SecretNameAgentClientCert, agentNamespace, upsert, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
-				return tlsutil.GenerateClientCertificate(agentName, c, pk)
+
+			if principalCfg.KubeContext == agentCfg.KubeContext && !sameContext {
+				cmdutil.Fatal("PKI and agent usually do not reside within the same context. Use --same-context if you really mean it.")
+			}
+			keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+			issueAndSaveSecret(agentCfg.KubeContext, config.SecretNameAgentClientCert, agentNamespace, upsert, days, keyOpts, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateClientCertificate(agentName, c, pk, days, keyOpts)
 			})
 			ctx := context.TODO()
 
-			principalClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			principalClt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
 
-			agentClt, err := kube.NewKubernetesClientFromConfig(ctx, agentNamespace, "", globalOpts.agentContext)
+			agentClt, err := kube.NewKubernetesClientFromConfig(ctx, agentNamespace, "", agentCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
 			}
 
-			caSecret, err := principalClt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			caSecret, err := principalClt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
 			if err != nil {
 				cmdutil.Fatal("Error getting CA secret from principal: %v", err)
 			}
@@ -506,6 +515,8 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
 	command.Flags().BoolVar(&sameContext, "same-context", false, "Use when the PKI and agent use the same context")
 	command.Flags().StringVar(&agentNamespace, "agent-namespace", "argocd", "The namespace the agent is installed to")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize)
 	return command
 }
 
@@ -515,28 +526,28 @@ func NewPKIIssueAgentClientCert() *cobra.Command {
 // secret's certificate and private key as PEM encoded string. The resulting
 // certificate will be saved to a secret referred to by outContext, outName and
 // outNamespace.
-func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, issue func(*x509.Certificate, crypto.PrivateKey) (string, string, error)) {
+func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, validityDays int, _ tlsutil.KeyGenOptions, issue func(*x509.Certificate, crypto.PrivateKey) (string, string, error)) {
 	ctx := context.TODO()
 
 	// Client for principal's kube context - it has the CA
-	caClt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+	caClt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 	if err != nil {
 		cmdutil.Fatal("%v", err)
 	}
 
 	// Client for the kube context to write the resulting secret to - might be different
 	var outClt *kube.KubernetesClient
-	if outContext == globalOpts.principalContext || outContext == "" {
+	if outContext == principalCfg.KubeContext || outContext == "" {
 		outClt = caClt
 	} else {
-		outClt, err = kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", outContext)
+		outClt, err = kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", outContext)
 		if err != nil {
 			cmdutil.Fatal("%v", err)
 		}
 	}
 
 	// Load CA keypair from a secret on the principal
-	caCert, err := tlsutil.TLSCertFromSecret(ctx, caClt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
+	caCert, err := tlsutil.TLSCertFromSecret(ctx, caClt.Clientset, principalCfg.Namespace, config.SecretNamePrincipalCA)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			cmdutil.Fatal("CA is not initialized.")
@@ -549,6 +560,10 @@ func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, i
 	signerCert, err := x509.ParseCertificate(caCert.Certificate[0])
 	if err != nil {
 		cmdutil.Fatal("Could not parse CA certificate: %v", err)
+	}
+
+	if err := tlsutil.ValidateLeafValidityDays(signerCert, validityDays); err != nil {
+		cmdutil.Fatal("%v", err)
 	}
 
 	// Generate a new TLS keypair from the cert and private key
@@ -586,7 +601,6 @@ func issueAndSaveSecret(outContext, outName, outNamespace string, upsert bool, i
 	} else {
 		fmt.Printf("Secret %s/%s created\n", outNamespace, outName)
 	}
-
 }
 
 func readAndSummarizeCertificate(ctx context.Context, clt *kube.KubernetesClient, namespace, name string, isCA bool) (certificateSummary, error) {
@@ -596,7 +610,7 @@ func readAndSummarizeCertificate(ctx context.Context, clt *kube.KubernetesClient
 	}
 	parsedCert, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
-		return certificateSummary{}, fmt.Errorf("could not parse certificate: %v", err)
+		return certificateSummary{}, fmt.Errorf("could not parse certificate: %w", err)
 	}
 
 	warnings := []string{}
@@ -610,10 +624,11 @@ func readAndSummarizeCertificate(ctx context.Context, clt *kube.KubernetesClient
 	for _, ip := range parsedCert.IPAddresses {
 		ips = append(ips, ip.String())
 	}
+	keyType, keyLength := tlsutil.PublicKeySummary(parsedCert.PublicKey)
 	sum := certificateSummary{
 		Subject:   parsedCert.Subject.String(),
-		KeyType:   "RSA",
-		KeyLength: parsedCert.PublicKey.(*rsa.PublicKey).N.BitLen(),
+		KeyType:   keyType,
+		KeyLength: keyLength,
 		NotBefore: parsedCert.NotBefore.Format(time.RFC1123Z),
 		NotAfter:  parsedCert.NotAfter.Format(time.RFC1123Z),
 		Checksum:  fmt.Sprintf("%x", sha256.Sum256(parsedCert.Raw)),

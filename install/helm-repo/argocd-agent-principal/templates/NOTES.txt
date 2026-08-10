@@ -1,0 +1,61 @@
+Thank you for installing {{ include "argocd-agent-principal.name" . }}!
+
+Your principal has been deployed to the {{ include "argocd-agent-principal.namespace" . }} namespace.
+
+Release: {{ .Release.Name }}
+Namespace: {{ include "argocd-agent-principal.namespace" . }}
+
+Deployment
+----------
+- Name: {{ include "argocd-agent-principal.fullname" . }}
+- Replicas: {{ .Values.replicaCount }}
+- Image: {{ .Values.image.repository }}:{{ include "argocd-agent-principal.defaultTag" . }} (pullPolicy: {{ .Values.image.pullPolicy }})
+
+Services
+--------
+- gRPC Service:    {{ include "argocd-agent-principal.serviceName" . }}
+  - Port: {{ .Values.principal.listen.port }}
+- Metrics Service: {{ include "argocd-agent-principal.metricsServiceName" . }}
+  - Port: {{ .Values.principal.metrics.port }}
+- Healthz Service: {{ include "argocd-agent-principal.healthzServiceName" . }}
+  - Port: {{ .Values.principal.healthz.port }}
+
+Quick checks
+------------
+1) Check Deployment rollout
+   kubectl -n {{ include "argocd-agent-principal.namespace" . }} rollout status deploy/{{ include "argocd-agent-principal.fullname" . }}
+
+2) List Services
+   kubectl -n {{ include "argocd-agent-principal.namespace" . }} get svc
+
+3) Port-forward to Metrics and Healthz
+   # Metrics
+   kubectl -n {{ include "argocd-agent-principal.namespace" . }} port-forward deploy/{{ include "argocd-agent-principal.fullname" . }} 127.0.0.1:{{ .Values.principal.metrics.port }}:{{ .Values.principal.metrics.port }}
+   # Healthz
+   kubectl -n {{ include "argocd-agent-principal.namespace" . }} port-forward deploy/{{ include "argocd-agent-principal.fullname" . }} 127.0.0.1:{{ .Values.principal.healthz.port }}:{{ .Values.principal.healthz.port }}
+
+4) Probe endpoints
+   curl -sf http://127.0.0.1:{{ .Values.principal.healthz.port }}/healthz || true
+   curl -sf http://127.0.0.1:{{ .Values.principal.metrics.port }}/metrics | head -n 20 || true
+
+Configuration overview
+----------------------
+- Listen port:  {{ .Values.principal.listen.port }}
+- Auth method:  {{ .Values.principal.auth }}
+- Namespace:    {{ .Values.principal.namespace }}
+- Redis:        {{ .Values.principal.redis.server.address }}
+{{- if .Values.principal.tls.server.allowGenerate }}
+
+WARNING: TLS certificate generation is enabled. This is insecure and should only be used for development.
+For production, please provide proper TLS certificates.
+{{- end }}
+{{- if .Values.principal.jwt.allowGenerate }}
+
+WARNING: JWT key generation is enabled. This is insecure and should only be used for development.
+For production, please provide a proper JWT signing key.
+{{- end }}
+{{- if hasPrefix "userpass:" .Values.principal.auth }}
+
+NOTE: userpass auth is configured. Ensure the Secret "{{ .Values.principal.userpass.secretName }}" exists with
+a valid encrypted credentials file before agents attempt to connect.
+{{- end }}

@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -142,7 +143,7 @@ func (c *ArgoRestClient) Sync(app *v1alpha1.Application) error {
 }
 
 // GetResource requests a resource managed through an Application from Argo CD
-func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, kind, namespace, name string) (string, error) {
+func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, kind, namespace, name string, t *testing.T) (string, error) {
 	reqURL := c.url(
 		"appNamespace", app.Namespace,
 		"project", app.Spec.Project,
@@ -153,6 +154,9 @@ func (c *ArgoRestClient) GetResource(app *v1alpha1.Application, group, version, 
 		"kind", kind,
 	)
 	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource", app.Name)
+
+	t.Logf("GetResource: GET request to URL: '%s'", reqURL)
+
 	resp, err := c.Do(&http.Request{Method: http.MethodGet, URL: reqURL, Header: make(http.Header)})
 	if err != nil {
 		return "", err
@@ -189,7 +193,7 @@ func (c *ArgoRestClient) RunResourceAction(app *v1alpha1.Application, action, gr
 	reqURL.Path = fmt.Sprintf("/api/v1/applications/%s/resource/actions/v2", app.Name)
 
 	// Based on Argo CD Swagger: https://cd.apps.argoproj.io/swagger-ui#tag/ApplicationService/operation/ApplicationService_RunResourceActionV2
-	requestBody := map[string]interface{}{
+	requestBody := map[string]any{
 		"action":       action,
 		"appNamespace": app.Namespace,
 		"group":        group,
@@ -301,11 +305,11 @@ func (c *ArgoRestClient) GetApplicationLogs(app *v1alpha1.Application, namespace
 	}
 
 	type logResult struct {
-		Content      string      `json:"content"`
-		TimeStamp    interface{} `json:"timeStamp"`
-		Last         bool        `json:"last"`
-		TimeStampStr string      `json:"timeStampStr"`
-		PodName      string      `json:"podName"`
+		Content      string `json:"content"`
+		TimeStamp    any    `json:"timeStamp"`
+		Last         bool   `json:"last"`
+		TimeStampStr string `json:"timeStampStr"`
+		PodName      string `json:"podName"`
 	}
 	type logError struct {
 		GRPCCode   int    `json:"grpc_code"`
@@ -437,10 +441,10 @@ func GetInitialAdminSecret(k8sClient KubeClient) (string, error) {
 	// Read admin secret from principal's cluster
 	pwdSecret := &corev1.Secret{}
 	err := k8sClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-initial-admin-secret"}, pwdSecret, metav1.GetOptions{})
+		types.NamespacedName{Namespace: PrincipalNamespace, Name: "argocd-initial-admin-secret"}, pwdSecret, metav1.GetOptions{})
 
 	if err != nil {
-		return "", fmt.Errorf("unable to get admin secret: %v", err)
+		return "", fmt.Errorf("unable to get admin secret: %w", err)
 	}
 
 	return string(pwdSecret.Data["password"]), nil
@@ -451,7 +455,7 @@ func GetArgoCDServerEndpoint(k8sClient KubeClient) (string, error) {
 	// Get the Argo server endpoint to use
 	srvService := &corev1.Service{}
 	err := k8sClient.Get(context.Background(),
-		types.NamespacedName{Namespace: "argocd", Name: "argocd-server"}, srvService, metav1.GetOptions{})
+		types.NamespacedName{Namespace: PrincipalNamespace, Name: "argocd-server"}, srvService, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}

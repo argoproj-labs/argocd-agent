@@ -39,7 +39,7 @@ func setup(t *testing.T, redisAddress string) (string, *Manager) {
 	agentName, clusterName := "agent-test", "cluster"
 
 	m, err := NewManager(context.Background(), "default", redisAddress, "", cacheutil.RedisCompressionNone,
-		kube.NewFakeKubeClient("default"))
+		kube.NewFakeKubeClient("default"), nil)
 	require.NoError(t, err)
 
 	// map cluster with agent
@@ -228,7 +228,7 @@ func Test_SetAgentConnectionStatus(t *testing.T) {
 	t.Run("SetAgentConnectionStatus with invalid redis address", func(t *testing.T) {
 		// Create a manager with invalid redis address
 		invalidM, err := NewManager(context.Background(), "default", "invalid:redis:address", "",
-			cacheutil.RedisCompressionNone, kube.NewFakeKubeClient("default"))
+			cacheutil.RedisCompressionNone, kube.NewFakeKubeClient("default"), nil)
 		require.NoError(t, err)
 
 		// Map cluster with agent
@@ -307,7 +307,7 @@ func Test_RefreshClusterInfo(t *testing.T) {
 	t.Run("RefreshClusterInfo with invalid redis", func(t *testing.T) {
 		// Create manager with invalid redis
 		invalidM, err := NewManager(context.Background(), "default", "invalid:redis", "",
-			cacheutil.RedisCompressionNone, kube.NewFakeKubeClient("default"))
+			cacheutil.RedisCompressionNone, kube.NewFakeKubeClient("default"), nil)
 		require.NoError(t, err)
 
 		err = invalidM.MapCluster(agentName, &appv1.Cluster{Name: "cluster", Server: "https://test-cluster"})

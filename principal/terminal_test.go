@@ -622,7 +622,7 @@ func TestHandleJSONResizeMessage(t *testing.T) {
 			Done:    make(chan struct{}),
 		}
 
-		resizeMsg := map[string]interface{}{
+		resizeMsg := map[string]any{
 			"operation": "resize",
 			"cols":      float64(100),
 			"rows":      float64(30),
@@ -649,7 +649,7 @@ func TestHandleJSONResizeMessage(t *testing.T) {
 			Done:    make(chan struct{}),
 		}
 
-		msg := map[string]interface{}{
+		msg := map[string]any{
 			"operation": "other",
 			"cols":      float64(100),
 			"rows":      float64(30),

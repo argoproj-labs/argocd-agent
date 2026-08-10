@@ -27,7 +27,7 @@ The protocol uses a **hub-and-spoke** architecture where:
 │   Agent 1       │──────────────────►│   Principal     │
 │  (Workload)     │                   │ (Control Plane) │
 └─────────────────┘                   └─────────────────┘
-                                              ▲
+                                             ▲
 ┌─────────────────┐                          │
 │   Agent 2       │──────────────────────────┘
 │  (Workload)     │
@@ -38,7 +38,7 @@ The protocol uses a **hub-and-spoke** architecture where:
 
 ```
 ┌─────────────────────────────────────┐
-│         Application Events          │  ← Create, Update, Delete, Status
+│         Application Events          │  ← Create, Delete, SpecUpdate, Status, etc
 ├─────────────────────────────────────┤
 │        CloudEvents Format           │  ← Event envelope with metadata
 ├─────────────────────────────────────┤
@@ -100,7 +100,6 @@ The protocol defines several event types for different synchronization scenarios
 #### Resource Management Events
 
 - **`create`**: Create new resource (managed mode only)
-- **`update`**: Update resource configuration
 - **`delete`**: Remove resource (managed mode only)
 - **`spec-update`**: Update resource specification
 - **`status-update`**: Update resource status
@@ -143,14 +142,14 @@ Principal                           Agent
     │                                │
     │  ◄─── create/update/delete ────│  (Configuration changes)
     │                                │
-    │─── status-update ─────────────► │  (Status sync)
+    │─── status-update ────────────► │  (Status sync)
     │                                │
     │─── request-synced-resource ──► │  (On principal restart)
     │     -list                      │
     │                                │
     │  ◄─── response-synced-resource │  (For each resource)
     │                                │
-    │─── request-update ────────────► │  (Request specific updates)
+    │─── request-update ───────────► │  (Request specific updates)
 ```
 
 ## Synchronization Modes
@@ -254,6 +253,27 @@ type ResourceKey struct {
     UID       string  // Source UID for tracking
 }
 ```
+
+### Source UID Tracking
+
+In managed mode, every resource synced to an agent carries a **source UID annotation** (`argocd.argoproj.io/source-uid`). This annotation records the Kubernetes UID of the resource as it existed on the principal at the time of creation. The agent uses it to detect identity changes between principal and agent copies of the same resource.
+
+A **source-UID mismatch** occurs when the agent receives an event for a resource that already exists locally, but the incoming source UID differs from the one recorded in the annotation. This typically means the resource was deleted and recreated on the principal side (producing a new UID) without the agent being notified of the deletion.
+
+#### Mismatch Policy
+
+The agent's behavior on source-UID mismatch is configurable via `--source-uid-mismatch-policy`:
+
+| Policy | Behavior |
+|--------|----------|
+| `recreate` | Delete the existing resource, then create the incoming one (default) |
+| `upsert` | Update the existing resource in-place without deleting it |
+
+The policy can be overridden per-resource using the annotation `argocd.argoproj.io/source-uid-mismatch-policy` set on the resource on the principal. The annotation takes precedence over the global flag. Unknown annotation values are logged as a warning and the global policy is used as a fallback.
+
+The `recreate` default is appropriate for most resources, as it guarantees the agent copy is an exact reflection of the principal. The `upsert` policy is useful for sensitive resources (such as `argocd-gpg-keys-cm`) where destructive replacement is undesirable and in-place update is safe.
+
+Mismatch handling applies to all managed resource types: Applications, AppProjects, Repositories, and GPG keys.
 
 ### Checksum Calculation
 

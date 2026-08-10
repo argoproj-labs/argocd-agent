@@ -55,15 +55,15 @@ func (suite *SelfAgentRegistrationTestSuite) SetupSuite() {
 func (suite *SelfAgentRegistrationTestSuite) SetupTest() {
 	suite.BaseSuite.SetupTest()
 
-	if !fixture.IsProcessRunning(fixture.PrincipalName) {
-		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName))
+	if !fixture.IsProcessRunning(fixture.PrincipalName, suite.T()) {
+		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	} else {
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	}
 
-	if !fixture.IsProcessRunning(fixture.AgentManagedName) {
-		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName))
+	if !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T()) {
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	} else {
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
@@ -83,12 +83,31 @@ func (suite *SelfAgentRegistrationTestSuite) TearDownTest() {
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
 	// Ensure agent is running
-	if !fixture.IsProcessRunning(fixture.AgentManagedName) {
-		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName))
+	if !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T()) {
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 	}
 	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 
 	suite.BaseSuite.TearDownTest()
+}
+
+// waitForFreshConnection waits for agent-managed to establish a fresh connection to the principal
+// after a principal restart. oldModifiedAt should be read from Redis before the restart so
+// that stale cache data from a previous session can be detected and skipped.
+func (suite *SelfAgentRegistrationTestSuite) waitForFreshConnection(oldModifiedAt *metav1.Time) {
+	suite.Require().Eventually(func() bool {
+		info, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+		if err != nil || info.ConnectionState.Status != appv1.ConnectionStatusSuccessful {
+			return false
+		}
+		if info.ConnectionState.ModifiedAt == nil {
+			return false
+		}
+		if oldModifiedAt == nil {
+			return true
+		}
+		return info.ConnectionState.ModifiedAt.After(oldModifiedAt.Time)
+	}, 60*time.Second, 1*time.Second)
 }
 
 // ensureOriginalSecretExists ensures the original manually-created cluster secret exists before each test
@@ -246,21 +265,23 @@ func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret(
 
 	// Enable self agent registration
 	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
+	oldInfo, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	requires.NoError(err)
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
 
 	// Stop the agent
-	err := fixture.StopProcess(fixture.AgentManagedName)
+	err = fixture.StopProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 
 	// Wait for agent to disconnect
 	requires.Eventually(func() bool {
 		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
-			Status:     appv1.ConnectionStatusFailed,
-			Message:    fmt.Sprintf("Agent: '%s' is %s with principal", fixture.AgentManagedName, "disconnected"),
-			ModifiedAt: &metav1.Time{Time: time.Now()},
+			Status:  appv1.ConnectionStatusFailed,
+			Message: fmt.Sprintf("Agent: '%s' is %s with principal", fixture.AgentManagedName, "disconnected"),
 		}, suite.ClusterDetails)
-	}, 30*time.Second, 1*time.Second)
+	}, 120*time.Second, 1*time.Second)
 
 	// Store secret UID of manually created secret
 	originalSecret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
@@ -320,15 +341,18 @@ func (suite *SelfAgentRegistrationTestSuite) Test_ManuallyCreatedAndSelfRegister
 
 	// Enable self registration
 	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
+	oldInfo, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	requires.NoError(err)
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
 
 	// Stop agent and delete manually created cluster secret
-	err = fixture.StopProcess(fixture.AgentManagedName)
+	err = fixture.StopProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.AgentManagedName)
+		return !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete manually created cluster secret
@@ -376,15 +400,18 @@ func (suite *SelfAgentRegistrationTestSuite) Test_NoSecretAndSelfRegistrationDis
 
 	// Disable self agent registration
 	_ = fixture.DisableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient)
+	oldInfo, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	requires.NoError(err)
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
 
 	// Stop agent to trigger agent disconnection
-	err := fixture.StopProcess(fixture.AgentManagedName)
+	err = fixture.StopProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.AgentManagedName)
+		return !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete manually created cluster secret

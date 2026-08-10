@@ -5,6 +5,8 @@ SCRIPTPATH="$(
     pwd -P
 )"
 
+source ${SCRIPTPATH}/../namespaces.sh
+
 DOCKER_BIN=${DOCKER_BIN:-"docker"}
 
 
@@ -65,7 +67,7 @@ getExternalLoadBalancerIP() {
   for ((i=1; i<=MAX_ATTEMPTS; i++)); do
     
     echo ""
-    EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME $K8S_CONTEXT_CONTROL_PLANE $K8S_NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+    EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME $K8S_CONTEXT_CONTROL_PLANE -n ${ARGOCD_PRINCIPAL_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
 
     if [ -n "$EXTERNAL_IP" ]; then
       echo "External IP is $EXTERNAL_IP"
@@ -93,9 +95,8 @@ echo ""
 echo "Installing Rathole on K8s"
 
 K8S_CONTEXT_CONTROL_PLANE="--context=vcluster-control-plane"
-K8S_NAMESPACE="-n argocd"
 
-kubectl apply $K8S_CONTEXT_CONTROL_PLANE $K8S_NAMESPACE -k $TEMP_DIR/server 
+kubectl apply $K8S_CONTEXT_CONTROL_PLANE -n ${ARGOCD_PRINCIPAL_NAMESPACE} -k $TEMP_DIR/server 
 
 
 # Wait for rathole-container-external load balancer hostname
@@ -109,11 +110,11 @@ echo ""
 echo "Patching cluster-agent-managed secret on vcluster-control-plane"
 
 # Replace the .data.server field of the Secret
-kubectl $K8S_CONTEXT_CONTROL_PLANE $K8S_NAMESPACE patch secret cluster-agent-managed  --type='json' -p='[{"op": "replace", "path": "/data/server", "value":"'"$NEW_VALUE_BASE64"'"}]'
+kubectl $K8S_CONTEXT_CONTROL_PLANE -n ${ARGOCD_PRINCIPAL_NAMESPACE} patch secret cluster-agent-managed  --type='json' -p='[{"op": "replace", "path": "/data/server", "value":"'"$NEW_VALUE_BASE64"'"}]'
 
 
 # Extract .data.config
-CONFIG_FIELD_VALUE=`kubectl $K8S_CONTEXT_CONTROL_PLANE $K8S_NAMESPACE get secret cluster-agent-managed -o jsonpath='{.data.config}' | base64 --decode`
+CONFIG_FIELD_VALUE=`kubectl $K8S_CONTEXT_CONTROL_PLANE -n ${ARGOCD_PRINCIPAL_NAMESPACE} get secret cluster-agent-managed -o jsonpath='{.data.config}' | base64 --decode`
 
 # remove .data.config.tlsClientConfig.caData and set '.data.config.tlsClientConfig.insecure = true'
 TLS_CLIENT_CONFIG=`echo "$CONFIG_FIELD_VALUE" | jq -r '.tlsClientConfig' | jq 'del(.caData)' | jq '.insecure = true' `
@@ -122,24 +123,24 @@ CONFIG_FIELD_VALUE=`echo $CONFIG_FIELD_VALUE | jq ".tlsClientConfig = $TLS_CLIEN
 CONFIG_FIELD_VALUE_BASE64=$(echo -n "$CONFIG_FIELD_VALUE" | base64 -w 0)
 
 # Patch the secret with the new .data.config value
-kubectl $K8S_CONTEXT_CONTROL_PLANE $K8S_NAMESPACE patch secret cluster-agent-managed  --type='json' -p='[{"op": "replace", "path": "/data/config", "value":"'"$CONFIG_FIELD_VALUE_BASE64"'"}]'
+kubectl $K8S_CONTEXT_CONTROL_PLANE -n ${ARGOCD_PRINCIPAL_NAMESPACE} patch secret cluster-agent-managed  --type='json' -p='[{"op": "replace", "path": "/data/config", "value":"'"$CONFIG_FIELD_VALUE_BASE64"'"}]'
 
 echo ""
 echo "Patching ConfigMap 'argocd-cmd-params-cm' to redirect redis to tunnel"
-kubectl $K8S_CONTEXT_CONTROL_PLANE $K8S_NAMESPACE patch configmap argocd-cmd-params-cm --type json --patch '[{"op": "add", "path": "/data/redis.server", "value": "rathole-container-internal:6379"}]'
+kubectl $K8S_CONTEXT_CONTROL_PLANE -n ${ARGOCD_PRINCIPAL_NAMESPACE} patch configmap argocd-cmd-params-cm --type json --patch '[{"op": "add", "path": "/data/redis.server", "value": "rathole-container-internal:6379"}]'
 
 echo ""
 echo "Patching Service 'argocds-redis' to enable type: LoadBalancer, on vcluster-agent-managed"
-kubectl --context=vcluster-agent-managed $K8S_NAMESPACE patch service argocd-redis -p '{"spec":{"type":"LoadBalancer"}}'
+kubectl --context=vcluster-agent-managed -n ${ARGOCD_MANAGED_NAMESPACE} patch service argocd-redis -p '{"spec":{"type":"LoadBalancer"}}'
 
 echo ""
 echo "Patching Service 'argocds-redis' to enable type: LoadBalancer, on vcluster-agent-autonomous"
-kubectl --context=vcluster-agent-autonomous $K8S_NAMESPACE patch service argocd-redis -p '{"spec":{"type":"LoadBalancer"}}'
+kubectl --context=vcluster-agent-autonomous -n ${ARGOCD_AUTONOMOUS_NAMESPACE} patch service argocd-redis -p '{"spec":{"type":"LoadBalancer"}}'
 
 
 echo ""
 echo "Restarting all pods in argocd NS"
-kubectl $K8S_CONTEXT_CONTROL_PLANE $K8S_NAMESPACE delete pods --all
+kubectl $K8S_CONTEXT_CONTROL_PLANE -n ${ARGOCD_PRINCIPAL_NAMESPACE} delete pods --all
 
 echo ""
 echo "* Starting the rathole local client."

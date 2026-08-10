@@ -15,7 +15,9 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"time"
@@ -154,7 +156,7 @@ func (m *Manager) SetClusterCacheStats(clusterInfo *event.ClusterCacheInfo, agen
 		"resourcesCount":    clusterInfo.ResourcesCount,
 		"cluster":           cluster.Name,
 		"agent":             agentName,
-	}).Infof("Updated cluster cache stats in cluster.")
+	}).Debug("Updated cluster cache stats in cluster.")
 
 	return nil
 }
@@ -168,13 +170,13 @@ func (m *Manager) setClusterInfo(clusterServer, agentName, clusterName string, c
 
 	// Save the given cluster info in cache.
 	if err := m.clusterCache.SetClusterInfo(clusterServer, clusterInfo); err != nil {
-		return fmt.Errorf("failed to refresh connection info in cluster: '%s' mapped with agent: '%s': %v", clusterName, agentName, err)
+		return fmt.Errorf("failed to refresh connection info in cluster: '%s' mapped with agent: '%s': %w", clusterName, agentName, err)
 	}
 	return nil
 }
 
 // NewClusterCacheInstance creates a new cache instance with Redis connection
-func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType) (*appstatecache.Cache, error) {
+func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressionType cacheutil.RedisCompressionType, tlsConfig *tls.Config) (*appstatecache.Cache, error) {
 
 	redisOptions := &redis.Options{
 		Addr:     redisAddress,
@@ -182,6 +184,7 @@ func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressio
 		MaintNotificationsConfig: &maintnotifications.Config{
 			Mode: maintnotifications.ModeDisabled,
 		},
+		TLSConfig: tlsConfig,
 	}
 	redisClient := redis.NewClient(redisOptions)
 
@@ -203,14 +206,14 @@ func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Int
 	// Generate bearer token for this agent
 	bearerToken, err := tokenIssuer.IssueResourceProxyToken(agentName)
 	if err != nil {
-		return fmt.Errorf("could not issue resource proxy token: %v", err)
+		return fmt.Errorf("could not issue resource proxy token: %w", err)
 	}
 	logCtx.Info("Successfully issued resource proxy token")
 
 	// Read shared client certificate for mTLS
 	clientCert, clientKey, caData, err := readClientCertFromSecret(ctx, kubeclient, namespace, clientCertSecretName)
 	if err != nil {
-		return fmt.Errorf("could not read client certificate from secret %s: %v", clientCertSecretName, err)
+		return fmt.Errorf("could not read client certificate from secret %s: %w", clientCertSecretName, err)
 	}
 	logCtx.Info("Successfully read client certificate from secret")
 
@@ -245,7 +248,7 @@ func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Int
 		},
 	}
 	if err := ClusterToSecret(cluster, secret); err != nil {
-		return fmt.Errorf("could not convert cluster to secret: %v", err)
+		return fmt.Errorf("could not convert cluster to secret: %w", err)
 	}
 
 	// Create the cluster secret
@@ -254,7 +257,7 @@ func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Int
 			logCtx.Info("Cluster secret already exists, skipping creation")
 			return nil
 		}
-		return fmt.Errorf("could not create cluster secret: %v", err)
+		return fmt.Errorf("could not create cluster secret: %w", err)
 	}
 
 	logCtx.Info("Successfully created self-registered cluster secret with shared client cert and bearer token")
@@ -279,28 +282,68 @@ func UpdateClusterBearerTokenFromSecret(ctx context.Context, kubeclient kubernet
 
 	cluster, err := db.SecretToCluster(secret)
 	if err != nil {
-		return fmt.Errorf("could not parse cluster secret: %v", err)
+		return fmt.Errorf("could not parse cluster secret: %w", err)
 	}
 
 	// Generate new bearer token
 	bearerToken, err := tokenIssuer.IssueResourceProxyToken(agentName)
 	if err != nil {
-		return fmt.Errorf("could not issue resource proxy token: %v", err)
+		return fmt.Errorf("could not issue resource proxy token: %w", err)
 	}
 	logCtx.Info("Successfully issued new resource proxy token")
 
 	cluster.Config.BearerToken = bearerToken
 
 	if err := ClusterToSecret(cluster, secret); err != nil {
-		return fmt.Errorf("could not convert cluster to secret: %v", err)
+		return fmt.Errorf("could not convert cluster to secret: %w", err)
 	}
 
 	if _, err = kubeclient.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("could not update cluster secret: %v", err)
+		return fmt.Errorf("could not update cluster secret: %w", err)
 	}
 
 	logCtx.Info("Successfully updated cluster secret bearer token")
 	return nil
+}
+
+// UpdateClusterTLSFromSecret refreshes the TLS client config in a self-registered cluster secret.
+// It returns true only when the cluster secret was updated.
+func UpdateClusterTLSFromSecret(ctx context.Context, kubeclient kubernetes.Interface,
+	namespace, agentName string, secret *v1.Secret, clientCertSecretName string) (bool, error) {
+
+	logCtx := log().WithField("agent", agentName).WithField("process", "self-agent-registration")
+
+	cluster, err := db.SecretToCluster(secret)
+	if err != nil {
+		return false, fmt.Errorf("could not parse cluster secret: %w", err)
+	}
+
+	clientCert, clientKey, caData, err := readClientCertFromSecret(ctx, kubeclient, namespace, clientCertSecretName)
+	if err != nil {
+		return false, fmt.Errorf("could not read client certificate from secret %s: %w", clientCertSecretName, err)
+	}
+
+	tlsConfig := &cluster.Config.TLSClientConfig
+	if bytes.Equal(tlsConfig.CertData, []byte(clientCert)) &&
+		bytes.Equal(tlsConfig.KeyData, []byte(clientKey)) &&
+		bytes.Equal(tlsConfig.CAData, []byte(caData)) {
+		return false, nil
+	}
+
+	tlsConfig.CertData = []byte(clientCert)
+	tlsConfig.KeyData = []byte(clientKey)
+	tlsConfig.CAData = []byte(caData)
+
+	if err := ClusterToSecret(cluster, secret); err != nil {
+		return false, fmt.Errorf("could not convert cluster to secret: %w", err)
+	}
+
+	if _, err = kubeclient.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+		return false, fmt.Errorf("could not update cluster secret: %w", err)
+	}
+
+	logCtx.Info("Successfully updated cluster secret TLS data")
+	return true, nil
 }
 
 // readClientCertFromSecret reads TLS credentials from an existing Kubernetes TLS secret.

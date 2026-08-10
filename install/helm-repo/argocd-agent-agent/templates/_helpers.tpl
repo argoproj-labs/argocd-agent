@@ -35,6 +35,28 @@ Base name for Helm-created resources, derived from the release.
 {{- end }}
 
 {{/*
+Produce a Kubernetes-compliant name (<= 63 chars, the DNS label limit).
+
+If the input already fits, it is returned unchanged. Otherwise it is
+truncated to 54 chars and suffixed with an 8-char hash derived from the
+full, untruncated input. This guarantees that two inputs which only differ
+in their tail (e.g. "<base>-metrics" vs "<base>-healthz") still produce
+distinct, deterministic names after truncation, instead of silently
+colliding once the differentiating suffix is cut off.
+
+Usage: {{ include "argocd-agent-agent.safeName" "some-long-candidate-name" }}
+*/}}
+{{- define "argocd-agent-agent.safeName" -}}
+{{- $name := . -}}
+{{- if le (len $name) 63 -}}
+{{- $name -}}
+{{- else -}}
+{{- $hash := $name | sha256sum | trunc 8 -}}
+{{- printf "%s-%s" ($name | trunc 54 | trimSuffix "-") $hash -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Helper to append a suffix to the resource base name.
 Usage: {{ include "argocd-agent-agent.resourceName" (dict "root" . "suffix" "metrics") }}
 */}}
@@ -43,9 +65,9 @@ Usage: {{ include "argocd-agent-agent.resourceName" (dict "root" . "suffix" "met
 {{- $suffix := .suffix | default "" -}}
 {{- $base := include "argocd-agent-agent.agentBaseName" $root -}}
 {{- if $suffix }}
-{{- printf "%s-%s" $base $suffix | trunc 63 | trimSuffix "-" }}
+{{- include "argocd-agent-agent.safeName" (printf "%s-%s" $base $suffix) }}
 {{- else }}
-{{- $base }}
+{{- include "argocd-agent-agent.safeName" $base }}
 {{- end }}
 {{- end }}
 
@@ -91,8 +113,17 @@ Common resource-specific helpers.
 Name for resources used exclusively by Helm tests.
 */}}
 {{- define "argocd-agent-agent.testResourceName" -}}
-{{- printf "%s-test" (include "argocd-agent-agent.agentBaseName" .) | trunc 63 | trimSuffix "-" }}
+{{- include "argocd-agent-agent.resourceName" (dict "root" . "suffix" "test") }}
 {{- end }}
+
+{{/*
+Create default image tag. Uses appVersion as the default, which can be
+overridden by setting image.tag in values.yaml. This follows the same
+pattern as the official argo-cd Helm chart (argo-cd.defaultTag).
+*/}}
+{{- define "argocd-agent-agent.defaultTag" -}}
+{{- default .Chart.AppVersion .Values.image.tag }}
+{{- end -}}
 
 {{/*
 Create chart name and version as used by the chart label.
@@ -114,10 +145,15 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/*
-Selector labels
+Selector labels.
+NOTE: `spec.selector.matchLabels` is immutable on Deployments. Changing any
+value emitted here after the initial install (e.g. by setting
+`.Values.nameOverride`) requires deleting and reinstalling the release.
 */}}
 {{- define "argocd-agent-agent.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "argocd-agent-agent.name" . }}
+app.kubernetes.io/part-of: argocd-agent
+app.kubernetes.io/component: agent
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
@@ -136,6 +172,12 @@ Create the name of the service account to use
 {{- end }}
 {{- end }}
 
+{{/*
+Name for the agent service monitor.
+*/}}
+{{- define "argocd-agent-agent.agentServiceMonitorName" -}}
+{{- include "argocd-agent-agent.resourceName" (dict "root" . "suffix" "servicemonitor") }}
+{{- end }}
 
 {{/*
 Expand the namespace of the release.

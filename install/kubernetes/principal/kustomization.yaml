@@ -8,6 +8,7 @@ resources:
 - principal-grpc-service.yaml
 - principal-resource-proxy-service.yaml
 - principal-redis-proxy-service.yaml
+- principal-redis-proxy-networkpolicy.yaml
 - principal-params-cm.yaml
 - principal-metrics-service.yaml
 - principal-healthz-service.yaml

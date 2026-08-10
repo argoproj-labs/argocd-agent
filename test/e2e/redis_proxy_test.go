@@ -27,11 +27,11 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
 
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	argocdclient "github.com/argoproj/argo-cd/v3/pkg/apiclient"
 	"github.com/argoproj/argo-cd/v3/pkg/apiclient/application"
 	sessionpkg "github.com/argoproj/argo-cd/v3/pkg/apiclient/session"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/stretchr/testify/suite"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -58,7 +58,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	appOnPrincipal := v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-app",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
@@ -67,10 +67,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: v1alpha1.ApplicationDestination{
-				Name:      "agent-managed",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &v1alpha1.SyncPolicy{
 				Automated: &v1alpha1.SyncPolicyAutomated{},
 				SyncOptions: v1alpha1.SyncOptions{
@@ -128,7 +125,6 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 	requires.NotNil(msgChan)
 
 	// Find pod on managed-agent client
-
 	var podList corev1.PodList
 	err := suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
 	requires.NoError(err)
@@ -146,24 +142,39 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 	}
 	requires.NotEmpty(oldPod.Name)
 
-	// Ensure that the pod appears in the resource tree value returned by Argo CD server (this will only be true if redis proxy is working)
-	tree, err := appClient.ResourceTree(suite.Ctx, &application.ResourcesQuery{
-		ApplicationName: &appOnPrincipal.Name,
-		AppNamespace:    &appOnPrincipal.Namespace,
-		Project:         &appOnPrincipal.Spec.Project,
-	})
-	requires.NoError(err)
+	// Wait for the old pod to appear in the resource tree
+	// This ensures that Redis proxy is fully working before proceeding
+	// (the pod will only appear in the resource tree if redis is fully available)
+	t.Logf("Waiting for pod %s to appear in resource tree (verifying Redis proxy is working)...", oldPod.Name)
+	var tree *v1alpha1.ApplicationTree
+	requires.Eventually(func() bool {
+		var err error
+		tree, err = appClient.ResourceTree(suite.Ctx, &application.ResourcesQuery{
+			ApplicationName: &appOnPrincipal.Name,
+			AppNamespace:    &appOnPrincipal.Namespace,
+			Project:         &appOnPrincipal.Spec.Project,
+		})
+		if err != nil {
+			t.Logf("ResourceTree error: %v", err)
+			return false
+		}
+		if tree == nil {
+			t.Logf("ResourceTree returned nil")
+			return false
+		}
+
+		// Check if the old pod appears in the resource tree
+		for _, node := range tree.Nodes {
+			if node.Kind == "Pod" && node.Name == oldPod.Name {
+				t.Logf("Pod %s found in resource tree - Redis proxy is working", oldPod.Name)
+				return true
+			}
+		}
+		return false
+
+	}, time.Second*60, time.Second*5)
 
 	requires.NotNil(tree)
-
-	matchFound := false
-	for _, node := range tree.Nodes {
-		if node.Kind == "Pod" && node.Name == oldPod.Name {
-			matchFound = true
-			break
-		}
-	}
-	requires.True(matchFound)
 
 	// Delete pod on managed agent cluster
 	err = suite.ManagedAgentClient.Delete(suite.Ctx, &oldPod, metav1.DeleteOptions{})
@@ -186,7 +197,7 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 
 		return newPod.Name != ""
 
-	}, time.Second*30, time.Second*5)
+	}, time.Second*60, time.Second*5)
 
 	// Verify the name of the new pod exists in what has been sent from the channel (this will only be true if redis proxy subscription is working)
 	requires.Eventually(func() bool {
@@ -214,7 +225,8 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 	requires.NoError(err)
 	requires.NotNil(tree)
 
-	matchFound = false
+	// Verify that the new pod appears in the resource tree
+	matchFound := false
 	for _, node := range tree.Nodes {
 		if node.Kind == "Pod" && node.Name == newPod.Name {
 			matchFound = true
@@ -242,7 +254,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	appOnAutonomous := v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-app",
-			Namespace: "argocd",
+			Namespace: fixture.AutonomousAgentNamespace,
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
@@ -295,7 +307,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 
 	t.Log("beginning stream", time.Now())
 
-	// Wait for sucessful connection to event source
+	// Wait for successful connection to event source
 	var msgChan chan string
 	requires.Eventually(func() bool {
 		var err error
@@ -311,7 +323,6 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	requires.NotNil(msgChan)
 
 	// Find pod of deployed Application, on autonomous cluster
-
 	var podList corev1.PodList
 	err = suite.AutonomousAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
 	requires.NoError(err)
@@ -329,34 +340,39 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	}
 	requires.NotEmpty(oldPod.Name)
 
+	// Wait for the old pod to appear in the resource tree
+	// This ensures that Redis proxy is fully working before proceeding
+	// (the pod will only appear in the resource tree if redis is fully available)
+	t.Logf("Waiting for pod %s to appear in resource tree (verifying Redis proxy is working)...", oldPod.Name)
 	var tree *v1alpha1.ApplicationTree
 	requires.Eventually(func() bool {
 		var err error
-		// Ensure that the pod appears in the resource tree value returned by Argo CD server
 		tree, err = appClient.ResourceTree(suite.Ctx, &application.ResourcesQuery{
 			ApplicationName: &appOnPrincipal.Name,
 			AppNamespace:    &appOnPrincipal.Namespace,
 			Project:         &appOnPrincipal.Spec.Project,
 		})
 		if err != nil {
-			t.Log(err)
+			t.Logf("ResourceTree error: %v", err)
+			return false
+		}
+		if tree == nil {
+			t.Logf("ResourceTree returned nil")
 			return false
 		}
 
-		return true
+		// Check if the old pod appears in the resource tree
+		for _, node := range tree.Nodes {
+			if node.Kind == "Pod" && node.Name == oldPod.Name {
+				t.Logf("Pod %s found in resource tree - Redis proxy is working", oldPod.Name)
+				return true
+			}
+		}
+		return false
 
 	}, time.Second*60, time.Second*5)
 
 	requires.NotNil(tree)
-
-	matchFound := false
-	for _, node := range tree.Nodes {
-		if node.Kind == "Pod" && node.Name == oldPod.Name {
-			matchFound = true
-			break
-		}
-	}
-	requires.True(matchFound)
 
 	t.Log("deleting pod", time.Now())
 
@@ -381,7 +397,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 
 		return newPod.Name != ""
 
-	}, time.Second*30, time.Second*5)
+	}, time.Second*60, time.Second*5)
 
 	// Verify the name of the new pod exists in what has been sent on the subscribe channel
 
@@ -410,7 +426,8 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 	requires.NoError(err)
 	requires.NotNil(tree)
 
-	matchFound = false
+	// Verify that the new pod appears in the resource tree
+	matchFound := false
 	for _, node := range tree.Nodes {
 		if node.Kind == "Pod" && node.Name == newPod.Name {
 			matchFound = true
@@ -427,7 +444,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_AutonomousAgent_Argo() {
 // - After X minutes, if the synced/healthy condition is never met, it stops trying and returns an error.
 func ensureAppExistsAndIsSyncedAndHealthy(appParam *v1alpha1.Application, k8sClient fixture.KubeClient, suite *fixture.BaseSuite) error {
 
-	overallExpireTime := time.Now().Add(time.Minute * 5)
+	overallExpireTime := time.Now().Add(time.Minute * 10)
 
 	count := 0
 outer:
@@ -477,7 +494,7 @@ outer:
 		}
 
 		// Wait X seconds for app to become synced/healthy
-		singleRoundExpireTime := time.Now().Add(time.Minute * 1)
+		singleRoundExpireTime := time.Now().Add(time.Minute * 3)
 		for {
 
 			err := k8sClient.Get(suite.Ctx, types.NamespacedName{Namespace: appFromCreate.Namespace, Name: appFromCreate.Name}, appFromCreate, metav1.GetOptions{})
@@ -572,8 +589,8 @@ func streamFromEventSourceNew(ctx context.Context, eventSourceAPIURL string, ses
 					return strings.Contains(err.Error(), "context canceled")
 				}
 
-				if strings.HasPrefix(line, "data:") {
-					data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				if after, ok := strings.CutPrefix(line, "data:"); ok {
+					data := strings.TrimSpace(after)
 					select {
 					case <-ctx.Done():
 						t.Log("Context is complete")

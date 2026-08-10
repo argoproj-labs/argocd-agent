@@ -125,7 +125,7 @@ func NewIssuer(name string, opts ...JwtIssuerOption) (*JwtIssuer, error) {
 	return iss, nil
 }
 
-func (i *JwtIssuer) validationKey(t *jwt.Token) (interface{}, error) {
+func (i *JwtIssuer) validationKey(t *jwt.Token) (any, error) {
 	var pubKey crypto.PublicKey
 	switch t.Method {
 	case jwt.SigningMethodRS512:

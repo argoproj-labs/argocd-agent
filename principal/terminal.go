@@ -66,7 +66,7 @@ func (s *Server) processTerminalRequest(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Check agent connectivity before WebSocket upgrade
-	if !s.queues.HasQueuePair(agentName) {
+	if !s.isAgentConnected(agentName) {
 		logCtx.WithField("agent", agentName).Debug("Agent is not connected, cannot start terminal session")
 		w.WriteHeader(http.StatusBadGateway)
 		return

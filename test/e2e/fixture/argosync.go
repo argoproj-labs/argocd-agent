@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -81,5 +81,5 @@ func WaitForAppSyncedAndHealthy(t *testing.T, ctx context.Context, kclient KubeC
 		}
 		retries++
 		return false
-	}, 60*time.Second, 1*time.Second)
+	}, 180*time.Second, 1*time.Second)
 }

@@ -1,0 +1,107 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-configmap" (include "argocd-agent-principal.testResourceName" .) | quote }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  containers:
+    - name: wget
+      image: busybox:1.37.0
+      command: ['sh', '-c', '
+        echo "Testing ConfigMap keys..."
+
+        # Test principal.listen.port
+        if [ -f /etc/config/principal.listen.port ]; then
+          echo "✓ principal.listen.port exists"
+          cat /etc/config/principal.listen.port
+        else
+          echo "✗ principal.listen.port missing"
+          exit 1
+        fi
+
+        # Test principal.log.level
+        if [ -f /etc/config/principal.log.level ]; then
+          echo "✓ principal.log.level exists"
+          cat /etc/config/principal.log.level
+        else
+          echo "✗ principal.log.level missing"
+          exit 1
+        fi
+
+        # Test principal.metrics.port
+        if [ -f /etc/config/principal.metrics.port ]; then
+          echo "✓ principal.metrics.port exists"
+          cat /etc/config/principal.metrics.port
+        else
+          echo "✗ principal.metrics.port missing"
+          exit 1
+        fi
+
+        # Test principal.healthz.port
+        if [ -f /etc/config/principal.healthz.port ]; then
+          echo "✓ principal.healthz.port exists"
+          cat /etc/config/principal.healthz.port
+        else
+          echo "✗ principal.healthz.port missing"
+          exit 1
+        fi
+
+        # Test principal.namespace
+        if [ -f /etc/config/principal.namespace ]; then
+          echo "✓ principal.namespace exists"
+          cat /etc/config/principal.namespace
+        else
+          echo "✗ principal.namespace missing"
+          exit 1
+        fi
+
+        # Test principal.auth
+        if [ -f /etc/config/principal.auth ]; then
+          echo "✓ principal.auth exists"
+          cat /etc/config/principal.auth
+        else
+          echo "✗ principal.auth missing"
+          exit 1
+        fi
+
+        # Test principal.tls.secret-name
+        if [ -f /etc/config/principal.tls.secret-name ]; then
+          echo "✓ principal.tls.secret-name exists"
+          cat /etc/config/principal.tls.secret-name
+        else
+          echo "✗ principal.tls.secret-name missing"
+          exit 1
+        fi
+
+        # Test principal.jwt.secret-name
+        if [ -f /etc/config/principal.jwt.secret-name ]; then
+          echo "✓ principal.jwt.secret-name exists"
+          cat /etc/config/principal.jwt.secret-name
+        else
+          echo "✗ principal.jwt.secret-name missing"
+          exit 1
+        fi
+
+        # Test principal.redis.server.address
+        if [ -f /etc/config/principal.redis.server.address ]; then
+          echo "✓ principal.redis.server.address exists"
+          cat /etc/config/principal.redis.server.address
+        else
+          echo "✗ principal.redis.server.address missing"
+          exit 1
+        fi
+
+        echo "All ConfigMap keys verified successfully!"
+      ']
+      volumeMounts:
+        - name: argocd-agent-principal-params
+          mountPath: /etc/config
+  volumes:
+    - name: argocd-agent-principal-params
+      configMap:
+        name: {{ include "argocd-agent-principal.configMapName" . }}
+  restartPolicy: Never
+{{- end }}

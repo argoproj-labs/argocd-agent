@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
@@ -64,9 +65,12 @@ func Test_addAppCreationToQueue(t *testing.T) {
 		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
 		a.addAppCreationToQueue(app)
 
-		// Should not have an event in queue
+		// Should have an update event in queue (creation for already-managed app is forwarded as update)
 		items := a.queues.SendQ(defaultQueueName).Len()
-		assert.Equal(t, 0, items)
+		assert.Equal(t, 1, items)
+		ev, _ := a.queues.SendQ(defaultQueueName).Get()
+		assert.NotNil(t, ev)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
 
 		// App should be managed by now
 		assert.True(t, a.appManager.IsManaged("agent/guestbook"))
@@ -106,7 +110,9 @@ func Test_addAppUpdateToQueue(t *testing.T) {
 	})
 
 	t.Run("Update event for managed agent", func(t *testing.T) {
-		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
+		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent", Annotations: map[string]string{
+			manager.SourceUIDAnnotation: "sourceuid",
+		}}}
 		// App must be already managed for event to be generated
 		_ = a.appManager.Manage("agent/guestbook")
 		a.mode = types.AgentModeManaged
@@ -125,6 +131,14 @@ func Test_addAppUpdateToQueue(t *testing.T) {
 		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
 	})
 
+	t.Run("Update event for managed agent where application has no source uid", func(t *testing.T) {
+		app := &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "guestbook", Namespace: "agent"}}
+		_ = a.appManager.Manage("agent/guestbook")
+		a.mode = types.AgentModeManaged
+		a.addAppUpdateToQueue(app, app)
+		defer a.appManager.Unmanage("agent/guestbook")
+		require.Equal(t, 0, a.queues.SendQ(defaultQueueName).Len())
+	})
 }
 
 func Test_addAppDeletionToQueue(t *testing.T) {
@@ -228,6 +242,70 @@ func Test_addAppDeletionToQueue(t *testing.T) {
 		assert.Equal(t, 1, testAgent.queues.SendQ(defaultQueueName).Len())
 		ev, _ := testAgent.queues.SendQ(defaultQueueName).Get()
 		assert.Equal(t, event.Delete.String(), ev.Type())
+	})
+}
+
+func Test_recreateTransform(t *testing.T) {
+	t.Run("Ignore action does not modify the app", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.recreateAction = manager.RecreateActionIgnore
+
+		app := &v1alpha1.Application{
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: "Succeeded",
+				},
+			},
+		}
+
+		logCtx := log().WithField("test", true)
+		transform := a.recreateTransform(logCtx)
+		transform(app)
+
+		assert.NotNil(t, app.Status.OperationState)
+		assert.Equal(t, "Succeeded", string(app.Status.OperationState.Phase))
+		assert.Nil(t, app.Operation)
+	})
+
+	t.Run("ClearStatus action clears operationState", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.recreateAction = manager.RecreateActionClearStatus
+
+		app := &v1alpha1.Application{
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: "Succeeded",
+				},
+			},
+		}
+
+		logCtx := log().WithField("test", true)
+		transform := a.recreateTransform(logCtx)
+		transform(app)
+
+		assert.Nil(t, app.Status.OperationState)
+		assert.Nil(t, app.Operation)
+	})
+
+	t.Run("Resync action sets Operation.Sync on the app", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.recreateAction = manager.RecreateActionResync
+
+		app := &v1alpha1.Application{
+			Status: v1alpha1.ApplicationStatus{
+				OperationState: &v1alpha1.OperationState{
+					Phase: "Succeeded",
+				},
+			},
+		}
+
+		logCtx := log().WithField("test", true)
+		transform := a.recreateTransform(logCtx)
+		transform(app)
+
+		require.NotNil(t, app.Operation)
+		assert.NotNil(t, app.Operation.Sync)
+		assert.NotNil(t, app.Status.OperationState)
 	})
 }
 
@@ -454,14 +532,14 @@ func Test_addClusterCacheInfoUpdateToQueue(t *testing.T) {
 	remote, err := client.NewRemote("127.0.0.1", 8080)
 	require.NoError(t, err)
 
-	a, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithRedisHost(miniRedis.Addr()))
+	a, err := NewAgent(context.TODO(), kubec, "argocd", WithRemote(remote), WithRedisHost(miniRedis.Addr()), WithCacheRefreshInterval(10*time.Second), WithInformerSyncTimeout(10*time.Second))
 	require.NoError(t, err)
 
 	a.remote.SetClientID("agent")
 	a.emitter = event.NewEventSource("principal")
 
 	// First populate the cache with dummy data
-	clusterMgr, err := cluster.NewManager(a.context, a.namespace, miniRedis.Addr(), "", cacheutil.RedisCompressionGZip, a.kubeClient.Clientset)
+	clusterMgr, err := cluster.NewManager(a.context, a.namespace, miniRedis.Addr(), "", cacheutil.RedisCompressionGZip, a.kubeClient.Clientset, nil)
 	require.NoError(t, err)
 	err = clusterMgr.MapCluster("test-agent", &v1alpha1.Cluster{
 		Name:   "test-cluster",
@@ -688,5 +766,233 @@ func Test_handleRepositoryDeletion(t *testing.T) {
 		// Should remove from resources but skip unmanage
 		assert.Equal(t, initialResourceCount-1, a.resources.Len())
 		assert.False(t, a.repoManager.IsManaged("test-repo"))
+	})
+}
+
+func Test_handleGPGKeyCreation(t *testing.T) {
+	a, _ := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	t.Run("Skip GPG key event in autonomous mode", func(t *testing.T) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		a.mode = types.AgentModeAutonomous
+		defer func() {
+			a.mode = types.AgentModeManaged
+		}()
+
+		initialResourceCount := a.resources.Len()
+		a.handleGPGKeyCreation(cm)
+
+		assert.Equal(t, initialResourceCount, a.resources.Len())
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Skip already managed GPG key in managed mode", func(t *testing.T) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		a.mode = types.AgentModeManaged
+
+		err := a.gpgKeyManager.Manage("argocd-gpg-keys-cm")
+		require.NoError(t, err)
+		defer a.gpgKeyManager.ClearManaged()
+
+		initialResourceCount := a.resources.Len()
+		a.handleGPGKeyCreation(cm)
+
+		assert.Equal(t, initialResourceCount+1, a.resources.Len())
+		assert.True(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Successfully handle new GPG key in managed mode", func(t *testing.T) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "new-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		a.mode = types.AgentModeManaged
+		defer a.gpgKeyManager.ClearManaged()
+
+		initialResourceCount := a.resources.Len()
+		a.handleGPGKeyCreation(cm)
+
+		assert.Equal(t, initialResourceCount+1, a.resources.Len())
+		assert.True(t, a.gpgKeyManager.IsManaged("new-gpg-keys-cm"))
+	})
+}
+
+func Test_handleGPGKeyUpdate(t *testing.T) {
+	a, _ := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	oldCM := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "argocd-gpg-keys-cm",
+			Namespace:       "argocd",
+			ResourceVersion: "1",
+		},
+	}
+
+	newCM := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "argocd-gpg-keys-cm",
+			Namespace:       "argocd",
+			ResourceVersion: "2",
+		},
+	}
+
+	t.Run("Skip GPG key update in autonomous mode", func(t *testing.T) {
+		a.mode = types.AgentModeAutonomous
+		defer func() {
+			a.mode = types.AgentModeManaged
+		}()
+
+		// Should not panic or cause issues
+		a.handleGPGKeyUpdate(oldCM, newCM)
+
+		// Should not be managed
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Skip ignored change in managed mode", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		// Pre-manage the GPG key and ignore the change
+		err := a.gpgKeyManager.Manage("argocd-gpg-keys-cm")
+		require.NoError(t, err)
+		err = a.gpgKeyManager.IgnoreChange("argocd-gpg-keys-cm", "2")
+		require.NoError(t, err)
+		defer a.gpgKeyManager.ClearManaged()
+
+		// Should skip because the change is ignored
+		a.handleGPGKeyUpdate(oldCM, newCM)
+
+		// Should still be managed but no further action taken
+		assert.True(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Skip update for unmanaged GPG key", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+
+		// Should skip because the GPG key is not managed
+		a.handleGPGKeyUpdate(oldCM, newCM)
+
+		// Should still not be managed
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Process valid GPG key update", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		err := a.gpgKeyManager.Manage("argocd-gpg-keys-cm")
+		require.NoError(t, err)
+		defer a.gpgKeyManager.ClearManaged()
+
+		// Should process the update successfully
+		a.handleGPGKeyUpdate(oldCM, newCM)
+
+		// Should still be managed
+		assert.True(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Revert local modification to managed GPG key", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		originalData := map[string]string{
+			"4AEE18F83AFDEB23": "original-key-data",
+		}
+
+		sourceUID := k8stypes.UID("test-source-uid")
+		existingCM := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: string(sourceUID),
+				},
+			},
+			Data: originalData,
+		}
+		_, err := a.kubeClient.Clientset.CoreV1().ConfigMaps("argocd").Create(context.Background(), existingCM, v1.CreateOptions{})
+		require.NoError(t, err)
+		defer a.kubeClient.Clientset.CoreV1().ConfigMaps("argocd").Delete(context.Background(), "argocd-gpg-keys-cm", v1.DeleteOptions{})
+
+		err = a.gpgKeyManager.Manage("argocd-gpg-keys-cm")
+		require.NoError(t, err)
+		defer a.gpgKeyManager.ClearManaged()
+
+		a.sourceCache.GPGKey.Set(sourceUID, originalData)
+
+		// Make a local modification to the GPG key
+		tamperedCM := existingCM.DeepCopy()
+		tamperedCM.Data["7AEE18F83AFDEB23"] = "new-key-data"
+		tamperedCM.ResourceVersion = "3"
+
+		a.handleGPGKeyUpdate(existingCM, tamperedCM)
+
+		// Verify the ConfigMap was reverted to the original data
+		reverted, err := a.kubeClient.Clientset.CoreV1().ConfigMaps("argocd").Get(context.Background(), "argocd-gpg-keys-cm", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, originalData, reverted.Data)
+		_, ok := reverted.Data["7AEE18F83AFDEB23"]
+		assert.False(t, ok)
+	})
+}
+
+func Test_handleGPGKeyDeletion(t *testing.T) {
+	a, _ := newAgent(t)
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+		},
+	}
+
+	t.Run("Skip GPG key deletion in autonomous mode", func(t *testing.T) {
+		a.mode = types.AgentModeAutonomous
+		defer func() {
+			a.mode = types.AgentModeManaged
+		}()
+
+		a.resources.Add(resources.NewResourceKeyFromGPGKey(cm))
+		initialResourceCount := a.resources.Len()
+
+		a.handleGPGKeyDeletion(cm)
+
+		assert.Equal(t, initialResourceCount, a.resources.Len())
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+	})
+
+	t.Run("Skip deletion for unmanaged GPG key", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+
+		a.resources.Add(resources.NewResourceKeyFromGPGKey(cm))
+		initialResourceCount := a.resources.Len()
+
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
+
+		a.handleGPGKeyDeletion(cm)
+
+		assert.Equal(t, initialResourceCount-1, a.resources.Len())
+		assert.False(t, a.gpgKeyManager.IsManaged("argocd-gpg-keys-cm"))
 	})
 }

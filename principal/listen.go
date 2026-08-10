@@ -23,9 +23,8 @@ import (
 	"strings"
 	"time"
 
+	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -36,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/terminalstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/versionapi"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/auth"
@@ -109,7 +109,7 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 		// Even though we load TLS configuration here, we will not yet create
 		// a TLS listener. TLS will be setup using the appropriate grpc-go API
 		// functions.
-		s.tlsConfig, lerr = s.loadTLSConfig()
+		_, lerr = s.ensureTLSConfig()
 		if lerr != nil {
 			return false, lerr
 		}
@@ -139,10 +139,34 @@ func (s *Server) Listen(ctx context.Context, backoff wait.Backoff) error {
 	return err
 }
 
-func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetrics, errch chan error) error {
+func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetrics, grpcMetrics *grpcprom.ServerMetrics, errch chan error) error {
 	err := s.Listen(ctx, listenerBackoff)
 	if err != nil {
 		return fmt.Errorf("could not start listener: %w", err)
+	}
+
+	streamInterceptors := []grpc.StreamServerInterceptor{
+		s.streamRequestLogger(), // logging
+		s.streamAuthInterceptor, // auth
+		grpcutil.StreamServerMsgSizeInterceptor(s.options.maxGRPCMessageSize), // message size warning
+	}
+	unaryInterceptors := []grpc.UnaryServerInterceptor{
+		s.unaryRequestLogger(), // logging
+		s.unaryAuthInterceptor, // auth
+		grpcutil.UnaryServerMsgSizeInterceptor(s.options.maxGRPCMessageSize), // message size warning
+	}
+
+	// Prepend gRPC Prometheus interceptors so they observe all RPCs
+	// including those rejected by auth.
+	if grpcMetrics != nil {
+		streamInterceptors = append(
+			[]grpc.StreamServerInterceptor{grpcMetrics.StreamServerInterceptor()},
+			streamInterceptors...,
+		)
+		unaryInterceptors = append(
+			[]grpc.UnaryServerInterceptor{grpcMetrics.UnaryServerInterceptor()},
+			unaryInterceptors...,
+		)
 	}
 
 	grpcOpts := []grpc.ServerOption{
@@ -151,22 +175,16 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 		// Global stats handler for tracing
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		// Global interceptors for gRPC streams
-		grpc.ChainStreamInterceptor(
-			s.streamRequestLogger(), // logging
-			s.streamAuthInterceptor, // auth
-			grpcutil.StreamServerMsgSizeInterceptor(s.options.maxGRPCMessageSize), // message size warning
-		),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
 		// Global interceptors for gRPC unary calls
-		grpc.ChainUnaryInterceptor(
-			s.unaryRequestLogger(), // logging
-			s.unaryAuthInterceptor, // auth
-			grpcutil.UnaryServerMsgSizeInterceptor(s.options.maxGRPCMessageSize), // message size warning
-		),
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 	}
 
+	tlsConfig := s.currentTLSConfig()
+
 	// Add TLS credentials unless running in plaintext mode (e.g., behind Istio)
-	if s.tlsConfig != nil {
-		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(s.tlsConfig)))
+	if tlsConfig != nil {
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsConfig)))
 	} else {
 		log().Warn("gRPC server running without TLS - ensure service mesh provides transport security")
 	}
@@ -184,6 +202,10 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 		return fmt.Errorf("could not register gRPC services: %w", err)
 	}
 
+	if grpcMetrics != nil {
+		grpcMetrics.InitializeMetrics(s.grpcServer)
+	}
+
 	// If the server is configured with HTTP/1 support enabled, configured and
 	// start the downgrading proxy. Otherwise, start the gRPC server.
 	if s.enableWebSocket {
@@ -191,13 +213,17 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 
 		downgradingHandler := grpchttp1server.CreateDowngradingHandler(s.grpcServer, http.NotFoundHandler(), opts...)
 		downgradingServer := &http.Server{
-			TLSConfig: s.tlsConfig,
-			Handler:   h2c.NewHandler(downgradingHandler, &http2.Server{}),
+			TLSConfig: tlsConfig,
+			Handler:   downgradingHandler,
 		}
+		downgradingServer.Protocols = new(http.Protocols)
+		downgradingServer.Protocols.SetHTTP1(true)
+		downgradingServer.Protocols.SetHTTP2(true)
+		downgradingServer.Protocols.SetUnencryptedHTTP2(true)
 
 		go func() {
 			// Use plaintext HTTP if TLS is disabled (e.g., behind Istio)
-			if s.tlsConfig != nil {
+			if tlsConfig != nil {
 				err = downgradingServer.ServeTLS(s.listener.l, s.options.tlsCertPath, s.options.tlsKeyPath)
 			} else {
 				err = downgradingServer.Serve(s.listener.l)
@@ -231,8 +257,9 @@ func (l *Listener) Address() string {
 // This method should be called after the server is configured, and has all
 // required configuration properties set.
 func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
-	authSrv, err := auth.NewServer(s.queues, s.authMethods, s.issuer,
-		auth.WithAgentRegistrationManager(s.agentRegistrationManager))
+	authSrv, err := auth.NewServer(s.queues, s.namespace, s.authMethods, s.issuer,
+		auth.WithAgentRegistrationManager(s.agentRegistrationManager),
+		auth.WithOnAuthenticated(s.setAgentNamespace))
 	if err != nil {
 		return fmt.Errorf("could not create new auth server: %w", err)
 	}
@@ -242,11 +269,23 @@ func (s *Server) registerGrpcServices(metrics *metrics.PrincipalMetrics) error {
 	opts := []eventstream.ServerOption{}
 	opts = append(opts, eventstream.WithNotifyOnConnect(s.notifyOnConnect))
 	opts = append(opts, eventstream.WithLogger(s.options.grpcEventLogger))
+	if s.ha != nil {
+		opts = append(opts, eventstream.WithAcceptCheck(func(agentName string) error {
+			return s.ha.Controller.OnAgentConnect(agentName)
+		}))
+	}
 
-	eventstreamapi.RegisterEventStreamServer(s.grpcServer, eventstream.NewServer(s.queues, s.eventWriters, metrics, s.clusterMgr, opts...))
+	s.eventStreamSrv = eventstream.NewServer(s.queues, s.eventWriters, metrics, s.clusterMgr, opts...)
+	eventstreamapi.RegisterEventStreamServer(s.grpcServer, s.eventStreamSrv)
 	// Proposal: register LogStream gRPC service for data-plane (use singleton instance)
 	logstreamapi.RegisterLogStreamServiceServer(s.grpcServer, s.logStream)
 	// Register TerminalStream gRPC service for web terminal sessions
 	terminalstreamapi.RegisterTerminalStreamServiceServer(s.grpcServer, s.terminalStreamServer)
+
+	// Register replication service when HA is enabled
+	if s.ha != nil && s.ha.ReplicationServer != nil {
+		replicationapi.RegisterReplicationServer(s.grpcServer, s.ha.ReplicationServer)
+	}
+
 	return nil
 }

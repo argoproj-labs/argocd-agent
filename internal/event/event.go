@@ -20,7 +20,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/google/uuid"
@@ -35,57 +37,71 @@ import (
 
 const cloudEventSpecVersion = "1.0"
 
-type (
-	EventType   string
-	EventTarget string
-)
-
-const TypePrefix = "io.argoproj.argocd-agent.event"
+type EventType string
 
 // Supported EventTypes that are sent agent <-> principal. Note that not every
 // EventType is supported by every EventTarget.
 const (
-	Ping                       EventType = TypePrefix + ".ping"
-	Pong                       EventType = TypePrefix + ".pong"
-	Create                     EventType = TypePrefix + ".create"
-	Delete                     EventType = TypePrefix + ".delete"
-	Update                     EventType = TypePrefix + ".update"
-	SpecUpdate                 EventType = TypePrefix + ".spec-update"
-	StatusUpdate               EventType = TypePrefix + ".status-update"
-	OperationUpdate            EventType = TypePrefix + ".operation-update"
-	TerminateOperation         EventType = TypePrefix + ".terminate-operation"
-	EventProcessed             EventType = TypePrefix + ".processed"
-	GetRequest                 EventType = TypePrefix + ".get"
-	GetResponse                EventType = TypePrefix + ".response"
-	RedisGenericRequest        EventType = TypePrefix + ".redis-request"
-	RedisGenericResponse       EventType = TypePrefix + ".redis-response"
-	SyncedResourceList         EventType = TypePrefix + ".request-synced-resource-list"
-	ResponseSyncedResource     EventType = TypePrefix + ".response-synced-resource"
-	EventRequestUpdate         EventType = TypePrefix + ".request-update"
-	EventRequestResourceResync EventType = TypePrefix + ".request-resource-resync"
-	ClusterCacheInfoUpdate     EventType = TypePrefix + ".cluster-cache-info-update"
-	TerminalRequest            EventType = TypePrefix + ".terminal-request"
+	Ping                       EventType = targets.TypePrefix + ".ping"
+	Pong                       EventType = targets.TypePrefix + ".pong"
+	Create                     EventType = targets.TypePrefix + ".create"
+	Delete                     EventType = targets.TypePrefix + ".delete"
+	SpecUpdate                 EventType = targets.TypePrefix + ".spec-update"
+	StatusUpdate               EventType = targets.TypePrefix + ".status-update"
+	SetOperation               EventType = targets.TypePrefix + ".set-operation"
+	TerminateOperation         EventType = targets.TypePrefix + ".terminate-operation"
+	EventProcessed             EventType = targets.TypePrefix + ".processed"
+	GetRequest                 EventType = targets.TypePrefix + ".get"
+	GetResponse                EventType = targets.TypePrefix + ".response"
+	RedisGenericRequest        EventType = targets.TypePrefix + ".redis-request"
+	RedisGenericResponse       EventType = targets.TypePrefix + ".redis-response"
+	SyncedResourceList         EventType = targets.TypePrefix + ".request-synced-resource-list"
+	ResponseSyncedResource     EventType = targets.TypePrefix + ".response-synced-resource"
+	EventRequestUpdate         EventType = targets.TypePrefix + ".request-update"
+	EventRequestResourceResync EventType = targets.TypePrefix + ".request-resource-resync"
+	ClusterCacheInfoUpdate     EventType = targets.TypePrefix + ".cluster-cache-info-update"
+	TerminalRequest            EventType = targets.TypePrefix + ".terminal-request"
+	Error                      EventType = targets.TypePrefix + ".error"
 )
 
 const (
-	TargetUnknown                EventTarget = "unknown"
-	TargetApplication            EventTarget = "application"
-	TargetAppProject             EventTarget = "appproject"
-	TargetEventAck               EventTarget = "eventProcessed"
-	TargetResource               EventTarget = "resource"
-	TargetRedis                  EventTarget = "redis"
-	TargetResourceResync         EventTarget = "resourceResync"
-	TargetClusterCacheInfoUpdate EventTarget = "clusterCacheInfoUpdate"
-	TargetRepository             EventTarget = "repository"
-	TargetContainerLog           EventTarget = "containerlog"
-	TargetHeartbeat              EventTarget = "heartbeat"
-	TargetTerminal               EventTarget = "terminal"
+	resourceID   string = "resourceid"
+	eventID      string = "eventid"
+	sentAt       string = "sentat"
+	principalUID string = "principaluid"
 )
 
-const (
-	resourceID string = "resourceid"
-	eventID    string = "eventid"
-)
+// SetSentAt stamps the current time on an event as the send time.
+func SetSentAt(ev *cloudevents.Event) {
+	ev.SetExtension(sentAt, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+// SentAt returns the send timestamp from an event, or nil if not set.
+func SentAt(ev *cloudevents.Event) *time.Time {
+	val, ok := ev.Extensions()[sentAt].(string)
+	if !ok {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, val)
+	if err != nil {
+		return nil
+	}
+	return &t
+}
+
+// SetPrincipalUID stamps the principal's persistent identity on an event.
+func SetPrincipalUID(ev *cloudevents.Event, uid string) {
+	ev.SetExtension(principalUID, uid)
+}
+
+// PrincipalUID returns the principal identity from an event, or empty string if not set.
+func PrincipalUID(ev *cloudevents.Event) string {
+	val, ok := ev.Extensions()[principalUID].(string)
+	if !ok {
+		return ""
+	}
+	return val
+}
 
 var (
 	ErrEventDiscarded    error = errors.New("event discarded")
@@ -98,10 +114,6 @@ func (t EventType) String() string {
 	return string(t)
 }
 
-func (t EventTarget) String() string {
-	return string(t)
-}
-
 // EventSource is a utility to construct new 'cloudevents.Event' events for a given 'source'
 type EventSource struct {
 	source string
@@ -110,10 +122,10 @@ type EventSource struct {
 // Event is the 'on the wire' representation of an event, and is parsed by from protobuf via FromWire
 type Event struct {
 	event  *cloudevents.Event
-	target EventTarget
+	target targets.EventTarget
 }
 
-func New(ev *cloudevents.Event, target EventTarget) *Event {
+func New(ev *cloudevents.Event, target targets.EventTarget) *Event {
 	return &Event{
 		event:  ev,
 		target: target,
@@ -153,7 +165,8 @@ func (evs EventSource) ApplicationEvent(evType EventType, app *v1alpha1.Applicat
 	cev.SetType(evType.String())
 	cev.SetExtension(eventID, createEventID(app.ObjectMeta))
 	cev.SetExtension(resourceID, createResourceID(app.ObjectMeta))
-	cev.SetDataSchema(TargetApplication.String())
+	cev.SetDataSchema(targets.Application.String())
+	cev.SetSubject(fmt.Sprintf("%s/%s", app.Namespace, app.Name))
 	// TODO: Handle this error situation?
 	_ = cev.SetData(cloudevents.ApplicationJSON, app)
 	return &cev
@@ -174,9 +187,23 @@ func (evs EventSource) AppProjectEvent(evType EventType, appProject *v1alpha1.Ap
 	cev.SetType(evType.String())
 	cev.SetExtension(eventID, createEventID(appProject.ObjectMeta))
 	cev.SetExtension(resourceID, createResourceID(appProject.ObjectMeta))
-	cev.SetDataSchema(TargetAppProject.String())
+	cev.SetDataSchema(targets.AppProject.String())
+	cev.SetSubject(fmt.Sprintf("%s/%s", appProject.Namespace, appProject.Name))
 	// TODO: Handle this error situation?
 	_ = cev.SetData(cloudevents.ApplicationJSON, appProject)
+	return &cev
+}
+
+func (evs EventSource) ApplicationSetEvent(evType EventType, appSet *v1alpha1.ApplicationSet) *cloudevents.Event {
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(evType.String())
+	cev.SetExtension(eventID, createEventID(appSet.ObjectMeta))
+	cev.SetExtension(resourceID, createResourceID(appSet.ObjectMeta))
+	cev.SetDataSchema(targets.ApplicationSet.String())
+	cev.SetSubject(fmt.Sprintf("%s/%s", appSet.Namespace, appSet.Name))
+	_ = cev.SetData(cloudevents.ApplicationJSON, appSet)
 	return &cev
 }
 
@@ -194,7 +221,7 @@ func (evs EventSource) ClusterCacheInfoUpdateEvent(evType EventType, clusterInfo
 	cev.SetType(evType.String())
 	cev.SetExtension(eventID, reqUUID)
 	cev.SetExtension(resourceID, reqUUID)
-	cev.SetDataSchema(TargetClusterCacheInfoUpdate.String())
+	cev.SetDataSchema(targets.ClusterCacheInfoUpdate.String())
 	_ = cev.SetData(cloudevents.ApplicationJSON, clusterInfo)
 	return &cev
 }
@@ -206,9 +233,22 @@ func (evs EventSource) RepositoryEvent(evType EventType, repository *corev1.Secr
 	cev.SetType(evType.String())
 	cev.SetExtension(eventID, createEventID(repository.ObjectMeta))
 	cev.SetExtension(resourceID, createResourceID(repository.ObjectMeta))
-	cev.SetDataSchema(TargetRepository.String())
-
+	cev.SetDataSchema(targets.Repository.String())
+	cev.SetSubject(fmt.Sprintf("%s/%s", repository.Namespace, repository.Name))
 	_ = cev.SetData(cloudevents.ApplicationJSON, repository)
+	return &cev
+}
+
+func (evs EventSource) GPGKeyEvent(evType EventType, cm *corev1.ConfigMap) *cloudevents.Event {
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(evType.String())
+	cev.SetExtension(eventID, createEventID(cm.ObjectMeta))
+	cev.SetExtension(resourceID, createResourceID(cm.ObjectMeta))
+	cev.SetDataSchema(targets.GPGKey.String())
+	cev.SetSubject(fmt.Sprintf("%s/%s", cm.Namespace, cm.Name))
+	_ = cev.SetData(cloudevents.ApplicationJSON, cm)
 	return &cev
 }
 
@@ -223,7 +263,7 @@ func (evs EventSource) HeartbeatEvent(evType EventType) *cloudevents.Event {
 	cev.SetType(evType.String())
 	cev.SetExtension(eventID, reqUUID)
 	cev.SetExtension(resourceID, reqUUID)
-	cev.SetDataSchema(TargetHeartbeat.String())
+	cev.SetDataSchema(targets.Heartbeat.String())
 	// No data payload needed for heartbeat
 	return &cev
 }
@@ -335,7 +375,7 @@ func (r *ResourceRequest) IsValid() bool {
 }
 
 // ResourceResponse is an event that holds the response to a resource request.
-// It is usually sent by an agent to the princiapl in response to a prior
+// It is usually sent by an agent to the principal in response to a prior
 // resource request.
 type ResourceResponse struct {
 	// UUID is the unique ID of the request this response is targeted at
@@ -371,7 +411,7 @@ func (evs EventSource) NewRedisRequestEvent(connectionUUID string, body RedisCom
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(RedisGenericRequest.String())
-	cev.SetDataSchema(TargetRedis.String())
+	cev.SetDataSchema(targets.Redis.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
 	err := cev.SetData(cloudevents.ApplicationJSON, rr)
@@ -389,7 +429,7 @@ func (evs EventSource) NewRedisResponseEvent(reqUUID string, connectionUUID stri
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(RedisGenericResponse.String())
-	cev.SetDataSchema(TargetRedis.String())
+	cev.SetDataSchema(targets.Redis.String())
 	cev.SetExtension(resourceID, resUUID)
 	// eventid must be set to the requested resource's uuid
 	cev.SetExtension(eventID, reqUUID)
@@ -422,7 +462,7 @@ func (evs EventSource) NewResourceRequestEvent(gvr v1.GroupVersionResource, name
 	cev.SetType(method)
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
-	cev.SetDataSchema(TargetResource.String())
+	cev.SetDataSchema(targets.Resource.String())
 	err := cev.SetData(cloudevents.ApplicationJSON, rr)
 	return &cev, err
 }
@@ -438,7 +478,7 @@ func (evs EventSource) NewResourceResponseEvent(reqUUID string, status int, data
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(GetResponse.String())
-	cev.SetDataSchema(TargetResource.String())
+	cev.SetDataSchema(targets.Resource.String())
 	cev.SetExtension(resourceID, resUUID)
 	// eventid must be set to the requested resource's uuid
 	cev.SetExtension(eventID, reqUUID)
@@ -456,7 +496,7 @@ func (evs EventSource) ProcessedEvent(evType EventType, ev *Event) *cloudevents.
 		cev.SetExtension(k, v)
 	}
 
-	cev.SetDataSchema(TargetEventAck.String())
+	cev.SetDataSchema(targets.EventAck.String())
 	return &cev
 }
 
@@ -479,7 +519,7 @@ func (evs EventSource) RequestSyncedResourceListEvent(checksum []byte) (*cloudev
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(SyncedResourceList.String())
-	cev.SetDataSchema(TargetResourceResync.String())
+	cev.SetDataSchema(targets.ResourceResync.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
 
@@ -510,7 +550,7 @@ func (evs EventSource) SyncedResourceEvent(resourceKey resources.ResourceKey) (*
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(ResponseSyncedResource.String())
-	cev.SetDataSchema(TargetResourceResync.String())
+	cev.SetDataSchema(targets.ResourceResync.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
 
@@ -546,7 +586,7 @@ func (evs EventSource) RequestUpdateEvent(reqUpdate *RequestUpdate) (*cloudevent
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(EventRequestUpdate.String())
-	cev.SetDataSchema(TargetResourceResync.String())
+	cev.SetDataSchema(targets.ResourceResync.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
 
@@ -566,7 +606,7 @@ func (evs EventSource) RequestResourceResyncEvent() (*cloudevents.Event, error) 
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(EventRequestResourceResync.String())
-	cev.SetDataSchema(TargetResourceResync.String())
+	cev.SetDataSchema(targets.ResourceResync.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
 
@@ -583,43 +623,46 @@ func FromWire(pev *pb.CloudEvent) (*Event, error) {
 		return nil, err
 	}
 	ev := &Event{}
-	var target EventTarget
 	if ev.target = Target(raw); ev.target == "" {
-		return nil, fmt.Errorf("unknown event target FromWire: %s / %v", target, *raw)
+		return nil, fmt.Errorf("unknown event target FromWire: %s / %v", raw.DataSchema(), *raw)
 	}
 	ev.event = raw
 	return ev, nil
 }
 
-func Target(raw *cloudevents.Event) EventTarget {
+func Target(raw *cloudevents.Event) targets.EventTarget {
 	switch raw.DataSchema() {
-	case TargetApplication.String():
-		return TargetApplication
-	case TargetAppProject.String():
-		return TargetAppProject
-	case TargetRepository.String():
-		return TargetRepository
-	case TargetResource.String():
-		return TargetResource
-	case TargetEventAck.String():
-		return TargetEventAck
-	case TargetResourceResync.String():
-		return TargetResourceResync
-	case TargetRedis.String():
-		return TargetRedis
-	case TargetClusterCacheInfoUpdate.String():
-		return TargetClusterCacheInfoUpdate
-	case TargetContainerLog.String():
-		return TargetContainerLog
-	case TargetHeartbeat.String():
-		return TargetHeartbeat
-	case TargetTerminal.String():
-		return TargetTerminal
+	case targets.Application.String():
+		return targets.Application
+	case targets.AppProject.String():
+		return targets.AppProject
+	case targets.Repository.String():
+		return targets.Repository
+	case targets.GPGKey.String():
+		return targets.GPGKey
+	case targets.Resource.String():
+		return targets.Resource
+	case targets.EventAck.String():
+		return targets.EventAck
+	case targets.ResourceResync.String():
+		return targets.ResourceResync
+	case targets.Redis.String():
+		return targets.Redis
+	case targets.ClusterCacheInfoUpdate.String():
+		return targets.ClusterCacheInfoUpdate
+	case targets.ContainerLog.String():
+		return targets.ContainerLog
+	case targets.Heartbeat.String():
+		return targets.Heartbeat
+	case targets.Terminal.String():
+		return targets.Terminal
+	case targets.ApplicationSet.String():
+		return targets.ApplicationSet
 	}
 	return ""
 }
 
-func (ev Event) Target() EventTarget {
+func (ev Event) Target() targets.EventTarget {
 	return ev.target
 }
 
@@ -669,10 +712,22 @@ func (ev Event) AppProject() (*v1alpha1.AppProject, error) {
 	return proj, err
 }
 
+func (ev Event) ApplicationSet() (*v1alpha1.ApplicationSet, error) {
+	appSet := &v1alpha1.ApplicationSet{}
+	err := ev.event.DataAs(appSet)
+	return appSet, err
+}
+
 func (ev Event) Repository() (*corev1.Secret, error) {
 	repo := &corev1.Secret{}
 	err := ev.event.DataAs(repo)
 	return repo, err
+}
+
+func (ev Event) GPGKey() (*corev1.ConfigMap, error) {
+	cm := &corev1.ConfigMap{}
+	err := ev.event.DataAs(cm)
+	return cm, err
 }
 
 // ResourceRequest gets the resource request payload from an event
@@ -794,7 +849,7 @@ func (evs EventSource) NewLogRequestEvent(namespace, podName, method string, par
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(method) // HTTP method
-	cev.SetDataSchema(TargetContainerLog.String())
+	cev.SetDataSchema(targets.ContainerLog.String())
 	cev.SetExtension(resourceID, reqUUID)
 	cev.SetExtension(eventID, reqUUID)
 	err := cev.SetData(cloudevents.ApplicationJSON, logReq)
@@ -826,7 +881,7 @@ func (evs EventSource) NewTerminalRequestEvent(terminalReq *ContainerTerminalReq
 	cev.SetSource(evs.source)
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(TerminalRequest.String())
-	cev.SetDataSchema(TargetTerminal.String())
+	cev.SetDataSchema(targets.Terminal.String())
 	cev.SetExtension(resourceID, terminalReq.UUID)
 	cev.SetExtension(eventID, terminalReq.UUID)
 	err := cev.SetData(cloudevents.ApplicationJSON, terminalReq)
@@ -838,4 +893,23 @@ func (ev Event) TerminalRequest() (*ContainerTerminalRequest, error) {
 	req := &ContainerTerminalRequest{}
 	err := ev.event.DataAs(req)
 	return req, err
+}
+
+type ErrorData struct {
+	ResourceName      string `json:"resourceName"`
+	ResourceNamespace string `json:"resourceNamespace"`
+	Message           string `json:"message"`
+}
+
+func (evs EventSource) ErrorEvent(evTarget targets.EventTarget, errData *ErrorData) (*cloudevents.Event, error) {
+	reqUUID := uuid.NewString()
+	cev := cloudevents.NewEvent()
+	cev.SetSource(evs.source)
+	cev.SetSpecVersion(cloudEventSpecVersion)
+	cev.SetType(Error.String())
+	cev.SetExtension(eventID, reqUUID)
+	cev.SetExtension(resourceID, reqUUID)
+	cev.SetDataSchema(evTarget.String())
+	err := cev.SetData(cloudevents.ApplicationJSON, errData)
+	return &cev, err
 }

@@ -44,6 +44,62 @@ const (
 	// SourceUIDAnnotation is an annotation that represents the UID of the source resource.
 	// It is added to the resources managed on the target.
 	SourceUIDAnnotation = "argocd.argoproj.io/source-uid"
+
+	// PrincipalUIDAnnotation is an annotation stamped by the agent on managed resources
+	// to track which principal identity last wrote the resource. This survives
+	// principal failovers and allows the agent to distinguish a true source-uid
+	// mismatch (same principal recreated the resource) from an AppSet annotation
+	// wipe on a new principal (different principal-uid → transition in-place).
+	PrincipalUIDAnnotation = "argocd.argoproj.io/principal-uid"
+
+	// NamespaceRemappedAnnotation is a boolean marker stamped by the agent when
+	// it remaps an application from the principal's namespace to its own namespace
+	// (under destination-based mapping in managed mode). Its presence signals to
+	// the principal that the app's namespace should be restored to the principal's
+	// namespace.
+	NamespaceRemappedAnnotation = "argocd.argoproj.io/namespace-remapped"
+)
+
+// SourceUIDMismatchPolicy defines the agent's behavior on source-UID mismatch.
+type SourceUIDMismatchPolicy string
+
+const (
+	// MismatchPolicyRecreate deletes the existing resource and recreates it (default).
+	MismatchPolicyRecreate SourceUIDMismatchPolicy = "recreate"
+	// MismatchPolicyUpsert updates the existing resource in-place without deleting it.
+	MismatchPolicyUpsert SourceUIDMismatchPolicy = "upsert"
+
+	// MismatchPolicyAnnotation is the annotation operators set on a resource to override
+	// the global mismatch policy for that specific resource.
+	MismatchPolicyAnnotation = "argocd.argoproj.io/source-uid-mismatch-policy"
+)
+
+// RecreateAction defines the agent's behavior after recreating an Application
+// from an unauthorized deletion. It is only applicable in managed mode.
+type RecreateAction string
+
+const (
+	// RecreateActionIgnore takes no action after recreation. This is the default action.
+	RecreateActionIgnore RecreateAction = "ignore"
+	// RecreateActionClearStatus clears operationState so auto-sync can re-trigger.
+	RecreateActionClearStatus RecreateAction = "clear-status"
+	// RecreateActionResync sets a sync operation to force immediate re-sync.
+	RecreateActionResync RecreateAction = "resync"
+)
+
+// AdoptionPolicy defines a managed mode agent's behavior when dealing with a create event where
+// the application to be created already exists
+type AdoptionPolicy string
+
+const (
+	// AdoptionPolicyAlways adopts an application by stamping the principal-uid onto the application
+	AdoptionPolicyAlways AdoptionPolicy = "always"
+
+	// AdoptionPolicyNever does not adoption the application and leaves it as is
+	AdoptionPolicyNever AdoptionPolicy = "never"
+
+	// DontAdoptAnnotation is an annotation for setting whether an app should not be adopted
+	AdoptionPolicyAnnotation = "argocd.argoproj.io/adoption-policy"
 )
 
 type Manager interface {
@@ -200,7 +256,10 @@ type kubeResource interface {
 }
 
 type resourceManager[R kubeResource] interface {
-	Create(ctx context.Context, obj R) (R, error)
+
+	// Create creates the resource using the Manager's backend.
+	// - 'ignoreChange' field controls whether or not the resourceVersion of the resource will be ignored if it is seen again (because it is considered to already have been processed). If true, the resource will be added to the ignore list. If false, it will not (false is useful for a few specific cases, like the 'a user deletes a managed agent Application resource, which needs to be reverted by agent' case)
+	Create(ctx context.Context, obj R, ignoreChange bool) (R, error)
 }
 
 // RevertUserInitiatedDeletion detects if a resource deletion was unauthorized and recreates the resource.
@@ -210,8 +269,8 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 	deletions *DeletionTracker,
 	mgr resourceManager[R],
 	logCtx *logrus.Entry,
+	preCreateTransforms ...func(R),
 ) (bool, error) {
-
 	logCtx = logCtx.WithFields(logrus.Fields{
 		"resource": outbound.GetName(),
 		"kind":     outbound.GetObjectKind().GroupVersionKind().Kind,
@@ -234,7 +293,13 @@ func RevertUserInitiatedDeletion[R kubeResource](ctx context.Context,
 	resource.SetResourceVersion("")
 	resource.SetDeletionTimestamp(nil)
 	resource.SetUID(types.UID(sourceUID))
-	_, err := mgr.Create(ctx, resource)
+
+	// apply the pre-create transforms to the resource
+	for _, transform := range preCreateTransforms {
+		transform(resource)
+	}
+
+	_, err := mgr.Create(ctx, resource, false)
 	if err != nil {
 		return false, err
 	} else {

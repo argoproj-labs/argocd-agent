@@ -16,13 +16,15 @@ package eventstream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 	"time"
 
-	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
@@ -40,6 +42,11 @@ import (
 
 var _ eventstreamapi.EventStreamServer = &Server{}
 
+// clusterStatusUpdater is the subset of cluster.Manager used by the Server.
+type clusterStatusUpdater interface {
+	SetAgentConnectionStatus(agentName string, status v1alpha1.ConnectionStatus, modifiedAt time.Time)
+}
+
 // Server:
 // - Reads Application CR events from GRPC stream and writes them to the relevant agent receive queue (the 'inbox') in 'queues' for processing (see recvFunc)
 // - Reads Application CR events from agent send queue in 'queues' (the 'outbox'), and writes to GRPC stream (see sendFunc)
@@ -56,12 +63,41 @@ type Server struct {
 	eventWriters *event.EventWritersMap
 
 	metrics    *metrics.PrincipalMetrics
-	clusterMgr *cluster.Manager
+	clusterMgr clusterStatusUpdater
+
+	// activeClients tracks active client connections keyed by agent name.
+	// Used by DisconnectAll and to guard against stale cleanup races.
+	activeClients   map[string]*client
+	activeClientsMu sync.Mutex
+}
+
+// AcceptCheck is called at the start of Subscribe to decide whether to accept
+// the agent connection. Return a non-nil error to reject with that status.
+type AcceptCheck func(agentName string) error
+
+const (
+	eventWriterSendErrorReasonContextCanceled  = "context-canceled"
+	eventWriterSendErrorReasonTransportClosing = "transport-closing"
+	eventWriterSendErrorReasonOther            = "other"
+)
+
+type sendErrorObservingSubscribeServer struct {
+	eventstreamapi.EventStream_SubscribeServer
+	onSendError func(error)
+}
+
+func (s *sendErrorObservingSubscribeServer) Send(ev *eventstreamapi.Event) error {
+	err := s.EventStream_SubscribeServer.Send(ev)
+	if err != nil && s.onSendError != nil {
+		s.onSendError(err)
+	}
+	return err
 }
 
 type ServerOptions struct {
 	MaxStreamDuration time.Duration
 	notifyOnConnect   chan types.Agent
+	acceptCheck       AcceptCheck
 
 	logger *logging.CentralizedLogger
 }
@@ -76,8 +112,9 @@ type client struct {
 	wg        *sync.WaitGroup
 	start     time.Time
 	// lock must be owned before read/writing to 'end' var
-	end  time.Time
-	lock sync.RWMutex
+	end            time.Time
+	lock           sync.RWMutex
+	disconnectOnce sync.Once
 }
 
 func WithMaxStreamDuration(d time.Duration) ServerOption {
@@ -92,6 +129,12 @@ func WithNotifyOnConnect(notify chan types.Agent) ServerOption {
 	}
 }
 
+func WithAcceptCheck(fn AcceptCheck) ServerOption {
+	return func(o *ServerOptions) {
+		o.acceptCheck = fn
+	}
+}
+
 func WithLogger(logger *logging.CentralizedLogger) ServerOption {
 	return func(o *ServerOptions) {
 		o.logger = logger
@@ -99,7 +142,7 @@ func WithLogger(logger *logging.CentralizedLogger) ServerOption {
 }
 
 // NewServer returns a new AppStream server instance with the given options
-func NewServer(queues queue.QueuePair, eventWriters *event.EventWritersMap, metrics *metrics.PrincipalMetrics, clusterMgr *cluster.Manager, opts ...ServerOption) *Server {
+func NewServer(queues queue.QueuePair, eventWriters *event.EventWritersMap, metrics *metrics.PrincipalMetrics, clusterMgr clusterStatusUpdater, opts ...ServerOption) *Server {
 	options := &ServerOptions{}
 	for _, o := range opts {
 		o(options)
@@ -110,11 +153,12 @@ func NewServer(queues queue.QueuePair, eventWriters *event.EventWritersMap, metr
 	}
 
 	return &Server{
-		queues:       queues,
-		options:      options,
-		eventWriters: eventWriters,
-		metrics:      metrics,
-		clusterMgr:   clusterMgr,
+		queues:        queues,
+		options:       options,
+		eventWriters:  eventWriters,
+		metrics:       metrics,
+		clusterMgr:    clusterMgr,
+		activeClients: make(map[string]*client),
 	}
 }
 
@@ -149,13 +193,49 @@ func (s *Server) newClientConnection(ctx context.Context, timeout time.Duration)
 	return c, nil
 }
 
+func classifyEventWriterSendError(err error) string {
+	if errors.Is(err, context.Canceled) || status.Code(err) == codes.Canceled {
+		return eventWriterSendErrorReasonContextCanceled
+	}
+	if grpcutil.NeedReconnectOnError(err) {
+		return eventWriterSendErrorReasonTransportClosing
+	}
+	return eventWriterSendErrorReasonOther
+}
+
+func (s *Server) observeSubscribeSendErrors(c *client, subs eventstreamapi.EventStream_SubscribeServer) eventstreamapi.EventStream_SubscribeServer {
+	return &sendErrorObservingSubscribeServer{
+		EventStream_SubscribeServer: subs,
+		onSendError: func(err error) {
+			reason := classifyEventWriterSendError(err)
+			if s.metrics != nil {
+				s.metrics.EventWriterSendErrors.WithLabelValues(c.agentName, reason).Inc()
+			}
+			if reason == eventWriterSendErrorReasonContextCanceled || reason == eventWriterSendErrorReasonTransportClosing {
+				c.logCtx.WithError(err).WithField("reason", reason).Info("Event writer send error requires reconnect")
+				c.cancelFn()
+			}
+		},
+	}
+}
+
 // onDisconnect must be called whenever client c disconnects from the stream
 func (s *Server) onDisconnect(c *client) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	c.end = time.Now()
+	c.disconnectOnce.Do(func() {
+		c.lock.Lock()
+		c.end = time.Now()
+		c.lock.Unlock()
 
-	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
+		// Only mark the agent as disconnected if no newer connection has already replaced this client in the active set.
+		// this is to avoid a race condition where a stale goroutine's late cleanup overwrites a newer connection's
+		// "Successful" status with "Failed".
+		s.activeClientsMu.Lock()
+		current := s.activeClients[c.agentName]
+		if current == c {
+			s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusFailed, c.end)
+		}
+		s.activeClientsMu.Unlock()
+	})
 
 	c.wg.Done()
 }
@@ -213,13 +293,13 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	})
 
 	switch event.Target(incomingEvent) {
-	case event.TargetApplication:
+	case targets.Application:
 		err = incomingEvent.DataAs(app)
-	case event.TargetAppProject:
+	case targets.AppProject:
 		err = incomingEvent.DataAs(proj)
-	case event.TargetResource:
+	case targets.Resource:
 		err = incomingEvent.DataAs(resResp)
-	case event.TargetRedis:
+	case targets.Redis:
 		err = incomingEvent.DataAs(redisResp)
 		if err != nil {
 			logCtx = logCtx.WithField("connectionUUID", redisResp.ConnectionUUID)
@@ -231,16 +311,14 @@ func (s *Server) recvFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("could not unserialize app data from wire: %w", err)
 	}
 
-	if app.Name != "" {
-		logCtx.Infof("Received update for application '%v'", app.QualifiedName())
-	}
+	logging.LogEventReceived(logCtx, incomingEvent)
 
 	q := s.queues.RecvQ(c.agentName)
 	if q == nil {
 		return fmt.Errorf("panic: no recvq for agent %s", c.agentName)
 	}
 
-	if event.Target(incomingEvent) == event.TargetEventAck {
+	if event.Target(incomingEvent) == targets.EventAck {
 		logCtx.Trace("Received an ACK")
 		eventWriter := s.eventWriters.Get(c.agentName)
 		if eventWriter == nil {
@@ -305,12 +383,13 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 		return fmt.Errorf("panic: event writer not found for agent %s", c.agentName)
 	}
 
-	logCtx.WithFields(logrus.Fields{
+	logCtx = logCtx.WithFields(logrus.Fields{
 		"resource_id": event.ResourceID(ev),
 		"event_id":    event.EventID(ev),
-		"type":        ev.Type(),
-	}).Trace("Adding an event to the event writer")
+	})
+	logCtx.Trace("Adding an event to the event writer")
 	eventWriter.Add(ev)
+	logging.LogEventSent(logCtx, ev)
 
 	q.Done(ev)
 
@@ -330,21 +409,42 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		return err
 	}
 
+	if s.options.acceptCheck != nil {
+		if err := s.options.acceptCheck(c.agentName); err != nil {
+			c.logCtx.WithError(err).Warn("Rejecting agent connection")
+			return status.Errorf(codes.Unavailable, "%s", err)
+		}
+	}
+
+	s.activeClientsMu.Lock()
+	s.activeClients[c.agentName] = c
+	s.activeClientsMu.Unlock()
+
 	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
 
 	if s.metrics != nil {
-		// increase counter when an agent is connected with principal
+		// increase counter to track how many agents are currently connected with principal
 		s.metrics.AgentConnected.Inc()
+
+		// increase counter to track how many times an agent has connected/reconnected to principal
+		s.metrics.AgentConnectionCount.WithLabelValues(c.agentName).Inc()
 
 		// store connection time to find average connection time of all agents
 		metrics.SetAgentConnectionTime(c.agentName, c.start)
 	}
 
+	target := s.observeSubscribeSendErrors(c, subs)
 	eventWriter := s.eventWriters.Get(c.agentName)
 	if eventWriter != nil {
-		eventWriter.UpdateTarget(subs)
+		eventWriter.UpdateTarget(target)
 	} else {
-		eventWriter = event.NewEventWriter(subs)
+		eventWriter = event.NewEventWriter(c.agentName, target, logging.GetDefaultLogger().ModuleLogger("EventWriter"))
+		if s.metrics != nil {
+			// set function to call when an event is discarded
+			eventWriter.SetOnDiscard(func(eventType, resourceType string) {
+				s.metrics.EventWriterEventsDiscarded.WithLabelValues(c.agentName, eventType, resourceType).Inc()
+			})
+		}
 		s.eventWriters.Add(c.agentName, eventWriter)
 	}
 
@@ -412,6 +512,12 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	c.wg.Wait()
 	c.logCtx.Info("Closing EventStream")
 
+	s.activeClientsMu.Lock()
+	if s.activeClients[c.agentName] == c {
+		delete(s.activeClients, c.agentName)
+	}
+	s.activeClientsMu.Unlock()
+
 	if s.metrics != nil {
 		// decrease counter when an agent is disconnected with principal
 		s.metrics.AgentConnected.Dec()
@@ -421,6 +527,27 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	}
 
 	return nil
+}
+
+// ConnectedAgentCount returns the number of currently connected agents.
+func (s *Server) ConnectedAgentCount() int {
+	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
+	return len(s.activeClients)
+}
+
+// DisconnectAll cancels every active agent stream, forcing all agents to disconnect.
+func (s *Server) DisconnectAll() {
+	s.activeClientsMu.Lock()
+	clients := s.activeClients
+	s.activeClients = make(map[string]*client)
+	s.activeClientsMu.Unlock()
+
+	for name, c := range clients {
+		logrus.WithField("agent", name).Info("Disconnecting agent (HA demote)")
+		s.clusterMgr.SetAgentConnectionStatus(name, v1alpha1.ConnectionStatusFailed, time.Now())
+		c.cancelFn()
+	}
 }
 
 // Push implements a client-side stream to receive updates for the client's
@@ -496,6 +623,44 @@ recvloop:
 	}
 
 	return nil
+}
+
+// DisconnectAgent cancels the event stream for a specific agent, forcing it to disconnect.
+// Returns true if the agent was connected and disconnected, false if it was not connected.
+func (s *Server) DisconnectAgent(agentName string) bool {
+	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
+	c, found := s.activeClients[agentName]
+	if !found || c == nil {
+		return false
+	}
+	delete(s.activeClients, agentName)
+	if c.cancelFn != nil {
+		c.cancelFn()
+	}
+	return true
+}
+
+// IsAgentConnected returns true if the agent is connected to the server via the event stream.
+func (s *Server) IsAgentConnected(agentName string) bool {
+	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
+	_, found := s.activeClients[agentName]
+	return found
+}
+
+// MarkConnected registers agentName as an active client.
+func (s *Server) MarkConnected(agentName string) {
+	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
+	s.activeClients[agentName] = &client{agentName: agentName}
+}
+
+// MarkDisconnected removes agentName from active clients.
+func (s *Server) MarkDisconnected(agentName string) {
+	s.activeClientsMu.Lock()
+	defer s.activeClientsMu.Unlock()
+	delete(s.activeClients, agentName)
 }
 
 func (s *Server) log() *logrus.Entry {

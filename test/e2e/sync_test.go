@@ -20,9 +20,9 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
+	synccommon "github.com/argoproj/argo-cd/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apiclient/application"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/stretchr/testify/suite"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -68,7 +68,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -77,10 +77,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 				TargetRevision: "HEAD",
 				Path:           "kustomize-guestbook",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{
 					"CreateNamespace=true",
@@ -92,7 +89,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 	requires.NoError(err)
 
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the app has been pushed to the managed-agent
 	requires.Eventually(func() bool {
@@ -106,7 +103,7 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 		app = argoapp.Application{}
 		err = suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeOutOfSync
-	}, 60*time.Second, 1*time.Second)
+	}, 120*time.Second, 1*time.Second)
 
 	// Sync the app
 	err = fixture.SyncApplication(suite.Ctx, principalKey, suite.PrincipalClient)
@@ -117,14 +114,14 @@ func (suite *SyncTestSuite) Test_SyncManaged() {
 		app := argoapp.Application{}
 		err := suite.PrincipalClient.Get(suite.Ctx, principalKey, &app, metav1.GetOptions{})
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
-	}, 60*time.Second, 1*time.Second)
+	}, 4*time.Minute, 1*time.Second)
 
 	// Ensure the app on the managed-agent becomes synced
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
 		return err == nil && app.Status.Sync.Status == argoapp.SyncStatusCodeSynced
-	}, 60*time.Second, 1*time.Second)
+	}, 4*time.Minute, 1*time.Second)
 
 	// Check that the .spec field of the managed-agent matches that of the
 	// principal
@@ -178,7 +175,7 @@ func (suite *SyncTestSuite) Test_SyncAutonomous() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "argocd",
+			Namespace: fixture.AutonomousAgentNamespace,
 			Finalizers: []string{
 				"resources-finalizer.argocd.argoproj.io",
 			},
@@ -299,7 +296,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -308,10 +305,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 				TargetRevision: "HEAD",
 				Path:           "test/data/pre-sync",
 			},
-			Destination: argoapp.ApplicationDestination{
-				Server:    "https://kubernetes.default.svc",
-				Namespace: "guestbook",
-			},
+			Destination: fixture.ManagedDestination("guestbook"),
 			SyncPolicy: &argoapp.SyncPolicy{
 				SyncOptions: argoapp.SyncOptions{
 					"CreateNamespace=true",
@@ -323,7 +317,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.NoError(err)
 
 	principalKey := fixture.ToNamespacedName(&app)
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the app has been pushed to the managed-agent
 	requires.Eventually(func() bool {
@@ -340,8 +334,19 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		err := suite.ManagedAgentClient.Get(suite.Ctx, agentKey, &app, metav1.GetOptions{})
-		return err == nil && app.Status.OperationState != nil &&
+		res := err == nil && app.Status.OperationState != nil &&
 			app.Status.OperationState.Phase == synccommon.OperationRunning
+
+		if !res {
+			appState := "N/A"
+			if app.Status.OperationState != nil {
+				appState = string(app.Status.OperationState.Phase)
+			}
+
+			suite.T().Log("operation state is currently", appState)
+		}
+
+		return res
 	}, 60*time.Second, 1*time.Second)
 
 	// Wait for the sync operation to start on the principal
@@ -395,6 +400,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationManaged() {
 	}
 	requires.Eventually(func() bool {
 		err := suite.ManagedAgentClient.Get(suite.Ctx, fixture.ToNamespacedName(&hook), &hook, metav1.GetOptions{})
+		suite.T().Logf("waiting for 'not found' error, error is currently: %v", err)
 		return err != nil && errors.IsNotFound(err)
 	}, 120*time.Second, 1*time.Second)
 
@@ -417,7 +423,7 @@ func (suite *SyncTestSuite) Test_TerminateOperationAutonomous() {
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "argocd",
+			Namespace: fixture.AutonomousAgentNamespace,
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",

@@ -17,10 +17,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,6 +33,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -41,34 +44,36 @@ import (
 // NewAgentRunCommand returns a new agent run command.
 func NewAgentRunCommand() *cobra.Command {
 	var (
-		serverAddress       string
-		serverPort          int
-		logLevels           []string
-		logFormat           string
-		insecure            bool
-		insecurePlaintext   bool
-		rootCASecretName    string
-		rootCAPath          string
-		kubeConfig          string
-		kubeContext         string
-		namespace           string
-		agentMode           string
-		creds               string
-		tlsSecretName       string
-		tlsClientCrt        string
-		tlsClientKey        string
-		tlsMinVersion       string
-		tlsMaxVersion       string
-		tlsCipherSuites     []string
-		enableWebSocket     bool
-		metricsPort         int
-		healthzPort         int
-		enableCompression   bool
-		pprofPort           int
-		redisAddr           string
-		redisUsername       string
-		redisPassword       string
-		enableResourceProxy bool
+		serverAddress        string
+		serverPort           int
+		logLevels            []string
+		logFormat            string
+		fullDetailCategories []string
+		insecure             bool
+		insecurePlaintext    bool
+		rootCASecretName     string
+		rootCAPath           string
+		kubeConfig           string
+		kubeContext          string
+		namespace            string
+		agentMode            string
+		creds                string
+		tlsSecretName        string
+		tlsClientCrt         string
+		tlsClientKey         string
+		tlsMinVersion        string
+		tlsMaxVersion        string
+		tlsCipherSuites      []string
+		enableWebSocket      bool
+		metricsPort          int
+		healthzPort          int
+		enableCompression    bool
+		pprofPort            int
+		redisAddr            string
+		redisUsername        string
+		redisPassword        string
+		redisCredsDirPath    string
+		enableResourceProxy  bool
 
 		// Time interval for agent to principal ping
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
@@ -76,6 +81,12 @@ func NewAgentRunCommand() *cobra.Command {
 
 		// Time interval for agent to refresh cluster cache info in principal
 		cacheRefreshInterval time.Duration
+
+		// Timeout for the initial informer sync at startup
+		informerSyncTimeout time.Duration
+
+		// Minimum time between Application informer update callbacks for the same Application (debouncing).
+		bufferK8sInformerEvents time.Duration
 
 		// Time interval for application-level heartbeats over the Subscribe stream.
 		// This is used to keep the connection alive through service meshes like Istio.
@@ -90,9 +101,23 @@ func NewAgentRunCommand() *cobra.Command {
 		// Destination-based mapping options
 		createNamespace         bool
 		destinationBasedMapping bool
+		ignoreUnmanagedApps     bool
+		sourceMismatchPolicy    string
+		onApplicationRecreate   string
 
 		// Allowed namespaces for filtering applications
 		allowedNamespaces []string
+
+		labelSelector string
+
+		// Redis TLS configuration
+		redisTLSEnabled      bool
+		redisTLSCAPath       string
+		redisTLSCASecretName string
+		redisTLSInsecure     bool
+
+		// Adoption options
+		adoptionPolicy string
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -136,9 +161,10 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 
 			subLoggers := cmdutil.SubSystemLoggers{
-				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
-				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
-				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
+				ResourceProxyLogger:       cmdutil.CreateLogger(logFormat),
+				RedisProxyLogger:          cmdutil.CreateLogger(logFormat),
+				GrpcEventLogger:           cmdutil.CreateLogger(logFormat),
+				InformerEventBufferLogger: cmdutil.CreateLogger(logFormat),
 			}
 
 			if len(logLevels) == 0 {
@@ -148,7 +174,10 @@ func NewAgentRunCommand() *cobra.Command {
 				cmdutil.ParseLogLevels(logLevels, &subLoggers)
 			}
 
-			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
+			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger, subLoggers.InformerEventBufferLogger))
+
+			cmdutil.ParseFullDetail(fullDetailCategories)
+
 			if namespace == "" {
 				cmdutil.Fatal("namespace value is empty and must be specified")
 			}
@@ -221,6 +250,11 @@ func NewAgentRunCommand() *cobra.Command {
 			remoteOpts = append(remoteOpts, client.WithKeepAlivePingInterval(keepAlivePingInterval))
 			remoteOpts = append(remoteOpts, client.WithCompression(enableCompression))
 			remoteOpts = append(remoteOpts, client.WithMaxGRPCMessageSize(maxGRPCMessageSize))
+			remoteOpts = append(remoteOpts, client.WithAgentNamespace(namespace))
+
+			if metricsPort > 0 {
+				remoteOpts = append(remoteOpts, client.WithGRPCClientMetrics(metrics.NewClientGRPCMetrics()))
+			}
 
 			if serverAddress != "" && serverPort > 0 && serverPort < 65536 {
 				remote, err = client.NewRemote(serverAddress, serverPort, remoteOpts...)
@@ -237,15 +271,61 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithHealthzPort(healthzPort))
 
 			agentOpts = append(agentOpts, agent.WithRedisHost(redisAddr))
+
+			redisUsername, redisPassword, err = redisCreds(redisCredsDirPath, redisUsername, redisPassword)
+			if err != nil {
+				cmdutil.Fatal("Failed loading Redis credentials: %s", err.Error())
+			}
 			agentOpts = append(agentOpts, agent.WithRedisUsername(redisUsername))
 			agentOpts = append(agentOpts, agent.WithRedisPassword(redisPassword))
 
+			// Configure Redis TLS
+			agentOpts = append(agentOpts, agent.WithRedisTLSEnabled(redisTLSEnabled))
+			if redisTLSEnabled {
+				// Validate Redis TLS configuration - only one mode can be specified
+				// This validation works for both CLI flags and environment variables
+				modesSet := 0
+				if redisTLSInsecure {
+					modesSet++
+				}
+				if redisTLSCAPath != "" {
+					modesSet++
+				}
+				// For secret name: count it if explicitly set (CLI) or if set to non-default value (env var)
+				// This allows the default secret name to be used as a fallback when no mode is explicitly specified
+				if c.Flags().Changed("redis-tls-ca-secret-name") || (redisTLSCASecretName != "" && redisTLSCASecretName != "argocd-redis-tls") {
+					modesSet++
+				}
+				if modesSet > 1 {
+					cmdutil.Fatal("Only one Redis TLS mode can be specified: --redis-tls-insecure, --redis-tls-ca-path, or --redis-tls-ca-secret-name")
+				}
+
+				// Redis TLS (for connections to agent's argocd-redis)
+				if redisTLSInsecure {
+					logrus.Warn("INSECURE: Not verifying Redis TLS certificate")
+					agentOpts = append(agentOpts, agent.WithRedisTLSInsecure(true))
+				} else if redisTLSCAPath != "" {
+					logrus.Infof("Loading Redis CA certificate from file %s", redisTLSCAPath)
+					agentOpts = append(agentOpts, agent.WithRedisTLSCAPath(redisTLSCAPath))
+				} else {
+					logrus.Infof("Loading Redis CA certificate from secret %s/%s", namespace, redisTLSCASecretName)
+					agentOpts = append(agentOpts, agent.WithRedisTLSCAFromSecret(kubeConfig.Clientset, namespace, redisTLSCASecretName, "ca.crt"))
+				}
+			}
+
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
+			agentOpts = append(agentOpts, agent.WithInformerSyncTimeout(informerSyncTimeout))
+			agentOpts = append(agentOpts, agent.WithApplicationInformerEventBufferInterval(bufferK8sInformerEvents))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
 			agentOpts = append(agentOpts, agent.WithCreateNamespace(createNamespace))
 			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
+			agentOpts = append(agentOpts, agent.WithIgnoreUnmanagedApps(ignoreUnmanagedApps))
+			agentOpts = append(agentOpts, agent.WithSourceUIDMismatchPolicy(sourceMismatchPolicy))
+			agentOpts = append(agentOpts, agent.WithRecreateAction(onApplicationRecreate))
 			agentOpts = append(agentOpts, agent.WithAllowedNamespaces(allowedNamespaces...))
+			agentOpts = append(agentOpts, agent.WithLabelSelector(labelSelector))
+			agentOpts = append(agentOpts, agent.WithAdoptionPolicy(adoptionPolicy))
 
 			if metricsPort > 0 {
 				agentOpts = append(agentOpts, agent.WithMetricsPort(metricsPort))
@@ -271,21 +351,40 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&logLevels, "log-level",
 		env.StringSliceWithDefault("ARGOCD_AGENT_LOG_LEVEL", nil, []string{"info"}),
 		"The log level to use. Comma-separated list of components in the format [<component>=]level")
+	command.Flags().StringSliceVar(&fullDetailCategories, "full-detail",
+		env.StringSliceWithDefault("ARGOCD_AGENT_FULL_DETAIL", nil, nil),
+		"Enable full detail logging for specified categories. Comma-separated list of: "+cmdutil.AvailableFullDetailCategories)
 
 	command.Flags().StringVar(&redisAddr, "redis-addr",
 		env.StringWithDefault("REDIS_ADDR", nil, "argocd-redis:6379"),
 		"The redis host to connect to")
 
+	command.Flags().StringVar(&redisCredsDirPath, "redis-creds-dir-path",
+		env.StringWithDefault("REDIS_CREDS_DIR_PATH", nil, ""),
+		"The redis directory with 'auth_username' file for Redis username (optional) and 'auth' for Redis password")
 	command.Flags().StringVar(&redisUsername, "redis-username",
 		env.StringWithDefault("REDIS_USERNAME", nil, ""),
 		"The username to connect to redis with")
-
 	command.Flags().StringVar(&redisPassword, "redis-password",
 		env.StringWithDefault("REDIS_PASSWORD", nil, ""),
 		"The password to connect to redis with")
 
+	// Redis TLS flags
+	command.Flags().BoolVar(&redisTLSEnabled, "redis-tls-enabled",
+		env.BoolWithDefault("ARGOCD_AGENT_REDIS_TLS_ENABLED", false),
+		"Enable TLS for Redis connections")
+	command.Flags().StringVar(&redisTLSCAPath, "redis-tls-ca-path",
+		env.StringWithDefault("ARGOCD_AGENT_REDIS_TLS_CA_PATH", nil, ""),
+		"Path to CA certificate for Redis TLS (for local development)")
+	command.Flags().StringVar(&redisTLSCASecretName, "redis-tls-ca-secret-name",
+		env.StringWithDefault("ARGOCD_AGENT_REDIS_TLS_CA_SECRET_NAME", nil, "argocd-redis-tls"),
+		"Secret name containing CA certificate for Redis TLS (for production deployment)")
+	command.Flags().BoolVar(&redisTLSInsecure, "redis-tls-insecure",
+		env.BoolWithDefault("ARGOCD_AGENT_REDIS_TLS_INSECURE", false),
+		"INSECURE: Do not verify Redis TLS certificate")
+
 	command.Flags().StringVar(&logFormat, "log-format",
-		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),
+		env.StringWithDefault("ARGOCD_AGENT_LOG_FORMAT", nil, "text"),
 		"The log format to use (one of: text, json)")
 	command.Flags().BoolVar(&insecure, "insecure-tls",
 		env.BoolWithDefault("ARGOCD_AGENT_TLS_INSECURE", false),
@@ -352,6 +451,15 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&cacheRefreshInterval, "cache-refresh-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_CACHE_REFRESH_INTERVAL", nil, 10*time.Second),
 		"Interval to refresh cluster cache info in principal")
+	command.Flags().DurationVar(&informerSyncTimeout, "informer-sync-timeout",
+		env.DurationWithDefault("ARGOCD_AGENT_INFORMER_SYNC_TIMEOUT", nil, 10*time.Second),
+		"Timeout to wait for Application/AppProject/Repository/GPG/Namespace informers to sync at startup")
+
+	// The advantage to this parameter is that buffering allows redundant events that occur closely together to be removed, thus reducing the cpu/bandwidth cost of processing 'update' events. The disadvantage is that it introduces a latency of up to X seconds for 'update' events, where X is the interval specified in the parameter. For example, with buffer-informer-event-interval=10s, an update event may be communicated from agent -> principal up to 10 seconds after it was first detected on workload cluster. (However, for infrequent events [those that occur >10s apart], there will be no delay.)
+	command.Flags().DurationVar(&bufferK8sInformerEvents, "buffer-informer-event-interval",
+		env.DurationWithDefault("ARGOCD_AGENT_BUFFER_INFORMER_EVENT_INTERVAL", nil, 0),
+		"Minimum interval in seconds that detected workload cluster Application resource 'update' events will wait in a buffer before being communicated by agent back to principal.")
+
 	command.Flags().DurationVar(&heartbeatInterval, "heartbeat-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_HEARTBEAT_INTERVAL", nil, 0),
 		"Interval for application-level heartbeats over the Subscribe stream (e.g., 30s). "+
@@ -374,9 +482,26 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&createNamespace, "create-namespace",
 		env.BoolWithDefault("ARGOCD_AGENT_CREATE_NAMESPACE", false),
 		"Create target namespace if it doesn't exist when syncing applications (used with destination-based-mapping)")
+	command.Flags().BoolVar(&ignoreUnmanagedApps, "ignore-unmanaged-apps",
+		env.BoolWithDefault("ARGOCD_AGENT_IGNORE_UNMANAGED_APPS", false),
+		"Ignore applications without the source UID annotation during resync instead of logging errors")
+	command.Flags().StringVar(&sourceMismatchPolicy, "source-uid-mismatch-policy",
+		env.StringWithDefault("ARGOCD_AGENT_SOURCE_UID_MISMATCH_POLICY", nil, "recreate"),
+		"Policy for source-UID mismatches: recreate (delete and recreate, default) or upsert (update in-place)")
+	command.Flags().StringVar(&onApplicationRecreate, "on-application-recreate",
+		env.StringWithDefault("ARGOCD_AGENT_ON_APPLICATION_RECREATE", nil, "ignore"),
+		"Action after recreating an app from unauthorized deletion (managed mode only): ignore (default), clear-status, or resync")
 	command.Flags().StringSliceVar(&allowedNamespaces, "allowed-namespaces",
 		env.StringSliceWithDefault("ARGOCD_AGENT_ALLOWED_NAMESPACES", nil, []string{}),
 		"List of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature)")
+
+	command.Flags().StringVar(&labelSelector, "label-selector",
+		env.StringWithDefault("ARGOCD_AGENT_LABEL_SELECTOR", nil, ""),
+		"Kubernetes label selector to restrict which resources the agent watches")
+
+	command.Flags().StringVar(&adoptionPolicy, "adoption-policy",
+		env.StringWithDefault("ARGOCD_AGENT_ADOPTION_POLICY", nil, "always"),
+		"Set the adoption policy for applications that already exist on a managed agent (always or never)")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
@@ -426,4 +551,34 @@ func loadCreds(path string) (auth.Credentials, error) {
 		userpass.ClientSecretField: c[1],
 	}
 	return creds, nil
+}
+
+// redisCreds read the credentials from a REDIS_CREDS_DIR_PATH https://argo-cd.readthedocs.io/en/stable/faq/#using-file-based-redis-credentials-via-redis_creds_dir_path.
+// This does not read the sentinel auth.
+func redisCreds(credsDirPath string, username string, password string) (outUsername string, outPassword string, err error) {
+	if credsDirPath != "" {
+		if username != "" || password != "" {
+			return "", "", errors.New("dir path cannot be combined with username / password")
+		}
+
+		usernameFile := filepath.Join(credsDirPath, "auth_username")
+		usernameData, err := os.ReadFile(usernameFile)
+		if err != nil {
+			// The file is optional, use an empty username if missing
+			if !os.IsNotExist(err) {
+				return "", "", fmt.Errorf("failed reading username from '%s': %w", usernameFile, err)
+			}
+			usernameData = []byte{}
+		}
+		username = strings.TrimSpace(string(usernameData))
+
+		passwordFile := filepath.Join(credsDirPath, "auth")
+		passwordData, err := os.ReadFile(passwordFile)
+		if err != nil {
+			return "", "", fmt.Errorf("failed reading password from '%s': %w", passwordFile, err)
+		}
+		password = strings.TrimSpace(string(passwordData))
+	}
+
+	return username, password, nil
 }

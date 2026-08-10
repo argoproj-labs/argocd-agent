@@ -41,27 +41,27 @@ func TestClusterTestSuite(t *testing.T) {
 }
 
 func (suite *ClusterInfoTestSuite) SetupTest() {
-	if !fixture.IsProcessRunning(fixture.PrincipalName) {
+	if !fixture.IsProcessRunning(fixture.PrincipalName, suite.T()) {
 		// Start the principal if it is not running and wait for it to be ready
-		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName))
+		suite.Require().NoError(fixture.StartProcess(fixture.PrincipalName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	} else {
 		// If principal is already running, verify that it is ready
 		fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 	}
 
-	if !fixture.IsProcessRunning(fixture.AgentManagedName) {
+	if !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T()) {
 		// Start the agent if it is not running and wait for it to be ready
-		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName))
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	} else {
 		// If agent is already running, verify that it is ready
 		fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 	}
 
-	if !fixture.IsProcessRunning(fixture.AgentAutonomousName) {
+	if !fixture.IsProcessRunning(fixture.AgentAutonomousName, suite.T()) {
 		// Start the agent if it is not running and wait for it to be ready
-		suite.Require().NoError(fixture.StartProcess(fixture.AgentAutonomousName))
+		suite.Require().NoError(fixture.StartProcess(fixture.AgentAutonomousName, suite.T()))
 		fixture.CheckReadiness(suite.T(), fixture.AgentAutonomousName)
 	} else {
 		// If agent is already running, verify that it is ready
@@ -84,10 +84,10 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	// Stop the agent
-	err := fixture.StopProcess(fixture.AgentManagedName)
+	err := fixture.StopProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 
 	// Verify that connection status is updated when agent is disconnected
@@ -97,10 +97,10 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	// Restart the agent
-	err = fixture.StartProcess(fixture.AgentManagedName)
+	err = fixture.StartProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 
@@ -111,7 +111,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Managed() {
 			Message:    fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 }
 
 func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
@@ -124,10 +124,10 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf(message, fixture.AgentAutonomousName, "connected"),
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	// Stop the agent
-	err := fixture.StopProcess(fixture.AgentAutonomousName)
+	err := fixture.StopProcess(fixture.AgentAutonomousName, suite.T())
 	requires.NoError(err)
 
 	// Verify that connection status is updated when agent is disconnected
@@ -137,10 +137,10 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 			Message:    fmt.Sprintf(message, fixture.AgentAutonomousName, "disconnected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	// Restart the agent
-	err = fixture.StartProcess(fixture.AgentAutonomousName)
+	err = fixture.StartProcess(fixture.AgentAutonomousName, suite.T())
 	requires.NoError(err)
 	fixture.CheckReadiness(suite.T(), fixture.AgentAutonomousName)
 
@@ -151,7 +151,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterInfo_Autonomous() {
 			Message:    fmt.Sprintf(message, fixture.AgentAutonomousName, "connected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 }
 
 // This test suite validates the cluster cache info reporting for managed agent.
@@ -169,35 +169,35 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// Create the first application in the principal cluster and validate deployment to managed cluster
 	appFirst := createApp(suite.Ctx, suite.PrincipalClient, requires)
 	appFirst = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient,
-		fixture.ToNamespacedName(&appFirst), types.NamespacedName{Name: appFirst.Name, Namespace: "argocd"}, requires)
+		fixture.ToNamespacedName(&appFirst), types.NamespacedName{Name: appFirst.Name, Namespace: fixture.ManagedAgentAppNamespace()}, requires)
 
 	// Step 2:
 	// Verify that cluster cache info has been updated for first application in agent cluster by Argo CD
 	// and then agent updated principal with this information
 	requires.Eventually(func() bool {
 		return fixture.HasApplicationsCount(appCountBefore+1, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 120*time.Second, 5*time.Second)
 
 	// Step 3:
 	// Create the second application having different name and namespace, also validate deployment to managed cluster
 	appSecond := createApp(suite.Ctx, suite.PrincipalClient, requires, struct{ Name, Namespace string }{Name: "guestbook1", Namespace: "guestbook1"})
 	appSecond = validateManagedAppCreated(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient,
-		fixture.ToNamespacedName(&appSecond), types.NamespacedName{Name: appSecond.Name, Namespace: "argocd"}, requires)
+		fixture.ToNamespacedName(&appSecond), types.NamespacedName{Name: appSecond.Name, Namespace: fixture.ManagedAgentAppNamespace()}, requires)
 
 	// Step 4:
 	// Verify that cluster cache info has been updated by Argo CD for second application in agent cluster
 	// and then agent again updated principal with this new information
 	requires.Eventually(func() bool {
 		return fixture.HasApplicationsCount(appCountBefore+2, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 
 	// Step 5:
 	// Delete the first application from the principal cluster and validate that it is removed from managed cluster
@@ -206,7 +206,7 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	requires.Eventually(func() bool {
 		app := argoapp.Application{}
 		return errors.IsNotFound(suite.ManagedAgentClient.Get(suite.Ctx,
-			types.NamespacedName{Name: appFirst.Name, Namespace: "argocd"}, &app, metav1.GetOptions{}))
+			types.NamespacedName{Name: appFirst.Name, Namespace: fixture.ManagedAgentAppNamespace()}, &app, metav1.GetOptions{}))
 	}, 60*time.Second, 2*time.Second)
 
 	// Step 6:
@@ -214,11 +214,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 	// and then agent again updated principal with this new information
 	requires.Eventually(func() bool {
 		return fixture.HasApplicationsCount(appCountBefore+1, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 120*time.Second, 5*time.Second)
 
 	// Step 7:
 	// Verify that existing agent connection status is preserved when cluster cache info is updated
@@ -227,11 +227,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 			Status:  appv1.ConnectionStatusSuccessful,
 			Message: fmt.Sprintf(message, fixture.AgentManagedName, "connected"),
 		}, clusterDetail)
-	}, 30*time.Second, 1*time.Second)
+	}, 60*time.Second, 1*time.Second)
 
 	// Step 8:
 	// Disconnect agent and verify that connection status is changed to Failed
-	requires.NoError(fixture.StopProcess(fixture.AgentManagedName))
+	requires.NoError(fixture.StopProcess(fixture.AgentManagedName, suite.T()))
 	requires.Eventually(func() bool {
 		return fixture.HasConnectionStatus(fixture.AgentManagedName, appv1.ConnectionState{
 			Status:     appv1.ConnectionStatusFailed,
@@ -248,11 +248,11 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 			return false
 		}
 		return ci.ApplicationsCount == 0 && ci.CacheInfo.APIsCount == 0 && ci.CacheInfo.ResourcesCount == 0
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 
 	// Step 10:
 	// Reconnect agent and verify that connection status and cluster cache info are updated again with correct values
-	requires.NoError(fixture.StartProcess(fixture.AgentManagedName))
+	requires.NoError(fixture.StartProcess(fixture.AgentManagedName, suite.T()))
 	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
 
 	requires.Eventually(func() bool {
@@ -265,5 +265,5 @@ func (suite *ClusterInfoTestSuite) Test_ClusterCacheInfo() {
 
 	requires.Eventually(func() bool {
 		return fixture.HasClusterCacheInfoSynced(fixture.AgentManagedName, clusterDetail)
-	}, 90*time.Second, 5*time.Second)
+	}, 180*time.Second, 5*time.Second)
 }

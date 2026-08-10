@@ -36,7 +36,7 @@ const (
 func EnableSelfAgentRegistration(ctx context.Context, principalClient, agentClient KubeClient) error {
 	// Create the shared client cert secret for self-registration
 	if err := CreateSharedClientCertSecret(ctx, principalClient, agentClient); err != nil {
-		return fmt.Errorf("failed to create shared client cert secret: %v", err)
+		return fmt.Errorf("failed to create shared client cert secret: %w", err)
 	}
 
 	// Set both the enable flag and the client cert secret name environment variables
@@ -58,7 +58,7 @@ func ClusterSecretExists(ctx context.Context, client KubeClient, agentName strin
 	if err != nil {
 		return false
 	}
-	secret, err := cluster.GetClusterSecret(ctx, kubeclient, "argocd", agentName)
+	secret, err := cluster.GetClusterSecret(ctx, kubeclient, PrincipalNamespace, agentName)
 	if err != nil {
 		return false
 	}
@@ -69,7 +69,7 @@ func ClusterSecretExists(ctx context.Context, client KubeClient, agentName strin
 func GetClusterSecret(ctx context.Context, client KubeClient, agentName string) (*corev1.Secret, error) {
 	secretName := "cluster-" + agentName
 	secret := &corev1.Secret{}
-	secretKey := types.NamespacedName{Name: secretName, Namespace: "argocd"}
+	secretKey := types.NamespacedName{Name: secretName, Namespace: PrincipalNamespace}
 	err := client.Get(ctx, secretKey, secret, metav1.GetOptions{})
 	return secret, err
 }
@@ -80,7 +80,7 @@ func DeleteClusterSecret(ctx context.Context, client KubeClient, agentName strin
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      secretName,
-			Namespace: "argocd",
+			Namespace: PrincipalNamespace,
 		},
 	}
 	return client.Delete(ctx, secret, metav1.DeleteOptions{})
@@ -90,7 +90,7 @@ func DeleteClusterSecret(ctx context.Context, client KubeClient, agentName strin
 // For the test it copies the existing agent client certificate from the managed agent cluster and adds the CA cert.
 func CreateSharedClientCertSecret(ctx context.Context, principalClient, agentClient KubeClient) error {
 	secret := &corev1.Secret{}
-	secretKey := types.NamespacedName{Name: SharedClientCertSecretName, Namespace: "argocd"}
+	secretKey := types.NamespacedName{Name: SharedClientCertSecretName, Namespace: PrincipalNamespace}
 	if err := principalClient.Get(ctx, secretKey, secret, metav1.GetOptions{}); err == nil {
 		// Secret already exists, no need to create
 		return nil
@@ -98,9 +98,9 @@ func CreateSharedClientCertSecret(ctx context.Context, principalClient, agentCli
 
 	// Get the existing agent client certificate from the managed agent cluster that was created during E2E setup
 	agentClientCert := &corev1.Secret{}
-	agentClientCertKey := types.NamespacedName{Name: config.SecretNameAgentClientCert, Namespace: "argocd"}
+	agentClientCertKey := types.NamespacedName{Name: config.SecretNameAgentClientCert, Namespace: ManagedAgentNamespace}
 	if err := agentClient.Get(ctx, agentClientCertKey, agentClientCert, metav1.GetOptions{}); err != nil {
-		return fmt.Errorf("failed to get agent client certificate: %v", err)
+		return fmt.Errorf("failed to get agent client certificate: %w", err)
 	}
 
 	tlsCert, ok := agentClientCert.Data["tls.crt"]
@@ -115,9 +115,9 @@ func CreateSharedClientCertSecret(ctx context.Context, principalClient, agentCli
 
 	// Get the CA certificate from the principal's CA secret
 	caSecret := &corev1.Secret{}
-	caSecretKey := types.NamespacedName{Name: config.SecretNamePrincipalCA, Namespace: "argocd"}
+	caSecretKey := types.NamespacedName{Name: config.SecretNamePrincipalCA, Namespace: PrincipalNamespace}
 	if err := principalClient.Get(ctx, caSecretKey, caSecret, metav1.GetOptions{}); err != nil {
-		return fmt.Errorf("failed to get CA certificate secret: %v", err)
+		return fmt.Errorf("failed to get CA certificate secret: %w", err)
 	}
 
 	caCert, ok := caSecret.Data["tls.crt"]
@@ -129,7 +129,7 @@ func CreateSharedClientCertSecret(ctx context.Context, principalClient, agentCli
 	sharedSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      SharedClientCertSecretName,
-			Namespace: "argocd",
+			Namespace: PrincipalNamespace,
 		},
 		Type: corev1.SecretTypeTLS,
 		Data: map[string][]byte{
@@ -140,7 +140,7 @@ func CreateSharedClientCertSecret(ctx context.Context, principalClient, agentCli
 	}
 
 	if err := principalClient.Create(ctx, sharedSecret, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("failed to create shared client cert secret: %v", err)
+		return fmt.Errorf("failed to create shared client cert secret: %w", err)
 	}
 
 	return nil
@@ -151,7 +151,7 @@ func DeleteSharedClientCertSecret(ctx context.Context, client KubeClient) error 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      SharedClientCertSecretName,
-			Namespace: "argocd",
+			Namespace: PrincipalNamespace,
 		},
 	}
 	err := client.Delete(ctx, secret, metav1.DeleteOptions{})

@@ -25,11 +25,14 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// newTestTrackingReader creates a ResourceTrackingReader with the specified tracking method.
-func newTestTrackingReader(trackingMethod v1alpha1.TrackingMethod) *ResourceTrackingReader {
+// newTestTrackingReaderWithLabelKey creates a ResourceTrackingReader with the specified tracking method and label key.
+func newTestTrackingReaderWithLabelKey(trackingMethod v1alpha1.TrackingMethod, labelKey string) *ResourceTrackingReader {
 	data := map[string]string{}
 	if trackingMethod != "" {
 		data["application.resourceTrackingMethod"] = string(trackingMethod)
+	}
+	if labelKey != "" {
+		data["application.instanceLabelKey"] = labelKey
 	}
 	cm := &corev1.ConfigMap{
 		ObjectMeta: v1.ObjectMeta{
@@ -45,10 +48,16 @@ func newTestTrackingReader(trackingMethod v1alpha1.TrackingMethod) *ResourceTrac
 	return NewResourceTrackingReader(context.Background(), kubeClient, "argocd")
 }
 
+// newTestTrackingReader creates a ResourceTrackingReader with the specified tracking method.
+func newTestTrackingReader(trackingMethod v1alpha1.TrackingMethod) *ResourceTrackingReader {
+	return newTestTrackingReaderWithLabelKey(trackingMethod, "")
+}
+
 func TestResourceTrackingReader_IsResourceTracked(t *testing.T) {
 	tests := []struct {
 		name           string
 		trackingMethod v1alpha1.TrackingMethod
+		labelKey       string
 		labels         map[string]string
 		annotations    map[string]string
 		expected       bool
@@ -90,13 +99,13 @@ func TestResourceTrackingReader_IsResourceTracked(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:           "Annotation+Label method - not tracked with only annotation",
+			name:           "Annotation+Label method - tracked with only annotation",
 			trackingMethod: v1alpha1.TrackingMethodAnnotationAndLabel,
 			labels:         nil,
 			annotations: map[string]string{
 				"argocd.argoproj.io/tracking-id": "my-app:namespace/Kind:name",
 			},
-			expected: false,
+			expected: true,
 		},
 		{
 			name:           "Annotation+Label method - not tracked with only label",
@@ -119,6 +128,16 @@ func TestResourceTrackingReader_IsResourceTracked(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:           "Label method - tracked with custom label key",
+			trackingMethod: v1alpha1.TrackingMethodLabel,
+			labelKey:       "argocd.argoproj.io/instance",
+			labels: map[string]string{
+				"argocd.argoproj.io/instance": "my-app",
+			},
+			annotations: nil,
+			expected:    true,
+		},
+		{
 			name:           "Annotation+Label method - not tracked with neither",
 			trackingMethod: v1alpha1.TrackingMethodAnnotationAndLabel,
 			labels:         nil,
@@ -138,7 +157,7 @@ func TestResourceTrackingReader_IsResourceTracked(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := newTestTrackingReader(tt.trackingMethod)
+			reader := newTestTrackingReaderWithLabelKey(tt.trackingMethod, tt.labelKey)
 			result, err := reader.IsResourceTracked(tt.labels, tt.annotations)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expected, result)

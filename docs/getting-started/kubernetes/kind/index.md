@@ -119,8 +119,11 @@ kubectl create namespace $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
 ### Install Argo CD for Control Plane
 Install Principal-specific Argo CD configuration.
 
+!!! note "Server-side apply required"
+    The Argo CD manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+
 ```bash
-kubectl apply -n $NAMESPACE_NAME \
+kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/principal?ref=$RELEASE_BRANCH" \
   --context kind-$PRINCIPAL_CLUSTER_NAME
 ```
@@ -132,7 +135,7 @@ This configuration includes:
 - ✅ **argocd-redis** (state storage)
 - ✅ **argocd-repo-server** (Git repository access)
 - ❌ **argocd-application-controller** (runs on workload clusters only)
-- ❌ **argocd-applicationset-controller** (not yet supported)
+- **argocd-applicationset-controller** (optional, see [ApplicationSets](../../../user-guide/applicationsets.md))
 
 !!! warning "Critical Component Placement"
     The **argocd-application-controller** must **never** be deployed on the control plane cluster. It can only run on workload clusters where it has direct access to manage Kubernetes resources. Running it on the control plane is not supported and is out of scope for this project.
@@ -331,8 +334,11 @@ kubectl create namespace $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
 
 ### Install Argo CD for Workload Cluster
 
+!!! note "Server-side apply required"
+    The Argo CD manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+
 ```bash
-kubectl apply -n $NAMESPACE_NAME \
+kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-$AGENT_MODE?ref=$RELEASE_BRANCH" \
   --context kind-$AGENT_CLUSTER_NAME
 ```
@@ -344,17 +350,17 @@ This configuration includes:
 - ✅ **argocd-redis** (local state for the application controller)
 - ❌ **argocd-server** (runs on control plane only)
 - ❌ **argocd-dex-server** (runs on control plane only)
-- ❌ **argocd-applicationset-controller** (not included by default)
+- ❌ **argocd-applicationset-controller** (not included by default, see [ApplicationSets](../../../user-guide/applicationsets.md))
 
 !!! info "Why Application Controller Runs Here"
     The **argocd-application-controller** runs on workload clusters because it needs direct access to the Kubernetes API to create, update, and delete resources. The argocd-agent facilitates communication between the control plane and these controllers, enabling centralized management while maintaining local execution.
 
 ### (Optional) Install Argo CD for Workload Cluster with ApplicationSet (Autonomous mode only)
 
-**Instead of the standard install above**, use the following command with `--server-side=true` (required due to the large ApplicationSet CRD):
+**Instead of the standard install above**, use the following command with `--server-side` (required due to the large ApplicationSet CRD):
 
 ```bash
-kubectl apply -n $NAMESPACE_NAME --server-side=true \
+kubectl apply -n $NAMESPACE_NAME --server-side \
   -k "https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous-appset?ref=$RELEASE_BRANCH" \
   --context kind-$AGENT_CLUSTER_NAME
 ```

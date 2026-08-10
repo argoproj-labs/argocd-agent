@@ -37,6 +37,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
+	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	"github.com/argoproj-labs/argocd-agent/principal"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 
@@ -51,6 +52,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		listenPort                int
 		logLevels                 []string
 		logFormat                 string
+		fullDetailCategories      []string
 		metricsPort               int
 		namespace                 string
 		allowedNamespaces         []string
@@ -93,19 +95,41 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 		redisAddress         string
 		redisPassword        string
+		redisCredsDirPath    string
 		redisCompressionType string
+		disableRedisProxy    bool
 		healthzPort          int
 
 		maxGRPCMessageSize int
+
+		numEventProcessors int
 
 		// OpenTelemetry configuration
 		otlpAddress  string
 		otlpInsecure bool
 
 		destinationBasedMapping bool
+		labelSelector           string
 
 		enableSelfClusterRegistration bool
 		selfRegClientCertSecretName   string
+		// Redis TLS configuration
+		redisTLSEnabled               bool
+		redisProxyServerTLSCertPath   string
+		redisProxyServerTLSKeyPath    string
+		redisProxyServerTLSSecretName string
+		redisTLSCAPath                string
+		redisTLSCASecretName          string
+		redisTLSInsecure              bool
+
+		// HA configuration
+		haEnabled                      bool
+		haPreferredRole                string
+		haPeerAddress                  string
+		haFailoverTimeout              time.Duration
+		haAdminPort                    int
+		haAllowedReplClients           []string
+		haReplicationInitialAckTimeout time.Duration
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -147,9 +171,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			subLoggers := cmdutil.SubSystemLoggers{
-				ResourceProxyLogger: cmdutil.CreateLogger(logFormat),
-				RedisProxyLogger:    cmdutil.CreateLogger(logFormat),
-				GrpcEventLogger:     cmdutil.CreateLogger(logFormat),
+				ResourceProxyLogger:       cmdutil.CreateLogger(logFormat),
+				RedisProxyLogger:          cmdutil.CreateLogger(logFormat),
+				GrpcEventLogger:           cmdutil.CreateLogger(logFormat),
+				InformerEventBufferLogger: cmdutil.CreateLogger(logFormat),
 			}
 
 			if len(logLevels) == 0 {
@@ -160,6 +185,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			opts = append(opts, principal.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
+
+			cmdutil.ParseFullDetail(fullDetailCategories)
 
 			kubeConfig, err := cmdutil.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
 			if err != nil {
@@ -337,10 +364,19 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			opts = append(opts, principal.WithWebSocket(enableWebSocket))
 			opts = append(opts, principal.WithKeepAliveMinimumInterval(keepAliveMinimumInterval))
+			_, redisPassword, err := redisCreds(redisCredsDirPath, "", redisPassword)
+			if err != nil {
+				cmdutil.Fatal("Failed loading Redis credentials: %s", err.Error())
+			}
 			opts = append(opts, principal.WithRedis(redisAddress, redisPassword, redisCompressionType))
+			if disableRedisProxy {
+				opts = append(opts, principal.WithRedisProxyDisabled())
+			}
 			opts = append(opts, principal.WithHealthzPort(healthzPort))
 			opts = append(opts, principal.WithDestinationBasedMapping(destinationBasedMapping))
+			opts = append(opts, principal.WithLabelSelector(labelSelector))
 			opts = append(opts, principal.WithMaxGRPCMessageSize(maxGRPCMessageSize))
+			opts = append(opts, principal.WithEventProcessors(int64(numEventProcessors)))
 
 			// Self agent registration validation and options
 			if enableSelfClusterRegistration {
@@ -354,6 +390,75 @@ func NewPrincipalRunCommand() *cobra.Command {
 			opts = append(opts, principal.WithAgentRegistration(enableSelfClusterRegistration))
 			if selfRegClientCertSecretName != "" {
 				opts = append(opts, principal.WithClientCertSecretName(selfRegClientCertSecretName))
+			}
+
+			// Configure Redis TLS
+			opts = append(opts, principal.WithRedisTLSEnabled(redisTLSEnabled))
+			if redisTLSEnabled {
+				// Redis proxy server TLS (for incoming connections from Argo CD)
+				if redisProxyServerTLSCertPath != "" && redisProxyServerTLSKeyPath != "" {
+					logrus.Infof("Loading Redis proxy server TLS configuration from files cert=%s and key=%s", redisProxyServerTLSCertPath, redisProxyServerTLSKeyPath)
+					opts = append(opts, principal.WithRedisProxyServerTLSFromPath(redisProxyServerTLSCertPath, redisProxyServerTLSKeyPath))
+				} else if (redisProxyServerTLSCertPath != "" && redisProxyServerTLSKeyPath == "") || (redisProxyServerTLSCertPath == "" && redisProxyServerTLSKeyPath != "") {
+					cmdutil.Fatal("Both --redis-proxy-server-tls-cert and --redis-proxy-server-tls-key have to be given")
+				} else {
+					logrus.Infof("Loading Redis proxy server TLS certificate from secret %s/%s", namespace, redisProxyServerTLSSecretName)
+					opts = append(opts, principal.WithRedisProxyServerTLSFromSecret(kubeConfig.Clientset, namespace, redisProxyServerTLSSecretName))
+				}
+
+				// Validate Redis TLS configuration - only one mode can be specified
+				// This validation works for both CLI flags and environment variables
+				modesSet := 0
+				if redisTLSInsecure {
+					modesSet++
+				}
+				if redisTLSCAPath != "" {
+					modesSet++
+				}
+				// For secret name: count it if explicitly set (CLI) or if set to non-default value (env var)
+				// This allows the default secret name to be used as a fallback when no mode is explicitly specified
+				if c.Flags().Changed("redis-ca-secret-name") || (redisTLSCASecretName != "" && redisTLSCASecretName != "argocd-redis-tls") {
+					modesSet++
+				}
+				if modesSet > 1 {
+					cmdutil.Fatal("Only one Redis TLS mode can be specified: --redis-tls-insecure, --redis-ca-path, or --redis-ca-secret-name")
+				}
+
+				// Redis TLS (for connections to principal's argocd-redis)
+				if redisTLSInsecure {
+					logrus.Warn("INSECURE: Not verifying Redis TLS certificate")
+					opts = append(opts, principal.WithRedisTLSInsecure(true))
+				} else if redisTLSCAPath != "" {
+					logrus.Infof("Loading Redis CA certificate from file %s", redisTLSCAPath)
+					opts = append(opts, principal.WithRedisTLSCAFromFile(redisTLSCAPath))
+				} else {
+					logrus.Infof("Loading Redis CA certificate from secret %s/%s", namespace, redisTLSCASecretName)
+					opts = append(opts, principal.WithRedisTLSCAFromSecret(kubeConfig.Clientset, namespace, redisTLSCASecretName, "ca.crt"))
+				}
+			}
+
+			if haEnabled {
+				haOpts := []ha.Option{ha.WithEnabled(true)}
+				if haPreferredRole != "" {
+					haOpts = append(haOpts, ha.WithPreferredRole(haPreferredRole))
+				}
+				if haPeerAddress != "" {
+					haOpts = append(haOpts, ha.WithPeerAddress(haPeerAddress))
+				}
+				if haFailoverTimeout > 0 {
+					haOpts = append(haOpts, ha.WithFailoverTimeout(haFailoverTimeout))
+				}
+				if haAdminPort > 0 {
+					haOpts = append(haOpts, ha.WithAdminPort(haAdminPort))
+				}
+				if len(haAllowedReplClients) > 0 {
+					haOpts = append(haOpts, ha.WithAllowedReplicationClients(haAllowedReplClients))
+				}
+				if haReplicationInitialAckTimeout > 0 {
+					haOpts = append(haOpts, ha.WithReplicationInitialAckTimeout(haReplicationInitialAckTimeout))
+				}
+				opts = append(opts, principal.WithHA(haOpts...))
+				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
 			}
 
 			s, err := principal.NewServer(ctx, kubeConfig, namespace, opts...)
@@ -381,6 +486,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&logFormat, "log-format",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LOG_FORMAT", nil, "text"),
 		"The log format to use (one of: text, json)")
+	command.Flags().StringSliceVar(&fullDetailCategories, "full-detail",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_FULL_DETAIL", nil, nil),
+		"Enable full detail logging for specified categories. Comma-separated list of: "+cmdutil.AvailableFullDetailCategories)
 
 	command.Flags().IntVar(&metricsPort, "metrics-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_METRICS_PORT", cmdutil.ValidPort, 8000),
@@ -491,6 +599,13 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&redisPassword, "redis-password",
 		env.StringWithDefault("REDIS_PASSWORD", nil, ""),
 		"The password to connect to redis with")
+	command.Flags().StringVar(&redisCredsDirPath, "redis-creds-dir-path",
+		env.StringWithDefault("REDIS_CREDS_DIR_PATH", nil, ""),
+		"The redis directory with 'auth' file for Redis password")
+
+	command.Flags().BoolVar(&disableRedisProxy, "disable-redis-proxy",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_DISABLE_REDIS_PROXY", false),
+		"Disable the local Redis proxy")
 
 	command.Flags().StringVar(&redisCompressionType, "redis-compression-type",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),
@@ -505,6 +620,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().IntVar(&maxGRPCMessageSize, "grpc-max-message-size",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_GRPC_MAX_MESSAGE_SIZE", nil, grpcutil.DefaultGRPCMaxMessageSize),
 		"Maximum gRPC message size in bytes for send and receive (default: 200MB)")
+	command.Flags().IntVar(&numEventProcessors, "event-processors",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_EVENT_PROCESSORS", nil, 10),
+		"Number of concurrent event processors")
 
 	command.Flags().StringVar(&otlpAddress, "otlp-address",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_OTLP_ADDRESS", nil, ""),
@@ -512,10 +630,36 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&otlpInsecure, "otlp-insecure",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_OTLP_INSECURE", false),
 		"Experimental: Use insecure connection to OpenTelemetry collector endpoint")
+	// Redis TLS flags
+	command.Flags().BoolVar(&redisTLSEnabled, "redis-tls-enabled",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_REDIS_TLS_ENABLED", false),
+		"Enable TLS for Redis connections")
+	command.Flags().StringVar(&redisProxyServerTLSCertPath, "redis-proxy-server-tls-cert",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_CERT_PATH", nil, ""),
+		"Path to TLS certificate for Redis proxy server")
+	command.Flags().StringVar(&redisProxyServerTLSKeyPath, "redis-proxy-server-tls-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_KEY_PATH", nil, ""),
+		"Path to TLS private key for Redis proxy server")
+	command.Flags().StringVar(&redisProxyServerTLSSecretName, "redis-proxy-server-tls-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_PROXY_SERVER_TLS_SECRET_NAME", nil, "argocd-redis-proxy-tls"),
+		"Secret name containing TLS certificate and key for Redis proxy server")
+	command.Flags().StringVar(&redisTLSCAPath, "redis-ca-path",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_CA_PATH", nil, ""),
+		"Path to CA certificate for verifying Redis TLS certificate")
+	command.Flags().StringVar(&redisTLSCASecretName, "redis-ca-secret-name",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_CA_SECRET_NAME", nil, "argocd-redis-tls"),
+		"Secret name containing CA certificate for verifying Redis TLS certificate")
+	command.Flags().BoolVar(&redisTLSInsecure, "redis-tls-insecure",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_REDIS_TLS_INSECURE", false),
+		"INSECURE: Do not verify Redis TLS certificate")
 
 	command.Flags().BoolVar(&destinationBasedMapping, "destination-based-mapping",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING", false),
 		"Map applications to agents based on spec.destination.name instead of namespace")
+
+	command.Flags().StringVar(&labelSelector, "label-selector",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_LABEL_SELECTOR", nil, ""),
+		"Kubernetes label selector to restrict which resources the principal watches")
 
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
@@ -526,6 +670,28 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&selfRegClientCertSecretName, "self-registration-client-cert-secret",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET", nil, ""),
 		"TLS secret containing shared client cert for self-registered cluster secrets (must have tls.crt, tls.key, ca.crt)")
+
+	command.Flags().BoolVar(&haEnabled, "ha-enabled",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_HA_ENABLED", false),
+		"Enable High Availability mode")
+	command.Flags().StringVar(&haPreferredRole, "ha-preferred-role",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_PREFERRED_ROLE", nil, "primary"),
+		"Preferred HA role: 'primary' or 'replica'")
+	command.Flags().StringVar(&haPeerAddress, "ha-peer-address",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_PEER_ADDRESS", nil, ""),
+		"Address of the HA peer principal (required for replicas, optional for primary)")
+	command.Flags().DurationVar(&haFailoverTimeout, "ha-failover-timeout",
+		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_FAILOVER_TIMEOUT", nil, 30*time.Second),
+		"Time to wait before promoting to primary after peer is unreachable")
+	command.Flags().IntVar(&haAdminPort, "ha-admin-port",
+		env.NumWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_PORT", cmdutil.ValidPort, 0),
+		"Port for the localhost-only HAAdmin gRPC server (0 uses ha.Options default 8405)")
+	command.Flags().StringSliceVar(&haAllowedReplClients, "ha-allowed-replication-clients",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS", nil, []string{}),
+		"Comma-separated list of peer identities allowed to connect for replication")
+	command.Flags().DurationVar(&haReplicationInitialAckTimeout, "ha-replication-initial-ack-timeout",
+		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_INITIAL_ACK_TIMEOUT", nil, 0),
+		"How long the primary waits for the replica's initial ACK after snapshot fetch (default: 5m)")
 
 	return command
 }
@@ -654,11 +820,11 @@ func parseHeaderAuth(config string) (string, *regexp.Regexp, error) {
 //
 // Example: "uri:spiffe://ea1t\\.us\\.a/ns/argocd-agent/sa/(.+)"
 func parseMTLSConfig(config string) (mtls.IdentitySource, string) {
-	if strings.HasPrefix(config, "subject:") {
-		return mtls.IdentitySourceSubject, strings.TrimPrefix(config, "subject:")
+	if after, ok := strings.CutPrefix(config, "subject:"); ok {
+		return mtls.IdentitySourceSubject, after
 	}
-	if strings.HasPrefix(config, "uri:") {
-		return mtls.IdentitySourceURI, strings.TrimPrefix(config, "uri:")
+	if after, ok := strings.CutPrefix(config, "uri:"); ok {
+		return mtls.IdentitySourceURI, after
 	}
 	logrus.Warn("DEPRECATED: mTLS auth config without explicit source (subject: or uri:). Please update to use 'mtls:subject:<regex>' or 'mtls:uri:<regex>'")
 	return mtls.IdentitySourceSubject, config

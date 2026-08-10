@@ -73,6 +73,104 @@ export ARGOCD_AGENT_LOG_LEVEL=info
 INFO[0001] Agent connected                               agent=production-cluster
 ```
 
+### Full-Detail Logging
+
+Full-detail logging adds verbose resource payloads, diffs, and event data to structured log fields. It is independent of the log level and can be enabled per category.
+
+**Categories:**
+
+| Category | What it adds |
+|----------|-------------|
+| `actions` | Full JSON of created resources, diffs for updates (secrets are redacted) |
+| `events` | Full CloudEvent payloads for messages exchanged between agent and principal |
+| `informers` | Full JSON on add, diffs on update for K8s informer events (secrets are redacted) |
+
+**Enable on the principal:**
+
+```bash
+# Single category
+argocd-agent principal --full-detail=actions
+
+# Multiple categories (comma-separated)
+argocd-agent principal --full-detail=actions,events
+
+# All categories
+argocd-agent principal --full-detail=all
+```
+
+Via environment variable:
+
+```bash
+# Comma-separated list
+export ARGOCD_PRINCIPAL_FULL_DETAIL="actions,events,informers"
+
+# Or enable everything
+export ARGOCD_PRINCIPAL_FULL_DETAIL="all"
+```
+
+**Enable on the agent:**
+
+```bash
+argocd-agent agent --full-detail=all
+```
+
+Via environment variable:
+
+```bash
+export ARGOCD_AGENT_FULL_DETAIL="actions,events"
+```
+
+**Example output with `--full-detail=actions`:**
+
+```text
+level=info msg="Created application default/my-app" action=create detail="{\"metadata\":{\"name\":\"my-app\",...}}" log_category=actions name=my-app namespace=default resource_type=application
+```
+
+Without full detail, the same log omits the `detail` field:
+
+```text
+level=info msg="Created application default/my-app" action=create log_category=actions name=my-app namespace=default resource_type=application
+```
+
+!!! note "Secret Redaction"
+    Kubernetes Secrets are never included in the `detail` field. Create/add logs show `<redacted: Secret>` and update diffs are skipped entirely.
+
+### Structured Log Fields
+
+All action, event, and informer logs include structured fields for filtering and dashboard queries.
+
+**Common fields across all categories:**
+
+| Field | Description | Example values |
+|-------|-------------|----------------|
+| `log_category` | Log category | `actions`, `events`, `informers` |
+| `action` | The operation performed | `create`, `update`, `delete` |
+| `name` | Resource name | `my-app`, `default` |
+| `namespace` | Resource namespace | `argocd`, `default` |
+
+**Action-specific fields:**
+
+| Field | Description | Example values |
+|-------|-------------|----------------|
+| `resource_type` | Kubernetes resource type | `application`, `appproject`, `secret`, `configmap` |
+| `detail` | Full JSON or diff (when full detail enabled) | `{"metadata":...}` |
+
+**Event-specific fields:**
+
+| Field | Description | Example values |
+|-------|-------------|----------------|
+| `direction` | Event direction | `send`, `recv` |
+| `event_target` | Target resource type | `application`, `appproject`, `repository` |
+| `event_type` | CloudEvent type | `io.argoproj.argocd-agent.event.create` |
+| `detail` | Event payload (when full detail enabled) | `{"metadata":...}` |
+
+**Informer-specific fields:**
+
+| Field | Description | Example values |
+|-------|-------------|----------------|
+| `resource_type` | Kubernetes resource type (lowercase) | `application`, `configmap`, `secret` |
+| `detail` | Full JSON or diff (when full detail enabled) | `{"metadata":...}` |
+
 ### Debugging Tips
 
 1. **Enable debug logging temporarily** to troubleshoot issues:
@@ -89,6 +187,11 @@ INFO[0001] Agent connected                               agent=production-cluste
 3. **Filter logs by agent**:
    ```bash
    kubectl logs -n argocd deployment/argocd-agent-principal | grep "agent=my-cluster"
+   ```
+
+4. **Trace a resource through all categories**:
+   ```bash
+   kubectl logs -n argocd deployment/argocd-agent-agent | grep 'name=my-app' | grep -E 'log_category=(actions|events|informers)'
    ```
 
 ## Metrics
@@ -171,7 +274,7 @@ spec:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `argocd_agent_connected_agents` | Gauge | Number of currently connected agents |
+| `argocd_principal_connected_agents` | Gauge | Number of currently connected agents |
 | `argocd_agent_grpc_requests_total` | Counter | Total gRPC requests by method |
 | `argocd_agent_grpc_request_duration_seconds` | Histogram | gRPC request duration |
 | `argocd_agent_sync_operations_total` | Counter | Total sync operations |
@@ -185,9 +288,26 @@ spec:
 | `argocd_agent_events_sent_total` | Counter | Total events sent to principal |
 | `argocd_agent_events_received_total` | Counter | Total events received from principal |
 
-### Grafana Dashboard
+### Grafana Dashboards
 
-For detailed metrics visualization, see the [Operations: Metrics](../operations/metrics.md) documentation.
+Example Grafana dashboards are available in `examples/o11y/`:
+
+**Principal Dashboard** (`argocd-agent-principal-dashboard.json`):
+Import on the control-plane cluster. Monitors the principal component including connected agents, resource operations (Applications, AppProjects, Repositories, ApplicationSets, GPG keys), event processing, connection status, and resource/Redis proxy metrics.
+
+**Agent Dashboard** (`argocd-agent-agent-dashboard.json`):
+The same dashboard JSON can be imported in two ways:
+
+- **On the control-plane**: Shows metrics from all connected agents. Use the "Agent Name" dropdown to filter by a specific agent or view all at once. Requires agent's metrics endpoint to be reachable from the control-plane Prometheus.
+- **On a workload cluster**: Shows only that cluster's local agent data, since the local Prometheus only scrapes the local agent.
+
+The agent dashboard includes connection status, event processing, resource/Redis proxy metrics, gRPC metrics, Kubernetes API metrics, and process health (CPU, memory, goroutines).
+
+> **Note**: When the control-plane Prometheus scrapes agent metrics from workload clusters, it stores its own copy of the data. If a workload cluster also has its own Prometheus scraping the same agent locally, both instances independently collect and store the same metrics.
+
+See `examples/o11y/grafana-setup.md` in the repository for instructions on configuring Prometheus scrape targets, importing dashboards, and setting up multi-cluster monitoring.
+
+For a complete list of available metrics, see the [Operations: Metrics](../operations/metrics.md) documentation.
 
 ## Health Checks
 
@@ -378,6 +498,7 @@ For detailed profiling guidance, see the [Operations: Profiling](../operations/p
 |-----------|----------|--------------|-----------|---------|
 | Log Level | `--log-level` | `ARGOCD_PRINCIPAL_LOG_LEVEL` | `principal.log.level` | `info` |
 | Log Format | `--log-format` | `ARGOCD_PRINCIPAL_LOG_FORMAT` | N/A | `text` |
+| Full Detail | `--full-detail` | `ARGOCD_PRINCIPAL_FULL_DETAIL` | N/A | disabled |
 | Metrics Port | `--metrics-port` | `ARGOCD_PRINCIPAL_METRICS_PORT` | `principal.metrics.port` | `8000` |
 | Health Port | `--healthz-port` | `ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT` | `principal.healthz.port` | `8003` |
 | Profiling Port | `--pprof-port` | `ARGOCD_PRINCIPAL_PPROF_PORT` | N/A | `0` (disabled) |
@@ -387,7 +508,8 @@ For detailed profiling guidance, see the [Operations: Profiling](../operations/p
 | Parameter | CLI Flag | Env Variable | ConfigMap | Default |
 |-----------|----------|--------------|-----------|---------|
 | Log Level | `--log-level` | `ARGOCD_AGENT_LOG_LEVEL` | `agent.log.level` | `info` |
-| Log Format | `--log-format` | `ARGOCD_PRINCIPAL_LOG_FORMAT` | N/A | `text` |
+| Log Format | `--log-format` | `ARGOCD_AGENT_LOG_FORMAT` | N/A | `text` |
+| Full Detail | `--full-detail` | `ARGOCD_AGENT_FULL_DETAIL` | N/A | disabled |
 | Metrics Port | `--metrics-port` | `ARGOCD_AGENT_METRICS_PORT` | `agent.metrics.port` | `8181` |
 | Health Port | `--healthz-port` | `ARGOCD_AGENT_HEALTH_CHECK_PORT` | `agent.healthz.port` | `8001` |
 | Profiling Port | `--pprof-port` | `ARGOCD_AGENT_PPROF_PORT` | N/A | `0` (disabled) |

@@ -64,11 +64,11 @@ func NewAgentCommand() *cobra.Command {
 	return command
 }
 
-func generateAgentClientCert(agentName string, clt *kube.KubernetesClient) (clientCert string, clientKey string, caData string, err error) {
+func generateAgentClientCert(agentName string, clt *kube.KubernetesClient, validityDays int, opts tlsutil.KeyGenOptions) (clientCert string, clientKey string, caData string, err error) {
 	ctx := context.Background()
 
 	// Our CA certificate is stored in a secret
-	tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, globalOpts.principalNamespace, config.SecretNamePrincipalCA)
+	tlsCert, err := tlsutil.TLSCertFromSecret(ctx, clt.Clientset, principalCfg.Namespace, config.SecretNamePrincipalCA)
 	if err != nil {
 		err = fmt.Errorf("could not read CA secret: %w", err)
 		return
@@ -80,8 +80,13 @@ func generateAgentClientCert(agentName string, clt *kube.KubernetesClient) (clie
 		return
 	}
 
+	if err = tlsutil.ValidateLeafValidityDays(signerCert, validityDays); err != nil {
+		err = fmt.Errorf("invalid certificate validity: %w", err)
+		return
+	}
+
 	// Generate a client cert and sign it using the CA's cert and key
-	clientCert, clientKey, err = tlsutil.GenerateClientCertificate(agentName, signerCert, tlsCert.PrivateKey)
+	clientCert, clientKey, err = tlsutil.GenerateClientCertificate(agentName, signerCert, tlsCert.PrivateKey, validityDays, opts)
 	if err != nil {
 		err = fmt.Errorf("could not create client cert: %w", err)
 		return
@@ -90,9 +95,9 @@ func generateAgentClientCert(agentName string, clt *kube.KubernetesClient) (clie
 	// We need to re-encode the CA's public certificate back to PEM.
 	// It's a little stupid, because it is stored in the secret as
 	// PEM already, but the tls.Certificate contains only RAW byte.
-	caData, err = tlsutil.CertDataToPEM([]byte(tlsCert.Certificate[0]))
+	caData, err = tlsutil.CertDataToPEM(tlsCert.Certificate[0])
 	if err != nil {
-		err = fmt.Errorf("could not encode CA cert to PEM: %v", err)
+		err = fmt.Errorf("could not encode CA cert to PEM: %w", err)
 		return
 	}
 
@@ -118,8 +123,8 @@ func parseSecretRef(secretRef, defaultNamespace string) (namespace, name string)
 // Secret references can be in the format "namespace/name" or just "name" (uses principal namespace).
 func readTLSFromExistingSecrets(ctx context.Context, clt *kube.KubernetesClient, tlsSecretRef, caSecretRef string) (clientCert string, clientKey string, caData string, err error) {
 	// Parse secret references to extract namespace and name
-	tlsNamespace, tlsSecretName := parseSecretRef(tlsSecretRef, globalOpts.principalNamespace)
-	caNamespace, caSecretName := parseSecretRef(caSecretRef, globalOpts.principalNamespace)
+	tlsNamespace, tlsSecretName := parseSecretRef(tlsSecretRef, principalCfg.Namespace)
+	caNamespace, caSecretName := parseSecretRef(caSecretRef, principalCfg.Namespace)
 
 	// Read TLS certificate and key from the TLS secret
 	tlsSecret, err := clt.Clientset.CoreV1().Secrets(tlsNamespace).Get(ctx, tlsSecretName, metav1.GetOptions{})
@@ -172,6 +177,9 @@ func NewAgentCreateCommand() *cobra.Command {
 		addLabels     []string
 		tlsFromSecret string
 		caFromSecret  string
+		days          int
+		keyAlgorithm  string
+		keySize       int
 	)
 	command := &cobra.Command{
 		Short: "Create a new agent configuration",
@@ -188,6 +196,9 @@ func NewAgentCreateCommand() *cobra.Command {
 			if (tlsFromSecret != "" && caFromSecret == "") || (tlsFromSecret == "" && caFromSecret != "") {
 				cmdutil.Fatal("Both --tls-from-secret and --ca-from-secret must be provided together")
 			}
+
+			usingExistingTLS := tlsFromSecret != "" && caFromSecret != ""
+			rejectUnusedKeyGenFlags(c, !usingExistingTLS, "are only used when generating certificates from the PKI")
 
 			// A set of labels for the cluster secret
 			labels := make(map[string]string)
@@ -207,13 +218,13 @@ func NewAgentCreateCommand() *cobra.Command {
 				cmdutil.Fatal("%v", err)
 			}
 
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 			}
 
 			// Make sure the cluster secret doesn't exist yet
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
 			if err != nil && !errors.IsNotFound(err) {
 				cmdutil.Fatal("Reading cluster secret: %s", err)
 			} else if err == nil {
@@ -222,7 +233,7 @@ func NewAgentCreateCommand() *cobra.Command {
 
 			var clientCert, clientKey, caData string
 
-			if tlsFromSecret != "" && caFromSecret != "" {
+			if usingExistingTLS {
 				// Read TLS credentials from existing secrets
 				clientCert, clientKey, caData, err = readTLSFromExistingSecrets(ctx, clt, tlsFromSecret, caFromSecret)
 				if err != nil {
@@ -230,7 +241,8 @@ func NewAgentCreateCommand() *cobra.Command {
 				}
 			} else {
 				// Generate certificates from the PKI
-				clientCert, clientKey, caData, err = generateAgentClientCert(agentName, clt)
+				keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+				clientCert, clientKey, caData, err = generateAgentClientCert(agentName, clt, days, keyOpts)
 				if err != nil {
 					cmdutil.Fatal("%v", err)
 				}
@@ -259,14 +271,14 @@ func NewAgentCreateCommand() *cobra.Command {
 			sec := &v1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      clusterSecretName(agentName),
-					Namespace: globalOpts.principalNamespace,
+					Namespace: principalCfg.Namespace,
 				},
 			}
 			err = cluster.ClusterToSecret(clus, sec)
 			if err != nil {
 				cmdutil.Fatal("Could not convert cluster to secret: %v", err)
 			}
-			_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Create(ctx, sec, metav1.CreateOptions{})
+			_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Create(ctx, sec, metav1.CreateOptions{})
 			if err != nil {
 				cmdutil.Fatal("Could not create cluster secret: %v", err)
 			}
@@ -277,24 +289,24 @@ func NewAgentCreateCommand() *cobra.Command {
 	command.Flags().StringSliceVarP(&addLabels, "label", "l", []string{}, "Additional labels for the agent")
 	command.Flags().StringVar(&tlsFromSecret, "tls-from-secret", "", "Name of an existing secret containing TLS certificate and key (keys: tls.crt, tls.key). Format: [namespace/]name")
 	command.Flags().StringVar(&caFromSecret, "ca-from-secret", "", "Name of an existing secret containing CA certificate (key: ca.crt). Format: [namespace/]name")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the client certificate is valid for (only used when generating from PKI)")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize, "only used when generating from PKI")
 	return command
 }
 
 func NewAgentListCommand() *cobra.Command {
-	var (
-		labelSelector []string
-	)
+	var labelSelector []string
 	command := &cobra.Command{
 		Short: "List configured agents",
 		Use:   "list",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.TODO()
 			labelSelector = append(labelSelector, cluster.LabelKeyClusterAgentMapping)
-			clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+			clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 			if err != nil {
 				cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 			}
-			agentList, err := clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).List(ctx, metav1.ListOptions{
+			agentList, err := clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).List(ctx, metav1.ListOptions{
 				LabelSelector: strings.Join(labelSelector, ","),
 			})
 			if err != nil {
@@ -314,9 +326,7 @@ func NewAgentListCommand() *cobra.Command {
 }
 
 func NewAgentInspectCommand() *cobra.Command {
-	var (
-		outputFormat string
-	)
+	var outputFormat string
 	command := &cobra.Command{
 		Short:   "Inspect agent configuration",
 		Use:     "inspect",
@@ -377,11 +387,9 @@ func NewAgentInspectCommand() *cobra.Command {
 }
 
 func NewAgentPrintTLSCommand() *cobra.Command {
-	var (
-		printWhat string
-	)
+	var printWhat string
 	command := &cobra.Command{
-		Short:   "Print the TLS client certificate of an agent to stdout",
+		Short:   "Print a TLS asset of an agent to stdout",
 		Use:     "print-tls",
 		Aliases: []string{"dump-tls"},
 		Run: func(cmd *cobra.Command, args []string) {
@@ -397,19 +405,30 @@ func NewAgentPrintTLSCommand() *cobra.Command {
 				cmd.Printf("Agent '%s' is not configured.\n", agentName)
 				os.Exit(1)
 			}
-			switch printWhat {
-			case "cert":
-				fmt.Print(string(clus.Config.CertData))
-			case "key":
-				fmt.Print(string(clus.Config.KeyData))
-			case "ca:":
-				fmt.Print(string(clus.Config.CAData))
+
+			assetData, err := clusterTLSAsset(clus, printWhat)
+			if err != nil {
+				cmdutil.Fatal("%v", err)
 			}
+			fmt.Print(string(assetData))
 		},
 	}
 
-	command.Flags().StringVarP(&printWhat, "type", "t", "cert", "Type of asset to print (cert or key)")
+	command.Flags().StringVarP(&printWhat, "type", "t", "cert", "Type of asset to print (cert, key, or ca)")
 	return command
+}
+
+func clusterTLSAsset(clus *v1alpha1.Cluster, assetType string) ([]byte, error) {
+	switch strings.ToLower(assetType) {
+	case "cert":
+		return clus.Config.CertData, nil
+	case "key":
+		return clus.Config.KeyData, nil
+	case "ca":
+		return clus.Config.CAData, nil
+	default:
+		return nil, fmt.Errorf("unknown TLS asset type %q; expected one of cert, key, or ca", assetType)
+	}
 }
 
 func NewAgentReconfigureCommand() *cobra.Command {
@@ -418,6 +437,9 @@ func NewAgentReconfigureCommand() *cobra.Command {
 		rpUsername        string
 		rpPassword        string
 		reissueClientCert bool
+		days              int
+		keyAlgorithm      string
+		keySize           int
 	)
 	command := &cobra.Command{
 		Short: "Reconfigures an agent's properties",
@@ -437,6 +459,8 @@ func NewAgentReconfigureCommand() *cobra.Command {
 				os.Exit(1)
 			}
 
+			rejectUnusedKeyGenFlags(cmd, reissueClientCert, "are only used with --reissue-client-cert")
+
 			if rpServerAddr != "" && rpServerAddr != cluster.Server {
 				cmd.Println("Setting new server address")
 				cluster.Server = rpServerAddr
@@ -453,11 +477,12 @@ func NewAgentReconfigureCommand() *cobra.Command {
 				changed = true
 			}
 			if reissueClientCert {
-				clt, err := kube.NewKubernetesClientFromConfig(context.Background(), globalOpts.principalNamespace, "", globalOpts.principalContext)
+				clt, err := kube.NewKubernetesClientFromConfig(context.Background(), principalCfg.Namespace, "", principalCfg.KubeContext)
 				if err != nil {
 					cmdutil.Fatal("Could not create Kubernetes client: %v", err)
 				}
-				clientCert, clientKey, caData, err := generateAgentClientCert(agentName, clt)
+				keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+				clientCert, clientKey, caData, err := generateAgentClientCert(agentName, clt, days, keyOpts)
 				if err != nil {
 					cmdutil.Fatal("%v", err)
 				}
@@ -481,6 +506,8 @@ func NewAgentReconfigureCommand() *cobra.Command {
 	command.Flags().StringVar(&rpUsername, "resource-proxy-username", "", "The username for the resource-proxy")
 	command.Flags().StringVar(&rpPassword, "resource-proxy-password", "", "The password for the resource-proxy")
 	command.Flags().BoolVar(&reissueClientCert, "reissue-client-cert", false, "Reissue the agent's client cert")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the client certificate is valid for (only used with --reissue-client-cert)")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize, "only used with --reissue-client-cert")
 	return command
 }
 
@@ -528,11 +555,11 @@ func labelSliceToMap(labels []string) (map[string]string, error) {
 
 func loadClusterSecret(agentName string) (*v1alpha1.Cluster, error) {
 	ctx := context.TODO()
-	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+	clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 	if err != nil {
 		return nil, err
 	}
-	sec, err := clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
+	sec, err := clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil, nil
@@ -542,26 +569,26 @@ func loadClusterSecret(agentName string) (*v1alpha1.Cluster, error) {
 	}
 	clus, err := db.SecretToCluster(sec)
 	if err != nil {
-		return nil, fmt.Errorf("invalid cluster secret: %v", err)
+		return nil, fmt.Errorf("invalid cluster secret: %w", err)
 	}
 	return clus, nil
 }
 
 func saveClusterSecret(agentName string, clstr *v1alpha1.Cluster) error {
 	ctx := context.TODO()
-	clt, err := kube.NewKubernetesClientFromConfig(ctx, globalOpts.principalNamespace, "", globalOpts.principalContext)
+	clt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
 	if err != nil {
 		return err
 	}
-	sec, err := clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
+	sec, err := clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Get(ctx, clusterSecretName(agentName), metav1.GetOptions{})
 	if errors.IsNotFound(err) {
-		_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Create(ctx, sec, metav1.CreateOptions{})
+		_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Create(ctx, sec, metav1.CreateOptions{})
 	} else if err == nil {
 		err = cluster.ClusterToSecret(clstr, sec)
 		if err != nil {
 			cmdutil.Fatal("Could not convert cluster to secret: %v", err)
 		}
-		_, err = clt.Clientset.CoreV1().Secrets(globalOpts.principalNamespace).Update(ctx, sec, metav1.UpdateOptions{})
+		_, err = clt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Update(ctx, sec, metav1.UpdateOptions{})
 	}
 	return err
 }

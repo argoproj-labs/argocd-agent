@@ -26,6 +26,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -202,13 +203,7 @@ func ValidateTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16) err
 			for _, cs := range availableCiphers {
 				if cs.ID == cipherID {
 					// Check if this cipher supports the minimum TLS version
-					supported := false
-					for _, v := range cs.SupportedVersions {
-						if v == minVersion {
-							supported = true
-							break
-						}
-					}
+					supported := slices.Contains(cs.SupportedVersions, minVersion)
 					if !supported {
 						return fmt.Errorf("cipher suite %s is not supported by minimum TLS version %s",
 							cs.Name, TLSVersionName(minVersion))

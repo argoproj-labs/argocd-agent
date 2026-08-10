@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -26,6 +27,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 	"github.com/sirupsen/logrus"
@@ -38,6 +40,10 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/workqueue"
 )
+
+// ErrSourceUIDNotFound is returned when a resource does not have the source UID annotation.
+// Resources without this annotation are not managed by the agent and should be skipped.
+var ErrSourceUIDNotFound = errors.New("source UID annotation not found")
 
 // RequestHandler handles all the resync requests that are exchanged when the agent/principal process restarts.
 // Depending on the agent mode, the sync messages are common to both the agent and the principal.
@@ -52,6 +58,7 @@ type RequestHandler struct {
 
 	log *logrus.Entry
 
+	// role refers to the role of the current process, either 'principal'/'agent'
 	role manager.ManagerRole
 
 	namespace string
@@ -60,6 +67,19 @@ type RequestHandler struct {
 	// by their actual namespace instead of assuming the agent name is the namespace.
 	// This is used when destination-based mapping is enabled on the principal.
 	destinationBasedMapping bool
+
+	// ignoreUnmanagedApps indicates that resources without the source UID annotation
+	// should be silently skipped during resync instead of causing an error.
+	ignoreUnmanagedApps bool
+
+	// principalUID is stamped on outgoing events so that agents can detect
+	// principal transitions during resync after a failover.
+	principalUID string
+
+	// peerNamespace is the Kubernetes namespace where the peer (agent or principal)
+	// is installed. Used with destinationBasedMapping to remap namespaces
+	// during resync lookups when agent and principal are in different namespaces.
+	peerNamespace string
 }
 
 func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLimitingInterface[*cloudevent.Event], events *event.EventSource, resources *resources.Resources, log *logrus.Entry, role manager.ManagerRole, namespace string) *RequestHandler {
@@ -74,11 +94,31 @@ func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLim
 	}
 }
 
+// WithPrincipalUID sets the principal identity that will be stamped on all
+// outgoing events during resync. Required for agents to correctly handle
+// principal transitions after failover.
+func (r *RequestHandler) WithPrincipalUID(uid string) *RequestHandler {
+	r.principalUID = uid
+	return r
+}
+
 // WithDestinationBasedMapping sets whether destination-based mapping is enabled.
-// When enabled, the handler will use the namespace from requests instead of
-// assuming the agent name equals the namespace for Applications.
 func (r *RequestHandler) WithDestinationBasedMapping(enabled bool) *RequestHandler {
 	r.destinationBasedMapping = enabled
+	return r
+}
+
+// WithPeerNamespace sets the namespace of the peer (agent or principal).
+func (r *RequestHandler) WithPeerNamespace(ns string) *RequestHandler {
+	r.peerNamespace = ns
+	return r
+}
+
+// WithIgnoreUnmanagedApps sets whether resources without the source UID annotation
+// should be silently skipped during resync. When enabled, unmanaged resources
+// (those not created via the agent) will be ignored instead of causing errors.
+func (r *RequestHandler) WithIgnoreUnmanagedApps(enabled bool) *RequestHandler {
+	r.ignoreUnmanagedApps = enabled
 	return r
 }
 
@@ -132,9 +172,29 @@ func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, inco
 		return err
 	}
 
+	// Determine the local namespace for the lookup. Non-Application kinds
+	// always live in the Argo CD namespace regardless of what the peer reports.
+	lookupNamespace := incoming.Namespace
+	switch incoming.Kind {
+	case "AppProject", "Repository", "GPGKey":
+		lookupNamespace = r.namespace
+	case "Application":
+		// For Applications with destination-based mapping, remap the namespace
+		// if the app exists in the peer's namespace
+		if r.destinationBasedMapping {
+			if r.peerNamespace == "" {
+				return fmt.Errorf("peer namespace is not set, cannot remap application %s", incoming.Name)
+			}
+
+			if incoming.Namespace == r.peerNamespace {
+				lookupNamespace = r.namespace
+			}
+		}
+	}
+
 	// Check if the given resource exists locally
 	resClient := r.dynClient.Resource(gvr)
-	res, err := resClient.Namespace(incoming.Namespace).Get(ctx, incoming.Name, v1.GetOptions{})
+	res, err := resClient.Namespace(lookupNamespace).Get(ctx, incoming.Name, v1.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return err
@@ -143,9 +203,13 @@ func (r *RequestHandler) ProcessIncomingSyncedResource(ctx context.Context, inco
 		// The incoming app is not found locally
 		reqUpdate = event.NewRequestUpdate(incoming.Name, incoming.Namespace, incoming.Kind, "", nil)
 	} else {
-		reqUpdate, err = newRequestUpdateFromObject(res, incoming.Kind)
+		reqUpdate, err = newRequestUpdateFromObject(res, incoming.Kind, r.peerNamespace)
 		if err != nil {
-			return fmt.Errorf("failed to construct a request update for resource: %s", res.GetName())
+			if errors.Is(err, ErrSourceUIDNotFound) && r.ignoreUnmanagedApps {
+				logCtx.WithField(logfields.Name, res.GetName()).Debug("skipping resource without source UID annotation")
+				return nil
+			}
+			return fmt.Errorf("newRequestUpdateFromObject failed: %w", err)
 		}
 	}
 
@@ -165,11 +229,12 @@ func (r *RequestHandler) ProcessIncomingResourceResyncRequest(ctx context.Contex
 
 	resources := r.resources.GetAll()
 	for _, resource := range resources {
+		logCtx := logCtxForResourceKey(r.log, resource)
 		if err := r.sendRequestUpdate(ctx, resource); err != nil {
-			r.log.Errorf("failed to send request update for resource %s: %v", resource.Name, err)
+			logCtx.WithError(err).Error("Failed to send request update")
 			continue
 		}
-		r.log.WithField(logfields.Kind, resource.Kind).WithField(logfields.Name, resource.Name).Trace("Sent a request update event")
+		logCtx.Trace("Sent a request update event")
 	}
 
 	return nil
@@ -178,8 +243,9 @@ func (r *RequestHandler) ProcessIncomingResourceResyncRequest(ctx context.Contex
 func (r *RequestHandler) SendRequestUpdates(ctx context.Context) {
 	resources := r.resources.GetAll()
 	for _, resource := range resources {
+		logCtx := logCtxForResourceKey(r.log, resource)
 		if err := r.sendRequestUpdate(ctx, resource); err != nil {
-			r.log.Errorf("failed to send request update for resource %s: %v", resource.Name, err)
+			logCtx.WithError(err).Error("Failed to send request update")
 			continue
 		}
 	}
@@ -194,11 +260,15 @@ func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resourc
 	resClient := r.dynClient.Resource(gvr)
 	res, err := resClient.Namespace(resource.Namespace).Get(ctx, resource.Name, v1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get resource: %v", err)
+		return fmt.Errorf("failed to get resource: %w", err)
 	}
-
-	reqUpdate, err := newRequestUpdateFromObject(res, resource.Kind)
+	logCtx := logCtxForResourceKey(r.log, resource)
+	reqUpdate, err := newRequestUpdateFromObject(res, resource.Kind, r.peerNamespace)
 	if err != nil {
+		if errors.Is(err, ErrSourceUIDNotFound) && r.ignoreUnmanagedApps {
+			logCtx.Debug("skipping resource without source UID annotation")
+			return nil
+		}
 		return fmt.Errorf("failed to construct a request update from resource %s: %w", resource.Name, err)
 	}
 
@@ -208,18 +278,27 @@ func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resourc
 	}
 
 	r.sendQ.Add(ev)
-	r.log.WithField(logfields.Kind, resource.Kind).WithField(logfields.Name, resource.Name).Trace("Sent a request update event")
+	logCtx.Trace("Sent a request update event")
 	return nil
 }
 
-func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentName string, reqUpdate *event.RequestUpdate) error {
-	logCtx := r.log.WithFields(logrus.Fields{
-		logfields.Name:      reqUpdate.Name,
-		logfields.Kind:      reqUpdate.Kind,
-		logfields.Namespace: reqUpdate.Namespace,
-	})
+func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentName string, agentMode types.AgentMode, reqUpdate *event.RequestUpdate) error {
+	logCtx := logCtxForRequestUpdate(r.log, reqUpdate)
 
 	logCtx.Trace("Received a request for the resource update event")
+
+	// Sanity test:
+	// Principal should only accept 'request-update' events from managed agent
+	// Autonomous agent can accept request-update events
+	// Managed agent should never accept request-update events
+	// Agent mode should be set
+	if r.role == manager.ManagerRolePrincipal && agentMode != types.AgentModeManaged {
+		return fmt.Errorf("principal should only process requestUpdate events from managed mode agents")
+	} else if r.role == manager.ManagerRoleAgent && agentMode != types.AgentModeAutonomous {
+		return fmt.Errorf("managed mode agents should not process requestUpdate events; only autonomous agents should process them")
+	} else if agentMode == types.AgentModeUnknown {
+		return fmt.Errorf("agent mode is unknown")
+	}
 
 	gvr, err := getGroupVersionResource(reqUpdate.Kind)
 	if err != nil {
@@ -229,15 +308,17 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 	// Depending on the role, the namespace of the resource may be different.
 	namespace := r.namespace
 	switch reqUpdate.Kind {
-	case "AppProject", "Repository":
-		// AppProjects and Repositories always live in the Argo CD namespace
+	case "AppProject", "Repository", "GPGKey":
+		// AppProjects, Repositories, and GPG keys always live in the Argo CD namespace
 		// regardless of whether this is principal or agent
 		namespace = r.namespace
 	case "Application":
 		if r.role == manager.ManagerRolePrincipal {
 			if r.destinationBasedMapping {
-				// With destination-based mapping, applications can be in any namespace on the principal.
-				// Use the namespace from the request, which reflects where the app actually lives.
+				// With destination-based mapping, applications can be in any namespace
+				// on the principal. The agent's newRequestUpdateFromObject resolves
+				// the reqUpdate.Namespace to the correct principal-side namespace
+				// based on the presence of the NamespaceRemappedAnnotation.
 				namespace = reqUpdate.Namespace
 			} else {
 				// With namespace-based mapping, applications on the principal are in the agent's namespace
@@ -263,8 +344,8 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 		return r.handleDeletedResource(logCtx, reqUpdate)
 	}
 
-	// If the resource is AppProject/Repository, we need to ensure that it is still relevant with the current AppProject rules
-	if reqUpdate.Kind == "AppProject" || reqUpdate.Kind == "Repository" {
+	// If the resource is AppProject/Repository, we need to ensure that it is still relevant with the current AppProject rules.
+	if r.role == manager.ManagerRolePrincipal && (reqUpdate.Kind == "AppProject" || reqUpdate.Kind == "Repository") {
 		err, isRelevant := r.isAppProjectRelevant(ctx, logCtx, agentName, reqUpdate, res)
 		if err != nil {
 			return err
@@ -290,10 +371,20 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 
 	logCtx.Trace("Checksums do not match. Sending a specUpdate event")
 
-	return r.handleUpdatedResource(logCtx, reqUpdate, res, agentName)
+	return r.handleUpdatedResource(logCtx, reqUpdate, res, agentName, agentMode)
 }
 
-func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured, agentName string) error {
+func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured, agentName string, agentMode types.AgentMode) error {
+
+	// Sanity test the context of this function call
+	if r.role == manager.ManagerRolePrincipal && agentMode != types.AgentModeManaged {
+		return fmt.Errorf("principal should only send specupdates to managed mode agents, not autonomous")
+	} else if r.role == manager.ManagerRoleAgent && agentMode != types.AgentModeAutonomous {
+		return fmt.Errorf("managed mode agents should not send specupdates; only autonomous agents")
+	} else if agentMode == types.AgentModeUnknown {
+		return fmt.Errorf("agent mode is unknown")
+	}
+
 	resBytes, err := res.MarshalJSON()
 	if err != nil {
 		return err
@@ -308,6 +399,7 @@ func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *
 		}
 
 		ev := r.events.ApplicationEvent(event.SpecUpdate, app)
+		r.stampPrincipalUID(ev)
 		logCtx.Trace("Sending a request to update the application")
 		r.sendQ.Add(ev)
 
@@ -318,15 +410,32 @@ func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *
 			return err
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName, r.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName, r.destinationBasedMapping, agentMode)
 		ev := r.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		logCtx.Trace("Sending a request to update the appProject")
+		r.sendQ.Add(ev)
+
+	case "GPGKey":
+		cm := &corev1.ConfigMap{}
+		err := json.Unmarshal(resBytes, cm)
+		if err != nil {
+			return err
+		}
+
+		ev := r.events.GPGKeyEvent(event.SpecUpdate, cm)
+		logCtx.Trace("Sending a request to update the GPG key ConfigMap")
 		r.sendQ.Add(ev)
 	default:
 		return fmt.Errorf("unknown resource Kind: %s", reqUpdate.Kind)
 	}
 
 	return nil
+}
+
+func (r *RequestHandler) stampPrincipalUID(ev *cloudevent.Event) {
+	if r.principalUID != "" {
+		event.SetPrincipalUID(ev, r.principalUID)
+	}
 }
 
 // isAppProjectRelevant checks if the incoming AppProject/Repository is still relevant to the agent based on the AppProject rules.
@@ -345,7 +454,7 @@ func (r *RequestHandler) isAppProjectRelevant(ctx context.Context, logCtx *logru
 			return err, false
 		}
 
-		if appproject.DoesAgentMatchWithProject(agentName, *appProject) {
+		if appproject.DoesAgentMatchWithProject(agentName, *appProject, r.destinationBasedMapping) {
 			// The AppProject is still relevant to the agent
 			logCtx.Trace("AppProject is still relevant to the agent")
 			return nil, true
@@ -392,7 +501,7 @@ func (r *RequestHandler) isAppProjectRelevant(ctx context.Context, logCtx *logru
 			return err, false
 		}
 
-		if appproject.DoesAgentMatchWithProject(agentName, *appProject) {
+		if appproject.DoesAgentMatchWithProject(agentName, *appProject, r.destinationBasedMapping) {
 			// The AppProject is still relevant to the agent
 			logCtx.Trace("AppProject is still relevant to the agent. Checking the repository for updates")
 			return nil, true
@@ -421,6 +530,7 @@ func (r *RequestHandler) handleDeletedResource(logCtx *logrus.Entry, reqUpdate *
 		}
 
 		ev := r.events.ApplicationEvent(event.Delete, app)
+		r.stampPrincipalUID(ev)
 		logCtx.Trace("Sending a request to delete the orphaned application")
 		r.sendQ.Add(ev)
 		return nil
@@ -437,17 +547,30 @@ func (r *RequestHandler) handleDeletedResource(logCtx *logrus.Entry, reqUpdate *
 		logCtx.Trace("Sending a request to delete the orphaned appProject")
 		r.sendQ.Add(ev)
 		return nil
+
+	case "GPGKey":
+		cm := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      reqUpdate.Name,
+				Namespace: reqUpdate.Namespace,
+				UID:       ktypes.UID(reqUpdate.UID),
+			},
+		}
+		ev := r.events.GPGKeyEvent(event.Delete, cm)
+		logCtx.Trace("Sending a request to delete the orphaned GPG key ConfigMap")
+		r.sendQ.Add(ev)
+		return nil
 	default:
 		return fmt.Errorf("unknown resource Kind: %s", reqUpdate.Kind)
 	}
 }
 
-func newRequestUpdateFromObject(res *unstructured.Unstructured, kind string) (*event.RequestUpdate, error) {
+func newRequestUpdateFromObject(res *unstructured.Unstructured, kind string, peerNamespace string) (*event.RequestUpdate, error) {
 	// RequestUpdate is always sent by the peer. So, the object must have the source UID annotation
 	annotations := res.GetAnnotations()
 	sourceUID, ok := annotations[manager.SourceUIDAnnotation]
 	if !ok {
-		return nil, fmt.Errorf("source UID annotation not found for resource: %s", res.GetName())
+		return nil, ErrSourceUIDNotFound
 	}
 
 	checksum, err := generateSpecChecksum(res)
@@ -455,7 +578,15 @@ func newRequestUpdateFromObject(res *unstructured.Unstructured, kind string) (*e
 		return nil, fmt.Errorf("failed to generate checksum for resource %s/%s: %w", res.GetKind(), res.GetName(), err)
 	}
 
-	reqUpdate := event.NewRequestUpdate(res.GetName(), res.GetNamespace(), kind, sourceUID, checksum[:])
+	namespace := res.GetNamespace()
+	if _, found := annotations[manager.NamespaceRemappedAnnotation]; found && kind == "Application" {
+		if peerNamespace == "" {
+			return nil, fmt.Errorf("peer namespace is not set, cannot remap application %s", res.GetName())
+		}
+		namespace = peerNamespace
+	}
+
+	reqUpdate := event.NewRequestUpdate(res.GetName(), namespace, kind, sourceUID, checksum[:])
 	return reqUpdate, nil
 }
 
@@ -479,6 +610,12 @@ func getGroupVersionResource(kind string) (schema.GroupVersionResource, error) {
 			Resource: "secrets",
 			Version:  "v1",
 		}, nil
+	case "GPGKey":
+		return schema.GroupVersionResource{
+			Group:    "",
+			Resource: "configmaps",
+			Version:  "v1",
+		}, nil
 	default:
 		return schema.GroupVersionResource{}, fmt.Errorf("unexpected Kind: %s", kind)
 	}
@@ -487,12 +624,17 @@ func getGroupVersionResource(kind string) (schema.GroupVersionResource, error) {
 func generateSpecChecksum(resObj *unstructured.Unstructured) ([]byte, error) {
 	res := resObj.DeepCopy()
 
-	var resSpec interface{}
+	var resSpec any
 	var ok bool
-	if res.GetKind() == "Secret" {
+	if res.GetKind() == "Secret" || res.GetKind() == "ConfigMap" {
 		resSpec, ok = res.Object["data"]
 		if !ok {
-			return nil, fmt.Errorf("data field not found for resource: %s", res.GetName())
+			if res.GetKind() == "ConfigMap" {
+				logrus.Debugf("ConfigMap %s has no data field, using empty map for checksum", res.GetName())
+				resSpec = map[string]any{}
+			} else {
+				return nil, fmt.Errorf("data field not found for resource: %s", res.GetName())
+			}
 		}
 	} else {
 		resSpec, ok = res.Object["spec"]
@@ -501,7 +643,7 @@ func generateSpecChecksum(resObj *unstructured.Unstructured) ([]byte, error) {
 		}
 	}
 
-	specMap, ok := resSpec.(map[string]interface{})
+	specMap, ok := resSpec.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("unable to convert the spec object of %s:%s to a map", res.GetKind(), res.GetName())
 	}
@@ -512,10 +654,28 @@ func generateSpecChecksum(resObj *unstructured.Unstructured) ([]byte, error) {
 
 	specBytes, err := json.Marshal(resSpec)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal application spec: %v", err)
+		return nil, fmt.Errorf("failed to marshal application spec: %w", err)
 	}
 
 	checksum := sha256.Sum256(specBytes)
 
 	return checksum[:], nil
+}
+
+func logCtxForResourceKey(logCtx *logrus.Entry, resource resources.ResourceKey) *logrus.Entry {
+	return logCtx.WithFields(logrus.Fields{
+		logfields.UID:       resource.UID,
+		logfields.Name:      resource.Name,
+		logfields.Kind:      resource.Kind,
+		logfields.Namespace: resource.Namespace,
+	})
+}
+
+func logCtxForRequestUpdate(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate) *logrus.Entry {
+	return logCtx.WithFields(logrus.Fields{
+		logfields.UID:       reqUpdate.UID,
+		logfields.Name:      reqUpdate.Name,
+		logfields.Kind:      reqUpdate.Kind,
+		logfields.Namespace: reqUpdate.Namespace,
+	})
 }

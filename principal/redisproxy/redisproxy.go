@@ -18,6 +18,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -28,6 +31,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/principal/tracker"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
@@ -67,6 +71,24 @@ type RedisProxy struct {
 
 	// logger is a separate logger from the default one to allow control to the log level of this subsystem
 	logger *logging.CentralizedLogger
+
+	// TLS configuration for Redis proxy server (incoming connections from Argo CD)
+	tlsEnabled        bool
+	tlsServerCert     *x509.Certificate
+	tlsServerKey      crypto.PrivateKey
+	tlsServerCertPath string
+	tlsServerKeyPath  string
+	tlsMinVersion     uint16
+	tlsMaxVersion     uint16
+	tlsCipherSuites   []uint16
+
+	// TLS configuration for Redis (connections to principal's argocd-redis)
+	redisTLSCA       *x509.CertPool
+	redisTLSCAPath   string
+	redisTLSInsecure bool
+
+	onRequest func(agentName, command string)
+	onError   func(agentName, command string)
 }
 
 const (
@@ -109,13 +131,104 @@ func (rp *RedisProxy) SetPrincipalNamespace(namespace string) {
 	rp.principalNamespace = namespace
 }
 
+// SetOnRequest sets a callback invoked for each Redis proxy request.
+func (rp *RedisProxy) SetOnRequest(fn func(agentName, command string)) {
+	rp.onRequest = fn
+}
+
+// SetOnError sets a callback invoked when a Redis proxy request fails.
+func (rp *RedisProxy) SetOnError(fn func(agentName, command string)) {
+	rp.onError = fn
+}
+
+// SetTLSEnabled enables or disables TLS for the Redis proxy
+func (rp *RedisProxy) SetTLSEnabled(enabled bool) {
+	rp.tlsEnabled = enabled
+}
+
+// SetServerTLS sets the TLS certificate and key for the Redis proxy server
+func (rp *RedisProxy) SetServerTLS(cert *x509.Certificate, key crypto.PrivateKey) {
+	rp.tlsServerCert = cert
+	rp.tlsServerKey = key
+}
+
+// SetServerTLSFromPath sets the TLS certificate and key paths for the Redis proxy server
+func (rp *RedisProxy) SetServerTLSFromPath(certPath, keyPath string) {
+	rp.tlsServerCertPath = certPath
+	rp.tlsServerKeyPath = keyPath
+}
+
+// SetServerTLSConfig sets the TLS protocol configuration for the Redis proxy server
+func (rp *RedisProxy) SetServerTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16) {
+	rp.tlsMinVersion = minVersion
+	rp.tlsMaxVersion = maxVersion
+	rp.tlsCipherSuites = cipherSuites
+}
+
+// SetUpstreamTLSCA sets the CA certificate pool for verifying upstream Redis TLS
+func (rp *RedisProxy) SetUpstreamTLSCA(ca *x509.CertPool) {
+	rp.redisTLSCA = ca
+}
+
+// SetUpstreamTLSCAPath sets the CA certificate path for verifying upstream Redis TLS
+func (rp *RedisProxy) SetUpstreamTLSCAPath(caPath string) {
+	rp.redisTLSCAPath = caPath
+}
+
+// SetUpstreamTLSInsecure enables insecure upstream TLS (for testing only)
+func (rp *RedisProxy) SetUpstreamTLSInsecure(insecure bool) {
+	rp.redisTLSInsecure = insecure
+}
+
+// createServerTLSConfig creates a TLS configuration for the Redis proxy server
+func (rp *RedisProxy) createServerTLSConfig() (*tls.Config, error) {
+	var cert tls.Certificate
+	var err error
+
+	// Load certificate from path or use provided certificate
+	if rp.tlsServerCertPath != "" && rp.tlsServerKeyPath != "" {
+		cert, err = tls.LoadX509KeyPair(rp.tlsServerCertPath, rp.tlsServerKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load TLS certificate: %w", err)
+		}
+	} else if rp.tlsServerCert != nil && rp.tlsServerKey != nil {
+		// Convert cert and key to tls.Certificate
+		cert.Certificate = [][]byte{rp.tlsServerCert.Raw}
+		cert.PrivateKey = rp.tlsServerKey
+		cert.Leaf = rp.tlsServerCert
+	} else {
+		return nil, fmt.Errorf("no TLS certificate configured")
+	}
+
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   rp.tlsMinVersion,
+		MaxVersion:   rp.tlsMaxVersion,
+		CipherSuites: rp.tlsCipherSuites,
+	}, nil
+}
+
 // Start listening on redis proxy port, and handling connections
 func (rp *RedisProxy) Start() error {
-	l, err := net.Listen("tcp", rp.listenAddress)
+	var l net.Listener
+	var err error
+
+	if rp.tlsEnabled {
+		var tlsConfig *tls.Config
+		tlsConfig, err = rp.createServerTLSConfig()
+		if err != nil {
+			rp.log().WithError(err).Error("error creating TLS config for Redis proxy server")
+			return err
+		}
+		l, err = tls.Listen("tcp", rp.listenAddress, tlsConfig)
+	} else {
+		l, err = net.Listen("tcp", rp.listenAddress)
+	}
 	if err != nil {
-		rp.log().WithError(err).Error("error occurred on listening to addr: " + rp.listenAddress)
+		rp.log().WithError(err).WithField("tls", rp.tlsEnabled).Error("Unable to listen on " + rp.listenAddress)
 		return err
 	}
+
 	rp.listener = l
 
 	// Start server and connection handler
@@ -130,7 +243,7 @@ func (rp *RedisProxy) Start() error {
 		}
 	}()
 
-	rp.log().Infof("Redis proxy started on %s", rp.listenAddress)
+	rp.log().WithField("tls", rp.tlsEnabled).Infof("Redis proxy started on %s", rp.listenAddress)
 
 	return nil
 }
@@ -153,7 +266,7 @@ func (rp *RedisProxy) handleConnection(fromArgoCDConn net.Conn) {
 	logCtx := rp.log().WithField("function", "redisFxn")
 	logCtx = logCtx.WithField("connUUID", connUUID)
 
-	redisConn, err := establishConnectionToPrincipalRedis(rp.principalRedisAddress, logCtx)
+	redisConn, err := rp.establishConnectionToPrincipalRedis(logCtx)
 	if err != nil {
 		logCtx.WithError(err).Error("unable to connect to principal redis")
 		return
@@ -291,6 +404,9 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 
 				if err := rp.handleAgentSubscribe(connState, channelName, agentName, argocdWriter, logCtx); err != nil {
 					logCtx.WithError(err).Error("exit due to unable to handle agent subscribe")
+					if rp.onError != nil {
+						rp.onError(agentName, "subscribe")
+					}
 					return
 				}
 			}
@@ -316,6 +432,9 @@ func (rp *RedisProxy) handleConnectionMessageLoop(connState *connectionState, en
 
 				if err := rp.handleAgentGet(connState, key, argocdWriter, agentName, logCtx); err != nil {
 					logCtx.WithError(err).Error("exit due to unable to handle agent get")
+					if rp.onError != nil {
+						rp.onError(agentName, "get")
+					}
 					return
 				}
 			}
@@ -386,6 +505,9 @@ func handleInternalNotify(vals []string, argocdWriter argoCDRedisWriter, logCtx 
 
 // handleAgentGet processes a redis get message that is destinated for a specific agent
 func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, argocdWriter argoCDRedisWriter, agentName string, logCtx *logrus.Entry) error {
+	if rp.onRequest != nil {
+		rp.onRequest(agentName, "get")
+	}
 	rp.beginPingGoRoutineIfNeeded(connState, agentName, logCtx)
 
 	// Example of a redis get command request/response:
@@ -462,6 +584,9 @@ func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, arg
 
 // handleAgentSubscribe handles a subscription request from Argo CD to be forwarded to agent redis
 func (rp *RedisProxy) handleAgentSubscribe(connState *connectionState, channelName string, agentName string, argoCDWrite argoCDRedisWriter, logCtx *logrus.Entry) error {
+	if rp.onRequest != nil {
+		rp.onRequest(agentName, "subscribe")
+	}
 	rp.beginPingGoRoutineIfNeeded(connState, agentName, logCtx)
 
 	// Create the channel and start the goroutine for the channel that is responsible for reading asynchronous redis subscription responses from agents
@@ -617,12 +742,13 @@ func (prc *parsedRedisCommand) generateParsedCommandDebugString() string {
 		return fmt.Sprintf("internal message: %v", prc.internalMsg)
 	}
 
-	res := "(a->r) "
+	var res strings.Builder
+	res.WriteString("(a->r) ")
 	for _, str := range prc.parsedReceived {
-		res += fmt.Sprintf("'%s' | ", sanitizeStringIfNonASCII(str))
+		fmt.Fprintf(&res, "'%s' | ", sanitizeStringIfNonASCII(str))
 	}
 
-	return res
+	return res.String()
 }
 
 // sanitizeStringIfNonASCII: if the string is non-ascii (likely because it includes binary data), then only return the number of bytes of the string rather than the string itself
@@ -748,24 +874,87 @@ func (are *argoCDRedisWriterInternal) writeToArgoCDRedisSocket(logCtx *logrus.En
 	return nil
 }
 
-// establishConnectionToPrincipalRedis establishes a simple TCP-IP socket connection to principal's redis. (That is, we don't use go-redis client)
-func establishConnectionToPrincipalRedis(principalRedisAddress string, logCtx *logrus.Entry) (*net.TCPConn, error) {
-	var redisConn *net.TCPConn
+// establishConnectionToPrincipalRedis establishes a TCP-IP socket connection to principal's redis
+func (rp *RedisProxy) establishConnectionToPrincipalRedis(logCtx *logrus.Entry) (net.Conn, error) {
 
-	addr, err := net.ResolveTCPAddr("tcp", principalRedisAddress)
+	addr, err := net.ResolveTCPAddr("tcp", rp.principalRedisAddress)
 	if err != nil {
-		logCtx.WithError(err).WithField("redisAddress", principalRedisAddress).Error("Resolution error")
+		logCtx.WithError(err).WithField("redisAddress", rp.principalRedisAddress).Error("Resolution error")
 		return nil, fmt.Errorf("unable to resolve address: %w", err)
 	}
 
-	// Dial the resolved address
-	redisConn, err = net.DialTCP("tcp", nil, addr)
+	// Dial the resolved address with timeout to prevent indefinite hangs
+	dialer := &net.Dialer{
+		Timeout: 30 * time.Second,
+	}
+	conn, err := dialer.Dial("tcp", addr.String())
 	if err != nil {
-		logCtx.WithError(err).WithField("redisAddress", principalRedisAddress).Error("Connection error")
-		return nil, fmt.Errorf("unable to connect to redis '%s': %w", principalRedisAddress, err)
+		logCtx.WithError(err).WithField("redisAddress", rp.principalRedisAddress).Error("Connection error")
+		return nil, fmt.Errorf("unable to connect to redis '%s': %w", rp.principalRedisAddress, err)
 	}
 
-	return redisConn, nil
+	// Check if upstream TLS configuration is provided
+	hasUpstreamTLSConfig := rp.redisTLSCA != nil || rp.redisTLSCAPath != "" || rp.redisTLSInsecure
+
+	// Warn if server TLS is enabled but upstream TLS is not configured
+	// This creates a security gap: agent→proxy is encrypted, but proxy→redis is not
+	if rp.tlsEnabled && !hasUpstreamTLSConfig {
+		logCtx.Warn("SECURITY WARNING: Redis proxy server has TLS enabled, but no upstream TLS configuration provided. " +
+			"This creates an unencrypted connection to principal Redis. " +
+			"Consider configuring upstream TLS using --redis-ca-path, --redis-ca-secret-name, or --redis-tls-insecure")
+	}
+
+	// If upstream TLS is configured, wrap the connection with TLS
+	// This is independent of server TLS configuration
+	if hasUpstreamTLSConfig {
+		tlsConfig := &tls.Config{}
+
+		if rp.redisTLSInsecure {
+			logCtx.Warn("INSECURE: Not verifying upstream Redis TLS certificate")
+			tlsConfig.InsecureSkipVerify = true
+		} else if rp.redisTLSCA != nil {
+			tlsConfig.RootCAs = rp.redisTLSCA
+			logCtx.Trace("Using provided CA certificate pool for upstream Redis TLS")
+		} else if rp.redisTLSCAPath != "" {
+			caCertPool, err := tlsutil.X509CertPoolFromFile(rp.redisTLSCAPath)
+			if err != nil {
+				conn.Close()
+				return nil, fmt.Errorf("failed to load CA certificate: %w", err)
+			}
+			tlsConfig.RootCAs = caCertPool
+			logCtx.Debugf("Using CA certificate from %s for upstream Redis TLS", rp.redisTLSCAPath)
+		}
+
+		// Extract hostname from address for SNI
+		hostname := rp.principalRedisAddress
+		if h, _, err := net.SplitHostPort(rp.principalRedisAddress); err == nil {
+			hostname = h
+		}
+		tlsConfig.ServerName = hostname
+
+		// Set deadline for handshake to prevent indefinite hangs
+		if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("failed to set handshake deadline: %w", err)
+		}
+
+		tlsConn := tls.Client(conn, tlsConfig)
+		if err := tlsConn.Handshake(); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("TLS handshake failed: %w", err)
+		}
+
+		// Clear deadline after successful handshake so future I/O operations aren't affected
+		if err := tlsConn.SetDeadline(time.Time{}); err != nil {
+			tlsConn.Close()
+			return nil, fmt.Errorf("failed to clear handshake deadline: %w", err)
+		}
+
+		logCtx.Trace("Established TLS connection to upstream Redis")
+		return tlsConn, nil
+	}
+
+	return conn, nil
 }
 
 // Extract agent name from the key field of 'get' or 'subscribe' redis commands
@@ -800,7 +989,15 @@ func (rp *RedisProxy) extractAgentNameFromRedisCommandKey(redisKey string, logCt
 			return "", nil
 		}
 
-		logCtx.Warningf("Unexpected redis key seen: '%s'. Redirecting to principal by default.", redisKey)
+		if strings.HasPrefix(redisKey, "git-refs|") || strings.HasPrefix(redisKey, "gitdirs|") || strings.HasPrefix(redisKey, "gitfiles|") {
+			// 'git-refs' redis prefix: a cache of git references (branches, tags, etc) (used in a number of places, including exposed via '/api/v1/repositories/{repo}/refs' api)
+			// 'gitdirs' redis prefix: a cache of all directories contained within a git repo (e.g. a dir list, but excluding files. Seemingly only used by appset, presumably by git directory generator)
+			// 'gitfiles' redis prefix: a cache of file contents within a git repo (used by appset git file generator)
+			logCtx.Debug("redirecting git redis key to principal redis")
+			return "", nil
+		}
+
+		logCtx.Debugf("Unexpected redis key seen: '%s'. Redirecting to principal by default.", redisKey)
 
 		return "", nil
 	}
@@ -832,10 +1029,10 @@ func (rp *RedisProxy) extractAgentNameFromRedisCommandKey(redisKey string, logCt
 		// but may target an agent via destination-based mapping.
 		if rp.agentLookupFn == nil {
 			// agentLookupFn not set indicates namespace-based mapping mode,
-			// where missing underscore is an error
-			errMsg := fmt.Sprintf("unexpected lack of '_' namespace/name separator: '%s'", redisKey)
-			logCtx.Error(errMsg)
-			return "", fmt.Errorf("%s", errMsg)
+			// for which we require the namespace to be specified in the key
+			// if there is no namespace, we assume it's a local application and forward to principal redis.
+			logCtx.Debugf("local application detected (no '_' in key): '%s', forwarding to redis", redisKey)
+			return "", nil
 		}
 		namespace = rp.principalNamespace
 		appName = namespaceAndName

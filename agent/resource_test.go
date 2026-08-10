@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	agentkube "github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -21,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakediscovery "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -62,6 +65,25 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		un := objToUnstructured(pod1)
 
 		isOwned, err := isResourceManaged(kubeclient, un, 5, annotationTrackingReader)
+		assert.True(t, isOwned)
+		assert.NoError(t, err)
+	})
+	t.Run("Find manager by custom label key", func(t *testing.T) {
+		customLabelTrackingReader := newTestTrackingReaderWithLabelKey(v1alpha1.TrackingMethodLabel, "argocd.argoproj.io/instance")
+		pod1 := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: "default",
+				Labels: map[string]string{
+					"argocd.argoproj.io/instance": "some-app",
+				},
+			},
+		}
+		kubeclient := kube.NewDynamicFakeClient(pod1)
+
+		un := objToUnstructured(pod1)
+
+		isOwned, err := isResourceManaged(kubeclient, un, 5, customLabelTrackingReader)
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 	})
@@ -308,7 +330,7 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 
-		// Should not be tracked, only has annotation
+		// Should not be tracked, only has annotation.
 		pod2 := &corev1.Pod{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "pod2",
@@ -383,7 +405,7 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		assert.True(t, isOwned)
 		assert.NoError(t, err)
 
-		// Should not be tracked, only has annotation
+		// Should be tracked, annotation+label uses the annotation for tracking.
 		pod2 := &corev1.Pod{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "pod2",
@@ -396,10 +418,10 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		kubeclient2 := kube.NewDynamicFakeClient(pod2)
 		un2 := objToUnstructured(pod2)
 		isOwned, err = isResourceManaged(kubeclient2, un2, 5, annotationAndLabelReader)
-		assert.False(t, isOwned)
+		assert.True(t, isOwned)
 		assert.NoError(t, err)
 
-		// Should not be tracked, only has label
+		// Should not be tracked, only has label.
 		pod3 := &corev1.Pod{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "pod3",
@@ -415,6 +437,127 @@ func Test_isResourceOwnedByApp(t *testing.T) {
 		assert.False(t, isOwned)
 		assert.NoError(t, err)
 	})
+
+	t.Run("OLM ClusterServiceVersion resolves via olm.operatorGroup annotation", func(t *testing.T) {
+		og := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1",
+			"kind":       "OperatorGroup",
+			"metadata": map[string]any{
+				"name":      "my-operator",
+				"namespace": "operators",
+				"labels": map[string]any{
+					"app.kubernetes.io/instance": "some-app",
+				},
+			},
+		}}
+		csv := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "my-operator.v1.0.0",
+				"namespace": "operators",
+				"annotations": map[string]any{
+					"olm.operatorGroup": "my-operator",
+				},
+			},
+		}}
+		kubeclient := newOLMFakeClient(og, csv)
+
+		isOwned, err := isResourceManaged(kubeclient, csv, 5, labelTrackingReader)
+		assert.True(t, isOwned)
+		assert.NoError(t, err)
+	})
+
+	t.Run("OLM descendant chain resolves through ClusterServiceVersion", func(t *testing.T) {
+		og := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1",
+			"kind":       "OperatorGroup",
+			"metadata": map[string]any{
+				"name":      "my-operator",
+				"namespace": "operators",
+				"labels": map[string]any{
+					"app.kubernetes.io/instance": "some-app",
+				},
+			},
+		}}
+		csv := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "my-operator.v1.0.0",
+				"namespace": "operators",
+				"annotations": map[string]any{
+					"olm.operatorGroup": "my-operator",
+				},
+			},
+		}}
+		depl := &appsv1.Deployment{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "my-operator-controller",
+				Namespace: "operators",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "operators.coreos.com/v1alpha1",
+						Kind:       "ClusterServiceVersion",
+						Name:       "my-operator.v1.0.0",
+					},
+				},
+			},
+		}
+		pod := &corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "my-operator-pod",
+				Namespace: "operators",
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "Deployment",
+						Name:       "my-operator-controller",
+					},
+				},
+			},
+		}
+		kubeclient := newOLMFakeClient(og, csv, depl, pod)
+
+		isOwned, err := isResourceManaged(kubeclient, objToUnstructured(pod), 5, labelTrackingReader)
+		assert.True(t, isOwned)
+		assert.NoError(t, err)
+	})
+
+	t.Run("OLM ClusterServiceVersion without annotation is not managed", func(t *testing.T) {
+		csv := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "my-operator.v1.0.0",
+				"namespace": "operators",
+			},
+		}}
+		kubeclient := newOLMFakeClient(csv)
+
+		isOwned, err := isResourceManaged(kubeclient, csv, 5, labelTrackingReader)
+		assert.False(t, isOwned)
+		assert.NoError(t, err)
+	})
+
+	t.Run("OLM ClusterServiceVersion with missing OperatorGroup returns error", func(t *testing.T) {
+		csv := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "my-operator.v1.0.0",
+				"namespace": "operators",
+				"annotations": map[string]any{
+					"olm.operatorGroup": "missing-operator",
+				},
+			},
+		}}
+		kubeclient := newOLMFakeClient(csv)
+
+		isOwned, err := isResourceManaged(kubeclient, csv, 5, labelTrackingReader)
+		assert.False(t, isOwned)
+		assert.True(t, errors.IsNotFound(err))
+	})
 }
 
 func objToUnstructured(obj any) *unstructured.Unstructured {
@@ -423,6 +566,25 @@ func objToUnstructured(obj any) *unstructured.Unstructured {
 		panic(err)
 	}
 	return &unstructured.Unstructured{Object: unObj}
+}
+
+func newOLMFakeClient(objects ...runtime.Object) *agentkube.KubernetesClient {
+	c := kube.NewDynamicFakeClient(objects...)
+	fakeDiscovery := c.Clientset.Discovery().(*fakediscovery.FakeDiscovery)
+	olmResourceList := &v1.APIResourceList{
+		GroupVersion: "operators.coreos.com/v1",
+		APIResources: []v1.APIResource{
+			{Group: "operators.coreos.com", Version: "v1", Name: "operatorgroups", SingularName: "operatorgroup", Namespaced: true, Kind: "OperatorGroup", Verbs: []string{"get", "list", "watch"}},
+		},
+	}
+	olmAlphaResourceList := &v1.APIResourceList{
+		GroupVersion: "operators.coreos.com/v1alpha1",
+		APIResources: []v1.APIResource{
+			{Group: "operators.coreos.com", Version: "v1alpha1", Name: "clusterserviceversions", SingularName: "clusterserviceversion", Namespaced: true, Kind: "ClusterServiceVersion", Verbs: []string{"get", "list", "watch"}},
+		},
+	}
+	fakeDiscovery.Resources = append(fakeDiscovery.Resources, olmResourceList, olmAlphaResourceList)
+	return c
 }
 
 func Test_processIncomingResourceRequest(t *testing.T) {
@@ -477,7 +639,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, resourceReq))
 
 		// Process the request
-		err := agent.processIncomingResourceRequest(event.New(&ev, event.TargetResource))
+		err := agent.processIncomingResourceRequest(event.New(&ev, targets.Resource))
 		require.NoError(t, err)
 
 		// Verify response
@@ -543,7 +705,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, resourceReq))
 
 		// Process the request
-		err := agent.processIncomingResourceRequest(event.New(&ev, event.TargetResource))
+		err := agent.processIncomingResourceRequest(event.New(&ev, targets.Resource))
 		require.NoError(t, err)
 
 		// Verify error response
@@ -593,7 +755,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, resourceReq))
 
 		// Process the request
-		err := agent.processIncomingResourceRequest(event.New(&ev, event.TargetResource))
+		err := agent.processIncomingResourceRequest(event.New(&ev, targets.Resource))
 		require.NoError(t, err)
 
 		// Verify error response
@@ -628,7 +790,7 @@ func Test_processIncomingResourceRequest(t *testing.T) {
 		ev.SetType(event.GetRequest.String())
 
 		// Process the request
-		err := agent.processIncomingResourceRequest(event.New(&ev, event.TargetResource))
+		err := agent.processIncomingResourceRequest(event.New(&ev, targets.Resource))
 		assert.NoError(t, err)
 	})
 }
@@ -1038,6 +1200,7 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 		expectErr     bool
 		expectPatched bool
 		forceValue    string
+		managedByApp  bool
 	}
 
 	originalObj := &corev1.Pod{
@@ -1062,6 +1225,7 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
 			expectErr:     false,
 			expectPatched: true,
+			managedByApp:  true,
 		},
 		{
 			name:      "Patch returns error",
@@ -1075,6 +1239,7 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 			},
 			expectErr:     true,
 			expectPatched: false,
+			managedByApp:  true,
 		},
 		{
 			name:          "Invalid force param returns error",
@@ -1084,6 +1249,7 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
 			expectErr:     true,
 			expectPatched: false,
+			managedByApp:  true,
 		},
 		{
 			name:          "Passes PatchOptions params",
@@ -1093,21 +1259,40 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
 			expectErr:     false,
 			expectPatched: true,
+			managedByApp:  true,
+		},
+		{
+			name:          "Returns error on unmanaged resource",
+			params:        map[string]string{},
+			namespace:     "default",
+			patchBody:     patch,
+			setupReactor:  func(fakeDyn *fake.FakeDynamicClient) {},
+			expectErr:     true,
+			expectPatched: false,
+			managedByApp:  false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			kubeClient := kube.NewDynamicFakeClient(originalObj)
+			obj := originalObj.DeepCopy()
+			if tc.managedByApp {
+				obj.ObjectMeta.Labels = map[string]string{
+					"app.kubernetes.io/instance": "test-app",
+				}
+			}
+
+			kubeClient := kube.NewDynamicFakeClient(obj)
 			scheme := runtime.NewScheme()
 			_ = corev1.AddToScheme(scheme)
-			fakeDyn := fake.NewSimpleDynamicClient(scheme, originalObj)
+			fakeDyn := fake.NewSimpleDynamicClient(scheme, obj)
 			tc.setupReactor(fakeDyn)
 			kubeClient.DynamicClient = fakeDyn
 
 			agent := &Agent{
-				context:    context.Background(),
-				kubeClient: kubeClient,
+				context:        context.Background(),
+				kubeClient:     kubeClient,
+				trackingReader: newTestTrackingReader(v1alpha1.TrackingMethodLabel),
 			}
 
 			gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
@@ -1160,12 +1345,12 @@ func Test_getAvailableAPIs(t *testing.T) {
 		// Check that resources array exists and has content
 		resources, exists := result.Object["resources"]
 		assert.True(t, exists)
-		resourcesList, ok := resources.([]interface{})
+		resourcesList, ok := resources.([]any)
 		assert.True(t, ok)
 		assert.Greater(t, len(resourcesList), 0)
 
 		// Check that the first resource has the expected fields
-		firstResource, ok := resourcesList[0].(map[string]interface{})
+		firstResource, ok := resourcesList[0].(map[string]any)
 		assert.True(t, ok)
 		assert.Contains(t, firstResource, "name")
 		assert.Contains(t, firstResource, "kind")
@@ -1193,12 +1378,12 @@ func Test_getAvailableAPIs(t *testing.T) {
 		// Check that resources array exists and has content
 		resources, exists := result.Object["resources"]
 		assert.True(t, exists)
-		resourcesList, ok := resources.([]interface{})
+		resourcesList, ok := resources.([]any)
 		assert.True(t, ok)
 		assert.Greater(t, len(resourcesList), 0)
 
 		// Check that the first resource has the expected fields
-		firstResource, ok := resourcesList[0].(map[string]interface{})
+		firstResource, ok := resourcesList[0].(map[string]any)
 		assert.True(t, ok)
 		assert.Contains(t, firstResource, "name")
 		assert.Contains(t, firstResource, "kind")
@@ -1221,12 +1406,12 @@ func Test_getAvailableAPIs(t *testing.T) {
 		// Check that groups array exists and has content
 		groups, exists := result.Object["groups"]
 		assert.True(t, exists)
-		groupsList, ok := groups.([]interface{})
+		groupsList, ok := groups.([]any)
 		assert.True(t, ok)
 		assert.Greater(t, len(groupsList), 0)
 
 		// Check that the first group has the expected fields
-		firstGroup, ok := groupsList[0].(map[string]interface{})
+		firstGroup, ok := groupsList[0].(map[string]any)
 		assert.True(t, ok)
 		assert.Contains(t, firstGroup, "name")
 		assert.Contains(t, firstGroup, "versions")
@@ -1235,12 +1420,12 @@ func Test_getAvailableAPIs(t *testing.T) {
 		// Check that versions array exists and has content
 		versions, exists := firstGroup["versions"]
 		assert.True(t, exists)
-		versionsList, ok := versions.([]interface{})
+		versionsList, ok := versions.([]any)
 		assert.True(t, ok)
 		assert.Greater(t, len(versionsList), 0)
 
 		// Check that the first version has the expected fields
-		firstVersion, ok := versionsList[0].(map[string]interface{})
+		firstVersion, ok := versionsList[0].(map[string]any)
 		assert.True(t, ok)
 		assert.Contains(t, firstVersion, "groupVersion")
 		assert.Contains(t, firstVersion, "version")

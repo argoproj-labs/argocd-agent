@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/stretchr/testify/suite"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -87,7 +87,7 @@ func (suite *ResourceTrackingTestSuite) TearDownTest() {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "argocd-cm",
-			Namespace: "argocd",
+			Namespace: fixture.ManagedAgentNamespace,
 		},
 	}
 	err = fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, cm, func(obj fixture.KubeObject) {
@@ -107,7 +107,7 @@ func (suite *ResourceTrackingTestSuite) TearDownTest() {
 			verifyConfig := &corev1.ConfigMap{}
 			err := suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
 				Name:      "argocd-cm",
-				Namespace: "argocd",
+				Namespace: fixture.ManagedAgentNamespace,
 			}, verifyConfig, metav1.GetOptions{})
 			if err != nil {
 				return false
@@ -133,7 +133,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "argocd-cm",
-			Namespace: "argocd",
+			Namespace: fixture.ManagedAgentNamespace,
 		},
 	}
 	err := fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, cm, func(obj fixture.KubeObject) {
@@ -149,7 +149,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 	app := argoapp.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appName,
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: argoapp.ApplicationSpec{
 			Project: "default",
@@ -164,8 +164,8 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 			},
 			SyncPolicy: &argoapp.SyncPolicy{
 				Automated: &argoapp.SyncPolicyAutomated{
-					Prune:    true,
-					SelfHeal: true,
+					Prune:    new(true),
+					SelfHeal: new(true),
 				},
 			},
 		},
@@ -184,15 +184,15 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 		agentApp := &argoapp.Application{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      app.Name,
-				Namespace: "argocd",
+				Namespace: fixture.ManagedAgentAppNamespace(),
 			},
 		}
-		if err := fixture.WaitForDeletion(suite.Ctx, suite.ManagedAgentClient, agentApp); err != nil {
+		if err := fixture.WaitForDeletion(suite.Ctx, suite.ManagedAgentClient, agentApp, "managed agent"); err != nil {
 			suite.T().Logf("Failed to wait for application deletion from managed-agent: %v", err)
 		}
 	})
 
-	agentKey := types.NamespacedName{Name: app.Name, Namespace: "argocd"}
+	agentKey := types.NamespacedName{Name: app.Name, Namespace: fixture.ManagedAgentAppNamespace()}
 
 	// Ensure the app has been pushed to the managed-agent
 	requires.Eventually(func() bool {
@@ -236,7 +236,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 	requires.Eventually(func() bool {
 		err := suite.PrincipalClient.Get(suite.Ctx, types.NamespacedName{
 			Name:      appName,
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		}, &principalApp, metav1.GetOptions{})
 		if err != nil || principalApp.Status.Health.Status != health.HealthStatusHealthy {
 			return false
@@ -252,7 +252,7 @@ func (suite *ResourceTrackingTestSuite) runTrackingTest(
 
 	// Verify that the resource proxy can fetch the tracked resource
 	resource, err := argoClient.GetResource(&principalApp,
-		"apps", "v1", "Deployment", suite.getTestNamespace(), "guestbook-ui")
+		"apps", "v1", "Deployment", suite.getTestNamespace(), "guestbook-ui", suite.T())
 	requires.NoError(err, "Resource proxy should be able to fetch resource with %s tracking", trackingMethod)
 
 	// Verify the fetched resource is correct

@@ -20,17 +20,23 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
+	synccommon "github.com/argoproj/argo-cd/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -41,6 +47,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/util/workqueue"
 )
 
@@ -50,6 +57,7 @@ func TestMapAppProjectToAgents(t *testing.T) {
 		appProject v1alpha1.AppProject
 		agents     map[string]types.AgentMode
 		want       map[string]bool
+		dstMapping bool
 	}{
 		{
 			name: "matches single agent",
@@ -120,11 +128,32 @@ func TestMapAppProjectToAgents(t *testing.T) {
 			},
 			want: map[string]bool{},
 		},
+		{
+			name: "destination-based mapping - agent only matches destination name",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "cluster-1"},
+					},
+				},
+			},
+			agents: map[string]types.AgentMode{
+				"cluster-1": types.AgentModeManaged,
+				"cluster-2": types.AgentModeManaged,
+			},
+			want: map[string]bool{
+				"cluster-1": true,
+			},
+			dstMapping: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Server{namespaceMap: tt.agents}
+			s := &Server{
+				namespaceMap:            tt.agents,
+				destinationBasedMapping: tt.dstMapping,
+			}
 			got := s.mapAppProjectToAgents(tt.appProject)
 			assert.Equal(t, tt.want, got)
 		})
@@ -372,58 +401,96 @@ func TestSyncAppProjectUpdatesToAgents(t *testing.T) {
 
 func TestIsResourceFromAutonomousAgent(t *testing.T) {
 	tests := []struct {
-		name    string
-		project v1alpha1.AppProject
-		want    bool
+		name         string
+		project      v1alpha1.AppProject
+		namespaceMap map[string]types.AgentMode
+		want         bool
 	}{
 		{
-			name: "project with SourceUID annotation is autonomous",
+			name: "source-uid with autonomous mode",
 			project: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-project",
+					Name:      "test-project",
+					Namespace: "agent1",
 					Annotations: map[string]string{
 						manager.SourceUIDAnnotation: "some-uid",
 					},
 				},
 			},
-			want: true,
+			namespaceMap: map[string]types.AgentMode{"agent1": types.AgentModeAutonomous},
+			want:         true,
+		},
+		{
+			name: "source-uid with managed mode is not autonomous",
+			project: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-project",
+					Namespace: "agent1",
+					Annotations: map[string]string{
+						manager.SourceUIDAnnotation: "some-uid",
+					},
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+			want:         false,
+		},
+		{
+			name: "source-uid with unknown mode is not autonomous",
+			project: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-project",
+					Namespace: "agent1",
+					Annotations: map[string]string{
+						manager.SourceUIDAnnotation: "some-uid",
+					},
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{},
+			want:         false,
 		},
 		{
 			name: "project without annotations is not autonomous",
 			project: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-project",
+					Name:      "test-project",
+					Namespace: "agent1",
 				},
 			},
-			want: false,
+			namespaceMap: map[string]types.AgentMode{"agent1": types.AgentModeAutonomous},
+			want:         false,
 		},
 		{
 			name: "project with empty annotations is not autonomous",
 			project: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-project",
+					Namespace:   "agent1",
 					Annotations: map[string]string{},
 				},
 			},
-			want: false,
+			namespaceMap: map[string]types.AgentMode{"agent1": types.AgentModeAutonomous},
+			want:         false,
 		},
 		{
 			name: "project with other annotations but no SourceUID is not autonomous",
 			project: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-project",
+					Name:      "test-project",
+					Namespace: "agent1",
 					Annotations: map[string]string{
 						"other-annotation": "value",
 					},
 				},
 			},
-			want: false,
+			namespaceMap: map[string]types.AgentMode{"agent1": types.AgentModeAutonomous},
+			want:         false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isResourceFromAutonomousAgent(&tt.project)
+			s := &Server{namespaceMap: tt.namespaceMap}
+			got := s.isResourceFromAutonomousAgent(&tt.project)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -1121,6 +1188,9 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 				appManager:  appManager,
 				sourceCache: cache.NewSourceCache(),
 				deletions:   manager.NewDeletionTracker(),
+				namespaceMap: map[string]types.AgentMode{
+					"autonomous-agent": types.AgentModeAutonomous,
+				},
 			}
 
 			// Create send queue for the agent
@@ -1148,7 +1218,7 @@ func TestServer_deleteAppCallback_AutonomousAgent(t *testing.T) {
 			if tt.shouldRecreate {
 				// If we recreated, callback should have returned early - no events in queue
 				assert.Equal(t, 0, sendQ.Len(), "Queue should be empty when recreation happens")
-			} else if !isResourceFromAutonomousAgent(tt.app) {
+			} else if !s.isResourceFromAutonomousAgent(tt.app) {
 				// If not autonomous agent app, normal deletion flow should add event to queue
 				assert.Equal(t, 1, sendQ.Len(), "Queue should contain delete event for normal apps")
 			}
@@ -1279,6 +1349,39 @@ func TestServer_deleteAppCallback(t *testing.T) {
 		agents := s.appToAgent.Get(app.QualifiedName())
 		assert.Empty(t, agents)
 	})
+
+	t.Run("skips queue creation for agent without cluster mapping", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		clusterMgr := &cluster.Manager{}
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			appManager: appManager,
+			clusterMgr: clusterMgr,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "deregistered-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		s.deleteAppCallback(app)
+
+		// No queue should be created for deregistered agent
+		assert.False(t, s.queues.HasQueuePair("deregistered-agent"))
+	})
 }
 
 func TestServer_newAppCallback(t *testing.T) {
@@ -1401,6 +1504,73 @@ func TestServer_newAppCallback(t *testing.T) {
 		// Should not process the app
 		assert.Zero(t, s.queues.Len())
 	})
+
+	t.Run("skips app targeting agent without cluster mapping", func(t *testing.T) {
+		clusterMgr := &cluster.Manager{}
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			clusterMgr: clusterMgr,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "deregistered-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		s.newAppCallback(app)
+
+		// No queue should be created
+		assert.False(t, s.queues.HasQueuePair("deregistered-agent"))
+		// No resource tracking
+		assert.Empty(t, s.resources.GetAllResources("deregistered-agent"))
+		// No app-to-agent tracking
+		assert.Empty(t, s.appToAgent.Get("deregistered-agent/test-app"))
+	})
+
+	t.Run("processes app when cluster mapping exists", func(t *testing.T) {
+		clusterMgr, err := cluster.NewManager(context.Background(), "argocd", "", "", "", kubefake.NewSimpleClientset(), nil)
+		require.NoError(t, err)
+		require.NoError(t, clusterMgr.MapCluster("registered-agent", &v1alpha1.Cluster{Name: "registered-agent", Server: "https://registered.example.com"}))
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			clusterMgr: clusterMgr,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "registered-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		s.newAppCallback(app)
+
+		// Queue should be created and event added
+		assert.True(t, s.queues.HasQueuePair("registered-agent"))
+		sendQ := s.queues.SendQ("registered-agent")
+		require.NotNil(t, sendQ)
+		assert.Equal(t, 1, sendQ.Len())
+		// Resource tracking should be populated
+		assert.Len(t, s.resources.GetAllResources("registered-agent"), 1)
+	})
 }
 
 func TestServer_updateAppCallback(t *testing.T) {
@@ -1416,6 +1586,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 		}
 
 		err = s.queues.Create("managed-agent")
@@ -1457,6 +1628,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 		}
 
 		err = s.queues.Create("managed-agent")
@@ -1486,6 +1658,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 			sourceCache:  cache.NewSourceCache(),
 		}
 
@@ -1523,6 +1696,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 			sourceCache:  cache.NewSourceCache(),
 		}
 
@@ -1574,6 +1748,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 			sourceCache:  cache.NewSourceCache(),
 		}
 
@@ -1615,7 +1790,50 @@ func TestServer_updateAppCallback(t *testing.T) {
 		assert.Equal(t, 1, sendQ.Len())
 	})
 
-	t.Run("include operation in event if it is initiated for the first time", func(t *testing.T) {
+	t.Run("autonomous agent finalizer removal marks deletion as expected", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		deletions := manager.NewDeletionTracker()
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
+			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
+			sourceCache:  cache.NewSourceCache(),
+			deletions:    deletions,
+		}
+
+		err = s.queues.Create("autonomous-agent")
+		require.NoError(t, err)
+
+		deletionTime := metav1.Now()
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
+				Annotations:       map[string]string{manager.SourceUIDAnnotation: "uid-xyz"},
+				DeletionTimestamp: &deletionTime,
+				Finalizers:        []string{"resources-finalizer.argocd.argoproj.io"},
+			},
+		}
+		appWithoutFinalizers2 := newApp.DeepCopy()
+		appWithoutFinalizers2.Finalizers = nil
+
+		mockBackend.On("Get", mock.Anything, "test-app", "autonomous-agent").Return(newApp, nil)
+		mockBackend.On("SupportsPatch").Return(false)
+		mockBackend.On("Update", mock.Anything, mock.Anything).Return(appWithoutFinalizers2, nil)
+
+		s.updateAppCallback(newApp, newApp)
+
+		// Deletion must be pre-registered so deleteAppCallback won't recreate the app.
+		assert.True(t, deletions.RemoveExpected(k8stypes.UID("uid-xyz")), "expected deletion to be marked as expected after finalizer removal")
+	})
+
+	t.Run("operation sent as separate SetOperation event on nil to non-nil transition", func(t *testing.T) {
 		mockBackend := &mocks.Application{}
 
 		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
@@ -1627,6 +1845,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 		}
 
 		err = s.queues.Create("managed-agent")
@@ -1647,19 +1866,29 @@ func TestServer_updateAppCallback(t *testing.T) {
 		s.updateAppCallback(oldApp, newApp)
 
 		sendQ := s.queues.SendQ("managed-agent")
-		assert.Equal(t, 1, sendQ.Len())
+		// Two events: SpecUpdate (no operation) + SetOperation (with operation)
+		assert.Equal(t, 2, sendQ.Len())
 
+		// First event: SpecUpdate with operation stripped
 		ev, _ := sendQ.Get()
 		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
 		app := &v1alpha1.Application{}
-		b := ev.Data()
-		err = json.Unmarshal(b, app)
+		err = json.Unmarshal(ev.Data(), app)
+		require.NoError(t, err)
+		require.Nil(t, app.Operation, "SpecUpdate must not carry the operation")
+		sendQ.Done(ev)
+
+		// Second event: SetOperation carrying the operation
+		ev, _ = sendQ.Get()
+		assert.Equal(t, event.SetOperation.String(), ev.Type())
+		app = &v1alpha1.Application{}
+		err = json.Unmarshal(ev.Data(), app)
 		require.NoError(t, err)
 		require.NotNil(t, app.Operation)
 		assert.Equal(t, newApp.Operation, app.Operation)
 		sendQ.Done(ev)
 
-		// Operation should be set to nil for subsequent events
+		// Subsequent non-nil → non-nil update: only SpecUpdate, no SetOperation
 		oldApp = newApp.DeepCopy()
 		s.updateAppCallback(oldApp, newApp)
 
@@ -1667,11 +1896,66 @@ func TestServer_updateAppCallback(t *testing.T) {
 		ev, _ = sendQ.Get()
 		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
 		app = &v1alpha1.Application{}
-		b = ev.Data()
-		err = json.Unmarshal(b, app)
+		err = json.Unmarshal(ev.Data(), app)
 		require.NoError(t, err)
-		fmt.Println(app.Operation.String())
-		require.Nil(t, app.Operation)
+		require.Nil(t, app.Operation, "SpecUpdate must not carry the operation even when non-nil on both old and new")
+		sendQ.Done(ev)
+	})
+
+	t.Run("autonomous agent also receives SetOperation on nil to non-nil transition", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
+			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
+			sourceCache:  cache.NewSourceCache(),
+		}
+
+		err = s.queues.Create("autonomous-agent")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
+				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+			},
+		}
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
+				Annotations: map[string]string{manager.SourceUIDAnnotation: "uid-123"},
+			},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{Revision: "HEAD"},
+			},
+		}
+
+		s.updateAppCallback(oldApp, newApp)
+
+		sendQ := s.queues.SendQ("autonomous-agent")
+		assert.Equal(t, 2, sendQ.Len())
+
+		ev, _ := sendQ.Get()
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+		app := &v1alpha1.Application{}
+		err = json.Unmarshal(ev.Data(), app)
+		require.NoError(t, err)
+		require.Nil(t, app.Operation, "SpecUpdate must not carry the operation for autonomous agents either")
+		sendQ.Done(ev)
+
+		ev, _ = sendQ.Get()
+		assert.Equal(t, event.SetOperation.String(), ev.Type())
+		app = &v1alpha1.Application{}
+		err = json.Unmarshal(ev.Data(), app)
+		require.NoError(t, err)
+		require.NotNil(t, app.Operation)
 		sendQ.Done(ev)
 	})
 
@@ -1687,6 +1971,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 			events:       event.NewEventSource("test"),
 			namespaceMap: map[string]types.AgentMode{"managed-agent": types.AgentModeManaged},
 			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
 		}
 
 		err = s.queues.Create("managed-agent")
@@ -1972,12 +2257,56 @@ func TestServer_updateAppCallback(t *testing.T) {
 		agentResources1 := s.resources.GetAllResources("cluster-1")
 		assert.Len(t, agentResources1, 0, "Old cluster should have no resources")
 	})
+
+	t.Run("skips queue creation for agent without cluster mapping", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+		mockBackend.On("IsChangeIgnored", mock.Anything, mock.Anything).Return(false)
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd")
+		require.NoError(t, err)
+
+		clusterMgr := &cluster.Manager{}
+
+		s := &Server{
+			ctx:        context.Background(),
+			queues:     queue.NewSendRecvQueues(),
+			events:     event.NewEventSource("test"),
+			resources:  resources.NewAgentResources(),
+			appToAgent: newConcurrentStringMap(),
+			appManager: appManager,
+			clusterMgr: clusterMgr,
+		}
+
+		app := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-app",
+				Namespace: "deregistered-agent",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+			},
+		}
+
+		s.updateAppCallback(app, app)
+
+		// No queue should be created for deregistered agent
+		assert.False(t, s.queues.HasQueuePair("deregistered-agent"))
+	})
+}
+
+func newTestClusterManager(t *testing.T) *cluster.Manager {
+	t.Helper()
+	m, err := cluster.NewManager(context.Background(), "default", "", "", cacheutil.RedisCompressionGZip, fakekube.NewFakeKubeClient("default"), nil)
+	require.NoError(t, err)
+	return m
 }
 
 func TestServer_handleAppAgentChange(t *testing.T) {
 	tests := []struct {
 		name                    string
 		destinationBasedMapping bool
+		namespaceMap            map[string]types.AgentMode
+		clusterMgr              *cluster.Manager
 		oldApp                  *v1alpha1.Application
 		newApp                  *v1alpha1.Application
 		expectedDeleteAgent     string
@@ -2138,6 +2467,7 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 		{
 			name:                    "autonomous resource - no action taken",
 			destinationBasedMapping: true,
+			namespaceMap:            map[string]types.AgentMode{"default": types.AgentModeAutonomous},
 			oldApp: &v1alpha1.Application{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-app",
@@ -2168,10 +2498,76 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 			expectedAddAgent:    "",
 			shouldTrackApp:      false,
 		},
+		{
+			name:                    "new agent has no cluster mapping - does not poison appToAgent",
+			destinationBasedMapping: true,
+			clusterMgr:              newTestClusterManager(t),
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "local-cluster",
+					},
+				},
+			},
+			expectedDeleteAgent: "old-agent",
+			expectedDeleteEvent: true,
+			expectedAddAgent:    "",
+			shouldTrackApp:      false,
+		},
+		{
+			name:                    "new agent has a live cluster mapping - tracks normally",
+			destinationBasedMapping: true,
+			clusterMgr:              newTestClusterManager(t),
+			oldApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "old-agent",
+					},
+				},
+			},
+			newApp: &v1alpha1.Application{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ApplicationSpec{
+					Destination: v1alpha1.ApplicationDestination{
+						Name: "new-agent",
+					},
+				},
+			},
+			expectedDeleteAgent: "old-agent",
+			expectedDeleteEvent: true,
+			expectedAddAgent:    "new-agent",
+			shouldTrackApp:      true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.clusterMgr != nil && tt.expectedAddAgent != "" && tt.shouldTrackApp {
+				require.NoError(t, tt.clusterMgr.MapCluster(tt.expectedAddAgent, &v1alpha1.Cluster{Name: tt.expectedAddAgent}))
+			}
+
 			s := &Server{
 				ctx:                     context.Background(),
 				queues:                  queue.NewSendRecvQueues(),
@@ -2179,6 +2575,8 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 				resources:               resources.NewAgentResources(),
 				appToAgent:              newConcurrentStringMap(),
 				destinationBasedMapping: tt.destinationBasedMapping,
+				namespaceMap:            tt.namespaceMap,
+				clusterMgr:              tt.clusterMgr,
 			}
 
 			// Create queues for agents involved
@@ -2236,6 +2634,258 @@ func TestServer_handleAppAgentChange(t *testing.T) {
 	}
 }
 
+func TestServer_newGPGKeyCallback(t *testing.T) {
+	tests := []struct {
+		name           string
+		cm             *corev1.ConfigMap
+		namespaceMap   map[string]types.AgentMode
+		expectEvents   bool
+		expectedAgents []string
+	}{
+		{
+			name: "successful GPG key creation with single managed agent",
+			cm: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "argocd-gpg-keys-cm",
+					Namespace: "argocd",
+					UID:       "gpg-uid-123",
+				},
+				Data: map[string]string{
+					"my-key": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n...",
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeAutonomous,
+			},
+			expectEvents:   true,
+			expectedAgents: []string{"agent1"},
+		},
+		{
+			name: "GPG key creation with multiple managed agents",
+			cm: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "argocd-gpg-keys-cm",
+					Namespace: "argocd",
+					UID:       "gpg-uid-456",
+				},
+				Data: map[string]string{
+					"key1": "-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey1...",
+					"key2": "-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey2...",
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeManaged,
+				"agent3": types.AgentModeAutonomous,
+			},
+			expectEvents:   true,
+			expectedAgents: []string{"agent1", "agent2"},
+		},
+		{
+			name: "GPG key creation with no managed agents",
+			cm: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "argocd-gpg-keys-cm",
+					Namespace: "argocd",
+					UID:       "gpg-uid-789",
+				},
+			},
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeAutonomous,
+			},
+			expectEvents:   false,
+			expectedAgents: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				ctx:          context.Background(),
+				queues:       queue.NewSendRecvQueues(),
+				events:       event.NewEventSource("test"),
+				namespaceMap: tt.namespaceMap,
+				resources:    resources.NewAgentResources(),
+			}
+
+			for agentName := range tt.namespaceMap {
+				err := s.queues.Create(agentName)
+				require.NoError(t, err)
+			}
+
+			s.newGPGKeyCallback(tt.cm)
+
+			if tt.expectEvents {
+				var eventsReceived []string
+				for _, agentName := range tt.expectedAgents {
+					q := s.queues.SendQ(agentName)
+					require.NotNil(t, q)
+					require.Equal(t, 1, q.Len())
+
+					if q.Len() > 0 {
+						ev, shutdown := q.Get()
+						require.False(t, shutdown)
+						require.NotNil(t, ev)
+
+						assert.Equal(t, event.Create.String(), ev.Type())
+
+						eventsReceived = append(eventsReceived, agentName)
+						q.Done(ev)
+					}
+				}
+				assert.ElementsMatch(t, tt.expectedAgents, eventsReceived)
+			} else {
+				for agentName := range tt.namespaceMap {
+					q := s.queues.SendQ(agentName)
+					require.NotNil(t, q)
+					assert.Equal(t, 0, q.Len())
+				}
+			}
+		})
+	}
+}
+
+func TestServer_syncGPGKeyToManagedAgents(t *testing.T) {
+	t.Run("sends create event to all managed agents", func(t *testing.T) {
+		s := &Server{
+			ctx:    context.Background(),
+			queues: queue.NewSendRecvQueues(),
+			events: event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeManaged,
+				"agent3": types.AgentModeAutonomous,
+			},
+			resources: resources.NewAgentResources(),
+		}
+
+		s.queues.Create("agent1")
+		s.queues.Create("agent2")
+		s.queues.Create("agent3")
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		logCtx := logrus.WithField("test", "syncGPGKeyToManagedAgents")
+		s.syncGPGKeyToManagedAgents(context.Background(), cm, event.Create, logCtx)
+
+		assert.Equal(t, 1, s.queues.SendQ("agent1").Len())
+		assert.Equal(t, 1, s.queues.SendQ("agent2").Len())
+		assert.Equal(t, 0, s.queues.SendQ("agent3").Len())
+	})
+
+	t.Run("sends delete event and removes resources", func(t *testing.T) {
+		s := &Server{
+			ctx:    context.Background(),
+			queues: queue.NewSendRecvQueues(),
+			events: event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+			},
+			resources: resources.NewAgentResources(),
+		}
+
+		s.queues.Create("agent1")
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		s.resources.Add("agent1", resources.NewResourceKeyFromGPGKey(cm))
+		assert.Equal(t, 1, len(s.resources.GetAllResources("agent1")))
+
+		logCtx := logrus.WithField("test", "syncGPGKeyToManagedAgents")
+		s.syncGPGKeyToManagedAgents(context.Background(), cm, event.Delete, logCtx)
+
+		assert.Equal(t, 1, s.queues.SendQ("agent1").Len())
+
+		ev, shutdown := s.queues.SendQ("agent1").Get()
+		require.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type())
+		s.queues.SendQ("agent1").Done(ev)
+
+		assert.Equal(t, 0, len(s.resources.GetAllResources("agent1")))
+	})
+
+	t.Run("sends update event and adds resources", func(t *testing.T) {
+		s := &Server{
+			ctx:    context.Background(),
+			queues: queue.NewSendRecvQueues(),
+			events: event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+			},
+			resources: resources.NewAgentResources(),
+		}
+
+		s.queues.Create("agent1")
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		logCtx := logrus.WithField("test", "syncGPGKeyToManagedAgents")
+		s.syncGPGKeyToManagedAgents(context.Background(), cm, event.SpecUpdate, logCtx)
+
+		assert.Equal(t, 1, s.queues.SendQ("agent1").Len())
+
+		ev, shutdown := s.queues.SendQ("agent1").Get()
+		require.False(t, shutdown)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+		s.queues.SendQ("agent1").Done(ev)
+
+		assert.Equal(t, 1, len(s.resources.GetAllResources("agent1")))
+	})
+}
+
+func TestServer_deleteGPGKeyCallback(t *testing.T) {
+	t.Run("sends delete event to managed agents", func(t *testing.T) {
+		s := &Server{
+			ctx:    context.Background(),
+			queues: queue.NewSendRecvQueues(),
+			events: event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+				"agent2": types.AgentModeAutonomous,
+			},
+			resources: resources.NewAgentResources(),
+		}
+
+		s.queues.Create("agent1")
+		s.queues.Create("agent2")
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		s.resources.Add("agent1", resources.NewResourceKeyFromGPGKey(cm))
+
+		s.deleteGPGKeyCallback(cm)
+
+		assert.Equal(t, 1, s.queues.SendQ("agent1").Len())
+		assert.Equal(t, 0, s.queues.SendQ("agent2").Len())
+
+		ev, shutdown := s.queues.SendQ("agent1").Get()
+		require.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type())
+		s.queues.SendQ("agent1").Done(ev)
+	})
+}
+
 func drainQueue(t *testing.T, q workqueue.TypedRateLimitingInterface[*cloudevents.Event]) {
 	for q.Len() > 0 {
 		ev, shutdown := q.Get()
@@ -2244,4 +2894,533 @@ func drainQueue(t *testing.T, q workqueue.TypedRateLimitingInterface[*cloudevent
 		}
 		q.Done(ev)
 	}
+}
+
+func newServerWithHA(t *testing.T) (*Server, *HAComponents) {
+	t.Helper()
+	ctx := context.Background()
+
+	mockRepoBackend := &mocks.Repository{}
+	mockRepoBackend.On("Create", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(&corev1.Secret{}, nil).Maybe()
+
+	mockProjectBackend := &mocks.AppProject{}
+	projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+	require.NoError(t, err)
+
+	repoManager := repository.NewManager(mockRepoBackend, "argocd", false)
+
+	s := &Server{
+		ctx:            ctx,
+		queues:         queue.NewSendRecvQueues(),
+		events:         event.NewEventSource("test"),
+		namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+		projectManager: projectManager,
+		repoManager:    repoManager,
+		resources:      resources.NewAgentResources(),
+		repoToAgents:   NewMapToSet(),
+		projectToRepos: NewMapToSet(),
+	}
+	require.NoError(t, s.queues.Create("agent1"))
+
+	components, err := NewHAComponents(ctx, s)
+	require.NoError(t, err)
+	require.NoError(t, components.Controller.Start())
+
+	s.ha = components
+
+	return s, components
+}
+
+func TestServer_newRepositoryCallback_ForwardsToHA(t *testing.T) {
+	mockProjectBackend := &mocks.AppProject{}
+	project := &v1alpha1.AppProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "argocd"},
+		Spec: v1alpha1.AppProjectSpec{
+			Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+			SourceNamespaces: []string{"agent1"},
+		},
+	}
+	mockProjectBackend.On("Get", mock.Anything, "default", "argocd").Return(project, nil)
+
+	mockRepoBackend := &mocks.Repository{}
+	mockRepoBackend.On("Create", mock.Anything, mock.AnythingOfType("*v1.Secret")).Return(&corev1.Secret{}, nil).Maybe()
+
+	projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+	require.NoError(t, err)
+
+	repoManager := repository.NewManager(mockRepoBackend, "argocd", false)
+
+	ctx := context.Background()
+	s := &Server{
+		ctx:            ctx,
+		queues:         queue.NewSendRecvQueues(),
+		events:         event.NewEventSource("test"),
+		namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+		projectManager: projectManager,
+		repoManager:    repoManager,
+		resources:      resources.NewAgentResources(),
+		repoToAgents:   NewMapToSet(),
+		projectToRepos: NewMapToSet(),
+	}
+	require.NoError(t, s.queues.Create("agent1"))
+
+	components, err := NewHAComponents(ctx, s)
+	require.NoError(t, err)
+	require.NoError(t, components.Controller.Start())
+	s.ha = components
+
+	before := components.ReplicationForwarder.CurrentSequenceNum()
+
+	repo := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "fwd-repo", Namespace: "argocd", UID: "uid-fwd"},
+		Data:       map[string][]byte{"project": []byte("default"), "url": []byte("https://github.com/example/repo.git")},
+	}
+	s.newRepositoryCallback(repo)
+
+	after := components.ReplicationForwarder.CurrentSequenceNum()
+	assert.Greater(t, after, before, "forwarding should increment sequence number")
+}
+
+func TestServer_deleteRepositoryCallback_ForwardsToHA(t *testing.T) {
+	mockProjectBackend := &mocks.AppProject{}
+	project := &v1alpha1.AppProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "argocd"},
+		Spec: v1alpha1.AppProjectSpec{
+			Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+			SourceNamespaces: []string{"agent1"},
+		},
+	}
+	mockProjectBackend.On("Get", mock.Anything, "default", "argocd").Return(project, nil)
+
+	mockRepoBackend := &mocks.Repository{}
+
+	projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+	require.NoError(t, err)
+
+	repoManager := repository.NewManager(mockRepoBackend, "argocd", false)
+
+	ctx := context.Background()
+	s := &Server{
+		ctx:            ctx,
+		queues:         queue.NewSendRecvQueues(),
+		events:         event.NewEventSource("test"),
+		namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+		projectManager: projectManager,
+		repoManager:    repoManager,
+		resources:      resources.NewAgentResources(),
+		repoToAgents:   NewMapToSet(),
+		projectToRepos: NewMapToSet(),
+	}
+	require.NoError(t, s.queues.Create("agent1"))
+
+	components, err := NewHAComponents(ctx, s)
+	require.NoError(t, err)
+	require.NoError(t, components.Controller.Start())
+	s.ha = components
+
+	repo := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "del-fwd-repo", Namespace: "argocd", UID: "uid-del"},
+		Data:       map[string][]byte{"project": []byte("default"), "url": []byte("https://github.com/example/repo.git")},
+	}
+	s.repoToAgents.Add(repo.Name, "agent1")
+	s.projectToRepos.Add("default", repo.Name)
+
+	before := components.ReplicationForwarder.CurrentSequenceNum()
+
+	s.deleteRepositoryCallback(repo)
+
+	after := components.ReplicationForwarder.CurrentSequenceNum()
+	assert.Greater(t, after, before, "forwarding should increment sequence number")
+}
+
+func TestServer_deleteAppProjectCallback_SyncsRepositories(t *testing.T) {
+	t.Run("deleting project sends repo delete events to agents", func(t *testing.T) {
+		repoSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte("test-project"), "url": []byte("https://example.com/repo.git")},
+		}
+
+		mockProjectBackend := &mocks.AppProject{}
+		mockProjectBackend.On("Get", mock.Anything, "test-project", "argocd").
+			Return(nil, errors.NewNotFound(schema.GroupResource{}, "test-project"))
+
+		projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+			projectManager: projectManager,
+			resources:      resources.NewAgentResources(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset(repoSecret)},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+		s.repoToAgents.Add("test-repo", "agent1")
+		s.projectToRepos.Add("test-project", "test-repo")
+
+		appProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+				SourceNamespaces: []string{"agent1"},
+			},
+		}
+
+		s.deleteAppProjectCallback(appProject)
+
+		q := s.queues.SendQ("agent1")
+		require.NotNil(t, q)
+
+		var deleteCount, appProjectDeleteCount int
+		for q.Len() > 0 {
+			ev, shutdown := q.Get()
+			require.False(t, shutdown)
+			switch ev.DataSchema() {
+			case "repository":
+				assert.Equal(t, event.Delete.String(), ev.Type())
+				deleteCount++
+			case "appproject":
+				appProjectDeleteCount++
+			}
+			q.Done(ev)
+		}
+		assert.Equal(t, 1, deleteCount, "Should have 1 repo delete event from syncRepositoriesForProject")
+		assert.Equal(t, 1, appProjectDeleteCount, "Should have 1 appproject delete event")
+
+		assert.Empty(t, s.repoToAgents.Get("test-repo"), "Repo-to-agents mapping should be cleaned up")
+
+		mockProjectBackend.AssertExpectations(t)
+	})
+
+	t.Run("deleting project with multiple repos and agents", func(t *testing.T) {
+		repo1 := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "repo-1", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte("multi-project"), "url": []byte("https://example.com/repo1.git")},
+		}
+		repo2 := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "repo-2", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte("multi-project"), "url": []byte("https://example.com/repo2.git")},
+		}
+
+		mockProjectBackend := &mocks.AppProject{}
+		mockProjectBackend.On("Get", mock.Anything, "multi-project", "argocd").
+			Return(nil, errors.NewNotFound(schema.GroupResource{}, "multi-project"))
+
+		projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged, "agent2": types.AgentModeManaged},
+			projectManager: projectManager,
+			resources:      resources.NewAgentResources(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset(repo1, repo2)},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+		require.NoError(t, s.queues.Create("agent2"))
+
+		s.repoToAgents.Add("repo-1", "agent1")
+		s.repoToAgents.Add("repo-1", "agent2")
+		s.repoToAgents.Add("repo-2", "agent1")
+		s.projectToRepos.Add("multi-project", "repo-1")
+		s.projectToRepos.Add("multi-project", "repo-2")
+
+		appProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "multi-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent*"}},
+				SourceNamespaces: []string{"agent1", "agent2"},
+			},
+		}
+
+		s.deleteAppProjectCallback(appProject)
+
+		repoDeleteEvents := map[string]int{}
+		for _, agentName := range []string{"agent1", "agent2"} {
+			q := s.queues.SendQ(agentName)
+			for q.Len() > 0 {
+				ev, _ := q.Get()
+				if ev.DataSchema() == "repository" && ev.Type() == event.Delete.String() {
+					repoDeleteEvents[agentName]++
+				}
+				q.Done(ev)
+			}
+		}
+		assert.Equal(t, 2, repoDeleteEvents["agent1"], "agent1 should get delete events for both repos")
+		assert.Equal(t, 1, repoDeleteEvents["agent2"], "agent2 should get delete event for repo-1")
+
+		assert.Empty(t, s.repoToAgents.Get("repo-1"))
+		assert.Empty(t, s.repoToAgents.Get("repo-2"))
+	})
+
+	t.Run("deleting project with missing repo secret logs error and continues", func(t *testing.T) {
+		existingRepo := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "existing-repo", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte("test-project"), "url": []byte("https://example.com/repo.git")},
+		}
+
+		mockProjectBackend := &mocks.AppProject{}
+		mockProjectBackend.On("Get", mock.Anything, "test-project", "argocd").
+			Return(nil, errors.NewNotFound(schema.GroupResource{}, "test-project"))
+
+		projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+		require.NoError(t, err)
+
+		// Only "existing-repo" is in the fake client; "deleted-repo" is not
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+			projectManager: projectManager,
+			resources:      resources.NewAgentResources(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset(existingRepo)},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+
+		// Stale mapping entry: "deleted-repo" no longer exists in the cluster
+		s.repoToAgents.Add("deleted-repo", "agent1")
+		s.repoToAgents.Add("existing-repo", "agent1")
+		s.projectToRepos.Add("test-project", "deleted-repo")
+		s.projectToRepos.Add("test-project", "existing-repo")
+
+		appProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+				SourceNamespaces: []string{"agent1"},
+			},
+		}
+
+		s.deleteAppProjectCallback(appProject)
+
+		q := s.queues.SendQ("agent1")
+		var repoDeleteCount int
+		for q.Len() > 0 {
+			ev, _ := q.Get()
+			if ev.DataSchema() == "repository" && ev.Type() == event.Delete.String() {
+				repoDeleteCount++
+			}
+			q.Done(ev)
+		}
+		assert.Equal(t, 1, repoDeleteCount, "Should still process existing-repo even when deleted-repo is missing")
+		assert.Empty(t, s.repoToAgents.Get("existing-repo"), "Existing repo mapping should be cleaned up")
+		assert.Equal(t, map[string]bool{"agent1": true}, s.repoToAgents.Get("deleted-repo"),
+			"Stale mapping for missing repo should remain since it was never processed")
+	})
+
+	t.Run("deleting project with no repos in mapping is a no-op for repos", func(t *testing.T) {
+		mockProjectBackend := &mocks.AppProject{}
+		projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+			projectManager: projectManager,
+			resources:      resources.NewAgentResources(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset()},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+
+		appProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "empty-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+				SourceNamespaces: []string{"agent1"},
+			},
+		}
+
+		s.deleteAppProjectCallback(appProject)
+
+		q := s.queues.SendQ("agent1")
+		var repoDeleteCount int
+		for q.Len() > 0 {
+			ev, _ := q.Get()
+			if ev.DataSchema() == "repository" {
+				repoDeleteCount++
+			}
+			q.Done(ev)
+		}
+		assert.Equal(t, 0, repoDeleteCount, "No repo events when project has no repos")
+	})
+}
+
+func TestServer_updateAppProjectCallback_SyncsRepositories(t *testing.T) {
+	t.Run("updating project rules reconciles repos to agents", func(t *testing.T) {
+		repoSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "argocd"},
+			Data:       map[string][]byte{"project": []byte("test-project"), "url": []byte("https://example.com/repo.git")},
+		}
+
+		// After update, the project only includes agent1
+		updatedProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+				SourceNamespaces: []string{"agent1"},
+			},
+		}
+		mockProjectBackend := &mocks.AppProject{}
+		mockProjectBackend.On("Get", mock.Anything, "test-project", "argocd").Return(updatedProject, nil)
+
+		projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged, "agent2": types.AgentModeManaged},
+			projectManager: projectManager,
+			resources:      resources.NewAgentResources(),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset(repoSecret)},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+		require.NoError(t, s.queues.Create("agent2"))
+
+		// Before update: repo was on both agents
+		s.repoToAgents.Add("test-repo", "agent1")
+		s.repoToAgents.Add("test-repo", "agent2")
+		s.projectToRepos.Add("test-project", "test-repo")
+
+		oldProject := &v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-project", Namespace: "argocd"},
+			Spec: v1alpha1.AppProjectSpec{
+				Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent*"}},
+				SourceNamespaces: []string{"agent1", "agent2"},
+			},
+		}
+
+		s.updateAppProjectCallback(oldProject, updatedProject)
+
+		// agent2 should receive a repo delete event from syncRepositoriesForProject
+		q2 := s.queues.SendQ("agent2")
+		var agent2RepoDeletes int
+		for q2.Len() > 0 {
+			ev, _ := q2.Get()
+			if ev.DataSchema() == "repository" && ev.Type() == event.Delete.String() {
+				agent2RepoDeletes++
+			}
+			q2.Done(ev)
+		}
+		assert.Equal(t, 1, agent2RepoDeletes, "agent2 should get a repo delete event after losing project access")
+
+		// agent1 should receive a repo update event from syncRepositoriesForProject
+		q1 := s.queues.SendQ("agent1")
+		var agent1RepoUpdates int
+		for q1.Len() > 0 {
+			ev, _ := q1.Get()
+			if ev.DataSchema() == "repository" && ev.Type() == event.SpecUpdate.String() {
+				agent1RepoUpdates++
+			}
+			q1.Done(ev)
+		}
+		assert.Equal(t, 1, agent1RepoUpdates, "agent1 should get a repo update event to stay in sync")
+
+		assert.False(t, s.repoToAgents.Get("test-repo")["agent2"], "agent2 should be removed from repo mapping")
+		assert.True(t, s.repoToAgents.Get("test-repo")["agent1"], "agent1 should remain in repo mapping")
+	})
+}
+
+func TestServer_syncRepositoriesForProject(t *testing.T) {
+	t.Run("non-existent project should not panic", func(t *testing.T) {
+		s := &Server{
+			ctx:            context.Background(),
+			queues:         queue.NewSendRecvQueues(),
+			events:         event.NewEventSource("test"),
+			repoToAgents:   NewMapToSet(),
+			projectToRepos: NewMapToSet(),
+			kubeClient:     &kube.KubernetesClient{Clientset: kubefake.NewSimpleClientset()},
+		}
+
+		require.NoError(t, s.queues.Create("agent1"))
+		logCtx := logrus.WithField("test", "syncRepositoriesForProject")
+
+		// Should not panic
+		s.syncRepositoriesForProject(context.Background(), "nonexistent-project", "argocd", logCtx)
+
+		q := s.queues.SendQ("agent1")
+		assert.Equal(t, 0, q.Len())
+	})
+}
+
+func TestServer_syncRepositoryUpdatesToAgents_ForwardsToHA(t *testing.T) {
+	mockProjectBackend := &mocks.AppProject{}
+	project := &v1alpha1.AppProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "argocd"},
+		Spec: v1alpha1.AppProjectSpec{
+			Destinations:     []v1alpha1.ApplicationDestination{{Name: "agent1"}},
+			SourceNamespaces: []string{"agent1"},
+		},
+	}
+	mockProjectBackend.On("Get", mock.Anything, "default", "argocd").Return(project, nil).Maybe()
+
+	mockRepoBackend := &mocks.Repository{}
+
+	projectManager, err := appproject.NewAppProjectManager(mockProjectBackend, "argocd")
+	require.NoError(t, err)
+
+	repoManager := repository.NewManager(mockRepoBackend, "argocd", false)
+
+	ctx := context.Background()
+	s := &Server{
+		ctx:            ctx,
+		queues:         queue.NewSendRecvQueues(),
+		events:         event.NewEventSource("test"),
+		namespaceMap:   map[string]types.AgentMode{"agent1": types.AgentModeManaged},
+		projectManager: projectManager,
+		repoManager:    repoManager,
+		resources:      resources.NewAgentResources(),
+		repoToAgents:   NewMapToSet(),
+		projectToRepos: NewMapToSet(),
+	}
+	require.NoError(t, s.queues.Create("agent1"))
+
+	components, err := NewHAComponents(ctx, s)
+	require.NoError(t, err)
+	require.NoError(t, components.Controller.Start())
+	s.ha = components
+
+	s.repoToAgents.Add("sync-repo", "agent1")
+
+	oldSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "sync-repo", Namespace: "argocd"},
+		Data:       map[string][]byte{"project": []byte("default"), "url": []byte("https://github.com/example/old.git")},
+	}
+	newSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "sync-repo", Namespace: "argocd"},
+		Data:       map[string][]byte{"project": []byte("default"), "url": []byte("https://github.com/example/new.git")},
+	}
+
+	before := components.ReplicationForwarder.CurrentSequenceNum()
+
+	logCtx := logrus.WithField("test", "syncRepositoryUpdatesToAgents_ForwardsToHA")
+	s.syncRepositoryUpdatesToAgents(ctx, oldSecret, newSecret, logCtx)
+
+	after := components.ReplicationForwarder.CurrentSequenceNum()
+	assert.Greater(t, after, before, "forwarding should increment sequence number")
+
+	_ = replication.DirectionOutbound
 }

@@ -211,7 +211,7 @@ Comma-separated list of TLS cipher suites to use. Use `--tls-ciphersuites=list` 
 | **Type** | String (comma-separated list) |
 | **Default** | `info` |
 | **Format** | `[<component>=]<level>` |
-| **Valid Values (component)** | `resource-proxy`, `redis-proxy`, `grpc-event` |
+| **Valid Values (component)** | `resource-proxy`, `redis-proxy`, `grpc-event`, `informer-event-buffer` |
 | **Valid Values (level)** | `trace`, `debug`, `info`, `warning`, `error` |
 
 The log level for the general logger and subsystem loggers for the agent.
@@ -269,6 +269,24 @@ Port the metrics server will listen on.
 | **Range** | 1024-65535 |
 
 Port the health check server will listen on.
+
+## Startup Behavior
+
+### Informer Sync Timeout
+
+| | |
+|---|---|
+| **CLI Flag** | `--informer-sync-timeout` |
+| **Environment Variable** | `ARGOCD_AGENT_INFORMER_SYNC_TIMEOUT` |
+| **ConfigMap Entry** | `agent.informer-sync-timeout` |
+| **Type** | Duration |
+| **Default** | `10s` |
+
+How long the agent waits for its informers (Application, AppProject, Repository, GPG, Namespace) to complete the initial cache sync at startup. If the informers do not sync within this window, the agent fails to start.
+
+Increase this value on large clusters or clusters under high API server load where the initial list-and-watch round-trips take longer than the default.
+
+**Example:** `30s`
 
 ## Network and Performance
 
@@ -342,6 +360,21 @@ Use compression while sending data between Principal and Agent using gRPC.
 
 The redis host to connect to.
 
+### Redis Credentials directory path
+
+| | |
+|---|---|
+| **CLI Flag** | `--redis-creds-dir-path` |
+| **Environment Variable** | `REDIS_CREDS_DIR_PATH` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+The directory with `auth_username` file for Redis username (optional) and `auth` for Redis password.
+In kubernetes, this is intended to read a Secret mounted as a directory.
+
+Cannot be used together with `--redis-username` or `--redis-password`, or their respective environment variables.
+
 ### Redis Username
 
 | | |
@@ -352,7 +385,7 @@ The redis host to connect to.
 | **Type** | String |
 | **Default** | `""` |
 
-The username to connect to redis with.
+The username to connect to redis with. Prefer `--redis-creds-dir-path` for added security benefits.
 
 ### Redis Password
 
@@ -364,7 +397,7 @@ The username to connect to redis with.
 | **Type** | String |
 | **Default** | `""` |
 
-The password to connect to redis with.
+The password to connect to redis with. Prefer `--redis-creds-dir-path` for added security benefits.
 
 ## Resource Proxy Configuration
 
@@ -385,6 +418,23 @@ Enable the resource proxy to allow access to live resources on this agent cluste
 - Security policies that require restricted resource access
 - Performance optimization when live resource viewing is not needed
 - Troubleshooting resource proxy related issues
+
+## Resource Filtering
+
+### Label Selector
+
+| | |
+|---|---|
+| **CLI Flag** | `--label-selector` |
+| **Environment Variable** | `ARGOCD_AGENT_LABEL_SELECTOR` |
+| **ConfigMap Entry** | `agent.label-selector` |
+| **Type** | String |
+| **Default** | `""` (no additional filtering) |
+
+Kubernetes label selector that restricts which resources the agent watches.
+Only resources matching this selector will be listed, watched, and processed
+by the agent. This is combined with the default selector that already excludes
+resources with the ignore sync label.
 
 ## Kubernetes Configuration
 
@@ -411,3 +461,130 @@ Path to a kubeconfig file to use.
 | **Default** | `""` (uses current context) |
 
 Override the default kube context.
+
+## Managed Mode Options
+
+### Ignore Unmanaged Apps
+
+| | |
+|---|---|
+| **CLI Flag** | `--ignore-unmanaged-apps` |
+| **Environment Variable** | `ARGOCD_AGENT_IGNORE_UNMANAGED_APPS` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Ignore applications without the source UID annotation during resync instead of logging errors.
+
+In managed mode, applications created via the agent have a source UID annotation that links them to the principal. Pre-existing applications (created before the agent was installed, or created directly on the cluster) lack this annotation.
+
+When disabled (default), the agent logs errors for applications without the annotation during resync. When enabled, these applications are silently skipped with a debug log message.
+
+**Use Cases:**
+
+- Clusters with pre-existing Argo CD applications not managed by the agent
+- Gradual migration to agent-managed applications
+- Mixed environments with both managed and unmanaged applications
+
+**Example:**
+
+```bash
+argocd-agent agent --ignore-unmanaged-apps
+```
+
+### Source UID Mismatch Policy
+
+| | |
+|---|---|
+| **CLI Flag** | `--source-uid-mismatch-policy` |
+| **Environment Variable** | `ARGOCD_AGENT_SOURCE_UID_MISMATCH_POLICY` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `recreate` |
+
+Controls the agent's behavior when a source-UID mismatch is detected on an incoming managed resource.
+
+In managed mode, the agent stamps each resource with a source UID annotation (`argocd.argoproj.io/source-uid`) recording the resource's Kubernetes UID on the principal. When the agent receives an event for a resource that already exists locally with a different source UID, it means the resource was deleted and recreated on the principal side. This flag determines how the agent handles that situation.
+
+**Policies:**
+
+- `recreate` *(default)*: Delete the existing resource on the agent, then create the incoming one. Guarantees the agent copy exactly reflects the principal state.
+- `upsert`: Update the existing resource in-place without deleting it. Safer for sensitive resources where destructive replacement is undesirable.
+
+**Per-resource override:**
+
+Individual resources can override the global policy via the annotation `argocd.argoproj.io/source-uid-mismatch-policy` set on the resource on the principal side. The annotation value must be `recreate` or `upsert`; unknown values fall back to the global policy with a warning log.
+
+**Use Cases:**
+
+- Set `upsert` globally when managing sensitive resources like `argocd-gpg-keys-cm` where deletion is unacceptable
+- Use the per-resource annotation to apply `upsert` selectively to specific resources while keeping `recreate` as the default
+
+**Example:**
+
+```bash
+argocd-agent agent --source-uid-mismatch-policy=upsert
+```
+
+Per-resource annotation example (set on the principal):
+
+```yaml
+metadata:
+  annotations:
+    argocd.argoproj.io/source-uid-mismatch-policy: upsert
+```
+
+### On Application Recreate
+
+| | |
+|---|---|
+| **CLI Flag** | `--on-application-recreate` |
+| **Environment Variable** | `ARGOCD_AGENT_ON_APPLICATION_RECREATE` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `ignore` |
+| **Valid Values** | `ignore`, `clear-status`, `resync` |
+
+Controls the agent's behavior after it reverts an unauthorized application deletion in managed mode.
+
+When a user or external process deletes an Application directly on the agent cluster (bypassing the principal), the agent detects this as an unauthorized deletion and recreates the Application. However, if the deleted Application had the `resources-finalizer.argocd.argoproj.io` finalizer, the recreated Application inherits a stale `operationState` from the previous sync. This stale state prevents Argo CD's auto-sync from triggering, leaving the Application stuck in `OutOfSync` or `Missing` status indefinitely.
+
+**Actions:**
+
+- `ignore` *(default)*: Take no corrective action after recreation. The Application may remain stuck in `OutOfSync` if it had a finalizer. Use this if you want to manually investigate unauthorized deletions.
+- `clear-status`: Clear the `operationState` on the recreated Application. This allows Argo CD's automated sync policy to re-trigger naturally, bringing the Application back to `Synced` and `Healthy`.
+- `resync`: Set a sync operation on the recreated Application to force an immediate re-sync. This is the most aggressive option and brings the Application back to `Synced` fastest.
+
+**Example:**
+
+```bash
+argocd-agent agent --on-application-recreate=clear-status
+```
+
+Or via environment variable:
+
+```bash
+ARGOCD_AGENT_ON_APPLICATION_RECREATE=clear-status
+```
+
+### Application Adoption
+
+| | |
+|---|---|
+| **CLI Flag** | `--adoption-policy` |
+| **Environment Variable** | `ARGOCD_AGENT_ADOPTION_POLICY` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `always` |
+| **Valid Values** | `always`, `never` |
+
+This flag sets the adoption policy for existing applications in managed mode. Adoption occurs when the application that the principal is trying to create already exists on the agent.
+
+**Policies:**
+
+- `always`: always adopt existing applications
+- `never`: never adopt existing applications
+
+This setting can also be set on the application level by including the annotation `argocd.argoproj.io/adoption-policy` to the value of a valid policy.
+
+**Use Case:** The main use case for this would be to transfer applications from a multi-instance Argo CD set up to using the agent set up.

@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-agent-common-application-resources
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argocd-agent-common-application-resources
+subjects:
+- kind: ServiceAccount
+  name: argocd-agent-agent
+  namespace: default  # Replace with the namespace the agent is in

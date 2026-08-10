@@ -123,7 +123,7 @@ spec:
                 name: argocd-agent-params
                 key: agent.healthz.port
                 optional: true
-          - name: ARGOCD_PRINCIPAL_LOG_FORMAT
+          - name: ARGOCD_AGENT_LOG_FORMAT
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
@@ -164,6 +164,24 @@ spec:
               secretKeyRef:
                 name: argocd-redis
                 key: auth
+          - name: ARGOCD_AGENT_REDIS_TLS_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.redis.tls.enabled
+                optional: true
+          - name: ARGOCD_AGENT_REDIS_TLS_CA_PATH
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.redis.tls.ca-path
+                optional: true
+          - name: ARGOCD_AGENT_REDIS_TLS_INSECURE
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.redis.tls.insecure
+                optional: true
           - name: ARGOCD_AGENT_ENABLE_RESOURCE_PROXY
             valueFrom:
               configMapKeyRef:
@@ -188,11 +206,23 @@ spec:
                 name: argocd-agent-params
                 key: agent.allowed-namespaces
                 optional: true
+          - name: ARGOCD_AGENT_LABEL_SELECTOR
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.label-selector
+                optional: true
           - name: ARGOCD_AGENT_INSECURE_PLAINTEXT
             valueFrom:
               configMapKeyRef:
                 name: argocd-agent-params
                 key: agent.tls.insecure-plaintext
+                optional: true
+          - name: ARGOCD_AGENT_INFORMER_SYNC_TIMEOUT
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.informer-sync-timeout
                 optional: true
           image: argocd-agent
           imagePullPolicy: Always
@@ -214,6 +244,9 @@ spec:
           volumeMounts:
             - name: userpass-passwd
               mountPath: /app/config/creds
+            - name: redis-tls-ca
+              mountPath: /app/config/redis-tls
+              readOnly: true
       serviceAccountName: argocd-agent-agent
       volumes:
       - name: userpass-passwd
@@ -222,4 +255,11 @@ spec:
           items:
           - key: credentials
             path: userpass.creds
+          optional: true
+      - name: redis-tls-ca
+        secret:
+          secretName: argocd-redis-tls
+          items:
+          - key: ca.crt
+            path: ca.crt
           optional: true

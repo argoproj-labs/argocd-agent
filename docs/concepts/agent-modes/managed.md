@@ -32,3 +32,52 @@ Changes to `Application` resources on the workload cluster that are not originat
 * In the case the control plane cluster is compromised, it may affect workload clusters in managed mode, too
 * As noted [previously](#architectural-considerations), the control plane cluster might become a SPoF
 
+## Pre-existing Applications
+
+When deploying the agent to a cluster with existing Argo CD applications, those applications won't have the source UID annotation that the agent uses to track managed resources. By default, the agent logs errors during resync for these unmanaged applications.
+
+To suppress these errors, enable the `--ignore-unmanaged-apps` flag:
+
+```bash
+argocd-agent agent --ignore-unmanaged-apps
+```
+
+Or via environment variable:
+
+```bash
+ARGOCD_AGENT_IGNORE_UNMANAGED_APPS=true
+```
+
+When enabled, applications without the source UID annotation are silently skipped during resync. This is useful for:
+
+* Gradual migration from standalone Argo CD to agent-managed deployments
+* Clusters with a mix of managed and unmanaged applications
+* Avoiding noisy error logs in environments with pre-existing applications
+
+See the [Agent Configuration Reference](../../configuration/reference/agent.md#ignore-unmanaged-apps) for more details.
+
+## Application Stuck OutOfSync After Unauthorized Deletion
+
+In managed mode, the agent reverts unauthorized deletions by recreating the Application. However, when the deleted Application had the `resources-finalizer.argocd.argoproj.io` finalizer, the following sequence occurs:
+
+1. A user or external process deletes the Application directly on the agent cluster
+2. Argo CD's application controller processes the finalizer (deleting managed resources)
+3. The agent detects the unauthorized deletion and recreates the Application
+4. The recreated Application carries over stale `operationState` from the previous sync
+5. Argo CD sees the operation as already completed and does not re-trigger auto-sync
+6. The Application remains stuck in `OutOfSync` or `Missing` status
+
+This is the expected default behavior (`ignore` action) to allow administrators to investigate why the deletion occurred.
+
+To automatically recover from this situation, configure the `--on-application-recreate` flag:
+
+```bash
+# Clear stale state so auto-sync re-triggers naturally
+argocd-agent agent --on-application-recreate=clear-status
+
+# Or force an immediate re-sync
+argocd-agent agent --on-application-recreate=resync
+```
+
+See the [Agent Configuration Reference](../../configuration/reference/agent.md#on-application-recreate) for more details on each action.
+

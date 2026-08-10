@@ -21,6 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	"github.com/sirupsen/logrus"
+
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
@@ -51,9 +54,11 @@ func TestEventWriter(t *testing.T) {
 		},
 	}
 
+	eventWriterLogger := logrus.StandardLogger().WithField("module", "EventWriter")
+
 	t.Run("should add/update/remove events from the queue", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		ev := es.ApplicationEvent(Create, app1)
 		evSender.Add(ev)
@@ -63,9 +68,9 @@ func TestEventWriter(t *testing.T) {
 		require.Equal(t, latestEvent.event, ev)
 		require.Nil(t, latestEvent.retryAfter)
 
-		// Add an Update event for the same resource
+		// Add a SpecUpdate event for the same resource
 		app1.ResourceVersion = "2"
-		newEv := es.ApplicationEvent(Update, app1)
+		newEv := es.ApplicationEvent(SpecUpdate, app1)
 		evSender.Add(newEv)
 
 		latestEvent = evSender.Get(ResourceID(ev))
@@ -75,7 +80,7 @@ func TestEventWriter(t *testing.T) {
 
 		// Try removing an event with the same resourceID but different eventID.
 		app1.ResourceVersion = "3"
-		newEv = es.ApplicationEvent(Update, app1)
+		newEv = es.ApplicationEvent(SpecUpdate, app1)
 		evSender.Remove(newEv)
 
 		// The old event should not removed from the queue.
@@ -94,10 +99,10 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle events from multiple resources", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
-		app1Events := []EventType{Create, Update, Delete}
-		app2Events := []EventType{Create, Update, Update, Delete}
+		app1Events := []EventType{Create, SpecUpdate, Delete}
+		app2Events := []EventType{Create, SpecUpdate, SpecUpdate, Delete}
 
 		for v, e := range app2Events {
 			app2.ResourceVersion = fmt.Sprintf("%d", v)
@@ -121,7 +126,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should send waiting events to the stream", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
@@ -150,14 +155,14 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should prioritize DELETE events and clear queue", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
-		// Add Create and Update events
+		// Add Create and SpecUpdate events
 		ev1 := es.ApplicationEvent(Create, app1)
 		evSender.Add(ev1)
 
 		app1.ResourceVersion = "2"
-		ev2 := es.ApplicationEvent(Update, app1)
+		ev2 := es.ApplicationEvent(SpecUpdate, app1)
 		evSender.Add(ev2)
 
 		resID := createResourceID(app1.ObjectMeta)
@@ -181,18 +186,18 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle concurrent adds and removes", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		var wg sync.WaitGroup
 		numGoroutines := 10
 		numOpsPerGoroutine := 100
 
 		// Concurrent adds
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
-				for j := 0; j < numOpsPerGoroutine; j++ {
+				for j := range numOpsPerGoroutine {
 					app := &v1alpha1.Application{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:            fmt.Sprintf("app-%d", id),
@@ -201,7 +206,7 @@ func TestEventWriter(t *testing.T) {
 							UID:             types.UID(fmt.Sprintf("%d", id)),
 						},
 					}
-					ev := es.ApplicationEvent(Update, app)
+					ev := es.ApplicationEvent(SpecUpdate, app)
 					evSender.Add(ev)
 				}
 			}(i)
@@ -222,7 +227,7 @@ func TestEventWriter(t *testing.T) {
 							UID:             types.UID(fmt.Sprintf("%d", id)),
 						},
 					}
-					ev := es.ApplicationEvent(Update, app)
+					ev := es.ApplicationEvent(SpecUpdate, app)
 					evSender.Remove(ev)
 				}
 			}(i)
@@ -236,7 +241,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should move events from unsent to sent on first send", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
@@ -256,7 +261,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should retry sent events with exponential backoff", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		ev := es.ApplicationEvent(Create, app1)
 		resID := createResourceID(app1.ObjectMeta)
@@ -286,39 +291,15 @@ func TestEventWriter(t *testing.T) {
 		require.Equal(t, 1, sentMsg.retryCount)
 	})
 
-	t.Run("should give up after max retries", func(t *testing.T) {
-		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
-
-		ev := es.ApplicationEvent(Create, app1)
-		resID := createResourceID(app1.ObjectMeta)
-		evSender.Add(ev)
-
-		// Send the event
-		evSender.sendEvent(resID)
-		sentMsg := evSender.sentEvents[resID]
-		require.NotNil(t, sentMsg)
-
-		// Exhaust retries
-		for i := 0; i <= maxEventRetries; i++ {
-			pastTime := time.Now().Add(-1 * time.Second)
-			sentMsg.retryAfter = &pastTime
-			evSender.retrySentEvent(resID, sentMsg)
-		}
-
-		// After max retries, event should be removed from sentEvents
-		require.NotContains(t, evSender.sentEvents, resID)
-	})
-
 	t.Run("should not send ACK events to sentEvents", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Create an ACK event
 		cev := cloudevents.NewEvent()
 		cev.SetSource("test")
 		cev.SetType(EventProcessed.String())
-		cev.SetDataSchema(TargetEventAck.String())
+		cev.SetDataSchema(targets.EventAck.String())
 		cev.SetExtension(eventID, "test-ack")
 		cev.SetExtension(resourceID, "test-resource")
 
@@ -335,7 +316,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should not send heartbeat events to sentEvents (fire-and-forget)", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Create a heartbeat event using EventSource helper
 		heartbeatEv := es.HeartbeatEvent(Ping)
@@ -354,10 +335,10 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("heartbeat events should not accumulate in sentEvents over time", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Simulate multiple heartbeats being sent (like a real heartbeat interval)
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			heartbeatEv := es.HeartbeatEvent(Ping)
 			resID := ResourceID(heartbeatEv)
 			evSender.Add(heartbeatEv)
@@ -370,13 +351,13 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle empty resource ID gracefully", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Create an event manually with empty resourceID extension
 		cev := cloudevents.NewEvent()
 		cev.SetSource("test")
 		cev.SetType(Create.String())
-		cev.SetDataSchema(TargetApplication.String())
+		cev.SetDataSchema(targets.Application.String())
 		cev.SetExtension(eventID, "test-event-id")
 		// Explicitly set resourceID to empty string
 		cev.SetExtension(resourceID, "")
@@ -389,7 +370,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle Get for non-existent resource", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		result := evSender.Get("non-existent-resource-id")
 		require.Nil(t, result)
@@ -397,7 +378,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should return sent event before checking unsent queue in Get", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		// Reset app1 to version 1
 		app1.ResourceVersion = "1"
@@ -414,7 +395,7 @@ func TestEventWriter(t *testing.T) {
 
 		// Add another event for the same resource with version 2
 		app1.ResourceVersion = "2"
-		ev2 := es.ApplicationEvent(Update, app1)
+		ev2 := es.ApplicationEvent(SpecUpdate, app1)
 		evSender.Add(ev2)
 
 		// Get should return the sent event (version 1), not the unsent one (version 2)
@@ -427,7 +408,7 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should handle SendWaitingEvents with context cancellation", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		ev := es.ApplicationEvent(Create, app1)
 		evSender.Add(ev)
@@ -458,14 +439,14 @@ func TestEventWriter(t *testing.T) {
 
 	t.Run("should coalesce multiple updates for same resource", func(t *testing.T) {
 		fs := &fakeStream{}
-		evSender := NewEventWriter(fs)
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
 
 		resID := createResourceID(app1.ObjectMeta)
 
 		// Add multiple updates
 		for i := 1; i <= 5; i++ {
 			app1.ResourceVersion = fmt.Sprintf("%d", i)
-			ev := es.ApplicationEvent(Update, app1)
+			ev := es.ApplicationEvent(SpecUpdate, app1)
 			evSender.Add(ev)
 		}
 
@@ -474,6 +455,107 @@ func TestEventWriter(t *testing.T) {
 		require.NotNil(t, latestEvent)
 		eventID := EventID(latestEvent.event)
 		require.Contains(t, eventID, "_5") // Should be version 5
+	})
+}
+
+func TestDeduplicateEventMessageItems(t *testing.T) {
+	es := NewEventSource("dedupe-test")
+	app := &v1alpha1.Application{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app",
+			Namespace: "ns",
+			UID:       "uid-a",
+		},
+	}
+
+	eventMsg := func(evType EventType, resourceVersion string) *eventMessage {
+		app.ResourceVersion = resourceVersion
+		return &eventMessage{event: es.ApplicationEvent(evType, app)}
+	}
+
+	t.Run("empty slice", func(t *testing.T) {
+		items := []*eventMessage{}
+		deduplicateEventMessageItems(&items)
+		require.Empty(t, items)
+	})
+
+	t.Run("single spec update unchanged", func(t *testing.T) {
+		ev := eventMsg(SpecUpdate, "1")
+		items := []*eventMessage{ev}
+		deduplicateEventMessageItems(&items)
+		require.Len(t, items, 1)
+		require.Equal(t, EventID(ev.event), EventID(items[0].event))
+	})
+
+	t.Run("multiple spec updates keep only freshest", func(t *testing.T) {
+		items := []*eventMessage{
+			eventMsg(SpecUpdate, "1"),
+			eventMsg(SpecUpdate, "2"),
+			eventMsg(SpecUpdate, "3"),
+		}
+		deduplicateEventMessageItems(&items)
+		require.Len(t, items, 1)
+		require.Contains(t, EventID(items[0].event), "_3")
+	})
+
+	t.Run("multiple status updates keep only freshest", func(t *testing.T) {
+		items := []*eventMessage{
+			eventMsg(StatusUpdate, "10"),
+			eventMsg(StatusUpdate, "20"),
+		}
+		deduplicateEventMessageItems(&items)
+		require.Len(t, items, 1)
+		require.Contains(t, EventID(items[0].event), "_20")
+	})
+
+	t.Run("spec and status updates both retained", func(t *testing.T) {
+		items := []*eventMessage{
+			eventMsg(SpecUpdate, "1"),
+			eventMsg(StatusUpdate, "2"),
+		}
+		deduplicateEventMessageItems(&items)
+		require.Len(t, items, 2)
+		require.Equal(t, SpecUpdate.String(), items[0].event.Type())
+		require.Equal(t, StatusUpdate.String(), items[1].event.Type())
+	})
+
+	t.Run("interleaved create leaves creates alone but dedupes spec updates", func(t *testing.T) {
+		items := []*eventMessage{
+			eventMsg(SpecUpdate, "1"),
+			eventMsg(Create, "2"),
+			eventMsg(SpecUpdate, "3"),
+		}
+		deduplicateEventMessageItems(&items)
+		require.Len(t, items, 2)
+		require.Equal(t, Create.String(), items[0].event.Type())
+		require.Equal(t, SpecUpdate.String(), items[1].event.Type())
+		require.Contains(t, EventID(items[1].event), "_3")
+	})
+
+	t.Run("does not dedupe event types other than spec or status update", func(t *testing.T) {
+		items := []*eventMessage{
+			eventMsg(Create, "1"),
+			eventMsg(Create, "2"),
+		}
+		deduplicateEventMessageItems(&items)
+		require.Len(t, items, 2)
+		require.Contains(t, EventID(items[0].event), "_1")
+		require.Contains(t, EventID(items[1].event), "_2")
+	})
+
+	t.Run("keeps latest of each deduped type when interleaved", func(t *testing.T) {
+		items := []*eventMessage{
+			eventMsg(SpecUpdate, "1"),
+			eventMsg(SpecUpdate, "2"),
+			eventMsg(StatusUpdate, "3"),
+			eventMsg(SpecUpdate, "4"),
+		}
+		deduplicateEventMessageItems(&items)
+		require.Len(t, items, 2)
+		require.Equal(t, StatusUpdate.String(), items[0].event.Type())
+		require.Contains(t, EventID(items[0].event), "_3")
+		require.Equal(t, SpecUpdate.String(), items[1].event.Type())
+		require.Contains(t, EventID(items[1].event), "_4")
 	})
 }
 

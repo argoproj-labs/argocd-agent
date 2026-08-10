@@ -17,7 +17,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/config"
@@ -36,33 +35,35 @@ func (suite *HTTP1DowngradeTestSuite) TearDownTest() {
 	suite.BaseSuite.TearDownTest()
 	requires := suite.Require()
 
-	if _, err := os.Stat(fixture.EnvVariablesFromE2EFile); err == nil {
-		requires.NoError(os.Remove(fixture.EnvVariablesFromE2EFile))
-		fixture.RestartAgent(suite.T(), "agent-managed")
-		fixture.RestartAgent(suite.T(), "agent-autonomous")
-	}
+	fixture.ClearEnvVarsFile()
+	fixture.RestartAgent(suite.T(), "agent-managed")
+	fixture.RestartAgent(suite.T(), "agent-autonomous")
 
 	// Ensure that all the components are running after runnings the tests
-	if !fixture.IsProcessRunning("process") {
-		err := fixture.StartProcess("principal")
+	if !fixture.IsProcessRunning("process", suite.T()) {
+		err := fixture.StartProcess("principal", suite.T())
 		requires.NoError(err)
 		fixture.CheckReadiness(suite.T(), "principal")
 	}
 
-	if !fixture.IsProcessRunning("agent-managed") {
-		err := fixture.StartProcess("agent-managed")
+	if !fixture.IsProcessRunning("agent-managed", suite.T()) {
+		err := fixture.StartProcess("agent-managed", suite.T())
 		requires.NoError(err)
 		fixture.CheckReadiness(suite.T(), "agent-managed")
 	}
 
-	if !fixture.IsProcessRunning("agent-autonomous") {
-		err := fixture.StartProcess("agent-autonomous")
+	if !fixture.IsProcessRunning("agent-autonomous", suite.T()) {
+		err := fixture.StartProcess("agent-autonomous", suite.T())
 		requires.NoError(err)
 		fixture.CheckReadiness(suite.T(), "agent-autonomous")
 	}
 }
 
 func (suite *HTTP1DowngradeTestSuite) Test_WithHTTP1Downgrade() {
+
+	// This test assumes that resource proxy is available at localhost, which is not true when agent is on cluster.
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+
 	requires := suite.Require()
 
 	// Verify that the agent has connected to the principal
@@ -82,11 +83,11 @@ func (suite *HTTP1DowngradeTestSuite) Test_WithHTTP1Downgrade() {
 	ctx := context.Background()
 
 	// Load the principal's certificate for incoming connections (agent → proxy)
-	principalServerCert, err := tlsutil.TLSCertFromSecret(ctx, principalClient, "argocd", config.SecretNamePrincipalTLS)
+	principalServerCert, err := tlsutil.TLSCertFromSecret(ctx, principalClient, fixture.PrincipalNamespace, config.SecretNamePrincipalTLS)
 	requires.NoError(err)
 
 	// Load the agent's client certificate for outgoing connections (proxy → principal)
-	agentClientCert, err := tlsutil.TLSCertFromSecret(ctx, agentClient, "argocd", config.SecretNameAgentClientCert)
+	agentClientCert, err := tlsutil.TLSCertFromSecret(ctx, agentClient, fixture.ManagedAgentNamespace, config.SecretNameAgentClientCert)
 	requires.NoError(err)
 
 	proxyPort := 9091
@@ -97,16 +98,15 @@ func (suite *HTTP1DowngradeTestSuite) Test_WithHTTP1Downgrade() {
 	defer http1Proxy.Close()
 
 	// The agent must connect to the principal via the proxy and explicitly disable WebSocket
-	envVar := fmt.Sprintf(`ARGOCD_AGENT_REMOTE_PORT=%d
-ARGOCD_AGENT_ENABLE_WEBSOCKET=false
-ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=false`, proxyPort)
-	err = os.WriteFile(fixture.EnvVariablesFromE2EFile, []byte(envVar+"\n"), 0644)
+	err = fixture.WriteEnvVarsToFile(map[string]string{
+		"ARGOCD_AGENT_REMOTE_PORT":          fmt.Sprintf("%d", proxyPort),
+		"ARGOCD_AGENT_ENABLE_WEBSOCKET":     "false",
+		"ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET": "false",
+	})
 	requires.NoError(err)
 
 	defer func() {
-		if err := os.Remove(fixture.EnvVariablesFromE2EFile); err != nil {
-			suite.T().Errorf("failed to remove env file: %v", err)
-		}
+		fixture.ClearEnvVarsFile()
 
 		// Restart the agent process
 		fixture.RestartAgent(suite.T(), "agent-managed")
@@ -129,10 +129,11 @@ ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=false`, proxyPort)
 	fixture.IsNotReady(suite.T(), "agent-managed")
 
 	// Restart the principal and the agent with the Websocket enabled
-	envVar = fmt.Sprintf(`ARGOCD_AGENT_REMOTE_PORT=%d
-ARGOCD_AGENT_ENABLE_WEBSOCKET=true
-ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=true`, proxyPort)
-	err = os.WriteFile(fixture.EnvVariablesFromE2EFile, []byte(envVar+"\n"), 0644)
+	err = fixture.WriteEnvVarsToFile(map[string]string{
+		"ARGOCD_AGENT_REMOTE_PORT":          fmt.Sprintf("%d", proxyPort),
+		"ARGOCD_AGENT_ENABLE_WEBSOCKET":     "true",
+		"ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET": "true",
+	})
 	requires.NoError(err)
 
 	fixture.RestartAgent(suite.T(), "principal")

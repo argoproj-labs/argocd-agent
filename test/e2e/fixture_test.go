@@ -484,8 +484,8 @@ func (suite *FixtureTestSuite) Test_Patch_Application() {
 			Namespace: "test-argocd-agent",
 		},
 	}
-	err = kclient.Patch(ctx, &app, []interface{}{
-		map[string]interface{}{
+	err = kclient.Patch(ctx, &app, []any{
+		map[string]any{
 			"op":    "replace",
 			"path":  "/spec/source/targetRevision",
 			"value": "TAIL",
@@ -551,10 +551,10 @@ func (suite *FixtureTestSuite) Test_SyncApplication() {
 func (suite *FixtureTestSuite) Test_Goreman_StartStopStatus_Sanity() {
 	const process = "principal"
 	requires := suite.Require()
-	requires.True(fixture.IsProcessRunning(process))
-	requires.NoError(fixture.StopProcess(process))
-	requires.False(fixture.IsProcessRunning(process))
-	requires.NoError(fixture.StartProcess(process))
+	requires.True(fixture.IsProcessRunning(process, suite.T()))
+	requires.NoError(fixture.StopProcess(process, suite.T()))
+	requires.False(fixture.IsProcessRunning(process, suite.T()))
+	requires.NoError(fixture.StartProcess(process, suite.T()))
 }
 
 func XTestFixtureTestSuite(t *testing.T) {

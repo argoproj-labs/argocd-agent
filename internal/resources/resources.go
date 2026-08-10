@@ -27,9 +27,11 @@ import (
 )
 
 const (
-	applicationKind = "Application"
-	appProjectKind  = "AppProject"
-	repositoryKind  = "Repository"
+	applicationKind    = "Application"
+	appProjectKind     = "AppProject"
+	repositoryKind     = "Repository"
+	applicationSetKind = "ApplicationSet"
+	gpgKeyKind         = "GPGKey"
 )
 
 // ResourceKey uniquely identifies a resource in the cluster
@@ -70,6 +72,14 @@ func NewResourceKeyFromAppProject(appProject *v1alpha1.AppProject) ResourceKey {
 	return newResourceKey(appProjectKind, appProject.Name, appProject.Namespace, string(appProject.UID))
 }
 
+func NewResourceKeyFromApplicationSet(appSet *v1alpha1.ApplicationSet) ResourceKey {
+	sourceUID, ok := appSet.Annotations[manager.SourceUIDAnnotation]
+	if ok {
+		return newResourceKey(applicationSetKind, appSet.Name, appSet.Namespace, sourceUID)
+	}
+	return newResourceKey(applicationSetKind, appSet.Name, appSet.Namespace, string(appSet.UID))
+}
+
 func NewResourceKeyFromRepository(repo *corev1.Secret) ResourceKey {
 	// sourceUID annotation indicates that the repository was created from a source.
 	// So, consider the source UID instead of the resource UID.
@@ -79,6 +89,14 @@ func NewResourceKeyFromRepository(repo *corev1.Secret) ResourceKey {
 	}
 
 	return newResourceKey(repositoryKind, repo.Name, repo.Namespace, string(repo.UID))
+}
+
+func NewResourceKeyFromGPGKey(cm *corev1.ConfigMap) ResourceKey {
+	sourceUID, ok := cm.Annotations[manager.SourceUIDAnnotation]
+	if ok {
+		return newResourceKey(gpgKeyKind, cm.Name, cm.Namespace, sourceUID)
+	}
+	return newResourceKey(gpgKeyKind, cm.Name, cm.Namespace, string(cm.UID))
 }
 
 func newResourceKey(kind, name, namespace, uid string) ResourceKey {
@@ -130,6 +148,13 @@ func (r *AgentResources) Remove(agent string, key ResourceKey) {
 	}
 }
 
+// RemoveAgent removes all tracked resources for the given agent.
+func (r *AgentResources) RemoveAgent(agent string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.resources, agent)
+}
+
 func (r *AgentResources) GetAllResources(agent string) []ResourceKey {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -154,6 +179,18 @@ func (r *AgentResources) Len() int {
 	defer r.mu.RUnlock()
 
 	return len(r.resources)
+}
+
+// Names returns all agent names that have tracked resources.
+func (r *AgentResources) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	names := make([]string, 0, len(r.resources))
+	for name := range r.resources {
+		names = append(names, name)
+	}
+	return names
 }
 
 func (r *AgentResources) Checksum(agent string) []byte {

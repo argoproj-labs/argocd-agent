@@ -14,7 +14,10 @@
 
 package principal
 
-import "sync"
+import (
+	"maps"
+	"sync"
+)
 
 // MapToSet is a map of keys to a set of unique values.
 type MapToSet struct {
@@ -31,7 +34,13 @@ func NewMapToSet() *MapToSet {
 func (m *MapToSet) Get(key string) map[string]bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.m[key]
+	s, exists := m.m[key]
+	if !exists {
+		return nil
+	}
+	cp := make(map[string]bool, len(s))
+	maps.Copy(cp, s)
+	return cp
 }
 
 func (m *MapToSet) Add(key string, value string) {
@@ -51,6 +60,19 @@ func (m *MapToSet) Delete(key string, value string) {
 	if s, ok := m.m[key]; ok {
 		delete(s, value)
 
+		if len(s) == 0 {
+			delete(m.m, key)
+		}
+	}
+}
+
+// DeleteFromAll removes the given value from every key's set.
+// Keys whose sets become empty are removed entirely.
+func (m *MapToSet) DeleteFromAll(value string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, s := range m.m {
+		delete(s, value)
 		if len(s) == 0 {
 			delete(m.m, key)
 		}

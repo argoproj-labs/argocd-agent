@@ -64,9 +64,13 @@ kubectl create namespace argocd --context <control-plane-context>
 
 Install a customized Argo CD instance that excludes components that will run on workload clusters replacing <release-branch> with the release you wish to use:
 
+!!! note "Server-side apply required"
+    The Argo CD manifest is large and exceeds Kubernetes annotation size limits when using client-side apply. Server-side apply prevents annotation size failures.
+
 ```bash
 # Apply the principal-specific Argo CD configuration
 kubectl apply -n argocd \
+  --server-side  \
   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/principal?ref=<release-branch>' \
   --context <control-plane-context>
 ```
@@ -78,7 +82,7 @@ This configuration includes:
 - ✅ **argocd-redis** (state storage)
 - ✅ **argocd-repo-server** (Git repository access)
 - ❌ **argocd-application-controller** (runs on workload clusters only)
-- ❌ **argocd-applicationset-controller** (not yet supported)
+- **argocd-applicationset-controller** (optional, see [ApplicationSets](../../user-guide/applicationsets.md))
 
 !!! warning "Critical Component Placement"
     The **argocd-application-controller** must **never** be deployed on the control plane cluster. It can only run on workload clusters where it has direct access to manage Kubernetes resources. Running it on the control plane is not supported and is out of scope for this project.
@@ -241,11 +245,13 @@ Replace <release-branch> with the release you wish to use:
 ```bash
 # For managed agents
 kubectl apply -n argocd \
+  --server-side \
   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-managed?ref=<release-branch>' \
   --context <workload-cluster-context>
 
 # For autonomous agents (alternative)
 # kubectl apply -n argocd \
+#   --server-side \
 #   -k 'https://github.com/argoproj-labs/argocd-agent/install/kubernetes/argo-cd/agent-autonomous?ref=<release-branch>' \
 #   --context <workload-cluster-context>
 ```
@@ -257,7 +263,7 @@ This configuration includes:
 - ✅ **argocd-redis** (local state for the application controller)
 - ❌ **argocd-server** (runs on control plane only)
 - ❌ **argocd-dex-server** (runs on control plane only)
-- ❌ **argocd-applicationset-controller** (managed agents don't create their own ApplicationSets)
+- ❌ **argocd-applicationset-controller** (managed agents don't run their own, see [ApplicationSets](../../user-guide/applicationsets.md))
 
 !!! info "Why Application Controller Runs Here"
     The **argocd-application-controller** runs on workload clusters because it needs direct access to the Kubernetes API to create, update, and delete resources. The argocd-agent facilitates communication between the control plane and these controllers, enabling centralized management while maintaining local execution.

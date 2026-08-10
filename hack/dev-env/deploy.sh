@@ -28,6 +28,7 @@ AGENTCTL=${BASEPATH}/dist/argocd-agentctl
 test -x ${AGENTCTL} || (echo "Please build the CLI" && exit 1)
 
 source ${SCRIPTPATH}/utility.sh
+source ${SCRIPTPATH}/namespaces.sh
 
 DEFAULT_IMAGE_NAME=ghcr.io/argoproj-labs/argocd-agent/argocd-agent:latest
 IMAGE_NAME=${DEFAULT_IMAGE_NAME}
@@ -50,71 +51,162 @@ cleanup() {
 trap cleanup EXIT
 
 cp -a ${BASEPATH}/install/kubernetes/* ${TMPDIR}
+cp -a ${BASEPATH}/install/kubernetes/agent ${TMPDIR}/agent-managed
+cp -a ${BASEPATH}/install/kubernetes/agent ${TMPDIR}/agent-autonomous
+rm -rf ${TMPDIR}/agent
 
 deploy_principal() {
 	(
 		cd ${TMPDIR}/principal && (
-			kustomize edit set namespace argocd
+			kustomize edit set namespace ${ARGOCD_PRINCIPAL_NAMESPACE}
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
 		sed -i'' \
+			-e "s/  principal.listen.host:.*/  principal.listen.host: \"0.0.0.0\"/" \
+			-e "s/  principal.namespace:.*/  principal.namespace: \"${ARGOCD_PRINCIPAL_NAMESPACE}\"/" \
 			-e "s/  principal.allowed-namespaces:.*/  principal.allowed-namespaces: \"agent-*\"/" \
 			principal-params-cm.yaml
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd apply -f -
-		kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd rollout restart deployment argocd-agent-principal
+		set_rbac_subject_namespace ${ARGOCD_PRINCIPAL_NAMESPACE} \
+			principal-rolebinding.yaml principal-clusterrolebinding.yaml
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n ${ARGOCD_PRINCIPAL_NAMESPACE} apply -f -
+		kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n ${ARGOCD_PRINCIPAL_NAMESPACE} rollout restart deployment argocd-agent-principal
 	)
 }
 
 deploy_agent_managed() {
 	(
-		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
-		cd ${TMPDIR}/agent && (
-			kustomize edit set namespace argocd
+		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} ${ARGOCD_PRINCIPAL_NAMESPACE} argocd-agent-principal)
+		cd ${TMPDIR}/agent-managed && (
+			kustomize edit set namespace ${ARGOCD_MANAGED_NAMESPACE}
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
+		# Modify the ClusterRole to include RBAC required by E2E tests (which are written for the configuration where agent runs locally via goreman)
+		cat >> agent-clusterrole.yaml <<-'EOF'
+		- apiGroups:
+		  - ""
+		  resources:
+		  - configmaps
+		  verbs:
+		  - create
+		  - delete
+		  - get
+		  - list
+		  - update
+		  - watch
+		  - patch
+		- apiGroups:
+		  - ""
+		  resources:
+		  - pods
+		  - pods/log
+		  - pods/exec
+		  verbs:
+		  - create
+		  - get
+		  - list
+		  - watch
+		- apiGroups:
+		  - apps
+		  resources:
+		  - deployments
+		  - replicasets
+		  verbs:
+		  - create
+		  - update
+		  - delete
+		  - get
+		  - list
+		  - watch
+		  - patch
+		EOF
 		sed -i'' \
-		        -e "s/  agent.mode:.*/  agent.mode: \"managed\"/" \
+			-e "s/  agent.namespace:.*/  agent.namespace: \"${ARGOCD_MANAGED_NAMESPACE}\"/" \
+			-e "s/  agent.mode:.*/  agent.mode: \"managed\"/" \
 			-e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
 			-e "s/  agent.server.address:.*/  agent.server.address: \"$principal_addr\"/" \
 			agent-params-cm.yaml
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_MANAGED_CONTEXT} -n argocd apply -f -
+		set_rbac_subject_namespace ${ARGOCD_MANAGED_NAMESPACE} \
+			agent-rolebinding.yaml agent-clusterrolebinding.yaml
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_MANAGED_CONTEXT} -n ${ARGOCD_MANAGED_NAMESPACE} apply -f -
 	)
 }
 
 deploy_agent_autonomous() {
 	(
-		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} argocd argocd-agent-principal)
-		cd ${TMPDIR}/agent && (
-			kustomize edit set namespace argocd
+		principal_addr=$(getExternalLoadBalancerIP ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} ${ARGOCD_PRINCIPAL_NAMESPACE} argocd-agent-principal)
+		cd ${TMPDIR}/agent-autonomous && (
+			kustomize edit set namespace ${ARGOCD_AUTONOMOUS_NAMESPACE}
 			kustomize edit set image argocd-agent=${IMAGE_NAME}
 		)
+		# Modify the ClusterRole to include RBAC required by E2E tests (which are written for the configuration where agent runs locally via goreman)
+		cat >> agent-clusterrole.yaml <<-'EOF'
+		- apiGroups:
+		  - ""
+		  resources:
+		  - configmaps
+		  verbs:
+		  - create
+		  - delete
+		  - get
+		  - list
+		  - update
+		  - watch
+		  - patch
+		- apiGroups:
+		  - ""
+		  resources:
+		  - pods
+		  - pods/log
+		  - pods/exec
+		  verbs:
+		  - create
+		  - get
+		  - list
+		  - watch
+		- apiGroups:
+		  - apps
+		  resources:
+		  - deployments
+		  - replicasets
+		  verbs:
+		  - create
+		  - update
+		  - delete
+		  - get
+		  - list
+		  - watch
+		  - patch
+		EOF
 		sed -i'' \
-		        -e "s/  agent.mode:.*/  agent.mode: \"autonomous\"/" \
+			-e "s/  agent.namespace:.*/  agent.namespace: \"${ARGOCD_AUTONOMOUS_NAMESPACE}\"/" \
+			-e "s/  agent.mode:.*/  agent.mode: \"autonomous\"/" \
 			-e "s/  agent.creds:.*/  agent.creds: \"mtls:any\"/" \
 			-e "s/  agent.server.address:.*/  agent.server.address: \"$principal_addr\"/" \
 			agent-params-cm.yaml
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_AUTONOMOUS_CONTEXT} -n argocd apply -f -
+		set_rbac_subject_namespace ${ARGOCD_AUTONOMOUS_NAMESPACE} \
+			agent-rolebinding.yaml agent-clusterrolebinding.yaml
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_AUTONOMOUS_CONTEXT} -n ${ARGOCD_AUTONOMOUS_NAMESPACE} apply -f -
 	)
 }
 
 undeploy_principal() {
 	(
-		cd ${TMPDIR}/principal && kustomize edit set namespace argocd
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n argocd delete -f -
+		cd ${TMPDIR}/principal && kustomize edit set namespace ${ARGOCD_PRINCIPAL_NAMESPACE}
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_PRINCIPAL_CONTEXT} -n ${ARGOCD_PRINCIPAL_NAMESPACE} delete -f -
 	)
 }
 
 undeploy_agent_managed() {
 	(
-		cd ${TMPDIR}/agent && kustomize edit set namespace argocd
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_MANAGED_CONTEXT} -n argocd delete -f -
+		cd ${TMPDIR}/agent-managed && kustomize edit set namespace ${ARGOCD_MANAGED_NAMESPACE}
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_MANAGED_CONTEXT} -n ${ARGOCD_MANAGED_NAMESPACE} delete -f -
 	)
 }
 
 undeploy_agent_autonomous() {
 	(
-		cd ${TMPDIR}/agent && kustomize edit set namespace argocd
-		kustomize build . | kubectl --context ${ARGOCD_AGENT_AUTONOMOUS_CONTEXT} -n argocd delete -f -
+		cd ${TMPDIR}/agent-autonomous && kustomize edit set namespace ${ARGOCD_AUTONOMOUS_NAMESPACE}
+		kustomize build . | kubectl --context ${ARGOCD_AGENT_AUTONOMOUS_CONTEXT} -n ${ARGOCD_AUTONOMOUS_NAMESPACE} delete -f -
 	)
 }
 
@@ -134,4 +226,3 @@ case "$1" in
 	echo "[image] is optional and defaults to ${DEFAULT_IMAGE_NAME}" >&2
 	exit 1
 esac
-

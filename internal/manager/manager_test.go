@@ -55,9 +55,13 @@ type fakeManager[R kubeResource] struct {
 	retErr  error
 }
 
-func (f *fakeManager[R]) Create(ctx context.Context, obj R) (R, error) {
+func (f *fakeManager[R]) Create(ctx context.Context, obj R, ignoreChange bool) (R, error) {
 	f.created = obj
 	return obj, f.retErr
+}
+
+func (f *fakeManager[R]) Get(ctx context.Context, name, namespace string) (R, error) {
+	return f.created, nil
 }
 
 func newLogger() *logrus.Entry {
@@ -103,6 +107,37 @@ func TestRevertUserInitiatedDeletion(t *testing.T) {
 		requires.Equal(types.UID("u2"), mgr.created.GetUID())
 		requires.Equal("", mgr.created.GetResourceVersion())
 		requires.Nil(mgr.created.GetDeletionTimestamp())
+	})
+
+	t.Run("Application with preCreateTransform", func(t *testing.T) {
+		requires := require.New(t)
+
+		app := &argoapp.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "app",
+				Namespace: "ns",
+				Annotations: map[string]string{
+					SourceUIDAnnotation: string(types.UID("u3")),
+				},
+			},
+			Status: argoapp.ApplicationStatus{
+				OperationState: &argoapp.OperationState{
+					Phase: "Succeeded",
+				},
+			},
+		}
+		mgr := &fakeManager[*argoapp.Application]{}
+		deletions := NewDeletionTracker()
+
+		clearOpState := func(a *argoapp.Application) {
+			a.Status.OperationState = nil
+		}
+		ok, err := RevertUserInitiatedDeletion(context.Background(), app, deletions, mgr, newLogger(), clearOpState)
+		requires.NoError(err)
+		requires.True(ok)
+		requires.NotNil(mgr.created)
+		requires.Nil(mgr.created.Status.OperationState)
+		requires.Equal(types.UID("u3"), mgr.created.GetUID())
 	})
 
 	t.Run("AppProject", func(t *testing.T) {

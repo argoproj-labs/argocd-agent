@@ -38,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 )
@@ -66,6 +67,7 @@ func ToNamespacedName(object KubeObject) types.NamespacedName {
 
 type KubeClient struct {
 	Config         *rest.Config
+	Clientset      kubernetes.Interface
 	scheme         *runtime.Scheme
 	dclient        *dynamic.DynamicClient
 	mapper         meta.RESTMapper
@@ -112,12 +114,18 @@ func NewKubeClient(config *rest.Config) (KubeClient, error) {
 		return kclient, err
 	}
 
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return kclient, err
+	}
+
 	mapper := restmapper.NewDiscoveryRESTMapper(groupResources)
 
 	typeToResource := make(map[reflect.Type]schema.GroupVersionResource)
 
 	return KubeClient{
 		config,
+		clientset,
 		scheme,
 		dclient,
 		mapper,
@@ -237,7 +245,7 @@ func (c KubeClient) Update(ctx context.Context, object KubeObject, options metav
 // Patch patches the given object in the cluster using the JSONPatch patch type.
 // object must be a struct pointer so that it can be updated with the result
 // returned by the server.
-func (c KubeClient) Patch(ctx context.Context, object KubeObject, jsonPatch []interface{}, options metav1.PatchOptions) error {
+func (c KubeClient) Patch(ctx context.Context, object KubeObject, jsonPatch []any, options metav1.PatchOptions) error {
 	resource, err := c.resourceFor(object)
 	if err != nil {
 		return err

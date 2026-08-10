@@ -2,6 +2,9 @@
 
 This guide outlines the strategy for migrating from a traditional, multi-cluster Argo CD installation to argocd-agent. The migration involves transitioning from a **push-based architecture** (where the control plane reaches out to workload clusters) to a **pull-based architecture** (where agents reach back to the control plane).
 
+!!! note "Hybrid Architecture"
+    It is now possible to install and run argocd-agent alongside an existing Argo CD setup. The hybrid architecture enables you to try out argocd-agent without replacing your existing setup, gradually migrate applications, or run both architectures long-term. Please see [Hybrid Architecture](./hybrid-architecture.md) page for more details.
+
 !!! warning "Migration Complexity"
     Migration from traditional Argo CD to argocd-agent requires careful planning and will involve service interruption. This is an architectural change that affects your entire GitOps infrastructure.
 
@@ -208,7 +211,6 @@ argocd cluster list --context <control-plane-context>
 #### Managed Mode Applications
 
 1. **Create Applications on Control Plane**: Applications are created in namespaces named after the target agent
-
 ```bash
 # Application will be deployed to the workload cluster by the agent
 kubectl apply -f - <<EOF
@@ -229,7 +231,6 @@ EOF
 #### Autonomous Mode Applications
 
 1. **Create Applications on Workload Cluster**: Applications are managed locally and reported to control plane
-
 ```bash
 # Create application on workload cluster
 kubectl apply -f my-app.yaml --context <workload-cluster-context>
@@ -252,11 +253,13 @@ AppProjects in argocd-agent work differently from traditional Argo CD due to the
 #### Understanding AppProject Distribution
 
 **Traditional Argo CD:**
+
 - AppProjects are created once on the control plane
 - All clusters share the same AppProject definitions
 - Projects can reference multiple clusters directly
 
 **argocd-agent:**
+
 - **Managed Mode**: AppProjects created on control plane, distributed to matching agents
 - **Autonomous Mode**: AppProjects created on agents, synchronized back to control plane
 - Projects are transformed for each agent's local context
@@ -270,7 +273,6 @@ kubectl get appprojects -n argocd -o yaml > legacy-appprojects.yaml
 ```
 
 2. **Update AppProject Specifications**: Modify each AppProject to use agent-aware patterns:
-
 ```yaml
 # Before (Traditional Argo CD)
 apiVersion: argoproj.io/v1alpha1
@@ -307,14 +309,12 @@ spec:
 ```
 
 3. **Create Updated AppProjects**: Apply the modified AppProjects to the argocd-agent control plane:
-
 ```bash
 # Apply updated AppProjects
 kubectl apply -f updated-appprojects.yaml --context <control-plane-context>
 ```
 
 4. **Verify Distribution**: Check that AppProjects are distributed to the correct agents:
-
 ```bash
 # Check AppProjects on workload clusters
 kubectl get appprojects -n argocd --context <workload-cluster-context>
@@ -326,7 +326,6 @@ kubectl get appproject production-project -n argocd -o yaml --context <workload-
 #### Migrating AppProjects for Autonomous Mode
 
 1. **Create AppProjects on Workload Clusters**: For autonomous agents, create AppProjects directly on each workload cluster:
-
 ```yaml
 # Create on each autonomous agent cluster
 apiVersion: argoproj.io/v1alpha1
@@ -344,14 +343,12 @@ spec:
   sourceRepos:
   - "*"
 ```
-
 ```bash
 # Apply to each autonomous agent
 kubectl apply -f autonomous-appproject.yaml --context <workload-cluster-context>
 ```
 
 2. **Verify Control Plane Synchronization**: Check that AppProjects appear on the control plane with prefixed names:
-
 ```bash
 # List AppProjects on control plane - look for prefixed names
 kubectl get appprojects -A --context <control-plane-context>

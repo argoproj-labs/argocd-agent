@@ -8,12 +8,14 @@ import (
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -53,7 +55,7 @@ func Test_StartStop(t *testing.T) {
 		},
 	}
 	clt := kube.NewFakeClientsetWithResources(redisSecret)
-	m, err := NewManager(context.TODO(), "argocd", "", "", "", clt)
+	m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, clt, nil)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	err = m.Start()
@@ -74,7 +76,7 @@ func Test_onClusterAdd(t *testing.T) {
 		},
 	}
 	clt := kube.NewFakeClientsetWithResources(redisSecret)
-	m, err := NewManager(context.TODO(), "argocd", "", "", "", clt)
+	m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, clt, nil)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	err = m.Start()
@@ -171,6 +173,122 @@ func Test_onClusterAdd(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+}
+
+func newSelfRegisteredClusterSecret(t *testing.T, name string) *v1.Secret {
+	t.Helper()
+	return &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            name,
+			Namespace:       "argocd",
+			UID:             k8stypes.UID("uid-" + name),
+			ResourceVersion: "1",
+			Labels: map[string]string{
+				common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+				LabelKeySelfRegisteredCluster: "true",
+			},
+		},
+		Data: map[string][]byte{"server": []byte("https://example.com")},
+	}
+}
+
+func TestGetClusterSecrets(t *testing.T) {
+	selfReg := newSelfRegisteredClusterSecret(t, "cluster-agent-a")
+
+	manualCluster := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cluster-manual",
+			Namespace: "argocd",
+			Labels: map[string]string{
+				common.LabelKeySecretType: common.LabelValueSecretTypeCluster,
+			},
+		},
+	}
+
+	clt := kube.NewFakeClientsetWithResources(selfReg, manualCluster)
+	m := &Manager{namespace: "argocd", kubeclient: clt}
+
+	t.Run("returns only self-registered cluster secrets", func(t *testing.T) {
+		secrets, err := m.GetClusterSecrets(context.Background())
+		require.NoError(t, err)
+		require.Len(t, secrets, 1)
+		assert.Equal(t, "cluster-agent-a", secrets[0].Name)
+	})
+
+	t.Run("returns empty slice when no self-registered secrets exist", func(t *testing.T) {
+		clt2 := kube.NewFakeClientsetWithResources(manualCluster)
+		m2 := &Manager{namespace: "argocd", kubeclient: clt2}
+		secrets, err := m2.GetClusterSecrets(context.Background())
+		require.NoError(t, err)
+		assert.Empty(t, secrets)
+	})
+}
+
+func TestCreateOrUpdateClusterSecret(t *testing.T) {
+	t.Run("creates secret when absent", func(t *testing.T) {
+		clt := kube.NewFakeClientsetWithResources()
+		m := &Manager{namespace: "argocd", kubeclient: clt}
+
+		secret := newSelfRegisteredClusterSecret(t, "cluster-new")
+		err := m.CreateOrUpdateClusterSecret(context.Background(), secret)
+		require.NoError(t, err)
+
+		created, err := clt.CoreV1().Secrets("argocd").Get(context.Background(), "cluster-new", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, "cluster-new", created.Name)
+		assert.Equal(t, "argocd", created.Namespace)
+	})
+
+	t.Run("clears UID and ResourceVersion before create", func(t *testing.T) {
+		clt := kube.NewFakeClientsetWithResources()
+		m := &Manager{namespace: "argocd", kubeclient: clt}
+
+		secret := newSelfRegisteredClusterSecret(t, "cluster-clear")
+		secret.UID = "original-uid"
+		secret.ResourceVersion = "999"
+
+		err := m.CreateOrUpdateClusterSecret(context.Background(), secret)
+		require.NoError(t, err)
+
+		created, err := clt.CoreV1().Secrets("argocd").Get(context.Background(), "cluster-clear", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Empty(t, string(created.UID))
+		assert.Empty(t, created.ResourceVersion)
+	})
+
+	t.Run("updates existing secret preserving UID and ResourceVersion", func(t *testing.T) {
+		existing := newSelfRegisteredClusterSecret(t, "cluster-exist")
+		existing.UID = "existing-uid"
+		existing.ResourceVersion = "42"
+		existing.Data = map[string][]byte{"server": []byte("https://old.example.com")}
+
+		clt := kube.NewFakeClientsetWithResources(existing)
+		m := &Manager{namespace: "argocd", kubeclient: clt}
+
+		updated := newSelfRegisteredClusterSecret(t, "cluster-exist")
+		updated.Data = map[string][]byte{"server": []byte("https://new.example.com")}
+
+		err := m.CreateOrUpdateClusterSecret(context.Background(), updated)
+		require.NoError(t, err)
+
+		got, err := clt.CoreV1().Secrets("argocd").Get(context.Background(), "cluster-exist", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, []byte("https://new.example.com"), got.Data["server"])
+	})
+
+	t.Run("sets namespace from manager", func(t *testing.T) {
+		clt := kube.NewFakeClientsetWithResources()
+		m := &Manager{namespace: "argocd", kubeclient: clt}
+
+		secret := newSelfRegisteredClusterSecret(t, "cluster-ns")
+		secret.Namespace = "some-other-ns"
+
+		err := m.CreateOrUpdateClusterSecret(context.Background(), secret)
+		require.NoError(t, err)
+
+		_, err = clt.CoreV1().Secrets("argocd").Get(context.Background(), "cluster-ns", metav1.GetOptions{})
+		require.NoError(t, err)
+	})
 }
 
 func init() {

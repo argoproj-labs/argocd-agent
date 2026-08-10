@@ -4,23 +4,30 @@ import (
 	"bufio"
 	"bytes"
 	"os/exec"
+	"testing"
 )
 
 // StopProcess stops the named process managed by goreman
-func StopProcess(processName string) error {
+func StopProcess(processName string, t *testing.T) error {
+	// Goreman is only usable in local case
+	SkipIfAgentInClusterEnvVarIsSet(t)
 	cmd := exec.Command("goreman", "run", "stop", processName)
 	return cmd.Run()
 }
 
 // StartProcess starts the named process managed by goreman
-func StartProcess(processName string) error {
+func StartProcess(processName string, t *testing.T) error {
+	// Goreman is only usable in local case
+	SkipIfAgentInClusterEnvVarIsSet(t)
 	cmd := exec.Command("goreman", "run", "start", processName)
 	return cmd.Run()
 }
 
 // IsProcessRunning returns whether the named process managed by goreman is
 // running
-func IsProcessRunning(processName string) bool {
+func IsProcessRunning(processName string, t *testing.T) bool {
+	// Goreman is only usable in local case
+	SkipIfAgentInClusterEnvVarIsSet(t)
 	out := &bytes.Buffer{}
 	cmd := exec.Command("goreman", "run", "status")
 	cmd.Stdout = out

@@ -22,7 +22,10 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sync"
 	"time"
+
+	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
@@ -48,6 +51,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 )
+
+// Time interval left for access token refresh
+const tokenRefreshThreshold = 30 * time.Second
 
 type timeouts struct {
 	dialTimeout         time.Duration
@@ -76,11 +82,13 @@ type Remote struct {
 	hostname          string
 	port              int
 	tlsConfig         *tls.Config
+	tokenMu           sync.Mutex
 	accessToken       *token
 	refreshToken      *token
 	authMethod        string
 	creds             auth.Credentials
 	backoff           wait.Backoff
+	connMu            sync.Mutex
 	conn              *grpc.ClientConn
 	clientID          string
 	clientMode        types.AgentMode
@@ -99,6 +107,15 @@ type Remote struct {
 
 	// agentVersion is the version of the agent, used for handshake validation
 	agentVersion string
+
+	// agentNamespace is the namespace where the agent is running.
+	agentNamespace string
+
+	// grpcClientMetrics holds gRPC client-side Prometheus metrics
+	grpcClientMetrics *grpcprom.ClientMetrics
+
+	onAuthenticated onAuthenticatedFunc
+	onAuthFailure   func()
 }
 
 type RemoteOption func(r *Remote) error
@@ -156,7 +173,7 @@ func WithTLSClientCertFromFile(certPath, keyPath string) RemoteOption {
 	return func(r *Remote) error {
 		c, err := tlsutil.TLSCertFromFile(certPath, keyPath, true)
 		if err != nil {
-			return fmt.Errorf("unable to read TLS client cert: %v", err)
+			return fmt.Errorf("unable to read TLS client cert: %w", err)
 		}
 		r.tlsConfig.Certificates = append(r.tlsConfig.Certificates, c)
 		return nil
@@ -169,7 +186,7 @@ func WithTLSClientCertFromSecret(kube kubernetes.Interface, namespace, name stri
 	return func(r *Remote) error {
 		c, err := tlsutil.TLSCertFromSecret(context.Background(), kube, namespace, name)
 		if err != nil {
-			return fmt.Errorf("unable to read TLS client from secret: %v", err)
+			return fmt.Errorf("unable to read TLS client from secret: %w", err)
 		}
 		r.tlsConfig.Certificates = append(r.tlsConfig.Certificates, c)
 		return nil
@@ -311,6 +328,22 @@ func WithMinimumTLSVersion(version string) RemoteOption {
 	}
 }
 
+func WithAgentNamespace(namespace string) RemoteOption {
+	return func(r *Remote) error {
+		r.agentNamespace = namespace
+		return nil
+	}
+}
+
+// WithGRPCClientMetrics attaches gRPC Prometheus client-side metrics
+// interceptors to every outgoing RPC.
+func WithGRPCClientMetrics(m *grpcprom.ClientMetrics) RemoteOption {
+	return func(r *Remote) error {
+		r.grpcClientMetrics = m
+		return nil
+	}
+}
+
 // WithMaximumTLSVersion configures the maximum TLS version the client will use.
 func WithMaximumTLSVersion(version string) RemoteOption {
 	return func(r *Remote) error {
@@ -397,11 +430,18 @@ func (r *Remote) retriable(err error) bool {
 	return true
 }
 
-func (r *Remote) unaryAuthInterceptor(ctx context.Context, method string, req interface{}, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+func (r *Remote) unaryAuthInterceptor(ctx context.Context, method string, req any, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 	log().Infof("Outgoing unary call to %s", method)
+
+	// Auth methods do not need token refresh, so we can call the invoker directly
+	if isAuthMethod(method) {
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
 	nCtx := ctx
-	if r.accessToken != nil && r.accessToken.RawToken != "" {
-		nCtx = metadata.AppendToOutgoingContext(ctx, "authorization", r.accessToken.RawToken)
+
+	// For other methods, we need to check if the token is valid or refresh it
+	if token := r.getValidAccessToken(ctx); token != "" {
+		nCtx = metadata.AppendToOutgoingContext(ctx, "authorization", token)
 	}
 	return invoker(nCtx, method, req, reply, cc, opts...)
 }
@@ -409,8 +449,8 @@ func (r *Remote) unaryAuthInterceptor(ctx context.Context, method string, req in
 func (r *Remote) streamAuthInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	log().Infof("Outgoing stream call to %s", method)
 	nCtx := ctx
-	if r.accessToken != nil && r.accessToken.RawToken != "" {
-		nCtx = metadata.AppendToOutgoingContext(ctx, "authorization", r.accessToken.RawToken)
+	if token := r.getValidAccessToken(ctx); token != "" {
+		nCtx = metadata.AppendToOutgoingContext(ctx, "authorization", token)
 	}
 	return streamer(nCtx, desc, cc, method, opts...)
 }
@@ -424,43 +464,85 @@ func connectBackoff() wait.Backoff {
 	}
 }
 
-// Connect connects this Remote to the remote host and performs authentication.
-// If the remote is configured with a retry, Connect will keep trying to
-// establish a connection to the remote host until either the number of maximum
-// retries has been reached or the context ctx is canceled or expired.
-//
-// When Connect returns nil, the connection was successfully established and an
-// authentication token has been received.
-func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
-	cparams := grpc.ConnectParams{
-		MinConnectTimeout: 365 * 24 * time.Hour,
+func isAuthMethod(method string) bool {
+	return method == "/authapi.Authentication/Authenticate" ||
+		method == "/authapi.Authentication/RefreshToken"
+}
+
+// getValidAccessToken checks whether the access token is about to expire and,
+// if yes, then it uses the stored refresh token to obtain a new one from the principal.
+// It returns refreshed or existing token to the caller which is attached to the request.
+func (r *Remote) getValidAccessToken(ctx context.Context) string {
+	r.tokenMu.Lock()
+	defer r.tokenMu.Unlock()
+
+	if r.accessToken == nil || r.refreshToken == nil {
+		if r.accessToken != nil {
+			return r.accessToken.RawToken
+		}
+		return ""
 	}
 
-	// Some default options
-	opts := []grpc.DialOption{
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(r.MaxGRPCMessageSize), grpc.MaxCallSendMsgSize(r.MaxGRPCMessageSize)),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-		grpc.WithConnectParams(cparams),
-		grpc.WithUserAgent("argocd-agent/v0.0.1"),
-		grpc.WithChainUnaryInterceptor(
-			r.unaryAuthInterceptor,
-			grpcutil.UnaryClientMsgSizeInterceptor(r.MaxGRPCMessageSize),
-		),
-		grpc.WithChainStreamInterceptor(
-			r.streamAuthInterceptor,
-			grpcutil.StreamClientMsgSizeInterceptor(r.MaxGRPCMessageSize),
-		),
+	exp, err := r.accessToken.Claims.GetExpirationTime()
+	if err != nil || exp == nil {
+		return r.accessToken.RawToken
 	}
 
-	if r.enableCompression {
-		log().Debug("gRPC compression is enabled.")
-		opts = append(opts, grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)))
+	remainingTime := time.Until(exp.Time)
+	if remainingTime > tokenRefreshThreshold {
+		return r.accessToken.RawToken
 	}
 
-	var (
-		conn *grpc.ClientConn
-		err  error
-	)
+	log().Info("Access token is about to expire, refreshing")
+
+	conn := r.Conn()
+	if conn == nil {
+		log().Warn("No connection available for token refresh")
+		return r.accessToken.RawToken
+	}
+
+	authClient := authapi.NewAuthenticationClient(conn)
+	resp, err := authClient.RefreshToken(ctx, &authapi.RefreshTokenRequest{
+		RefreshToken: r.refreshToken.RawToken,
+	})
+	if err != nil {
+		log().Warnf("Token refresh failed: %v", err)
+		return r.accessToken.RawToken
+	}
+
+	newAccessToken, err := NewToken(resp.AccessToken)
+	if err != nil {
+		log().Warnf("Invalid access token from refresh response: %v", err)
+		return r.accessToken.RawToken
+	}
+	r.accessToken = newAccessToken
+
+	if resp.RefreshToken != "" {
+		newRefreshToken, err := NewToken(resp.RefreshToken)
+		if err != nil {
+			log().Warnf("Could not parse new refresh token: %v", err)
+		} else {
+			r.refreshToken = newRefreshToken
+		}
+	}
+
+	log().Info("Access token refreshed successfully")
+	return r.accessToken.RawToken
+}
+
+// Disconnect closes the underlying gRPC connection and nils it out.
+func (r *Remote) Disconnect() {
+	r.connMu.Lock()
+	defer r.connMu.Unlock()
+	if r.conn != nil {
+		r.conn.Close()
+		r.conn = nil
+	}
+}
+
+func (r *Remote) newClientConn(ctx context.Context, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+	var conn *grpc.ClientConn
+	var err error
 	if r.enableWebSocket {
 		grpcHTTP1Opts := []grpchttp1client.ConnectOption{
 			grpchttp1client.UseWebSocket(true),
@@ -473,9 +555,6 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			tlsCfg = r.tlsConfig
 		}
 		conn, err = grpchttp1client.ConnectViaProxy(ctx, r.Addr(), tlsCfg, grpcHTTP1Opts...)
-		if err != nil {
-			return err
-		}
 	} else {
 		// Use insecure credentials for plaintext mode (e.g., behind Istio)
 		if r.insecurePlaintext {
@@ -484,19 +563,75 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(r.tlsConfig)))
 		}
 
-		if r.keepAlivePingInterval != 0 {
-			log().Debugf("Agent ping to principal is enabled, agent will send a ping event after every %s.", r.keepAlivePingInterval)
-			opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: r.keepAlivePingInterval}))
-		}
-
 		conn, err = grpc.NewClient(r.Addr(), opts...)
-		if err != nil {
-			return err
-		}
+	}
+	return conn, err
+}
+
+// Connect connects this Remote to the remote host and performs authentication.
+// If the remote is configured with a retry, Connect will keep trying to
+// establish a connection to the remote host until either the number of maximum
+// retries has been reached or the context ctx is canceled or expired.
+//
+// When Connect returns nil, the connection was successfully established and an
+// authentication token has been received.
+func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
+	r.connMu.Lock()
+	if r.conn != nil {
+		log().Warn("Connect called with existing connection; closing stale conn")
+		r.conn.Close()
+		r.conn = nil
+	}
+	r.connMu.Unlock()
+
+	cparams := grpc.ConnectParams{
+		MinConnectTimeout: 365 * 24 * time.Hour,
 	}
 
-	authC := authapi.NewAuthenticationClient(conn)
+	unaryInterceptors := []grpc.UnaryClientInterceptor{
+		r.unaryAuthInterceptor,
+		grpcutil.UnaryClientMsgSizeInterceptor(r.MaxGRPCMessageSize),
+	}
+	streamInterceptors := []grpc.StreamClientInterceptor{
+		r.streamAuthInterceptor,
+		grpcutil.StreamClientMsgSizeInterceptor(r.MaxGRPCMessageSize),
+	}
 
+	// Prepend gRPC Prometheus interceptors so they observe all RPCs.
+	if r.grpcClientMetrics != nil {
+		unaryInterceptors = append(
+			[]grpc.UnaryClientInterceptor{r.grpcClientMetrics.UnaryClientInterceptor()},
+			unaryInterceptors...,
+		)
+		streamInterceptors = append(
+			[]grpc.StreamClientInterceptor{r.grpcClientMetrics.StreamClientInterceptor()},
+			streamInterceptors...,
+		)
+	}
+
+	opts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(r.MaxGRPCMessageSize), grpc.MaxCallSendMsgSize(r.MaxGRPCMessageSize)),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithConnectParams(cparams),
+		grpc.WithUserAgent("argocd-agent/v0.0.1"),
+		grpc.WithChainUnaryInterceptor(unaryInterceptors...),
+		grpc.WithChainStreamInterceptor(streamInterceptors...),
+	}
+
+	if r.enableCompression {
+		log().Debug("gRPC compression is enabled.")
+		opts = append(opts, grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)))
+	}
+
+	if r.keepAlivePingInterval != 0 {
+		log().Debugf("Agent ping to principal is enabled, agent will send a ping event after every %s.", r.keepAlivePingInterval)
+		opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: r.keepAlivePingInterval}))
+	}
+
+	var (
+		conn *grpc.ClientConn
+		err  error
+	)
 	authenticated := false
 	cBackoff := connectBackoff()
 
@@ -510,8 +645,29 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		case <-ctx.Done():
 			return status.Error(codes.Canceled, "context canceled")
 		default:
-			resp, ierr := authC.Authenticate(ctx, &authapi.AuthRequest{Method: r.authMethod, Credentials: r.creds, Mode: r.clientMode.String(), Version: r.agentVersion})
+			conn, err = r.newClientConn(ctx, opts...)
+			if err != nil {
+				return err
+			}
+			authC := authapi.NewAuthenticationClient(conn)
+
+			authReq := &authapi.AuthRequest{
+				Method:         r.authMethod,
+				Credentials:    r.creds,
+				Mode:           r.clientMode.String(),
+				Version:        r.agentVersion,
+				AgentNamespace: r.agentNamespace,
+			}
+			resp, ierr := authC.Authenticate(ctx, authReq)
+			defer func() {
+				if ierr != nil {
+					conn.Close()
+				}
+			}()
 			if ierr != nil {
+				if r.onAuthFailure != nil {
+					r.onAuthFailure()
+				}
 				st, ok := status.FromError(ierr)
 				if ok {
 					if st.Code() == codes.FailedPrecondition {
@@ -527,6 +683,8 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 				return ierr
 			}
 
+			r.tokenMu.Lock()
+			defer r.tokenMu.Unlock()
 			r.accessToken, ierr = NewToken(resp.AccessToken)
 			if ierr != nil {
 				logrus.Warnf("Auth failure: %v (retrying in %v)", ierr, cBackoff.Step())
@@ -539,14 +697,20 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			}
 			r.clientID, ierr = r.accessToken.Claims.GetSubject()
 			if ierr != nil {
-				return err
+				return ierr
 			}
+
+			if r.onAuthenticated != nil {
+				r.onAuthenticated(resp.PrincipalNamespace)
+			}
+
 			authenticated = true
 			return nil
 		}
 	})
 	if err != nil {
-		conn.Close()
+		// Connection is already closed by the defer func in the retry loop
+		// if the loop exits with an error
 		return err
 	}
 
@@ -564,15 +728,23 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 		return err
 	}
 	log().Infof("Connected to %s", vr.Version)
+	r.connMu.Lock()
 	r.conn = conn
+	r.connMu.Unlock()
 	return nil
 }
 
 // Conn returns this remote's underlying gRPC connection object. It should
 // be treated as read-only.
 func (r *Remote) Conn() *grpc.ClientConn {
+	r.connMu.Lock()
+	defer r.connMu.Unlock()
 	return r.conn
 }
+
+// onAuthenticatedFunc is called after a successful authentication handshake.
+// principalNamespace is the namespace the principal reported in its auth response.
+type onAuthenticatedFunc func(principalNamespace string)
 
 // ClientID returns the client ID used by this remote
 func (r *Remote) ClientID() string {
@@ -593,6 +765,17 @@ func (r *Remote) SetClientMode(mode types.AgentMode) {
 // The only use case for this is to be used in unit testing.
 func (r *Remote) SetClientID(id string) {
 	r.clientID = id
+}
+
+// SetOnAuthenticated registers a callback invoked after a successful auth
+// handshake, receiving the principal's namespace from the AuthResponse.
+func (r *Remote) SetOnAuthenticated(fn onAuthenticatedFunc) {
+	r.onAuthenticated = fn
+}
+
+// SetOnAuthFailure registers a callback invoked on each authentication failure.
+func (r *Remote) SetOnAuthFailure(fn func()) {
+	r.onAuthFailure = fn
 }
 
 func log() *logrus.Entry {

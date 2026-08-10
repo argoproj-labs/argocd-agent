@@ -2,11 +2,13 @@ package cluster
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
@@ -15,7 +17,7 @@ import (
 
 func Test_onClusterAdded(t *testing.T) {
 	t.Run("Successfully add a cluster", func(t *testing.T) {
-		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"))
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
 		require.NoError(t, err)
 		s := &v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -29,7 +31,7 @@ func Test_onClusterAdded(t *testing.T) {
 		assert.Len(t, m.clusters, 1)
 	})
 	t.Run("Secret is malformed", func(t *testing.T) {
-		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"))
+		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"), nil)
 		require.NoError(t, err)
 		s := &v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -46,7 +48,7 @@ func Test_onClusterAdded(t *testing.T) {
 		assert.Len(t, m.clusters, 0)
 	})
 	t.Run("Secret is missing one or more labels", func(t *testing.T) {
-		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"))
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
 		require.NoError(t, err)
 		s := &v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -63,7 +65,7 @@ func Test_onClusterAdded(t *testing.T) {
 		assert.Len(t, m.clusters, 0)
 	})
 	t.Run("Target agent already has a mapping", func(t *testing.T) {
-		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"))
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
 		require.NoError(t, err)
 		s := &v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -76,6 +78,72 @@ func Test_onClusterAdded(t *testing.T) {
 		m.mapCluster("agent", &v1alpha1.Cluster{})
 		assert.Len(t, m.clusters, 1)
 		m.onClusterAdded(s)
+		assert.Len(t, m.clusters, 1)
+	})
+}
+
+func Test_onClusterAdded_InvokesCallback(t *testing.T) {
+	t.Run("Callback invoked on successful add", func(t *testing.T) {
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
+		require.NoError(t, err)
+
+		var callbackAgent atomic.Value
+		m.SetOnClusterAdded(func(agentName string) {
+			callbackAgent.Store(agentName)
+		})
+
+		s := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping: "agent1",
+					common.LabelKeySecretType:   common.LabelValueSecretTypeCluster,
+				},
+			},
+		}
+		m.onClusterAdded(s)
+		assert.Len(t, m.clusters, 1)
+		assert.Equal(t, "agent1", callbackAgent.Load())
+	})
+
+	t.Run("Callback not invoked on malformed secret", func(t *testing.T) {
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
+		require.NoError(t, err)
+
+		callbackCalled := atomic.Bool{}
+		m.SetOnClusterAdded(func(agentName string) {
+			callbackCalled.Store(true)
+		})
+
+		s := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping: "agent1",
+					common.LabelKeySecretType:   common.LabelValueSecretTypeCluster,
+				},
+			},
+			Data: map[string][]byte{
+				"config": []byte("invalid json"),
+			},
+		}
+		m.onClusterAdded(s)
+		assert.False(t, callbackCalled.Load())
+	})
+
+	t.Run("No callback registered does not panic", func(t *testing.T) {
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
+		require.NoError(t, err)
+
+		s := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping: "agent1",
+					common.LabelKeySecretType:   common.LabelValueSecretTypeCluster,
+				},
+			},
+		}
+		assert.NotPanics(t, func() {
+			m.onClusterAdded(s)
+		})
 		assert.Len(t, m.clusters, 1)
 	})
 }
@@ -100,7 +168,7 @@ func Test_onClusterUpdated(t *testing.T) {
 				Name: "cluster",
 			},
 		}
-		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"))
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
 		require.NoError(t, err)
 		m.mapCluster("agent1", &v1alpha1.Cluster{})
 		assert.NotNil(t, m.mapping("agent1"))
@@ -135,7 +203,7 @@ func Test_onClusterUpdated(t *testing.T) {
 				"name": []byte("cluster2"),
 			},
 		}
-		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"))
+		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"), nil)
 		require.NoError(t, err)
 		m.mapCluster("agent1", &v1alpha1.Cluster{Name: "cluster1"})
 		assert.NotNil(t, m.mapping("agent1"))
@@ -172,7 +240,7 @@ func Test_onClusterUpdated(t *testing.T) {
 				Name: "cluster2",
 			},
 		}
-		m, err := NewManager(context.TODO(), "argocd", "", "", "", kube.NewFakeKubeClient("argocd"))
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
 		require.NoError(t, err)
 		m.mapCluster("agent1", &v1alpha1.Cluster{Name: "cluster1"})
 		assert.NotNil(t, m.mapping("agent1"))
@@ -182,5 +250,68 @@ func Test_onClusterUpdated(t *testing.T) {
 		assert.NotNil(t, m.mapping("agent1"))
 		assert.NotNil(t, m.mapping("agent2"))
 
+	})
+}
+
+func Test_onClusterDeleted(t *testing.T) {
+	t.Run("Successfully delete a cluster and invoke callback", func(t *testing.T) {
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
+		require.NoError(t, err)
+		m.mapCluster("agent1", &v1alpha1.Cluster{Name: "cluster1"})
+		assert.NotNil(t, m.mapping("agent1"))
+
+		var callbackAgent atomic.Value
+		m.SetOnClusterDeleted(func(agentName string) {
+			callbackAgent.Store(agentName)
+		})
+
+		s := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping: "agent1",
+				},
+			},
+		}
+		m.onClusterDeleted(s)
+		assert.Nil(t, m.mapping("agent1"))
+		assert.Equal(t, "agent1", callbackAgent.Load())
+	})
+
+	t.Run("Callback not invoked when no mapping exists", func(t *testing.T) {
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
+		require.NoError(t, err)
+
+		callbackCalled := atomic.Bool{}
+		m.SetOnClusterDeleted(func(agentName string) {
+			callbackCalled.Store(true)
+		})
+
+		s := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping: "nonexistent",
+				},
+			},
+		}
+		m.onClusterDeleted(s)
+		assert.False(t, callbackCalled.Load())
+	})
+
+	t.Run("No callback registered does not panic", func(t *testing.T) {
+		m, err := NewManager(context.TODO(), "argocd", "", "", cacheutil.RedisCompressionGZip, kube.NewFakeKubeClient("argocd"), nil)
+		require.NoError(t, err)
+		m.mapCluster("agent1", &v1alpha1.Cluster{Name: "cluster1"})
+
+		s := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping: "agent1",
+				},
+			},
+		}
+		assert.NotPanics(t, func() {
+			m.onClusterDeleted(s)
+		})
+		assert.Nil(t, m.mapping("agent1"))
 	})
 }

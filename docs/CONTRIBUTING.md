@@ -33,7 +33,7 @@ logCtx.WithField("resource_id", event.resourceID(ev)).WithField("event_id", even
 ```
 
 Argo CD Agent logs at the following levels (ordered by decreasing severity):
-- **Error**: Logs specific, non-fatal errors that have occured.
+- **Error**: Logs specific, non-fatal errors that have occurred.
 - **Warn**: Logs unexpected behaviour which may be an error in some cases, but might also be innocuous depending on context.
 - **Info**: Logs actions taken by the agent, the reason for the action, and any useful context. May also log general context information related to the operating environment.
 - **Debug**: Logs actions/context that are more verbose than info, and may include information that is only relevant to developers familiar with the code.

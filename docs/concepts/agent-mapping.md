@@ -5,6 +5,9 @@ argocd-agent supports two modes for mapping applications to agents: **namespace-
 !!! important "Managed Mode Only"
     Destination-based mapping only applies to **managed agents**. Autonomous agents do not require this feature because the agent is the source of truth and controls where applications are stored locally. On the principal, autonomous apps are always stored in the `{agentName}` namespace for clear ownership.
 
+!!! tip "Coming from traditional Argo CD?"
+    If you've used Argo CD before, destination-based mapping uses the same model. It routes on `spec.destination.name`, the field traditional Argo CD has always used to target a cluster added with `argocd cluster add`.
+
 ## Overview
 
 When an Application is created on the control plane (principal), argocd-agent needs to determine which agent should manage it. The mapping mode controls how this routing decision is made.
@@ -17,6 +20,7 @@ When an Application is created on the control plane (principal), argocd-agent ne
 | Configuration            | Default (no config)                      | Requires flag                          |
 | App namespace on agent   | Agent's namespace (typically `argocd`)   | Preserves original namespace           |
 | Supported agent modes    | Managed and Autonomous                   | Managed only                           |
+| Familiar to Argo CD users | argocd-agent specific concept            | Same `destination.name` targeting as traditional Argo CD |
 
 ## Namespace-Based Mapping (Default)
 
@@ -88,17 +92,43 @@ graph TB
 
 ## Destination-Based Mapping
 
-With Destination-based mapping, the principal uses the Application's `spec.destination.name` field to determine the target agent. This enables more flexible routing and better multi-tenancy support.
+With Destination-based mapping, the principal uses the Application's `spec.destination.name` field to determine the target agent. Routing only depends on this field, not on the Application's namespace, so no special namespace configuration is required to use this mode.
 
 ### How It Works
 
-1. **Application Creation**: Create Applications in any namespace. Set `spec.destination.name` to the target agent's name.
+1. **Application Creation**: Create Applications in the `argocd` namespace by default. Other namespaces are optional and require Argo CD's apps-in-any-namespace configuration. Set `spec.destination.name` to the target agent's name.
 
 2. **Routing**: The principal maintains a lookup table (`appToAgent`) mapping applications to agents based on `destination.name`.
 
 3. **Agent Processing**: The agent creates the Application in a namespace matching the original namespace from the principal (not forced to the agent's namespace).
 
-The diagram below shows destination-based mapping where multiple namespaces (`team-a`, `team-b`) can route applications to the same agent using `spec.destination.name`. Unlike namespace-based mapping, the original namespace is preserved on the agent side.
+The diagram below shows the simplest case. Unlike namespace-based mapping, a single namespace is not tied to a single agent: `App1` and `App2` both live in `argocd` but target different agents using `spec.destination.name`. This is the same targeting model traditional Argo CD has always used.
+
+```mermaid
+graph TB
+    subgraph control["Control Plane Cluster"]
+        principal[Principal]
+        argocd_ns["Namespace: argocd"]
+        app2["App2<br/>destination.name: agent-prod"]
+        app1["App1<br/>destination.name: agent-staging"]
+    end
+
+    subgraph workload2["Workload Cluster 2"]
+        agent2[Agent: agent-prod]
+    end
+
+    subgraph workload1["Workload Cluster 1"]
+        agent1[Agent: agent-staging]
+    end
+
+    principal --> argocd_ns
+    argocd_ns --> app2
+    argocd_ns --> app1
+    app2 -.->|"routed by destination.name"| agent2
+    app1 -.->|"routed by destination.name"| agent1
+```
+
+Namespace isolation is an optional extension, not a requirement. If you also want per-team namespaces, destination-based mapping supports that too, matching Argo CD's apps-in-any-namespace feature: multiple namespaces can route to the same agent, and each namespace is preserved on the agent side. This requires enabling apps-in-any-namespace (`application.namespaces`) for those namespaces. The diagram below shows two teams (`team-a`, `team-b`) both targeting `agent-prod`:
 
 ```mermaid
 graph TB
@@ -192,7 +222,7 @@ spec:
 
 ## AppProject Configuration
 
-Destination-based mapping requires the AppProject on the agent to allow applications in any namespace:
+If your Applications stay in the `argocd` namespace, no AppProject changes are needed. `sourceNamespaces` is only required for the optional namespace isolation described above, to let the AppProject on the agent allow Applications in those other namespaces:
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -202,11 +232,11 @@ metadata:
   namespace: argocd
 spec:
   sourceNamespaces:
-    - <namespaces>  # Required for destination-based mapping
+    - <namespaces>  # Only needed for Applications outside the argocd namespace
   # ... other configuration
 ```
 
-Unlike the namespace-based mapping where the `sourceNamespaces` field is removed, the `sourceNamespaces` field on AppProject is preserved when using destination-based mapping.
+Unlike namespace-based mapping, where the `sourceNamespaces` field is removed, this field is preserved when using destination-based mapping, so it can list any additional namespaces you choose to allow.
 
 ## Migration Guide
 
@@ -273,6 +303,7 @@ When migrating, be aware of these changes:
 - You want applications organized by team/project rather than by agent
 - You need the apps-in-any-namespace feature
 - You're setting up a new deployment with multi-tenancy requirements
+- You're already familiar with Argo CD's traditional `destination.name`/cluster-secret model and want to reuse that mental model directly
 
 ## Troubleshooting
 

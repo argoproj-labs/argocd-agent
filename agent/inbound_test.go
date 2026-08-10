@@ -31,9 +31,11 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
+	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -62,7 +64,7 @@ func Test_CreateApplication(t *testing.T) {
 		},
 	}}
 	t.Run("Discard event in unmanaged mode", func(t *testing.T) {
-		napp, err := a.createApplication(app)
+		napp, err := a.createApplication(app, "")
 		require.Nil(t, napp)
 		require.ErrorContains(t, err, "not in managed mode")
 	})
@@ -71,7 +73,7 @@ func Test_CreateApplication(t *testing.T) {
 		defer a.appManager.Unmanage(app.QualifiedName())
 		a.mode = types.AgentModeManaged
 		a.appManager.Manage(app.QualifiedName())
-		napp, err := a.createApplication(app)
+		napp, err := a.createApplication(app, "")
 		require.ErrorContains(t, err, "is already managed")
 		require.Nil(t, napp)
 	})
@@ -81,7 +83,7 @@ func Test_CreateApplication(t *testing.T) {
 		a.mode = types.AgentModeManaged
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
 		defer createMock.Unset()
-		napp, err := a.createApplication(app)
+		napp, err := a.createApplication(app, "")
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
@@ -106,7 +108,7 @@ func Test_CreateApplication(t *testing.T) {
 
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(newApp, nil)
 		defer createMock.Unset()
-		napp, err := a.createApplication(newApp)
+		napp, err := a.createApplication(newApp, "")
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 
@@ -118,7 +120,6 @@ func Test_CreateApplication(t *testing.T) {
 		require.NotEqual(t, a.namespace, newApp.Namespace)
 		require.Equal(t, "principal-namespace", newApp.Namespace, "Namespace should not be modified in destination based mapping")
 	})
-
 }
 
 func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
@@ -199,7 +200,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		a.appManager.Manage(oldApp.QualifiedName())
 		defer a.appManager.ClearManaged()
 
-		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -232,7 +233,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 			"name": "test",
 		}
 
-		ev := event.New(evs.ApplicationEvent(event.Create, newApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.Create, newApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -257,7 +258,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		defer a.appManager.ClearManaged()
 
 		// Create an Update event for the new app
-		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, incomingApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -289,14 +290,15 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 
 		getMock.Unset()
 		notFoundError := kerrors.NewNotFound(schema.GroupResource{
-			Group: "argoproj.io", Resource: "application"}, newApp.Name)
+			Group: "argoproj.io", Resource: "application",
+		}, newApp.Name)
 		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
 
 		createMock.Unset()
 		createMock = be.On("Create", mock.Anything, mock.Anything).Return(newApp, nil)
 
 		// Create an Update event for the new app
-		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, newApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, newApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -337,7 +339,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		updateMock.Unset()
 		updateMock = be.On("Update", mock.Anything, mock.Anything).Return(newApp, nil)
 
-		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, newApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, newApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -362,7 +364,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		defer a.appManager.ClearManaged()
 
 		// Create a delete event for the new app
-		ev := event.New(evs.ApplicationEvent(event.Delete, incomingApp), event.TargetApplication)
+		ev := event.New(evs.ApplicationEvent(event.Delete, incomingApp), targets.Application)
 		err := a.processIncomingApplication(ev)
 		require.Nil(t, err)
 
@@ -375,6 +377,256 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 		require.False(t, a.appManager.IsManaged(incomingApp.QualifiedName()))
+	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.ApplicationEvent(event.SpecUpdate, incomingApp), targets.Application)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Upsert: Get (identity check) + Update only — no Delete, no Create
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), targets.Application)
+		err := a.processIncomingApplication(ev)
+		require.Nil(t, err)
+
+		// Upsert on Create: Get (identity check) + Update only — no Delete, no Create
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+}
+
+func Test_processIncomingApplication_AutonomousUpdateDoesNotStampPrincipalUID(t *testing.T) {
+	a, _ := newAgent(t)
+	a.mode = types.AgentModeAutonomous
+
+	be := backend_mocks.NewApplication(t)
+	var err error
+	a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true),
+		application.WithRole(manager.ManagerRoleAgent), application.WithMode(manager.ManagerModeAutonomous))
+	require.NoError(t, err)
+
+	existingApp := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "argocd",
+		},
+	}
+	incomingApp := existingApp.DeepCopy()
+	incomingApp.Operation = &v1alpha1.Operation{
+		Sync: &v1alpha1.SyncOperation{
+			Revision: "1.0.0",
+		},
+	}
+
+	getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+	defer getMock.Unset()
+	supportsPatchMock := be.On("SupportsPatch").Return(false)
+	defer supportsPatchMock.Unset()
+
+	var updatedArg *v1alpha1.Application
+	updateMock := be.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		updatedArg = args.Get(1).(*v1alpha1.Application).DeepCopy()
+	}).Return(existingApp.DeepCopy(), nil)
+	defer updateMock.Unset()
+
+	evs := event.NewEventSource("test")
+	ce := evs.ApplicationEvent(event.SpecUpdate, incomingApp)
+	event.SetPrincipalUID(ce, "principal-B")
+
+	err = a.processIncomingApplication(event.New(ce, targets.Application))
+	require.NoError(t, err)
+	require.NotNil(t, updatedArg)
+	assert.NotContains(t, updatedArg.Annotations, manager.PrincipalUIDAnnotation)
+}
+
+func Test_ProcessIncomingApplicationSetOperation(t *testing.T) {
+	evs := event.NewEventSource("test")
+
+	t.Run("SetOperation on managed agent updates the operation field", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.mode = types.AgentModeManaged
+		a.context = context.Background()
+
+		be := backend_mocks.NewApplication(t)
+		var err error
+		a.appManager, err = application.NewApplicationManager(be, "argocd",
+			application.WithAllowUpsert(true),
+			application.WithRole(manager.ManagerRoleAgent),
+			application.WithMode(manager.ManagerModeManaged),
+		)
+		require.NoError(t, err)
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "uid-from-principal",
+				},
+			},
+		}
+
+		incomingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				UID:       "uid-from-principal",
+			},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{
+					Revision: "abc123",
+				},
+			},
+		}
+
+		updatedApp := existingApp.DeepCopy()
+		updatedApp.Operation = incomingApp.Operation
+		updatedApp.ResourceVersion = "2"
+
+		be.On("SupportsPatch").Return(false)
+		be.On("Get", mock.Anything, "test", "argocd").Return(existingApp, nil)
+		be.On("Update", mock.Anything, mock.Anything).Return(updatedApp, nil)
+
+		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), targets.Application)
+		err = a.processIncomingApplication(ev)
+		require.NoError(t, err)
+
+		// First Get is from CompareSourceUID, second Get is from SetManagedOperation's update()
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		var gotCalls []string
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Verify only the operation was set on the existing app (not spec or status)
+		updateArg := be.Calls[3].Arguments[1].(*v1alpha1.Application)
+		require.NotNil(t, updateArg.Operation)
+		require.Equal(t, "abc123", updateArg.Operation.Sync.Revision)
+	})
+
+	t.Run("SetOperation on autonomous agent updates the operation field", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.mode = types.AgentModeAutonomous
+		a.context = context.Background()
+
+		be := backend_mocks.NewApplication(t)
+		var err error
+		a.appManager, err = application.NewApplicationManager(be, "argocd",
+			application.WithAllowUpsert(true),
+			application.WithRole(manager.ManagerRoleAgent),
+			application.WithMode(manager.ManagerModeAutonomous),
+		)
+		require.NoError(t, err)
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+			},
+		}
+
+		incomingApp := existingApp.DeepCopy()
+		incomingApp.Operation = &v1alpha1.Operation{
+			Sync: &v1alpha1.SyncOperation{
+				Revision: "def456",
+			},
+		}
+
+		updatedApp := existingApp.DeepCopy()
+		updatedApp.Operation = incomingApp.Operation
+		updatedApp.ResourceVersion = "2"
+
+		be.On("SupportsPatch").Return(false)
+		be.On("Get", mock.Anything, "test", "argocd").Return(existingApp, nil)
+		be.On("Update", mock.Anything, mock.Anything).Return(updatedApp, nil)
+
+		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), targets.Application)
+		err = a.processIncomingApplication(ev)
+		require.NoError(t, err)
+
+		expectedCalls := []string{"Get", "SupportsPatch", "Update"}
+		var gotCalls []string
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		updateArg := be.Calls[2].Arguments[1].(*v1alpha1.Application)
+		require.NotNil(t, updateArg.Operation)
+		require.Equal(t, "def456", updateArg.Operation.Sync.Revision)
+	})
+
+	t.Run("SetOperation rejected when source UID does not match in managed mode", func(t *testing.T) {
+		a, _ := newAgent(t)
+		a.mode = types.AgentModeManaged
+		a.context = context.Background()
+
+		be := backend_mocks.NewApplication(t)
+		var err error
+		a.appManager, err = application.NewApplicationManager(be, "argocd",
+			application.WithAllowUpsert(true),
+			application.WithRole(manager.ManagerRoleAgent),
+			application.WithMode(manager.ManagerModeManaged),
+		)
+		require.NoError(t, err)
+
+		existingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "old-principal-uid",
+				},
+			},
+		}
+
+		incomingApp := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test",
+				Namespace: "argocd",
+				UID:       "different-principal-uid",
+			},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{Revision: "abc123"},
+			},
+		}
+
+		be.On("Get", mock.Anything, "test", "argocd").Return(existingApp, nil)
+
+		ev := event.New(evs.ApplicationEvent(event.SetOperation, incomingApp), targets.Application)
+		err = a.processIncomingApplication(ev)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "source UID mismatch")
 	})
 }
 
@@ -442,7 +694,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		defer unsetMocks(t)
 		a.projectManager.Manage(oldAppProject.Name)
 		defer a.projectManager.ClearManaged()
-		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -475,7 +727,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 			"name": "test",
 		}
 
-		ev := event.New(evs.AppProjectEvent(event.Create, newAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Create, newAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -500,7 +752,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		defer a.projectManager.ClearManaged()
 
 		// Create an Update event for the new appProject
-		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -532,14 +784,15 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 
 		getMock.Unset()
 		notFoundError := kerrors.NewNotFound(schema.GroupResource{
-			Group: "argoproj.io", Resource: "appproject"}, newAppProject.Name)
+			Group: "argoproj.io", Resource: "appproject",
+		}, newAppProject.Name)
 		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
 
 		createMock.Unset()
 		createMock = be.On("Create", mock.Anything, mock.Anything).Return(newAppProject, nil)
 
 		// Create an Update event for the new appProject
-		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, newAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, newAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -565,7 +818,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		defer a.projectManager.ClearManaged()
 
 		// Create a delete event for the new appProject
-		ev := event.New(evs.AppProjectEvent(event.Delete, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Delete, incomingAppProject), targets.AppProject)
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
@@ -611,7 +864,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		a.projectManager.Manage(existingAppProject.Name)
 		defer a.projectManager.ClearManaged()
 
-		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), targets.AppProject)
 		err = a.processIncomingAppProject(ev)
 
 		// The process should succeed after deleting the existing AppProject and creating the new one
@@ -662,7 +915,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		a.projectManager.Manage(existingAppProject.Name)
 		defer a.projectManager.ClearManaged()
 
-		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), targets.AppProject)
 		err = a.processIncomingAppProject(ev)
 
 		// The process should succeed after deleting the existing AppProject and creating the new one
@@ -711,7 +964,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		a.projectManager.Manage(existingAppProject.Name)
 		defer a.projectManager.ClearManaged()
 
-		ev := event.New(evs.AppProjectEvent(event.Delete, incomingAppProject), event.TargetAppProject)
+		ev := event.New(evs.AppProjectEvent(event.Delete, incomingAppProject), targets.AppProject)
 		err = a.processIncomingAppProject(ev)
 
 		// Delete events should succeed after deleting the existing AppProject
@@ -721,6 +974,48 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		expectedCalls := []string{"Get", "Get", "Delete"}
 		gotCalls := []string{}
 		for _, call := range beMissing.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.projectManager.Manage(oldAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), targets.AppProject)
+		err := a.processIncomingAppProject(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		configureManager(t)
+		defer unsetMocks(t)
+		a.projectManager.Manage(oldAppProject.Name)
+		defer a.projectManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+		defer func() { a.mismatchPolicy = manager.MismatchPolicyRecreate }()
+
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), targets.AppProject)
+		err := a.processIncomingAppProject(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
 		}
 		require.Equal(t, expectedCalls, gotCalls)
@@ -747,7 +1042,8 @@ func Test_UpdateApplication(t *testing.T) {
 					UID:        "uid-1",
 				},
 			},
-		}}
+		},
+	}
 	t.Run("Discard event because version has been seen already", func(t *testing.T) {
 		defer a.appManager.ClearIgnored()
 		a.appManager.IgnoreChange(fmt.Sprintf("%s/test", a.namespace), "12345")
@@ -786,6 +1082,39 @@ func Test_UpdateApplication(t *testing.T) {
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app")
 	})
 
+	t.Run("Managed mode caches spec by resolved source uid", func(t *testing.T) {
+		a.mode = types.AgentModeManaged
+		a.sourceCache.Application.Clear()
+		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true), application.WithMode(manager.ManagerModeManaged), application.WithRole(manager.ManagerRoleAgent))
+
+		appWithInheritedSourceUID := app.DeepCopy()
+		appWithInheritedSourceUID.UID = ktypes.UID("new-principal-uid")
+		appWithInheritedSourceUID.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old-source-uid",
+		}
+		appWithInheritedSourceUID.Spec = v1alpha1.ApplicationSpec{
+			Project: "default",
+		}
+
+		getEvent := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
+		defer getEvent.Unset()
+		supportsPatchEvent := be.On("SupportsPatch").Return(false)
+		defer supportsPatchEvent.Unset()
+		updateEvent := be.On("Update", mock.Anything, mock.Anything).Return(&v1alpha1.Application{}, nil)
+		defer updateEvent.Unset()
+
+		napp, err := a.updateApplication(appWithInheritedSourceUID)
+		require.NoError(t, err)
+		require.NotNil(t, napp)
+
+		cachedSpec, ok := a.sourceCache.Application.Get(ktypes.UID("old-source-uid"))
+		require.True(t, ok)
+		assert.Equal(t, appWithInheritedSourceUID.Spec, cachedSpec)
+
+		_, ok = a.sourceCache.Application.Get(ktypes.UID("new-principal-uid"))
+		require.False(t, ok)
+	})
+
 	t.Run("Update application using patch in autonomous mode", func(t *testing.T) {
 		a.mode = types.AgentModeAutonomous
 		a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true), application.WithMode(manager.ManagerModeAutonomous), application.WithRole(manager.ManagerRoleAgent))
@@ -815,7 +1144,6 @@ func Test_UpdateApplication(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 	})
-
 }
 
 func Test_CreateAppProject(t *testing.T) {
@@ -878,7 +1206,6 @@ func Test_CreateAppProject(t *testing.T) {
 		require.NotNil(t, napp)
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app project")
 	})
-
 }
 
 func Test_UpdateAppProject(t *testing.T) {
@@ -904,7 +1231,8 @@ func Test_UpdateAppProject(t *testing.T) {
 		},
 		Spec: v1alpha1.AppProjectSpec{
 			SourceNamespaces: []string{"default", "argocd"},
-		}}
+		},
+	}
 
 	t.Run("Update appproject using patch", func(t *testing.T) {
 		a.mode = types.AgentModeManaged
@@ -1124,7 +1452,6 @@ func Test_UpdateAppProject(t *testing.T) {
 		assert.Equal(t, customAgentNamespace, capturedDeleteNamespace, "Delete should use custom agent namespace")
 		assert.NotEqual(t, "principal-namespace", capturedDeleteNamespace, "Delete should not use principal namespace")
 	})
-
 }
 
 func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
@@ -1181,7 +1508,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		defer deleteMock.Unset()
 
-		ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1230,7 +1557,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(updatedRepo, nil)
 		defer updateMock.Unset()
 
-		ev := event.New(evs.RepositoryEvent(event.Create, newRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.Create, newRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1268,7 +1595,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		defer deleteMock.Unset()
 
 		// Create an Update event for the new repository
-		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1296,14 +1623,15 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 
 		// Set up mock expectations
 		notFoundError := kerrors.NewNotFound(schema.GroupResource{
-			Group: "", Resource: "secret"}, newRepo.Name)
+			Group: "", Resource: "secret",
+		}, newRepo.Name)
 		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
 		defer getMock.Unset()
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdRepo, nil)
 		defer createMock.Unset()
 
 		// Create an Update event for the new repository
-		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, newRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, newRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1339,7 +1667,7 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		defer deleteMock.Unset()
 
 		// Create a delete event for the new repository
-		ev := event.New(evs.RepositoryEvent(event.Delete, incomingRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.Delete, incomingRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
@@ -1366,12 +1694,70 @@ func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 		defer getMock.Unset()
 
 		// Create an unknown event type
-		ev := event.New(evs.RepositoryEvent(event.EventType("Unknown"), incomingRepo), event.TargetRepository)
+		ev := event.New(evs.RepositoryEvent(event.EventType("Unknown"), incomingRepo), targets.Repository)
 		err := a.processIncomingRepository(ev)
 		require.Nil(t, err)
 
 		// Only the Get call for CompareSourceUID should be made, no other backend operations
 		expectedCalls := []string{"Get"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.repoManager.Manage(oldRepo.Name)
+		defer a.repoManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+		supportsPatchMock := be.On("SupportsPatch").Return(false)
+		defer supportsPatchMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingRepo, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), targets.Repository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldRepo.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.repoManager.Manage(oldRepo.Name)
+		defer a.repoManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldRepo, nil)
+		defer getMock.Unset()
+		supportsPatchMock := be.On("SupportsPatch").Return(false)
+		defer supportsPatchMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingRepo, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), targets.Repository)
+		err := a.processIncomingRepository(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -1522,7 +1908,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		expected := "agent can only handle SyncedResourceList request in the autonomous mode"
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Equal(t, expected, err.Error())
 	})
 
@@ -1532,7 +1918,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		ev, err := a.emitter.RequestSyncedResourceListEvent([]byte{})
 		assert.Nil(t, err)
 
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Nil(t, err)
 	})
 
@@ -1547,7 +1933,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		ev, err := a.emitter.SyncedResourceEvent(res)
 		assert.Nil(t, err)
 
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.NotNil(t, err)
 	})
 
@@ -1558,7 +1944,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		expected := "agent can only handle SyncedResource request in the managed mode"
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Equal(t, expected, err.Error())
 	})
 
@@ -1572,7 +1958,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		ev, err := a.emitter.RequestUpdateEvent(update)
 		assert.Nil(t, err)
 
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.NotNil(t, err)
 	})
 
@@ -1584,7 +1970,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		expected := "agent can only handle RequestUpdate in the autonomous mode"
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Equal(t, expected, err.Error())
 	})
 
@@ -1594,7 +1980,7 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		ev, err := a.emitter.RequestResourceResyncEvent()
 		assert.Nil(t, err)
 
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Nil(t, err)
 	})
 
@@ -1605,7 +1991,771 @@ func Test_processIncomingResourceResyncEvent(t *testing.T) {
 		assert.Nil(t, err)
 
 		expected := "agent can only handle ResourceResync request in the managed mode"
-		err = a.processIncomingResourceResyncEvent(event.New(ev, event.TargetResourceResync))
+		err = a.processIncomingResourceResyncEvent(event.New(ev, targets.ResourceResync))
 		assert.Equal(t, expected, err.Error())
+	})
+}
+
+func Test_ProcessIncomingGPGKey(t *testing.T) {
+	evs := event.NewEventSource("test")
+
+	incomingCM := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+		},
+		Data: map[string]string{
+			"my-key": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n...",
+		},
+	}
+
+	oldCM := incomingCM.DeepCopy()
+
+	incomingCM.UID = ktypes.UID("new_uid")
+
+	createdCM := incomingCM.DeepCopy()
+	createdCM.UID = ktypes.UID("random_uid")
+	createdCM.Annotations = map[string]string{
+		manager.SourceUIDAnnotation: string(incomingCM.UID),
+	}
+
+	createAgent := func(t *testing.T) (*Agent, *backend_mocks.GPGKey) {
+		t.Helper()
+		a, _ := newAgent(t)
+		a.mode = types.AgentModeManaged
+		be := backend_mocks.NewGPGKey(t)
+		a.gpgKeyManager = gpgkey.NewManager(be, "argocd")
+		return a, be
+	}
+
+	t.Run("Create: Old GPG key with different UID must be deleted before creating the incoming GPG key", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdCM, nil)
+		defer createMock.Unset()
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		defer deleteMock.Unset()
+
+		ev := event.New(evs.GPGKeyEvent(event.Create, incomingCM), targets.GPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		// compare the UID, delete old GPG key, and create a new GPG key.
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new GPG key has the updated source UID annotation.
+		cmInterface := be.Calls[3].ReturnArguments[0]
+		latestCM, ok := cmInterface.(*corev1.ConfigMap)
+		require.True(t, ok)
+		require.Equal(t, string(incomingCM.UID), latestCM.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Create: Old GPG key with the same UID must be updated", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		// The incoming GPG key's UID matches with the UID in the annotation
+		newCM := incomingCM.DeepCopy()
+		newCM.UID = ktypes.UID("old_uid")
+		newCM.Labels = map[string]string{
+			"name": "test",
+		}
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+
+		updatedCM := newCM.DeepCopy()
+		updatedCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: string(newCM.UID),
+		}
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(updatedCM, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.GPGKeyEvent(event.Create, newCM), targets.GPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		// Check if the API calls were made in the same order:
+		expectedCalls := []string{"Get", "Get", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		cmInterface := be.Calls[2].ReturnArguments[0]
+		latestCM, ok := cmInterface.(*corev1.ConfigMap)
+		require.True(t, ok)
+		require.Equal(t, newCM.Labels, latestCM.Labels)
+		require.Equal(t, string(newCM.UID), latestCM.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Update: Old GPG key with different UID must be deleted and a new GPG key must be created", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdCM, nil)
+		defer createMock.Unset()
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		defer deleteMock.Unset()
+
+		// Create an Update event for the incoming GPG key
+		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, incomingCM), targets.GPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new GPG key has the updated source UID annotation.
+		cmInterface := be.Calls[3].ReturnArguments[0]
+		latestCM, ok := cmInterface.(*corev1.ConfigMap)
+		require.True(t, ok)
+		require.Equal(t, string(incomingCM.UID), latestCM.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Update: incoming GPG key must be created if it doesn't exist while handling update event", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		newCM := incomingCM.DeepCopy()
+
+		notFoundError := kerrors.NewNotFound(schema.GroupResource{
+			Group: "", Resource: "configmap",
+		}, newCM.Name)
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
+		defer getMock.Unset()
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(createdCM, nil)
+		defer createMock.Unset()
+
+		// Create an Update event for the incoming GPG key
+		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, newCM), targets.GPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Create"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// Check if the new GPG key has the updated source UID annotation.
+		cmInterface := be.Calls[1].ReturnArguments[0]
+		latestCM, ok := cmInterface.(*corev1.ConfigMap)
+		require.True(t, ok)
+		require.Equal(t, createdCM, latestCM)
+		require.Equal(t, string(newCM.UID), latestCM.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("Delete: Old GPG key must be deleted", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		deleteMock := be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		defer deleteMock.Unset()
+
+		// Create a delete event for the incoming GPG key
+		ev := event.New(evs.GPGKeyEvent(event.Delete, incomingCM), targets.GPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "Delete"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+		require.False(t, a.gpgKeyManager.IsManaged(incomingCM.Name))
+	})
+
+	t.Run("Unknown event type should not do anything", func(t *testing.T) {
+		a, be := createAgent(t)
+
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+
+		// Create an unknown event type
+		ev := event.New(evs.GPGKeyEvent(event.EventType("Unknown"), incomingCM), targets.GPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		// Only the Get call for CompareSourceUID should be made, no other backend operations
+		expectedCalls := []string{"Get"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingCM, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.GPGKeyEvent(event.Create, incomingCM), targets.GPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+
+	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
+		a, be := createAgent(t)
+		oldCM.Annotations = map[string]string{
+			manager.SourceUIDAnnotation: "old_uid",
+		}
+		a.gpgKeyManager.Manage(oldCM.Name)
+		defer a.gpgKeyManager.ClearManaged()
+
+		a.mismatchPolicy = manager.MismatchPolicyUpsert
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
+		defer getMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(incomingCM, nil)
+		defer updateMock.Unset()
+
+		ev := event.New(evs.GPGKeyEvent(event.SpecUpdate, incomingCM), targets.GPGKey)
+		err := a.processIncomingGPGKey(ev)
+		require.Nil(t, err)
+
+		expectedCalls := []string{"Get", "Get", "Update"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+	})
+}
+
+func Test_CreateGPGKey(t *testing.T) {
+	a, _ := newAgent(t)
+	be := backend_mocks.NewGPGKey(t)
+	gpgMgr := gpgkey.NewManager(be, "argocd")
+	a.gpgKeyManager = gpgMgr
+	a.mode = types.AgentModeManaged
+	require.NotNil(t, a)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "argocd-gpg-keys-cm",
+			Namespace: "argocd",
+		},
+		Data: map[string]string{
+			"my-key": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n...",
+		},
+	}
+
+	t.Run("GPG key already managed calls updateGPGKey", func(t *testing.T) {
+		defer a.gpgKeyManager.Unmanage(cm.Name)
+		a.gpgKeyManager.Manage(cm.Name)
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&corev1.ConfigMap{}, nil)
+		defer getMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(&corev1.ConfigMap{}, nil)
+		defer updateMock.Unset()
+
+		ncm, err := a.createGPGKey(cm)
+		require.NoError(t, err)
+		require.NotNil(t, ncm)
+	})
+
+	t.Run("Create GPG key", func(t *testing.T) {
+		defer a.gpgKeyManager.Unmanage(cm.Name)
+		createMock := be.On("Create", mock.Anything, mock.Anything).Return(&corev1.ConfigMap{}, nil)
+		defer createMock.Unset()
+		ncm, err := a.createGPGKey(cm)
+		require.NoError(t, err)
+		require.NotNil(t, ncm)
+	})
+}
+
+func Test_UpdateGPGKey(t *testing.T) {
+	a, _ := newAgent(t)
+	be := backend_mocks.NewGPGKey(t)
+	gpgMgr := gpgkey.NewManager(be, "argocd")
+	a.gpgKeyManager = gpgMgr
+	a.mode = types.AgentModeManaged
+	require.NotNil(t, a)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Name:            "argocd-gpg-keys-cm",
+			Namespace:       "argocd",
+			ResourceVersion: "12345",
+		},
+		Data: map[string]string{
+			"my-key": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n...",
+		},
+	}
+
+	t.Run("Discard event because version has been seen already", func(t *testing.T) {
+		a.gpgKeyManager.Manage(cm.Name)
+		defer a.gpgKeyManager.Unmanage(cm.Name)
+		defer a.gpgKeyManager.ClearIgnored()
+		a.gpgKeyManager.IgnoreChange(cm.Name, "12345")
+		ncm, err := a.updateGPGKey(cm)
+		require.Nil(t, ncm)
+		require.ErrorContains(t, err, "has already been seen")
+	})
+
+	t.Run("Update GPG key in managed mode", func(t *testing.T) {
+		a.gpgKeyManager.Manage(cm.Name)
+		defer a.gpgKeyManager.Unmanage(cm.Name)
+
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&corev1.ConfigMap{}, nil)
+		defer getMock.Unset()
+		updateMock := be.On("Update", mock.Anything, mock.Anything).Return(&corev1.ConfigMap{}, nil)
+		defer updateMock.Unset()
+		ncm, err := a.updateGPGKey(cm)
+		require.NoError(t, err)
+		require.NotNil(t, ncm)
+	})
+}
+
+func Test_identityAction(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   *application.IdentityCompareResult
+		expected identityActionType
+	}{
+		{
+			name: "same principal, same source-uid → update",
+			result: &application.IdentityCompareResult{
+				Exists:            true,
+				SourceUIDMatch:    true,
+				PrincipalUIDMatch: true,
+			},
+			expected: identityActionUpdate,
+		},
+		{
+			name: "same principal, different source-uid → delete/recreate",
+			result: &application.IdentityCompareResult{
+				Exists:            true,
+				SourceUIDMatch:    false,
+				PrincipalUIDMatch: true,
+			},
+			expected: identityActionMismatch,
+		},
+		{
+			name: "same principal, missing source-uid → stamp",
+			result: &application.IdentityCompareResult{
+				Exists:            true,
+				MissingSourceUID:  true,
+				PrincipalUIDMatch: true,
+			},
+			expected: identityActionUpdateStampUID,
+		},
+		{
+			name: "different principal → transition",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      false,
+				PrincipalUIDMatch:   false,
+				PrincipalTransition: true,
+			},
+			expected: identityActionTransition,
+		},
+		{
+			name: "different principal, missing source-uid → transition takes priority",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				MissingSourceUID:    true,
+				PrincipalUIDMatch:   false,
+				PrincipalTransition: true,
+			},
+			expected: identityActionTransition,
+		},
+		{
+			name: "backward compat: no principal-uid, source-uid match → update",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      true,
+				PrincipalUIDMatch:   true,
+				MissingPrincipalUID: true,
+			},
+			expected: identityActionUpdate,
+		},
+		{
+			name: "backward compat: no principal-uid, source-uid mismatch → delete/recreate",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      false,
+				PrincipalUIDMatch:   true,
+				MissingPrincipalUID: true,
+			},
+			expected: identityActionMismatch,
+		},
+		{
+			name: "adopted principal-uid, source-uid mismatch → transition (pre-upgrade failover)",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      false,
+				PrincipalUIDMatch:   true,
+				AdoptedPrincipalUID: true,
+			},
+			expected: identityActionTransition,
+		},
+		{
+			name: "adopted principal-uid, source-uid match → update",
+			result: &application.IdentityCompareResult{
+				Exists:              true,
+				SourceUIDMatch:      true,
+				PrincipalUIDMatch:   true,
+				AdoptedPrincipalUID: true,
+			},
+			expected: identityActionUpdate,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			action := identityAction(tt.result)
+			assert.Equal(t, tt.expected, action)
+		})
+	}
+}
+
+func Test_processIncomingApplication_TransitionUsesResolvedSourceUID(t *testing.T) {
+	a, _ := newAgent(t)
+	a.mode = types.AgentModeManaged
+
+	be := backend_mocks.NewApplication(t)
+	var err error
+	a.appManager, err = application.NewApplicationManager(be, "argocd", application.WithAllowUpsert(true),
+		application.WithRole(manager.ManagerRoleAgent), application.WithMode(manager.ManagerModeManaged))
+	require.NoError(t, err)
+
+	existingApp := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test",
+			Namespace: "argocd",
+			Annotations: map[string]string{
+				manager.SourceUIDAnnotation:    "old-source-uid",
+				manager.PrincipalUIDAnnotation: "principal-A",
+			},
+		},
+	}
+	incomingApp := existingApp.DeepCopy()
+	incomingApp.UID = ktypes.UID("new-principal-uid")
+	incomingApp.Annotations[manager.SourceUIDAnnotation] = "old-source-uid"
+
+	getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingApp, nil)
+	defer getMock.Unset()
+	supportsPatchMock := be.On("SupportsPatch").Return(false)
+	defer supportsPatchMock.Unset()
+
+	var updatedArg *v1alpha1.Application
+	updateMock := be.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		updatedArg = args.Get(1).(*v1alpha1.Application).DeepCopy()
+	}).Return(existingApp.DeepCopy(), nil)
+	defer updateMock.Unset()
+
+	evs := event.NewEventSource("test")
+	ce := evs.ApplicationEvent(event.SpecUpdate, incomingApp)
+	event.SetPrincipalUID(ce, "principal-B")
+
+	err = a.processIncomingApplication(event.New(ce, targets.Application))
+	require.NoError(t, err)
+	require.NotNil(t, updatedArg)
+	assert.Equal(t, "old-source-uid", updatedArg.Annotations[manager.SourceUIDAnnotation])
+	assert.True(t, a.sourceCache.Application.Contains(ktypes.UID("old-source-uid")))
+	assert.False(t, a.sourceCache.Application.Contains(ktypes.UID("new-principal-uid")))
+}
+
+func Test_getTargetNamespaceForApp(t *testing.T) {
+	tests := []struct {
+		name                    string
+		agentNamespace          string
+		principalNamespace      string
+		destinationBasedMapping bool
+		agentMode               types.AgentMode
+		appNamespace            string
+		expected                string
+		expectAnnotation        bool
+	}{
+		{
+			name:                    "Remaps principal namespace to agent namespace and stamps annotation",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd",
+			expected:                "argocd-agent",
+			expectAnnotation:        true,
+		},
+		{
+			name:                    "No remap and no annotation when app namespace differs from principal",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "tenant-apps",
+			expected:                "tenant-apps",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Tenant namespace same as agent namespace gets no annotation",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd-agent",
+			expected:                "argocd-agent",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Falls back to agent namespace without destination-based mapping",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: false,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd",
+			expected:                "argocd-agent",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Falls back to agent namespace in autonomous mode",
+			agentNamespace:          "argocd-agent",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeAutonomous,
+			appNamespace:            "argocd",
+			expected:                "argocd-agent",
+			expectAnnotation:        false,
+		},
+		{
+			name:                    "Same namespace on agent and principal skips annotation",
+			agentNamespace:          "argocd",
+			principalNamespace:      "argocd",
+			destinationBasedMapping: true,
+			agentMode:               types.AgentModeManaged,
+			appNamespace:            "argocd",
+			expected:                "argocd",
+			expectAnnotation:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &Agent{
+				namespace:               tt.agentNamespace,
+				principalNamespace:      tt.principalNamespace,
+				destinationBasedMapping: tt.destinationBasedMapping,
+				mode:                    tt.agentMode,
+			}
+			app := &v1alpha1.Application{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      "myapp",
+					Namespace: tt.appNamespace,
+				},
+			}
+			result := a.getTargetNamespaceForApp(app)
+			assert.Equal(t, tt.expected, result)
+
+			_, hasAnnotation := app.Annotations[manager.NamespaceRemappedAnnotation]
+			if tt.expectAnnotation {
+				assert.True(t, hasAnnotation, "expected namespace-remapped annotation")
+				assert.Equal(t, "true", app.Annotations[manager.NamespaceRemappedAnnotation])
+			} else {
+				assert.False(t, hasAnnotation, "did not expect namespace-remapped annotation")
+			}
+		})
+	}
+}
+
+func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
+	a, _ := newAgent(t)
+	a.mode = types.AgentModeManaged
+	a.emitter = event.NewEventSource("test")
+	var be *backend_mocks.Application
+	var getMock, updateMock, patchMock *mock.Call
+	var updatedApp *v1alpha1.Application
+
+	incomingApp := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-app",
+			Namespace: "argocd",
+			UID:       ktypes.UID("new-app"),
+		},
+	}
+
+	existingApp := incomingApp.DeepCopy()
+	existingApp.UID = ktypes.UID("existing-app")
+
+	expectedPrincipalUID := "principal-uid"
+
+	configureManager := func(t *testing.T, app *v1alpha1.Application) {
+		t.Helper()
+		be = backend_mocks.NewApplication(t)
+		var err error
+		a.appManager, err = application.NewApplicationManager(be, "argocd",
+			application.WithAllowUpsert(true),
+			application.WithRole(manager.ManagerRoleAgent),
+			application.WithMode(manager.ManagerModeManaged))
+		require.NoError(t, err)
+
+		getMock = be.On("Get", mock.Anything, "test-app", "argocd").Return(app, nil)
+
+		updateMock = be.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			updatedApp = args.Get(1).(*v1alpha1.Application).DeepCopy()
+		}).Return(app, nil)
+
+		patchMock = be.On("SupportsPatch").Return(false)
+	}
+
+	unsetMocks := func(t *testing.T) {
+		t.Helper()
+		getMock.Unset()
+		updateMock.Unset()
+		patchMock.Unset()
+	}
+
+	clearUpdatedApp := func() {
+		updatedApp = nil
+	}
+
+	t.Run("Existing application gets stamped with principal uid when enabled", func(t *testing.T) {
+		defer unsetMocks(t)
+		defer clearUpdatedApp()
+
+		configureManager(t, existingApp.DeepCopy())
+
+		evs := event.NewEventSource("test-app")
+		ce := evs.ApplicationEvent(event.Create, incomingApp)
+		event.SetPrincipalUID(ce, expectedPrincipalUID)
+
+		err := a.processIncomingApplication(event.New(ce, targets.Application))
+		require.NoError(t, err)
+		require.NotNil(t, updatedApp)
+		require.NotNil(t, updatedApp.Annotations)
+
+		sourceUID, exists := updatedApp.Annotations[manager.SourceUIDAnnotation]
+		require.True(t, exists)
+		require.Equal(t, string(incomingApp.UID), sourceUID)
+
+		principalUID, exists := updatedApp.Annotations[manager.PrincipalUIDAnnotation]
+		require.True(t, exists)
+		require.Equal(t, expectedPrincipalUID, principalUID)
+	})
+
+	t.Run("Existing application does not get principal uid when adoption is disabled on existing application", func(t *testing.T) {
+		defer unsetMocks(t)
+		defer clearUpdatedApp()
+
+		existingAppWithAnnotation := existingApp.DeepCopy()
+		existingAppWithAnnotation.SetAnnotations(map[string]string{
+			manager.AdoptionPolicyAnnotation: string(manager.AdoptionPolicyNever),
+		})
+		configureManager(t, existingAppWithAnnotation)
+
+		evs := event.NewEventSource("test-app")
+		ce := evs.ApplicationEvent(event.Create, incomingApp)
+		event.SetPrincipalUID(ce, expectedPrincipalUID)
+
+		err := a.processIncomingApplication(event.New(ce, targets.Application))
+		require.NoError(t, err)
+		require.Nil(t, updatedApp)
+	})
+
+	t.Run("Existing application does not get principal uid when adoption is disabled globally", func(t *testing.T) {
+		defer unsetMocks(t)
+		defer clearUpdatedApp()
+
+		a.adoptionPolicy = manager.AdoptionPolicyNever
+
+		configureManager(t, existingApp.DeepCopy())
+
+		evs := event.NewEventSource("test-app")
+		ce := evs.ApplicationEvent(event.Create, incomingApp)
+		event.SetPrincipalUID(ce, expectedPrincipalUID)
+
+		err := a.processIncomingApplication(event.New(ce, targets.Application))
+		require.NoError(t, err)
+		require.Nil(t, updatedApp)
+	})
+
+	t.Run("Existing application gets stamped if adoption is globally disabled but enabled on app", func(t *testing.T) {
+		defer unsetMocks(t)
+		defer clearUpdatedApp()
+
+		a.adoptionPolicy = manager.AdoptionPolicyNever
+
+		existingAppWithAnnotation := existingApp.DeepCopy()
+		existingAppWithAnnotation.SetAnnotations(map[string]string{
+			manager.AdoptionPolicyAnnotation: string(manager.AdoptionPolicyAlways),
+		})
+		configureManager(t, existingAppWithAnnotation)
+
+		evs := event.NewEventSource("test-app")
+		ce := evs.ApplicationEvent(event.Create, incomingApp)
+		event.SetPrincipalUID(ce, expectedPrincipalUID)
+
+		err := a.processIncomingApplication(event.New(ce, targets.Application))
+		require.NoError(t, err)
+		require.NotNil(t, updatedApp)
+		require.NotNil(t, updatedApp.Annotations)
+
+		sourceUID, exists := updatedApp.Annotations[manager.SourceUIDAnnotation]
+		require.True(t, exists)
+		require.Equal(t, string(incomingApp.UID), sourceUID)
+
+		principalUID, exists := updatedApp.Annotations[manager.PrincipalUIDAnnotation]
+		require.True(t, exists)
+		require.Equal(t, expectedPrincipalUID, principalUID)
 	})
 }

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/stretchr/testify/assert"
@@ -110,6 +111,37 @@ func TestReadAndSummarizeCertificate(t *testing.T) {
 		assert.NotEmpty(t, summary.NotAfter)
 		assert.NotEmpty(t, summary.Checksum)
 		assert.Empty(t, summary.Warnings) // Should be no warnings for valid CA
+	})
+
+	t.Run("Valid ECDSA CA certificate", func(t *testing.T) {
+		opts, err := tlsutil.ParseKeyAlgorithm("ecdsa-p256", 0)
+		assert.NoError(t, err)
+
+		certPEM, keyPEM, err := tlsutil.GenerateCaCertificate("ECDSA CA", tlsutil.DefaultCACertValidityDays, opts)
+		assert.NoError(t, err)
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: namespace,
+			},
+			Type: corev1.SecretTypeTLS,
+			Data: map[string][]byte{
+				"tls.crt": []byte(certPEM),
+				"tls.key": []byte(keyPEM),
+			},
+		}
+
+		fakeClient := fakekube.NewFakeClientsetWithResources(secret)
+		client := &kube.KubernetesClient{
+			Clientset: fakeClient,
+		}
+
+		summary, err := readAndSummarizeCertificate(ctx, client, namespace, secretName, true)
+		assert.NoError(t, err)
+		assert.Contains(t, summary.Subject, "ECDSA CA")
+		assert.Equal(t, "ECDSA", summary.KeyType)
+		assert.Equal(t, 256, summary.KeyLength)
 	})
 
 	t.Run("Valid non-CA certificate with IP and DNS", func(t *testing.T) {

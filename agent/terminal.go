@@ -18,16 +18,30 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"sync"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/terminalstreamapi"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 )
+
+// newWebSocketExecutor and newSPDYExecutor are package-level variables so that
+// tests can inject fake executors without starting a real Kubernetes cluster.
+var newWebSocketExecutor = func(config *rest.Config, method, rawURL string) (remotecommand.Executor, error) {
+	return remotecommand.NewWebSocketExecutor(config, method, rawURL)
+}
+
+var newSPDYExecutor = func(config *rest.Config, method string, u *url.URL) (remotecommand.Executor, error) {
+	return remotecommand.NewSPDYExecutor(config, method, u)
+}
 
 // processIncomingTerminalRequest handles incoming web terminal requests from the principal.
 // It establishes a Kubernetes exec session with a shell running inside the application pod
@@ -77,6 +91,11 @@ func (a *Agent) processIncomingTerminalRequest(ev *event.Event) error {
 	stream, err := terminalStreamClient.StreamTerminal(ctx)
 	if err != nil {
 		logCtx.WithError(err).Error("Failed to open terminal stream to principal")
+
+		// Trigger reconnection to principal, as refresh token may have expired
+		if status.Code(err) == codes.Unauthenticated || status.Code(err) == codes.PermissionDenied {
+			a.SetConnected(false)
+		}
 		return err
 	}
 
@@ -129,13 +148,6 @@ func (a *Agent) terminalInPod(ctx context.Context, stream terminalstreamapi.Term
 
 	logCtx.Infof("Executing command: %v", execOptions.Command)
 
-	// Create WebSocket executor,
-	// it connects agent to the shell running inside the application pod and streams data back and forth.
-	exec, err := remotecommand.NewWebSocketExecutor(a.kubeClient.RestConfig, "GET", req.URL().String())
-	if err != nil {
-		return fmt.Errorf("failed to create WebSocket executor: %w", err)
-	}
-
 	// Create cancellable context for the exec
 	// This allows us to terminate the exec when EOF is received from principal
 	execCtx, cancelExec := context.WithCancel(ctx)
@@ -167,17 +179,36 @@ func (a *Agent) terminalInPod(ctx context.Context, stream terminalstreamapi.Term
 	// Start goroutine to receive stdin from principal and forward to K8s
 	go streamHandler.receiveFromPrincipal()
 
-	// Execute the command in the pod using the stream handler
-	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
+	// Close the stream to signal the end of the terminal session
+	defer streamHandler.close()
+
+	streamOpts := remotecommand.StreamOptions{
 		Stdin:             streamHandler,
 		Stdout:            streamHandler,
 		Stderr:            streamHandler,
 		Tty:               terminalReq.TTY,
 		TerminalSizeQueue: sizeQueue,
-	})
+	}
 
-	// Close the stream to signal the end of the terminal session
-	streamHandler.close()
+	// Try WebSocket executor first, fall back to SPDY if the cluster does not
+	// support WebSocket-based exec (e.g. TranslateStreamCloseWebsocketRequests
+	// feature gate is disabled).
+	exec, err := newWebSocketExecutor(a.kubeClient.RestConfig, "GET", req.URL().String())
+	if err != nil {
+		return fmt.Errorf("failed to create WebSocket executor: %w", err)
+	}
+
+	err = exec.StreamWithContext(execCtx, streamOpts)
+
+	if err != nil && isWebSocketHandshakeError(err) {
+		logCtx.WithError(err).Warn("WebSocket exec failed, retrying with SPDY")
+
+		spdyExec, spdyErr := newSPDYExecutor(a.kubeClient.RestConfig, "POST", req.URL())
+		if spdyErr != nil {
+			return fmt.Errorf("failed to create SPDY executor: %w", spdyErr)
+		}
+		err = spdyExec.StreamWithContext(execCtx, streamOpts)
+	}
 
 	if err != nil {
 		if !isShellNotFoundError(err) {
@@ -342,6 +373,13 @@ func isContextCanceledError(err error) bool {
 		return true
 	}
 	return strings.Contains(err.Error(), "context canceled")
+}
+
+func isWebSocketHandshakeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "websocket: bad handshake")
 }
 
 // isShellNotFoundError checks if the error is due to a shell executable not being found in container.

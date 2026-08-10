@@ -25,6 +25,8 @@ GENERATE_PATHS="
 	${PROJECT_ROOT}/principal/apis/version;versionapi
 	${PROJECT_ROOT}/principal/apis/logstreamapi;logstreamapi
 	${PROJECT_ROOT}/principal/apis/terminalstream;terminalstreamapi
+	${PROJECT_ROOT}/principal/apis/replication;replicationapi
+	${PROJECT_ROOT}/principal/apis/haadmin;haadminapi
 "
 
 for p in ${GENERATE_PATHS}; do

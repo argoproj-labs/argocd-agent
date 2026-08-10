@@ -27,13 +27,14 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -126,7 +127,8 @@ func (m *AppProjectManager) StartBackend(ctx context.Context) error {
 }
 
 // Create creates the AppProject using the Manager's AppProject backend.
-func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+// - 'ignoreChange' field controls whether or not the resourceVersion of the resource will be ignored if it is seen again (because it is considered to already have been processed). If true, the resource will be added to the ignore list. If false, it will not (false is useful for a few specific cases, like the 'a user deletes a managed agent Application resource, which needs to be reverted by agent' case)
+func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppProject, ignoreChange bool) (*v1alpha1.AppProject, error) {
 	// A new AppProject must neither specify ResourceVersion nor Generation
 	project.ResourceVersion = ""
 	project.Generation = 0
@@ -144,25 +146,65 @@ func (m *AppProjectManager) Create(ctx context.Context, project *v1alpha1.AppPro
 	// AppProject must be created in the agent's namespace, which should be the
 	// same as ArgoCD's namespace.
 	project.Namespace = m.namespace
-	created, err := createAppProject(ctx, m, project)
+	created, err := createAppProject(ctx, m, project, ignoreChange)
 	if err != nil {
 		return nil, err
 	}
 	return created, nil
 }
 
-func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+func createAppProject(ctx context.Context, m *AppProjectManager, project *v1alpha1.AppProject, ignoreChange bool) (*v1alpha1.AppProject, error) {
 	created, err := m.appprojectBackend.Create(ctx, project)
 	if err == nil {
+		logging.LogActionCreate(log().WithField("appProject", project.Name), "appproject", created)
 		if err := m.Manage(created.Name); err != nil {
 			log().Warnf("Could not manage app %s: %v", created.Name, err)
 		}
-		if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
-			log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
+		if ignoreChange {
+			if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
+				log().Warnf("Could not ignore change %s for app %s: %v", created.ResourceVersion, created.Name, err)
+			}
 		}
 		return created, nil
 	}
 	return nil, err
+}
+
+// Upsert creates the AppProject or updates it if it already exists.
+// Used by HA replication to write resources to the replica cluster.
+func (m *AppProjectManager) Upsert(ctx context.Context, project *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+	created, err := m.Create(ctx, project, true)
+	if err == nil {
+		return created, nil
+	}
+	if !errors.IsAlreadyExists(err) {
+		return nil, err
+	}
+	existing, err := m.appprojectBackend.Get(ctx, project.Name, m.namespace)
+	if err != nil {
+		return nil, fmt.Errorf("get existing appproject for upsert: %w", err)
+	}
+	// UID must match the replica's existing object — the primary and replica
+	// assign different UIDs to the same-named resource. Without this, etcd
+	// rejects the update with a storage precondition error (Code 4).
+	project.UID = existing.UID
+	project.ResourceVersion = existing.ResourceVersion
+	project.Namespace = m.namespace
+	// Do NOT preserve the existing source-uid here. Create() already stamped
+	// source-uid = primary's UID; preserving the existing value would lock in
+	// a stale/wrong source-uid from a previous failover.
+	if m.role == manager.ManagerRolePrincipal {
+		stampLastUpdated(project)
+	}
+	updated, err := m.appprojectBackend.Update(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	logging.LogActionUpdate(log().WithField("appProject", updated.Name), "appproject", project, updated)
+	if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
+		log().Warnf("Could not ignore change %s for appproject %s: %v", updated.ResourceVersion, updated.Name, err)
+	}
+	return updated, nil
 }
 
 func (m *AppProjectManager) Get(ctx context.Context, name, namespace string) (*v1alpha1.AppProject, error) {
@@ -231,10 +273,8 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 		return patch, err
 	})
 	if err == nil {
-		if updated.Generation == 1 {
-			logCtx.Infof("Created AppProject")
-		} else {
-			logCtx.Infof("Updated AppProject")
+		if updated.Generation > 1 {
+			logging.LogActionUpdate(logCtx, "appproject", incoming, updated)
 		}
 		if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Couldn't unignore change %s for AppProject %s: %v", updated.ResourceVersion, updated.Name, err)
@@ -262,7 +302,7 @@ func (m *AppProjectManager) update(ctx context.Context, upsert bool, incoming *v
 		existing, ierr := m.appprojectBackend.Get(ctx, incoming.Name, incoming.Namespace)
 		if ierr != nil {
 			if errors.IsNotFound(ierr) && upsert {
-				updated, ierr = m.Create(ctx, incoming)
+				updated, ierr = m.Create(ctx, incoming, true)
 				return ierr
 			} else {
 				return fmt.Errorf("error updating app-project %s: %w", incoming.Name, ierr)
@@ -316,7 +356,11 @@ func (m *AppProjectManager) Delete(ctx context.Context, incoming *v1alpha1.AppPr
 		}
 	}
 
-	return m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	err = m.appprojectBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	if err == nil {
+		logging.LogActionDelete(logCtx, "appproject", incoming.Namespace, incoming.Name)
+	}
+	return err
 }
 
 // RemoveFinalizers will remove finalizers on an existing app project.
@@ -339,6 +383,10 @@ func (m *AppProjectManager) RemoveFinalizers(ctx context.Context, incoming *v1al
 		patch, err = jsondiff.Compare(source, target, jsondiff.SkipCompact())
 		return patch, err
 	})
+
+	if err == nil {
+		logging.LogActionUpdate(log().WithField("appProject", incoming.Name), "appproject", incoming, updated)
+	}
 	return updated, err
 }
 
@@ -378,11 +426,19 @@ func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project
 	})
 
 	sourceUID, exists := project.Annotations[manager.SourceUIDAnnotation]
+
+	// Autonomous agents don't revert their AppProjects, they are the source of truth for their AppProjects
+	// If there is no source UID annotation, this is a locally created AppProject
+	if m.role == manager.ManagerRoleAgent && m.mode == manager.ManagerModeAutonomous {
+		return false, nil
+	}
+
+	// For managed agents and principal, source UID annotation is required
 	if !exists {
 		return false, fmt.Errorf("source UID annotation not found for resource")
 	}
 
-	if cachedSpec, ok := projectCache.Get(types.UID(sourceUID)); ok {
+	if cachedSpec, ok := projectCache.Get(ktypes.UID(sourceUID)); ok {
 		logCtx.Debugf("AppProject %s is available in agent cache", project.Name)
 
 		if isEqual := reflect.DeepEqual(cachedSpec, project.Spec); !isEqual {
@@ -404,11 +460,12 @@ func (m *AppProjectManager) RevertAppProjectChanges(ctx context.Context, project
 
 // DoesAgentMatchWithProject checks if the agent name matches the given AppProject.
 // We match the agent to an AppProject if:
-// 1. The agent name matches any one of the destination names OR
-// 2. The agent name is empty but the agent name is present in the server URL parameter AND
-// 3. The agent name is not denied by any of the destination names
+// 1. The agent name is not denied by any of the destination names.
+// 2. The agent name matches one of the AppProject's destination names and source namespaces in the case of namespace-based mapping.
+// 3. The agent name matches one of the AppProject's destination names in the case of destination-based mapping.
+// It matches the agent name with the server URL parameter if the destination name is empty and the server URL is present.
 // Ref: https://github.com/argoproj/argo-cd/blob/master/pkg/apis/application/v1alpha1/app_project_types.go#L477
-func DoesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject) bool {
+func DoesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject, dstMapping bool) bool {
 	destinationMatched := false
 
 	for _, dst := range appProject.Spec.Destinations {
@@ -446,9 +503,14 @@ func DoesAgentMatchWithProject(agentName string, appProject v1alpha1.AppProject)
 		}
 	}
 
-	// Must match both destination and source namespace requirements
-	return destinationMatched &&
-		glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
+	// Must match both destination and source namespace requirements for namespace-based mapping
+	if !dstMapping {
+		return destinationMatched &&
+			glob.MatchStringInList(appProject.Spec.SourceNamespaces, agentName, glob.REGEXP)
+	}
+
+	// For destination-based mapping, only match the destination name
+	return destinationMatched
 }
 
 func isDenyPattern(pattern string) bool {
@@ -458,7 +520,8 @@ func isDenyPattern(pattern string) bool {
 // AgentSpecificAppProject returns an agent specific version of the given AppProject
 // We don't have to check for deny patterns because we only construct the agent specific AppProject
 // if the agent name matches the AppProject's destinations.
-func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string, dstMapping bool) v1alpha1.AppProject {
+func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string, dstMapping bool, mode types.AgentMode) v1alpha1.AppProject {
+
 	// Only keep the destinations that are relevant to the given agent
 	filteredDst := []v1alpha1.ApplicationDestination{}
 	for _, dst := range appProject.Spec.Destinations {
@@ -492,8 +555,10 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string, dstMa
 		appProject.Spec.SourceNamespaces = nil
 	}
 
-	// Remove the roles since they are not relevant on the workload cluster
-	appProject.Spec.Roles = []v1alpha1.ProjectRole{}
+	if !mode.IsAutonomous() {
+		// Remove the roles since they are not relevant on the workload cluster
+		appProject.Spec.Roles = []v1alpha1.ProjectRole{}
+	}
 
 	return appProject
 }

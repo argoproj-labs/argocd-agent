@@ -2,11 +2,14 @@ package event
 
 import (
 	"context"
+	"math"
+	"math/rand/v2"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
-	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
@@ -17,7 +20,7 @@ import (
 
 const (
 	// maxEventRetries is the maximum number of times an event will be retried before giving up.
-	maxEventRetries = 5
+	maxEventRetries = math.MaxInt
 )
 
 type streamWriter interface {
@@ -43,7 +46,16 @@ type EventWriter struct {
 	// target refers to the specified gRPC stream.
 	target streamWriter
 
+	// agentName is the name of the agent for which this EventWriter is responsible.
+	agentName string
+
+	// onDiscard is called when an event is discarded after exhausting retries.
+	onDiscard func(eventType, resourceType string)
+
 	log *logrus.Entry
+
+	// baseLog is log Entry but without target field; baseLog is used to regenerate the 'log' field when the target changes via 'UpdateTarget'
+	baseLog *logrus.Entry
 }
 
 type eventMessage struct {
@@ -65,12 +77,17 @@ type eventMessage struct {
 	retryCount int
 }
 
-func NewEventWriter(target streamWriter) *EventWriter {
+// NewEventWriter creates a new EventWriter for the given target stream.
+// If you create an EventWriter targeting the principal, an empty agentName
+// should be used.
+func NewEventWriter(agentName string, target streamWriter, baseLog *logrus.Entry) *EventWriter {
 	return &EventWriter{
 		unsentEvents: map[string]*eventQueue{},
 		sentEvents:   map[string]*eventMessage{},
 		target:       target,
-		log:          logging.GetDefaultLogger().ModuleLogger("EventWriter").WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())),
+		agentName:    agentName,
+		baseLog:      baseLog,
+		log:          baseLog.WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).WithField(logfields.Agent, agentName),
 	}
 }
 
@@ -78,6 +95,9 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 	ew.mu.Lock()
 	defer ew.mu.Unlock()
 	ew.target = target
+	ew.log = ew.baseLog.
+		WithField(logfields.ClientAddr, grpcutil.AddressFromContext(target.Context())).
+		WithField(logfields.Agent, ew.agentName)
 
 	// Reset retry timers so events in sentEvents are retried immediately on the new connection.
 	// This is important for reconnection scenarios where the old connection died
@@ -90,22 +110,29 @@ func (ew *EventWriter) UpdateTarget(target streamWriter) {
 	}
 }
 
+func (ew *EventWriter) SetOnDiscard(fn func(eventType, resourceType string)) {
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+	ew.onDiscard = fn
+}
+
 func (ew *EventWriter) Add(ev *cloudevents.Event) {
 	resID := ResourceID(ev)
+	ew.mu.Lock()
+	defer ew.mu.Unlock()
+
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"resource_id": ResourceID(ev),
 		"event_id":    EventID(ev),
 		"type":        ev.Type(),
 	})
 
-	ew.mu.Lock()
-	defer ew.mu.Unlock()
-
 	defaultBackoff := wait.Backoff{
 		Steps:    maxEventRetries,
 		Duration: 5 * time.Second,
-		Factor:   2.0,
-		Jitter:   0.1,
+		Factor:   4,
+		Jitter:   1,
+		Cap:      2 * time.Minute, // never wait longer than 2 minutes
 	}
 
 	if resID == "" {
@@ -161,7 +188,7 @@ func (ew *EventWriter) Get(resID string) *eventMessage {
 
 	// Then check unsent queue
 	if eq, exists := ew.unsentEvents[resID]; exists {
-		return eq.get()
+		return eq.peek()
 	}
 	return nil
 }
@@ -192,7 +219,7 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 		return
 	}
 
-	front := eq.get()
+	front := eq.peek()
 	if front == nil {
 		return
 	}
@@ -213,7 +240,9 @@ func (ew *EventWriter) Remove(ev *cloudevents.Event) {
 // Note: This function will never return unless the context is done, and therefore
 // should be started in a separate goroutine.
 func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
+	ew.mu.RLock()
 	logCtx := ew.log
+	ew.mu.RUnlock()
 
 	logCtx.Info("Starting event writer")
 	for {
@@ -235,6 +264,11 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 				}
 			}
 			ew.mu.RUnlock()
+
+			// Shuffle so no resource is systematically starved
+			rand.Shuffle(len(resourceIDs), func(i, j int) {
+				resourceIDs[i], resourceIDs[j] = resourceIDs[j], resourceIDs[i]
+			})
 
 			for _, resourceID := range resourceIDs {
 				ew.sendEvent(resourceID)
@@ -260,14 +294,16 @@ func (ew *EventWriter) sendEvent(resID string) {
 
 // retrySentEvent handles retrying an event that was already sent but not yet acknowledged
 func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
+	ew.mu.RLock()
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"method":      "retrySentEvent",
 		"resource_id": resID,
 	})
 
 	// Re-verify the event is still in sentEvents
-	ew.mu.RLock()
 	currentSent, stillExists := ew.sentEvents[resID]
+	// Create thread local copy of target under lock to avoid a data race with UpdateTarget.
+	target := ew.target
 	ew.mu.RUnlock()
 
 	// If event was ACK'd between check and use, skip retry
@@ -293,12 +329,20 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 	// Check if we've exhausted retries
 	if sentMsg.retryCount >= maxEventRetries {
 		logCtx.Warnf("Event failed after %d retries, giving up to unblock queue", sentMsg.retryCount)
+		evType := strings.TrimPrefix(sentMsg.event.Type(), targets.TypePrefix+".")
+		resType := sentMsg.event.DataSchema()
 		sentMsg.mu.Unlock()
 
 		// Remove from sentEvents to unblock the queue
 		ew.mu.Lock()
+		onDiscard := ew.onDiscard
 		delete(ew.sentEvents, resID)
 		ew.mu.Unlock()
+
+		// call function provided by caller to handle the discarded event
+		if onDiscard != nil {
+			onDiscard(evType, resType)
+		}
 		return
 	}
 
@@ -318,7 +362,7 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 		return
 	}
 
-	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
+	err = target.Send(&eventstreamapi.Event{Event: pev})
 	sentMsg.mu.Unlock()
 
 	if err != nil {
@@ -339,13 +383,13 @@ func (ew *EventWriter) scheduleRetry(eventMsg *eventMessage) {
 
 // sendUnsentEvent pops an event from the unsent queue and sends it for the first time
 func (ew *EventWriter) sendUnsentEvent(resID string) {
+	ew.mu.Lock()
 	logCtx := ew.log.WithFields(logrus.Fields{
 		"method":      "sendUnsentEvent",
 		"resource_id": resID,
 	})
 
 	// Pop event from unsent queue and atomically move to sent tracker
-	ew.mu.Lock()
 	eq, exists := ew.unsentEvents[resID]
 	if !exists || eq.isEmpty() {
 		ew.mu.Unlock()
@@ -363,7 +407,7 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	}
 
 	target := Target(eventMsg.event)
-	isFireAndForget := target == TargetEventAck || target == TargetHeartbeat
+	isFireAndForget := target == targets.EventAck || target == targets.Heartbeat
 	if !isFireAndForget {
 		// IMPORTANT: Set retryAfter *before* publishing into sentEvents.
 		// We can have concurrent SendWaitingEvents loops (e.g. brief overlap during reconnect),
@@ -376,6 +420,8 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		ew.scheduleRetry(eventMsg)
 		ew.sentEvents[resID] = eventMsg
 	}
+	// Create thread local copy of target under lock to avoid a data race with UpdateTarget.
+	sendTarget := ew.target
 	ew.mu.Unlock()
 
 	// Send the event
@@ -386,6 +432,10 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 		"event_type":   eventMsg.event.Type(),
 	})
 
+	if !isFireAndForget {
+		SetSentAt(eventMsg.event)
+	}
+
 	pev, err := format.ToProto(eventMsg.event)
 	eventMsg.mu.Unlock()
 
@@ -395,7 +445,7 @@ func (ew *EventWriter) sendUnsentEvent(resID string) {
 	}
 
 	// A Send() on the stream is actually not blocking.
-	err = ew.target.Send(&eventstreamapi.Event{Event: pev})
+	err = sendTarget.Send(&eventstreamapi.Event{Event: pev})
 	if err != nil {
 		logCtx.Errorf("Error while sending: %v\n", err)
 		return
@@ -468,26 +518,47 @@ func (eq *eventQueue) add(ev *eventMessage) {
 	eq.mu.Lock()
 	defer eq.mu.Unlock()
 
-	if len(eq.items) > 0 {
-		tail := eq.items[len(eq.items)-1]
-		tail.mu.Lock()
-
-		// Replace an older event with a newer one of the same type
-		if ev.event.Type() == tail.event.Type() {
-			tail.event = ev.event
-			tail.backoff = ev.backoff
-			tail.retryAfter = ev.retryAfter
-			tail.mu.Unlock()
-			return
-		}
-		tail.mu.Unlock()
-	}
-
 	eq.items = append(eq.items, ev)
+
+	deduplicateEventMessageItems(&eq.items)
+
 }
 
-// get the first item from the queue.
-func (eq *eventQueue) get() *eventMessage {
+// deduplicateEventMessageItems
+// - Ensure you own the lock on the items parameter (e.g. via eq.mu.Lock()) before calling this function
+func deduplicateEventMessageItems(items *[]*eventMessage) {
+
+	// key: Type() of event
+	// value: (not used)
+	haveWeSeenMsgWithType := make(map[string]bool, 0)
+
+	// Work backwards through the list:
+	// - Items at the end of the list are 'fresher', items at the beginning of the list are more stale
+	// - We thus remove items early in the list in favour of those that are later in the list
+	for idx := len(*items) - 1; idx >= 0; idx-- {
+		item := (*items)[idx]
+
+		myType := item.event.Type()
+
+		// No de-duplication of events we can't guarantee are safe to de-duplicate
+		if myType != StatusUpdate.String() && myType != SpecUpdate.String() {
+			continue
+		}
+
+		// De-duplicate statusupdate and specupdate, as we know they are safe to de-duplicate
+		if _, typePreviouslySeen := haveWeSeenMsgWithType[myType]; typePreviouslySeen {
+			// Stale duplicate: a fresher same-type entry was retained when scanning from the tail.
+			*items = append((*items)[:idx], (*items)[idx+1:]...)
+		} else {
+			// This is the first type we have seen the type, so add it to the map and continue without removal
+			haveWeSeenMsgWithType[myType] = true
+		}
+	}
+
+}
+
+// peek the first item from the queue.
+func (eq *eventQueue) peek() *eventMessage {
 	eq.mu.RLock()
 	defer eq.mu.RUnlock()
 	if len(eq.items) == 0 {

@@ -22,3 +22,12 @@ func WithAgentRegistrationManager(manager *registration.AgentRegistrationManager
 		return nil
 	}
 }
+
+// WithOnAuthenticated registers a callback that is invoked after a successful
+// authentication with the agent's clientID and the namespace it reported.
+func WithOnAuthenticated(fn func(name, namespace string)) ServerOption {
+	return func(o *ServerOptions) error {
+		o.onAuthenticated = fn
+		return nil
+	}
+}

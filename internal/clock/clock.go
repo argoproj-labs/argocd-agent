@@ -20,7 +20,10 @@ It only provides the most basic primitives Now(), Until() and Since().
 */
 package clock
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 type Clock interface {
 	Now() time.Time
@@ -34,6 +37,7 @@ var _ Clock = &seededClock{}
 type standardClock struct{}
 
 type seededClock struct {
+	mu  sync.RWMutex
 	now time.Time
 }
 
@@ -58,17 +62,25 @@ func SeededClock(now time.Time) *seededClock {
 }
 
 func (c *seededClock) Now() time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.now
 }
 
 func (c *seededClock) Until(t time.Time) time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return t.Sub(c.now)
 }
 
 func (c *seededClock) Since(t time.Time) time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.now.Sub(t)
 }
 
 func (c *seededClock) At(seed time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.now = seed
 }

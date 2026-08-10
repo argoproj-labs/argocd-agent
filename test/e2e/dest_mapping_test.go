@@ -21,9 +21,9 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	argoapp "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/stretchr/testify/suite"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -61,6 +61,9 @@ type DestinationMappingTestSuite struct {
 
 // SetupSuite runs before the tests in the suite are run.
 func (suite *DestinationMappingTestSuite) SetupSuite() {
+	if fixture.IsDestinationBased() {
+		suite.T().Skip("DestinationMappingTestSuite is redundant when all suites already run in destination-based mode")
+	}
 	suite.BaseSuite.SetupSuite()
 	var err error
 
@@ -91,12 +94,12 @@ ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true`)
 	defaultAppProject := &v1alpha1.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "default",
-			Namespace: "argocd",
+			Namespace: fixture.ManagedAgentNamespace,
 		},
 	}
 	err = suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
 		Name:      "default",
-		Namespace: "argocd",
+		Namespace: fixture.ManagedAgentNamespace,
 	}, defaultAppProject, metav1.GetOptions{})
 	requires.NoError(err, "failed to read original AppProject state")
 	suite.origSourceNamespaces = defaultAppProject.Spec.SourceNamespaces
@@ -105,12 +108,12 @@ ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true`)
 	origConfigMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "argocd-cmd-params-cm",
-			Namespace: "argocd",
+			Namespace: fixture.ManagedAgentNamespace,
 		},
 	}
 	err = suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
 		Name:      "argocd-cmd-params-cm",
-		Namespace: "argocd",
+		Namespace: fixture.ManagedAgentNamespace,
 	}, origConfigMap, metav1.GetOptions{})
 	requires.NoError(err, "failed to read original ConfigMap state")
 	if origConfigMap.Data != nil {
@@ -131,7 +134,7 @@ ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true`)
 	acm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "argocd-cmd-params-cm",
-			Namespace: "argocd",
+			Namespace: fixture.ManagedAgentNamespace,
 		},
 	}
 	err = fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, acm, func(obj fixture.KubeObject) {
@@ -147,6 +150,9 @@ ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING=true`)
 }
 
 func (suite *DestinationMappingTestSuite) TearDownSuite() {
+	if fixture.IsDestinationBased() {
+		return
+	}
 	suite.BaseSuite.TearDownTest()
 	requires := suite.Require()
 
@@ -164,7 +170,7 @@ func (suite *DestinationMappingTestSuite) TearDownSuite() {
 	defaultAppProject := &v1alpha1.AppProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "default",
-			Namespace: "argocd",
+			Namespace: fixture.ManagedAgentNamespace,
 		},
 	}
 	err := fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, defaultAppProject, func(obj fixture.KubeObject) {
@@ -177,7 +183,7 @@ func (suite *DestinationMappingTestSuite) TearDownSuite() {
 	acm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "argocd-cmd-params-cm",
-			Namespace: "argocd",
+			Namespace: fixture.ManagedAgentNamespace,
 		},
 	}
 	err = fixture.EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, acm, func(obj fixture.KubeObject) {
@@ -322,7 +328,7 @@ func (suite *DestinationMappingTestSuite) TestAppCreatedInOriginalNamespace() {
 	t.Log("Verify application is NOT in argocd namespace on the agent")
 	agentAppInArgoCD := &v1alpha1.Application{}
 	err = suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
-		Namespace: "argocd",
+		Namespace: fixture.ManagedAgentNamespace,
 		Name:      appName,
 	}, agentAppInArgoCD, metav1.GetOptions{})
 	requires.True(errors.IsNotFound(err), "Application should NOT be in argocd namespace on agent")
@@ -359,6 +365,57 @@ func (suite *DestinationMappingTestSuite) TestAppCreatedInOriginalNamespace() {
 		}
 	}
 	requires.True(foundDeployment, "Status should include the kustomize-guestbook-ui Deployment")
+}
+
+func (suite *DestinationMappingTestSuite) TestAppProjectSync() {
+	requires := suite.Require()
+	t := suite.T()
+
+	t.Log("Create an appProject on the principal without source namespaces")
+	appProjectName := "destmap-appproject-test"
+	appProject := &argoapp.AppProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      appProjectName,
+			Namespace: fixture.PrincipalNamespace,
+		},
+		Spec: argoapp.AppProjectSpec{
+			Destinations: []argoapp.ApplicationDestination{
+				{Name: destMapAgentName},
+			},
+		},
+	}
+
+	err := suite.PrincipalClient.Create(suite.Ctx, appProject, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	defer func() {
+		err = fixture.EnsureDeletion(suite.Ctx, suite.PrincipalClient, appProject)
+		requires.NoError(err)
+	}()
+
+	t.Log("Verify the appProject is synced to the agent")
+	requires.Eventually(func() bool {
+		appProject := &argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
+			Name:      appProjectName,
+			Namespace: fixture.ManagedAgentNamespace,
+		}, appProject, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second)
+
+	t.Log("Delete the appProject from the principal")
+	err = suite.PrincipalClient.Delete(suite.Ctx, appProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	t.Log("Verify the appProject is deleted from the agent")
+	requires.Eventually(func() bool {
+		appProject := &argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
+			Name:      appProjectName,
+			Namespace: fixture.ManagedAgentNamespace,
+		}, appProject, metav1.GetOptions{})
+		return errors.IsNotFound(err)
+	}, 30*time.Second, 1*time.Second)
 }
 
 // TestRefreshPropagation verifies that refresh requests from the
@@ -670,7 +727,7 @@ func (suite *DestinationMappingTestSuite) TestAutonomousAppCreation() {
 	t := suite.T()
 
 	appName := "autonomous-destmap-create"
-	appNamespace := "argocd"
+	appNamespace := fixture.AutonomousAgentNamespace
 	targetNamespace := "guestbook"
 
 	app := createAutonomousAppForDestMappingTests(appName, appNamespace, targetNamespace)
@@ -765,7 +822,7 @@ func (suite *DestinationMappingTestSuite) TestAutonomousSpecUpdate() {
 	t := suite.T()
 
 	appName := "autonomous-destmap-specupdate"
-	appNamespace := "argocd"
+	appNamespace := fixture.AutonomousAgentNamespace
 	targetNamespace := "guestbook"
 
 	app := createAutonomousAppForDestMappingTests(appName, appNamespace, targetNamespace)
@@ -826,7 +883,7 @@ func (suite *DestinationMappingTestSuite) TestAutonomousSpecUpdate() {
 func (suite *DestinationMappingTestSuite) restartApplicationController() {
 	requires := suite.Require()
 	podList := &corev1.PodList{}
-	err := suite.ManagedAgentClient.List(suite.Ctx, "argocd", podList, metav1.ListOptions{
+	err := suite.ManagedAgentClient.List(suite.Ctx, fixture.ManagedAgentNamespace, podList, metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=argocd-application-controller",
 	})
 	requires.NoError(err)
@@ -837,7 +894,7 @@ func (suite *DestinationMappingTestSuite) restartApplicationController() {
 
 	requires.Eventually(func() bool {
 		pod := &corev1.Pod{}
-		err := suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{Name: podList.Items[0].Name, Namespace: "argocd"}, pod, metav1.GetOptions{})
+		err := suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{Name: podList.Items[0].Name, Namespace: fixture.ManagedAgentNamespace}, pod, metav1.GetOptions{})
 		if err != nil {
 			return false
 		}

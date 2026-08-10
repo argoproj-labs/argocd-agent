@@ -1,0 +1,60 @@
+// Copyright 2024 The argocd-agent Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+option go_package = "github.com/argoproj-labs/argocd-agent/pkg/api/grpc/haadminapi";
+
+package haadminapi;
+
+// HAStatusResponse contains the current HA state of the principal
+message HAStatusResponse {
+    string state = 1;
+    string preferred_role = 2;
+    string peer_address = 3;
+    bool peer_reachable = 4;
+    string peer_state = 5;
+    int32 connected_replicas = 6;
+    int64 last_event_timestamp = 7;
+    uint64 last_sequence_num = 8;
+    int32 connected_agents = 9;
+}
+
+// PromoteRequest asks the principal to become ACTIVE
+message PromoteRequest {
+    bool force = 1;
+}
+
+// PromoteResponse confirms the promotion
+message PromoteResponse {
+    string state = 1;
+}
+
+// DemoteRequest asks the principal to become a REPLICA
+message DemoteRequest {}
+
+// DemoteResponse confirms the demotion
+message DemoteResponse {
+    string state = 1;
+}
+
+// StatusRequest is empty — just fetches current state
+message StatusRequest {}
+
+// HAAdmin service for operator-driven HA management (promote/demote/status)
+service HAAdmin {
+    rpc Status(StatusRequest) returns (HAStatusResponse);
+    rpc Promote(PromoteRequest) returns (PromoteResponse);
+    rpc Demote(DemoteRequest) returns (DemoteResponse);
+}

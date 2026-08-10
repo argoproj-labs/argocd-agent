@@ -15,12 +15,15 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
@@ -49,6 +52,11 @@ func (a *Agent) maintainConnection() error {
 						}
 					}
 					a.SetConnected(true)
+					if a.metrics != nil {
+						a.metrics.ConnectionStatus.Set(1)
+						a.metrics.ConnectionStartTimestamp.SetToCurrentTime()
+						a.metrics.ConnectionCount.Inc()
+					}
 				}
 			} else {
 				err = a.handleStreamEvents()
@@ -83,9 +91,9 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 	}
 	logCtx.Trace("Grabbed an item")
 	if ev == nil {
-		// TODO: Is this really the right thing to do?
-		return nil
+		return fmt.Errorf("nil item in send queue")
 	}
+	defer q.Done(ev)
 	logCtx = logCtx.WithFields(logrus.Fields{
 		"event_target": ev.DataSchema(),
 		"event_type":   ev.Type(),
@@ -94,6 +102,7 @@ func (a *Agent) sender(stream eventstreamapi.EventStream_SubscribeClient) error 
 	})
 	logCtx.Trace("Adding an event to the event writer")
 	a.eventWriter.Add(ev)
+	logging.LogEventSent(logCtx, ev)
 
 	return nil
 }
@@ -127,9 +136,9 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 		"type":        ev.Type(),
 	})
 
-	logCtx.Debugf("Received a new event from stream")
+	logging.LogEventReceived(logCtx, ev.CloudEvent())
 
-	if ev.Target() == event.TargetEventAck {
+	if ev.Target() == targets.EventAck {
 		logCtx.Trace("Received an ACK for an event")
 		rawEvent, err := format.FromProto(rcvd.Event)
 		if err != nil {
@@ -142,7 +151,7 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 
 	err = a.processIncomingEvent(ev)
 	if err != nil {
-		logCtx.WithError(err).Errorf("Unable to process incoming event")
+		logging.LogEventError(logCtx, ev.CloudEvent(), err)
 		// Don't send an ACK if it is a retryable error.
 		if kube.IsRetryableError(err) {
 			logCtx.Trace("Skipping ACK for retryable errors")
@@ -169,14 +178,29 @@ func (a *Agent) handleStreamEvents() error {
 		return err
 	}
 
-	if a.eventWriter != nil {
-		// Reuse the existing event writer if it exists.
-		a.eventWriter.UpdateTarget(stream)
+	// Per-stream context: cancelled when this stream dies so all child
+	// goroutines (recv, send, heartbeat) exit and don't leak across reconnects.
+	streamCtx, streamCancel := context.WithCancel(a.context)
+	defer streamCancel()
+	defer func() {
+		if a.metrics != nil {
+			a.metrics.ConnectionStatus.Set(0)
+			a.metrics.ConnectionStartTimestamp.Set(0)
+		}
+	}()
+
+	if a.eventWriter == nil {
+		a.eventWriter = event.NewEventWriter("", stream, logging.GetDefaultLogger().ModuleLogger("EventWriter"))
+		if a.metrics != nil {
+			// set function to call when an event is discarded
+			a.eventWriter.SetOnDiscard(func(eventType, resourceType string) {
+				a.metrics.EventWriterEventsDiscarded.WithLabelValues(eventType, resourceType).Inc()
+			})
+		}
 	} else {
-		// Create a new event writer if it doesn't exist.
-		a.eventWriter = event.NewEventWriter(stream)
-		go a.eventWriter.SendWaitingEvents(a.context)
+		a.eventWriter.UpdateTarget(stream)
 	}
+	go a.eventWriter.SendWaitingEvents(streamCtx)
 
 	logCtx := log().WithFields(logrus.Fields{
 		logfields.Module:     "StreamEvent",
@@ -250,20 +274,17 @@ func (a *Agent) handleStreamEvents() error {
 			ticker := time.NewTicker(a.options.heartbeatInterval)
 			defer ticker.Stop()
 
-			for a.IsConnected() {
+			for {
 				select {
-				case <-a.context.Done():
-					logCtx.Debug("Heartbeat sender stopped due to context cancellation")
+				case <-streamCtx.Done():
+					logCtx.Debug("Heartbeat sender stopped")
 					return
 				case <-ticker.C:
-					// Add heartbeat to EventWriter for thread-safe sending
-					// EventWriter will send it without ACK tracking (fire-and-forget)
 					pingEvent := a.emitter.HeartbeatEvent(event.Ping)
 					a.eventWriter.Add(pingEvent)
 					logCtx.Debug("Queued heartbeat ping")
 				}
 			}
-			logCtx.Debug("Heartbeat sender stopped")
 		}()
 	}
 
@@ -277,6 +298,7 @@ func (a *Agent) handleStreamEvents() error {
 	}
 
 	log().WithField(logfields.Component, "EventHandler").Info("Stream closed")
+	a.remote.Disconnect()
 
 	return nil
 }
@@ -312,7 +334,9 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 		}
 
 		resyncHandler := resync.NewRequestHandler(dynClient, sendQ, a.emitter, a.resources, logCtx, manager.ManagerRoleAgent, a.namespace).
-			WithDestinationBasedMapping(a.destinationBasedMapping)
+			WithDestinationBasedMapping(a.destinationBasedMapping).
+			WithIgnoreUnmanagedApps(a.ignoreUnmanagedApps).
+			WithPeerNamespace(a.principalNS())
 		go resyncHandler.SendRequestUpdates(a.context)
 
 		// Agent should request SyncedResourceList from the principal to detect deleted
@@ -322,7 +346,7 @@ func (a *Agent) resyncOnStart(logCtx *logrus.Entry) error {
 		// send the checksum to the principal
 		ev, err := a.emitter.RequestSyncedResourceListEvent(checksum)
 		if err != nil {
-			return fmt.Errorf("failed to create synced resource list event: %v", err)
+			return fmt.Errorf("failed to create synced resource list event: %w", err)
 		}
 
 		sendQ.Add(ev)

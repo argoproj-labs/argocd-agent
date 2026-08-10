@@ -23,6 +23,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/sirupsen/logrus"
 	"github.com/wI2L/jsondiff"
@@ -86,7 +87,8 @@ func (m *RepositoryManager) CompareSourceUID(ctx context.Context, incoming *core
 }
 
 // Create creates the Repository using the Manager's Repository backend.
-func (m *RepositoryManager) Create(ctx context.Context, repo *corev1.Secret) (*corev1.Secret, error) {
+// - 'ignoreChange' field controls whether or not the resourceVersion of the resource will be ignored if it is seen again (because it is considered to already have been processed). If true, the resource will be added to the ignore list. If false, it will not (false is useful for a few specific cases, like the 'a user deletes a managed agent Application resource, which needs to be reverted by agent' case)
+func (m *RepositoryManager) Create(ctx context.Context, repo *corev1.Secret, ignoreChange bool) (*corev1.Secret, error) {
 
 	// A new Repository must neither specify ResourceVersion nor Generation
 	repo.ResourceVersion = ""
@@ -99,11 +101,14 @@ func (m *RepositoryManager) Create(ctx context.Context, repo *corev1.Secret) (*c
 
 	created, err := m.backend.Create(ctx, repo)
 	if err == nil {
+		logging.LogActionCreate(log().WithField("repository", repo.Name), "repository", created)
 		if err := m.Manage(created.Name); err != nil {
 			log().Warnf("Could not manage repository %s: %v", created.Name, err)
 		}
-		if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
-			log().Warnf("Could not ignore change %s for repository %s: %v", created.ResourceVersion, created.Name, err)
+		if ignoreChange {
+			if err := m.IgnoreChange(created.Name, created.ResourceVersion); err != nil {
+				log().Warnf("Could not ignore change %s for repository %s: %v", created.ResourceVersion, created.Name, err)
+			}
 		}
 		return created, nil
 	}
@@ -111,7 +116,11 @@ func (m *RepositoryManager) Create(ctx context.Context, repo *corev1.Secret) (*c
 }
 
 func (m *RepositoryManager) Delete(ctx context.Context, name, namespace string, deletionPropagation *backend.DeletionPropagation) error {
-	return m.backend.Delete(ctx, name, namespace, deletionPropagation)
+	err := m.backend.Delete(ctx, name, namespace, deletionPropagation)
+	if err == nil {
+		logging.LogActionDelete(log(), "repository", namespace, name)
+	}
+	return err
 }
 
 func (m *RepositoryManager) List(ctx context.Context, selector backend.RepositorySelector) ([]corev1.Secret, error) {
@@ -177,10 +186,8 @@ func (m *RepositoryManager) UpdateManagedRepository(ctx context.Context, incomin
 		return patch, err
 	})
 	if err == nil {
-		if updated.Generation == 1 {
-			logCtx.Infof("Created Repository")
-		} else {
-			logCtx.Infof("Updated Repository")
+		if updated.Generation > 1 {
+			logging.LogActionUpdate(logCtx, "repository", incoming, updated)
 		}
 		if err := m.IgnoreChange(updated.Name, updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Couldn't unignore change %s for Repository %s: %v", updated.ResourceVersion, updated.Name, err)
@@ -208,7 +215,7 @@ func (m *RepositoryManager) update(ctx context.Context, upsert bool, incoming *c
 		existing, ierr := m.backend.Get(ctx, incoming.Name, incoming.Namespace)
 		if ierr != nil {
 			if errors.IsNotFound(ierr) && upsert {
-				updated, ierr = m.Create(ctx, incoming)
+				updated, ierr = m.Create(ctx, incoming, true)
 				return ierr
 			} else {
 				return fmt.Errorf("error updating repository %s: %w", incoming.Name, ierr)

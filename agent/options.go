@@ -15,10 +15,15 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -109,6 +114,22 @@ func WithCacheRefreshInterval(interval time.Duration) AgentOption {
 		return nil
 	}
 }
+func WithApplicationInformerEventBufferInterval(interval time.Duration) AgentOption {
+	return func(o *Agent) error {
+		if interval < 0 {
+			return fmt.Errorf("application informer event buffer interval must be non-negative")
+		}
+		o.applicationInformerEventBufferInterval = interval
+		return nil
+	}
+}
+
+func WithInformerSyncTimeout(timeout time.Duration) AgentOption {
+	return func(o *Agent) error {
+		o.informerSyncTimeout = timeout
+		return nil
+	}
+}
 
 func WithHeartbeatInterval(interval time.Duration) AgentOption {
 	return func(o *Agent) error {
@@ -117,7 +138,7 @@ func WithHeartbeatInterval(interval time.Duration) AgentOption {
 	}
 }
 
-func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) AgentOption {
+func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent, informerEventBuffer *logrus.Logger) AgentOption {
 	return func(o *Agent) error {
 		if resourceProxy != nil {
 			o.resourceProxyLogger = logging.New(resourceProxy)
@@ -129,6 +150,10 @@ func WithSubsystemLoggers(resourceProxy, redisProxy, grpcEvent *logrus.Logger) A
 
 		if grpcEvent != nil {
 			o.grpcEventLogger = logging.New(grpcEvent)
+		}
+
+		if informerEventBuffer != nil {
+			o.informerEventBufferLogger = logging.New(informerEventBuffer)
 		}
 		return nil
 	}
@@ -153,6 +178,97 @@ func WithCreateNamespace(enabled bool) AgentOption {
 func WithDestinationBasedMapping(enabled bool) AgentOption {
 	return func(o *Agent) error {
 		o.destinationBasedMapping = enabled
+		return nil
+	}
+}
+
+// WithIgnoreUnmanagedApps enables ignoring resources without the source UID annotation
+// during resync. When enabled, unmanaged resources will be silently skipped instead of
+// causing errors.
+func WithIgnoreUnmanagedApps(enabled bool) AgentOption {
+	return func(o *Agent) error {
+		o.ignoreUnmanagedApps = enabled
+		return nil
+	}
+}
+
+// WithLabelSelector sets an optional Kubernetes label selector that restricts
+// which resources the agent watches. Only resources matching this selector
+// will be listed, watched, and processed by the agent.
+func WithLabelSelector(selector string) AgentOption {
+	return func(o *Agent) error {
+		o.labelSelector = selector
+		return nil
+	}
+}
+
+// WithRedisTLSEnabled enables or disables TLS for Redis connections
+func WithRedisTLSEnabled(enabled bool) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisTLSEnabled = enabled
+		return nil
+	}
+}
+
+// WithRedisTLSCAPath sets the CA certificate path for Redis TLS
+func WithRedisTLSCAPath(caPath string) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisTLSCAPath = caPath
+		return nil
+	}
+}
+
+// WithRedisTLSCAFromSecret loads the CA certificate from a Kubernetes secret for Redis TLS
+func WithRedisTLSCAFromSecret(kube kubernetes.Interface, namespace, name, field string) AgentOption {
+	return func(o *Agent) error {
+		pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, name, field)
+		if err != nil {
+			return err
+		}
+		o.redisProxyMsgHandler.redisTLSCA = pool
+		return nil
+	}
+}
+
+// WithRedisTLSInsecure enables insecure Redis TLS (for testing only)
+func WithRedisTLSInsecure(insecure bool) AgentOption {
+	return func(o *Agent) error {
+		o.redisProxyMsgHandler.redisTLSInsecure = insecure
+		return nil
+	}
+}
+
+// WithSourceUIDMismatchPolicy sets the policy for handling source-UID mismatches.
+// Valid values: "recreate" (default) or "upsert".
+func WithSourceUIDMismatchPolicy(policy string) AgentOption {
+	return func(a *Agent) error {
+		switch manager.SourceUIDMismatchPolicy(policy) {
+		case manager.MismatchPolicyRecreate, manager.MismatchPolicyUpsert:
+			a.mismatchPolicy = manager.SourceUIDMismatchPolicy(policy)
+			return nil
+		default:
+			return fmt.Errorf("unknown source-uid-mismatch-policy %q: must be recreate or upsert", policy)
+		}
+	}
+}
+
+// WithRecreateAction sets the action taken after recreating an application from
+// an unauthorized deletion in managed mode.
+func WithRecreateAction(action string) AgentOption {
+	return func(a *Agent) error {
+		switch manager.RecreateAction(action) {
+		case manager.RecreateActionIgnore, manager.RecreateActionClearStatus, manager.RecreateActionResync:
+			a.recreateAction = manager.RecreateAction(action)
+			return nil
+		default:
+			return fmt.Errorf("unknown on-application-recreate %q: must be ignore, clear-status, or resync", action)
+		}
+	}
+}
+
+func WithAdoptionPolicy(policy string) AgentOption {
+	return func(a *Agent) error {
+		a.adoptionPolicy = manager.AdoptionPolicy(policy)
 		return nil
 	}
 }

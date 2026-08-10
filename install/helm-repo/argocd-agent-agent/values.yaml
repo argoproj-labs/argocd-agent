@@ -5,19 +5,37 @@
 ## @section Global
 # -- Override namespace to deploy the agent into. Leave empty to use the release namespace.
 namespaceOverride: ""
+# -- Override the chart name used in `app.kubernetes.io/name`
+# Also changes `spec.selector.matchLabels`, which is immutable — do not set after initial
+# install unless you are prepared to delete+reinstall.
+nameOverride: ""
+# -- Override the fully-qualified resource name (defaults to `<release>-agent-helm`).
+fullnameOverride: ""
 
 ## @section Image
 image:
   # -- Container image repository for the agent.
   repository: ghcr.io/argoproj-labs/argocd-agent/argocd-agent
-  # -- Container image tag for the agent.
-  tag: latest 
+  # -- Overrides the image tag whose default is the chart appVersion.
+  tag: ""
   # -- Image pull policy for the agent container.
-  pullPolicy: "Always"
+  pullPolicy: "IfNotPresent"
 
 ## @section Deployment
 # -- Number of replicas for the agent Deployment.
 replicaCount: 1
+# -- Image pull secrets for private registries.
+imagePullSecrets: []
+# -- Deployment update strategy (passed through as `spec.strategy`).
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 25%
+# -- Number of old ReplicaSets to retain for rollback.
+revisionHistoryLimit: 10
+# -- Time allowed for the Deployment to make progress before the controller reports failure.
+progressDeadlineSeconds: 600
 # -- Name of the TLS Secret containing client cert/key for mTLS.
 tlsSecretName: "argocd-agent-client-tls"
 # -- Name of the Secret containing root CA certificate.
@@ -42,6 +60,45 @@ serviceAccount:
   name: ""
   # -- Annotations to add to the ServiceAccount.
   annotations: {}
+  # -- Automount API credentials for the Service Account
+  automountServiceAccountToken: true
+
+## @section Pod security context
+# -- Pod-level securityContext. Applied to the Pod spec.
+podSecurityContext:
+  fsGroup: 999
+  fsGroupChangePolicy: "OnRootMismatch"
+  runAsGroup: 999
+  runAsNonRoot: true
+  runAsUser: 999
+  seccompProfile:
+    type: RuntimeDefault
+
+## @section Container security context
+# -- Container-level securityContext. Applied to the agent container.
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  privileged: false
+  readOnlyRootFilesystem: true
+  runAsGroup: 999
+  runAsNonRoot: true
+  runAsUser: 999
+  seccompProfile:
+    type: RuntimeDefault
+
+
+## @section RBAC
+rbac:
+  # -- Create namespace-scoped Role and RoleBinding for the agent.
+  create: true
+  # -- Create cluster-scoped ClusterRole and ClusterRoleBinding. Required for
+  # destination-based mapping, create-namespace, and resource-proxy discovery
+  # across multiple namespaces. Leave `false` to keep the agent strictly
+  # namespace-scoped.
+  createClusterRole: true
 
 ## @section Pod Scheduling and Metadata
 # -- Node selector for scheduling the agent Pod.
@@ -50,12 +107,26 @@ nodeSelector: {}
 affinity: {}
 # -- Tolerations for the agent Pod.
 tolerations: []
+# -- Topology spread constraints for the agent Pod.
+topologySpreadConstraints: []
+# -- Additional annotations to add to the agent Deployment metadata
+# (e.g. Stakater Reloader trigger annotations, which are read from workload metadata only).
+deploymentAnnotations: {}
+
 # -- Additional annotations to add to the agent Pod.
 podAnnotations: {}
 # -- Additional labels to add to the agent Pod.
 podLabels: {}
 # -- PriorityClassName for the agent Pod.
 priorityClassName: ""
+# -- Grace period for Pod termination (seconds).
+terminationGracePeriodSeconds: 30
+# -- Host aliases injected into /etc/hosts of the agent Pod.
+hostAliases: []
+# -- DNS policy for the Pod (e.g. ClusterFirst, None). Empty leaves the default.
+dnsPolicy: ""
+# -- DNS config for the Pod. Only honored when `dnsPolicy` is "None".
+dnsConfig: {}
 
 ## @section Probes
 # -- Liveness and readiness probe configuration.
@@ -126,8 +197,13 @@ pprofPort: "0"
 enableResourceProxy: true
 # -- Cache refresh interval.
 cacheRefreshInterval: "10s"
+# -- Timeout for the initial informer sync at agent startup. Increase on
+# large clusters or when the API server is under heavy load.
+informerSyncTimeout: "10s"
 # -- Keep-alive interval for connections.
 keepAliveInterval: "50s"
+# -- Heartbeat interval for the gRPC Subscribe stream. See docs for details.
+heartbeatInterval: ""
 # -- Path to the TLS client key.
 tlsClientKeyPath: ""
 # -- Path to the TLS client certificate.
@@ -143,6 +219,8 @@ tlsCipherSuites: ""
 # -- Comma-separated list of additional namespaces the agent is allowed to
 # manage applications in (used with applications in any namespace feature). Supports glob patterns (e.g., "team-*,prod-*").
 allowedNamespaces: ""
+# -- Whether to connect to the principal without TLS
+tlsInsecurePlaintext: "false"
 
 ## @section Destination-Based Mapping
 # -- Whether to enable destination-based mapping. When enabled, the agent
@@ -152,6 +230,27 @@ destinationBasedMapping: false
 # -- Whether to create target namespaces automatically when they don't exist.
 # Used with destination-based mapping.
 createNamespace: false
+
+## @section Resource Filtering
+# -- Kubernetes label selector to restrict which resources the agent watches.
+# Only matching resources will be listed, watched, and processed.
+labelSelector: ""
+
+## @section Redis TLS
+# -- Redis TLS configuration.
+redisTLS:
+  # -- Enable TLS for Redis connections.
+  enabled: false
+  # -- Path to CA certificate for verifying Redis TLS certificate.
+  # This path is where the CA certificate will be mounted inside the container.
+  caPath: "/app/config/redis-tls/ca.crt"
+  # -- Name of the Kubernetes Secret containing the Redis TLS CA certificate.
+  # The secret should have a key 'ca.crt' containing the CA certificate in PEM format.
+  # Set to empty string to disable mounting (requires system CAs or insecure mode).
+  secretName: "argocd-redis-tls"
+  # -- Skip verification of Redis TLS certificate (INSECURE - for development only).
+  insecure: false
+
 
 ## @section Services
 # -- Service configuration for metrics and healthz endpoints.
@@ -170,6 +269,32 @@ service:
     targetPort: 8002
     # -- Annotations to add to the healthz Service.
     annotations: {}
+
+## @section ServiceMonitor
+# -- Prometheus ServiceMonitor configuration.
+serviceMonitor:
+  # -- Whether to create a ServiceMonitor resource.
+  enabled: false
+  # -- Prometheus ServiceMonitor labels
+  additionalLabels: {}
+  # -- Prometheus ServiceMonitor annotations
+  annotations: {}
+  # -- Namespace where the ServiceMonitor should be created. Defaults to release namespace.
+  namespace: ""
+  # -- Prometheus scrape interval. Must be a valid duration string (e.g. "30s").
+  interval: "30s"
+  # -- Prometheus scrape timeout. Must be a valid duration string (e.g. "10s").
+  scrapeTimeout: "10s"
+  # -- Prometheus [RelabelConfigs] to apply to samples before scraping
+  relabelings: []
+  # -- Prometheus [MetricRelabelConfigs] to apply to samples before ingestion
+  metricRelabelings: []
+  # -- When true, honorLabels preserves the metric’s labels when they collide with the target’s labels.
+  honorLabels: false
+  # -- Prometheus ServiceMonitor scheme
+  scheme: ""
+  # -- Prometheus ServiceMonitor tlsConfig
+  tlsConfig: {}
 
 ## @section Tests
 # -- Configuration for helm-chart tests.

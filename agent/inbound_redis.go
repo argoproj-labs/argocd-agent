@@ -17,14 +17,17 @@ package agent
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	rediscache "github.com/go-redis/cache/v9"
 	"github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9/maintnotifications"
@@ -45,6 +48,12 @@ type redisProxyMsgHandler struct {
 
 	// connections maintains statistics about redis connections from principal
 	connections *connectionEntries
+
+	// Redis TLS configuration
+	redisTLSEnabled  bool
+	redisTLSCAPath   string
+	redisTLSCA       *x509.CertPool // CA cert pool loaded from secret
+	redisTLSInsecure bool
 }
 
 // connectionEntries maintains statistics about redis connections from principal
@@ -85,18 +94,30 @@ func (a *Agent) processIncomingRedisRequest(ev *event.Event) error {
 	var responseBody *event.RedisResponseBody
 
 	if rreq.Body.Get != nil {
+		if a.metrics != nil {
+			a.metrics.RedisProxyRequests.WithLabelValues("get").Inc()
+		}
 		var err error
 
 		responseBody, err = a.handleRedisGetMessage(logCtx, rreq)
 		if err != nil {
+			if a.metrics != nil {
+				a.metrics.RedisProxyErrors.WithLabelValues("get").Inc()
+			}
 			return err
 		}
 
 	} else if rreq.Body.Subscribe != nil {
+		if a.metrics != nil {
+			a.metrics.RedisProxyRequests.WithLabelValues("subscribe").Inc()
+		}
 
 		var err error
 		responseBody, err = a.handleRedisSubscribeMessage(logCtx, rreq)
 		if err != nil {
+			if a.metrics != nil {
+				a.metrics.RedisProxyErrors.WithLabelValues("subscribe").Inc()
+			}
 			return err
 		}
 
@@ -150,7 +171,7 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 		var err error
 		channelName, err = stripNamespaceFromRedisKey(channelName, logCtx)
 		if err != nil {
-			return nil, fmt.Errorf("unable to transform SUBSCRIBE key for agent: %v", err)
+			return nil, fmt.Errorf("unable to transform SUBSCRIBE key for agent: %w", err)
 		}
 	}
 
@@ -186,6 +207,13 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubSub, rreq *event.RedisRequest, channelName string, logCtx *logrus.Entry) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
+	defer pubsub.Close()
+	defer func() {
+		connections := a.redisProxyMsgHandler.connections
+		connections.lock.Lock()
+		delete(connections.connMap, rreq.ConnectionUUID)
+		connections.lock.Unlock()
+	}()
 
 	ch := pubsub.Channel()
 
@@ -213,7 +241,6 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 
 			// If the connection has not been active for X minutes, close the connection
 			if time.Since(*lastPing) >= principalRedisConnectionTimeout {
-				pubsub.Close()
 				logCtx.WithField(logfields.LastPing, lastPing).Trace("closing redis connection due to inactivity")
 				return
 			}
@@ -258,7 +285,7 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 		var err error
 		key, err = stripNamespaceFromRedisKey(key, logCtx)
 		if err != nil {
-			return nil, fmt.Errorf("unable to transform GET key for agent: %v", err)
+			return nil, fmt.Errorf("unable to transform GET key for agent: %w", err)
 		}
 	}
 
@@ -298,6 +325,12 @@ func (a *Agent) handleRedisGetMessage(logCtx *logrus.Entry, rreq *event.RedisReq
 // needs to be converted to, e.g.
 // "app|resources-tree|my-app|1.8.3.gz
 func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error) {
+
+	// git-refs, gitdirs, and gitfiles keys don't contain namespace information; return as-is
+	if strings.HasPrefix(key, "git-refs|") || strings.HasPrefix(key, "gitdirs|") || strings.HasPrefix(key, "gitfiles|") {
+		return key, nil
+	}
+
 	var matchedPrefix string
 	expectedPrefixes := []string{
 		"app|resources-tree|",
@@ -325,14 +358,14 @@ func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error
 
 	appName := components[2]
 
-	underscoreIndex := strings.Index(appName, "_")
-	if underscoreIndex == -1 {
+	_, after, ok := strings.Cut(appName, "_")
+	if !ok {
 		err := fmt.Errorf("unexpected key format, missing '_': '%s'", key)
 		logCtx.WithError(err).Error("Unable to reply to redis get request")
 		return "", err
 
 	}
-	components[2] = appName[underscoreIndex+1:]
+	components[2] = after
 
 	key = strings.Join(components, "|")
 
@@ -340,7 +373,31 @@ func stripNamespaceFromRedisKey(key string, logCtx *logrus.Entry) (string, error
 }
 
 func (a *Agent) getRedisClientAndCache() (*redis.Client, *rediscache.Cache, error) {
-	var tlsConfig *tls.Config = nil
+	// Create TLS config for Redis client
+	var tlsConfig *tls.Config
+	if a.redisProxyMsgHandler.redisTLSEnabled {
+		serverName, _, err := net.SplitHostPort(a.redisProxyMsgHandler.redisAddress)
+		if err != nil {
+			serverName = a.redisProxyMsgHandler.redisAddress
+		}
+		tlsConfig = &tls.Config{
+			ServerName: serverName,
+		}
+		if a.redisProxyMsgHandler.redisTLSInsecure {
+			tlsConfig.InsecureSkipVerify = true
+			log().Warn("INSECURE: Redis client not verifying Redis TLS certificate")
+		} else if a.redisProxyMsgHandler.redisTLSCA != nil {
+			tlsConfig.RootCAs = a.redisProxyMsgHandler.redisTLSCA
+		} else if a.redisProxyMsgHandler.redisTLSCAPath != "" {
+			caPool, err := tlsutil.X509CertPoolFromFile(a.redisProxyMsgHandler.redisTLSCAPath)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to load Redis CA certificate: %w", err)
+			}
+			tlsConfig.RootCAs = caPool
+		} else {
+			return nil, nil, fmt.Errorf("redis TLS enabled but no CA certificate configured for Redis client")
+		}
+	}
 
 	opts := &redis.Options{
 		Addr:       a.redisProxyMsgHandler.redisAddress,

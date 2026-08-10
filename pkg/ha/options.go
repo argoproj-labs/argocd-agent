@@ -1,0 +1,167 @@
+// Copyright 2026 The argocd-agent Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package ha
+
+import (
+	"fmt"
+	"time"
+)
+
+// Options contains configuration for the HA controller
+type Options struct {
+	Enabled         bool
+	PreferredRole   Role
+	PeerAddress     string
+	FailoverTimeout time.Duration
+
+	// AdminPort is the port for the localhost-only admin gRPC server (HAAdmin)
+	AdminPort int
+
+	// AllowedReplicationClients is the list of identities allowed to connect
+	// for replication. When empty, any authenticated peer is allowed.
+	AllowedReplicationClients []string
+
+	ReconnectBackoffInitial time.Duration
+	ReconnectBackoffMax     time.Duration
+	ReconnectBackoffFactor  float64
+
+	// ReplicationInitialAckTimeout is how long the primary waits for the
+	// replica to send its initial ACK after fetching the snapshot. Large
+	// deployments may need a higher value if snapshot processing exceeds
+	// the default.
+	ReplicationInitialAckTimeout time.Duration
+}
+
+// DefaultOptions returns the default HA options
+func DefaultOptions() *Options {
+	return &Options{
+		Enabled:                      false,
+		PreferredRole:                RoleReplica,
+		FailoverTimeout:              30 * time.Second,
+		AdminPort:                    8405,
+		ReconnectBackoffInitial:      1 * time.Second,
+		ReconnectBackoffMax:          30 * time.Second,
+		ReconnectBackoffFactor:       1.5,
+		ReplicationInitialAckTimeout: 5 * time.Minute,
+	}
+}
+
+// Option is a function that modifies Options
+type Option func(*Options) error
+
+// WithEnabled sets whether HA is enabled
+func WithEnabled(enabled bool) Option {
+	return func(o *Options) error {
+		o.Enabled = enabled
+		return nil
+	}
+}
+
+// WithPreferredRole sets the preferred role for this principal
+func WithPreferredRole(role string) Option {
+	return func(o *Options) error {
+		r, err := ParseRole(role)
+		if err != nil {
+			return err
+		}
+		o.PreferredRole = r
+		return nil
+	}
+}
+
+// WithPeerAddress sets the address of the peer principal
+func WithPeerAddress(address string) Option {
+	return func(o *Options) error {
+		if address == "" {
+			return fmt.Errorf("peer address cannot be empty")
+		}
+		o.PeerAddress = address
+		return nil
+	}
+}
+
+// WithFailoverTimeout sets the failover timeout duration
+func WithFailoverTimeout(timeout time.Duration) Option {
+	return func(o *Options) error {
+		if timeout < 0 {
+			return fmt.Errorf("failover timeout cannot be negative")
+		}
+		o.FailoverTimeout = timeout
+		return nil
+	}
+}
+
+// WithAdminPort sets the port for the localhost-only admin gRPC server
+func WithAdminPort(port int) Option {
+	return func(o *Options) error {
+		if port < 1 || port > 65535 {
+			return fmt.Errorf("admin port must be between 1 and 65535")
+		}
+		o.AdminPort = port
+		return nil
+	}
+}
+
+// WithAllowedReplicationClients sets the list of identities allowed to connect for replication
+func WithAllowedReplicationClients(clients []string) Option {
+	return func(o *Options) error {
+		o.AllowedReplicationClients = clients
+		return nil
+	}
+}
+
+// WithReplicationInitialAckTimeout sets how long the primary waits for the
+// replica's initial ACK after snapshot fetch. Increase for large deployments.
+func WithReplicationInitialAckTimeout(timeout time.Duration) Option {
+	return func(o *Options) error {
+		if timeout <= 0 {
+			return fmt.Errorf("replication initial ACK timeout must be positive")
+		}
+		o.ReplicationInitialAckTimeout = timeout
+		return nil
+	}
+}
+
+// WithReconnectBackoff sets the reconnection backoff parameters
+func WithReconnectBackoff(initial, max time.Duration, factor float64) Option {
+	return func(o *Options) error {
+		if initial < 0 {
+			return fmt.Errorf("initial backoff cannot be negative")
+		}
+		if max < initial {
+			return fmt.Errorf("max backoff cannot be less than initial")
+		}
+		if factor < 1.0 {
+			return fmt.Errorf("backoff factor must be at least 1.0")
+		}
+		o.ReconnectBackoffInitial = initial
+		o.ReconnectBackoffMax = max
+		o.ReconnectBackoffFactor = factor
+		return nil
+	}
+}
+
+// Validate validates the options
+func (o *Options) Validate() error {
+	if !o.Enabled {
+		return nil
+	}
+
+	if o.PeerAddress == "" && o.PreferredRole == RoleReplica {
+		return fmt.Errorf("peer address is required for replica role")
+	}
+
+	return nil
+}

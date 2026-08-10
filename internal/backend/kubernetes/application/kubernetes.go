@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	appclientset "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned"
@@ -49,9 +50,11 @@ type KubernetesBackend struct {
 	// namespace is not currently read, is not guaranteed to be non-empty, and is not guaranteed to contain the source of Argo CD Application CRs in all cases
 	namespace string
 	usePatch  bool
+
+	labelSelector string
 }
 
-func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appInformer informer.InformerInterface, usePatch bool) *KubernetesBackend {
+func NewKubernetesBackend(appClient appclientset.Interface, namespace string, appInformer informer.InformerInterface, usePatch bool, opts ...KubernetesBackendOption) *KubernetesBackend {
 	be := &KubernetesBackend{
 		appClient:   appClient,
 		appInformer: appInformer,
@@ -61,21 +64,35 @@ func NewKubernetesBackend(appClient appclientset.Interface, namespace string, ap
 	if specificInformer, ok := appInformer.(*informer.Informer[*v1alpha1.Application]); ok {
 		be.appLister = specificInformer.Lister()
 	}
+
+	for _, opt := range opts {
+		opt(be)
+	}
 	return be
+}
+
+type KubernetesBackendOption func(*KubernetesBackend)
+
+func WithLabelSelector(labelSelector string) KubernetesBackendOption {
+	return func(be *KubernetesBackend) {
+		be.labelSelector = labelSelector
+	}
 }
 
 func (be *KubernetesBackend) List(ctx context.Context, selector backend.ApplicationSelector) ([]v1alpha1.Application, error) {
 	res := make([]v1alpha1.Application, 0)
+
+	listOptions := config.LabelSelector(be.labelSelector)
 	if len(selector.Namespaces) > 0 {
 		for _, ns := range selector.Namespaces {
-			l, err := be.appClient.ArgoprojV1alpha1().Applications(ns).List(ctx, v1.ListOptions{})
+			l, err := be.appClient.ArgoprojV1alpha1().Applications(ns).List(ctx, listOptions)
 			if err != nil {
 				return nil, err
 			}
 			res = append(res, l.Items...)
 		}
 	} else {
-		l, err := be.appClient.ArgoprojV1alpha1().Applications("").List(ctx, v1.ListOptions{})
+		l, err := be.appClient.ArgoprojV1alpha1().Applications("").List(ctx, listOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -138,6 +155,12 @@ func (be *KubernetesBackend) Delete(ctx context.Context, name string, namespace 
 
 func (be *KubernetesBackend) Update(ctx context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
 	return be.appClient.ArgoprojV1alpha1().Applications(app.Namespace).Update(ctx, app, v1.UpdateOptions{})
+}
+
+func (be *KubernetesBackend) PatchStatus(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.Application, error) {
+	return be.appClient.ArgoprojV1alpha1().Applications(namespace).Patch(
+		ctx, name, types.MergePatchType, patch, v1.PatchOptions{}, "status",
+	)
 }
 
 func (be *KubernetesBackend) Patch(ctx context.Context, name string, namespace string, patch []byte) (*v1alpha1.Application, error) {

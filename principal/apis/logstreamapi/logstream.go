@@ -365,13 +365,16 @@ func (s *Server) processLogMessage(c *logClient, msg *logstreamapi.LogStreamData
 func (s *Server) WaitForCompletion(requestUUID string, timeout time.Duration) bool {
 	s.mu.RLock()
 	sess := s.sessions[requestUUID]
-	s.mu.RUnlock()
-
 	if sess == nil || sess.completeCh == nil {
+		s.mu.RUnlock()
 		return false
 	}
+
+	ch := sess.completeCh
+	s.mu.RUnlock()
+
 	select {
-	case <-sess.completeCh:
+	case <-ch:
 		return true
 	case <-time.After(timeout):
 		return false

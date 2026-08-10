@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
@@ -32,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -46,7 +48,16 @@ func Test_NewKubernetes(t *testing.T) {
 		assert.NotNil(t, k)
 		assert.False(t, k.SupportsPatch())
 	})
-
+	t.Run("New with label selector option", func(t *testing.T) {
+		k := NewKubernetesBackend(nil, "", nil, true, WithLabelSelector("env=prod"))
+		assert.NotNil(t, k)
+		assert.Equal(t, "env=prod", k.labelSelector)
+	})
+	t.Run("New with empty label selector option", func(t *testing.T) {
+		k := NewKubernetesBackend(nil, "", nil, true, WithLabelSelector(""))
+		assert.NotNil(t, k)
+		assert.Empty(t, k.labelSelector)
+	})
 }
 
 func mkApps() []runtime.Object {
@@ -77,6 +88,14 @@ func Test_List(t *testing.T) {
 		apps, err := k.List(context.TODO(), backend.ApplicationSelector{})
 		require.NoError(t, err)
 		assert.Len(t, apps, 10)
+
+		actions := fakeAppC.Actions()
+		require.NotEmpty(t, actions)
+		listAction, ok := actions[0].(k8stesting.ListAction)
+		require.True(t, ok)
+		restrictions := listAction.GetListRestrictions()
+		expected := config.LabelSelector("")
+		assert.Equal(t, expected.LabelSelector, restrictions.Labels.String())
 	})
 	t.Run("Apps with matching selector", func(t *testing.T) {
 		fakeAppC := fakeappclient.NewSimpleClientset(apps...)
@@ -92,6 +111,19 @@ func Test_List(t *testing.T) {
 		apps, err := k.List(context.TODO(), backend.ApplicationSelector{Namespaces: []string{"ns11", "ns12"}})
 		require.NoError(t, err)
 		assert.Len(t, apps, 0)
+	})
+	t.Run("List uses custom label selector", func(t *testing.T) {
+		fakeAppC := fakeappclient.NewSimpleClientset()
+		k := NewKubernetesBackend(fakeAppC, "", nil, true, WithLabelSelector("env=prod"))
+		_, err := k.List(context.TODO(), backend.ApplicationSelector{})
+		require.NoError(t, err)
+		actions := fakeAppC.Actions()
+		require.NotEmpty(t, actions)
+		listAction, ok := actions[0].(k8stesting.ListAction)
+		require.True(t, ok)
+		restrictions := listAction.GetListRestrictions()
+		expected := config.LabelSelector("env=prod")
+		assert.Equal(t, expected.LabelSelector, restrictions.Labels.String())
 	})
 }
 

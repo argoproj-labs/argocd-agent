@@ -25,7 +25,6 @@ import (
 
 const (
 	trackingAnnotationKey = "argocd.argoproj.io/tracking-id"
-	trackingLabelKey      = "app.kubernetes.io/instance"
 )
 
 // ResourceTrackingReader reads the resource tracking configuration
@@ -57,19 +56,20 @@ func (r *ResourceTrackingReader) IsResourceTracked(labels map[string]string, ann
 		return false, err
 	}
 
+	trackingLabelKey, err := r.settingsManager.GetAppInstanceLabelKey()
+	if err != nil {
+		return false, err
+	}
+
 	// Handle different tracking methods
 	switch trackingMethodStr {
 	case string(v1alpha1.TrackingMethodLabel):
 		_, hasLabel := labels[trackingLabelKey]
 		return hasLabel, nil
 
-	case string(v1alpha1.TrackingMethodAnnotationAndLabel):
-		_, hasAnnotation := annotations[trackingAnnotationKey]
-		_, hasLabel := labels[trackingLabelKey]
-		return hasAnnotation && hasLabel, nil
-
-	case string(v1alpha1.TrackingMethodAnnotation), "":
-		// Default to annotation-based tracking (when empty or explicitly set)
+	case string(v1alpha1.TrackingMethodAnnotationAndLabel), string(v1alpha1.TrackingMethodAnnotation), "":
+		// Argo CD uses the annotation for both annotation and annotation+label
+		// tracking methods. The label is informational only in annotation+label.
 		_, hasAnnotation := annotations[trackingAnnotationKey]
 		return hasAnnotation, nil
 

@@ -36,7 +36,7 @@ func (suite *TerminalStreamingTestSuite) validateTerminalStreaming() {
 	app := &v1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "guestbook",
-			Namespace: "agent-managed",
+			Namespace: fixture.ManagedPrincipalAppNamespace(),
 		},
 		Spec: v1alpha1.ApplicationSpec{
 			Project: "default",
@@ -170,10 +170,10 @@ func (suite *TerminalStreamingTestSuite) Test_SelfRegisteredSecret_Terminal() {
 	}()
 
 	// Stop agent
-	err = fixture.StopProcess(fixture.AgentManagedName)
+	err = fixture.StopProcess(fixture.AgentManagedName, suite.T())
 	requires.NoError(err)
 	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.AgentManagedName)
+		return !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T())
 	}, 30*time.Second, 1*time.Second)
 
 	// Delete manual secret

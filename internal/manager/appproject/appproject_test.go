@@ -23,6 +23,7 @@ import (
 	appmock "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -242,7 +243,7 @@ func TestCreateAppProject(t *testing.T) {
 		m, err := NewAppProjectManager(mockedBackend, "default", WithRole(manager.ManagerRoleAgent))
 		require.NoError(t, err)
 		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
-		rapp, err := m.Create(context.TODO(), app)
+		rapp, err := m.Create(context.TODO(), app, true)
 		assert.NoError(t, err)
 		assert.Equal(t, "test", rapp.Name)
 	})
@@ -259,7 +260,7 @@ func TestCreateAppProject(t *testing.T) {
 		m, err := NewAppProjectManager(mockedBackend, "", WithRole(manager.ManagerRolePrincipal))
 		require.NoError(t, err)
 		mockedBackend.On("Create", mock.Anything, mock.Anything).Return(app, nil)
-		rapp, err := m.Create(context.TODO(), app)
+		rapp, err := m.Create(context.TODO(), app, true)
 		assert.NoError(t, err)
 		assert.Equal(t, "test", rapp.Name)
 		assert.Equal(t, string(app.UID), rapp.Annotations[manager.SourceUIDAnnotation])
@@ -351,6 +352,7 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 		agentName  string
 		appProject v1alpha1.AppProject
 		want       bool
+		dstMapping bool
 	}{
 		{
 			name:      "agent matches destination name",
@@ -499,11 +501,51 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 			},
 			want: false, // Agent name doesn't match extracted query parameter
 		},
+		{
+			name:      "destination-based mapping - agent only matches destination name",
+			agentName: "agent-prod",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "agent-prod", Namespace: "default"},
+					},
+					SourceNamespaces: []string{"test"},
+				},
+			},
+			want:       true,
+			dstMapping: true,
+		},
+		{
+			name:      "destination-based mapping - nil sourceNamespaces with matching destination",
+			agentName: "agent-prod",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "agent-prod", Namespace: "default"},
+					},
+				},
+			},
+			want:       true,
+			dstMapping: true,
+		},
+		{
+			name:      "destination-based mapping - destination does not match",
+			agentName: "agent-prod",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Name: "other-agent", Namespace: "default"},
+					},
+				},
+			},
+			want:       false,
+			dstMapping: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := DoesAgentMatchWithProject(tt.agentName, tt.appProject)
+			got := DoesAgentMatchWithProject(tt.agentName, tt.appProject, tt.dstMapping)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -516,10 +558,12 @@ func TestAgentSpecificAppProject(t *testing.T) {
 		agent      string
 		want       v1alpha1.AppProject
 		dstMapping bool
+		mode       types.AgentMode
 	}{
 		{
 			name:       "filters destinations for matching agent",
 			dstMapping: false,
+			mode:       types.AgentModeManaged,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-project",
@@ -571,6 +615,7 @@ func TestAgentSpecificAppProject(t *testing.T) {
 		{
 			name:       "matches multiple destinations with glob pattern",
 			dstMapping: false,
+			mode:       types.AgentModeManaged,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "multi-dest-project",
@@ -628,6 +673,7 @@ func TestAgentSpecificAppProject(t *testing.T) {
 		{
 			name:       "no matching destinations",
 			dstMapping: false,
+			mode:       types.AgentModeManaged,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "no-match-project",
@@ -673,6 +719,7 @@ func TestAgentSpecificAppProject(t *testing.T) {
 		{
 			name:       "empty destinations and roles",
 			dstMapping: false,
+			mode:       types.AgentModeManaged,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "empty-project",
@@ -700,6 +747,7 @@ func TestAgentSpecificAppProject(t *testing.T) {
 		{
 			name:       "agent name matches wildcard destination",
 			dstMapping: false,
+			mode:       types.AgentModeManaged,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "wildcard-project",
@@ -738,6 +786,7 @@ func TestAgentSpecificAppProject(t *testing.T) {
 		{
 			name:       "preserves source namespaces for destination-based mapping",
 			dstMapping: true,
+			mode:       types.AgentModeManaged,
 			appProject: v1alpha1.AppProject{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "wildcard-project",
@@ -773,11 +822,65 @@ func TestAgentSpecificAppProject(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:       "autonomous mode preserves source namespaces and roles",
+			dstMapping: false,
+			mode:       types.AgentModeAutonomous,
+			appProject: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "auto-project",
+					Namespace: "argocd",
+				},
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{
+							Name:      "cluster-prod",
+							Namespace: "default",
+							Server:    "https://prod-cluster.example.com",
+						},
+					},
+					SourceNamespaces: []string{"argocd", "apps"},
+					Roles: []v1alpha1.ProjectRole{
+						{
+							Name: "admin",
+							Policies: []string{
+								"p, proj:auto-project:admin, applications, *, auto-project/*, allow",
+							},
+						},
+					},
+				},
+			},
+			agent: "cluster-prod",
+			want: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "auto-project",
+					Namespace: "argocd",
+				},
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{
+							Name:      "in-cluster",
+							Namespace: "default",
+							Server:    "https://kubernetes.default.svc",
+						},
+					},
+					SourceNamespaces: nil,
+					Roles: []v1alpha1.ProjectRole{
+						{
+							Name: "admin",
+							Policies: []string{
+								"p, proj:auto-project:admin, applications, *, auto-project/*, allow",
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := AgentSpecificAppProject(tt.appProject, tt.agent, tt.dstMapping)
+			got := AgentSpecificAppProject(tt.appProject, tt.agent, tt.dstMapping, tt.mode)
 			assert.Equal(t, tt.want, got)
 		})
 	}

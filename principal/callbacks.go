@@ -20,35 +20,42 @@ import (
 	"sync"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
+	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	synccommon "github.com/argoproj/argo-cd/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
-	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
 )
 
 const (
-	// Informer operation types
 	operationcreate = "create"
 	operationupdate = "update"
 	operationdelete = "delete"
 )
 
+// stampEvent stamps the principal identity on the event and injects trace context.
+func (s *Server) stampEvent(ctx context.Context, ev *cloudevents.Event) {
+	if s.principalUID != "" {
+		event.SetPrincipalUID(ev, s.principalUID)
+	}
+	tracing.InjectTraceContext(ctx, ev)
+}
+
 // newAppCallback is executed when a new application event was emitted from
 // the informer and needs to be sent out to an agent. If the receiving agent
 // is in autonomous mode, this event will be discarded.
 func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
-	ctx, span := s.startSpan(operationcreate, "Application", outbound)
-	defer span.End()
-
 	logCtx := log().WithFields(logrus.Fields{
 		"component":        "EventCallback",
 		"event":            "application_new",
@@ -61,11 +68,19 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		return
 	}
 
+	if !s.IsActive() {
+		return
+	}
+
+	ctx, span := s.startSpan(operationcreate, "Application", outbound)
+	defer span.End()
+
 	logCtx = logCtx.WithField("queue", agentName)
 
-	s.resources.Add(agentName, resources.NewResourceKeyFromApp(outbound))
-	// Track the app-to-agent mapping for redis proxy routing
-	s.trackAppToAgent(outbound, agentName)
+	if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+		logCtx.Error("Application is targeting an invalid agent, skipping creation")
+		return
+	}
 
 	if !s.queues.HasQueuePair(agentName) {
 		if err := s.queues.Create(agentName); err != nil {
@@ -79,10 +94,15 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		logCtx.Errorf("Help! queue pair for agent %s disappeared!", agentName)
 		return
 	}
+
+	s.resources.Add(agentName, resources.NewResourceKeyFromApp(outbound))
+	s.trackAppToAgent(outbound, agentName)
+
 	ev := s.events.ApplicationEvent(event.Create, outbound)
 	// Inject trace context into the event for propagation to agent
-	tracing.InjectTraceContext(ctx, ev)
+	s.stampEvent(ctx, ev)
 	q.Add(ev)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.Application), agentName, replication.DirectionOutbound)
 	logCtx.Tracef("Added app %s to send queue, total length now %d", outbound.QualifiedName(), q.Len())
 
 	if s.metrics != nil {
@@ -91,17 +111,20 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 }
 
 func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Application) {
-	s.watchLock.Lock()
-	defer s.watchLock.Unlock()
-
-	ctx, span := s.startSpan(operationupdate, "Application", old)
-	defer span.End()
-
 	logCtx := log().WithFields(logrus.Fields{
 		"component":        "EventCallback",
 		"event":            "application_update",
 		"application_name": old.Name,
 	})
+
+	if !s.IsActive() {
+		return
+	}
+	s.watchLock.Lock()
+	defer s.watchLock.Unlock()
+
+	ctx, span := s.startSpan(operationupdate, "Application", old)
+	defer span.End()
 
 	if s.destinationBasedMapping {
 		s.handleAppAgentChange(ctx, old, new, logCtx)
@@ -115,7 +138,15 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 
 	logCtx = logCtx.WithField("queue", agentName)
 
-	if isResourceFromAutonomousAgent(new) {
+	if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+		logCtx.Warn("Application is targeting an invalid agent, skipping update")
+		return
+	}
+
+	s.resources.Add(agentName, resources.NewResourceKeyFromApp(new))
+	s.trackAppToAgent(new, agentName)
+
+	if s.isResourceFromAutonomousAgent(new) {
 		// Remove finalizers from autonomous agent applications if it is being deleted
 		if new.DeletionTimestamp != nil && len(new.Finalizers) > 0 {
 			updated, err := s.appManager.RemoveFinalizers(s.ctx, new)
@@ -124,11 +155,17 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 			} else {
 				logCtx.Debug("Removed finalizers from autonomous application to allow deletion")
 				new = updated
+				// Register the expected deletion so deleteAppCallback won't recreate it.
+				if s.deletions != nil {
+					if srcUID, ok := new.Annotations[manager.SourceUIDAnnotation]; ok && srcUID != "" {
+						s.deletions.MarkExpected(ktypes.UID(srcUID))
+					}
+				}
 			}
 		}
 
 		// Revert modifications on autonomous agent applications
-		if s.appManager.RevertAutonomousAppChanges(s.ctx, new, s.sourceCache.Application) {
+		if s.appManager.RevertAutonomousAppChanges(s.ctx, new.DeepCopy(), s.sourceCache.Application) {
 			logCtx.Trace("Modifications to the application are reverted")
 			return
 		}
@@ -151,30 +188,39 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 
+	setOperation := false
 	var ev *cloudevents.Event
 
-	// Check if this update is a terminate-operation or a regular spec update
 	if isTerminateOperation(old, new) {
 		ev = s.events.ApplicationEvent(event.TerminateOperation, new)
 	} else {
-		// Prevent sending operation back on regular spec updates.
-		// Allow only nil->non-nil transitions to carry operation (i.e. principal-initiated sync).
-
-		// DeepCopy to avoid mutating the informer object
+		// DeepCopy to avoid mutating the informer object.
+		// Strip the operation from SpecUpdate; operations are
+		// delivered via a dedicated SetOperation event instead.
 		out := new.DeepCopy()
-		if old.Operation == nil && new.Operation != nil {
-			out.Operation = new.Operation.DeepCopy()
-		} else {
-			out.Operation = nil
-		}
-
+		out.Operation = nil
 		ev = s.events.ApplicationEvent(event.SpecUpdate, out)
+
+		if old.Operation == nil && new.Operation != nil {
+			setOperation = true
+		}
 	}
 
 	// Inject trace context into the event for propagation to agent
-	tracing.InjectTraceContext(ctx, ev)
+	s.stampEvent(ctx, ev)
 	q.Add(ev)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.Application), agentName, replication.DirectionOutbound)
 	logCtx.WithField("event_type", ev.Type()).Tracef("Added app to send queue, total length now %d", q.Len())
+
+	// When a new operation appears (nil → non-nil), send it as a separate
+	// SetOperation event so that it is not overwritten by the next SpecUpdate.
+	if setOperation {
+		opEv := s.events.ApplicationEvent(event.SetOperation, new)
+		tracing.InjectTraceContext(ctx, opEv)
+		q.Add(opEv)
+		s.ha.ForwardEventForReplication(event.New(opEv, targets.Application), agentName, replication.DirectionOutbound)
+		logCtx.WithField("event_type", opEv.Type()).Trace("Added SetOperation to send queue")
+	}
 
 	if s.metrics != nil {
 		s.metrics.ApplicationUpdated.Inc()
@@ -182,9 +228,6 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 }
 
 func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
-	ctx, span := s.startSpan(operationdelete, "Application", outbound)
-	defer span.End()
-
 	logCtx := log().WithFields(logrus.Fields{
 		"component":        "EventCallback",
 		"event":            "application_delete",
@@ -197,10 +240,20 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 		return
 	}
 
+	if !s.IsActive() {
+		return
+	}
+
+	s.resources.Remove(agentName, resources.NewResourceKeyFromApp(outbound))
+	s.untrackAppToAgent(outbound)
+
+	ctx, span := s.startSpan(operationdelete, "Application", outbound)
+	defer span.End()
+
 	logCtx = logCtx.WithField("queue", agentName)
 
 	// Revert user-initiated deletion on autonomous agent applications
-	if isResourceFromAutonomousAgent(outbound) {
+	if s.isResourceFromAutonomousAgent(outbound) {
 		reverted, err := manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.appManager, logCtx)
 		if err != nil {
 			logCtx.WithError(err).Error("failed to revert invalid deletion of application")
@@ -212,11 +265,11 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 		}
 	}
 
-	s.resources.Remove(agentName, resources.NewResourceKeyFromApp(outbound))
-	// Remove the app-to-agent mapping
-	s.untrackAppToAgent(outbound)
-
 	if !s.queues.HasQueuePair(agentName) {
+		if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+			logCtx.Warn("Application is targeting an invalid agent, skipping deletion")
+			return
+		}
 		if err := s.queues.Create(agentName); err != nil {
 			logCtx.WithError(err).Error("failed to create a queue pair for agent")
 			return
@@ -230,9 +283,10 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 	}
 	ev := s.events.ApplicationEvent(event.Delete, outbound)
 	// Inject trace context into the event for propagation to agent
-	tracing.InjectTraceContext(ctx, ev)
+	s.stampEvent(ctx, ev)
 	logCtx.WithField("event", "DeleteApp").WithField("sendq_len", q.Len()+1).Tracef("Added event to send queue")
 	q.Add(ev)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.Application), agentName, replication.DirectionOutbound)
 
 	if s.metrics != nil {
 		s.metrics.ApplicationDeleted.Inc()
@@ -243,9 +297,6 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 // the informer and needs to be sent out to an agent. If the receiving agent
 // is in autonomous mode, this event will be discarded.
 func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
-	ctx, span := s.startSpan(operationcreate, "AppProject", outbound)
-	defer span.End()
-
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "EventCallback",
 		"queue":           outbound.Namespace,
@@ -254,27 +305,25 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 	})
 
 	// Check if this AppProject was created by an autonomous agent
-	if isResourceFromAutonomousAgent(outbound) {
-		// For autonomous agents, the agent name may be different from the namespace name.
-		// SourceNamespaces[0] contains the exact agent name.
-		if len(outbound.Spec.SourceNamespaces) > 0 {
-			agentName := outbound.Spec.SourceNamespaces[0]
-			s.resources.Add(agentName, resources.NewResourceKeyFromAppProject(outbound))
+	if s.isAppProjectFromAutonomousAgent(outbound) {
+		if s.IsActive() {
+			if len(outbound.Spec.SourceNamespaces) > 0 {
+				agentName := outbound.Spec.SourceNamespaces[0]
+				s.resources.Add(agentName, resources.NewResourceKeyFromAppProject(outbound))
+			}
 		}
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
 
+	if !s.IsActive() {
+		return
+	}
+
 	s.resources.Add(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
 
-	// Return early if no interested agent is connected
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		if err := s.queues.Create(outbound.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing namespace")
-	}
+	ctx, span := s.startSpan(operationcreate, "AppProject", outbound)
+	defer span.End()
 
 	if s.metrics != nil {
 		s.metrics.AppProjectCreated.Inc()
@@ -288,19 +337,34 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.Create, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s to send queue, total length now %d", outbound.Name, q.Len())
 	}
+
+	ev := s.events.AppProjectEvent(event.Create, outbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.AppProject), outbound.Namespace, replication.DirectionOutbound)
 
 	// Reconcile repositories that reference this project.
 	s.syncRepositoriesForProject(ctx, outbound.Name, outbound.Namespace, logCtx)
 }
 
 func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha1.AppProject) {
+	if !s.IsActive() {
+		return
+	}
+
+	if s.isAppProjectFromAutonomousAgent(new) {
+		if len(new.Spec.SourceNamespaces) > 0 {
+			agentName := new.Spec.SourceNamespaces[0]
+			s.resources.Add(agentName, resources.NewResourceKeyFromAppProject(new))
+		}
+	} else {
+		s.resources.Add(new.Namespace, resources.NewResourceKeyFromAppProject(new))
+	}
 	s.watchLock.Lock()
 	defer s.watchLock.Unlock()
 
@@ -315,7 +379,7 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 	})
 
 	// Check if this AppProject was created by an autonomous agent
-	if isResourceFromAutonomousAgent(new) {
+	if s.isAppProjectFromAutonomousAgent(new) {
 		// Revert modifications on autonomous agent appProjects
 		reverted, err := s.projectManager.RevertAppProjectChanges(s.ctx, new, s.sourceCache.AppProject)
 		if err != nil {
@@ -342,15 +406,13 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
 		return
 	}
-	if !s.queues.HasQueuePair(old.Namespace) {
-		if err := s.queues.Create(old.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing agent namespace")
-	}
 
-	s.syncAppProjectUpdatesToAgents(ctx, old, new, logCtx)
+	if !s.isAppProjectFromAutonomousAgent(new) {
+		s.syncAppProjectUpdatesToAgents(ctx, old, new, logCtx)
+	} // For the autonomous case, on principal, there is no need to send AppProject updates to autonomous agents.
+
+	ev := s.events.AppProjectEvent(event.SpecUpdate, new)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.AppProject), new.Namespace, replication.DirectionOutbound)
 
 	// The project rules could have been updated. Reconcile repositories that reference this project.
 	s.syncRepositoriesForProject(ctx, new.Name, new.Namespace, logCtx)
@@ -361,9 +423,6 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 }
 
 func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
-	ctx, span := s.startSpan(operationdelete, "AppProject", outbound)
-	defer span.End()
-
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "EventCallback",
 		"queue":           outbound.Namespace,
@@ -372,41 +431,34 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	})
 
 	// Revert user-initiated deletion on autonomous agent applications
-	if isResourceFromAutonomousAgent(outbound) {
-		reverted, err := manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.projectManager, logCtx)
-		if err != nil {
-			logCtx.WithError(err).Error("failed to revert invalid deletion of appProject")
-			return
-		}
-		if reverted {
-			logCtx.Trace("Deleted appProject is recreated")
-			return
-		}
-
-		// For autonomous agents, the agent name may be different from the namespace name.
-		// SourceNamespaces[0] contains the exact agent name.
-		if len(outbound.Spec.SourceNamespaces) > 0 {
-			agentName := outbound.Spec.SourceNamespaces[0]
-			s.resources.Remove(agentName, resources.NewResourceKeyFromAppProject(outbound))
+	if s.isAppProjectFromAutonomousAgent(outbound) {
+		if s.IsActive() {
+			reverted, err := manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.projectManager, logCtx)
+			if err != nil {
+				logCtx.WithError(err).Error("failed to revert invalid deletion of appProject")
+				return
+			}
+			if reverted {
+				logCtx.Trace("Deleted appProject is recreated")
+				return
+			}
+			if len(outbound.Spec.SourceNamespaces) > 0 {
+				agentName := outbound.Spec.SourceNamespaces[0]
+				s.resources.Remove(agentName, resources.NewResourceKeyFromAppProject(outbound))
+			}
 		}
 		logCtx.Debugf("Discarding event, because the appProject is managed by an autonomous agent")
 		return
 	}
 
-	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
-
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		if err := s.queues.Create(outbound.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing agent namespace")
-	}
-	q := s.queues.SendQ(outbound.Namespace)
-	if q == nil {
-		logCtx.Error("Help! Queue pair has disappeared!")
+	if !s.IsActive() {
 		return
 	}
+
+	s.resources.Remove(outbound.Namespace, resources.NewResourceKeyFromAppProject(outbound))
+
+	ctx, span := s.startSpan(operationdelete, "AppProject", outbound)
+	defer span.End()
 
 	agents := s.mapAppProjectToAgents(*outbound)
 	for agent := range agents {
@@ -416,16 +468,60 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added appProject delete event to send queue")
 	}
 
+	ev := s.events.AppProjectEvent(event.Delete, outbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.AppProject), outbound.Namespace, replication.DirectionOutbound)
+
+	// Project is deleted, remove all repositories and credentials that reference this project
+	s.syncRepositoriesForProject(ctx, outbound.Name, outbound.Namespace, logCtx)
+
 	if s.metrics != nil {
 		s.metrics.AppProjectDeleted.Inc()
+	}
+}
+
+// newAppSetCallback forwards ApplicationSet create events to the replication layer only.
+// ApplicationSets are principal-local resources; agents don't receive them directly.
+func (s *Server) newAppSetCallback(outbound *v1alpha1.ApplicationSet) {
+	if !s.IsActive() {
+		return
+	}
+	ev := s.events.ApplicationSetEvent(event.Create, outbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.ApplicationSet), "", replication.DirectionOutbound)
+
+	if s.metrics != nil {
+		s.metrics.AppSetCreated.Inc()
+	}
+}
+
+func (s *Server) updateAppSetCallback(old *v1alpha1.ApplicationSet, new *v1alpha1.ApplicationSet) {
+	if !s.IsActive() {
+		return
+	}
+	ev := s.events.ApplicationSetEvent(event.SpecUpdate, new)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.ApplicationSet), "", replication.DirectionOutbound)
+
+	if s.metrics != nil {
+		s.metrics.AppSetUpdated.Inc()
+	}
+}
+
+func (s *Server) deleteAppSetCallback(outbound *v1alpha1.ApplicationSet) {
+	if !s.IsActive() {
+		return
+	}
+	ev := s.events.ApplicationSetEvent(event.Delete, outbound)
+	s.ha.ForwardEventForReplication(event.New(ev, targets.ApplicationSet), "", replication.DirectionOutbound)
+
+	if s.metrics != nil {
+		s.metrics.AppSetDeleted.Inc()
 	}
 }
 
@@ -471,8 +567,9 @@ func (s *Server) newRepositoryCallback(outbound *corev1.Secret) {
 
 		ev := s.events.RepositoryEvent(event.Create, outbound)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
+		s.ha.ForwardEventForReplication(event.New(ev, targets.Repository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Add(outbound.Name, agent)
 		logCtx.Tracef("Added repository %s to send queue, total length now %d", outbound.Name, q.Len())
@@ -554,8 +651,9 @@ func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
 
 		ev := s.events.RepositoryEvent(event.Delete, outbound)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
+		s.ha.ForwardEventForReplication(event.New(ev, targets.Repository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Delete(outbound.Name, agent)
 		logCtx.WithField("sendq_len", q.Len()+1).Tracef("Added repository delete event to send queue")
@@ -563,6 +661,88 @@ func (s *Server) deleteRepositoryCallback(outbound *corev1.Secret) {
 
 	if s.metrics != nil {
 		s.metrics.RepositoryDeleted.Inc()
+	}
+}
+
+func (s *Server) newGPGKeyCallback(outbound *corev1.ConfigMap) {
+	ctx, span := s.startSpan(operationcreate, "GPGKey", outbound)
+	defer span.End()
+
+	logCtx := log().WithFields(logrus.Fields{
+		"component": "EventCallback",
+		"event":     "gpgkey_create",
+	})
+
+	logCtx.Info("New GPG key ConfigMap event")
+
+	s.syncGPGKeyToManagedAgents(ctx, outbound, event.Create, logCtx)
+
+	if s.metrics != nil {
+		s.metrics.GPGKeyCount.Set(float64(len(outbound.Data)))
+	}
+}
+
+func (s *Server) updateGPGKeyCallback(old, new *corev1.ConfigMap) {
+	ctx, span := s.startSpan(operationupdate, "GPGKey", old)
+	defer span.End()
+
+	logCtx := log().WithFields(logrus.Fields{
+		"component": "EventCallback",
+		"event":     "gpgkey_update",
+	})
+
+	logCtx.Info("Update GPG key ConfigMap event")
+
+	s.syncGPGKeyToManagedAgents(ctx, new, event.SpecUpdate, logCtx)
+
+	if s.metrics != nil {
+		s.metrics.GPGKeyCount.Set(float64(len(new.Data)))
+	}
+}
+
+func (s *Server) deleteGPGKeyCallback(outbound *corev1.ConfigMap) {
+	ctx, span := s.startSpan(operationdelete, "GPGKey", outbound)
+	defer span.End()
+
+	logCtx := log().WithFields(logrus.Fields{
+		"component": "EventCallback",
+		"event":     "gpgkey_delete",
+	})
+
+	logCtx.Info("Delete GPG key ConfigMap event")
+
+	s.syncGPGKeyToManagedAgents(ctx, outbound, event.Delete, logCtx)
+
+	if s.metrics != nil {
+		s.metrics.GPGKeyCount.Set(0)
+	}
+}
+
+func (s *Server) syncGPGKeyToManagedAgents(ctx context.Context, cm *corev1.ConfigMap, evType event.EventType, logCtx *logrus.Entry) {
+	s.clientLock.RLock()
+	defer s.clientLock.RUnlock()
+
+	for agentName, mode := range s.namespaceMap {
+		if mode != types.AgentModeManaged {
+			continue
+		}
+
+		q := s.queues.SendQ(agentName)
+		if q == nil {
+			logCtx.Errorf("Queue pair not found for agent %s", agentName)
+			continue
+		}
+
+		ev := s.events.GPGKeyEvent(evType, cm)
+		tracing.InjectTraceContext(ctx, ev)
+		q.Add(ev)
+
+		if evType == event.Delete {
+			s.resources.Remove(agentName, resources.NewResourceKeyFromGPGKey(cm))
+		} else {
+			s.resources.Add(agentName, resources.NewResourceKeyFromGPGKey(cm))
+		}
+		logCtx.WithField("agent", agentName).Tracef("Added GPG key event to send queue")
 	}
 }
 
@@ -580,21 +760,12 @@ func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {
 		return
 	}
 
-	if err := s.queues.Delete(outbound.Name, true); err != nil {
-		logCtx.WithError(err).Error("failed to remove the queue pair for a deleted agent namespace")
-		return
-	}
-
-	// Remove eventwriter associated with this agent
-	s.eventWriters.Remove(outbound.Name)
+	s.cleanupAgentState(outbound.Name)
 
 	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
 }
 
-// mapAppProjectToAgents maps an AppProject to the list of managed agents that should receive it.
-// We sync an AppProject from the principal to an agent if:
-// 1. It is a managed agent (not autonomous)
-// 2. The agent name matches one of the AppProject's destinations and source namespaces
+// mapAppProjectToAgents returns the set of managed agents that should receive this AppProject.
 func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[string]bool {
 	agents := map[string]bool{}
 	s.clientLock.RLock()
@@ -604,7 +775,12 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 			continue
 		}
 
-		if appproject.DoesAgentMatchWithProject(agentName, appProject) {
+		// Skip agents that don't have a valid agent cluster secret
+		if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+			continue
+		}
+
+		if appproject.DoesAgentMatchWithProject(agentName, appProject, s.destinationBasedMapping) {
 			agents[agentName] = true
 		}
 	}
@@ -615,6 +791,11 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 // syncAppProjectUpdatesToAgents sends the AppProject update events to the relevant clusters.
 // It sends delete events to the clusters that no longer match the given AppProject.
 func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1alpha1.AppProject, logCtx *logrus.Entry) {
+
+	if s.isAppProjectFromAutonomousAgent(new) || s.isAppProjectFromAutonomousAgent(old) {
+		return
+	}
+
 	oldAgents := s.mapAppProjectToAgents(*old)
 	newAgents := s.mapAppProjectToAgents(*new)
 
@@ -632,10 +813,10 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		logCtx.Tracef("Sent a delete event for an AppProject for a removed cluster")
 		deletedAgents[agent] = true
@@ -653,10 +834,10 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
 		logCtx.Tracef("Added appProject %s update event to send queue", new.Name)
 	}
@@ -697,7 +878,9 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 
 	newProject, err := s.projectManager.Get(s.ctx, string(newProjectName), new.Namespace)
 	if err != nil {
-		logCtx.WithError(err).Error("failed to get the project that is currently referenced by the repository secret")
+		if !errors.IsNotFound(err) {
+			logCtx.WithError(err).Error("failed to get the project that is currently referenced by the repository secret")
+		}
 	} else {
 		newAgents = s.mapAppProjectToAgents(*newProject)
 	}
@@ -723,8 +906,9 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 
 		ev := s.events.RepositoryEvent(event.Delete, new)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
+		s.ha.ForwardEventForReplication(event.New(ev, targets.Repository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Delete(new.Name, agent)
 
@@ -742,8 +926,9 @@ func (s *Server) syncRepositoryUpdatesToAgents(ctx context.Context, old, new *co
 
 		ev := s.events.RepositoryEvent(event.SpecUpdate, new)
 		// Inject trace context into the event for propagation to agent
-		tracing.InjectTraceContext(ctx, ev)
+		s.stampEvent(ctx, ev)
 		q.Add(ev)
+		s.ha.ForwardEventForReplication(event.New(ev, targets.Repository), agent, replication.DirectionOutbound)
 
 		s.repoToAgents.Add(new.Name, agent)
 
@@ -766,15 +951,41 @@ func (s *Server) syncRepositoriesForProject(ctx context.Context, projectName, ns
 	}
 }
 
-// isResourceFromAutonomousAgent checks if a Kubernetes resource was created by an autonomous agent
-// by examining if it has the source UID annotation.
-func isResourceFromAutonomousAgent(resource metav1.Object) bool {
+// isResourceFromAutonomousAgent checks if a Kubernetes resource was created by an autonomous agent.
+// It requires both the source-uid annotation AND that the namespace maps to an autonomous agent mode,
+// because replicated resources also carry the source-uid annotation.
+func (s *Server) isResourceFromAutonomousAgent(resource metav1.Object) bool {
 	annotations := resource.GetAnnotations()
 	if annotations == nil {
 		return false
 	}
-	_, ok := annotations[manager.SourceUIDAnnotation]
-	return ok
+	if _, ok := annotations[manager.SourceUIDAnnotation]; !ok {
+		return false
+	}
+	return s.agentMode(resource.GetNamespace()) == types.AgentModeAutonomous
+}
+
+// isAppProjectFromAutonomousAgent detects autonomous AppProjects.
+// Mirrored autonomous AppProjects live in the
+// principal namespace, so we also check Spec.SourceNamespaces[0] (agent name).
+func (s *Server) isAppProjectFromAutonomousAgent(project *v1alpha1.AppProject) bool {
+	if project == nil {
+		return false
+	}
+	if s.isResourceFromAutonomousAgent(project) {
+		return true
+	}
+	annotations := project.GetAnnotations()
+	if annotations == nil {
+		return false
+	}
+	if _, ok := annotations[manager.SourceUIDAnnotation]; !ok {
+		return false
+	}
+	if len(project.Spec.SourceNamespaces) == 0 {
+		return false
+	}
+	return s.agentMode(project.Spec.SourceNamespaces[0]) == types.AgentModeAutonomous
 }
 
 func isTerminateOperation(old, new *v1alpha1.Application) bool {
@@ -788,7 +999,7 @@ func isTerminateOperation(old, new *v1alpha1.Application) bool {
 // If destination-based mapping is enabled, the agent name is determined from
 // spec.destination.name. Otherwise, the agent name is the application's namespace.
 func (s *Server) getAgentNameForApp(app *v1alpha1.Application) string {
-	if isResourceFromAutonomousAgent(app) {
+	if s.isResourceFromAutonomousAgent(app) {
 		return app.Namespace
 	}
 
@@ -834,7 +1045,7 @@ func (s *Server) GetAgentForApp(namespace, name string) string {
 // handleAppAgentChange handles the case when an application's destination.name changes,
 // meaning it needs to be moved from one agent to another.
 func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Application, logCtx *logrus.Entry) {
-	if isResourceFromAutonomousAgent(old) || isResourceFromAutonomousAgent(new) {
+	if s.isResourceFromAutonomousAgent(old) || s.isResourceFromAutonomousAgent(new) {
 		return
 	}
 
@@ -853,13 +1064,15 @@ func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Ap
 		s.resources.Remove(oldAgentName, resources.NewResourceKeyFromApp(old))
 
 		if !s.queues.HasQueuePair(oldAgentName) {
-			if err := s.queues.Create(oldAgentName); err != nil {
-				logCtx.WithError(err).Error("failed to create queue pair for old agent")
+			if s.clusterMgr == nil || s.clusterMgr.HasMapping(oldAgentName) {
+				if err := s.queues.Create(oldAgentName); err != nil {
+					logCtx.WithError(err).Error("failed to create queue pair for old agent")
+				}
 			}
 		}
 		if oldQ := s.queues.SendQ(oldAgentName); oldQ != nil {
 			deleteEv := s.events.ApplicationEvent(event.Delete, old)
-			tracing.InjectTraceContext(ctx, deleteEv)
+			s.stampEvent(ctx, deleteEv)
 			oldQ.Add(deleteEv)
 			logCtx.Debug("Sent delete event to old agent")
 		}
@@ -867,9 +1080,12 @@ func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Ap
 	}
 
 	if newAgentName != "" {
-		// Add mapping for the new agent
-		s.trackAppToAgent(new, newAgentName)
-		s.resources.Add(newAgentName, resources.NewResourceKeyFromApp(new))
+		// Only map to the new agent if it's actually a connected agent, otherwise we'd
+		// poison the Redis proxy routing for an app that isn't agent-managed.
+		if s.clusterMgr == nil || s.clusterMgr.HasMapping(newAgentName) {
+			s.trackAppToAgent(new, newAgentName)
+			s.resources.Add(newAgentName, resources.NewResourceKeyFromApp(new))
+		}
 	}
 }
 
@@ -881,7 +1097,7 @@ func (s *Server) startSpan(operation, resourceKind string, obj metav1.Object) (c
 	}
 
 	agentMode := types.AgentModeManaged
-	if isResourceFromAutonomousAgent(obj) {
+	if s.isResourceFromAutonomousAgent(obj) {
 		agentMode = types.AgentModeAutonomous
 	}
 
@@ -926,4 +1142,15 @@ func (c *concurrentMap[K, V]) Delete(key K) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.m, key)
+}
+
+// DeleteByValue removes all entries whose value equals the given value.
+func (c *concurrentMap[K, V]) DeleteByValue(value V, eq func(a, b V) bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, v := range c.m {
+		if eq(v, value) {
+			delete(c.m, k)
+		}
+	}
 }

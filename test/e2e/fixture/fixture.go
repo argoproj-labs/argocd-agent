@@ -17,7 +17,13 @@ package fixture
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
+	"reflect"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -38,7 +44,119 @@ import (
 const (
 	// EnvVariablesFromE2EFile holds the env variables that are configured from the e2e tests
 	EnvVariablesFromE2EFile = "/tmp/argocd-agent-e2e"
+
+	// PrincipalNamespace is the namespace where principal components run in the control-plane vcluster.
+	PrincipalNamespace = "argocd-principal"
+
+	// ManagedAgentNamespace is the namespace where managed agent components run in the agent-managed vcluster.
+	ManagedAgentNamespace = "argocd-managed"
+
+	// AutonomousAgentNamespace is the namespace where autonomous agent components run in the agent-autonomous vcluster.
+	AutonomousAgentNamespace = "argocd-autonomous"
+
+	// E2EDestinationBasedEnv is the environment variable that enables
+	// destination-based mapping mode for e2e tests.
+	E2EDestinationBasedEnv = "E2E_DESTINATION_BASED_MAPPING"
+
+	// DestMappingAppNamespace is the namespace used on the principal for
+	// Application CRs when running in destination-based mapping mode. It
+	// intentionally differs from the agent name to verify that apps in
+	// arbitrary namespaces are routed correctly.
+	DestMappingAppNamespace = "agent-test"
 )
+
+// IsDestinationBased returns true when the e2e suite is running in
+// destination-based mapping mode.
+func IsDestinationBased() bool {
+	return strings.ToLower(os.Getenv(E2EDestinationBasedEnv)) == "true"
+}
+
+// ManagedDestination returns the ApplicationDestination for a managed-agent
+// application. In namespace-scoped mode it uses the server URL; in
+// destination-based mode it uses the cluster name.
+func ManagedDestination(targetNs string) argoapp.ApplicationDestination {
+	if IsDestinationBased() {
+		return argoapp.ApplicationDestination{
+			Name:      "agent-managed",
+			Namespace: targetNs,
+		}
+	}
+	return argoapp.ApplicationDestination{
+		Server:    "https://kubernetes.default.svc",
+		Namespace: targetNs,
+	}
+}
+
+// ManagedAgentAppNamespace returns the namespace where an application exists
+// on the managed agent cluster. In namespace-scoped mode apps are placed in
+// the agent's argocd namespace; in destination-based mode the app stays in
+// DestMappingAppNamespace.
+func ManagedAgentAppNamespace() string {
+	if IsDestinationBased() {
+		return DestMappingAppNamespace
+	}
+	return ManagedAgentNamespace
+}
+
+// ManagedPrincipalAppNamespace returns the namespace where a managed
+// application is created on the principal cluster. In namespace-scoped mode
+// this is always "agent-managed"; in destination-based mode it is
+// DestMappingAppNamespace.
+func ManagedPrincipalAppNamespace() string {
+	if IsDestinationBased() {
+		return DestMappingAppNamespace
+	}
+	return "agent-managed"
+}
+
+func managedPrincipalCleanupNamespaces() []string {
+	if IsDestinationBased() {
+		return []string{"agent-managed", DestMappingAppNamespace}
+	}
+	return []string{"agent-managed"}
+}
+
+func managedAgentCleanupNamespaces() []string {
+	if IsDestinationBased() {
+		return []string{ManagedAgentNamespace, DestMappingAppNamespace}
+	}
+	return []string{ManagedAgentNamespace, "agent-managed"}
+}
+
+// WriteEnvVarsToFile writes environment variables to the e2e config file.
+// In destination-based mode the destination mapping variables are always
+// included. Pass nil to write only the base destination variables (or clear
+// the file in namespace-scoped mode).
+func WriteEnvVarsToFile(vars map[string]string) error {
+	allVars := make(map[string]string)
+	if IsDestinationBased() {
+		allVars["ARGOCD_AGENT_DESTINATION_BASED_MAPPING"] = "true"
+		allVars["ARGOCD_AGENT_CREATE_NAMESPACE"] = "true"
+		allVars["ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING"] = "true"
+	}
+	maps.Copy(allVars, vars)
+	if len(allVars) == 0 {
+		os.Remove(EnvVariablesFromE2EFile)
+		return nil
+	}
+	var buf strings.Builder
+	for k, v := range allVars {
+		fmt.Fprintf(&buf, "%s=%s\n", k, v)
+	}
+	return os.WriteFile(EnvVariablesFromE2EFile, []byte(buf.String()), 0644)
+}
+
+// ClearEnvVarsFile removes extra environment variables from the config file,
+// keeping destination-based mapping variables when running in that mode.
+func ClearEnvVarsFile() {
+	if IsDestinationBased() {
+		_ = WriteEnvVarsToFile(nil)
+	} else {
+		os.Remove(EnvVariablesFromE2EFile)
+	}
+}
+
+var destinationSetupOnce sync.Once
 
 type BaseSuite struct {
 	suite.Suite
@@ -73,6 +191,129 @@ func (suite *BaseSuite) SetupSuite() {
 	suite.ClusterDetails = &ClusterDetails{}
 	err = getClusterConfigurations(suite.Ctx, suite.ManagedAgentClient, suite.PrincipalClient, suite.ClusterDetails)
 	requires.Nil(err)
+
+	if IsDestinationBased() {
+		destinationSetupOnce.Do(func() {
+			suite.setupDestinationBasedMapping()
+		})
+	}
+}
+
+// setupDestinationBasedMapping configures the cluster for destination-based
+// mapping: writes env vars to the config file, patches the default AppProject
+// on the principal, patches argocd-cmd-params-cm on the managed agent, and
+// restarts the application controller so it watches all namespaces.
+//
+// The agent and principal processes are expected to have been started in
+// destination-based mode already.
+func (suite *BaseSuite) setupDestinationBasedMapping() {
+	requires := suite.Require()
+	suite.T().Log("Setting up destination-based mapping mode")
+
+	err := WriteEnvVarsToFile(nil)
+	requires.NoError(err)
+
+	// Create the agent-test namespace on the principal so Application CRs can be
+	// placed there.
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: DestMappingAppNamespace}}
+	if createErr := suite.PrincipalClient.Create(suite.Ctx, ns, metav1.CreateOptions{}); createErr != nil {
+		if !errors.IsAlreadyExists(createErr) {
+			requires.NoError(createErr)
+		}
+	}
+
+	// Also create the namespace on the managed agent so that tests which
+	// directly create Application CRs on the agent (e.g. adoption tests)
+	// can do so before the agent's auto-create logic kicks in.
+	agentNs := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: DestMappingAppNamespace}}
+	if createErr := suite.ManagedAgentClient.Create(suite.Ctx, agentNs, metav1.CreateOptions{}); createErr != nil {
+		if !errors.IsAlreadyExists(createErr) {
+			requires.NoError(createErr)
+		}
+	}
+
+	// Update the principal's default AppProject to allow apps in any source namespace.
+	defaultAppProject := &argoapp.AppProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "default",
+			Namespace: PrincipalNamespace,
+		},
+	}
+	err = EnsureUpdate(suite.Ctx, suite.PrincipalClient, defaultAppProject, func(obj KubeObject) {
+		appProject := obj.(*argoapp.AppProject)
+		appProject.Spec.SourceNamespaces = []string{"*"}
+	})
+	requires.NoError(err)
+
+	// Wait for the SourceNamespaces change to propagate to the managed agent
+	requires.Eventually(func() bool {
+		proj := &argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
+			Name: "default", Namespace: ManagedAgentNamespace,
+		}, proj, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		return slices.Contains(proj.Spec.SourceNamespaces, "*")
+	}, 30*time.Second, 1*time.Second, "SourceNamespaces should propagate to managed agent")
+
+	// Update argocd-cmd-params-cm to allow applications in any namespace.
+	// This ConfigMap is local Argo CD configuration and is not synced by
+	// the agent, so a direct update is safe.
+	acm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "argocd-cmd-params-cm",
+			Namespace: ManagedAgentNamespace,
+		},
+	}
+	err = EnsureUpdate(suite.Ctx, suite.ManagedAgentClient, acm, func(obj KubeObject) {
+		configMap := obj.(*corev1.ConfigMap)
+		if configMap.Data == nil {
+			configMap.Data = map[string]string{}
+		}
+		configMap.Data["application.namespaces"] = "*"
+	})
+	requires.NoError(err)
+
+	suite.RestartApplicationController()
+}
+
+// RestartApplicationController deletes the application controller pod on the
+// managed agent and waits for the replacement to become ready.
+func (suite *BaseSuite) RestartApplicationController() {
+	requires := suite.Require()
+	podList := &corev1.PodList{}
+	err := suite.ManagedAgentClient.List(suite.Ctx, ManagedAgentNamespace, podList, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=argocd-application-controller",
+	})
+	requires.NoError(err)
+	requires.True(len(podList.Items) > 0, "expected at least one application controller pod")
+
+	oldUID := podList.Items[0].UID
+	err = suite.ManagedAgentClient.Delete(suite.Ctx, &podList.Items[0], metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	requires.Eventually(func() bool {
+		pod := &corev1.Pod{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, types.NamespacedName{
+			Name: podList.Items[0].Name, Namespace: ManagedAgentNamespace,
+		}, pod, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+
+		if oldUID == pod.UID {
+			suite.T().Log("Old application controller pod still terminating...")
+			return false
+		}
+
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+				return true
+			}
+		}
+		return false
+	}, 120*time.Second, 2*time.Second, "Application controller pod should become ready")
 }
 
 func (suite *BaseSuite) SetupTest() {
@@ -81,7 +322,7 @@ func (suite *BaseSuite) SetupTest() {
 
 	// Ensure that the autonomous agent's default AppProject exists on the principal
 	project := &argoapp.AppProject{}
-	key := types.NamespacedName{Name: "default", Namespace: "argocd"}
+	key := types.NamespacedName{Name: "default", Namespace: AutonomousAgentNamespace}
 	err = suite.AutonomousAgentClient.Get(suite.Ctx, key, project, metav1.GetOptions{})
 	suite.Require().Nil(err)
 	now := time.Now().Format(time.RFC3339)
@@ -94,7 +335,7 @@ func (suite *BaseSuite) SetupTest() {
 
 	suite.Require().Eventually(func() bool {
 		project := &argoapp.AppProject{}
-		key := types.NamespacedName{Name: "agent-autonomous-default", Namespace: "argocd"}
+		key := types.NamespacedName{Name: "agent-autonomous-default", Namespace: PrincipalNamespace}
 		err := suite.PrincipalClient.Get(suite.Ctx, key, project, metav1.GetOptions{})
 		return err == nil && len(project.Annotations) > 0 && project.Annotations["created"] == now
 	}, 30*time.Second, 1*time.Second)
@@ -110,10 +351,10 @@ func (suite *BaseSuite) TearDownTest() {
 
 // EnsureDeletion will issue a delete for a namespace-scoped K8s resource, then wait for it to no longer exist
 func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) error {
-	// Wait for the object to be deleted  for 60 seconds
+	// Wait for the object to be deleted for 180 seconds
 	// - Primarily this will be waiting for the finalizer to be removed, so that the object is deleted
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 60; count++ {
+	for range 180 {
 		err := kclient.Delete(ctx, obj, metav1.DeleteOptions{})
 		if errors.IsNotFound(err) {
 			// object is already deleted
@@ -144,7 +385,7 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 
 	// Continue waiting for object to be deleted, now that finalizers have been removed.
 	key = types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 60; count++ {
+	for range 180 {
 		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			return nil
@@ -159,9 +400,9 @@ func EnsureDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) err
 }
 
 // WaitForDeletion will wait for a resource to be deleted
-func WaitForDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) error {
+func WaitForDeletion(ctx context.Context, kclient KubeClient, obj KubeObject, debugContext string) error {
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
-	for count := 0; count < 60; count++ {
+	for range 180 {
 		err := kclient.Get(ctx, key, obj, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
@@ -171,7 +412,13 @@ func WaitForDeletion(ctx context.Context, kclient KubeClient, obj KubeObject) er
 		}
 		time.Sleep(1 * time.Second)
 	}
-	return fmt.Errorf("WaitForDeletion: timeout waiting for deletion of %s/%s", key.Namespace, key.Name)
+
+	if debugContext != "" {
+		debugContext = "(" + debugContext + ")"
+	}
+
+	typeName := reflect.TypeOf(obj).Elem().Name()
+	return fmt.Errorf("WaitForDeletion: timeout waiting for deletion of %s %s/%s %s", typeName, key.Namespace, key.Name, debugContext)
 }
 
 // EnsureUpdate will ensure that the object is updated by retrying if there is a conflict.
@@ -206,8 +453,9 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 	var list argoapp.ApplicationList
 	var err error
 
-	// Remove any previously configured env variables from the config file
-	os.Remove(EnvVariablesFromE2EFile)
+	// Remove any previously configured env variables from the config file,
+	// preserving destination-based mapping vars when running in that mode.
+	ClearEnvVarsFile()
 
 	// Deletion should always propagate from the source of truth to the managed cluster
 	// Skip deletion of resources that have been created from a source
@@ -221,7 +469,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 	// Delete all applications from the autonomous agent
 	list = argoapp.ApplicationList{}
-	err = autonomousAgentClient.List(ctx, "argocd", &list, metav1.ListOptions{})
+	err = autonomousAgentClient.List(ctx, AutonomousAgentNamespace, &list, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
@@ -237,46 +485,54 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 		// Wait for the app to be deleted from the control plane
 		app.SetNamespace("agent-autonomous")
-		err = WaitForDeletion(ctx, principalClient, &app)
+		err = WaitForDeletion(ctx, principalClient, &app, "principal")
 		if err != nil {
 			return err
 		}
 	}
 
 	// Delete all managed applications from the principal
-	list = argoapp.ApplicationList{}
-	err = principalClient.List(ctx, "agent-managed", &list, metav1.ListOptions{})
-	if err != nil {
-		return err
-	}
-	for _, app := range list.Items {
-		if isFromSource(app.GetAnnotations()) {
-			continue
-		}
-
-		err = EnsureDeletion(ctx, principalClient, &app)
+	for _, principalNs := range managedPrincipalCleanupNamespaces() {
+		list = argoapp.ApplicationList{}
+		err = principalClient.List(ctx, principalNs, &list, metav1.ListOptions{})
 		if err != nil {
 			return err
 		}
+		for _, app := range list.Items {
+			if isFromSource(app.GetAnnotations()) {
+				continue
+			}
 
-		// Wait for the app to be deleted from the managed cluster
-		app.SetNamespace("argocd")
-		err = WaitForDeletion(ctx, managedAgentClient, &app)
-		if err != nil {
-			return err
+			err = EnsureDeletion(ctx, principalClient, &app)
+			if err != nil {
+				return err
+			}
+
+			// Wait for the app to be deleted from the managed cluster.
+			agentNs := ManagedAgentNamespace
+			if principalNs == DestMappingAppNamespace {
+				agentNs = DestMappingAppNamespace
+			}
+			app.SetNamespace(agentNs)
+			err = WaitForDeletion(ctx, managedAgentClient, &app, "managed agent")
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	// Delete any remaining managed applications left on the managed agent
-	list = argoapp.ApplicationList{}
-	err = managedAgentClient.List(ctx, "argocd", &list, metav1.ListOptions{})
-	if err != nil {
-		return err
-	}
-	for _, app := range list.Items {
-		err = EnsureDeletion(ctx, managedAgentClient, &app)
+	for _, agentNs := range managedAgentCleanupNamespaces() {
+		list = argoapp.ApplicationList{}
+		err = managedAgentClient.List(ctx, agentNs, &list, metav1.ListOptions{})
 		if err != nil {
 			return err
+		}
+		for _, app := range list.Items {
+			err = EnsureDeletion(ctx, managedAgentClient, &app)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -295,7 +551,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 	// Delete all appProjects from the autonomous agent
 	appProjectList := argoapp.AppProjectList{}
-	err = autonomousAgentClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
+	err = autonomousAgentClient.List(ctx, AutonomousAgentNamespace, &appProjectList, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
@@ -315,8 +571,8 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 		// Wait for the appProject to be deleted from the control plane
 		appProject.SetName("agent-autonomous-" + appProject.Name)
-		appProject.SetNamespace("argocd")
-		err = WaitForDeletion(ctx, principalClient, &appProject)
+		appProject.SetNamespace(PrincipalNamespace)
+		err = WaitForDeletion(ctx, principalClient, &appProject, "principal")
 		if err != nil {
 			return err
 		}
@@ -324,7 +580,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 	// Delete all appProjects from the principal
 	appProjectList = argoapp.AppProjectList{}
-	err = principalClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
+	err = principalClient.List(ctx, PrincipalNamespace, &appProjectList, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
@@ -343,8 +599,8 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		}
 
 		// Wait for the appProject to be deleted from the managed cluster
-		appProject.SetNamespace("argocd")
-		err = WaitForDeletion(ctx, managedAgentClient, &appProject)
+		appProject.SetNamespace(ManagedAgentNamespace)
+		err = WaitForDeletion(ctx, managedAgentClient, &appProject, "managed agent")
 		if err != nil {
 			return err
 		}
@@ -352,7 +608,7 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 
 	// Delete all appProjects from the managed agent
 	appProjectList = argoapp.AppProjectList{}
-	err = managedAgentClient.List(ctx, "argocd", &appProjectList, metav1.ListOptions{})
+	err = managedAgentClient.List(ctx, ManagedAgentNamespace, &appProjectList, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
@@ -366,59 +622,75 @@ func CleanUp(ctx context.Context, principalClient KubeClient, managedAgentClient
 		}
 	}
 
-	repoLabelSelector := metav1.LabelSelector{
-		MatchLabels: map[string]string{
-			common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
-		},
-	}
-	repoListOpts := metav1.ListOptions{
-		LabelSelector: labels.SelectorFromSet(repoLabelSelector.MatchLabels).String(),
+	// Delete all repository and repo-creds secrets from all clusters
+	for _, secretType := range []string{common.LabelValueSecretTypeRepository, common.LabelValueSecretTypeRepoCreds} {
+		repoListOpts := metav1.ListOptions{
+			LabelSelector: labels.SelectorFromSet(map[string]string{
+				common.LabelKeySecretType: secretType,
+			}).String(),
+		}
+
+		repoList := corev1.SecretList{}
+		err = principalClient.List(ctx, PrincipalNamespace, &repoList, repoListOpts)
+		if err != nil {
+			return err
+		}
+		for _, repo := range repoList.Items {
+			err = EnsureDeletion(ctx, principalClient, &repo)
+			if err != nil {
+				return err
+			}
+
+			repo.SetNamespace(ManagedAgentNamespace)
+			err = WaitForDeletion(ctx, managedAgentClient, &repo, "managed agent")
+			if err != nil {
+				return err
+			}
+		}
+
+		repoList = corev1.SecretList{}
+		err = autonomousAgentClient.List(ctx, AutonomousAgentNamespace, &repoList, repoListOpts)
+		if err != nil {
+			return err
+		}
+		for _, repo := range repoList.Items {
+			err = EnsureDeletion(ctx, autonomousAgentClient, &repo)
+			if err != nil {
+				return err
+			}
+		}
+		repoList = corev1.SecretList{}
+		err = managedAgentClient.List(ctx, ManagedAgentNamespace, &repoList, repoListOpts)
+		if err != nil {
+			return err
+		}
+		for _, repo := range repoList.Items {
+			err = EnsureDeletion(ctx, managedAgentClient, &repo)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
-	// Delete all repositories from the principal
-	repoList := corev1.SecretList{}
-	err = principalClient.List(ctx, "argocd", &repoList, repoListOpts)
+	// Delete GPG keys ConfigMap from the principal
+	gpgKeysCM := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: PrincipalNamespace}}
+	err = EnsureDeletion(ctx, principalClient, gpgKeysCM)
 	if err != nil {
 		return err
 	}
-	for _, repo := range repoList.Items {
-		err = EnsureDeletion(ctx, principalClient, &repo)
-		if err != nil {
-			return err
-		}
 
-		// Wait for the repository to be deleted from the managed cluster
-		repo.SetNamespace("argocd")
-		err = WaitForDeletion(ctx, managedAgentClient, &repo)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Delete all repositories from the autonomous agent
-	repoList = corev1.SecretList{}
-	err = autonomousAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
+	// Wait for the GPG keys ConfigMap to be deleted from the managed agent
+	gpgKeysCM = &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: ManagedAgentNamespace}}
+	err = WaitForDeletion(ctx, managedAgentClient, gpgKeysCM, "managed agent")
 	if err != nil {
 		return err
 	}
-	for _, repo := range repoList.Items {
-		err = EnsureDeletion(ctx, autonomousAgentClient, &repo)
-		if err != nil {
-			return err
-		}
-	}
 
-	// Delete all repositories from the managed agent
-	repoList = corev1.SecretList{}
-	err = managedAgentClient.List(ctx, "argocd", &repoList, repoListOpts)
+	// Delete GPG keys ConfigMap from the autonomous agent
+	gpgKeysCM = &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: AutonomousAgentNamespace}}
+	err = EnsureDeletion(ctx, autonomousAgentClient, gpgKeysCM)
 	if err != nil {
 		return err
-	}
-	for _, repo := range repoList.Items {
-		err = EnsureDeletion(ctx, managedAgentClient, &repo)
-		if err != nil {
-			return err
-		}
 	}
 
 	// Remove known finalizer-containing resources from guestbook ns (before we delete the NS in the next step)
@@ -489,4 +761,12 @@ func resetManagedAgentClusterInfo(clusterDetails *ClusterDetails) error {
 		return err
 	}
 	return nil
+}
+
+// SkipIfAgentInClusterEnvVarIsSet should be called to verify that the test (or utility function) is running locally (that is, not on cluster). If the test is running on cluster, the correct step is to skip the test.
+func SkipIfAgentInClusterEnvVarIsSet(t *testing.T) {
+	t.Helper()
+	if os.Getenv("ARGOCD_AGENT_IN_CLUSTER") == "true" {
+		t.Skip("skipping because ARGOCD_AGENT_IN_CLUSTER=true")
+	}
 }

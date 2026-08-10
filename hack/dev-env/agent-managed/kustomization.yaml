@@ -11,6 +11,9 @@ images:
 - name: quay.io/argoproj/argocd
   newTag: LatestReleaseTag
 
+transformers:
+- namespace-transformer.yaml
+
 patches:
 - path: argocd-cmd-params-cm.yaml
 - path: argocd-secret.yaml

@@ -30,7 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func signedTokenWithClaims(method jwt.SigningMethod, key interface{}, claims jwt.Claims) (string, error) {
+func signedTokenWithClaims(method jwt.SigningMethod, key any, claims jwt.Claims) (string, error) {
 	tok := jwt.NewWithClaims(method, claims)
 	return tok.SignedString(key)
 }
