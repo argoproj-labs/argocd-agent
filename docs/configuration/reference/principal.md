@@ -321,8 +321,8 @@ Path to file containing the resource proxy's TLS CA data.
 
 ## Self-Registration Configuration (Experimental)
 
-!!! warning "Experimental Feature"
-    Agent self-registration is an experimental feature and may change or be removed in future releases.
+!!! note "Beta feature"
+    Agent self-registration is currently in beta state and may have rough edges.
 
 ### Enable Self Cluster Registration
 
