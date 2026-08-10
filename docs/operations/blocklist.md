@@ -24,13 +24,13 @@ The principal also logs each agent's fingerprint on successful authentication.
 
 ```bash
 # Add a fingerprint
-argocd-agentctl blocklist add "A12B3C4D..."
+argocd-agentctl blocklist tls add "A12B3C4D..."
 
 # Remove a fingerprint
-argocd-agentctl blocklist remove "A12B3C4D..."
+argocd-agentctl blocklist tls remove "A12B3C4D..."
 
 # List all blocked fingerprints
-argocd-agentctl blocklist list
+argocd-agentctl blocklist tls list
 ```
 
 ## ConfigMap Format

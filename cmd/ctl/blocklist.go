@@ -32,17 +32,28 @@ const (
 func NewBlocklistCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "blocklist",
-		Short: "Manage the TLS certificate blocklist",
+		Short: "Manage blocklists",
 	}
 
-	cmd.AddCommand(NewBlocklistAddCommand())
-	cmd.AddCommand(NewBlocklistRemoveCommand())
-	cmd.AddCommand(NewBlocklistListCommand())
+	cmd.AddCommand(NewBlocklistTLSCommand())
 
 	return cmd
 }
 
-func NewBlocklistAddCommand() *cobra.Command {
+func NewBlocklistTLSCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "tls",
+		Short: "Manage the TLS certificate fingerprint blocklist",
+	}
+
+	cmd.AddCommand(NewBlocklistTLSAddCommand())
+	cmd.AddCommand(NewBlocklistTLSRemoveCommand())
+	cmd.AddCommand(NewBlocklistTLSListCommand())
+
+	return cmd
+}
+
+func NewBlocklistTLSAddCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <fingerprint>",
 		Short: "Add a certificate fingerprint to the blocklist",
@@ -82,7 +93,7 @@ func NewBlocklistAddCommand() *cobra.Command {
 	return cmd
 }
 
-func NewBlocklistRemoveCommand() *cobra.Command {
+func NewBlocklistTLSRemoveCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove <fingerprint>",
 		Short: "Remove a certificate fingerprint from the blocklist",
@@ -128,7 +139,7 @@ func NewBlocklistRemoveCommand() *cobra.Command {
 	return cmd
 }
 
-func NewBlocklistListCommand() *cobra.Command {
+func NewBlocklistTLSListCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all fingerprints in the blocklist",
