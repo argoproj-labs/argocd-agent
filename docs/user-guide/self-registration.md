@@ -1,7 +1,7 @@
 # Agent Self-Registration
 
-!!! warning "Experimental Feature"
-    Agent self-registration is an **experimental feature** and may change or be removed in future releases. Use it with caution in production environments.
+!!! note "Beta feature"
+    Agent self-registration is beta feature and may have rough edges
 
 ## Overview
 
