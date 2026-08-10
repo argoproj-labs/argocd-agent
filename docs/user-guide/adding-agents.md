@@ -5,7 +5,7 @@ This document explains how to add new agents to your argocd-agent deployment and
 !!! tip "Looking for automated onboarding?"
     If you want agents to register themselves automatically instead of creating
     cluster secrets manually, see
-    [Agent self-registration (Experimental)](./self-registration.md).
+    [Agent self-registration (Beta)](./self-registration.md).
 
 ## Overview
 
