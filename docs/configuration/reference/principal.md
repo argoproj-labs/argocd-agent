@@ -319,7 +319,7 @@ Secret name of the resource proxy's CA certificate.
 
 Path to file containing the resource proxy's TLS CA data.
 
-## Self-Registration Configuration (Experimental)
+## Self-Registration Configuration (Beta)
 
 !!! note "Beta feature"
     Agent self-registration is currently in beta state and may have rough edges.
@@ -334,7 +334,7 @@ Path to file containing the resource proxy's TLS CA data.
 | **Type** | Boolean |
 | **Default** | `false` |
 
-Experimental: Whether to allow agents with valid credentials to automatically create their own cluster secrets on first connection. Requires `--enable-resource-proxy` and `--self-registration-client-cert-secret` to be set. See the [self-registration user guide](../../user-guide/self-registration.md) for details.
+Beta: Whether to allow agents with valid credentials to automatically create their own cluster secrets on first connection. Requires `--enable-resource-proxy` and `--self-registration-client-cert-secret` to be set. See the [self-registration user guide](../../user-guide/self-registration.md) for details.
 
 ### Self-Registration Client Cert Secret
 
@@ -346,7 +346,7 @@ Experimental: Whether to allow agents with valid credentials to automatically cr
 | **Type** | String |
 | **Default** | `""` |
 
-Experimental: Name of a Kubernetes secret containing the shared TLS client certificate used in self-registered cluster secrets. The secret must contain `tls.crt`, `tls.key`, and `ca.crt` keys. Required when `--enable-self-cluster-registration` is `true`.
+Beta: Name of a Kubernetes secret containing the shared TLS client certificate used in self-registered cluster secrets. The secret must contain `tls.crt`, `tls.key`, and `ca.crt` keys. Required when `--enable-self-cluster-registration` is `true`.
 
 ## JWT Configuration
 
