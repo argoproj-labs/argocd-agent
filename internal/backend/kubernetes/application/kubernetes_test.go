@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
+	"github.com/argoproj/argo-cd/v3/util/settings"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wI2L/jsondiff"
@@ -36,6 +37,10 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 )
+
+func init() {
+	settings.ConfigureGoClientFeatures()
+}
 
 func Test_NewKubernetes(t *testing.T) {
 	t.Run("New with patch capability", func(t *testing.T) {
