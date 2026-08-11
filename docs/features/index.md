@@ -28,6 +28,12 @@ argocd-agent transforms traditional multi-cluster Argo CD deployments by inverti
 
 **[OpenTelemetry Tracing](../operations/tracing.md)**: Distributed tracing support using OpenTelemetry with OTLP export. Provides visibility into gRPC communication, resource synchronization, event processing, and Kubernetes operations across the distributed architecture.
 
+### Mapping Modes
+
+**[Namespace-Based Mapping](../concepts/agent-mapping.md#namespace-based-mapping-default)** (default): Applications are routed to agents based on their namespace on the control plane. Each agent has a dedicated namespace, and any Application placed in that namespace is synced to the corresponding agent. Simple to configure with no additional flags required.
+
+**[Destination-Based Mapping](../concepts/agent-mapping.md#destination-based-mapping)**: Applications are routed to agents based on `spec.destination.name`, matching the same targeting model that traditional Argo CD uses with cluster secrets. Multiple namespaces can target the same agent, enabling multi-tenancy and team-based namespace isolation.
+
 ### Resource Management
 
 **Application Synchronization**: Full lifecycle management of Argo CD Applications, including creation, updates, deletion, and status reporting across the distributed architecture.

@@ -4,27 +4,38 @@ This document explains how Argo CD `Applications` are synchronized between the p
 
 ## Overview
 
-Application synchronization in argocd-agent follows a fundamentally different pattern than AppProjects. Applications are mapped to agents using **namespaces**, where each namespace on the principal corresponds to a specific agent. This provides a clear and scalable way to manage Applications across multiple clusters.
+Application synchronization in argocd-agent supports two mapping modes that determine how Applications are routed to agents:
 
-The synchronization mechanism varies depending on the agent mode:
+- **Namespace-based mapping** (default): Applications are mapped to agents using **namespaces**, where each namespace on the principal corresponds to a specific agent.
+- **Destination-based mapping**: Applications are mapped to agents using `spec.destination.name`, allowing multiple namespaces to route to the same agent.
+
+The synchronization mechanism also varies depending on the agent mode:
 
 - **Managed agents**: Applications are created on the principal and distributed to agents; agents send status updates back
 - **Autonomous agents**: Applications are created on the agent and synchronized to the principal; principal acts as a read-only mirror for specifications but can still perform sync, refresh, and resource actions
+
+!!! tip "Choosing a Mapping Mode"
+    If you are unsure which mode to use, see [Agent Mapping Modes](../concepts/agent-mapping.md) for a detailed comparison. Destination-based mapping is recommended for multi-tenant environments and when using ApplicationSets targeting multiple agents.
 
 ## Managed Agent Mode
 
 ### Creating Applications
 
-In managed mode, Applications must be created in the **agent's corresponding namespace** on the **principal cluster** (control plane). The principal determines which agent should receive an Application based on the namespace where it's created.
+In managed mode, Applications are created on the **principal cluster** (control plane). The principal determines which agent should receive an Application based on the active mapping mode:
 
-### Namespace to Agent Mapping
+- **Namespace-based mapping** (default): The Application's namespace determines the target agent
+- **Destination-based mapping**: The Application's `spec.destination.name` determines the target agent
+
+### Namespace-Based Mapping (Default)
+
+#### Namespace to Agent Mapping
 
 Applications are mapped to agents through a simple naming convention:
 
 - **Namespace name on principal** = **Agent name**
 - Example: Applications in namespace `production-cluster` are sent to the agent named `production-cluster`
 
-### Example: Creating an Application for a Managed Agent
+#### Example: Creating an Application (Namespace-Based)
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -48,9 +59,9 @@ spec:
 
 When this Application is created in namespace `production-cluster` on the principal, it will be automatically sent to the managed agent named `production-cluster`.
 
-### Agent-Side Transformation
+#### Agent-Side Transformation (Namespace-Based)
 
-When an Application is sent to a managed agent, it undergoes transformation to make it agent-specific:
+When an Application is sent to a managed agent using namespace-based mapping, it undergoes transformation:
 
 1. **Destination Server**: Transformed to point to the local cluster:
 ```yaml
@@ -68,6 +79,61 @@ When an Application is sent to a managed agent, it undergoes transformation to m
 
 3. **Source UID Annotation**: Added to track the original source for synchronization purposes
 
+### Destination-Based Mapping
+
+#### How Routing Works
+
+With destination-based mapping enabled, the principal routes Applications to agents based on `spec.destination.name`. The Application's namespace is preserved rather than being used as a routing key.
+
+- Applications can live in any namespace on the principal
+- Multiple teams can share a namespace while targeting different agents
+- Applications from multiple namespaces can route to the same agent
+
+#### Example: Creating an Application (Destination-Based)
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: argocd  # Can be any namespace
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    name: production-cluster  # This determines the target agent
+    namespace: guestbook
+  syncPolicy:
+    syncOptions:
+    - CreateNamespace=true
+```
+
+When this Application is created on the principal with `destination.name: production-cluster`, it will be routed to the managed agent named `production-cluster` regardless of the Application's namespace.
+
+#### Agent-Side Transformation (Destination-Based)
+
+When an Application is sent to a managed agent using destination-based mapping, the transformation differs from namespace-based mapping:
+
+1. **Destination Server**: Transformed to point to the local cluster:
+```yaml
+   destination:
+     server: ""
+     name: "in-cluster"
+     namespace: "guestbook"
+```
+
+2. **Namespace**: The Application's **original namespace is preserved** on the agent:
+```yaml
+   metadata:
+     namespace: team-a  # Preserved from the principal
+```
+
+!!! note "Namespace Creation"
+    With destination-based mapping, the agent must create Applications in namespaces that may not exist yet. Use the `--create-namespace` flag on the agent to automatically create namespaces when needed.
+
 ### Status Synchronization
 
 In managed mode, the agent continuously monitors Application status changes and sends updates back to the principal:
@@ -83,16 +149,16 @@ If an Application is modified directly on the managed agent cluster (outside of 
 
 ### Lifecycle Management
 
-- **Creation**: Create Applications on the principal in the agent's namespace
+- **Creation**: Create Applications on the principal — in the agent's namespace (namespace-based mapping) or with `spec.destination.name` set to the agent (destination-based mapping)
 - **Updates**: Modify Applications on the principal; changes are automatically propagated
 - **Deletion**: Delete Applications on the principal; they're automatically removed from the agent
-- **Agent Connection**: When an agent connects, it receives all Applications in its namespace
+- **Agent Connection**: When an agent connects, it receives all Applications that are mapped to it
 
 ## Autonomous Agent Mode
 
 ### Creating Applications
 
-In autonomous mode, Applications are created directly on the **agent cluster**. The agent then synchronizes these Applications to the principal, where they appear in a namespace named after the agent.
+In autonomous mode, Applications are created directly on the **agent cluster**. The agent then synchronizes these Applications to the principal, where they appear in a dedicated namespace named after the agent on the control plane.
 
 ### Example: Creating an Application on an Autonomous Agent
 
@@ -151,7 +217,7 @@ The principal serves as a centralized view of all Applications across autonomous
 
 ## Best Practices
 
-### For Managed Agents
+### For Managed Agents (Namespace-Based Mapping)
 
 1. **Namespace Organization**: Use clear, descriptive namespace names that match your agent names:
 ```
@@ -172,6 +238,29 @@ The principal serves as a centralized view of all Applications across autonomous
 
 4. **Avoid Direct Changes**: Never modify Applications directly on agent clusters; always use the principal
 
+### For Managed Agents (Destination-Based Mapping)
+
+1. **Use Consistent destination.name**: Ensure `spec.destination.name` exactly matches the agent name:
+```yaml
+   spec:
+     destination:
+       name: production-east  # Must match agent name
+       namespace: my-app
+```
+
+2. **Organize by Team or Project**: Since Applications are not bound to agent-specific namespaces, organize them by team, project, or environment instead:
+```yaml
+   metadata:
+     name: frontend-prod
+     namespace: team-platform  # Need not match agent
+```
+
+3. **Enable Namespace Creation**: Use `--create-namespace` on agents to handle namespaces that may not exist yet
+
+4. **Configure Allowed Namespaces**: Restrict which namespaces the agent and principal can operate in using `--allowed-namespaces` with glob patterns for security
+
+5. **AppProject sourceNamespaces**: Ensure your AppProjects have `sourceNamespaces` configured to allow Applications from the namespaces you use
+
 ### For Autonomous Agents
 
 1. **Project Management**: Be mindful of project names as they may be prefixed on the principal:
@@ -188,10 +277,12 @@ The principal serves as a centralized view of all Applications across autonomous
 
 ### Application Not Appearing on Agent (Managed Mode)
 
-1. **Check Namespace**: Verify the Application is created in the correct namespace on the principal
-2. **Verify Agent Connection**: Ensure the agent is connected and the namespace name matches the agent name
-3. **Review Logs**: Check principal logs for distribution events and agent logs for reception
-4. **Check Source UID**: Look for source UID annotations to verify proper synchronization
+1. **Check Namespace** (namespace-based mapping): Verify the Application is created in the correct namespace on the principal
+2. **Check destination.name** (destination-based mapping): Verify `spec.destination.name` matches the agent name exactly and both principal and agent have `--destination-based-mapping` enabled
+3. **Verify Agent Connection**: Ensure the agent is connected and the namespace name matches the agent name
+4. **Review Logs**: Check principal logs for distribution events and agent logs for reception
+5. **Check Source UID**: Look for source UID annotations to verify proper synchronization
+6. **Check Allowed Namespaces** (destination-based mapping): Verify the Application's namespace is included in `--allowed-namespaces` on both principal and agent
 
 ### Application Not Appearing on Principal (Autonomous Mode)
 
@@ -311,7 +402,7 @@ This Application will remain only on the autonomous agent cluster and will not b
 
 2. **Label Removal**: If you remove the skip sync label from an existing Application, it will begin synchronizing according to the normal rules for your agent mode.
 
-3. **Namespace Rules Still Apply**: The skip sync label doesn't override namespace-based filtering. Applications must still be in allowed namespaces to be processed.
+3. **Routing Rules Still Apply**: The skip sync label doesn't override the normal mapping mode rules. Applications must still be in allowed namespaces to be processed.
 
 ### Use Cases
 
