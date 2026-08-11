@@ -314,6 +314,65 @@ func TestEventWriter(t *testing.T) {
 		require.Len(t, fs.events[resID], 1)
 	})
 
+	t.Run("SendDirect delivers an ACK even when the resource queue is blocked (#839)", func(t *testing.T) {
+		fs := &fakeStream{}
+		evSender := NewEventWriter("test", fs, eventWriterLogger)
+
+		app1.ResourceVersion = "1"
+		appEv := es.ApplicationEvent(SpecUpdate, app1)
+		resID := createResourceID(app1.ObjectMeta)
+
+		// A status update for this app has been sent and is now awaiting its
+		// ACK from the peer. This occupies sentEvents[resID] and blocks the
+		// resource's normal send path.
+		evSender.Add(appEv)
+		evSender.sendEvent(resID)
+		require.Contains(t, evSender.sentEvents, resID)
+
+		// Build the processed-event ACK for an inbound event. It carries the
+		// same resourceID as the app's status updates.
+		ack := cloudevents.NewEvent()
+		ack.SetSource("test")
+		ack.SetType(EventProcessed.String())
+		ack.SetDataSchema(targets.EventAck.String())
+		ack.SetExtension(eventID, "inbound-ack")
+		ack.SetExtension(resourceID, resID)
+
+		// Root cause (#839): routing the ACK through the per-resource queue the
+		// way the agent used to (sendQ -> EventWriter.Add) leaves it stuck,
+		// because sendEvent will not drain the queue while sentEvents[resID] is
+		// still occupied by the sent-but-unacked status update.
+		evSender.Add(&ack)
+		evSender.sendEvent(resID)
+		require.NotContains(t, fs.events[resID], "inbound-ack",
+			"a queued ACK stays blocked behind the sent-but-unacked update")
+
+		// The fix: SendDirect writes the ACK straight to the stream, bypassing
+		// the per-resource queue, so it is delivered immediately despite the block.
+		require.NoError(t, evSender.SendDirect(&ack))
+		require.Contains(t, fs.events[resID], "inbound-ack")
+
+		// The blocked status update is untouched and still awaiting its own ACK.
+		require.NotNil(t, evSender.sentEvents[resID])
+		require.Equal(t, EventID(appEv), EventID(evSender.sentEvents[resID].event))
+	})
+
+	t.Run("SendDirect returns an error when no target stream is set", func(t *testing.T) {
+		evSender := NewEventWriter("test", &fakeStream{}, eventWriterLogger)
+		evSender.mu.Lock()
+		evSender.target = nil
+		evSender.mu.Unlock()
+
+		ack := cloudevents.NewEvent()
+		ack.SetSource("test")
+		ack.SetType(EventProcessed.String())
+		ack.SetDataSchema(targets.EventAck.String())
+		ack.SetExtension(eventID, "x")
+		ack.SetExtension(resourceID, "r")
+
+		require.Error(t, evSender.SendDirect(&ack))
+	})
+
 	t.Run("should not send heartbeat events to sentEvents (fire-and-forget)", func(t *testing.T) {
 		fs := &fakeStream{}
 		evSender := NewEventWriter("test", fs, eventWriterLogger)
