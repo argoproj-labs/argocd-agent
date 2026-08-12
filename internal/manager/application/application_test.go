@@ -35,6 +35,7 @@ import (
 	synccommon "github.com/argoproj/argo-cd/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
+	"github.com/argoproj/argo-cd/v3/util/settings"
 	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
@@ -1257,6 +1258,7 @@ func Test_CompareIdentity(t *testing.T) {
 
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
+	settings.ConfigureGoClientFeatures()
 }
 
 func Test_RevertManagedAppChanges(t *testing.T) {
