@@ -72,6 +72,7 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 		"event_target": ev.DataSchema(),
 		"event_type":   ev.Type(),
 		"agent_name":   agentName,
+		"event_id":     event.EventID(ev),
 	})
 
 	// Extract trace context from the incoming event
@@ -98,6 +99,10 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 
 	// Start checkpoint step
 	cp.Start(target.String())
+
+	if logCtx.Logger != nil && logCtx.Logger.IsLevelEnabled(logrus.DebugLevel) {
+		logCtx.Debugf("Queue size %d while processing event", q.Len())
+	}
 
 	logCtx.Debugf("Processing event %s", target)
 
@@ -310,13 +315,11 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
 		}
 
-		s.sourceCache.Application.Set(incoming.UID, incoming.Spec)
-
 		_, err := s.appManager.UpdateStatus(ctx, agentName, incoming)
 		if err != nil {
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
 		}
-		logCtx.Infof("Updated application spec %s", incoming.QualifiedName())
+		logCtx.Infof("Updated application status %s", incoming.QualifiedName())
 	// App deletion
 	case event.Delete.String():
 		if agentMode.IsAutonomous() {

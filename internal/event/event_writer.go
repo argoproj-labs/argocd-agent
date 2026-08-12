@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"math/rand/v2"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
@@ -148,7 +150,7 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 		eq.add(&eventMessage{
 			event:   ev,
 			backoff: &defaultBackoff,
-		})
+		}, logCtx)
 		ew.unsentEvents[resID] = eq
 		logCtx.Trace("cleared all events and added DELETE event")
 		return
@@ -161,7 +163,7 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 		eq.add(&eventMessage{
 			event:   ev,
 			backoff: &defaultBackoff,
-		})
+		}, logCtx)
 		ew.unsentEvents[resID] = eq
 		logCtx.Trace("added a new event to the event writer")
 		return
@@ -172,7 +174,7 @@ func (ew *EventWriter) Add(ev *cloudevents.Event) {
 		event:      ev,
 		backoff:    &defaultBackoff,
 		retryAfter: nil,
-	})
+	}, logCtx)
 
 	logCtx.Trace("updated an existing event in the event writer")
 }
@@ -514,19 +516,19 @@ func newEventQueue() *eventQueue {
 
 // add an item to the tail of the queue.
 // If the item is the same type as the tail, replace the tail with the new item.
-func (eq *eventQueue) add(ev *eventMessage) {
+func (eq *eventQueue) add(ev *eventMessage, logCtx *logrus.Entry) {
 	eq.mu.Lock()
 	defer eq.mu.Unlock()
 
 	eq.items = append(eq.items, ev)
 
-	deduplicateEventMessageItems(&eq.items)
+	deduplicateEventMessageItems(&eq.items, logCtx)
 
 }
 
 // deduplicateEventMessageItems
 // - Ensure you own the lock on the items parameter (e.g. via eq.mu.Lock()) before calling this function
-func deduplicateEventMessageItems(items *[]*eventMessage) {
+func deduplicateEventMessageItems(items *[]*eventMessage, logCtx *logrus.Entry) {
 
 	// key: Type() of event
 	// value: (not used)
@@ -547,6 +549,29 @@ func deduplicateEventMessageItems(items *[]*eventMessage) {
 
 		// De-duplicate statusupdate and specupdate, as we know they are safe to de-duplicate
 		if _, typePreviouslySeen := haveWeSeenMsgWithType[myType]; typePreviouslySeen {
+
+			// If trace is enabled, log the removal of duplicate events
+			if logCtx.Logger != nil && logCtx.Logger.IsLevelEnabled(logrus.TraceLevel) {
+				stripLogCtx := logCtx.WithFields(logrus.Fields{
+					"event_type":   myType,
+					"event_id":     EventID(item.event),
+					"event_target": item.event.DataSchema(),
+				})
+
+				if item.event.DataSchema() == targets.Application.String() {
+					app := &v1alpha1.Application{}
+					if err := item.event.DataAs(app); err == nil {
+						specJSON, _ := json.Marshal(app.Spec)
+						statusJSON, _ := json.Marshal(app.Status)
+						stripLogCtx = stripLogCtx.WithFields(logrus.Fields{
+							"app_spec":   string(specJSON),
+							"app_status": string(statusJSON),
+						})
+					}
+				}
+				stripLogCtx.Trace("Stripping stale duplicate event from queue")
+			}
+
 			// Stale duplicate: a fresher same-type entry was retained when scanning from the tail.
 			*items = append((*items)[:idx], (*items)[idx+1:]...)
 		} else {
