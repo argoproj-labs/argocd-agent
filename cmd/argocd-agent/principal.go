@@ -30,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth/header"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/mtls"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
@@ -304,7 +305,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			switch authMethod {
-			case "mtls":
+			case auth.MethodMTLS:
 				source, regexStr := parseMTLSConfig(authConfig)
 				var regex *regexp.Regexp
 				if regexStr != "" {
@@ -314,8 +315,19 @@ func NewPrincipalRunCommand() *cobra.Command {
 					}
 				}
 				mtlsauth := mtls.NewMTLSAuthentication(regex, source)
+
+				blockList := blocklist.New()
+				fingerprints, err := blocklist.LoadFromConfigMap(ctx, kubeConfig.Clientset, namespace)
+				if err != nil {
+					cmdutil.Fatal("Could not load TLS blocklist: %v", err)
+				}
+				blockList.Replace(fingerprints)
+				logrus.Infof("Loaded TLS blocklist with %d entries", blockList.Len())
+				mtlsauth.Blocklist = blockList
+				opts = append(opts, principal.WithBlocklist(blockList))
+
 				logrus.Infof("Using mTLS authentication (source: %s, pattern: %s)", source, regexStr)
-				err := authMethods.RegisterMethod("mtls", mtlsauth)
+				err = authMethods.RegisterMethod(auth.MethodMTLS, mtlsauth)
 				if err != nil {
 					cmdutil.Fatal("Could not register mtls auth method: %v", err)
 				}
@@ -324,17 +336,17 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if !requireClientCerts {
 					opts = append(opts, principal.WithRequireClientCerts(true))
 				}
-			case "userpass":
+			case auth.MethodUserPass:
 				userauth := userpass.NewUserPassAuthentication(authConfig)
 				err = userauth.LoadAuthDataFromFile(authConfig)
 				if err != nil {
 					cmdutil.Fatal("Could not load user database: %v", err)
 				}
-				err = authMethods.RegisterMethod("userpass", userauth)
+				err = authMethods.RegisterMethod(auth.MethodUserPass, userauth)
 				if err != nil {
 					cmdutil.Fatal("Could not register userpass auth method: %v", err)
 				}
-			case "header":
+			case auth.MethodHeader:
 				// Generic header-based authentication extracts agent ID from any HTTP header
 				// Format: header:<header-name>:<extraction-regex>
 				headerName, extractionRegex, err := parseHeaderAuth(authConfig)
@@ -345,7 +357,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if err := headerAuth.Init(); err != nil {
 					cmdutil.Fatal("Error initializing header auth: %v", err)
 				}
-				err = authMethods.RegisterMethod("header", headerAuth)
+				err = authMethods.RegisterMethod(auth.MethodHeader, headerAuth)
 				if err != nil {
 					cmdutil.Fatal("Could not register header auth method: %v", err)
 				}
@@ -773,12 +785,12 @@ func parseAuth(authStr string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid auth string")
 	}
 	switch p[0] {
-	case "userpass":
-		return "userpass", p[1], nil
-	case "mtls":
-		return "mtls", p[1], nil
-	case "header":
-		return "header", p[1], nil
+	case auth.MethodUserPass:
+		return auth.MethodUserPass, p[1], nil
+	case auth.MethodMTLS:
+		return auth.MethodMTLS, p[1], nil
+	case auth.MethodHeader:
+		return auth.MethodHeader, p[1], nil
 	default:
 		return "", "", fmt.Errorf("unknown auth method: %s", p[0])
 	}
@@ -836,7 +848,7 @@ func parseMTLSConfig(config string) (mtls.IdentitySource, string) {
 //   - mtls auth requires TLS mode (needs client certificates)
 func validateAuthTLSPairing(authMethod string, insecurePlaintext bool) error {
 	switch authMethod {
-	case "header":
+	case auth.MethodHeader:
 		if !insecurePlaintext {
 			return fmt.Errorf("invalid configuration: header-based authentication requires --insecure-plaintext=true\n" +
 				"  Header authentication is designed for service mesh environments (e.g., Istio) where\n" +
@@ -845,7 +857,7 @@ func validateAuthTLSPairing(authMethod string, insecurePlaintext bool) error {
 				"  - Add --insecure-plaintext flag when using header auth behind a service mesh\n" +
 				"  - Use --auth=mtls:<regex> for direct TLS connections without a service mesh")
 		}
-	case "mtls":
+	case auth.MethodMTLS:
 		if insecurePlaintext {
 			return fmt.Errorf("invalid configuration: mtls authentication cannot be used with --insecure-plaintext\n" +
 				"  mTLS authentication requires TLS to be enabled to receive client certificates.\n" +

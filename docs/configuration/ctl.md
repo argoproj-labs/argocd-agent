@@ -14,6 +14,8 @@ These are the available commands for argocd-agentctl. Some commands have subcomm
 
 `jwt` - Inspect and manage JWT signing keys
 
+`blocklist` - Manage the TLS certificate blocklist
+
 `pki` - Inspect and manage the principal's PKI **(NOT FOR PRODUCTION USE)**
 
 ## Global Flags
@@ -141,6 +143,21 @@ principal. JWT signing keys are used by the principal to sign authentication tok
 `delete-key` - Delete the JWT signing key secret
 
 `inspect-key` - Inspect the JWT signing key
+
+## `blocklist` Command
+
+Manage the TLS certificate blocklist for the principal. Agents whose certificate
+fingerprints appear in the blocklist are immediately disconnected and prevented
+from reconnecting. See [TLS Certificate Blocklist](../operations/blocklist.md) for
+full details.
+
+**Subcommands:**
+
+`add <fingerprint>` - Add a certificate fingerprint to the blocklist
+
+`remove <fingerprint>` - Remove a certificate fingerprint from the blocklist
+
+`list` - List all fingerprints currently in the blocklist
 
 ## `pki` Command **(NOT FOR PRODUCTION USE)**
 

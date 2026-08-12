@@ -17,6 +17,7 @@ package main
 import (
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,38 +31,38 @@ func TestValidateAuthTLSPairing(t *testing.T) {
 	}{
 		{
 			name:              "valid: header auth with plaintext mode",
-			authMethod:        "header",
+			authMethod:        auth.MethodHeader,
 			insecurePlaintext: true,
 			expectError:       false,
 		},
 		{
 			name:              "valid: mtls auth with TLS mode",
-			authMethod:        "mtls",
+			authMethod:        auth.MethodMTLS,
 			insecurePlaintext: false,
 			expectError:       false,
 		},
 		{
 			name:              "valid: userpass auth with TLS mode",
-			authMethod:        "userpass",
+			authMethod:        auth.MethodUserPass,
 			insecurePlaintext: false,
 			expectError:       false,
 		},
 		{
 			name:              "valid: userpass auth with plaintext mode",
-			authMethod:        "userpass",
+			authMethod:        auth.MethodUserPass,
 			insecurePlaintext: true,
 			expectError:       false,
 		},
 		{
 			name:              "invalid: header auth without plaintext mode",
-			authMethod:        "header",
+			authMethod:        auth.MethodHeader,
 			insecurePlaintext: false,
 			expectError:       true,
 			errorContains:     "header-based authentication requires --insecure-plaintext=true",
 		},
 		{
 			name:              "invalid: mtls auth with plaintext mode",
-			authMethod:        "mtls",
+			authMethod:        auth.MethodMTLS,
 			insecurePlaintext: true,
 			expectError:       true,
 			errorContains:     "mtls authentication cannot be used with --insecure-plaintext",

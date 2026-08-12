@@ -20,6 +20,8 @@ import (
 	"regexp"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
@@ -42,6 +44,7 @@ const (
 type MTLSAuthentication struct {
 	AgentIDRegex   *regexp.Regexp
 	IdentitySource IdentitySource
+	Blocklist      *blocklist.Blocklist
 }
 
 func NewMTLSAuthentication(regex *regexp.Regexp, source IdentitySource) *MTLSAuthentication {
@@ -68,6 +71,14 @@ func (m *MTLSAuthentication) Authenticate(ctx context.Context, creds auth.Creden
 		return "", fmt.Errorf("no verified certificates found in TLS cred")
 	}
 	cert := tlsInfo.State.VerifiedChains[0][0]
+
+	if m.Blocklist != nil {
+		fingerprint := tlsutil.CertificateFingerprint(cert)
+		if m.Blocklist.Contains(fingerprint) {
+			logrus.WithField("module", "mtls").WithField("fingerprint", fingerprint).Warn("Rejected blocklisted certificate")
+			return "", fmt.Errorf("certificate is blocklisted")
+		}
+	}
 
 	var identityString string
 	var agentID string

@@ -341,6 +341,7 @@ func NewAgentInspectCommand() *cobra.Command {
 				Name           string    `yaml:"name" json:"name" text:"Server name"`
 				NotValidBefore time.Time `yaml:"notValidBefore" json:"notValidBefore" text:"Not valid before"`
 				NotValidAfter  time.Time `yaml:"notValidAfter" json:"notValidAfter" text:"Not valid after"`
+				Fingerprint    string    `yaml:"fingerprint" json:"fingerprint" text:"Fingerprint (SHA-256)"`
 			}
 			agentName := args[0]
 			argoCluster, err := loadClusterSecret(agentName)
@@ -354,11 +355,24 @@ func NewAgentInspectCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Not a valid certificate: %v", err)
 			}
+
+			if len(cert.Certificate) == 0 {
+				cmdutil.Fatal("Certificate chain is empty")
+			}
+			if len(cert.Certificate) > 1 {
+				cmdutil.Fatal("Certificate chain contains %d entries, but only 1 is expected. Please ensure the secret contains a single certificate.", len(cert.Certificate))
+			}
+			certObj, parseErr := x509.ParseCertificate(cert.Certificate[0])
+			if parseErr != nil {
+				cmdutil.Fatal("Could not parse certificate: %v", parseErr)
+			}
+
 			cluster := &clusterOut{
 				ServerAddr:     argoCluster.Server,
 				Name:           argoCluster.Name,
 				NotValidAfter:  cert.Leaf.NotAfter,
 				NotValidBefore: cert.Leaf.NotBefore,
+				Fingerprint:    tlsutil.CertificateFingerprint(certObj),
 			}
 			var out []byte
 			switch strings.ToLower(outputFormat) {

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -1151,6 +1152,62 @@ func (c *concurrentMap[K, V]) DeleteByValue(value V, eq func(a, b V) bool) {
 	for k, v := range c.m {
 		if eq(v, value) {
 			delete(c.m, k)
+		}
+	}
+}
+
+// trackAgentFingerprint records the mapping from a certificate fingerprint to
+// the connected agent name. This is used by the blocklist informer callback
+// to disconnect an agent by fingerprint without requiring an agent name in the
+// blocklist entry.
+func (s *Server) trackAgentFingerprint(agentName, fingerprint string) {
+	s.blocklist.TrackAgent(fingerprint, agentName)
+}
+
+// addBlocklistCallback is called by the informer when the blocklist ConfigMap
+// is first added.
+func (s *Server) addBlocklistCallback(cm *corev1.ConfigMap) {
+	s.updateBlocklistCallback(nil, cm)
+}
+
+// updateBlocklistCallback is called by the informer when the blocklist
+// ConfigMap is updated. It replaces the in-memory blocklist with
+// the entries from the ConfigMap and disconnects all blocklisted agents.
+func (s *Server) updateBlocklistCallback(_, newCM *corev1.ConfigMap) {
+	if s.blocklist == nil {
+		return
+	}
+	fingerprints := blocklist.FingerprintsFromConfigMapData(newCM.Data)
+	s.blocklist.Replace(fingerprints)
+	log().Infof("Reloaded TLS blocklist: %d entries", s.blocklist.Len())
+	s.disconnectBlocklisted(fingerprints)
+}
+
+// deleteBlocklistCallback is called by the informer when the blocklist
+// ConfigMap is deleted. It clears the in-memory blocklist so that previously
+// blocked agents can reconnect.
+func (s *Server) deleteBlocklistCallback(cm *corev1.ConfigMap) {
+	if s.blocklist == nil {
+		return
+	}
+	s.blocklist.Replace([]string{})
+	log().Info("Blocklist ConfigMap deleted, cleared in-memory blocklist")
+}
+
+// disconnectBlocklisted terminates active connections for all blocklisted
+// fingerprints. It resolves the agent name from the in-memory
+// fingerprint-to-agent mapping.
+func (s *Server) disconnectBlocklisted(fingerprints []string) {
+	if s.eventStreamSrv == nil {
+		return
+	}
+	for _, fp := range fingerprints {
+		agentName := s.blocklist.AgentForFingerprint(fp)
+		if agentName == "" {
+			continue
+		}
+		if s.eventStreamSrv.DisconnectAgent(agentName) {
+			log().Infof("Disconnected blocklisted agent %s (fingerprint: %s)", agentName, fp)
 		}
 	}
 }

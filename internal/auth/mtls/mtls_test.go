@@ -16,6 +16,8 @@ package mtls
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -23,8 +25,12 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 )
@@ -175,6 +181,59 @@ func Test_AuthenticateWithSPIFFE(t *testing.T) {
 		assert.Empty(t, agentID)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid agent ID")
+	})
+}
+
+func Test_Authenticate_Blocklist(t *testing.T) {
+	regex := regexp.MustCompile(`CN=([^,]+)`)
+	auth := NewMTLSAuthentication(regex, IdentitySourceSubject)
+
+	key := testcerts.GeneratePrivateKey(t, "rsa")
+	templ := testcerts.DefaultCertTempl
+	templ.Subject = pkix.Name{CommonName: "agent-1"}
+	raw, err := x509.CreateCertificate(rand.Reader, &templ, &templ, &key.(*rsa.PrivateKey).PublicKey, key)
+	require.NoError(t, err)
+	cert, err := x509.ParseCertificate(raw)
+	require.NoError(t, err)
+	fp := tlsutil.CertificateFingerprint(cert)
+
+	t.Run("allows when blocklist is nil", func(t *testing.T) {
+		auth.Blocklist = nil
+		ctx := generateContext([][]*x509.Certificate{{cert}})
+		agentID, err := auth.Authenticate(ctx, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, "agent-1", agentID)
+	})
+
+	t.Run("allows when fingerprint is not blocklisted", func(t *testing.T) {
+		bl := blocklist.New()
+		auth.Blocklist = bl
+		ctx := generateContext([][]*x509.Certificate{{cert}})
+		agentID, err := auth.Authenticate(ctx, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, "agent-1", agentID)
+	})
+
+	t.Run("rejects when fingerprint is blocklisted", func(t *testing.T) {
+		bl := blocklist.New()
+		bl.Add(fp)
+		auth.Blocklist = bl
+		ctx := generateContext([][]*x509.Certificate{{cert}})
+		agentID, err := auth.Authenticate(ctx, nil)
+		assert.Empty(t, agentID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "blocklisted")
+	})
+
+	t.Run("allows after fingerprint is removed from blocklist", func(t *testing.T) {
+		bl := blocklist.New()
+		bl.Add(fp)
+		auth.Blocklist = bl
+		bl.Remove(fp)
+		ctx := generateContext([][]*x509.Certificate{{cert}})
+		agentID, err := auth.Authenticate(ctx, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, "agent-1", agentID)
 	})
 }
 
