@@ -474,6 +474,31 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 	return result.Exists, result.SourceUIDMatch, nil
 }
 
+// principalOwnedAnnotations lists the annotations that are written on the
+// principal's copy of an application and are unknown to the agent. They are
+// retained across updates received from the agent.
+var principalOwnedAnnotations = []string{
+	manager.SourceUIDAnnotation,
+	manager.NotifiedAnnotation,
+}
+
+// preservePrincipalAnnotations carries principal-owned annotations from the
+// existing application over to the incoming one before the incoming
+// annotation set is applied. State written on the principal's copy of the
+// application (the source UID mapping, the notifications engine's delivery
+// tracking) is unknown to the agent, so an update inherited verbatim from
+// the agent would otherwise delete it.
+func preservePrincipalAnnotations(existing, incoming *v1alpha1.Application) {
+	for _, key := range principalOwnedAnnotations {
+		if v, ok := existing.Annotations[key]; ok {
+			if incoming.Annotations == nil {
+				incoming.Annotations = make(map[string]string)
+			}
+			incoming.Annotations[key] = v
+		}
+	}
+}
+
 // UpdateAutonomousApp updates the Application resource on the control plane side
 // when the agent is in autonomous mode. It will update changes to .spec and
 // .status fields along with syncing labels and annotations.
@@ -497,12 +522,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 	}
 
 	updated, err = m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
-			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
-		}
+		preservePrincipalAnnotations(existing, incoming)
 
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
@@ -518,12 +538,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		existing.Operation = incoming.Operation.DeepCopy()
 		logCtx.Infof("Updating")
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
-			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
-		}
+		preservePrincipalAnnotations(existing, incoming)
 
 		target := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
@@ -590,6 +605,7 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 	}
 
 	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+		preservePrincipalAnnotations(existing, incoming)
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Status = *incoming.Status.DeepCopy()
