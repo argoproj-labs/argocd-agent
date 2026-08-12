@@ -474,6 +474,14 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 	return result.Exists, result.SourceUIDMatch, nil
 }
 
+// principalOwnedAnnotations lists the annotations that are written on the
+// principal's copy of an application and are unknown to the agent. They are
+// retained across updates received from the agent.
+var principalOwnedAnnotations = []string{
+	manager.SourceUIDAnnotation,
+	manager.NotifiedAnnotation,
+}
+
 // preservePrincipalAnnotations carries principal-owned annotations from the
 // existing application over to the incoming one before the incoming
 // annotation set is applied. State written on the principal's copy of the
@@ -481,7 +489,7 @@ func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1a
 // tracking) is unknown to the agent, so an update inherited verbatim from
 // the agent would otherwise delete it.
 func preservePrincipalAnnotations(existing, incoming *v1alpha1.Application) {
-	for _, key := range []string{manager.SourceUIDAnnotation, manager.NotifiedAnnotation} {
+	for _, key := range principalOwnedAnnotations {
 		if v, ok := existing.Annotations[key]; ok {
 			if incoming.Annotations == nil {
 				incoming.Annotations = make(map[string]string)
