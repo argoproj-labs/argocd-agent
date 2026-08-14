@@ -469,18 +469,8 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 					return fmt.Errorf("could not update the existing appProject: %w", err)
 				}
 				return nil
-			} else {
-				if a.effectiveMismatchPolicy(incomingAppProject) == manager.MismatchPolicyUpsert {
-					logCtx.Info("AppProject source UID mismatch, upsert policy: updating in-place")
-					stampSourceUID(&incomingAppProject.ObjectMeta, string(incomingAppProject.UID))
-					_, err := a.updateAppProject(incomingAppProject)
-					return err
-				}
-				logCtx.Debug("An appProject already exists with a different source UID. Deleting the existing appProject")
-				if err := a.deleteAppProject(incomingAppProject); err != nil {
-					return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
-				}
 			}
+			return a.resolveAppProjectSourceUIDMismatch(logCtx, incomingAppProject)
 		}
 
 		_, err = a.createAppProject(incomingAppProject)
@@ -497,21 +487,7 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 		}
 
 		if !sourceUIDMatch {
-			if a.effectiveMismatchPolicy(incomingAppProject) == manager.MismatchPolicyUpsert {
-				logCtx.Info("AppProject source UID mismatch, upsert policy: updating in-place")
-				stampSourceUID(&incomingAppProject.ObjectMeta, string(incomingAppProject.UID))
-				_, err := a.updateAppProject(incomingAppProject)
-				return err
-			}
-			logCtx.Debug("Source UID mismatch between the incoming and existing appProject. Deleting the existing appProject")
-			if err := a.deleteAppProject(incomingAppProject); err != nil {
-				return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
-			}
-			logCtx.Debug("Creating the incoming appProject after deleting the existing appProject")
-			if _, err := a.createAppProject(incomingAppProject); err != nil {
-				return fmt.Errorf("could not create incoming appProject after deleting existing appProject: %w", err)
-			}
-			return nil
+			return a.resolveAppProjectSourceUIDMismatch(logCtx, incomingAppProject)
 		}
 
 		_, err = a.updateAppProject(incomingAppProject)
@@ -527,6 +503,52 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 		logCtx.Warnf("Received an unknown event: %s. Protocol mismatch?", ev.Type())
 	}
 
+	return err
+}
+
+// resolveAppProjectSourceUIDMismatch handles Create/SpecUpdate when an AppProject
+// already exists locally with a missing or different source-UID.
+func (a *Agent) resolveAppProjectSourceUIDMismatch(logCtx *logrus.Entry, incoming *v1alpha1.AppProject) error {
+	existing, err := a.projectManager.Get(a.context, incoming.Name, incoming.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed to get existing appProject for source-UID mismatch: %w", err)
+	}
+
+	_, hasSourceUID := existing.Annotations[manager.SourceUIDAnnotation]
+	// Pre-installed AppProjects may not have source-UID annotation and the deletion may fail with "is not managed" error.
+	// Adopt the existing AppProject in-place to avoid this issue.
+	if !hasSourceUID || !a.projectManager.IsManaged(incoming.Name) {
+		logCtx.Info("Adopting existing AppProject (missing source-UID or not managed)")
+		return a.adoptAppProject(incoming)
+	}
+
+	if a.effectiveMismatchPolicy(incoming) == manager.MismatchPolicyUpsert {
+		logCtx.Info("AppProject source UID mismatch, upsert policy: updating in-place")
+		return a.adoptAppProject(incoming)
+	}
+
+	logCtx.Debug("Source UID mismatch between the incoming and existing appProject. Deleting the existing appProject")
+	if err := a.deleteAppProject(incoming); err != nil {
+		return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
+	}
+
+	logCtx.Debug("Creating the incoming appProject after deleting the existing appProject")
+	if _, err := a.createAppProject(incoming); err != nil {
+		return fmt.Errorf("could not create incoming appProject after deleting existing appProject: %w", err)
+	}
+	return nil
+}
+
+// adoptAppProject stamps the principal source-UID onto an existing AppProject,
+// marks it managed, and updates it in-place.
+func (a *Agent) adoptAppProject(incoming *v1alpha1.AppProject) error {
+	stampSourceUID(&incoming.ObjectMeta, string(incoming.UID))
+	if !a.projectManager.IsManaged(incoming.Name) {
+		if err := a.projectManager.Manage(incoming.Name); err != nil {
+			return fmt.Errorf("could not manage adopted appProject: %w", err)
+		}
+	}
+	_, err := a.updateAppProject(incoming)
 	return err
 }
 
@@ -944,8 +966,12 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	})
 
 	if !a.projectManager.IsManaged(incoming.Name) {
-		logCtx.Trace("AppProject is not managed on this agent. Creating the new AppProject")
-		return a.createAppProject(incoming)
+		// Prefer update+manage over create when the resource may already exist
+		// locally (e.g. Argo CD's pre-installed default AppProject).
+		logCtx.Trace("AppProject is not managed on this agent. Managing and updating")
+		if err := a.projectManager.Manage(incoming.Name); err != nil {
+			return nil, fmt.Errorf("could not manage appProject prior to update: %w", err)
+		}
 	}
 
 	if a.projectManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
