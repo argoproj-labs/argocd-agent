@@ -519,12 +519,16 @@ func (a *Agent) resolveAppProjectSourceUIDMismatch(logCtx *logrus.Entry, incomin
 	// Adopt the existing AppProject in-place to avoid this issue.
 	if !hasSourceUID || !a.projectManager.IsManaged(incoming.Name) {
 		logCtx.Info("Adopting existing AppProject (missing source-UID or not managed)")
-		return a.adoptAppProject(incoming)
+		stampSourceUID(&incoming.ObjectMeta, string(incoming.UID))
+		_, err = a.updateAppProject(incoming)
+		return err
 	}
 
 	if a.effectiveMismatchPolicy(incoming) == manager.MismatchPolicyUpsert {
 		logCtx.Info("AppProject source UID mismatch, upsert policy: updating in-place")
-		return a.adoptAppProject(incoming)
+		stampSourceUID(&incoming.ObjectMeta, string(incoming.UID))
+		_, err = a.updateAppProject(incoming)
+		return err
 	}
 
 	logCtx.Debug("Source UID mismatch between the incoming and existing appProject. Deleting the existing appProject")
@@ -537,19 +541,6 @@ func (a *Agent) resolveAppProjectSourceUIDMismatch(logCtx *logrus.Entry, incomin
 		return fmt.Errorf("could not create incoming appProject after deleting existing appProject: %w", err)
 	}
 	return nil
-}
-
-// adoptAppProject stamps the principal source-UID onto an existing AppProject,
-// marks it managed, and updates it in-place.
-func (a *Agent) adoptAppProject(incoming *v1alpha1.AppProject) error {
-	stampSourceUID(&incoming.ObjectMeta, string(incoming.UID))
-	if !a.projectManager.IsManaged(incoming.Name) {
-		if err := a.projectManager.Manage(incoming.Name); err != nil {
-			return fmt.Errorf("could not manage adopted appProject: %w", err)
-		}
-	}
-	_, err := a.updateAppProject(incoming)
-	return err
 }
 
 func (a *Agent) processIncomingRepository(ev *event.Event) error {
@@ -965,6 +956,7 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
+	newlyManaged := false
 	if !a.projectManager.IsManaged(incoming.Name) {
 		// Prefer update+manage over create when the resource may already exist
 		// locally (e.g. Argo CD's pre-installed default AppProject).
@@ -972,6 +964,7 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		if err := a.projectManager.Manage(incoming.Name); err != nil {
 			return nil, fmt.Errorf("could not manage appProject prior to update: %w", err)
 		}
+		newlyManaged = true
 	}
 
 	if a.projectManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
@@ -984,7 +977,16 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	a.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
 
 	logCtx.Tracef("Calling update spec for this event")
-	return a.projectManager.UpdateAppProject(a.context, incoming)
+	updated, err := a.projectManager.UpdateAppProject(a.context, incoming)
+	if err != nil {
+		if newlyManaged {
+			if errUnmanage := a.projectManager.Unmanage(incoming.Name); errUnmanage != nil {
+				logCtx.Errorf("Could not unmanage appProject %s: %v", incoming.Name, errUnmanage)
+			}
+		}
+		return nil, err
+	}
+	return updated, nil
 }
 
 func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {

@@ -707,11 +707,10 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new app has the updated source UID annotation.
-		appInterface := be.Calls[4].ReturnArguments[0]
-		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
+		// Check the AppProject argument passed to Create has the correct source UID.
+		createdArg, ok := be.Calls[4].Arguments.Get(1).(*v1alpha1.AppProject)
 		require.True(t, ok)
-		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingAppProject.UID), createdArg.Annotations[manager.SourceUIDAnnotation])
 	})
 
 	t.Run("Create: Old appProject with the same UID must be updated", func(t *testing.T) {
@@ -764,12 +763,10 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new appProject has the updated source UID annotation.
-		appInterface := be.Calls[4].ReturnArguments[0]
-
-		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
+		// Check the AppProject argument passed to Create has the correct source UID.
+		createdArg, ok := be.Calls[4].Arguments.Get(1).(*v1alpha1.AppProject)
 		require.True(t, ok)
-		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingAppProject.UID), createdArg.Annotations[manager.SourceUIDAnnotation])
 	})
 
 	t.Run("Update: incoming appProject must be created if it doesn't exist while handling update event", func(t *testing.T) {
