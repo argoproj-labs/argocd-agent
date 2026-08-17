@@ -39,8 +39,8 @@ github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be/go.mod h1:ySMOLuW
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/argoproj/argo-cd/gitops-engine v0.0.0-20260804074500-e95e1be88a2d h1:C/iRE1t2optbTFFjeQbqklpaM4PXWzraqzAhs2QZ9FU=
 github.com/argoproj/argo-cd/gitops-engine v0.0.0-20260804074500-e95e1be88a2d/go.mod h1:RsOM4gdM/lsvAfIuzAhYrnHDTLA1AGooZRzVyxbVT3A=
-github.com/argoproj/argo-cd/v3 v3.5.0 h1:iqnPFSKaQ0l3hREMH2Rk55VDcxrvBFaSO0g9bifZKzc=
-github.com/argoproj/argo-cd/v3 v3.5.0/go.mod h1:/248vUTcQHNW3fYkaSUc0PkCFA/+mnILl5b6rv+xG6Y=
+github.com/argoproj/argo-cd/v3 v3.5.1 h1:jtwPLEFX9mNj3jSq88ugFcScGnOZVs2DWaXFuZxrRT8=
+github.com/argoproj/argo-cd/v3 v3.5.1/go.mod h1:/248vUTcQHNW3fYkaSUc0PkCFA/+mnILl5b6rv+xG6Y=
 github.com/argoproj/pkg/v2 v2.0.1 h1:O/gCETzB/3+/hyFL/7d/VM/6pSOIRWIiBOTb2xqAHvc=
 github.com/argoproj/pkg/v2 v2.0.1/go.mod h1:sdifF6sUTx9ifs38ZaiNMRJuMpSCBB9GulHfbPgQeRE=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
