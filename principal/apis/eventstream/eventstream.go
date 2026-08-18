@@ -348,7 +348,7 @@ func (s *Server) sendFunc(c *client, subs eventstreamapi.EventStream_SubscribeSe
 	// Get() is blocking until there is at least one item in the
 	// queue.
 	logCtx.Tracef("Waiting to grab an item from the queue")
-	ev, shutdown := queue.GetWithContext(q, c.ctx)
+	ev, shutdown := q.GetWithContext(c.ctx)
 	if shutdown {
 		return fmt.Errorf("sendq shutdown in progress")
 	}

@@ -15,6 +15,7 @@
 package queue
 
 import (
+	"context"
 	"sync"
 
 	internalevent "github.com/argoproj-labs/argocd-agent/internal/event"
@@ -203,6 +204,31 @@ func (q *dedupeQueue) ShutDown() {
 
 func (q *dedupeQueue) Len() int {
 	return q.queue.Len()
+}
+
+// GetWithContext is a wrapper around the workqueue's Get method.
+// It waits until an item is available in the queue or the context is Done.
+func (q *dedupeQueue) GetWithContext(ctx context.Context) (*event.Event, bool) {
+	for {
+		if ctx.Err() != nil {
+			return nil, false
+		}
+
+		if q.Len() > 0 {
+			ev, shutdown := q.popOne()
+			if shutdown || ev != nil {
+				return ev, shutdown
+			}
+			// Race produced a nil event, continue to re-check the queue
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-q.notify:
+		}
+	}
 }
 
 // deduplicationEnabled controls whether event deduplication is globally

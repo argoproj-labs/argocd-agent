@@ -36,6 +36,8 @@ type WorkQueue interface {
 	Done(item *event.Event)
 	Len() int
 	ShutDown()
+
+	GetWithContext(ctx context.Context) (*event.Event, bool)
 }
 
 // QueuePair maintains a map (indexed by name) of send/receive queue pairs
@@ -88,6 +90,24 @@ func (bq *boundedQueue) Add(item *event.Event) {
 	default:
 		// We don't want to block the caller if the notify channel is full.
 		return
+	}
+}
+
+// GetWithContext is a wrapper around the workqueue's Get method.
+// It waits until an item is available in the queue or the context is Done.
+func (bq *boundedQueue) GetWithContext(ctx context.Context) (*event.Event, bool) {
+	for {
+		if bq.Len() > 0 {
+			return bq.Get()
+		}
+
+		// Suspend until an item is available or context is done.
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-bq.notify:
+			// Wake up and re-check if an item is available
+		}
 	}
 }
 
@@ -213,56 +233,4 @@ func (q *SendRecvQueues) Delete(name string, shutdown bool) error {
 	}
 	delete(q.queues, name)
 	return nil
-}
-
-// GetWithContext is a wrapper around the workqueue's Get method.
-// It waits until an item is available in the queue or the context is Done.
-func GetWithContext(q WorkQueue, ctx context.Context) (*event.Event, bool) {
-	switch bq := q.(type) {
-	case *dedupeQueue:
-		return getWithContextDedupe(bq, ctx)
-	case *boundedQueue:
-		return getWithContextBounded(bq, ctx)
-	default:
-		return nil, false
-	}
-}
-
-func getWithContextDedupe(bq *dedupeQueue, ctx context.Context) (*event.Event, bool) {
-	for {
-		if ctx.Err() != nil {
-			return nil, false
-		}
-
-		if bq.Len() > 0 {
-			ev, shutdown := bq.popOne()
-			if shutdown || ev != nil {
-				return ev, shutdown
-			}
-			// Race produced a nil event, continue to re-check the queue
-			continue
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, false
-		case <-bq.notify:
-		}
-	}
-}
-
-func getWithContextBounded(bq *boundedQueue, ctx context.Context) (*event.Event, bool) {
-	for {
-		if bq.Len() > 0 {
-			return bq.Get()
-		}
-
-		// Suspend until an item is available or context is done.
-		select {
-		case <-ctx.Done():
-			return nil, false
-		case <-bq.notify:
-			// Wake up and re-check if an item is available
-		}
-	}
 }
