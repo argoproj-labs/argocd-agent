@@ -635,6 +635,87 @@ Cannot be used together with `--redis-password`, or its respective environment v
 
 The password to connect to redis with. Prefer `--redis-creds-dir-path` for added security benefits.
 
+## High Availability Configuration
+
+### HA Enabled
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-enabled` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ENABLED` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Enable HA mode.
+
+### HA Preferred Role
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-preferred-role` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_PREFERRED_ROLE` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `primary` |
+| **Valid Values** | `primary`, `replica` |
+
+Role this principal prefers on startup.
+
+### HA Peer Address
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-peer-address` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_PEER_ADDRESS` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+Address of the peer principal's gRPC server (`host:port`). Required on the replica.
+
+### HA Allowed Replication Clients
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-allowed-replication-clients` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String slice (comma-separated) |
+| **Default** | `[]` |
+
+Explicit allowlist of peer identities permitted for replication.
+
+### HA Admin Port
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-port` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_PORT` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Integer |
+| **Default** | `8405` |
+
+Port for the HAAdmin gRPC server.
+
+### HA Admin Auth
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-auth` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_AUTH` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+| **Format** | `mtls:subject:<regex>` or `mtls:uri:<regex>` |
+
+Authorization policy for the HA admin endpoint. The regex is matched against the client certificate's subject DN or URI SANs. When TLS is active and this flag is not set, all admin calls are denied (secure by default).
+
+**Examples:**
+
+- `mtls:subject:CN=ha-admin`
+- `mtls:uri:spiffe://cluster\.local/ns/argocd/sa/ha-admin`
+
 ## Kubernetes Configuration
 
 ### Kubeconfig

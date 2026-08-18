@@ -74,14 +74,36 @@ Explicit allowlist of peer identities permitted to connect for replication. Iden
 | **Type** | Integer |
 | **Default** | `8405` |
 
-Port for the localhost-only HAAdmin gRPC server used by `argocd-agentctl ha` commands. Set to `0` to use the default.
+Port for the HAAdmin gRPC server used by `argocd-agentctl ha` commands. Set to `0` to use the default.
+
+### Admin Auth
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-auth` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_AUTH` |
+| **Type** | String |
+| **Default** | `""` |
+| **Format** | `mtls:subject:<regex>` or `mtls:uri:<regex>` |
+
+Authorization policy for the HA admin endpoint. When TLS is active, the admin endpoint inherits mTLS from the main server. The regex is matched against the client certificate's subject DN or URI SANs.
+
+!!! warning "Secure by Default"
+    When TLS is active and `--ha-admin-auth` is **not** set, all admin calls are denied. You must explicitly configure this flag to allow access.
+
+**Examples:**
+
+- Allow only certs with `CN=ha-admin`: `mtls:subject:CN=ha-admin`
+- Allow any cert in the `HA-Admins` org: `mtls:subject:O=HA-Admins`
+- Allow SPIFFE identity: `mtls:uri:spiffe://cluster\.local/ns/argocd/sa/ha-admin`
 
 ## Ports Summary
 
 | Port | Bind | TLS | Purpose |
 |------|------|-----|---------|
 | 8443 | `0.0.0.0` | mTLS | Agent gRPC + replication (shared) |
-| 8405 | `127.0.0.1` | None | HAAdmin gRPC (status/promote/demote) |
+| 8405 | `0.0.0.0` | mTLS (inherited) | HAAdmin gRPC — when TLS is active |
+| 8405 | `127.0.0.1` | None | HAAdmin gRPC — plaintext/service mesh mode |
 
 ## Example: Two-Region Setup
 
@@ -92,7 +114,8 @@ argocd-agent principal \
   --ha-enabled \
   --ha-preferred-role=primary \
   --ha-peer-address=principal.region-b.internal:8443 \
-  --ha-allowed-replication-clients=region-b
+  --ha-allowed-replication-clients=region-b \
+  --ha-admin-auth="mtls:subject:CN=ha-admin"
 ```
 
 **Region B (preferred replica):**
@@ -102,7 +125,8 @@ argocd-agent principal \
   --ha-enabled \
   --ha-preferred-role=replica \
   --ha-peer-address=principal.region-a.internal:8443 \
-  --ha-allowed-replication-clients=region-a
+  --ha-allowed-replication-clients=region-a \
+  --ha-admin-auth="mtls:subject:CN=ha-admin"
 ```
 
 **Agents (unchanged):**
