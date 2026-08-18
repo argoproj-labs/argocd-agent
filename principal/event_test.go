@@ -29,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
+	wqmock "github.com/argoproj-labs/argocd-agent/test/mocks/k8s-workqueue"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
@@ -38,12 +39,23 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// newTestRecvQueue creates a RecvQueue with a single event pre-loaded, for use in
-// tests that call processRecvQueue.
-func newTestRecvQueue(ev *cloudevents.Event) queue.WorkQueue {
-	q := queue.NewDedupeQueue("cloud-events")
-	q.Add(ev)
-	return q
+// workQueueMock embeds the k8s TypedRateLimitingInterface mock and adds
+// GetWithContext so it satisfies queue.WorkQueue.
+type workQueueMock struct {
+	*wqmock.TypedRateLimitingInterface[*cloudevents.Event]
+}
+
+var _ queue.WorkQueue = (*workQueueMock)(nil)
+
+func (q *workQueueMock) GetWithContext(_ context.Context) (*cloudevents.Event, bool) {
+	return q.Get()
+}
+
+func newWorkQueueMock(t *testing.T) *workQueueMock {
+	t.Helper()
+	return &workQueueMock{
+		TypedRateLimitingInterface: wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t),
+	}
 }
 
 func Test_EventProcessorRoutesACKToMatchingQueue(t *testing.T) {
@@ -106,7 +118,7 @@ func Test_InvalidEvents(t *testing.T) {
 	t.Run("Unknown event schema", func(t *testing.T) {
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("unknown")
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -121,7 +133,7 @@ func Test_InvalidEvents(t *testing.T) {
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType("application")
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -137,7 +149,7 @@ func Test_InvalidEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
 		ev.SetData(cloudevents.ApplicationJSON, "something")
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -154,7 +166,7 @@ func Test_CreateEvents(t *testing.T) {
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -194,7 +206,7 @@ func Test_CreateEvents(t *testing.T) {
 		// Update the application before sending the event
 		app.Spec.Source.TargetRevision = "test"
 		ev.SetData(cloudevents.ApplicationJSON, app)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -249,7 +261,7 @@ func Test_CreateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
 		ev.SetData(cloudevents.ApplicationJSON, app)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -319,7 +331,7 @@ func Test_CreateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
 		ev.SetData(cloudevents.ApplicationJSON, app)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -378,7 +390,7 @@ func Test_CreateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.Create.String())
 		ev.SetData(cloudevents.ApplicationJSON, app)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -761,7 +773,7 @@ func Test_UpdateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.SpecUpdate.String())
 		ev.SetData(cloudevents.ApplicationJSON, upApp)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -845,7 +857,7 @@ func Test_UpdateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.SpecUpdate.String())
 		ev.SetData(cloudevents.ApplicationJSON, upApp)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -907,7 +919,7 @@ func Test_UpdateEvents(t *testing.T) {
 		ev.SetDataSchema("application")
 		ev.SetType(event.SpecUpdate.String())
 		ev.SetData(cloudevents.ApplicationJSON, upApp)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -976,7 +988,7 @@ func Test_DeleteEvents_ManagedMode(t *testing.T) {
 			ev.SetDataSchema("application")
 			ev.SetType(event.Delete.String())
 			ev.SetData(cloudevents.ApplicationJSON, delApp)
-			wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+			wq := newWorkQueueMock(t)
 			wq.On("Get").Return(&ev, false)
 			wq.On("Done", &ev)
 			wq.On("Len").Return(0)
@@ -1074,7 +1086,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		ev := cloudevents.NewEvent()
 		ev.SetDataSchema("appproject")
 		ev.SetType(event.Create.String())
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -1120,7 +1132,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		ev.SetType(event.Create.String())
 		ev.SetData(cloudevents.ApplicationJSON, project)
 
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -1182,7 +1194,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		updatedProject.Name = "test" // Use original name (will be prefixed)
 		ev.SetData(cloudevents.ApplicationJSON, updatedProject)
 
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
@@ -1228,7 +1240,7 @@ func Test_processAppProjectEvent(t *testing.T) {
 		ev.SetDataSchema("appproject")
 		ev.SetType(event.Delete.String())
 		ev.SetData(cloudevents.ApplicationJSON, upApp)
-		wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+		wq := newWorkQueueMock(t)
 		wq.On("Get").Return(&ev, false)
 		wq.On("Done", &ev)
 		wq.On("Len").Return(0)
