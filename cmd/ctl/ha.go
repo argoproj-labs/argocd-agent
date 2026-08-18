@@ -16,18 +16,24 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/haadminapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/portforward"
@@ -39,11 +45,17 @@ const (
 	principalPodLabel = "app.kubernetes.io/name=argocd-agent-principal"
 )
 
+var haTLSOpts haAdminTLSOptions
+
 func NewHACommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ha",
 		Short: "Manage HA state of the principal server",
 	}
+
+	cmd.PersistentFlags().StringVar(&haTLSOpts.certPath, "tls-cert", "", "Path to client certificate for mTLS authentication")
+	cmd.PersistentFlags().StringVar(&haTLSOpts.keyPath, "tls-key", "", "Path to client private key for mTLS authentication")
+	cmd.PersistentFlags().StringVar(&haTLSOpts.caPath, "tls-ca", "", "Path to CA certificate for verifying the admin server")
 
 	cmd.AddCommand(NewHAStatusCommand())
 	cmd.AddCommand(NewHAPromoteCommand())
@@ -66,7 +78,7 @@ func NewHAStatusCommand() *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			client, cleanup, err := getHAAdminClient(ctx, address)
+			client, cleanup, err := getHAAdminClient(ctx, address, haTLSOpts)
 			if err != nil {
 				return err
 			}
@@ -74,7 +86,7 @@ func NewHAStatusCommand() *cobra.Command {
 
 			resp, err := client.Status(ctx, &haadminapi.StatusRequest{})
 			if err != nil {
-				return fmt.Errorf("failed to get HA status: %w", err)
+				return wrapWithTLSHint(fmt.Errorf("failed to get HA status: %w", err), haTLSOpts)
 			}
 
 			return printHAStatus(resp, outputFormat)
@@ -119,7 +131,7 @@ Use --force to override the safety check.`,
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			client, cleanup, err := getHAAdminClient(ctx, address)
+			client, cleanup, err := getHAAdminClient(ctx, address, haTLSOpts)
 			if err != nil {
 				return err
 			}
@@ -127,7 +139,7 @@ Use --force to override the safety check.`,
 
 			resp, err := client.Promote(ctx, &haadminapi.PromoteRequest{Force: force})
 			if err != nil {
-				return fmt.Errorf("promote failed: %w", err)
+				return wrapWithTLSHint(fmt.Errorf("promote failed: %w", err), haTLSOpts)
 			}
 
 			fmt.Printf("Promoted. State is now: %s\n", resp.State)
@@ -173,7 +185,7 @@ from the peer.`,
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			client, cleanup, err := getHAAdminClient(ctx, address)
+			client, cleanup, err := getHAAdminClient(ctx, address, haTLSOpts)
 			if err != nil {
 				return err
 			}
@@ -181,7 +193,7 @@ from the peer.`,
 
 			resp, err := client.Demote(ctx, &haadminapi.DemoteRequest{})
 			if err != nil {
-				return fmt.Errorf("demote failed: %w", err)
+				return wrapWithTLSHint(fmt.Errorf("demote failed: %w", err), haTLSOpts)
 			}
 
 			fmt.Printf("Demoted. State is now: %s\n", resp.State)
@@ -198,9 +210,14 @@ from the peer.`,
 
 // getHAAdminClient returns an HA admin gRPC client. If address is set, dials
 // directly. Otherwise uses --principal-context to port-forward to the pod.
-func getHAAdminClient(ctx context.Context, address string) (haadminapi.HAAdminClient, func(), error) {
+func getHAAdminClient(ctx context.Context, address string, tlsOpts haAdminTLSOptions) (haadminapi.HAAdminClient, func(), error) {
+	creds, err := loadHAAdminTLSCredentials(tlsOpts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load TLS credentials: %w", err)
+	}
+
 	if address != "" {
-		client, conn, err := dialHAAdmin(address)
+		client, conn, err := dialHAAdmin(address, creds)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -213,7 +230,7 @@ func getHAAdminClient(ctx context.Context, address string) (haadminapi.HAAdminCl
 	}
 
 	addr := fmt.Sprintf("localhost:%d", localPort)
-	client, conn, err := dialHAAdmin(addr)
+	client, conn, err := dialHAAdmin(addr, creds)
 	if err != nil {
 		close(stopCh)
 		return nil, nil, err
@@ -226,14 +243,81 @@ func getHAAdminClient(ctx context.Context, address string) (haadminapi.HAAdminCl
 	return client, cleanup, nil
 }
 
-func dialHAAdmin(address string) (haadminapi.HAAdminClient, *grpc.ClientConn, error) {
+// haAdminTLSOptions holds the TLS file paths for the HA admin connection.
+type haAdminTLSOptions struct {
+	certPath string
+	keyPath  string
+	caPath   string
+}
+
+func (o haAdminTLSOptions) isEmpty() bool {
+	return o.certPath == "" && o.keyPath == "" && o.caPath == ""
+}
+
+// wrapWithTLSHint appends a hint about TLS issues when the error looks like
+// a TLS/connection failure.
+func wrapWithTLSHint(err error, opts haAdminTLSOptions) error {
+	if err == nil {
+		return nil
+	}
+	if !isTLSRelatedError(err) {
+		return err
+	}
+	if opts.isEmpty() {
+		return fmt.Errorf("%w\n\nHint: the admin endpoint may require mTLS. Provide --tls-cert, --tls-key, and --tls-ca flags", err)
+	}
+	return fmt.Errorf("%w\n\nHint: TLS handshake failed. Verify that the client certificate is signed by the CA the server trusts", err)
+}
+
+func isTLSRelatedError(err error) bool {
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	return st.Code() == codes.Unavailable || st.Code() == codes.DeadlineExceeded
+}
+
+func dialHAAdmin(address string, creds credentials.TransportCredentials) (haadminapi.HAAdminClient, *grpc.ClientConn, error) {
 	conn, err := grpc.NewClient(address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to connect to %s: %w", address, err)
 	}
 	return haadminapi.NewHAAdminClient(conn), conn, nil
+}
+
+// loadHAAdminTLSCredentials builds gRPC transport credentials from local cert files.
+// If no TLS paths are provided, falls back to insecure.
+func loadHAAdminTLSCredentials(opts haAdminTLSOptions) (credentials.TransportCredentials, error) {
+	if opts.certPath == "" && opts.keyPath == "" && opts.caPath == "" {
+		return insecure.NewCredentials(), nil
+	}
+
+	if opts.certPath == "" || opts.keyPath == "" || opts.caPath == "" {
+		return nil, fmt.Errorf("all three flags --tls-cert, --tls-key, and --tls-ca are required for mTLS")
+	}
+
+	clientCert, err := tlsutil.TLSCertFromFile(opts.certPath, opts.keyPath, false)
+	if err != nil {
+		return nil, fmt.Errorf("loading client cert: %w", err)
+	}
+
+	caPool, err := tlsutil.X509CertPoolFromFile(opts.caPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading CA: %w", err)
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{clientCert},
+		RootCAs:      caPool,
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
 }
 
 // portForwardToPrincipal finds the principal pod via --principal-context and

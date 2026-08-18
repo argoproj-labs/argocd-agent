@@ -134,6 +134,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 		haAdminPort                    int
 		haAllowedReplClients           []string
 		haReplicationInitialAckTimeout time.Duration
+		haAdminAuth                    string
+		haAdminTLSCert                 string
+		haAdminTLSKey                  string
+		haAdminCA                      string
 
 		// SPIRE integration
 		spireAgentSocket string
@@ -525,6 +529,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if haReplicationInitialAckTimeout > 0 {
 					haOpts = append(haOpts, ha.WithReplicationInitialAckTimeout(haReplicationInitialAckTimeout))
 				}
+				if haAdminAuth != "" {
+					haOpts = append(haOpts, ha.WithAdminAuth(haAdminAuth))
+				}
+				if haAdminTLSCert != "" || haAdminTLSKey != "" || haAdminCA != "" {
+					haOpts = append(haOpts, ha.WithAdminTLS(haAdminTLSCert, haAdminTLSKey, haAdminCA))
+				}
 				opts = append(opts, principal.WithHA(haOpts...))
 				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
 			}
@@ -768,6 +778,18 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&haReplicationInitialAckTimeout, "ha-replication-initial-ack-timeout",
 		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_INITIAL_ACK_TIMEOUT", nil, 0),
 		"How long the primary waits for the replica's initial ACK after snapshot fetch (default: 5m)")
+	command.Flags().StringVar(&haAdminAuth, "ha-admin-auth",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_AUTH", nil, ""),
+		"Authorization for HA admin endpoint, format: mtls:subject:<regex> or mtls:uri:<regex>")
+	command.Flags().StringVar(&haAdminTLSCert, "ha-admin-tls-cert",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_TLS_CERT", nil, ""),
+		"Path to TLS certificate for the HA admin endpoint (enables independent TLS, separate from main gRPC)")
+	command.Flags().StringVar(&haAdminTLSKey, "ha-admin-tls-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_TLS_KEY", nil, ""),
+		"Path to TLS private key for the HA admin endpoint")
+	command.Flags().StringVar(&haAdminCA, "ha-admin-ca",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_CA", nil, ""),
+		"Path to CA certificate for verifying HA admin client certs")
 
 	return command
 }

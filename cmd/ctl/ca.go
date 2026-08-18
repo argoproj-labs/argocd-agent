@@ -220,6 +220,7 @@ func NewPKIInspectCommand() *cobra.Command {
 		CA            certificateSummary `json:"ca,omitempty" yaml:"ca,omitempty" text:"CA,omitempty"`
 		Principal     certificateSummary `json:"principal,omitempty" yaml:"principal,omitempty" text:"Principal,omitempty"`
 		ResourceProxy certificateSummary `json:"resourceProxy,omitempty" yaml:"resourceProxy,omitempty" text:"Resource Proxy,omitempty"`
+		HAAdmin       certificateSummary `json:"haAdmin,omitempty" yaml:"haAdmin,omitempty" text:"HA Admin,omitempty"`
 	}
 	command := &cobra.Command{
 		Short: "NON-PROD!! Inspect the configured PKI",
@@ -243,11 +244,16 @@ func NewPKIInspectCommand() *cobra.Command {
 			if err != nil && !errors.IsNotFound(err) {
 				cmdutil.Fatal("Error reading principal certificate: %v", err)
 			}
+			haAdminSum, err := readAndSummarizeCertificate(ctx, clt, principalCfg.Namespace, config.SecretNameHAAdminTLS, false)
+			if err != nil && !errors.IsNotFound(err) {
+				cmdutil.Fatal("Error reading HA admin certificate: %v", err)
+			}
 
 			sum := inspectSummary{
 				CA:            caSum,
 				Principal:     principalSum,
 				ResourceProxy: resourceProxySum,
+				HAAdmin:       haAdminSum,
 			}
 
 			out, err := cmdutil.MarshalStruct(sum, outFormat)
@@ -370,6 +376,7 @@ func NewPKIIssueCommand() *cobra.Command {
 	command.AddCommand(NewPKIIssueResourceProxyCommand())
 	command.AddCommand(NewPKIIssueAgentClientCert())
 	command.AddCommand(NewPKIIssueSharedClientCert())
+	command.AddCommand(NewPKIIssueHAAdminCommand())
 	return command
 }
 
@@ -549,6 +556,34 @@ Only the principal context is required. No agent context needed.`,
 			})
 		},
 	}
+	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize)
+	return command
+}
+
+func NewPKIIssueHAAdminCommand() *cobra.Command {
+	var (
+		upsert       bool
+		name         string
+		days         int
+		keyAlgorithm string
+		keySize      int
+	)
+	command := &cobra.Command{
+		Use:   "ha-admin",
+		Short: "Issue a client certificate for an HA admin operator",
+		Run: func(cmd *cobra.Command, args []string) {
+			if name == "" {
+				name = "ha-admin"
+			}
+			keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+			issueAndSaveSecret(principalCfg.KubeContext, config.SecretNameHAAdminTLS, principalCfg.Namespace, upsert, days, keyOpts, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateClientCertificate(name, c, pk, days, keyOpts)
+			})
+		},
+	}
+	command.Flags().StringVar(&name, "name", "ha-admin", "Common name for the admin certificate")
 	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
 	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
 	addKeyGenFlags(command, &keyAlgorithm, &keySize)
