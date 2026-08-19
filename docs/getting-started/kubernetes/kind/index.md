@@ -184,13 +184,22 @@ kubectl get configmap argocd-agent-params \
 # Should output: mtls:CN=([^,]+)
 ```
 
+### Open NetworkPolicy for agent traffic
+```bash
+kubectl patch networkpolicy argocd-agent-redis-proxy \
+  -n $NAMESPACE_NAME \
+  --context kind-$PRINCIPAL_CLUSTER_NAME \
+  --type='json' -p='[{"op":"remove","path":"/spec/ingress/1/from"}]'
+```
+
 ### Update Principal configuration
 ```bash
 kubectl patch configmap argocd-agent-params \
   -n $NAMESPACE_NAME \
   --context kind-$PRINCIPAL_CLUSTER_NAME \
   --patch "{\"data\":{
-    \"principal.allowed-namespaces\":\"$AGENT_APP_NAME\"
+    \"principal.allowed-namespaces\":\"$AGENT_APP_NAME\",
+    \"principal.destination-based-mapping\":\"true\"
 }}"
 
 kubectl rollout restart deployment argocd-agent-principal \
@@ -200,15 +209,23 @@ kubectl rollout restart deployment argocd-agent-principal \
 kubectl get configmap argocd-agent-params \
   -n "$NAMESPACE_NAME" \
   --context "kind-$PRINCIPAL_CLUSTER_NAME" \
-  -o yaml | grep principal.allowed-namespaces
+  -o yaml | grep -E 'principal.allowed-namespaces|principal.destination-based-mapping'
 
 # Expected output: 
 # principal.allowed-namespaces: $AGENT_APP_NAME
-# ($AGENT_APP_NAME should be replaced with the string value you set for your agent application name.)
+# principal.destination-based-mapping: "true"
 ```
 
 ### Verify Principal service exposure
 ```bash
+# Bind gRPC to all interfaces
+kubectl patch configmap argocd-agent-params \
+  -n $NAMESPACE_NAME \
+  --context kind-$PRINCIPAL_CLUSTER_NAME \
+  --patch '{"data":{"principal.listen.host":"0.0.0.0"}}'
+
+kubectl rollout restart deployment argocd-agent-principal -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
+
 # Option 1: NodePort
 kubectl patch svc argocd-agent-principal \
   -n $NAMESPACE_NAME \
@@ -397,16 +414,6 @@ argocd-agentctl pki issue agent $AGENT_APP_NAME \
   --upsert
 ```
 
-### Propagate Certificate Authority to Agent
-
-```bash
-argocd-agentctl pki propagate \
-  --principal-context kind-$PRINCIPAL_CLUSTER_NAME \
-  --principal-namespace $NAMESPACE_NAME \
-  --agent-context kind-$AGENT_CLUSTER_NAME \
-  --agent-namespace $NAMESPACE_NAME
-```
-
 ### Verify certificate installation
 Verify that Agent client certificates are properly installed:
 
@@ -455,7 +462,9 @@ kubectl patch configmap argocd-agent-params \
     \"agent.server.address\":\"$PRINCIPAL_EXTERNAL_IP\",
     \"agent.server.port\":\"$PRINCIPAL_NODE_PORT\",
     \"agent.mode\":\"$AGENT_MODE\",
-    \"agent.creds\":\"mtls:any\"
+    \"agent.creds\":\"mtls:any\",
+    \"agent.destination-based-mapping\":\"true\",
+    \"agent.create-namespace\":\"true\"
   }}"
 
 kubectl rollout restart deployment argocd-agent-agent \
@@ -494,38 +503,24 @@ argocd-agentctl agent list \
   --principal-namespace $NAMESPACE_NAME
 ```
 
-### Test Application Synchronization (Managed Mode)
+### Test Application Synchronization (Managed Mode, Destination-Based Mapping)
 
-Propagate a default AppProject from principal to the agent:
+The default AppProject is synchronized to the agent automatically once it connects:
 
 ```bash
-kubectl patch appproject default -n $NAMESPACE_NAME \
-  --context kind-$PRINCIPAL_CLUSTER_NAME --type='merge' \
-  --patch='{"spec":{"sourceNamespaces":["*"],"destinations":[{"name":"*","namespace":"*","server":"*"}]}}'
+# Check that the default AppProject appears on the workload cluster
+kubectl get appprojects -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
 ```
 
-Verify the AppProject is synchronized to the agent:
+Create an Application on the principal, targeting the agent by name via `spec.destination.name`:
 
 ```bash
-# Check that the AppProject appears on the workload cluster
-kubectl get appprojs -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
-```
-
-```bash
-# Check NodePort
-PRINCIPAL_EXTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' argocd-hub-control-plane)
-echo "<principal-external-ip>: $PRINCIPAL_EXTERNAL_IP"
-
-PRINCIPAL_NODE_PORT=$(kubectl get svc argocd-agent-principal -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -o jsonpath='{.spec.ports[0].nodePort}'
-)
-echo "<principal-node-port>: $PRINCIPAL_NODE_PORT"
-
 cat <<EOF | kubectl apply -f - --context kind-$PRINCIPAL_CLUSTER_NAME
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: test-app
-  namespace: $AGENT_APP_NAME
+  name: guestbook
+  namespace: $NAMESPACE_NAME
 spec:
   project: default
   source:
@@ -533,7 +528,7 @@ spec:
     targetRevision: HEAD
     path: guestbook
   destination:
-    server: https://$PRINCIPAL_EXTERNAL_IP:$PRINCIPAL_NODE_PORT?agentName=$AGENT_APP_NAME
+    name: $AGENT_APP_NAME
     namespace: guestbook
   syncPolicy:
     syncOptions:
@@ -541,30 +536,40 @@ spec:
 EOF
 ```
 
-Verify that the application is synchronized to the Agent.
+Verify that the Application is synchronized to the agent, in the same `$NAMESPACE_NAME` namespace (not renamed to `$AGENT_APP_NAME`), and that on the agent side `destination.name` is rewritten to `in-cluster` while the principal keeps `$AGENT_APP_NAME` for routing:
 
 ```bash
-# Delete Application in wrong namespace
-kubectl delete application test-app -n $AGENT_APP_NAME --context kind-$PRINCIPAL_CLUSTER_NAME
-
-# Recreate in $NAMESPACE_NAME namespace (use the Application creation code above)
+kubectl get application guestbook -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
+kubectl get application guestbook -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -o jsonpath='{.spec.destination}'
+kubectl get application guestbook -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME -o jsonpath='{.spec.destination}'
 ```
 
-### Access ArgoCD UI
+The Application shows as `OutOfSync`/`Missing` until synced (there's no `automated` sync policy, by design, so it must be synced manually via the UI or CLI below).
+
+### Access Argo CD and sync the Application
 
 ```bash
 kubectl port-forward svc/argocd-server -n $NAMESPACE_NAME 8080:443 --context kind-$PRINCIPAL_CLUSTER_NAME &
 
-# Check initial admin password
-kubectl -n $NAMESPACE_NAME get secret argocd-initial-admin-secret --context kind-$PRINCIPAL_CLUSTER_NAME \
-  -o jsonpath="{.data.password}" | base64 -d && echo
+# Get the initial admin password
+ARGOCD_PASSWORD=$(kubectl -n $NAMESPACE_NAME get secret argocd-initial-admin-secret --context kind-$PRINCIPAL_CLUSTER_NAME \
+  -o jsonpath="{.data.password}" | base64 -d)
+echo "$ARGOCD_PASSWORD"
 ```
 
-- URL: https://localhost:8080
-- Username: `admin`
-- Password: Value confirmed by the command above
-- If SSL certificate warning appears in browser, click "Advanced" → "Proceed to unsafe"
-- You can verify that the Agent cluster (`agent-a`) is connected in the UI.
+**UI**: Open https://localhost:8080, log in as `admin` with the password above (accept the self-signed certificate warning), then click **Sync** on the `guestbook` app. You can also verify the Agent cluster (`$AGENT_APP_NAME`) is connected under **Settings → Clusters**.
+
+**CLI**:
+```bash
+argocd login localhost:8080 --username admin --password "$ARGOCD_PASSWORD" --insecure
+argocd app sync guestbook
+```
+
+Wait for the Application to reach `Synced`/`Healthy` on both clusters, proving that sync/health status computed on the agent is reflected back to the principal:
+
+```bash
+kubectl get application guestbook -n $NAMESPACE_NAME --context kind-$PRINCIPAL_CLUSTER_NAME -w
+```
 
 <br />
 
