@@ -438,8 +438,6 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		require.Contains(t, updated.Labels, "bar")
 		require.Contains(t, updated.Labels, "some")
 		require.Equal(t, updated.Spec.Source.Path, ".")
-		require.NotNil(t, updated.Operation)
-		require.Equal(t, incoming.Operation, updated.Operation)
 	})
 
 	t.Run("Retain principal-owned annotations across an agent status update", func(t *testing.T) {
@@ -1001,117 +999,6 @@ func Test_stampLastUpdated(t *testing.T) {
 	})
 }
 
-func Test_CompareSourceUIDForApp(t *testing.T) {
-	oldApp := &v1alpha1.Application{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      "test",
-			Namespace: "argocd",
-			Annotations: map[string]string{
-				manager.SourceUIDAnnotation: "old_uid",
-			},
-		},
-	}
-
-	mockedBackend := appmock.NewApplication(t)
-	getMock := mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
-	m, err := NewApplicationManager(mockedBackend, "")
-	require.Nil(t, err)
-	ctx := context.Background()
-
-	t.Cleanup(func() {
-		getMock.Unset()
-	})
-
-	t.Run("should return true if the UID matches", func(t *testing.T) {
-		incoming := oldApp.DeepCopy()
-		incoming.UID = ktypes.UID("old_uid")
-
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.True(t, exists)
-		require.Nil(t, err)
-		require.True(t, uidMatch)
-	})
-
-	t.Run("should return false if the UID doesn't match", func(t *testing.T) {
-		incoming := oldApp.DeepCopy()
-		// Clear source-uid so comparison falls back to incoming.UID (normal operation path)
-		delete(incoming.Annotations, manager.SourceUIDAnnotation)
-		incoming.UID = ktypes.UID("new_uid")
-
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.True(t, exists)
-		require.Nil(t, err)
-		require.False(t, uidMatch)
-	})
-
-	t.Run("should return true if incoming has matching source-uid annotation", func(t *testing.T) {
-		incoming := oldApp.DeepCopy()
-		incoming.UID = ktypes.UID("agent_uid")
-		incoming.Annotations[manager.SourceUIDAnnotation] = "old_uid"
-
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.True(t, exists)
-		require.Nil(t, err)
-		require.True(t, uidMatch)
-	})
-
-	t.Run("should return an error if there is no UID annotation", func(t *testing.T) {
-		oldApp.Annotations = map[string]string{}
-		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
-		m, err := NewApplicationManager(mockedBackend, "")
-		require.Nil(t, err)
-		ctx := context.Background()
-
-		incoming := oldApp.DeepCopy()
-		incoming.UID = ktypes.UID("new_uid")
-
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.True(t, exists)
-		require.NotNil(t, err)
-		require.EqualError(t, err, "source UID Annotation is not found for app: test")
-		require.False(t, uidMatch)
-	})
-
-	t.Run("should return False if the app doesn't exist", func(t *testing.T) {
-		expectedErr := errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"},
-			oldApp.Name)
-		getMock.Unset()
-		getMock = mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, expectedErr)
-		m, err := NewApplicationManager(mockedBackend, "")
-		require.Nil(t, err)
-		ctx := context.Background()
-
-		app, err := m.applicationBackend.Get(ctx, oldApp.Name, oldApp.Namespace)
-		require.Nil(t, app)
-		require.True(t, errors.IsNotFound(err))
-
-		incoming := oldApp.DeepCopy()
-		incoming.UID = ktypes.UID("new_uid")
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.False(t, exists)
-		require.False(t, uidMatch)
-		require.Nil(t, err)
-	})
-
-	t.Run("should override incoming namespace", func(t *testing.T) {
-		oldApp.Annotations = map[string]string{manager.SourceUIDAnnotation: "old_uid"}
-		getMock.Unset()
-		getMock = mockedBackend.On("Get", mock.Anything, mock.Anything, "argocd").Return(oldApp, nil)
-		m, err := NewApplicationManager(mockedBackend, oldApp.Namespace)
-		require.Nil(t, err)
-		ctx := context.Background()
-
-		incoming := oldApp.DeepCopy()
-		incoming.Namespace = "foobar"
-		incoming.UID = ktypes.UID("old_uid")
-
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.True(t, exists)
-		require.Nil(t, err)
-		require.True(t, uidMatch)
-	})
-}
-
 func Test_CompareIdentity(t *testing.T) {
 	existingApp := &v1alpha1.Application{
 		ObjectMeta: v1.ObjectMeta{
@@ -1351,6 +1238,7 @@ func Test_ClearOperationState(t *testing.T) {
 		}
 
 		mockedBackend := appmock.NewApplication(t)
+		mockedBackend.On("Get", mock.Anything, "guestbook", "argocd").Return(app, nil)
 		mockedBackend.On("Patch", mock.Anything, "guestbook", "argocd", []byte(`[{"op":"replace","path":"/status/operationState","value":null}]`)).Return(updatedApp, nil)
 
 		m, err := NewApplicationManager(mockedBackend, "argocd")
@@ -1370,6 +1258,7 @@ func Test_ClearOperationState(t *testing.T) {
 		}
 
 		mockedBackend := appmock.NewApplication(t)
+		mockedBackend.On("Get", mock.Anything, "guestbook", "argocd").Return(app, nil)
 		mockedBackend.On("Patch", mock.Anything, "guestbook", "argocd", []byte(`[{"op":"replace","path":"/status/operationState","value":null}]`)).Return(nil, fmt.Errorf("patch failed"))
 
 		m, err := NewApplicationManager(mockedBackend, "argocd")

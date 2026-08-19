@@ -214,17 +214,19 @@ func (m *ApplicationManager) Upsert(ctx context.Context, app *v1alpha1.Applicati
 	if !errors.IsAlreadyExists(err) {
 		return nil, err
 	}
+	var originalOnCluster *v1alpha1.Application
 	var updated *v1alpha1.Application
 	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		existing, ierr := m.applicationBackend.Get(ctx, app.Name, app.Namespace)
+		var ierr error
+		originalOnCluster, ierr = m.applicationBackend.Get(ctx, app.Name, app.Namespace)
 		if ierr != nil {
 			return fmt.Errorf("get existing application for upsert: %w", ierr)
 		}
 		// UID must match the replica's existing object — the primary and replica
 		// assign different UIDs to the same-named resource. Without this, etcd
 		// rejects the update with a storage precondition error (Code 4).
-		app.ResourceVersion = existing.ResourceVersion
-		app.UID = existing.UID
+		app.ResourceVersion = originalOnCluster.ResourceVersion
+		app.UID = originalOnCluster.UID
 		// Do NOT preserve the existing source-uid here. Create() already stamped
 		// source-uid = primary's UID before the AlreadyExists error. Preserving
 		// the existing value would allow a stale/wrong source-uid (e.g. from a
@@ -240,7 +242,7 @@ func (m *ApplicationManager) Upsert(ctx context.Context, app *v1alpha1.Applicati
 	if err != nil {
 		return nil, err
 	}
-	logging.LogActionUpdate(log().WithField("application", updated.QualifiedName()), "application", app, updated)
+	logging.LogActionUpdate(log().WithField("application", updated.QualifiedName()), "application", originalOnCluster, updated)
 	if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 		log().Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 	}
@@ -310,9 +312,6 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
-	var updated *v1alpha1.Application
-	var err error
-
 	if !m.destinationBasedMapping {
 		incoming.SetNamespace(m.namespace)
 	}
@@ -323,7 +322,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 
 	deletionTimestampChanged := false
 
-	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
+	updated, originalOnCluster, err := m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
 		applyManagedIdentity(existing, incoming, identity)
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
@@ -367,7 +366,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	})
 	if err == nil {
 		if updated.Generation > 1 {
-			logging.LogActionUpdate(logCtx, "application", incoming, updated)
+			logging.LogActionUpdate(logCtx, "application", originalOnCluster, updated)
 		}
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Couldn't unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
@@ -461,19 +460,6 @@ func (m *ApplicationManager) CompareIdentity(ctx context.Context, incoming *v1al
 	return result, nil
 }
 
-// CompareSourceUID checks for an existing app with the same name/namespace and compare its source UID with the incoming app.
-// Deprecated: Use CompareIdentity for principal-transition-aware comparisons.
-func (m *ApplicationManager) CompareSourceUID(ctx context.Context, incoming *v1alpha1.Application) (bool, bool, error) {
-	result, err := m.CompareIdentity(ctx, incoming, "")
-	if err != nil {
-		return result != nil && result.Exists, false, err
-	}
-	if result.ExistingMissingSourceUID {
-		return result != nil && result.Exists, false, fmt.Errorf("source UID Annotation is not found for app: %s", incoming.Name)
-	}
-	return result.Exists, result.SourceUIDMatch, nil
-}
-
 // principalOwnedAnnotations lists the annotations that are written on the
 // principal's copy of an application and are unknown to the agent. They are
 // retained across updates received from the agent.
@@ -512,8 +498,6 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
-	var updated *v1alpha1.Application
-	var err error
 	incoming.SetNamespace(namespace)
 	if m.role == manager.ManagerRolePrincipal {
 		stampLastUpdated(incoming)
@@ -521,7 +505,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		return nil, fmt.Errorf("UpdateAutonomousApp should only be called from principal")
 	}
 
-	updated, err = m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
+	updated, originalOnCluster, err := m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
 		preservePrincipalAnnotations(existing, incoming)
 
 		existing.Annotations = incoming.Annotations
@@ -574,7 +558,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not unignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logging.LogActionUpdate(logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion), "application", incoming, updated)
+		logging.LogActionUpdate(logCtx.WithField(logfields.NewResourceVersion, updated.ResourceVersion), "application", originalOnCluster, updated)
 	}
 	return updated, err
 }
@@ -593,8 +577,6 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
-	var updated *v1alpha1.Application
-	var err error
 	if !m.destinationBasedMapping {
 		incoming.SetNamespace(namespace)
 	}
@@ -604,7 +586,7 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		return nil, fmt.Errorf("UpdateStatus should only be called on principal")
 	}
 
-	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+	updated, originalOnCluster, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		preservePrincipalAnnotations(existing, incoming)
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
@@ -648,7 +630,7 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logging.LogActionUpdate(logCtx, "application", incoming, updated)
+		logging.LogActionUpdate(logCtx, "application", originalOnCluster, updated)
 	}
 	return updated, err
 }
@@ -668,14 +650,11 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
-	var updated *v1alpha1.Application
-	var err error
-
 	if !m.role.IsAgent() || !m.mode.IsAutonomous() {
 		return nil, fmt.Errorf("UpdateOperation should only be called by an agent in autonomous mode: %v %v", m.role, m.mode)
 	}
 
-	updated, err = m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+	updated, originalOnCluster, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Operation = operationToUse(existing, incoming)
@@ -706,7 +685,7 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logging.LogActionUpdate(logCtx, "application", incoming, updated)
+		logging.LogActionUpdate(logCtx, "application", originalOnCluster, updated)
 	}
 	return updated, err
 }
@@ -727,7 +706,7 @@ func (m *ApplicationManager) SetOperation(ctx context.Context, incoming *v1alpha
 		incoming.SetNamespace(m.namespace)
 	}
 
-	updated, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+	updated, originalOnCluster, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
 		existing.Operation = operationToUse(existing, incoming)
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
 		target := &v1alpha1.Application{
@@ -742,7 +721,7 @@ func (m *ApplicationManager) SetOperation(ctx context.Context, incoming *v1alpha
 		if err := m.IgnoreChange(updated.QualifiedName(), updated.ResourceVersion); err != nil {
 			logCtx.Warnf("Could not ignore change %s for app %s: %v", updated.ResourceVersion, updated.QualifiedName(), err)
 		}
-		logging.LogActionUpdate(logCtx, "application", incoming, updated)
+		logging.LogActionUpdate(logCtx, "application", originalOnCluster, updated)
 	}
 	return updated, err
 }
@@ -824,11 +803,9 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 	if m.role.IsPrincipal() {
 		removeFinalizer = true
 	}
-	var err error
-	var updated *v1alpha1.Application
 
 	if removeFinalizer {
-		updated, err = m.RemoveFinalizers(ctx, incoming)
+		updated, err := m.RemoveFinalizers(ctx, incoming)
 		if err == nil {
 			logCtx.Debugf("Removed finalizer for app %s", updated.QualifiedName())
 		} else {
@@ -836,7 +813,7 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 		}
 	}
 
-	err = m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
+	err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, deletionPropagation)
 	if err == nil {
 		logging.LogActionDelete(logCtx, "application", incoming.Namespace, incoming.Name)
 	}
@@ -856,7 +833,7 @@ func (m *ApplicationManager) Delete(ctx context.Context, namespace string, incom
 //
 // The updated application will be returned on success, otherwise an error will
 // be returned.
-func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *v1alpha1.Application, updateFn updateTransformer, patchFn patchTransformer) (*v1alpha1.Application, error) {
+func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *v1alpha1.Application, updateFn updateTransformer, patchFn patchTransformer) (*v1alpha1.Application, *v1alpha1.Application, error) {
 	var updated *v1alpha1.Application
 
 	if ctx == nil {
@@ -864,6 +841,7 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 	}
 	ctxForUpdate := context.WithValue(ctx, backend.ForUpdateContextKey, true)
 
+	var originalOnCluster *v1alpha1.Application
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		existing, ierr := m.applicationBackend.Get(ctxForUpdate, incoming.Name, incoming.Namespace)
 		if ierr != nil {
@@ -874,6 +852,7 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 				return fmt.Errorf("error updating application %s: %w", incoming.QualifiedName(), ierr)
 			}
 		} else {
+			originalOnCluster = existing.DeepCopy()
 			if m.applicationBackend.SupportsPatch() && patchFn != nil {
 				patch, err := patchFn(existing, incoming)
 				if err != nil {
@@ -893,14 +872,14 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 		}
 		return ierr
 	})
-	return updated, err
+	return updated, originalOnCluster, err
 }
 
 // RemoveFinalizers will remove finalizers on an existing application
 func (m *ApplicationManager) RemoveFinalizers(ctx context.Context, incoming *v1alpha1.Application) (*v1alpha1.Application, error) {
-	updated, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
+	updated, originalOnCluster, err := m.update(ctx, false, incoming, func(existing, _ *v1alpha1.Application) {
 		existing.Finalizers = nil
-	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
+	}, func(existing, _ *v1alpha1.Application) (jsondiff.Patch, error) {
 		var err error
 		var patch jsondiff.Patch
 		target := &v1alpha1.Application{
@@ -917,7 +896,7 @@ func (m *ApplicationManager) RemoveFinalizers(ctx context.Context, incoming *v1a
 		return patch, err
 	})
 	if err == nil {
-		logging.LogActionUpdate(log().WithField("application", incoming.QualifiedName()), "application", incoming, updated)
+		logging.LogActionUpdate(log().WithField("application", incoming.QualifiedName()), "application", originalOnCluster, updated)
 	}
 	return updated, err
 }
@@ -932,13 +911,19 @@ func (m *ApplicationManager) ClearOperationState(ctx context.Context, app *v1alp
 		"component":   "ClearOperationState",
 		"application": app.Namespace + "/" + app.Name,
 	})
+	// Retrieve the current contents of the existing app, so we can log (roughly) what we are patching against. This is not used for the patch.
+	origApp, err := m.applicationBackend.Get(ctx, app.Name, app.Namespace)
+	if err != nil {
+		logging.LogActionError(logCtx, "application", "clear-operation-state", app, err)
+		return err
+	}
 	updated, err := m.applicationBackend.Patch(ctx, app.Name, app.Namespace,
 		[]byte(`[{"op":"replace","path":"/status/operationState","value":null}]`))
 	if err != nil {
 		logging.LogActionError(logCtx, "application", "clear-operation-state", app, err)
 		return err
 	}
-	logging.LogActionUpdate(logCtx, "application", app, updated)
+	logging.LogActionUpdate(logCtx, "application", origApp, updated)
 	return nil
 }
 
