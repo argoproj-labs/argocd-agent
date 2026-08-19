@@ -81,6 +81,31 @@ func Test_Queue(t *testing.T) {
 		assert.Equal(t, "2", front.ID())
 	})
 
+	t.Run("Bound self-heals when the queue exceeds maxSize", func(t *testing.T) {
+		q := NewSendRecvQueues()
+		err := q.Create("agent1")
+		assert.NoError(t, err)
+		bq, ok := q.RecvQ("agent1").(*boundedQueue)
+		assert.True(t, ok)
+
+		const overshoot = 5
+		for i := 0; i < defaultMaxQueueSize+overshoot; i++ {
+			ev := event.New()
+			ev.SetID(strconv.Itoa(i))
+			bq.TypedRateLimitingInterface.Add(&ev)
+		}
+		assert.Equal(t, defaultMaxQueueSize+overshoot, bq.Len())
+
+		// Every further Add must evict before inserting, so the length never
+		// grows.
+		for i := 0; i < 100; i++ {
+			ev := event.New()
+			ev.SetID("new-" + strconv.Itoa(i))
+			bq.Add(&ev)
+			assert.LessOrEqual(t, bq.Len(), defaultMaxQueueSize+overshoot)
+		}
+	})
+
 	t.Run("Ensure that the queue sizes can be configured via environment variable", func(t *testing.T) {
 		queueSize := 100
 		t.Setenv(config.EnvRecvQueueSize, strconv.Itoa(queueSize))
