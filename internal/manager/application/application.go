@@ -914,8 +914,8 @@ func (m *ApplicationManager) ClearOperationState(ctx context.Context, app *v1alp
 	// Retrieve the current contents of the existing app, so we can log (roughly) what we are patching against. This is not used for the patch.
 	origApp, err := m.applicationBackend.Get(ctx, app.Name, app.Namespace)
 	if err != nil {
+		// Log the error, but continue: this Get is optional, and there is no need to block the Patch
 		logging.LogActionError(logCtx, "application", "clear-operation-state", app, err)
-		return err
 	}
 	updated, err := m.applicationBackend.Patch(ctx, app.Name, app.Namespace,
 		[]byte(`[{"op":"replace","path":"/status/operationState","value":null}]`))
