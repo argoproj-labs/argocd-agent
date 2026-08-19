@@ -230,12 +230,10 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 	var err error
 
 	updated, err = m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.AppProject) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
-			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
-		}
+		// Keep the existing source-UID unless the caller explicitly stamped a
+		// new one (adopt/upsert). Always overwriting would block adoption of
+		// pre-installed AppProjects such as "default".
+		preserveSourceUIDIfUnset(existing, incoming)
 
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
@@ -243,12 +241,7 @@ func (m *AppProjectManager) UpdateAppProject(ctx context.Context, incoming *v1al
 		existing.Spec = *incoming.Spec.DeepCopy()
 		existing.Status = *incoming.Status.DeepCopy()
 	}, func(existing, incoming *v1alpha1.AppProject) (jsondiff.Patch, error) {
-		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
-			if incoming.Annotations == nil {
-				incoming.Annotations = make(map[string]string)
-			}
-			incoming.Annotations[manager.SourceUIDAnnotation] = v
-		}
+		preserveSourceUIDIfUnset(existing, incoming)
 
 		target := &v1alpha1.AppProject{
 			ObjectMeta: v1.ObjectMeta{
@@ -394,6 +387,21 @@ func (m *AppProjectManager) RemoveFinalizers(ctx context.Context, incoming *v1al
 // timeout has been reached (which will return an error)
 func (m *AppProjectManager) EnsureSynced(duration time.Duration) error {
 	return m.appprojectBackend.EnsureSynced(duration)
+}
+
+// preserveSourceUIDIfUnset copies the existing source-UID onto incoming when
+// incoming does not already carry one. Callers that intentionally adopt or
+// upsert must stamp the new source-UID before UpdateAppProject.
+func preserveSourceUIDIfUnset(existing, incoming *v1alpha1.AppProject) {
+	if incoming.Annotations != nil && incoming.Annotations[manager.SourceUIDAnnotation] != "" {
+		return
+	}
+	if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
+		if incoming.Annotations == nil {
+			incoming.Annotations = make(map[string]string)
+		}
+		incoming.Annotations[manager.SourceUIDAnnotation] = v
+	}
 }
 
 // CompareSourceUID checks for an existing appProject with the same name/namespace and compare its source UID with the incoming appProject.
