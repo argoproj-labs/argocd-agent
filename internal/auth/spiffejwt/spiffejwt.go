@@ -36,8 +36,7 @@ type SPIFFEJWTAuthentication struct {
 	AgentIDRegex *regexp.Regexp
 
 	// BundleSource provides JWT bundles for validating JWT-SVID signatures.
-	// When set, ParseAndValidate is used for cryptographic verification.
-	// When nil, ParseInsecure is used (not recommended for production).
+	// Must be set; authentication fails if nil.
 	BundleSource jwtbundle.Source
 
 	// Audience is the expected audience in the JWT-SVID.
@@ -71,12 +70,10 @@ func (a *SPIFFEJWTAuthentication) Authenticate(_ context.Context, creds auth.Cre
 
 	audiences := []string{a.Audience}
 
-	if a.BundleSource != nil {
-		svid, err = jwtsvid.ParseAndValidate(token, a.BundleSource, audiences)
-	} else {
-		log.Warn("No SPIFFE JWT bundle source configured, using insecure JWT parsing")
-		svid, err = jwtsvid.ParseInsecure(token, audiences)
+	if a.BundleSource == nil {
+		return "", fmt.Errorf("no SPIFFE JWT bundle source configured; cannot validate JWT-SVID signature")
 	}
+	svid, err = jwtsvid.ParseAndValidate(token, a.BundleSource, audiences)
 	if err != nil {
 		return "", fmt.Errorf("SPIFFE JWT-SVID validation failed: %w", err)
 	}
@@ -85,7 +82,7 @@ func (a *SPIFFEJWTAuthentication) Authenticate(_ context.Context, creds auth.Cre
 	log.Debugf("Validated SPIFFE JWT-SVID, SPIFFE ID: %s", spiffeID)
 
 	if a.AgentIDRegex == nil {
-		return spiffeID, nil
+		return "", fmt.Errorf("no agent ID regex configured; cannot extract agent identity from SPIFFE ID %q", spiffeID)
 	}
 
 	matches := a.AgentIDRegex.FindStringSubmatch(spiffeID)

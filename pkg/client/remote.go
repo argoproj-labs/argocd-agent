@@ -677,10 +677,10 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			creds := r.creds
 			// When SPIRE is configured with JWT authentication,
 			// fetch the JWT-SVID and include it in the credentials.
-			if r.spireSource != nil && r.authMethod == "spiffe-jwt" {
+			if r.spireSource != nil && r.authMethod == auth.MethodSPIFFEJWT {
 				jwtToken, jwtErr := r.spireSource.FetchJWTSVID(ctx, config.SPIREJWTAudience)
 				if jwtErr != nil {
-					logrus.Warnf("Failed to fetch JWT-SVID: %v (retrying in %v)", jwtErr, cBackoff.Step())
+					logrus.Errorf("Failed to fetch JWT-SVID: %v (retrying in %v)", jwtErr, cBackoff.Step())
 					return jwtErr
 				}
 				creds = auth.Credentials{"token": jwtToken}

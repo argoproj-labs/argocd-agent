@@ -230,6 +230,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if spireAuthMethod != "" && spireAuthMethod != "jwt" && spireAuthMethod != "mtls" {
 				cmdutil.Fatal("--spire-auth-method must be 'jwt' or 'mtls', got %q", spireAuthMethod)
 			}
+			if spireAgentSocket != "" && insecurePlaintext {
+				cmdutil.Fatal("--spire-agent-socket cannot be used with --insecure-plaintext; SPIRE provides TLS credentials")
+			}
 
 			// Configure TLS: SPIRE, plaintext, or static certs
 			var spireSource *spire.Source
@@ -927,6 +930,12 @@ func validateAuthTLSPairing(authMethod string, insecurePlaintext bool) error {
 				"  Either:\n" +
 				"  - Remove --insecure-plaintext flag to enable TLS for mTLS authentication\n" +
 				"  - Use --auth=header:<header>:<regex> for service mesh environments with plaintext mode")
+		}
+	case auth.MethodSPIFFEJWT:
+		if insecurePlaintext {
+			return fmt.Errorf("invalid configuration: spiffe-jwt authentication cannot be used with --insecure-plaintext\n" +
+				"  JWT-SVIDs sent over an unencrypted channel can be intercepted and replayed.\n" +
+				"  Remove --insecure-plaintext flag to enable TLS for SPIFFE JWT authentication")
 		}
 	}
 	return nil

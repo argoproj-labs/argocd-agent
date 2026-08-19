@@ -86,11 +86,23 @@ func TestAuthenticate_Success(t *testing.T) {
 }
 
 func TestAuthenticate_NoToken(t *testing.T) {
-	a := NewSPIFFEJWTAuthentication(nil, "aud", nil)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	bundleSource := setupBundleSource(t, key, "example.org")
 
-	_, err := a.Authenticate(context.Background(), auth.Credentials{})
+	a := NewSPIFFEJWTAuthentication(nil, "aud", bundleSource)
+
+	_, err = a.Authenticate(context.Background(), auth.Credentials{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no SPIFFE JWT token provided")
+}
+
+func TestAuthenticate_NilBundleSource(t *testing.T) {
+	a := NewSPIFFEJWTAuthentication(nil, "aud", nil)
+
+	_, err := a.Authenticate(context.Background(), auth.Credentials{"token": "some.jwt.token"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no SPIFFE JWT bundle source configured")
 }
 
 func TestAuthenticate_InvalidToken(t *testing.T) {
@@ -123,7 +135,7 @@ func TestAuthenticate_RegexNoMatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "did not match agent ID regex")
 }
 
-func TestAuthenticate_NoRegex_ReturnsFullSPIFFEID(t *testing.T) {
+func TestAuthenticate_NoRegex_ReturnsError(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -135,9 +147,9 @@ func TestAuthenticate_NoRegex_ReturnsFullSPIFFEID(t *testing.T) {
 
 	a := NewSPIFFEJWTAuthentication(nil, audience, bundleSource)
 
-	agentID, err := a.Authenticate(context.Background(), auth.Credentials{"token": token})
-	require.NoError(t, err)
-	assert.Equal(t, spiffeID, agentID)
+	_, err = a.Authenticate(context.Background(), auth.Credentials{"token": token})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no agent ID regex configured")
 }
 
 func TestAuthenticate_WrongAudience(t *testing.T) {

@@ -68,14 +68,23 @@ func IsProcessRunning(processName string, t *testing.T) bool {
 // VerifyProcessLogs checks if expected messages are present in process logs.
 func VerifyProcessLogs(t testing.TB, processName string, requiredMessages []string) {
 	t.Helper()
+	prefix := processName + " | "
 	require.Eventually(t, func() bool {
 		content, err := os.ReadFile("/tmp/argocd-agent-e2e-process-output.log")
 		if err != nil {
 			t.Logf("reading process log for %s: %v", processName, err)
 			return false
 		}
+		lines := strings.Split(string(content), "\n")
 		for _, msg := range requiredMessages {
-			if !strings.Contains(string(content), msg) {
+			found := false
+			for _, line := range lines {
+				if strings.Contains(line, prefix) && strings.Contains(line, msg) {
+					found = true
+					break
+				}
+			}
+			if !found {
 				t.Logf("expected log not found for %s: %q", processName, msg)
 				return false
 			}

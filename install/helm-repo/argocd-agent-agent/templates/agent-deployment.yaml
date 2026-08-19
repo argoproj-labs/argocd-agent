@@ -352,7 +352,7 @@ spec:
           {{- else }}
           hostPath:
             path: {{ .Values.spire.hostSocketDir }}
-            type: DirectoryOrCreate
+            type: Directory
           {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}

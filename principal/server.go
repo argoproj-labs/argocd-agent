@@ -1239,22 +1239,22 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	// When SPIRE is configured, use SPIRE SVID instead of TLS certificate and key
 	if s.options.spireSource != nil {
 		log().Infof("Using SPIRE for server TLS credentials")
+		trustBundle, err := s.options.spireSource.TrustBundle()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get SPIRE trust bundle for client verification: %w", err)
+		}
+		clientAuth := tls.VerifyClientCertIfGiven
+		if s.options.requireClientCerts {
+			log().Infof("SPIRE mTLS: requiring client certificates verified against SPIRE trust bundle")
+			clientAuth = tls.RequireAndVerifyClientCert
+		}
 		tlsConfig := &tls.Config{
 			GetCertificate: s.options.spireSource.GetCertificate(),
-			ClientAuth:     tls.NoClientCert,
+			ClientAuth:     clientAuth,
+			ClientCAs:      trustBundle,
 			MinVersion:     s.options.tlsMinVersion,
 			MaxVersion:     s.options.tlsMaxVersion,
 			CipherSuites:   s.options.tlsCiphers,
-		}
-		// When mTLS is used with SPIRE, require client certs verified against the SPIRE trust bundle
-		if s.options.requireClientCerts {
-			log().Infof("SPIRE mTLS: requiring client certificates verified against SPIRE trust bundle")
-			trustBundle, err := s.options.spireSource.TrustBundle()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get SPIRE trust bundle for client verification: %w", err)
-			}
-			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-			tlsConfig.ClientCAs = trustBundle
 		}
 		return tlsConfig, nil
 	}

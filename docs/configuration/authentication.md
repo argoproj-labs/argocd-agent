@@ -296,7 +296,7 @@ ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET: "argocd-agent-shared-clie
 
 The shared client certificate must be created beforehand using `argocd-agentctl pki issue shared-client`. See [TLS & Certificates](tls-certificates.md#using-spire-automated-certificate-management) for the complete setup steps.
 
-No static certificate secrets are needed on the agent cluster — SPIRE provides all credentials automatically.
+No static certificate secrets are needed on the agent cluster. SPIRE provides all credentials automatically.
 
 ## UserPass Authentication (Deprecated)
 

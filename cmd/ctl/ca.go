@@ -532,7 +532,7 @@ func NewPKIIssueSharedClientCert() *cobra.Command {
 	)
 	command := &cobra.Command{
 		Use:   "shared-client",
-		Short: "Issue a shared client certificate for self-registration",
+		Short: "NON-PROD!! Issue a shared client certificate for self-registration",
 		Long: `Issues a TLS client certificate and stores it in the principal namespace.
 This certificate is used by self-registration: when an agent self-registers,
 the principal copies this shared cert into the agent's cluster secret so that

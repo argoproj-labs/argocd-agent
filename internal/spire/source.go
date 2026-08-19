@@ -50,7 +50,9 @@ func New(ctx context.Context, socketPath string) (*Source, error) {
 
 	jwtSource, err := workloadapi.NewJWTSource(ctx, clientOpts)
 	if err != nil {
-		x509Source.Close()
+		if closeErr := x509Source.Close(); closeErr != nil {
+			log.Warnf("Failed to close X509Source during cleanup: %v", closeErr)
+		}
 		return nil, fmt.Errorf("failed to create SPIRE JWTSource: %w", err)
 	}
 

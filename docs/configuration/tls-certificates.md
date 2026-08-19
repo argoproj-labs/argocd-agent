@@ -48,7 +48,7 @@ graph TB
 
 ## Using SPIRE (Automated Certificate Management)
 
-[SPIRE](https://spiffe.io/docs/latest/spire-about/) can replace static certificate management for agent-to-principal communication. When enabled, TLS credentials are obtained automatically from the SPIRE Workload API — no per-agent certificate generation, no secret copying between clusters.
+[SPIRE](https://spiffe.io/docs/latest/spire-about/) can replace static certificate management for agent-to-principal communication. When enabled, TLS credentials are obtained automatically from the SPIRE Workload API. There is no per-agent certificate generation, and no secret copying between clusters.
 
 !!! note "What SPIRE replaces and what it does not"
     SPIRE replaces the **agent-to-principal gRPC TLS** certificates (principal server cert, agent client certs, and CA certs) and **agent authentication** (identity comes from SPIFFE IDs instead of certificate CNs). The resource proxy TLS, JWT signing key, and CA secret on the principal are still managed via static secrets.
@@ -74,7 +74,10 @@ Two authentication methods are supported. Choose based on what your SPIRE setup 
 
 ### Step 2: Create one-time secrets on the principal
 
-These static secrets are still required because the resource proxy and JWT signing use static TLS, and self-registration needs a shared client certificate:
+These static secrets are still required because the resource proxy and JWT signing use static TLS, and self-registration needs a shared client certificate.
+
+!!! warning "Non-production PKI"
+    The `argocd-agentctl pki` commands below use a built-in CA intended for development and testing only. For production environments, use certificates issued by your organization's PKI or certificate authority.
 
 ```bash
 # Initialize the CA
