@@ -216,9 +216,6 @@ func NewAgentRunCommand() *cobra.Command {
 			if spireAgentSocket != "" && insecure {
 				cmdutil.Fatal("--spire-agent-socket cannot be used with --insecure-tls; SPIRE handles certificate verification")
 			}
-			if spireAgentSocket != "" && creds != "" {
-				cmdutil.Fatal("--creds cannot be used with --spire-agent-socket; SPIRE derives credentials from --spire-auth-method")
-			}
 
 			// Configure TLS: SPIRE, plaintext, or static certs
 			if spireAgentSocket != "" {

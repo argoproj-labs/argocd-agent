@@ -89,15 +89,10 @@ func (suite *SpireTestSuite) initExpectedLogs() {
 		suite.expectedPrincipalLogs = append(commonPrincipalLogs,
 			"SPIRE mTLS: requiring client certificates verified against SPIRE trust bundle",
 			"Using mTLS authentication (source: uri",
-		)
-		suite.expectedManagedAgentLogs = append(
-			commonAgentLogs(fixture.SpireManagedAgentSocket),
 			"Extracted agent identity from client certificate",
 		)
-		suite.expectedAutonomousAgentLogs = append(
-			commonAgentLogs(fixture.SpireAutonomousAgentSocket),
-			"Extracted agent identity from client certificate",
-		)
+		suite.expectedManagedAgentLogs = commonAgentLogs(fixture.SpireManagedAgentSocket)
+		suite.expectedAutonomousAgentLogs = commonAgentLogs(fixture.SpireAutonomousAgentSocket)
 	case "jwt":
 		suite.expectedPrincipalLogs = append(commonPrincipalLogs,
 			"Using SPIFFE JWT authentication",
