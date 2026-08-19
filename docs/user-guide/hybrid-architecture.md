@@ -5,6 +5,9 @@ This guide explains how to run argocd-agent (principal + agent) alongside a pre-
 !!! tip "Who is this for?"
     This guide is for teams that already have a working Argo CD installation managing applications and want to adopt argocd-agent incrementally. If you are setting up argocd-agent from scratch, see the [Getting Started](../getting-started/index.md) guide instead.
 
+!!! tip "Using this for app-of-apps in managed mode"
+    This architecture is also how to get proper app-of-apps support in [managed mode](../concepts/agent-modes/managed.md). Since the hub gains its own *application-controller*, a parent app-of-apps `Application` can target the hub cluster directly, and its labeled children are routed to agents via `spec.destination.name` like any other managed `Application`.
+
 ## Overview
 
 In a hybrid architecture, the traditional Argo CD components (server, application controller, repository server, Redis) continue to operate on the hub cluster. The argocd-agent principal is installed alongside them. Both systems share the same Argo CD UI and API, but each manages a distinct set of applications:

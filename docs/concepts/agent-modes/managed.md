@@ -28,9 +28,12 @@ Changes to `Application` resources on the workload cluster that are not originat
 
 ## Why not chose this mode
 
-* Very limited support for the app-of-apps pattern
 * In the case the control plane cluster is compromised, it may affect workload clusters in managed mode, too
 * As noted [previously](#architectural-considerations), the control plane cluster might become a SPoF
+
+## Enabling App-of-Apps in Managed Mode
+
+See the [Hybrid Architecture](../../user-guide/hybrid-architecture.md) guide to run an *application-controller* on the control plane cluster as well. This lets the parent app-of-apps `Application` target the control plane cluster directly, so its children are created there and distributed to agents like any other managed `Application`.
 
 ## Pre-existing Applications
 
