@@ -438,6 +438,8 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		require.Contains(t, updated.Labels, "bar")
 		require.Contains(t, updated.Labels, "some")
 		require.Equal(t, updated.Spec.Source.Path, ".")
+		require.NotNil(t, updated.Operation)
+		require.Equal(t, incoming.Operation, updated.Operation)
 	})
 
 	t.Run("Retain principal-owned annotations across an agent status update", func(t *testing.T) {
