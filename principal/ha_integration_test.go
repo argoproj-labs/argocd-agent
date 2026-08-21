@@ -16,11 +16,16 @@ package principal
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"regexp"
 	"testing"
 	"time"
 
@@ -47,6 +52,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -458,6 +467,162 @@ func TestIsActive(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.True(t, components.IsActive())
+	})
+}
+
+func TestHAAdminAuthInterceptor(t *testing.T) {
+	dummyHandler := func(ctx context.Context, req any) (any, error) {
+		return "ok", nil
+	}
+	dummyInfo := &grpc.UnaryServerInfo{FullMethod: "/haadminapi.HAAdmin/Status"}
+
+	t.Run("nil regex denies all calls", func(t *testing.T) {
+		interceptor := haAdminAuthInterceptor(nil, "subject")
+		ctx := peerContextWithSubject("ha-admin")
+
+		resp, err := interceptor(ctx, nil, dummyInfo, dummyHandler)
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+		assert.Contains(t, err.Error(), "ha-admin-auth not configured")
+	})
+
+	t.Run("matching subject allows call", func(t *testing.T) {
+		regex := regexp.MustCompile(`CN=ha-admin`)
+		interceptor := haAdminAuthInterceptor(regex, "subject")
+		ctx := peerContextWithSubject("ha-admin")
+
+		resp, err := interceptor(ctx, nil, dummyInfo, dummyHandler)
+		require.NoError(t, err)
+		assert.Equal(t, "ok", resp)
+	})
+
+	t.Run("non-matching subject denies call", func(t *testing.T) {
+		regex := regexp.MustCompile(`CN=ha-admin`)
+		interceptor := haAdminAuthInterceptor(regex, "subject")
+		ctx := peerContextWithSubject("some-agent")
+
+		resp, err := interceptor(ctx, nil, dummyInfo, dummyHandler)
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+		assert.Contains(t, err.Error(), "does not match ha-admin-auth pattern")
+	})
+
+	t.Run("matching uri allows call", func(t *testing.T) {
+		regex := regexp.MustCompile(`spiffe://cluster/ns/admin`)
+		interceptor := haAdminAuthInterceptor(regex, "uri")
+		ctx := peerContextWithURI("spiffe://cluster/ns/admin/sa/ha")
+
+		resp, err := interceptor(ctx, nil, dummyInfo, dummyHandler)
+		require.NoError(t, err)
+		assert.Equal(t, "ok", resp)
+	})
+
+	t.Run("non-matching uri denies call", func(t *testing.T) {
+		regex := regexp.MustCompile(`spiffe://cluster/ns/admin`)
+		interceptor := haAdminAuthInterceptor(regex, "uri")
+		ctx := peerContextWithURI("spiffe://cluster/ns/agent/sa/worker")
+
+		resp, err := interceptor(ctx, nil, dummyInfo, dummyHandler)
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+		assert.Contains(t, err.Error(), "no URI SAN matched")
+	})
+
+	t.Run("no peer in context returns unauthenticated", func(t *testing.T) {
+		regex := regexp.MustCompile(`CN=ha-admin`)
+		interceptor := haAdminAuthInterceptor(regex, "subject")
+
+		resp, err := interceptor(context.Background(), nil, dummyInfo, dummyHandler)
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
+
+	t.Run("no TLS info returns unauthenticated", func(t *testing.T) {
+		regex := regexp.MustCompile(`CN=ha-admin`)
+		interceptor := haAdminAuthInterceptor(regex, "subject")
+		ctx := peer.NewContext(context.Background(), &peer.Peer{})
+
+		resp, err := interceptor(ctx, nil, dummyInfo, dummyHandler)
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
+
+	t.Run("no verified chains returns unauthenticated", func(t *testing.T) {
+		regex := regexp.MustCompile(`CN=ha-admin`)
+		interceptor := haAdminAuthInterceptor(regex, "subject")
+		ctx := peer.NewContext(context.Background(), &peer.Peer{
+			AuthInfo: credentials.TLSInfo{
+				State: tls.ConnectionState{VerifiedChains: nil},
+			},
+		})
+
+		resp, err := interceptor(ctx, nil, dummyInfo, dummyHandler)
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
+
+	t.Run("second uri SAN matches", func(t *testing.T) {
+		regex := regexp.MustCompile(`spiffe://cluster/ns/admin`)
+		interceptor := haAdminAuthInterceptor(regex, "uri")
+		u1, _ := url.Parse("spiffe://cluster/ns/agent/sa/worker")
+		u2, _ := url.Parse("spiffe://cluster/ns/admin/sa/ha")
+		cert := &x509.Certificate{URIs: []*url.URL{u1, u2}}
+		ctx := peer.NewContext(context.Background(), &peer.Peer{
+			AuthInfo: credentials.TLSInfo{
+				State: tls.ConnectionState{
+					VerifiedChains: [][]*x509.Certificate{{cert}},
+				},
+			},
+		})
+
+		resp, err := interceptor(ctx, nil, dummyInfo, dummyHandler)
+		require.NoError(t, err)
+		assert.Equal(t, "ok", resp)
+	})
+
+	t.Run("uri source with no URI SANs returns unauthenticated", func(t *testing.T) {
+		regex := regexp.MustCompile(`spiffe://`)
+		interceptor := haAdminAuthInterceptor(regex, "uri")
+		ctx := peerContextWithSubject("ha-admin")
+
+		resp, err := interceptor(ctx, nil, dummyInfo, dummyHandler)
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
+		assert.Contains(t, err.Error(), "no URI SANs")
+	})
+}
+
+func peerContextWithSubject(cn string) context.Context {
+	cert := &x509.Certificate{
+		Subject: pkix.Name{CommonName: cn},
+	}
+	return peer.NewContext(context.Background(), &peer.Peer{
+		AuthInfo: credentials.TLSInfo{
+			State: tls.ConnectionState{
+				VerifiedChains: [][]*x509.Certificate{{cert}},
+			},
+		},
+	})
+}
+
+func peerContextWithURI(rawURI string) context.Context {
+	u, _ := url.Parse(rawURI)
+	cert := &x509.Certificate{
+		URIs: []*url.URL{u},
+	}
+	return peer.NewContext(context.Background(), &peer.Peer{
+		AuthInfo: credentials.TLSInfo{
+			State: tls.ConnectionState{
+				VerifiedChains: [][]*x509.Certificate{{cert}},
+			},
+		},
 	})
 }
 

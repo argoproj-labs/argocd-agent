@@ -12,6 +12,8 @@ These are the available commands for argocd-agentctl. Some commands have subcomm
 
 `config` - Operations related to config file for argocd-agentctl
 
+`ha` - Manage principal HA state (status, promote, demote)
+
 `jwt` - Inspect and manage JWT signing keys
 
 `blocklist` - Manage the TLS certificate blocklist
@@ -158,6 +160,41 @@ full details.
 `remove <fingerprint>` - Remove a certificate fingerprint from the blocklist
 
 `list` - List all fingerprints currently in the blocklist
+
+## `ha` Command
+
+Manage the principal's HA state. See [HA Failover Operations](../operations/ha-failover.md) for procedures.
+
+**Subcommands:**
+
+`status` - Show current HA state
+
+`promote` - Transition to ACTIVE
+
+  - `--force`: Skip safety check (replication stream still active)
+
+`demote` - Transition ACTIVE to REPLICATING
+
+  - `--force`: Skip confirmation prompt
+
+**Connection Flags (all subcommands):**
+
+| Flag | Description |
+|------|-------------|
+| `--address` | Direct address of the admin endpoint (`host:port`) |
+| `--tls-cert` | Path to client certificate file (required for mTLS) |
+| `--tls-key` | Path to client private key file (required for mTLS) |
+| `--tls-ca` | Path to CA certificate for verifying the server (required for mTLS) |
+
+**Example:**
+
+```bash
+argocd-agentctl ha status \
+  --address principal:8405 \
+  --tls-cert=admin.crt \
+  --tls-key=admin.key \
+  --tls-ca=ca.crt
+```
 
 ## `pki` Command **(NOT FOR PRODUCTION USE)**
 

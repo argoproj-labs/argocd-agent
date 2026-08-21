@@ -16,6 +16,8 @@ package ha
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -42,6 +44,14 @@ type Options struct {
 	// deployments may need a higher value if snapshot processing exceeds
 	// the default.
 	ReplicationInitialAckTimeout time.Duration
+
+	// AdminAuthRegex is the compiled regex for authorizing HA admin clients.
+	// The client certificate's subject DN or URI SAN must match this pattern.
+	// When nil and TLS is active, all admin calls are rejected keeping it secure by default.
+	AdminAuthRegex *regexp.Regexp
+
+	// AdminAuthSource specifies where to match the regex: "subject" (DN) or "uri" (SAN).
+	AdminAuthSource string
 }
 
 // DefaultOptions returns the default HA options
@@ -130,6 +140,45 @@ func WithReplicationInitialAckTimeout(timeout time.Duration) Option {
 			return fmt.Errorf("replication initial ACK timeout must be positive")
 		}
 		o.ReplicationInitialAckTimeout = timeout
+		return nil
+	}
+}
+
+// WithAdminAuth configures authorization for the HA admin endpoint.
+// The format mirrors --auth: "mtls:subject:<regex>" or "mtls:uri:<regex>".
+// Only the cert identity matching the regex is allowed to call admin RPCs.
+func WithAdminAuth(authStr string) Option {
+	return func(o *Options) error {
+		if authStr == "" {
+			return nil
+		}
+		if !strings.HasPrefix(authStr, "mtls:") {
+			return fmt.Errorf("ha-admin-auth must start with 'mtls:', got: %s", authStr)
+		}
+		remainder := strings.TrimPrefix(authStr, "mtls:")
+
+		var source, pattern string
+		if after, ok := strings.CutPrefix(remainder, "subject:"); ok {
+			source = "subject"
+			pattern = after
+		} else if after, ok := strings.CutPrefix(remainder, "uri:"); ok {
+			source = "uri"
+			pattern = after
+		} else {
+			return fmt.Errorf("ha-admin-auth must specify source: 'mtls:subject:<regex>' or 'mtls:uri:<regex>', got: mtls:%s", remainder)
+		}
+
+		if pattern == "" {
+			return fmt.Errorf("ha-admin-auth regex pattern cannot be empty")
+		}
+
+		regex, err := regexp.Compile(pattern)
+		if err != nil {
+			return fmt.Errorf("ha-admin-auth regex compile error: %w", err)
+		}
+
+		o.AdminAuthRegex = regex
+		o.AdminAuthSource = source
 		return nil
 	}
 }
