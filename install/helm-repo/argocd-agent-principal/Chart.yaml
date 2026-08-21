@@ -2,7 +2,7 @@ apiVersion: v2
 name: argocd-agent-principal
 description: Argo CD Agent Principal component for multi-cluster application management
 type: application
-version: 0.3.2
+version: 0.3.3
 appVersion: "v0.8.1"
 home: https://github.com/argoproj-labs/argocd-agent
 sources:

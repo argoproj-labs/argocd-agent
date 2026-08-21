@@ -10,6 +10,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
 	github.com/cloudevents/sdk-go/v2 v2.16.2
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-redis/cache/v9 v9.0.0
 	github.com/go-redis/redismock/v9 v9.2.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -24,6 +25,7 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/sirupsen/logrus v1.10.0
 	github.com/spf13/cobra v1.10.2
+	github.com/spiffe/go-spiffe/v2 v2.7.0
 	github.com/stretchr/testify v1.12.1
 	github.com/wI2L/jsondiff v0.7.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.70.0
@@ -97,7 +99,6 @@ require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
 	github.com/go-git/go-git/v5 v5.19.2 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.23.1 // indirect
