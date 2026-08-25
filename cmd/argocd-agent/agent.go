@@ -34,6 +34,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
+	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -118,6 +119,10 @@ func NewAgentRunCommand() *cobra.Command {
 
 		// Adoption options
 		adoptionPolicy string
+
+		// SPIRE integration
+		spireAgentSocket string
+		spireAuthMethod  string
 	)
 	command := &cobra.Command{
 		Use:   "agent",
@@ -195,8 +200,46 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 			var remote *client.Remote
 
-			// Configure TLS or plaintext mode
-			if insecurePlaintext {
+			// Validate SPIRE flags
+			if spireAgentSocket != "" && spireAuthMethod == "" {
+				cmdutil.Fatal("--spire-auth-method is required when --spire-agent-socket is set (use 'jwt' or 'mtls')")
+			}
+			if spireAuthMethod != "" && spireAgentSocket == "" {
+				cmdutil.Fatal("--spire-auth-method requires --spire-agent-socket to be set")
+			}
+			if spireAuthMethod != "" && spireAuthMethod != "jwt" && spireAuthMethod != "mtls" {
+				cmdutil.Fatal("--spire-auth-method must be 'jwt' or 'mtls', got %q", spireAuthMethod)
+			}
+			if spireAgentSocket != "" && insecurePlaintext {
+				cmdutil.Fatal("--spire-agent-socket cannot be used with --insecure-plaintext; SPIRE provides TLS credentials")
+			}
+			if spireAgentSocket != "" && insecure {
+				cmdutil.Fatal("--spire-agent-socket cannot be used with --insecure-tls; SPIRE handles certificate verification")
+			}
+
+			// Configure TLS: SPIRE, plaintext, or static certs
+			if spireAgentSocket != "" {
+				logrus.Infof("Using SPIRE for TLS credentials (socket: %s)", spireAgentSocket)
+				spireSource, err := spire.New(ctx, spireAgentSocket)
+				if err != nil {
+					cmdutil.Fatal("Failed to connect to SPIRE Agent: %v", err)
+				}
+				defer spireSource.Close()
+				remoteOpts = append(remoteOpts, client.WithSPIRE(spireSource, spireAuthMethod == "mtls"))
+				if creds == "" {
+					switch spireAuthMethod {
+					case "mtls":
+						creds = "mtls:"
+					case "jwt":
+						creds = "spiffe-jwt:"
+					}
+					authMethod, authCreds, err := parseCreds(creds)
+					if err != nil {
+						cmdutil.Fatal("Error setting up creds: %v", err)
+					}
+					remoteOpts = append(remoteOpts, client.WithAuth(authMethod, authCreds))
+				}
+			} else if insecurePlaintext {
 				// Plaintext mode - skip all TLS configuration (e.g., when behind Istio)
 				logrus.Warn("INSECURE: Connecting without TLS - ensure Istio or similar service mesh provides mTLS")
 				remoteOpts = append(remoteOpts, client.WithInsecurePlaintext())
@@ -503,6 +546,14 @@ func NewAgentRunCommand() *cobra.Command {
 		env.StringWithDefault("ARGOCD_AGENT_ADOPTION_POLICY", nil, "always"),
 		"Set the adoption policy for applications that already exist on a managed agent (always or never)")
 
+	command.Flags().StringVar(&spireAgentSocket, "spire-agent-socket",
+		env.StringWithDefault("ARGOCD_AGENT_SPIRE_AGENT_SOCKET", nil, ""),
+		"SPIRE Agent socket URI (e.g., unix:///run/spire/sockets/agent.sock). When set, TLS credentials are obtained from SPIRE instead of static certs")
+
+	command.Flags().StringVar(&spireAuthMethod, "spire-auth-method",
+		env.StringWithDefault("ARGOCD_AGENT_SPIRE_AUTH_METHOD", nil, ""),
+		"SPIFFE authentication method (required when --spire-agent-socket is set): 'jwt' uses JWT-SVIDs (for federated SPIRE), 'mtls' uses X.509-SVIDs (for centralized SPIRE)")
+
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
 	return command
@@ -524,6 +575,8 @@ func parseCreds(credStr string) (string, auth.Credentials, error) {
 		return auth.MethodUserPass, creds, nil
 	case auth.MethodMTLS:
 		return auth.MethodMTLS, auth.Credentials{}, nil
+	case auth.MethodSPIFFEJWT:
+		return auth.MethodSPIFFEJWT, auth.Credentials{}, nil
 	case auth.MethodHeader:
 		// Header-based auth doesn't require credentials - the sidecar/proxy injects the header
 		return auth.MethodHeader, auth.Credentials{}, nil
