@@ -364,6 +364,11 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 			replication.WithEventHandler(components.handleReplicatedEvent),
 		}
 
+		if server.options != nil {
+			clientOpts = append(clientOpts,
+				replication.WithMaxGRPCMessageByteSize(server.options.maxGRPCMessageSize))
+		}
+
 		if server.options != nil && server.options.insecurePlaintext {
 			clientOpts = append(clientOpts, replication.WithInsecure())
 		} else {

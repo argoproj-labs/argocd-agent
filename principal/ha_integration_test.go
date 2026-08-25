@@ -33,6 +33,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	appmanager "github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
@@ -114,6 +115,59 @@ func TestNewHAComponents(t *testing.T) {
 		assert.True(t, opts.Enabled)
 		assert.Equal(t, ha.RolePrimary, opts.PreferredRole)
 		assert.Equal(t, "peer.example.com:8443", opts.PeerAddress)
+	})
+
+	t.Run("replication client inherits the principal's gRPC message size", func(t *testing.T) {
+		ctx := context.Background()
+		server := createTestServer()
+		server.options = &ServerOptions{
+			insecurePlaintext:  true,
+			maxGRPCMessageSize: 12 * 1024 * 1024,
+		}
+
+		components, err := NewHAComponents(ctx, server,
+			ha.WithEnabled(true),
+			ha.WithPreferredRole("replica"),
+			ha.WithPeerAddress("localhost:0"),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, components.ReplicationClient)
+
+		assert.Equal(t, 12*1024*1024, components.ReplicationClient.MaxGRPCMessageByteSize())
+	})
+
+	t.Run("replication client survives a server built without options", func(t *testing.T) {
+		ctx := context.Background()
+		server := createTestServer()
+		server.options = nil
+
+		components, err := NewHAComponents(ctx, server,
+			ha.WithEnabled(true),
+			ha.WithPreferredRole("replica"),
+			ha.WithPeerAddress("localhost:0"),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, components.ReplicationClient)
+
+		assert.Equal(t, grpcutil.DefaultGRPCMaxMessageSize,
+			components.ReplicationClient.MaxGRPCMessageByteSize())
+	})
+
+	t.Run("replication client keeps the default when the principal configures no size", func(t *testing.T) {
+		ctx := context.Background()
+		server := createTestServer()
+		server.options = &ServerOptions{insecurePlaintext: true}
+
+		components, err := NewHAComponents(ctx, server,
+			ha.WithEnabled(true),
+			ha.WithPreferredRole("replica"),
+			ha.WithPeerAddress("localhost:0"),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, components.ReplicationClient)
+
+		assert.Equal(t, grpcutil.DefaultGRPCMaxMessageSize,
+			components.ReplicationClient.MaxGRPCMessageByteSize())
 	})
 
 	t.Run("replication client uses insecure transport when server plaintext is enabled", func(t *testing.T) {
