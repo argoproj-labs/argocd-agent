@@ -198,3 +198,37 @@ func TestResourceRequestRegexp(t *testing.T) {
 		})
 	}
 }
+
+func TestResourceGroupRequestRegexp(t *testing.T) {
+	re, err := regexp.Compile(resourceGroupRequestRegexp)
+	require.NoError(t, err)
+
+	tests := []struct {
+		path      string
+		group     string
+		shouldHit bool
+	}{
+		{path: "/apis/apps", group: "apps", shouldHit: true},
+		{path: "/apis/networking.k8s.io", group: "networking.k8s.io", shouldHit: true},
+		{path: "/apis", shouldHit: false},
+		{path: "/apis/apps/v1", shouldHit: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			matches := re.FindStringSubmatch(tt.path)
+			if !tt.shouldHit {
+				assert.Nil(t, matches)
+				return
+			}
+
+			require.NotNil(t, matches)
+			names := re.SubexpNames()
+			for i, name := range names {
+				if name == "group" {
+					assert.Equal(t, tt.group, matches[i])
+				}
+			}
+		})
+	}
+}
