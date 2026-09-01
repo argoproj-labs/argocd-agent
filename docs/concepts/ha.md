@@ -101,7 +101,7 @@ The forwarder queue (1000 events) drops events on overflow. The client detects s
 
 Replication RPCs are served on the main gRPC port (8443) alongside agent traffic. The server's interceptors route replication methods through a separate auth path using the HA controller's `AuthMethod` and `AllowedReplicationClients`.
 
-The admin server (`ha status/promote/demote`) binds to `127.0.0.1:8405` with no TLS. Access requires `kubectl port-forward` — Kubernetes RBAC is the gate.
+The admin server (`ha status/promote/demote`) listens on port 8405. When TLS is active, it inherits mTLS from the main endpoint by default and authorizes clients via `--ha-admin-auth`. Alternatively, `--ha-admin-tls-cert`, `--ha-admin-tls-key`, and `--ha-admin-ca` can configure independent TLS for the admin endpoint (useful when the main server uses SPIFFE/SPIRE). In plaintext mode it binds to `127.0.0.1` and relies on `kubectl port-forward`.
 
 ## Limitations
 
