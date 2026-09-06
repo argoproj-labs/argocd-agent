@@ -434,20 +434,35 @@ func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersi
 	return res, err
 }
 
-// getAvailableAPIs retrieves a list of available APIs for a given group and version.
+// getAvailableAPIs retrieves discovery data for a given group and version.
 // If group and version are empty, all available APIs are returned.
 // If group is empty and version is not, all APIs for the given version are returned.
-// If group and version are not empty, all APIs for the given group and version are returned.
+// If group is not empty and version is empty, metadata for the given API group is returned.
+// If group and version are both set, all APIs for the given group and version are returned.
 //
 // It does not yet support the new aggregated API.
 func (a *Agent) getAvailableAPIs(ctx context.Context, group, version string) (*unstructured.Unstructured, error) {
 	groupVersion := fmt.Sprintf("%s/%s", group, version)
 	var groupList *v1.APIGroupList
+	var groupInfo *v1.APIGroup
 	var resourceList *v1.APIResourceList
 	var err error
 
 	if group == "" && version == "" {
 		groupList, err = a.kubeClient.Clientset.Discovery().ServerGroups()
+	} else if group != "" && version == "" {
+		groupList, err = a.kubeClient.Clientset.Discovery().ServerGroups()
+		if err == nil {
+			for i := range groupList.Groups {
+				if groupList.Groups[i].Name == group {
+					groupInfo = &groupList.Groups[i]
+					break
+				}
+			}
+			if groupInfo == nil {
+				err = fmt.Errorf("api group %s not found", group)
+			}
+		}
 	} else if group == "" && version != "" {
 		resourceList, err = a.kubeClient.Clientset.Discovery().ServerResourcesForGroupVersion(version)
 	} else {
@@ -458,7 +473,9 @@ func (a *Agent) getAvailableAPIs(ctx context.Context, group, version string) (*u
 	}
 
 	var obj map[string]any
-	if groupList != nil {
+	if groupInfo != nil {
+		obj, err = runtime.DefaultUnstructuredConverter.ToUnstructured(groupInfo)
+	} else if groupList != nil {
 		obj, err = runtime.DefaultUnstructuredConverter.ToUnstructured(groupList)
 	} else if resourceList != nil {
 		obj, err = runtime.DefaultUnstructuredConverter.ToUnstructured(resourceList)
