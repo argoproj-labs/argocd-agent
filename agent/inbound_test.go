@@ -379,6 +379,41 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		require.False(t, a.appManager.IsManaged(incomingApp.QualifiedName()))
 	})
 
+	t.Run("Delete: App already deleted on the agent must not be recreated", func(t *testing.T) {
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		// The app was deleted on the agent at the same time it was deleted on
+		// the principal, so it is gone from the cluster before the Delete event
+		// from the principal is processed.
+		getMock.Unset()
+		notFoundError := kerrors.NewNotFound(schema.GroupResource{
+			Group: "argoproj.io", Resource: "application",
+		}, incomingApp.Name)
+		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
+
+		a.sourceCache.Application.Set(incomingApp.UID, incomingApp.Spec)
+
+		ev := event.New(evs.ApplicationEvent(event.Delete, incomingApp), targets.Application)
+		err := a.processIncomingApplication(ev)
+		require.NoError(t, err)
+
+		// Identity check and lookup of the existing app, but no Delete or Create
+		expectedCalls := []string{"Get", "Get"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// The stale source cache entry must be dropped and the deletion marked
+		// as expected, so the agent does not recreate the app.
+		require.False(t, a.sourceCache.Application.Contains(incomingApp.UID))
+		require.True(t, a.deletions.RemoveExpected(incomingApp.UID))
+	})
+
 	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
 		configureManager(t, manager.ManagerModeManaged)
 		defer unsetMocks(t)
