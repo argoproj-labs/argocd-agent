@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/haadminapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
@@ -37,6 +39,10 @@ import (
 	replicationserver "github.com/argoproj-labs/argocd-agent/principal/apis/replication"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -58,6 +64,9 @@ type HAComponents struct {
 
 	// adminGRPCServer is the localhost-only gRPC server for HAAdmin
 	adminGRPCServer *grpc.Server
+
+	// tlsConfigProvider returns the main server's TLS config for the admin endpoint
+	tlsConfigProvider func() (*tls.Config, error)
 
 	// ReplicationClient connects to the primary when in replica mode
 	ReplicationClient *replication.Client
@@ -326,8 +335,9 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 
 	components.HAAdminServer = haadmin.NewServer(controller, &haStatusProvider{components: components, server: server})
 
-	components.adminGRPCServer = grpc.NewServer()
-	haadminapi.RegisterHAAdminServer(components.adminGRPCServer, components.HAAdminServer)
+	if server.options != nil && !server.options.insecurePlaintext {
+		components.tlsConfigProvider = server.ensureTLSConfig
+	}
 
 	// Create the replication client — connects to the peer's main gRPC port
 	if haOptions.Enabled && haOptions.PeerAddress != "" {
@@ -409,6 +419,127 @@ func replicationClientTLSConfig(serverTLSConfig *tls.Config) *tls.Config {
 	}
 }
 
+// buildAdminGRPCServer creates the admin gRPC server.
+// The returned bool indicates whether TLS is active on the admin endpoint.
+func (h *HAComponents) buildAdminGRPCServer() (*grpc.Server, bool, error) {
+	haOptions := h.Controller.Options()
+	var serverOpts []grpc.ServerOption
+
+	adminTLS, err := h.loadAdminTLSConfig(haOptions)
+	if err != nil {
+		return nil, false, err
+	}
+	if adminTLS != nil {
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(adminTLS)))
+		interceptor := haAdminAuthInterceptor(haOptions.AdminAuthRegex, haOptions.AdminAuthSource)
+		serverOpts = append(serverOpts, grpc.ChainUnaryInterceptor(interceptor))
+	} else {
+		log().Warn("HA admin server running without authentication - access restricted to localhost")
+	}
+
+	return grpc.NewServer(serverOpts...), adminTLS != nil, nil
+}
+
+// loadAdminTLSConfig builds the TLS config for the admin endpoint.
+// If --ha-admin-tls-cert/key/ca are set, it uses those (independent config).
+// Otherwise it inherits from the main gRPC server's TLS config.
+func (h *HAComponents) loadAdminTLSConfig(haOptions *ha.Options) (*tls.Config, error) {
+	if haOptions.AdminTLSCertPath != "" {
+		return h.loadHAAdminTLS(haOptions)
+	}
+	if h.tlsConfigProvider == nil {
+		return nil, nil
+	}
+	serverTLSConfig, err := h.tlsConfigProvider()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load TLS config: %w", err)
+	}
+	if serverTLSConfig == nil {
+		return nil, nil
+	}
+	if len(serverTLSConfig.Certificates) == 0 && serverTLSConfig.GetCertificate != nil {
+		return nil, fmt.Errorf("main server uses dynamic certificates (e.g. SPIRE); configure --ha-admin-tls-cert, --ha-admin-tls-key, and --ha-admin-ca for the HA admin endpoint")
+	}
+	return &tls.Config{
+		Certificates: serverTLSConfig.Certificates,
+		MinVersion:   serverTLSConfig.MinVersion,
+		MaxVersion:   serverTLSConfig.MaxVersion,
+		CipherSuites: serverTLSConfig.CipherSuites,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    serverTLSConfig.ClientCAs,
+	}, nil
+}
+
+func (h *HAComponents) loadHAAdminTLS(haOptions *ha.Options) (*tls.Config, error) {
+	cert, err := tlsutil.TLSCertFromFile(haOptions.AdminTLSCertPath, haOptions.AdminTLSKeyPath, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load HA admin TLS cert: %w", err)
+	}
+	caPool, err := tlsutil.X509CertPoolFromFile(haOptions.AdminCAPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load HA admin CA: %w", err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
+		MinVersion:   tls.VersionTLS12,
+	}, nil
+}
+
+// haAdminAuthInterceptor returns a gRPC unary interceptor that authorizes
+// HA admin callers by matching their client certificate identity against
+// the configured regex. When regex is nil, all calls are rejected to keep it secure by default.
+func haAdminAuthInterceptor(regex *regexp.Regexp, source string) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if regex == nil {
+			return nil, status.Error(codes.PermissionDenied, "ha-admin-auth not configured; all admin calls are denied")
+		}
+		identity, err := matchAdminClientIdentity(ctx, regex, source)
+		if err != nil {
+			return nil, err
+		}
+		log().WithField("identity", identity).Debug("HA admin: authorized client")
+		return handler(ctx, req)
+	}
+}
+
+// matchAdminClientIdentity extracts the client certificate from the gRPC
+// context and matches it against the regex based on the configured source.
+func matchAdminClientIdentity(ctx context.Context, regex *regexp.Regexp, source string) (string, error) {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return "", status.Error(codes.Unauthenticated, "no peer info in context")
+	}
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return "", status.Error(codes.Unauthenticated, "connection has no TLS credentials")
+	}
+	if len(tlsInfo.State.VerifiedChains) == 0 {
+		return "", status.Error(codes.Unauthenticated, "no verified client certificate")
+	}
+
+	cert := tlsInfo.State.VerifiedChains[0][0]
+
+	if source == "uri" {
+		if len(cert.URIs) == 0 {
+			return "", status.Error(codes.Unauthenticated, "no URI SANs in client certificate")
+		}
+		for _, uri := range cert.URIs {
+			if regex.MatchString(uri.String()) {
+				return uri.String(), nil
+			}
+		}
+		return "", status.Errorf(codes.PermissionDenied, "no URI SAN matched ha-admin-auth pattern")
+	}
+
+	subject := cert.Subject.String()
+	if !regex.MatchString(subject) {
+		return "", status.Errorf(codes.PermissionDenied, "client identity %q does not match ha-admin-auth pattern", subject)
+	}
+	return subject, nil
+}
+
 // StartHA starts the HA components.
 // The replication gRPC service is already registered on the main server
 // (see registerGrpcServices), so we only start the admin server and
@@ -427,8 +558,19 @@ func (h *HAComponents) StartHA(ctx context.Context) error {
 
 	haOptions := h.Controller.Options()
 
-	// Start the localhost-only admin gRPC server for HAAdmin (status/promote/demote).
-	adminAddr := fmt.Sprintf("127.0.0.1:%d", haOptions.AdminPort)
+	// Build and start the admin gRPC server for HAAdmin (status/promote/demote).
+	adminServer, adminTLSActive, err := h.buildAdminGRPCServer()
+	if err != nil {
+		return fmt.Errorf("failed to build admin gRPC server: %w", err)
+	}
+	h.adminGRPCServer = adminServer
+	haadminapi.RegisterHAAdminServer(h.adminGRPCServer, h.HAAdminServer)
+
+	adminHost := "127.0.0.1"
+	if adminTLSActive {
+		adminHost = "0.0.0.0"
+	}
+	adminAddr := fmt.Sprintf("%s:%d", adminHost, haOptions.AdminPort)
 	adminListener, err := net.Listen("tcp", adminAddr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on admin port %s: %w", adminAddr, err)

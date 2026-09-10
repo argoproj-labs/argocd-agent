@@ -28,6 +28,10 @@ const SecretNameAgentClientCert = "argocd-agent-client-tls"
 // TLS client certificate for the agent.
 const SecretNameSharedClientCert = "argocd-agent-shared-client-tls"
 
+// SecretNameHAAdminTLS is the name of the secret containing the TLS
+// client certificate + key for an HA admin operator.
+const SecretNameHAAdminTLS = "argocd-agent-ha-admin-tls"
+
 // SecretNameJWT is the name of the secret containing the JWT signing key
 // for the principal.
 const SecretNameJWT = "argocd-agent-jwt"

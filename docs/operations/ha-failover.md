@@ -6,6 +6,64 @@ This page covers operating HA principals day-to-day: checking status, performing
 
 The `argocd-agentctl ha` commands manage HA state. By default they auto-detect the principal pod via `--principal-context` and port-forward to the admin port (8405). Use `--address` for a direct connection.
 
+### Connection Flags
+
+| Flag | Description |
+|------|-------------|
+| `--address` | Direct address of the admin endpoint (`host:port`) |
+| `--tls-cert` | Path to client certificate file |
+| `--tls-key` | Path to client private key file |
+| `--tls-ca` | Path to CA certificate for verifying the server |
+
+When the admin endpoint has mTLS active, all three TLS flags are required. Via `kubectl port-forward` to a plaintext endpoint, they are not needed.
+
+### Accessing the Admin Endpoint
+
+The HA admin server listens on port **8405**. This is separate from the agent gRPC port (8443). How you reach it depends on your deployment:
+
+**Option A: Port-forwarding**
+
+Use port-forwarding to access the HA admin endpoints. This requires kube RBAC access but no network exposure:
+
+**Option B: Add HA Admin port to the existing principal service**
+
+Configure HA Admin port (8405) on the principal's Service to expose both ports:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd-agent-principal
+spec:
+  ports:
+    - name: grpc
+      port: 8443
+      targetPort: 8443
+    - name: ha-admin
+      port: 8405
+      targetPort: 8405
+```
+
+Then connect using the principal's DNS name on port 8405:
+
+**Option C: Dedicated HA Admin service**
+
+For better security, create a separate Service with NetworkPolicy limiting access to admin workstations only:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd-agent-principal-admin
+spec:
+  selector:
+    app.kubernetes.io/name: argocd-agent-principal
+  ports:
+    - name: ha-admin
+      port: 8405
+      targetPort: 8405
+```
+
 ### ha status
 
 Show current HA state, peer reachability, and replication info.
