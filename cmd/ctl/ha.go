@@ -17,11 +17,13 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
@@ -263,6 +265,14 @@ func wrapWithTLSHint(err error, opts haAdminTLSOptions) error {
 	if !isTLSRelatedError(err) {
 		return err
 	}
+	if st, ok := status.FromError(err); ok {
+		switch st.Code() {
+		case codes.Unauthenticated:
+			return fmt.Errorf("%w\n\nHint: mTLS authentication failed. Verify the client certificate is trusted and matches the principal's --ha-admin-auth policy", err)
+		case codes.PermissionDenied:
+			return fmt.Errorf("%w\n\nHint: client certificate identity does not match the principal's --ha-admin-auth policy", err)
+		}
+	}
 	if opts.isEmpty() {
 		return fmt.Errorf("%w\n\nHint: the admin endpoint may require mTLS. Provide --tls-cert, --tls-key, and --tls-ca flags", err)
 	}
@@ -270,14 +280,58 @@ func wrapWithTLSHint(err error, opts haAdminTLSOptions) error {
 }
 
 func isTLSRelatedError(err error) bool {
-	if errors.Is(err, io.EOF) {
+	if err == nil {
+		return false
+	}
+	if hasTLSErrorInChain(err) {
 		return true
 	}
+	return isTLSRelatedGRPCError(err)
+}
+
+func hasTLSErrorInChain(err error) bool {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		switch {
+		case errors.As(e, new(*tls.RecordHeaderError)):
+			return true
+		case errors.As(e, new(*x509.HostnameError)):
+			return true
+		case errors.As(e, new(x509.UnknownAuthorityError)):
+			return true
+		case errors.As(e, new(x509.CertificateInvalidError)):
+			return true
+		case errors.As(e, new(x509.SystemRootsError)):
+			return true
+		}
+		msg := strings.ToLower(e.Error())
+		if strings.Contains(msg, "authentication handshake failed") ||
+			strings.HasPrefix(msg, "tls:") ||
+			strings.Contains(msg, "x509:") {
+			return true
+		}
+	}
+	return false
+}
+
+func isTLSRelatedGRPCError(err error) bool {
 	st, ok := status.FromError(err)
 	if !ok {
 		return false
 	}
-	return st.Code() == codes.Unavailable || st.Code() == codes.DeadlineExceeded
+	msg := strings.ToLower(st.Message())
+	switch st.Code() {
+	case codes.Unauthenticated:
+		return true
+	case codes.PermissionDenied:
+		return strings.Contains(msg, "ha-admin-auth") ||
+			strings.Contains(msg, "client identity") ||
+			strings.Contains(msg, "uri san")
+	case codes.Unavailable:
+		return strings.Contains(msg, "authentication handshake failed") ||
+			strings.Contains(msg, "cannot send secure credentials on an insecure connection")
+	default:
+		return false
+	}
 }
 
 func dialHAAdmin(address string, creds credentials.TransportCredentials) (haadminapi.HAAdminClient, *grpc.ClientConn, error) {
