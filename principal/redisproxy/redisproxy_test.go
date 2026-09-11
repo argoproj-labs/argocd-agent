@@ -214,6 +214,9 @@ func (m *mockSendSynchronousMessageToAgentFunc) call(agentName string, connectio
 	return m.responseToReturn
 }
 
+// Test_handleAgentGet verifies that handleAgentGet translates each agent
+// response into the correct RESP reply to Argo CD: a bulk string on a cache
+// hit, a null bulk string on a cache miss, and an error on a failed get.
 func Test_handleAgentGet(t *testing.T) {
 	t.Run("successful get with cache hit", func(t *testing.T) {
 		// Setup mocks
@@ -352,7 +355,8 @@ func Test_handleAgentGet(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, mockSendFunc.callCount)
 		require.True(t, mockWriter.writeToArgoCDRedisSocketCalled)
-		expectedResponse := "-\r\n"
+		// RESP null bulk string: signals a missing key, rather than an error
+		expectedResponse := "$-1\r\n"
 		require.Equal(t, expectedResponse, string(mockWriter.writtenBytes))
 	})
 

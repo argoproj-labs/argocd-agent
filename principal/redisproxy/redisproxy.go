@@ -556,7 +556,11 @@ func (rp *RedisProxy) handleAgentGet(connState *connectionState, key string, arg
 
 		// Cache miss: no data for that key in agent redis
 
-		response := "-\r\n" // Cache miss is a simple redis null
+		// A cache miss must be reported as a RESP null bulk string. The '-' prefix
+		// is the RESP simple error type, which Redis clients surface as an error
+		// (with an empty message) rather than as a missing key, preventing Argo CD
+		// from recognizing the miss and refreshing the cache.
+		response := "$-1\r\n"
 
 		logCtx.Tracef("Wrote GET response to argo cd: '%s'", response)
 
