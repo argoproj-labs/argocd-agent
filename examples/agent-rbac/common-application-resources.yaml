@@ -24,6 +24,16 @@ rules:
       - patch
       - delete
 
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+
   # Apps resources
   - apiGroups:
       - apps
@@ -42,7 +52,7 @@ rules:
       - delete
 
   # Networking resources
-  - apiGroups: 
+  - apiGroups:
       - "networking.k8s.io"
     resources:
       - ingresses
