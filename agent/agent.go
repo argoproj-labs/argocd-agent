@@ -35,6 +35,7 @@ import (
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
+	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
@@ -109,6 +110,10 @@ type Agent struct {
 
 	// enableResourceProxy determines if the agent should proxy resources to the principal
 	enableResourceProxy bool
+
+	// resourceProcSem bounds the number of resource requests that are
+	// processed concurrently. See processIncomingEvent.
+	resourceProcSem chan struct{}
 
 	cacheRefreshInterval time.Duration
 	informerSyncTimeout  time.Duration
@@ -223,6 +228,16 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 	a.redisProxyMsgHandler = &redisProxyMsgHandler{}
 	// Resource proxy is enabled by default.
 	a.enableResourceProxy = true
+
+	// Resource requests are processed concurrently (see processIncomingEvent),
+	// bounded by this semaphore to protect the local API server from
+	// unbounded request bursts.
+	a.resourceProcSem = make(chan struct{}, env.NumWithDefault("ARGOCD_AGENT_RESOURCE_PROXY_CONCURRENCY", func(n int) error {
+		if n < 1 {
+			return fmt.Errorf("concurrency must be at least 1")
+		}
+		return nil
+	}, defaultResourceProxyConcurrency))
 
 	for _, o := range opts {
 		err := o(a)

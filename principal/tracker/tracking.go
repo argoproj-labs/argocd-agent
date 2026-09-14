@@ -71,7 +71,11 @@ func (p *Tracker) Track(eventID string, agentName string) (<-chan *cloudevents.E
 	if ok {
 		return nil, fmt.Errorf("resource with ID %s already tracked", eventID)
 	}
-	ch := make(chan *cloudevents.Event)
+	// The channel is buffered so that publishing a response never blocks the
+	// publisher (the per-agent event receive path), even when the requester
+	// is not yet, or no longer, ready to read it. Exactly one response is
+	// expected per tracked request.
+	ch := make(chan *cloudevents.Event, 1)
 	p.statemap.requests[eventID] = &requestWrapper{agentName: agentName, evCh: ch}
 	return ch, nil
 }

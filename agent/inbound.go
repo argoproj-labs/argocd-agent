@@ -52,6 +52,14 @@ were received from a server.
 
 const defaultResourceRequestTimeout = 5 * time.Second
 
+// defaultResourceProxyConcurrency is the default number of resource requests
+// the agent is willing to process concurrently. The control plane's cluster
+// cache sync issues one discovery request per API group in a burst, so this
+// should be high enough to absorb such a burst without queueing. It can be
+// overridden with the ARGOCD_AGENT_RESOURCE_PROXY_CONCURRENCY environment
+// variable.
+const defaultResourceProxyConcurrency = 50
+
 func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	// Extract trace context from the incoming event
 	ctx := tracing.ExtractTraceContext(a.context, ev.CloudEvent())
@@ -95,7 +103,31 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	case targets.GPGKey:
 		err = a.processIncomingGPGKey(ev)
 	case targets.Resource:
-		err = a.processIncomingResourceRequest(ev)
+		// Process resource requests in separate goroutines, so that a burst
+		// of them does not serialize on the event thread. The control plane
+		// syncing its cluster cache issues one discovery request per API
+		// group, and each request blocks on a round trip to the local API
+		// server; served one at a time, total latency grows linearly with
+		// the number of API groups and trips the control plane's timeouts.
+		// Concurrency is bounded by a semaphore to protect the local API
+		// server.
+		select {
+		case a.resourceProcSem <- struct{}{}:
+		case <-a.context.Done():
+			return nil
+		}
+		go func() {
+			defer func() { <-a.resourceProcSem }()
+			_, resourceSpan := tracing.Tracer().Start(ctx, "resource.async_processing")
+			defer resourceSpan.End()
+			resErr := a.processIncomingResourceRequest(ev)
+			if resErr != nil {
+				tracing.RecordError(resourceSpan, resErr)
+				a.logGrpcEvent().WithError(resErr).Errorf("Unable to process incoming resource request event")
+			} else {
+				tracing.SetSpanOK(resourceSpan)
+			}
+		}()
 	case targets.ResourceResync:
 		err = a.processIncomingResourceResyncEvent(ev)
 	case targets.Redis:
