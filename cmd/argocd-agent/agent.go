@@ -202,9 +202,6 @@ func NewAgentRunCommand() *cobra.Command {
 				cmdutil.Fatal("Could not load Kubernetes config: %v", err)
 			}
 
-			// Watch the agent's settings ConfigMap for runtime overrides.
-			settingsManager.StartWatcher(ctx, kubeConfig, kubeConfig.Namespace, paramsConfigMap)
-
 			if creds != "" {
 				authMethod, authCreds, err := parseCreds(creds)
 				if err != nil {
@@ -392,6 +389,10 @@ func NewAgentRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not create a new agent instance: %v", err)
 			}
+
+			// Watch the agent's settings ConfigMap for runtime overrides.
+			settingsManager.StartWatcher(ctx, kubeConfig, kubeConfig.Namespace, paramsConfigMap)
+
 			if err := ag.Start(ctx); err != nil {
 				cmdutil.Fatal("Could not start agent: %v", err)
 			}

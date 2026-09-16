@@ -210,9 +210,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 				cmdutil.Fatal("Could not load Kubernetes config: %v", err)
 			}
 
-			// Watch the principal's settings ConfigMap for runtime overrides.
-			settingsManager.StartWatcher(ctx, kubeConfig, kubeConfig.Namespace, paramsConfigMap)
-
 			opts = append(opts, principal.WithListenerAddress(listenHost))
 			opts = append(opts, principal.WithListenerPort(listenPort))
 			opts = append(opts, principal.WithGRPC(true))
@@ -545,6 +542,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not create new server instance: %v", err)
 			}
+
+			// Watch the principal's settings ConfigMap for runtime overrides.
+			settingsManager.StartWatcher(ctx, kubeConfig, kubeConfig.Namespace, paramsConfigMap)
+
 			errch := make(chan error)
 			err = s.Start(ctx, errch)
 			if err != nil {
