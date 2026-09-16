@@ -63,6 +63,9 @@ spec:
             - {{ . | quote }}
             {{- end }}
           env:
+          # The ConfigMap used to configure the principal.
+          - name: ARGOCD_PRINCIPAL_PARAMS_CONFIGMAP
+            value: {{ include "argocd-agent-principal.configMapName" . }}
           - name: ARGOCD_PRINCIPAL_LISTEN_HOST
             valueFrom:
               configMapKeyRef:

@@ -19,8 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +32,8 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
+	"github.com/argoproj-labs/argocd-agent/internal/profile"
+	"github.com/argoproj-labs/argocd-agent/internal/settings"
 	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/client"
@@ -70,6 +70,8 @@ func NewAgentRunCommand() *cobra.Command {
 		healthzPort          int
 		enableCompression    bool
 		pprofPort            int
+		pprofEnabled         bool
+		paramsConfigMap      string
 		redisAddr            string
 		redisUsername        string
 		redisPassword        string
@@ -145,17 +147,6 @@ func NewAgentRunCommand() *cobra.Command {
 				logrus.Infof("OpenTelemetry tracing initialized (address=%s)", otlpAddress)
 			}
 
-			if pprofPort > 0 {
-				logrus.Infof("Starting pprof server on 127.0.0.1:%d", pprofPort)
-
-				go func() {
-					err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", pprofPort), nil)
-					if err != nil {
-						cmdutil.Fatal("Error starting pprof server: %v", err)
-					}
-				}()
-			}
-
 			agentOpts := []agent.AgentOption{}
 			remoteOpts := []client.RemoteOption{}
 
@@ -176,12 +167,31 @@ func NewAgentRunCommand() *cobra.Command {
 				logLevels = append(logLevels, "info")
 			}
 			if len(logLevels) > 0 {
-				cmdutil.ParseLogLevels(logLevels, &subLoggers)
+				err := cmdutil.ParseAndApplyLogLevels(logLevels, &subLoggers)
+				if err != nil {
+					cmdutil.Fatal("Failed to parse and apply log levels: %v", err)
+				}
 			}
 
 			agentOpts = append(agentOpts, agent.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger, subLoggers.InformerEventBufferLogger))
 
 			cmdutil.ParseFullDetail(fullDetailCategories)
+
+			settingsManager := settings.NewManager(settings.AgentKeyPrefix, settings.DefaultConfig{
+				LogLevels:    logLevels,
+				FullDetail:   fullDetailCategories,
+				PprofEnabled: pprofEnabled,
+			}, &subLoggers)
+
+			if pprofPort > 0 {
+				pprofServer := profile.NewPprofServer(fmt.Sprintf("127.0.0.1:%d", pprofPort), func() bool {
+					return settingsManager.PprofEnabled()
+				})
+
+				if err := pprofServer.Start(ctx); err != nil {
+					cmdutil.Fatal("Failed to start pprof server: %v", err)
+				}
+			}
 
 			if namespace == "" {
 				cmdutil.Fatal("namespace value is empty and must be specified")
@@ -191,6 +201,10 @@ func NewAgentRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not load Kubernetes config: %v", err)
 			}
+
+			// Watch the agent's settings ConfigMap for runtime overrides.
+			settingsManager.StartWatcher(ctx, kubeConfig, kubeConfig.Namespace, paramsConfigMap)
+
 			if creds != "" {
 				authMethod, authCreds, err := parseCreds(creds)
 				if err != nil {
@@ -397,6 +411,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&fullDetailCategories, "full-detail",
 		env.StringSliceWithDefault("ARGOCD_AGENT_FULL_DETAIL", nil, nil),
 		"Enable full detail logging for specified categories. Comma-separated list of: "+cmdutil.AvailableFullDetailCategories)
+	command.Flags().StringVar(&paramsConfigMap, "params-configmap",
+		env.StringWithDefault("ARGOCD_AGENT_PARAMS_CONFIGMAP", nil, settings.DefaultConfigMapName),
+		"Name of the ConfigMap used for agent configurations")
 
 	command.Flags().StringVar(&redisAddr, "redis-addr",
 		env.StringWithDefault("REDIS_ADDR", nil, "argocd-redis:6379"),
@@ -486,8 +503,11 @@ func NewAgentRunCommand() *cobra.Command {
 		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_COMPRESSION", false),
 		"Use compression while sending data between Principal and Agent using gRPC")
 	command.Flags().IntVar(&pprofPort, "pprof-port",
-		env.NumWithDefault("ARGOCD_AGENT_PPROF_PORT", cmdutil.ValidPort, 0),
-		"Port the pprof server will listen on")
+		env.NumWithDefault("ARGOCD_AGENT_PPROF_PORT", cmdutil.ValidPort, 6161),
+		"Port the pprof server will listen on, bound to localhost. Set to 0 to not listen at all.")
+	command.Flags().BoolVar(&pprofEnabled, "pprof-enabled",
+		env.BoolWithDefault("ARGOCD_AGENT_PPROF_ENABLED", false),
+		"Enable or disable profiling for the agent")
 	command.Flags().BoolVar(&enableResourceProxy, "enable-resource-proxy",
 		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_RESOURCE_PROXY", true),
 		"Enable resource proxy")

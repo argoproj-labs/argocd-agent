@@ -51,6 +51,7 @@ Kubernetes: `>=1.24.0-0`
 | keepAliveInterval | string | `"50s"` | Keep-alive interval for connections. |
 | labelSelector | string | `""` | Kubernetes label selector to restrict which resources the agent watches. Only matching resources will be listed, watched, and processed. |
 | logFormat | string | `"text"` | Log format for the agent (text or json). |
+| logFullDetail | string | `""` | Comma-separated full-detail logging categories (all, actions, events, informers). Very verbose; for debugging only. Applied at runtime: editing agent.log.full-detail in the params ConfigMap takes effect without a restart. |
 | logLevel | string | `"info"` | Log level for the agent. |
 | metricsPort | string | `"8181"` | Metrics server port exposed by the agent. |
 | nameOverride | string | `""` | Override the chart name used in `app.kubernetes.io/name` Also changes `spec.selector.matchLabels`, which is immutable — do not set after initial install unless you are prepared to delete+reinstall. |
@@ -59,7 +60,8 @@ Kubernetes: `>=1.24.0-0`
 | podAnnotations | object | `{}` | Additional annotations to add to the agent Pod. |
 | podLabels | object | `{}` | Additional labels to add to the agent Pod. |
 | podSecurityContext | object | `{"fsGroup":999,"fsGroupChangePolicy":"OnRootMismatch","runAsGroup":999,"runAsNonRoot":true,"runAsUser":999,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level securityContext. Applied to the Pod spec. |
-| pprofPort | string | `"0"` | Port for pprof server (0 disables pprof). |
+| pprofEnabled | string | `"false"` | Whether the pprof server answers requests; while false every endpoint returns 403. Applied at runtime: editing agent.pprof.enabled in the params ConfigMap takes effect without a restart. |
+| pprofPort | string | `"6161"` | Port for the pprof server, bound to localhost. 0 starts no listener at all, which also makes pprofEnabled below inert. |
 | priorityClassName | string | `""` | PriorityClassName for the agent Pod. |
 | probes | object | `{"liveness":{"enabled":true,"failureThreshold":3,"httpGet":{"path":"/healthz","port":"healthz"},"initialDelaySeconds":10,"periodSeconds":10,"timeoutSeconds":2},"readiness":{"enabled":true,"failureThreshold":3,"httpGet":{"path":"/healthz","port":"healthz"},"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":2}}` | Liveness and readiness probe configuration. |
 | probes.liveness.enabled | bool | `true` | Enable the liveness probe. |

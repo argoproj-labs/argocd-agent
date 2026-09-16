@@ -59,6 +59,9 @@ spec:
           args:
             - agent
           env:
+          # The ConfigMap used to configure the agent.
+          - name: ARGOCD_AGENT_PARAMS_CONFIGMAP
+            value: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
           - name: ARGOCD_AGENT_REMOTE_SERVER
             valueFrom:
               configMapKeyRef:
