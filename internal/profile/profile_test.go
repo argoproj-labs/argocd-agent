@@ -15,12 +15,15 @@
 package profile
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // newTestMux returns a mux with the profiler registered, gated by isEnabled.
@@ -80,4 +83,15 @@ func TestPprofGate(t *testing.T) {
 		isEnabled.Store(false)
 		assert.Equal(t, http.StatusForbidden, get(mux, "/debug/pprof/").Code)
 	})
+}
+
+func TestPprofServerStartBindError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	s := NewPprofServer(ln.Addr().String(), func() bool { return true })
+	err = s.Start(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to listen")
 }

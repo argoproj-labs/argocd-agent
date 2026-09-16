@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"time"
@@ -52,6 +53,11 @@ func (s *PprofServer) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	s.RegisterProfiler(mux)
 
+	ln, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", s.addr, err)
+	}
+
 	srv := &http.Server{
 		Addr:    s.addr,
 		Handler: mux,
@@ -60,7 +66,7 @@ func (s *PprofServer) Start(ctx context.Context) error {
 	go func() {
 		s.logger.Infof("Starting pprof server on %s", srv.Addr)
 		// ErrServerClosed is the expected result of Shutdown below.
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.logger.WithError(err).Error("pprof server terminated")
 		}
 	}()

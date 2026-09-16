@@ -80,6 +80,12 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.log.level
                 optional: true
+          - name: ARGOCD_AGENT_FULL_DETAIL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.log.full-detail
+                optional: true
           - name: ARGOCD_AGENT_NAMESPACE
             valueFrom:
               configMapKeyRef:
@@ -241,6 +247,12 @@ spec:
               configMapKeyRef:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.pprof.port
+                optional: true
+          - name: ARGOCD_AGENT_PPROF_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.pprof.enabled
                 optional: true
           - name: ARGOCD_AGENT_ENABLE_RESOURCE_PROXY
             valueFrom:

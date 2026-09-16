@@ -84,6 +84,12 @@ spec:
                 name: {{ include "argocd-agent-principal.configMapName" . }}
                 key: principal.log.level
                 optional: true
+          - name: ARGOCD_PRINCIPAL_FULL_DETAIL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.log.full-detail
+                optional: true
           - name: ARGOCD_PRINCIPAL_LOG_FORMAT
             valueFrom:
               configMapKeyRef:
@@ -335,6 +341,12 @@ spec:
               configMapKeyRef:
                 name: {{ include "argocd-agent-principal.configMapName" . }}
                 key: principal.pprof.port
+                optional: true
+          - name: ARGOCD_PRINCIPAL_PPROF_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.pprof.enabled
                 optional: true
           - name: ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING
             valueFrom:
