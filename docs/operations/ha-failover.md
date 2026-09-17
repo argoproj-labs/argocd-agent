@@ -25,6 +25,13 @@ The HA admin server listens on port **8405**. This is separate from the agent gR
 
 Use port-forwarding to access the HA admin endpoints. This requires kube RBAC access but no network exposure:
 
+```bash
+kubectl port-forward -n argocd deployment/argocd-agent-principal 127.0.0.1:8405:8405 --context <principal-context>
+
+# Then connect
+argocd-agentctl ha status --address 127.0.0.1:8405
+```
+
 **Option B: Add HA Admin port to the existing principal service**
 
 Configure HA Admin port (8405) on the principal's Service to expose both ports:
@@ -46,9 +53,17 @@ spec:
 
 Then connect using the principal's DNS name on port 8405:
 
+```bash
+argocd-agentctl ha status \
+  --address argocd-agent-principal.argocd.svc:8405 \
+  --tls-cert=admin.crt \
+  --tls-key=admin.key \
+  --tls-ca=ca.crt
+```
+
 **Option C: Dedicated HA Admin service**
 
-For better security, create a separate Service with NetworkPolicy limiting access to admin workstations only:
+Create a separate Service for HA admin:
 
 ```yaml
 apiVersion: v1
@@ -64,7 +79,7 @@ spec:
       targetPort: 8405
 ```
 
-### ha status
+### HA status
 
 Show current HA state, peer reachability, and replication info.
 
