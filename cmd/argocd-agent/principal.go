@@ -18,8 +18,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"net/http"
-	_ "net/http/pprof"
 	"regexp"
 	"runtime"
 	"strings"
@@ -37,6 +35,8 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
+	"github.com/argoproj-labs/argocd-agent/internal/profile"
+	"github.com/argoproj-labs/argocd-agent/internal/settings"
 	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
@@ -82,6 +82,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		enableResourceProxy       bool
 		resourceProxyAddress      string
 		pprofPort                 int
+		pprofEnabled              bool
+		paramsConfigMap           string
 		resourceProxySecretName   string
 		resourceProxyCertPath     string
 		resourceProxyKeyPath      string
@@ -160,17 +162,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 				logrus.Infof("OpenTelemetry tracing initialized (address=%s)", otlpAddress)
 			}
 
-			if pprofPort > 0 {
-				logrus.Infof("Starting pprof server on 127.0.0.1:%d", pprofPort)
-
-				go func() {
-					err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", pprofPort), nil)
-					if err != nil {
-						cmdutil.Fatal("Error starting pprof server: %v", err)
-					}
-				}()
-			}
-
 			opts := []principal.ServerOption{}
 			if formatter, err := cmdutil.LogFormatter(logFormat); err != nil {
 				cmdutil.Fatal("%s", err.Error())
@@ -189,12 +180,30 @@ func NewPrincipalRunCommand() *cobra.Command {
 				logLevels = append(logLevels, "info")
 			}
 			if len(logLevels) > 0 {
-				cmdutil.ParseLogLevels(logLevels, &subLoggers)
+				err := cmdutil.ParseAndApplyLogLevels(logLevels, &subLoggers)
+				if err != nil {
+					cmdutil.Fatal("Failed to parse and apply log levels: %v", err)
+				}
 			}
 
 			opts = append(opts, principal.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
 
 			cmdutil.ParseFullDetail(fullDetailCategories)
+
+			settingsManager := settings.NewManager(settings.PrincipalKeyPrefix, settings.DefaultConfig{
+				LogLevels:    logLevels,
+				FullDetail:   fullDetailCategories,
+				PprofEnabled: pprofEnabled,
+			}, &subLoggers)
+
+			if pprofPort > 0 {
+				pprofServer := profile.NewPprofServer(fmt.Sprintf("127.0.0.1:%d", pprofPort), func() bool {
+					return settingsManager.PprofEnabled()
+				})
+				if err := pprofServer.Start(ctx); err != nil {
+					cmdutil.Fatal("Failed to start pprof server: %v", err)
+				}
+			}
 
 			kubeConfig, err := cmdutil.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
 			if err != nil {
@@ -533,6 +542,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not create new server instance: %v", err)
 			}
+
+			// Watch the principal's settings ConfigMap for runtime overrides.
+			settingsManager.StartWatcher(ctx, kubeConfig, kubeConfig.Namespace, paramsConfigMap)
+
 			errch := make(chan error)
 			err = s.Start(ctx, errch)
 			if err != nil {
@@ -557,6 +570,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&fullDetailCategories, "full-detail",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_FULL_DETAIL", nil, nil),
 		"Enable full detail logging for specified categories. Comma-separated list of: "+cmdutil.AvailableFullDetailCategories)
+	command.Flags().StringVar(&paramsConfigMap, "params-configmap",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_PARAMS_CONFIGMAP", nil, settings.DefaultConfigMapName),
+		"Name of the ConfigMap used for principal configurations")
 
 	command.Flags().IntVar(&metricsPort, "metrics-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_METRICS_PORT", cmdutil.ValidPort, 8000),
@@ -679,8 +695,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),
 		"Compression algorithm required by Redis. (possible values: gzip, none. Default value: gzip)")
 	command.Flags().IntVar(&pprofPort, "pprof-port",
-		env.NumWithDefault("ARGOCD_PRINCIPAL_PPROF_PORT", cmdutil.ValidPort, 0),
-		"Port the pprof server will listen on")
+		env.NumWithDefault("ARGOCD_PRINCIPAL_PPROF_PORT", cmdutil.ValidPort, 6060),
+		"Port the pprof server will listen on, bound to localhost. Set to 0 to not listen at all.")
+	command.Flags().BoolVar(&pprofEnabled, "pprof-enabled",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_PPROF_ENABLED", false),
+		"Enable or disable profiling for the principal")
 	command.Flags().IntVar(&healthzPort, "healthz-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT", cmdutil.ValidPort, 8003),
 		"Port the health check server will listen on")

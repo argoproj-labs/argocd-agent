@@ -191,6 +191,13 @@
       "title": "logFormat",
       "type": "string"
     },
+    "logFullDetail": {
+      "default": "",
+      "description": "Comma-separated full-detail logging categories. Empty disables it.",
+      "pattern": "^$|^ *(all|actions|events|informers) *(, *(all|actions|events|informers) *)*$",
+      "title": "logFullDetail",
+      "type": "string"
+    },
     "logLevel": {
       "default": "info",
       "description": "Log level for the agent.",
@@ -285,9 +292,15 @@
       "title": "podSecurityContext",
       "type": "object"
     },
+    "pprofEnabled": {
+      "default": "false",
+      "description": "Whether the pprof server answers requests; while false every endpoint returns 403.",
+      "title": "pprofEnabled",
+      "type": "string"
+    },
     "pprofPort": {
-      "default": "0",
-      "description": "Port for pprof server (0 disables pprof).",
+      "default": "6161",
+      "description": "Port for the pprof server, bound to localhost. 0 starts no listener at all.",
       "title": "pprofPort",
       "type": "string"
     },
