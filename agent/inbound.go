@@ -872,10 +872,27 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	}
 
 	// Fetch the source UID of the existing app to mark it as expected deletion.
-	app, err := a.appManager.Get(a.context, app.Name, app.Namespace)
+	existing, err := a.appManager.Get(a.context, app.Name, app.Namespace)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// The app is already gone, e.g. because it was deleted on the agent
+			// at the same time it was deleted on the principal. Still mark the
+			// deletion as expected and drop the source cache entry, otherwise
+			// the agent recreates the app from stale state and the recreated
+			// app can never be deleted again.
+			logCtx.Debug("application is not found, perhaps it is already deleted")
+			a.deletions.MarkExpected(sourceUIDForApp(app))
+			if a.mode == types.AgentModeManaged {
+				a.sourceCache.Application.Delete(sourceUIDForApp(app))
+			}
+			if err := a.appManager.Unmanage(app.QualifiedName()); err != nil {
+				logCtx.Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
+			}
+			return nil
+		}
 		return err
 	}
+	app = existing
 
 	sourceUID := app.Annotations[manager.SourceUIDAnnotation]
 	a.deletions.MarkExpected(ktypes.UID(sourceUID))
@@ -887,6 +904,9 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
 			if a.mode == types.AgentModeManaged {
 				a.sourceCache.Application.Delete(sourceUIDForApp(app))
+			}
+			if err := a.appManager.Unmanage(app.QualifiedName()); err != nil {
+				logCtx.Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
 			}
 			return nil
 		}
