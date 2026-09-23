@@ -81,6 +81,17 @@ func StringSliceWithDefault(key string, validator func(string) error, def []stri
 	return ev
 }
 
+func StringToMapWithDefault(key string, validator func(string) error, def map[string]string) map[string]string {
+	ev, err := StringToMap(key, validator)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Print(err)
+		}
+		return def
+	}
+	return ev
+}
+
 func Bool(key string) (bool, error) {
 	ev, ok := os.LookupEnv(key)
 	if !ok {
@@ -137,6 +148,38 @@ func StringSlice(key string, validator func(string) error) ([]string, error) {
 			}
 		}
 		ret = append(ret, s)
+	}
+	return ret, nil
+}
+
+// StringToMap parses a comma-separated list of key=value pairs from the
+// environment variable referred to by key into a map[string]string.
+func StringToMap(key string, validator func(string) error) (map[string]string, error) {
+	ev, ok := os.LookupEnv(key)
+	if !ok {
+		return map[string]string{}, os.ErrNotExist
+	}
+	ret := map[string]string{}
+	for s := range strings.SplitSeq(ev, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if validator != nil {
+			if err := validator(s); err != nil {
+				return map[string]string{}, fmt.Errorf("error validating environment '%s': %w", key, err)
+			}
+		}
+		parts := strings.SplitN(s, "=", 2)
+		if len(parts) != 2 {
+			return map[string]string{}, fmt.Errorf("error parsing environment '%s': expected key=value, got '%s'", key, s)
+		}
+		k := strings.TrimSpace(parts[0])
+		v := strings.TrimSpace(parts[1])
+		if k == "" {
+			return map[string]string{}, fmt.Errorf("error parsing environment '%s': empty key in '%s'", key, s)
+		}
+		ret[k] = v
 	}
 	return ret, nil
 }
