@@ -117,6 +117,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 		enableSelfClusterRegistration bool
 		selfRegClientCertSecretName   string
+		selfRegSecretLabels           map[string]string
 		// Redis TLS configuration
 		redisTLSEnabled               bool
 		redisProxyServerTLSCertPath   string
@@ -464,6 +465,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 				opts = append(opts, principal.WithClientCertSecretName(selfRegClientCertSecretName))
 			}
 
+			// If selfRegSecretLabels is set, add it to the options
+			if len(selfRegSecretLabels) > 0 {
+				opts = append(opts, principal.WithSelfRegSecretLabels(selfRegSecretLabels))
+			}
+
 			// Configure Redis TLS
 			opts = append(opts, principal.WithRedisTLSEnabled(redisTLSEnabled))
 			if redisTLSEnabled {
@@ -756,6 +762,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&selfRegClientCertSecretName, "self-registration-client-cert-secret",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET", nil, ""),
 		"TLS secret containing shared client cert for self-registered cluster secrets (must have tls.crt, tls.key, ca.crt)")
+	command.Flags().StringToStringVar(&selfRegSecretLabels, "self-registration-secret-labels",
+		env.StringToMapWithDefault("ARGOCD_PRINCIPAL_SELF_REGISTRATION_SECRET_LABELS", nil, map[string]string{}),
+		"Comma-separated list of key=value labels to apply to self-registered cluster secrets")
 
 	command.Flags().BoolVar(&haEnabled, "ha-enabled",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_HA_ENABLED", false),
