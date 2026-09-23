@@ -37,6 +37,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
@@ -106,6 +107,59 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 		tlsConfig, err := s.loadTLSConfig()
 		assert.ErrorContains(t, err, "failed to find any PEM data")
 		assert.Nil(t, tlsConfig)
+	})
+
+	t.Run("With TLS Hot Reloading File Path", func(t *testing.T) {
+		templ := certTempl
+		fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+			WithTLSHotReload(true),
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		require.IsType(t, &tlsutil.TLSFileProvider{}, s.tlsSource)
+		tlsConfig, err := s.loadTLSConfig()
+		assert.NoError(t, err)
+		require.NotNil(t, tlsConfig)
+		require.NotNil(t, tlsConfig.GetConfigForClient)
+	})
+	t.Run("With TLS Hot Reloading Kubernetes Secret", func(t *testing.T) {
+		templ := certTempl
+		testSecretName := "test-tls-secret"
+
+		certPEM, keyPEM := fakecerts.CreateSelfSignedCert(t, "rsa", templ)
+		tlsSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: testNamespace,
+				Name:      testSecretName,
+			},
+			Type: corev1.SecretTypeTLS,
+			Data: map[string][]byte{
+				"tls.crt": certPEM,
+				"tls.key": keyPEM,
+			},
+		}
+
+		kubeClient := kube.NewKubernetesFakeClientWithResources(tlsSecret)
+
+		fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
+		s, err := NewServer(context.TODO(), kubeClient, testNamespace,
+			WithTLSKeyPairFromSecret(kubeClient.Clientset, testNamespace, testSecretName),
+			WithTLSHotReload(true),
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+		)
+
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		require.IsType(t, &tlsutil.TLSSecretProvider{}, s.tlsSource)
+		tlsConfig, err := s.loadTLSConfig()
+		assert.NoError(t, err)
+		require.NotNil(t, tlsConfig)
+		require.NotNil(t, tlsConfig.GetConfigForClient)
 	})
 }
 
@@ -700,7 +754,6 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		sendQ := s.queues.SendQ(agentName)
 		assert.Equal(t, 2, sendQ.Len())
 	})
-
 }
 
 func Test_cleanupAgentState(t *testing.T) {
