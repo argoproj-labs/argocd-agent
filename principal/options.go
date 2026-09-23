@@ -47,6 +47,8 @@ type ServerOptions struct {
 	serverName          string
 	port                int
 	address             string
+	tlsHotReload        bool
+	tlsSecretName       string
 	tlsCertPath         string
 	tlsKeyPath          string
 	tlsCert             *x509.Certificate
@@ -68,6 +70,8 @@ type ServerOptions struct {
 	metricsEnabled         bool
 	metricsPort            int
 	requireClientCerts     bool
+	rootCaPath             string
+	rootCaSecretName       string
 	rootCa                 *x509.CertPool
 	clientCertSubjectMatch bool
 	redisAddress           string
@@ -251,6 +255,7 @@ func WithTLSRootCaFromFile(caPath string) ServerOption {
 		if !ok {
 			return fmt.Errorf("invalid certificate data in %s", caPath)
 		}
+		o.options.rootCaPath = caPath
 		return nil
 	}
 }
@@ -267,6 +272,7 @@ func WithTLSRootCaFromSecret(kube kubernetes.Interface, namespace, name string, 
 			return err
 		}
 		o.options.rootCa = pool
+		o.options.rootCaSecretName = name
 		return nil
 	}
 }
@@ -328,6 +334,7 @@ func WithTLSKeyPairFromSecret(kube kubernetes.Interface, namespace, name string)
 		}
 		o.options.tlsCert = cert
 		o.options.tlsKey = c.PrivateKey
+		o.options.tlsSecretName = name
 		return nil
 	}
 }
@@ -732,6 +739,14 @@ func WithRedisTLSInsecure(insecure bool) ServerOption {
 func WithHA(opts ...ha.Option) ServerOption {
 	return func(o *Server) error {
 		o.options.haOptions = append(o.options.haOptions, opts...)
+		return nil
+	}
+}
+
+// WithTLSHotReload allows for hot reloading to be enabled for TLS certificates
+func WithTLSHotReload(enabled bool) ServerOption {
+	return func(o *Server) error {
+		o.options.tlsHotReload = enabled
 		return nil
 	}
 }
