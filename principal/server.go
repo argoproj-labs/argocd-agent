@@ -670,6 +670,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		s.options.clientCertSecretName,
 		kubeClient.Clientset,
 		s.issuer,
+		s.options.selfRegSecretLabels,
 	)
 
 	// Initialize HA components if HA options are configured

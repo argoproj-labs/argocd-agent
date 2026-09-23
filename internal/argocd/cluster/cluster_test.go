@@ -351,7 +351,7 @@ func Test_CreateClusterWithBearerToken(t *testing.T) {
 		mockIssuer := issuermocks.NewIssuer(t)
 		mockIssuer.On("IssueResourceProxyToken", "test-agent").Return("test-bearer-token", nil)
 
-		err := CreateClusterWithBearerToken(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, mockIssuer, testClientCertSecretName)
+		err := CreateClusterWithBearerToken(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, mockIssuer, testClientCertSecretName, nil)
 		require.NoError(t, err)
 
 		// Verify secret was created
@@ -361,6 +361,49 @@ func Test_CreateClusterWithBearerToken(t *testing.T) {
 		require.Equal(t, "test-agent", secret.Labels[LabelKeyClusterAgentMapping])
 		require.Equal(t, "true", secret.Labels[LabelKeySelfRegisteredCluster])
 		require.Equal(t, "true", secret.Annotations[common.AnnotationKeyAppSkipReconcile])
+		require.NotContains(t, secret.Annotations, AnnotationOwnedClusterSecretLabels)
+	})
+
+	t.Run("Creates cluster secret with configured custom labels", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+		createClientCertSecret(t, kubeclient)
+
+		mockIssuer := issuermocks.NewIssuer(t)
+		mockIssuer.On("IssueResourceProxyToken", "test-agent").Return("test-bearer-token", nil)
+
+		customLabels := map[string]string{
+			"e2e.test/registration": "custom-label",
+			"env":                   "prod",
+		}
+		err := CreateClusterWithBearerToken(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, mockIssuer, testClientCertSecretName, customLabels)
+		require.NoError(t, err)
+
+		secret, err := kubeclient.CoreV1().Secrets(testNamespace).Get(context.Background(), "cluster-test-agent", metav1.GetOptions{})
+		require.NoError(t, err)
+		require.Equal(t, "custom-label", secret.Labels["e2e.test/registration"])
+		require.Equal(t, "prod", secret.Labels["env"])
+		require.Equal(t, "e2e.test/registration,env", secret.Annotations[AnnotationOwnedClusterSecretLabels])
+	})
+
+	t.Run("Ignores custom labels that would override managed labels", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+		createClientCertSecret(t, kubeclient)
+
+		mockIssuer := issuermocks.NewIssuer(t)
+		mockIssuer.On("IssueResourceProxyToken", "test-agent").Return("test-bearer-token", nil)
+
+		customLabels := map[string]string{
+			LabelKeyClusterAgentMapping:   "other-agent",
+			LabelKeySelfRegisteredCluster: "false",
+		}
+		err := CreateClusterWithBearerToken(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, mockIssuer, testClientCertSecretName, customLabels)
+		require.NoError(t, err)
+
+		secret, err := kubeclient.CoreV1().Secrets(testNamespace).Get(context.Background(), "cluster-test-agent", metav1.GetOptions{})
+		require.NoError(t, err)
+		require.Equal(t, "test-agent", secret.Labels[LabelKeyClusterAgentMapping])
+		require.Equal(t, "true", secret.Labels[LabelKeySelfRegisteredCluster])
+		require.NotContains(t, secret.Annotations, AnnotationOwnedClusterSecretLabels)
 	})
 
 	t.Run("Returns error when client cert secret is missing", func(t *testing.T) {
@@ -368,7 +411,7 @@ func Test_CreateClusterWithBearerToken(t *testing.T) {
 		mockIssuer := issuermocks.NewIssuer(t)
 		mockIssuer.On("IssueResourceProxyToken", mock.Anything).Return("test-bearer-token", nil).Maybe()
 
-		err := CreateClusterWithBearerToken(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, mockIssuer, "nonexistent-secret")
+		err := CreateClusterWithBearerToken(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, mockIssuer, "nonexistent-secret", nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "could not read client certificate from secret")
 	})
@@ -380,7 +423,7 @@ func Test_CreateClusterWithBearerToken(t *testing.T) {
 		mockIssuer := issuermocks.NewIssuer(t)
 		mockIssuer.On("IssueResourceProxyToken", "test-agent").Return("", fmt.Errorf("issuer error"))
 
-		err := CreateClusterWithBearerToken(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, mockIssuer, testClientCertSecretName)
+		err := CreateClusterWithBearerToken(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, mockIssuer, testClientCertSecretName, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "could not issue resource proxy token")
 	})
@@ -400,7 +443,7 @@ func Test_CreateClusterWithBearerToken(t *testing.T) {
 		// Token is issued before checking if secret exists
 		mockIssuer.On("IssueResourceProxyToken", "test-agent").Return("test-bearer-token", nil)
 
-		err := CreateClusterWithBearerToken(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, mockIssuer, testClientCertSecretName)
+		err := CreateClusterWithBearerToken(context.Background(), kubeclient, testNamespace, "test-agent", testResourceProxyAddr, mockIssuer, testClientCertSecretName, nil)
 		require.NoError(t, err)
 	})
 }
@@ -634,6 +677,205 @@ func Test_readClientCertFromSecret(t *testing.T) {
 		require.Equal(t, "test-cert-data", clientCert)
 		require.Equal(t, "test-key-data", clientKey)
 		require.Equal(t, "principal-ca-data", caData)
+	})
+}
+
+func Test_ApplyClusterSecretLabels(t *testing.T) {
+	const testNamespace = "argocd"
+	const agentName = "test-agent"
+
+	t.Run("Updates fixed and custom labels when they differ", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      GetClusterSecretName(agentName),
+				Namespace: testNamespace,
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping:   "wrong-agent",
+					LabelKeySelfRegisteredCluster: "false",
+					common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+					"env":                         "old",
+				},
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret)
+
+		updatedSecret, changed, err := ApplyClusterSecretLabels(context.Background(), kubeclient, testNamespace, secret, agentName, map[string]string{"env": "prod"})
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, agentName, updatedSecret.Labels[LabelKeyClusterAgentMapping])
+		require.Equal(t, "true", updatedSecret.Labels[LabelKeySelfRegisteredCluster])
+		require.Equal(t, "prod", updatedSecret.Labels["env"])
+		require.Equal(t, "env", updatedSecret.Annotations[AnnotationOwnedClusterSecretLabels])
+	})
+
+	t.Run("Returns unchanged when labels already match", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      GetClusterSecretName(agentName),
+				Namespace: testNamespace,
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping:   agentName,
+					LabelKeySelfRegisteredCluster: "true",
+					common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+				},
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret)
+
+		_, changed, err := ApplyClusterSecretLabels(context.Background(), kubeclient, testNamespace, secret, agentName, nil)
+		require.NoError(t, err)
+		require.False(t, changed)
+	})
+
+	t.Run("Removes custom labels no longer in configuration", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      GetClusterSecretName(agentName),
+				Namespace: testNamespace,
+				Annotations: map[string]string{
+					AnnotationOwnedClusterSecretLabels: "env,retired",
+				},
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping:   agentName,
+					LabelKeySelfRegisteredCluster: "true",
+					common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+					"env":                         "prod",
+					"retired":                     "true",
+				},
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret)
+
+		updatedSecret, changed, err := ApplyClusterSecretLabels(context.Background(), kubeclient, testNamespace, secret, agentName, map[string]string{"env": "staging"})
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "staging", updatedSecret.Labels["env"])
+		require.NotContains(t, updatedSecret.Labels, "retired")
+		require.Equal(t, "env", updatedSecret.Annotations[AnnotationOwnedClusterSecretLabels])
+	})
+
+	t.Run("Does not remove unowned labels when ownership annotation is missing", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      GetClusterSecretName(agentName),
+				Namespace: testNamespace,
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping:   agentName,
+					LabelKeySelfRegisteredCluster: "true",
+					common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+					"env":                         "prod",
+					"retired":                     "true",
+				},
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret)
+
+		updatedSecret, changed, err := ApplyClusterSecretLabels(context.Background(), kubeclient, testNamespace, secret, agentName, map[string]string{"env": "staging"})
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "staging", updatedSecret.Labels["env"])
+		require.Equal(t, "true", updatedSecret.Labels["retired"])
+		require.Equal(t, "env", updatedSecret.Annotations[AnnotationOwnedClusterSecretLabels])
+	})
+
+	t.Run("Preserves third-party labels not owned by the agent", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      GetClusterSecretName(agentName),
+				Namespace: testNamespace,
+				Annotations: map[string]string{
+					AnnotationOwnedClusterSecretLabels: "env",
+				},
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping:   agentName,
+					LabelKeySelfRegisteredCluster: "true",
+					common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+					"env":                         "prod",
+					"third-party/label":           "keep-me",
+				},
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret)
+
+		updatedSecret, changed, err := ApplyClusterSecretLabels(context.Background(), kubeclient, testNamespace, secret, agentName, map[string]string{"env": "staging"})
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "staging", updatedSecret.Labels["env"])
+		require.Equal(t, "keep-me", updatedSecret.Labels["third-party/label"])
+	})
+
+	t.Run("Removes ownership annotation when all custom labels are cleared", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      GetClusterSecretName(agentName),
+				Namespace: testNamespace,
+				Annotations: map[string]string{
+					AnnotationOwnedClusterSecretLabels: "env",
+				},
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping:   agentName,
+					LabelKeySelfRegisteredCluster: "true",
+					common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+					"env":                         "prod",
+				},
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret)
+
+		updatedSecret, changed, err := ApplyClusterSecretLabels(context.Background(), kubeclient, testNamespace, secret, agentName, nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.NotContains(t, updatedSecret.Labels, "env")
+		require.NotContains(t, updatedSecret.Annotations, AnnotationOwnedClusterSecretLabels)
+	})
+
+	t.Run("Ignores custom labels that would override managed labels", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      GetClusterSecretName(agentName),
+				Namespace: testNamespace,
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping:   agentName,
+					LabelKeySelfRegisteredCluster: "true",
+					common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+				},
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret)
+
+		updatedSecret, changed, err := ApplyClusterSecretLabels(context.Background(), kubeclient, testNamespace, secret, agentName, map[string]string{
+			LabelKeyClusterAgentMapping:   "other-agent",
+			LabelKeySelfRegisteredCluster: "false",
+			"env":                         "prod",
+		})
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, agentName, updatedSecret.Labels[LabelKeyClusterAgentMapping])
+		require.Equal(t, "true", updatedSecret.Labels[LabelKeySelfRegisteredCluster])
+		require.Equal(t, "prod", updatedSecret.Labels["env"])
+		require.Equal(t, "env", updatedSecret.Annotations[AnnotationOwnedClusterSecretLabels])
+	})
+
+	t.Run("Applies custom label when configured value is empty", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      GetClusterSecretName(agentName),
+				Namespace: testNamespace,
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping:   agentName,
+					LabelKeySelfRegisteredCluster: "true",
+					common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+				},
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret)
+
+		updatedSecret, changed, err := ApplyClusterSecretLabels(context.Background(), kubeclient, testNamespace, secret, agentName, map[string]string{"marker": ""})
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Contains(t, updatedSecret.Labels, "marker")
+		require.Equal(t, "", updatedSecret.Labels["marker"])
+		require.Equal(t, "marker", updatedSecret.Annotations[AnnotationOwnedClusterSecretLabels])
 	})
 }
 

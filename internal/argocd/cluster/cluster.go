@@ -20,6 +20,8 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/config"
@@ -41,6 +43,11 @@ import (
 )
 
 const LabelKeySelfRegisteredCluster = "argocd-agent.argoproj-labs.io/self-registered-cluster"
+
+// AnnotationOwnedClusterSecretLabels is the annotation on a self-registered cluster
+// secret that tracks which label keys were applied from the agent configuration, so only
+// those keys are removed when the configuration changes.
+const AnnotationOwnedClusterSecretLabels = "argocd-agent.argoproj-labs.io/owned-cluster-secret-labels"
 
 // SetAgentConnectionStatus updates cluster info with connection state and time in mapped cluster at principal.
 // This is called when the agent is connected or disconnected with the principal.
@@ -199,7 +206,7 @@ func NewClusterCacheInstance(redisAddress, redisPassword string, redisCompressio
 // - The shared client certificate (mTLS) proves the request comes from a trusted Argo CD server
 // - The JWT bearer token identifies which specific agent is being accessed
 func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Interface,
-	namespace, agentName, resourceProxyAddress string, tokenIssuer issuer.Issuer, clientCertSecretName string) error {
+	namespace, agentName, resourceProxyAddress string, tokenIssuer issuer.Issuer, clientCertSecretName string, selfRegSecretLabels map[string]string) error {
 
 	logCtx := log().WithField("agent", agentName).WithField("process", "self-agent-registration")
 	logCtx.Info("Creating self-registered cluster secret with shared client cert and bearer token")
@@ -222,10 +229,6 @@ func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Int
 	cluster := &appv1.Cluster{
 		Server: fmt.Sprintf("https://%s?agentName=%s", resourceProxyAddress, agentName),
 		Name:   agentName,
-		Labels: map[string]string{
-			LabelKeyClusterAgentMapping:   agentName,
-			LabelKeySelfRegisteredCluster: "true",
-		},
 		Annotations: map[string]string{
 			// Skip ArgoCD Application Controller reconciliation for this cluster.
 			// Available in ArgoCD v3.4+
@@ -252,6 +255,9 @@ func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Int
 		return fmt.Errorf("could not convert cluster to secret: %w", err)
 	}
 
+	// Apply all self-registration labels to the secret
+	applyAllSelfRegLabels(secret, agentName, selfRegSecretLabels)
+
 	// Create the cluster secret
 	if _, err = kubeclient.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
 		if apierrors.IsAlreadyExists(err) {
@@ -263,6 +269,25 @@ func CreateClusterWithBearerToken(ctx context.Context, kubeclient kubernetes.Int
 
 	logCtx.Info("Successfully created self-registered cluster secret with shared client cert and bearer token")
 	return nil
+}
+
+// ApplyClusterSecretLabels applies fixed and custom labels to a self-registered cluster secret.
+func ApplyClusterSecretLabels(ctx context.Context, kubeclient kubernetes.Interface,
+	namespace string, secret *v1.Secret, agentName string, selfRegSecretLabels map[string]string) (*v1.Secret, bool, error) {
+
+	if secret == nil {
+		return nil, false, fmt.Errorf("secret is nil")
+	}
+
+	if !applyAllSelfRegLabels(secret, agentName, selfRegSecretLabels) {
+		return secret, false, nil
+	}
+
+	updated, err := kubeclient.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, false, fmt.Errorf("could not update cluster secret labels: %w", err)
+	}
+	return updated, true, nil
 }
 
 // IsClusterSelfRegistered checks if a cluster secret was created by self-registration.
@@ -410,4 +435,90 @@ func GetClusterSecret(ctx context.Context, kubeclient kubernetes.Interface, name
 
 func GetClusterSecretName(agentName string) string {
 	return "cluster-" + agentName
+}
+
+// applyAllSelfRegLabels applies all self-registration labels to the secret.
+func applyAllSelfRegLabels(secret *v1.Secret, agentName string, selfRegSecretLabels map[string]string) bool {
+	if secret.Labels == nil {
+		secret.Labels = map[string]string{}
+	}
+
+	changed := false
+
+	// Apply the agent name, secret type and self-registered cluster labels
+	// These are fixed and managed by the agent registration process.
+	for key, value := range map[string]string{
+		LabelKeyClusterAgentMapping:   agentName,
+		LabelKeySelfRegisteredCluster: "true",
+		common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+	} {
+		if secret.Labels[key] != value {
+			secret.Labels[key] = value
+			changed = true
+		}
+	}
+
+	// Build the set of user-supplied custom labels, drop labels that have the same name as the fixed labels.
+	customLabels := make(map[string]string, len(selfRegSecretLabels))
+	for key, value := range selfRegSecretLabels {
+		if key == LabelKeyClusterAgentMapping || key == LabelKeySelfRegisteredCluster || key == common.LabelKeySecretType {
+			continue
+		}
+		customLabels[key] = value
+	}
+
+	// Remove custom labels that were previously added but are no longer in user supplied selfRegSecretLabels.
+	if keys := secret.Annotations[AnnotationOwnedClusterSecretLabels]; keys != "" {
+		for _, key := range strings.Split(keys, ",") {
+			key = strings.TrimSpace(key)
+			// Skip custom labels that are not in user supplied selfRegSecretLabels
+			if _, ok := customLabels[key]; key == "" || ok {
+				continue
+			}
+
+			// Remove previously added custom label from secret if it is not in user supplied selfRegSecretLabels.
+			if _, ok := secret.Labels[key]; ok {
+				delete(secret.Labels, key)
+				changed = true
+			}
+		}
+	}
+
+	// Apply/update user-supplied custom labels.
+	for key, value := range customLabels {
+		current, ok := secret.Labels[key]
+		if !ok || current != value {
+			secret.Labels[key] = value
+			changed = true
+		}
+	}
+
+	// Update the annotation that tracks which keys argocd-agent added to the secret.
+	var ownedLabelKeys string
+	if len(customLabels) > 0 {
+		keys := make([]string, 0, len(customLabels))
+		for key := range customLabels {
+			keys = append(keys, key)
+		}
+
+		// Sort the keys to keep the order consistent for string comparison below.
+		sort.Strings(keys)
+		ownedLabelKeys = strings.Join(keys, ",")
+	}
+
+	if secret.Annotations == nil {
+		secret.Annotations = map[string]string{}
+	}
+	if secret.Annotations[AnnotationOwnedClusterSecretLabels] != ownedLabelKeys {
+		if ownedLabelKeys == "" {
+			// Remove the annotation if no custom labels are available.
+			delete(secret.Annotations, AnnotationOwnedClusterSecretLabels)
+		} else {
+			// Update the annotation with the new set of custom labels.
+			secret.Annotations[AnnotationOwnedClusterSecretLabels] = ownedLabelKeys
+		}
+		changed = true
+	}
+
+	return changed
 }
