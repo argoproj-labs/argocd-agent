@@ -19,11 +19,13 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -108,17 +110,18 @@ func (t *TLSFileProvider) Watch(ctx context.Context) error {
 	}
 	defer watcher.Close()
 
+	// Watch the dirs of the file paths to continue watching on the case where the file is removed or renamed
 	if t.CAPath != "" {
-		err = watcher.Add(t.CAPath)
+		err = watcher.Add(filepath.Dir(t.CAPath))
 		if err != nil {
 			return err
 		}
 	}
-	err = watcher.Add(t.ClientCertPath)
+	err = watcher.Add(filepath.Dir(t.ClientCertPath))
 	if err != nil {
 		return err
 	}
-	err = watcher.Add(t.ClientKeyPath)
+	err = watcher.Add(filepath.Dir(t.ClientKeyPath))
 	if err != nil {
 		return err
 	}
@@ -130,10 +133,10 @@ func (t *TLSFileProvider) Watch(ctx context.Context) error {
 				return fmt.Errorf("fsnotify watch event channel unexpectedly closed")
 			}
 
-			if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
+			if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove) {
 				err := t.OnChange(event)
 				if err != nil {
-					fmt.Printf("Warning: error changing certificate: %v, nothing was applied", err)
+					logrus.WithError(err).Warning("error changing certificate, nothing was applied")
 					continue
 				}
 			}

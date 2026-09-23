@@ -307,7 +307,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 			s.tlsSource = tlsutil.NewTLSSecretProvider(s.options.tlsSecretName, s.options.rootCaSecretName, s.namespace, s.kubeClient.Clientset, material)
 			log().Info("Enabling TLS Hot Reload with Secret Provider Source")
 		} else {
-			err = fmt.Errorf("cert and key have not been properly initialized")
+			err = fmt.Errorf("cert and key are not set properly or are not set through the same method")
 		}
 		if err != nil {
 			return nil, err
@@ -910,10 +910,17 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	// Start TLS Hot Reloading if enabled
 	if s.options.tlsHotReload {
 		go func() {
-			if err := s.tlsSource.Watch(s.ctx); err != nil {
-				logrus.Fatalf("TLS Hot Reload watch has exited non-successfully: %v", err)
-			} else {
-				log().Info("TLS Hot Reload Watch has exited")
+			for {
+				if err := s.tlsSource.Watch(s.ctx); err != nil {
+					logrus.Errorf("TLS Hot Reload watch has exited non-successfully: %v, retrying in 5 seconds", err)
+				} else {
+					log().Info("TLS Hot Reload Watch has exited")
+				}
+				select {
+				case <-s.ctx.Done():
+					return
+				case <-time.After(5*time.Second):
+				}
 			}
 		}()
 	}
