@@ -239,7 +239,7 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 			logging.LogActionError(logCtx, "application", "terminate-operation", incomingApp, err)
 		}
 	case event.Delete:
-		err = a.deleteApplication(incomingApp)
+		err = a.deleteApplicationFromEvent(incomingApp)
 		if err != nil {
 			logging.LogActionError(logCtx, "application", "delete", incomingApp, err)
 		}
@@ -853,6 +853,39 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	return napp, err
 }
 
+// deleteApplicationFromEvent processes a Delete event from the principal. The
+// source UID carried by app is the one of the application being deleted, so
+// if the application is already gone from the cluster (e.g. because it was
+// deleted on the agent at the same time it was deleted on the principal) the
+// deletion is still marked as expected and the stale source cache entry is
+// dropped. Otherwise the agent would recreate the application from stale
+// state and the recreated application could never be deleted again.
+//
+// This must only be used for Delete events. On a source UID mismatch, app is
+// the new application, and marking its source UID as an expected deletion
+// would allow a later user-initiated deletion of the recreated application.
+func (a *Agent) deleteApplicationFromEvent(app *v1alpha1.Application) error {
+	sourceUID := sourceUIDForApp(app)
+	err := a.deleteApplication(app)
+	if err == nil || !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"method": "DeleteApplication",
+		"app":    app.QualifiedName(),
+	})
+	logCtx.Debug("application is not found, perhaps it is already deleted")
+	a.deletions.MarkExpected(sourceUID)
+	if a.mode == types.AgentModeManaged {
+		a.sourceCache.Application.Delete(sourceUID)
+	}
+	if err := a.appManager.Unmanage(app.QualifiedName()); err != nil {
+		logCtx.Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
+	}
+	return nil
+}
+
 func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	// Determine the target namespace for the application
 	targetNamespace := a.getTargetNamespaceForApp(app)
@@ -872,6 +905,9 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	}
 
 	// Fetch the source UID of the existing app to mark it as expected deletion.
+	// A NotFound error is returned to the caller on purpose: only the caller
+	// knows whether the source UID of app is the one whose deletion should be
+	// recorded as expected (see deleteApplicationFromEvent).
 	app, err := a.appManager.Get(a.context, app.Name, app.Namespace)
 	if err != nil {
 		return err
@@ -887,6 +923,9 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
 			if a.mode == types.AgentModeManaged {
 				a.sourceCache.Application.Delete(sourceUIDForApp(app))
+			}
+			if err := a.appManager.Unmanage(app.QualifiedName()); err != nil {
+				logCtx.Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
 			}
 			return nil
 		}
