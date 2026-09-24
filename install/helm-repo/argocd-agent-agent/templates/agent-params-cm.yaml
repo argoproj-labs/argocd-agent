@@ -58,6 +58,12 @@ data:
   # trace, debug, info, warn and error.
   # Default: "info"
   agent.log.level: {{ .Values.logLevel | quote }}
+{{- with .Values.logFullDetail }}
+  # agent.log.full-detail: Comma-separated full-detail logging categories (all,
+  # actions, events, informers). Very verbose; for debugging only.
+  # Applied at runtime: editing this key takes effect without a restart.
+  agent.log.full-detail: {{ . | quote }}
+{{- end }}
   # agent.log.format: Log format (text or json).
   # Default: "text"
   agent.log.format: {{ .Values.logFormat | quote }}
@@ -96,9 +102,14 @@ data:
   # agent.compression.enabled: Whether to enable gRPC compression.
   # Default: false
   agent.compression.enabled: {{ .Values.enableCompression | quote }}
-  # agent.pprof.port: Port for pprof server (0 disables pprof).
-  # Default: 0
+  # agent.pprof.port: Port for the pprof server, bound to localhost. 0 starts no
+  # listener at all, which also makes agent.pprof.enabled inert.
+  # Default: 6161
   agent.pprof.port: {{ .Values.pprofPort | quote }}
+  # agent.pprof.enabled: Whether the pprof server answers requests; while false
+  # every endpoint returns 403.
+  # Applied at runtime: editing this key takes effect without a restart.
+  agent.pprof.enabled: {{ .Values.pprofEnabled | quote }}
   # agent.resource-proxy.enabled: Whether to enable resource proxy.
   # Default: true
   agent.resource-proxy.enabled: {{ .Values.enableResourceProxy | quote }}

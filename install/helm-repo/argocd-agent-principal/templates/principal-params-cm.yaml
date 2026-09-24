@@ -18,6 +18,12 @@ data:
   # warn or error.
   # Default: info
   principal.log.level: {{ .Values.principal.log.level | default "info" | quote }}
+{{- with .Values.principal.log.fullDetail }}
+  # principal.log.full-detail: Comma-separated full-detail logging categories
+  # (all, actions, events, informers). Very verbose; for debugging only.
+  # Applied at runtime: editing this key takes effect without a restart.
+  principal.log.full-detail: {{ . | quote }}
+{{- end }}
   # principal.log.format: The log format principal should use. Valid values are
   # "json" or "text".
   # Default: "text"
@@ -133,7 +139,13 @@ data:
   principal.redis.compression.type: {{ .Values.principal.redis.compressionType | quote }}
   principal.resource-proxy.enable: {{ .Values.principal.resourceProxy.enabled | quote }}
   principal.keep-alive.min-interval: {{ .Values.principal.keepAlive.minInterval | quote }}
+  # principal.pprof.port: Port for the pprof server, bound to localhost. 0
+  # starts no listener at all, which also makes principal.pprof.enabled inert.
   principal.pprof.port: {{ .Values.principal.pprof.port | quote }}
+  # principal.pprof.enabled: Whether the pprof server answers requests; while
+  # false every endpoint returns 403.
+  # Applied at runtime: editing this key takes effect without a restart.
+  principal.pprof.enabled: {{ .Values.principal.pprof.enabled | quote }}
   principal.redis.server.address: {{ .Values.principal.redis.server.address | quote }}
   principal.tls.min-version: {{ .Values.principal.tls.minVersion | quote }}
   principal.tls.max-version: {{ .Values.principal.tls.maxVersion | quote }}

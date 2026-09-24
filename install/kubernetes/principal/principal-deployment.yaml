@@ -39,6 +39,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.log.level
                 optional: true
+          - name: ARGOCD_PRINCIPAL_FULL_DETAIL
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.log.full-detail
+                optional: true
           - name: ARGOCD_PRINCIPAL_METRICS_PORT
             valueFrom:
               configMapKeyRef:
@@ -242,6 +248,12 @@ spec:
               configMapKeyRef:
                 name: argocd-agent-params
                 key: principal.pprof.port
+                optional: true
+          - name: ARGOCD_PRINCIPAL_PPROF_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.pprof.enabled
                 optional: true
           - name: ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING
             valueFrom:

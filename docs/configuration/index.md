@@ -20,16 +20,33 @@ If you set a parameter via all three methods:
 
 ```bash
 # Command line (wins)
-argocd-agent principal --log-level=debug
+argocd-agent principal --metrics-port=9000
 
 # Environment variable (overridden)
-export ARGOCD_PRINCIPAL_LOG_LEVEL=warn
+export ARGOCD_PRINCIPAL_METRICS_PORT=8500
 
 # ConfigMap (overridden)
-# principal.log.level: "info"
+# principal.metrics.port: "8000"
 ```
 
-The effective value will be `debug` (from the command line flag).
+The effective value will be `9000` (from the command line flag).
+
+### Exception: Runtime-Switchable Debug Settings
+
+Three debug settings are re-read from the `argocd-agent-params` ConfigMap while
+the component runs, so that they can be changed without a restart:
+
+* `<component>.log.level`
+* `<component>.log.full-detail`
+* `<component>.pprof.enabled`
+
+For these keys the precedence above is reversed: the flag or environment
+variable provides the value the component starts with, but once the ConfigMap
+has been read its value wins, including over a command line flag. Removing the
+key reverts the setting to the startup value. Invalid values are logged and ignored.
+
+See [Observability](observability.md#changing-settings-without-a-restart) for
+details.
 
 ## ConfigMap Configuration
 

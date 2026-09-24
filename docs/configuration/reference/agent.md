@@ -269,8 +269,23 @@ Comma-separated list of TLS cipher suites to use. Use `--tls-ciphersuites=list` 
 | **Format** | `[<component>=]<level>` |
 | **Valid Values (component)** | `resource-proxy`, `redis-proxy`, `grpc-event`, `informer-event-buffer` |
 | **Valid Values (level)** | `trace`, `debug`, `info`, `warning`, `error` |
+| **Applied at runtime** | Yes |
 
-The log level for the general logger and subsystem loggers for the agent.
+The log level for the general logger and subsystem loggers for the agent. Changing the ConfigMap entry takes effect without a restart.
+
+### Full Detail
+
+| | |
+|---|---|
+| **CLI Flag** | `--full-detail` |
+| **Environment Variable** | `ARGOCD_AGENT_FULL_DETAIL` |
+| **ConfigMap Entry** | `agent.log.full-detail` |
+| **Type** | String (comma-separated list) |
+| **Default** | empty (disabled) |
+| **Valid Values** | `all`, `actions`, `events`, `informers` |
+| **Applied at runtime** | Yes |
+
+Categories for which logs carry full resource payloads and diffs. See [Observability: Full-Detail Logging](../observability.md#full-detail-logging).
 
 ### Log Format
 
@@ -291,12 +306,37 @@ The log format to use.
 |---|---|
 | **CLI Flag** | `--pprof-port` |
 | **Environment Variable** | `ARGOCD_AGENT_PPROF_PORT` |
-| **ConfigMap Entry** | N/A |
+| **ConfigMap Entry** | `agent.pprof.port` |
 | **Type** | Integer |
-| **Default** | `0` (disabled) |
+| **Default** | `6161` |
 | **Range** | 0, 1024-65535 |
 
-Port the pprof server will listen on. Set to 0 to disable.
+Port the pprof server will listen on, bound to localhost. The listener always starts, but its endpoints stay behind `--pprof-enabled`. Set to 0 to not listen at all.
+
+### Profiling Enabled
+
+| | |
+|---|---|
+| **CLI Flag** | `--pprof-enabled` |
+| **Environment Variable** | `ARGOCD_AGENT_PPROF_ENABLED` |
+| **ConfigMap Entry** | `agent.pprof.enabled` |
+| **Type** | Boolean |
+| **Default** | `false` |
+| **Applied at runtime** | Yes |
+
+Whether the pprof endpoints answer requests; they return `403` while disabled. See [Operations: Profiling](../../operations/profiling.md).
+
+### Params ConfigMap
+
+| | |
+|---|---|
+| **CLI Flag** | `--params-configmap` |
+| **Environment Variable** | `ARGOCD_AGENT_PARAMS_CONFIGMAP` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `argocd-agent-params` |
+
+Name of the ConfigMap the agent reads its parameters from, and watches for the settings marked *Applied at runtime* above. The Helm chart names it `<release>-params` and sets this accordingly.
 
 ## Monitoring and Health
 

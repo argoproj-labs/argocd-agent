@@ -176,6 +176,11 @@ principal:
     level: info
     # -- Log format (text or json).
     format: text
+    # -- Comma-separated full-detail logging categories (all, actions, events,
+    # informers). Very verbose; for debugging only. Applied at runtime: editing
+    # principal.log.full-detail in the params ConfigMap takes effect without a
+    # restart.
+    fullDetail: ""
 
   metrics:
     # -- Metrics server port.
@@ -308,8 +313,13 @@ principal:
     minInterval: "0"
 
   pprof:
-    # -- Port for the pprof profiling server. 0 disables it.
-    port: "0"
+    # -- Port for the pprof profiling server, bound to localhost. 0 starts no
+    # listener at all, which also makes `enabled` below inert.
+    port: "6060"
+    # -- Whether the pprof server answers requests; while false every endpoint
+    # returns 403. Applied at runtime: editing principal.pprof.enabled in the
+    # params ConfigMap takes effect without a restart.
+    enabled: "false"
 
   userpass:
     # -- Name of the Secret containing encrypted agent credentials for userpass authentication.
