@@ -98,6 +98,7 @@ type ServerOptions struct {
 	selfAgentRegistrationEnabled bool
 	resourceProxyAddress         string
 	clientCertSecretName         string
+	selfRegSecretLabels          map[string]string
 	// Redis TLS configuration
 	redisTLSEnabled             bool
 	redisProxyServerTLSCert     *x509.Certificate
@@ -644,6 +645,13 @@ func WithResourceProxyAddress(address string) ServerOption {
 func WithClientCertSecretName(name string) ServerOption {
 	return func(o *Server) error {
 		o.options.clientCertSecretName = name
+		return nil
+	}
+}
+
+func WithSelfRegSecretLabels(labels map[string]string) ServerOption {
+	return func(o *Server) error {
+		o.options.selfRegSecretLabels = labels
 		return nil
 	}
 }

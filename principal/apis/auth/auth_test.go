@@ -180,7 +180,7 @@ func Test_Authenticate(t *testing.T) {
 
 		// Create manager with agent registration disabled
 		kubeclient := kube.NewFakeKubeClient("argocd")
-		mgr := registration.NewAgentRegistrationManager(false, "argocd", "resource-proxy:8443", "", kubeclient, iss)
+		mgr := registration.NewAgentRegistrationManager(false, "argocd", "resource-proxy:8443", "", kubeclient, iss, nil)
 
 		auths, err := NewServer(queues, "argocd", ams, iss, WithAgentRegistrationManager(mgr))
 		require.NoError(t, err)
@@ -206,7 +206,7 @@ func Test_Authenticate(t *testing.T) {
 		kubeclient := kube.NewFakeClientsetWithResources()
 		mockIss := issuermock.NewIssuer(t)
 		mockIss.On("IssueResourceProxyToken", "user1").Return("test-token", nil)
-		mgr := registration.NewAgentRegistrationManager(true, "argocd", "resource-proxy:8443", "", kubeclient, mockIss)
+		mgr := registration.NewAgentRegistrationManager(true, "argocd", "resource-proxy:8443", "", kubeclient, mockIss, nil)
 
 		auths, err := NewServer(queues, "argocd", ams, nil, WithAgentRegistrationManager(mgr))
 		require.NoError(t, err)

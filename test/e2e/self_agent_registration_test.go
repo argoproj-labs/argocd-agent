@@ -199,7 +199,7 @@ func (suite *SelfAgentRegistrationTestSuite) Test_ManualSecretWithSelfRegistrati
 	originalUID := originalSecret.UID
 
 	// Enable self agent registration
-	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, nil))
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
@@ -263,8 +263,13 @@ func (suite *SelfAgentRegistrationTestSuite) Test_ManualSecretWithSelfRegistrati
 func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret() {
 	requires := suite.Require()
 
-	// Enable self agent registration
-	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
+	customLabels := map[string]string{
+		"e2e.test/registration": "custom-label",
+		"team":                  "argocd-agent",
+	}
+
+	// Enable self agent registration with custom secret labels via principal env
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, customLabels))
 	oldInfo, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
 	requires.NoError(err)
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
@@ -329,6 +334,12 @@ func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret(
 		"Secret should have cluster type label")
 	requires.Equal(fixture.AgentManagedName, newSecret.Labels[cluster.LabelKeyClusterAgentMapping],
 		"Secret should have agent mapping label")
+	for key, value := range customLabels {
+		requires.Equal(value, newSecret.Labels[key],
+			"Self-registered secret should have configured custom label %q", key)
+	}
+	requires.Equal("e2e.test/registration,team", newSecret.Annotations[cluster.AnnotationOwnedClusterSecretLabels],
+		"Self-registered secret should track configured custom label keys in ownership annotation")
 }
 
 // Compare structure of manually created vs self-registered secrets, both should have same structure
@@ -340,7 +351,7 @@ func (suite *SelfAgentRegistrationTestSuite) Test_ManuallyCreatedAndSelfRegister
 	requires.NoError(err)
 
 	// Enable self registration
-	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, nil))
 	oldInfo, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
 	requires.NoError(err)
 	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
@@ -392,6 +403,78 @@ func (suite *SelfAgentRegistrationTestSuite) Test_ManuallyCreatedAndSelfRegister
 		requires.Contains(selfRegSecret.Data, key,
 			fmt.Sprintf("Self-registered secret should have '%s' field like manual secret", key))
 	}
+
+	requires.NotContains(selfRegSecret.Annotations, cluster.AnnotationOwnedClusterSecretLabels,
+		"Self-registered secret without custom labels should not have ownership annotation")
+}
+
+// Self-registered secrets reconcile configured labels on reconnect and only remove
+// labels previously owned by argocd-agent, preserving third-party labels.
+func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationReconcilesSecretLabels() {
+	requires := suite.Require()
+
+	initialLabels := map[string]string{
+		"e2e.test/registration": "custom-label",
+		"team":                  "argocd-agent",
+	}
+
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, initialLabels))
+	oldInfo, err := fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	requires.NoError(err)
+	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
+	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
+
+	requires.NoError(fixture.StopProcess(fixture.AgentManagedName, suite.T()))
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning(fixture.AgentManagedName, suite.T())
+	}, 30*time.Second, 1*time.Second)
+
+	requires.NoError(fixture.DeleteClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName))
+	requires.Eventually(func() bool {
+		return !fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	}, 10*time.Second, 1*time.Second)
+
+	fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
+	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
+	requires.Eventually(func() bool {
+		return fixture.ClusterSecretExists(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	}, 30*time.Second, 1*time.Second)
+
+	secret, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+	requires.NoError(err)
+	requires.Equal("true", secret.Labels[cluster.LabelKeySelfRegisteredCluster])
+
+	if secret.Labels == nil {
+		secret.Labels = map[string]string{}
+	}
+	secret.Labels["third-party/label"] = "keep-me"
+	requires.NoError(suite.PrincipalClient.Update(suite.Ctx, secret, metav1.UpdateOptions{}))
+
+	updatedLabels := map[string]string{
+		"e2e.test/registration": "staging",
+	}
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, updatedLabels))
+	oldInfo, err = fixture.GetPrincipalClusterInfo(fixture.AgentManagedName, suite.ClusterDetails)
+	requires.NoError(err)
+	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
+	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+	suite.waitForFreshConnection(oldInfo.ConnectionState.ModifiedAt)
+
+	fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
+	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
+
+	requires.Eventually(func() bool {
+		current, err := fixture.GetClusterSecret(suite.Ctx, suite.PrincipalClient, fixture.AgentManagedName)
+		if err != nil {
+			return false
+		}
+		_, hasTeam := current.Labels["team"]
+		return current.Labels["e2e.test/registration"] == "staging" &&
+			current.Labels["third-party/label"] == "keep-me" &&
+			!hasTeam &&
+			current.Annotations[cluster.AnnotationOwnedClusterSecretLabels] == "e2e.test/registration"
+	}, 60*time.Second, 1*time.Second)
 }
 
 // Delete manually created cluster secret and disable self registration, cluster secret should NOT be created
