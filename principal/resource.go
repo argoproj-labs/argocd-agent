@@ -300,8 +300,6 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 				w.WriteHeader(resp.Status)
 			}
 			return
-		default:
-			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
@@ -400,8 +398,6 @@ func (s *Server) sendSynchronousRedisMessageToAgent(agentName string, connection
 			logCtx.Trace("Received redis response message")
 
 			return &resp.Body
-		default:
-			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
