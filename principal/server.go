@@ -919,7 +919,7 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 				select {
 				case <-s.ctx.Done():
 					return
-				case <-time.After(5*time.Second):
+				case <-time.After(5 * time.Second):
 				}
 			}
 		}()
