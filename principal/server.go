@@ -921,6 +921,9 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 					return
 				case <-time.After(5 * time.Second):
 				}
+				if err := s.tlsSource.Reload(s.ctx); err != nil {
+					log().WithError(err).Warn("failed to reload certs, nothing was applied")
+				}
 			}
 		}()
 	}
