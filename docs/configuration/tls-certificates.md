@@ -761,6 +761,14 @@ argocd-agentctl pki issue agent <agent-name> \
    kubectl rollout restart deployment argocd-agent-principal -n argocd
    ```
 
+### Hot Reloading (Principal Only)
+
+Hot reloading for both the serving certificate and CA certificate can be enabled on the principal. It can be enabled
+by passing the `--tls-hot-reload` or setting the `ARGOCD_PRINCIPAL_TLS_HOT_RELOAD` environment variable to `true`.
+
+Both file paths or Kubernetes secrets can be watched for updates but both client cert and CA cert must be set the same way. If for some reason the newly rotated certificate is
+invalid, no changes will be applied.
+
 ## Troubleshooting
 
 ### Certificate Validation Errors
