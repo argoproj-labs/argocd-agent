@@ -79,6 +79,8 @@ type TLSSource interface {
 	Load() (tls.Certificate, *x509.CertPool)
 	// Watch is meant for watching the source for updates and then updating accordingly
 	Watch(ctx context.Context) error
+	// Reload is meant for reloading all of the sources in the provider to be used on a restart or other scenario
+	Reload(ctx context.Context) error
 }
 
 // NewTLSFileProvider creates a new TLSFileProvider with the file path provided
@@ -226,6 +228,50 @@ func (t *TLSFileProvider) caOnChange() error {
 	return nil
 }
 
+// TLSFileProvider.Reload reads the sources for the TLS data and sets them if they are new
+func (t *TLSFileProvider) Reload(ctx context.Context) error {
+	currentCert, currentCAPool := t.Load()
+	newMaterial := &TLSMaterial{}
+
+	cert, err := TLSCertFromFile(t.ClientCertPath, t.ClientKeyPath, true)
+	if err != nil {
+		return err
+	}
+
+	if err = ValidateNewClientCert(cert); err == nil {
+		newMaterial.Cert = cert
+	} else {
+		logrus.WithError(err).Warn("validation failed on reloading client cert, nothing was changed")
+		newMaterial.Cert = currentCert
+	}
+
+	bytes, err := os.ReadFile(t.CAPath)
+	if err != nil {
+		return err
+	}
+
+	if err = ValidateNewCACert(bytes); err == nil {
+		caPool := x509.NewCertPool()
+		ok := caPool.AppendCertsFromPEM(bytes)
+		if ok {
+			newMaterial.CAPool = caPool
+		} else {
+			logrus.Warn("ca pem could not be appended to capool, nothing was changed")
+			newMaterial.CAPool = currentCAPool
+		}
+	} else {
+		logrus.Warn("validation failed on reloading ca pool, nothing was changed")
+		newMaterial.CAPool = currentCAPool
+	}
+
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
+
+	t.Material.Store(newMaterial)
+
+	return nil
+}
+
 // NewTLSSecretProvider creates a TLSSecretProvider and stores initial TLS data
 func NewTLSSecretProvider(clientSecretName, caSecretName, namespace string, kubeClient kubernetes.Interface, material *TLSMaterial) *TLSSecretProvider {
 	provider := &TLSSecretProvider{
@@ -260,13 +306,13 @@ func (t *TLSSecretProvider) Watch(ctx context.Context) error {
 		informer.WithAddHandler[*corev1.Secret](func(secret *corev1.Secret) {
 			err := t.OnChange(secret)
 			if err != nil {
-				fmt.Printf("Error changing certificate: %v, nothing was applied", err)
+				logrus.WithError(err).Warn("error changing certificate, nothing was applied")
 			}
 		}),
 		informer.WithUpdateHandler[*corev1.Secret](func(old *corev1.Secret, new *corev1.Secret) {
 			err := t.OnChange(new)
 			if err != nil {
-				fmt.Printf("Error changing certificate: %v, nothing was applied", err)
+				logrus.WithError(err).Warn("error changing certificate, nothing was applied")
 			}
 		}),
 	)
@@ -276,7 +322,7 @@ func (t *TLSSecretProvider) Watch(ctx context.Context) error {
 
 	go func() {
 		if err := informer.Start(ctx); err != nil {
-			fmt.Printf("informer error: %v", err)
+			logrus.WithError(err).Error("TLS secret informer exited non-successfully")
 		}
 	}()
 	<-ctx.Done()
@@ -340,37 +386,44 @@ func (t *TLSSecretProvider) clientOnChange(secret *corev1.Secret) error {
 	return nil
 }
 
+// readTLSDataFromKey reads TLS data from a key in a Kubernetes secret and validates it and then adds it to the provided pool
+// if the ca is invalid an error will be returned
+func readTLSDataFromKey(caPool *x509.CertPool, key string, secret *corev1.Secret) error {
+	crtBytes, ok := secret.Data[key]
+	if crtBytes != nil && ok {
+		if err := ValidateNewCACert(crtBytes); err != nil {
+			return err
+		}
+
+		if ok := caPool.AppendCertsFromPEM(crtBytes); !ok {
+			return fmt.Errorf("failed to append PEM to cert pool")
+		}
+	} else {
+		return fmt.Errorf("key does not exist in the secret")
+	}
+	return nil
+}
+
 // TLSSecretProvider.caOnChange handles changing a ca cert from a Kubernetes secret
 func (t *TLSSecretProvider) caOnChange(secret *corev1.Secret) error {
 	if len(secret.Data) == 0 {
 		return fmt.Errorf("%s/%s is empty", secret.Namespace, secret.Name)
 	}
 
-	certPool := x509.NewCertPool()
+	caPool := x509.NewCertPool()
 	certsInPool := 0
 
-	crtBytes, ok := secret.Data["tls.crt"]
-	if crtBytes != nil && ok {
-		if err := ValidateNewCACert(crtBytes); err != nil {
-			return fmt.Errorf("validation failed on ca secret reload: %v", err)
-		}
-
-		ok := certPool.AppendCertsFromPEM(crtBytes)
-		if !ok {
-			return fmt.Errorf("failed to append PEM to cert pool")
-		}
+	err := readTLSDataFromKey(caPool, "tls.crt", secret)
+	if err != nil {
+		logrus.WithError(err).Warn("failed to read ca cert from tls.crt key, nothing was applied", err)
+	} else {
 		certsInPool++
 	}
 
-	crtBytes, ok = secret.Data["ca.crt"]
-	if crtBytes != nil && ok {
-		if err := ValidateNewCACert(crtBytes); err != nil {
-			return fmt.Errorf("validation failed on ca secret reload: %v", err)
-		}
-		ok := certPool.AppendCertsFromPEM(crtBytes)
-		if !ok {
-			return fmt.Errorf("failed to append PEM to cert pool")
-		}
+	err = readTLSDataFromKey(caPool, "ca.crt", secret)
+	if err != nil {
+		logrus.WithError(err).Warn("failed to read ca cert from ca.crt key, nothing was applied", err)
+	} else {
 		certsInPool++
 	}
 
@@ -389,8 +442,61 @@ func (t *TLSSecretProvider) caOnChange(secret *corev1.Secret) error {
 
 	t.Material.Store(&TLSMaterial{
 		Cert:   cert,
-		CAPool: certPool,
+		CAPool: caPool,
 	})
+
+	return nil
+}
+
+func (t *TLSSecretProvider) Reload(ctx context.Context) error {
+	currentCert, currentCAPool := t.Load()
+	newMaterial := &TLSMaterial{}
+
+	cert, err := TLSCertFromSecret(ctx, t.kubeClient, t.Namespace, t.ClientSecretName)
+	if err != nil {
+		return err
+	}
+	if err = ValidateNewClientCert(cert); err == nil {
+		newMaterial.Cert = cert
+	} else {
+		logrus.Warn("validation failed on reloading client cert, nothing was changed")
+		newMaterial.Cert = currentCert
+	}
+
+	caPool := x509.NewCertPool()
+	caSecret, err := t.kubeClient.CoreV1().Secrets(t.Namespace).Get(ctx, t.CASecretName, metav1.GetOptions{})
+	if err != nil {
+		logrus.WithError(err).Warn("failed to get ca secret")
+	}
+
+	certsInPool := 0
+	if caSecret != nil {
+		err := readTLSDataFromKey(caPool, "tls.crt", caSecret)
+		if err != nil {
+			logrus.WithError(err).Warn("failed to read ca cert from tls.crt key, nothing was applied", err)
+		} else {
+			certsInPool++
+		}
+
+		err = readTLSDataFromKey(caPool, "ca.crt", caSecret)
+		if err != nil {
+			logrus.WithError(err).Warn("failed to read ca cert from ca.crt key, nothing was applied", err)
+		} else {
+			certsInPool++
+		}
+	}
+
+	if certsInPool > 0 {
+		newMaterial.CAPool = caPool
+	} else {
+		logrus.Warn("no certs loaded on reload, keeping existing CA pool")
+		newMaterial.CAPool = currentCAPool
+	}
+
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
+
+	t.Material.Store(newMaterial)
 
 	return nil
 }
