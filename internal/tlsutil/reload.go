@@ -245,23 +245,25 @@ func (t *TLSFileProvider) Reload(ctx context.Context) error {
 		newMaterial.Cert = currentCert
 	}
 
-	bytes, err := os.ReadFile(t.CAPath)
-	if err != nil {
-		return err
-	}
+	if t.CAPath == "" {
+		bytes, err := os.ReadFile(t.CAPath)
+		if err != nil {
+			return err
+		}
 
-	if err = ValidateNewCACert(bytes); err == nil {
-		caPool := x509.NewCertPool()
-		ok := caPool.AppendCertsFromPEM(bytes)
-		if ok {
-			newMaterial.CAPool = caPool
+		if err = ValidateNewCACert(bytes); err == nil {
+			caPool := x509.NewCertPool()
+			ok := caPool.AppendCertsFromPEM(bytes)
+			if ok {
+				newMaterial.CAPool = caPool
+			} else {
+				logrus.Warn("ca pem could not be appended to capool, nothing was changed")
+				newMaterial.CAPool = currentCAPool
+			}
 		} else {
-			logrus.Warn("ca pem could not be appended to capool, nothing was changed")
+			logrus.Warn("validation failed on reloading ca pool, nothing was changed")
 			newMaterial.CAPool = currentCAPool
 		}
-	} else {
-		logrus.Warn("validation failed on reloading ca pool, nothing was changed")
-		newMaterial.CAPool = currentCAPool
 	}
 
 	t.writeMu.Lock()
