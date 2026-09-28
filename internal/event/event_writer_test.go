@@ -467,6 +467,7 @@ func TestDeduplicateEventMessageItems(t *testing.T) {
 			UID:       "uid-a",
 		},
 	}
+	testLog := logrus.NewEntry(logrus.New())
 
 	eventMsg := func(evType EventType, resourceVersion string) *eventMessage {
 		app.ResourceVersion = resourceVersion
@@ -475,14 +476,14 @@ func TestDeduplicateEventMessageItems(t *testing.T) {
 
 	t.Run("empty slice", func(t *testing.T) {
 		items := []*eventMessage{}
-		deduplicateEventMessageItems(&items)
+		deduplicateEventMessageItems(&items, testLog)
 		require.Empty(t, items)
 	})
 
 	t.Run("single spec update unchanged", func(t *testing.T) {
 		ev := eventMsg(SpecUpdate, "1")
 		items := []*eventMessage{ev}
-		deduplicateEventMessageItems(&items)
+		deduplicateEventMessageItems(&items, testLog)
 		require.Len(t, items, 1)
 		require.Equal(t, EventID(ev.event), EventID(items[0].event))
 	})
@@ -493,7 +494,7 @@ func TestDeduplicateEventMessageItems(t *testing.T) {
 			eventMsg(SpecUpdate, "2"),
 			eventMsg(SpecUpdate, "3"),
 		}
-		deduplicateEventMessageItems(&items)
+		deduplicateEventMessageItems(&items, testLog)
 		require.Len(t, items, 1)
 		require.Contains(t, EventID(items[0].event), "_3")
 	})
@@ -503,7 +504,7 @@ func TestDeduplicateEventMessageItems(t *testing.T) {
 			eventMsg(StatusUpdate, "10"),
 			eventMsg(StatusUpdate, "20"),
 		}
-		deduplicateEventMessageItems(&items)
+		deduplicateEventMessageItems(&items, testLog)
 		require.Len(t, items, 1)
 		require.Contains(t, EventID(items[0].event), "_20")
 	})
@@ -513,7 +514,7 @@ func TestDeduplicateEventMessageItems(t *testing.T) {
 			eventMsg(SpecUpdate, "1"),
 			eventMsg(StatusUpdate, "2"),
 		}
-		deduplicateEventMessageItems(&items)
+		deduplicateEventMessageItems(&items, testLog)
 		require.Len(t, items, 2)
 		require.Equal(t, SpecUpdate.String(), items[0].event.Type())
 		require.Equal(t, StatusUpdate.String(), items[1].event.Type())
@@ -525,7 +526,7 @@ func TestDeduplicateEventMessageItems(t *testing.T) {
 			eventMsg(Create, "2"),
 			eventMsg(SpecUpdate, "3"),
 		}
-		deduplicateEventMessageItems(&items)
+		deduplicateEventMessageItems(&items, testLog)
 		require.Len(t, items, 2)
 		require.Equal(t, Create.String(), items[0].event.Type())
 		require.Equal(t, SpecUpdate.String(), items[1].event.Type())
@@ -537,7 +538,7 @@ func TestDeduplicateEventMessageItems(t *testing.T) {
 			eventMsg(Create, "1"),
 			eventMsg(Create, "2"),
 		}
-		deduplicateEventMessageItems(&items)
+		deduplicateEventMessageItems(&items, testLog)
 		require.Len(t, items, 2)
 		require.Contains(t, EventID(items[0].event), "_1")
 		require.Contains(t, EventID(items[1].event), "_2")
@@ -550,7 +551,7 @@ func TestDeduplicateEventMessageItems(t *testing.T) {
 			eventMsg(StatusUpdate, "3"),
 			eventMsg(SpecUpdate, "4"),
 		}
-		deduplicateEventMessageItems(&items)
+		deduplicateEventMessageItems(&items, testLog)
 		require.Len(t, items, 2)
 		require.Equal(t, StatusUpdate.String(), items[0].event.Type())
 		require.Contains(t, EventID(items[0].event), "_3")

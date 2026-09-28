@@ -100,7 +100,10 @@ func (a *Agent) addAppUpdateToQueue(_ *v1alpha1.Application, new *v1alpha1.Appli
 	// because for managed-agent all changes should be done through principal
 	if reverted := a.appManager.RevertManagedAppChanges(a.context, new, a.sourceCache.Application); reverted {
 		logCtx.Debugf("Modifications done in application: %s are reverted", new.Name)
-		return
+
+		// We continue here, rather than return:
+		// - It's possible that the reason this addAppUpdateToQueue function was called was due to .status of Application being updated (which would be unaffected by revert of spec, above)
+		// - We thus need to send that .status event to ensure principal receives it
 	}
 
 	q := a.queues.SendQ(defaultQueueName)

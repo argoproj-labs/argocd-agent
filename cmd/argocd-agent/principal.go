@@ -29,12 +29,15 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/header"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/mtls"
+	"github.com/argoproj-labs/argocd-agent/internal/auth/spiffejwt"
 	"github.com/argoproj-labs/argocd-agent/internal/auth/userpass"
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/env"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
+	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
@@ -43,6 +46,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spiffe/go-spiffe/v2/bundle/jwtbundle"
 )
 
 // NewPrincipalRunCommand returns a new principal run command.
@@ -134,6 +138,14 @@ func NewPrincipalRunCommand() *cobra.Command {
 		haAdminPort                    int
 		haAllowedReplClients           []string
 		haReplicationInitialAckTimeout time.Duration
+		haAdminAuth                    string
+		haAdminTLSCert                 string
+		haAdminTLSKey                  string
+		haAdminCA                      string
+
+		// SPIRE integration
+		spireAgentSocket string
+		spireAuthMethod  string
 	)
 	command := &cobra.Command{
 		Use:   "principal",
@@ -216,8 +228,39 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			opts = append(opts, principal.WithNamespaces(allowedNamespaces...))
 
-			// Configure TLS or plaintext mode
-			if insecurePlaintext {
+			// Validate SPIRE flags
+			if spireAgentSocket != "" && spireAuthMethod == "" {
+				cmdutil.Fatal("--spire-auth-method is required when --spire-agent-socket is set (use 'jwt' or 'mtls')")
+			}
+			if spireAuthMethod != "" && spireAgentSocket == "" {
+				cmdutil.Fatal("--spire-auth-method requires --spire-agent-socket to be set")
+			}
+			if spireAuthMethod != "" && spireAuthMethod != "jwt" && spireAuthMethod != "mtls" {
+				cmdutil.Fatal("--spire-auth-method must be 'jwt' or 'mtls', got %q", spireAuthMethod)
+			}
+			if spireAgentSocket != "" && insecurePlaintext {
+				cmdutil.Fatal("--spire-agent-socket cannot be used with --insecure-plaintext; SPIRE provides TLS credentials")
+			}
+
+			// Configure TLS: SPIRE, plaintext, or static certs
+			var spireSource *spire.Source
+			if spireAgentSocket != "" {
+				logrus.Infof("Using SPIRE for TLS credentials (socket: %s)", spireAgentSocket)
+				spireSource, err = spire.New(ctx, spireAgentSocket)
+				if err != nil {
+					cmdutil.Fatal("Failed to connect to SPIRE Agent: %v", err)
+				}
+				defer spireSource.Close()
+				opts = append(opts, principal.WithSPIRESource(spireSource))
+				if authMethod == "" {
+					switch spireAuthMethod {
+					case "mtls":
+						authMethod = `mtls:uri:spiffe://[^/]+/(.+)`
+					case "jwt":
+						authMethod = `spiffe-jwt:spiffe://[^/]+/(.+)`
+					}
+				}
+			} else if insecurePlaintext {
 				logrus.Warn("INSECURE: Running in plaintext mode - ensure Istio or similar service mesh provides mTLS")
 				opts = append(opts, principal.WithInsecurePlaintext())
 			} else if allowTLSGenerate {
@@ -233,8 +276,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 				opts = append(opts, principal.WithTLSKeyPairFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
 			}
 
-			// Only load root CA if not in plaintext mode
-			if !insecurePlaintext {
+			// Only load root CA if not in plaintext or SPIRE mode
+			if !insecurePlaintext && spireAgentSocket == "" {
 				if rootCaPath != "" {
 					logrus.Infof("Loading root CA certificate from file %s", rootCaPath)
 					opts = append(opts, principal.WithTLSRootCaFromFile(rootCaPath))
@@ -308,7 +351,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			switch authMethod {
-			case "mtls":
+			case auth.MethodMTLS:
 				source, regexStr := parseMTLSConfig(authConfig)
 				var regex *regexp.Regexp
 				if regexStr != "" {
@@ -318,8 +361,19 @@ func NewPrincipalRunCommand() *cobra.Command {
 					}
 				}
 				mtlsauth := mtls.NewMTLSAuthentication(regex, source)
+
+				blockList := blocklist.New()
+				fingerprints, err := blocklist.LoadFromConfigMap(ctx, kubeConfig.Clientset, namespace)
+				if err != nil {
+					cmdutil.Fatal("Could not load TLS blocklist: %v", err)
+				}
+				blockList.Replace(fingerprints)
+				logrus.Infof("Loaded TLS blocklist with %d entries", blockList.Len())
+				mtlsauth.Blocklist = blockList
+				opts = append(opts, principal.WithBlocklist(blockList))
+
 				logrus.Infof("Using mTLS authentication (source: %s, pattern: %s)", source, regexStr)
-				err := authMethods.RegisterMethod("mtls", mtlsauth)
+				err = authMethods.RegisterMethod(auth.MethodMTLS, mtlsauth)
 				if err != nil {
 					cmdutil.Fatal("Could not register mtls auth method: %v", err)
 				}
@@ -328,17 +382,35 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if !requireClientCerts {
 					opts = append(opts, principal.WithRequireClientCerts(true))
 				}
-			case "userpass":
+			case auth.MethodUserPass:
 				userauth := userpass.NewUserPassAuthentication(authConfig)
 				err = userauth.LoadAuthDataFromFile(authConfig)
 				if err != nil {
 					cmdutil.Fatal("Could not load user database: %v", err)
 				}
-				err = authMethods.RegisterMethod("userpass", userauth)
+				err = authMethods.RegisterMethod(auth.MethodUserPass, userauth)
 				if err != nil {
 					cmdutil.Fatal("Could not register userpass auth method: %v", err)
 				}
-			case "header":
+			case auth.MethodSPIFFEJWT:
+				var regex *regexp.Regexp
+				if authConfig != "" {
+					regex, err = regexp.Compile(authConfig)
+					if err != nil {
+						cmdutil.Fatal("Error compiling spiffe-jwt agent id regex: %v", err)
+					}
+				}
+				var jwtBundleSource jwtbundle.Source
+				if spireSource != nil {
+					jwtBundleSource = spireSource.JWTSource()
+				}
+				jwtAuth := spiffejwt.NewSPIFFEJWTAuthentication(regex, config.SPIREJWTAudience, jwtBundleSource)
+				logrus.Infof("Using SPIFFE JWT authentication (pattern: %s, audience: %s)", authConfig, config.SPIREJWTAudience)
+				err = authMethods.RegisterMethod(auth.MethodSPIFFEJWT, jwtAuth)
+				if err != nil {
+					cmdutil.Fatal("Could not register spiffe-jwt auth method: %v", err)
+				}
+			case auth.MethodHeader:
 				// Generic header-based authentication extracts agent ID from any HTTP header
 				// Format: header:<header-name>:<extraction-regex>
 				headerName, extractionRegex, err := parseHeaderAuth(authConfig)
@@ -349,7 +421,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if err := headerAuth.Init(); err != nil {
 					cmdutil.Fatal("Error initializing header auth: %v", err)
 				}
-				err = authMethods.RegisterMethod("header", headerAuth)
+				err = authMethods.RegisterMethod(auth.MethodHeader, headerAuth)
 				if err != nil {
 					cmdutil.Fatal("Could not register header auth method: %v", err)
 				}
@@ -461,6 +533,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 				}
 				if haReplicationInitialAckTimeout > 0 {
 					haOpts = append(haOpts, ha.WithReplicationInitialAckTimeout(haReplicationInitialAckTimeout))
+				}
+				if haAdminAuth != "" {
+					haOpts = append(haOpts, ha.WithAdminAuth(haAdminAuth))
+				}
+				if haAdminTLSCert != "" || haAdminTLSKey != "" || haAdminCA != "" {
+					haOpts = append(haOpts, ha.WithAdminTLS(haAdminTLSCert, haAdminTLSKey, haAdminCA))
 				}
 				opts = append(opts, principal.WithHA(haOpts...))
 				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
@@ -670,6 +748,14 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LABEL_SELECTOR", nil, ""),
 		"Kubernetes label selector to restrict which resources the principal watches")
 
+	command.Flags().StringVar(&spireAgentSocket, "spire-agent-socket",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_SPIRE_AGENT_SOCKET", nil, ""),
+		"SPIRE Agent socket URI (e.g., unix:///run/spire/sockets/agent.sock). When set, TLS credentials are obtained from SPIRE instead of static certs")
+
+	command.Flags().StringVar(&spireAuthMethod, "spire-auth-method",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_SPIRE_AUTH_METHOD", nil, ""),
+		"SPIFFE authentication method (required when --spire-agent-socket is set): 'jwt' uses JWT-SVIDs (for federated SPIRE), 'mtls' uses X.509-SVIDs (for centralized SPIRE)")
+
 	command.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig file to use")
 	command.Flags().StringVar(&kubeContext, "kubecontext", "", "Override the default kube context")
 
@@ -701,6 +787,18 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&haReplicationInitialAckTimeout, "ha-replication-initial-ack-timeout",
 		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_INITIAL_ACK_TIMEOUT", nil, 0),
 		"How long the primary waits for the replica's initial ACK after snapshot fetch (default: 5m)")
+	command.Flags().StringVar(&haAdminAuth, "ha-admin-auth",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_AUTH", nil, ""),
+		"Authorization for HA admin endpoint, format: mtls:subject:<regex> or mtls:uri:<regex>")
+	command.Flags().StringVar(&haAdminTLSCert, "ha-admin-tls-cert",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_TLS_CERT", nil, ""),
+		"Path to TLS certificate for the HA admin endpoint (enables independent TLS, separate from main gRPC)")
+	command.Flags().StringVar(&haAdminTLSKey, "ha-admin-tls-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_TLS_KEY", nil, ""),
+		"Path to TLS private key for the HA admin endpoint")
+	command.Flags().StringVar(&haAdminCA, "ha-admin-ca",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_CA", nil, ""),
+		"Path to CA certificate for verifying HA admin client certs")
 
 	return command
 }
@@ -782,12 +880,14 @@ func parseAuth(authStr string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid auth string")
 	}
 	switch p[0] {
-	case "userpass":
-		return "userpass", p[1], nil
-	case "mtls":
-		return "mtls", p[1], nil
-	case "header":
-		return "header", p[1], nil
+	case auth.MethodUserPass:
+		return auth.MethodUserPass, p[1], nil
+	case auth.MethodMTLS:
+		return auth.MethodMTLS, p[1], nil
+	case auth.MethodHeader:
+		return auth.MethodHeader, p[1], nil
+	case auth.MethodSPIFFEJWT:
+		return auth.MethodSPIFFEJWT, p[1], nil
 	default:
 		return "", "", fmt.Errorf("unknown auth method: %s", p[0])
 	}
@@ -845,7 +945,7 @@ func parseMTLSConfig(config string) (mtls.IdentitySource, string) {
 //   - mtls auth requires TLS mode (needs client certificates)
 func validateAuthTLSPairing(authMethod string, insecurePlaintext bool) error {
 	switch authMethod {
-	case "header":
+	case auth.MethodHeader:
 		if !insecurePlaintext {
 			return fmt.Errorf("invalid configuration: header-based authentication requires --insecure-plaintext=true\n" +
 				"  Header authentication is designed for service mesh environments (e.g., Istio) where\n" +
@@ -854,13 +954,19 @@ func validateAuthTLSPairing(authMethod string, insecurePlaintext bool) error {
 				"  - Add --insecure-plaintext flag when using header auth behind a service mesh\n" +
 				"  - Use --auth=mtls:<regex> for direct TLS connections without a service mesh")
 		}
-	case "mtls":
+	case auth.MethodMTLS:
 		if insecurePlaintext {
 			return fmt.Errorf("invalid configuration: mtls authentication cannot be used with --insecure-plaintext\n" +
 				"  mTLS authentication requires TLS to be enabled to receive client certificates.\n" +
 				"  Either:\n" +
 				"  - Remove --insecure-plaintext flag to enable TLS for mTLS authentication\n" +
 				"  - Use --auth=header:<header>:<regex> for service mesh environments with plaintext mode")
+		}
+	case auth.MethodSPIFFEJWT:
+		if insecurePlaintext {
+			return fmt.Errorf("invalid configuration: spiffe-jwt authentication cannot be used with --insecure-plaintext\n" +
+				"  JWT-SVIDs sent over an unencrypted channel can be intercepted and replayed.\n" +
+				"  Remove --insecure-plaintext flag to enable TLS for SPIFFE JWT authentication")
 		}
 	}
 	return nil

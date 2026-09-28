@@ -12,7 +12,11 @@ These are the available commands for argocd-agentctl. Some commands have subcomm
 
 `config` - Operations related to config file for argocd-agentctl
 
+`ha` - Manage principal HA state (status, promote, demote)
+
 `jwt` - Inspect and manage JWT signing keys
+
+`blocklist` - Manage the TLS certificate blocklist
 
 `pki` - Inspect and manage the principal's PKI **(NOT FOR PRODUCTION USE)**
 
@@ -142,6 +146,56 @@ principal. JWT signing keys are used by the principal to sign authentication tok
 
 `inspect-key` - Inspect the JWT signing key
 
+## `blocklist` Command
+
+Manage the TLS certificate blocklist for the principal. Agents whose certificate
+fingerprints appear in the blocklist are immediately disconnected and prevented
+from reconnecting. See [TLS Certificate Blocklist](../operations/blocklist.md) for
+full details.
+
+**Subcommands:**
+
+`add <fingerprint>` - Add a certificate fingerprint to the blocklist
+
+`remove <fingerprint>` - Remove a certificate fingerprint from the blocklist
+
+`list` - List all fingerprints currently in the blocklist
+
+## `ha` Command
+
+Manage the principal's HA state. See [HA Failover Operations](../operations/ha-failover.md) for procedures.
+
+**Subcommands:**
+
+`status` - Show current HA state
+
+`promote` - Transition to ACTIVE
+
+  - `--force`: Skip safety check (replication stream still active)
+
+`demote` - Transition ACTIVE to REPLICATING
+
+  - `--force`: Skip confirmation prompt
+
+**Connection Flags (all subcommands):**
+
+| Flag | Description |
+|------|-------------|
+| `--address` | Direct address of the admin endpoint (`host:port`) |
+| `--tls-cert` | Path to client certificate file (required for mTLS) |
+| `--tls-key` | Path to client private key file (required for mTLS) |
+| `--tls-ca` | Path to CA certificate for verifying the server (required for mTLS) |
+
+**Example:**
+
+```bash
+argocd-agentctl ha status \
+  --address principal:8405 \
+  --tls-cert=admin.crt \
+  --tls-key=admin.key \
+  --tls-ca=ca.crt
+```
+
 ## `pki` Command **(NOT FOR PRODUCTION USE)**
 
 The pki command provides functions to inspect and manage a public key infrastructure
@@ -164,8 +218,11 @@ OR TO PROTECT ANY KIND OF DATA.
 
 `issue` - NON-PROD!! Issue TLS certificates signed by the PKI's CA
 
-  Subcommands: `principal`, `resource-proxy`, `agent <name>`
+  Subcommands: `principal`, `resource-proxy`, `agent <name>`, `ha-admin`
 
   - `--days`: Certificate validity in days (default: 180, ~6 months). For leaf certificates, must not exceed the signing CA's remaining validity.
+  - `ha-admin` specific flags:
+    - `--name`: Common name for the admin certificate (default: `ha-admin`)
+    - `--upsert`: Update an existing certificate if it exists
 
 `propagate` - NON-PROD!! Propagate the PKI to the agent

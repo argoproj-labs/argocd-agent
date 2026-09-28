@@ -91,6 +91,9 @@ This section is organized by task to help you find what you need:
 | [Reference: Principal](reference/principal.md) | Complete principal parameter reference |
 | [Reference: Agent](reference/agent.md) | Complete agent parameter reference |
 
+!!! tip "Mapping Mode Configuration"
+    argocd-agent supports two mapping modes: **namespace-based** (default) and **destination-based**. If you plan to use destination-based mapping, both principal and agent must have `--destination-based-mapping` enabled. See [Agent Mapping Modes](../concepts/agent-mapping.md) for a conceptual overview, or the [Principal](reference/principal.md#destination-based-mapping) and [Agent](reference/agent.md#destination-based-mapping) reference pages for configuration details.
+
 ## Quick Start
 
 ### Minimal Principal Configuration

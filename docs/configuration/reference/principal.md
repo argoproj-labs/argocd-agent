@@ -97,6 +97,30 @@ Labels to apply to auto-created namespaces.
 
 **Example:** `managed-by=argocd-agent,environment=production`
 
+## Agent Mapping
+
+### Destination-Based Mapping
+
+| | |
+|---|---|
+| **CLI Flag** | `--destination-based-mapping` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING` |
+| **ConfigMap Entry** | `principal.destination-based-mapping` |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Enable destination-based mapping mode. When enabled, the principal routes Applications to agents based on `spec.destination.name` instead of the Application's namespace. This allows applications from multiple namespaces to be synced to the same agent.
+
+Both the principal and agent must have this flag enabled for destination-based mapping to work correctly.
+
+See [Agent Mapping Modes](../../concepts/agent-mapping.md) for a detailed comparison of namespace-based and destination-based mapping.
+
+**Example:**
+
+```bash
+argocd-agent principal --destination-based-mapping
+```
+
 ## Resource Filtering
 
 ### Label Selector
@@ -335,6 +359,35 @@ Secret name of the resource proxy's CA certificate.
 | **Default** | `""` |
 
 Path to file containing the resource proxy's TLS CA data.
+
+## Self-Registration Configuration (Beta)
+
+!!! note "Beta feature"
+    Agent self-registration is currently in beta state and may have rough edges.
+
+### Enable Self Cluster Registration
+
+| | |
+|---|---|
+| **CLI Flag** | `--enable-self-cluster-registration` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Beta: Whether to allow agents with valid credentials to automatically create their own cluster secrets on first connection. Requires `--enable-resource-proxy` and `--self-registration-client-cert-secret` to be set. See the [self-registration user guide](../../user-guide/self-registration.md) for details.
+
+### Self-Registration Client Cert Secret
+
+| | |
+|---|---|
+| **CLI Flag** | `--self-registration-client-cert-secret` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+Beta: Name of a Kubernetes secret containing the shared TLS client certificate used in self-registered cluster secrets. The secret must contain `tls.crt`, `tls.key`, and `ca.crt` keys. Required when `--enable-self-cluster-registration` is `true`.
 
 ## JWT Configuration
 
@@ -599,6 +652,120 @@ Cannot be used together with `--redis-password`, or its respective environment v
 | **Default** | `""` |
 
 The password to connect to redis with. Prefer `--redis-creds-dir-path` for added security benefits.
+
+## High Availability Configuration
+
+### HA Enabled
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-enabled` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ENABLED` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Enable HA mode.
+
+### HA Preferred Role
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-preferred-role` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_PREFERRED_ROLE` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `primary` |
+| **Valid Values** | `primary`, `replica` |
+
+Role this principal prefers on startup.
+
+### HA Peer Address
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-peer-address` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_PEER_ADDRESS` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+Address of the peer principal's gRPC server (`host:port`). Required on the replica.
+
+### HA Allowed Replication Clients
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-allowed-replication-clients` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String slice (comma-separated) |
+| **Default** | `[]` |
+
+Explicit allowlist of peer identities permitted for replication.
+
+### HA Admin Port
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-port` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_PORT` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Integer |
+| **Default** | `8405` |
+
+Port for the HAAdmin gRPC server.
+
+### HA Admin Auth
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-auth` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_AUTH` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+| **Format** | `mtls:subject:<regex>` or `mtls:uri:<regex>` |
+
+Authorization policy for the HA admin endpoint. The regex is matched against the client certificate's subject DN or URI SANs. When TLS is active and this flag is not set, all admin calls are denied (secure by default).
+
+**Examples:**
+
+- `mtls:subject:CN=ha-admin`
+- `mtls:uri:spiffe://cluster\.local/ns/argocd/sa/ha-admin`
+
+### HA Admin TLS Certificate
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-tls-cert` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_TLS_CERT` |
+| **Type** | String (file path) |
+| **Default** | `""` |
+
+Path to the TLS server certificate for the HA admin endpoint. When set (along with `--ha-admin-tls-key` and `--ha-admin-ca`), the admin endpoint uses its own TLS configuration independent of the main gRPC server.
+
+### HA Admin TLS Key
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-tls-key` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_TLS_KEY` |
+| **Type** | String (file path) |
+| **Default** | `""` |
+
+Path to the TLS private key for the HA admin endpoint.
+
+### HA Admin CA
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-ca` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_CA` |
+| **Type** | String (file path) |
+| **Default** | `""` |
+
+Path to the CA certificate used to verify HA admin client certificates. All three admin TLS flags must be provided together.
 
 ## Kubernetes Configuration
 

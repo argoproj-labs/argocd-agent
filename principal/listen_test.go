@@ -165,7 +165,7 @@ func Test_Serve(t *testing.T) {
 
 	// Create and register authentication method
 	up := userPass(t, "hello", "world")
-	s.authMethods.RegisterMethod("userpass", up)
+	s.authMethods.RegisterMethod(auth.MethodUserPass, up)
 
 	conn := grpcDialer(t, s)
 	defer conn.Close()
@@ -174,7 +174,7 @@ func Test_Serve(t *testing.T) {
 	a, err := authC.Authenticate(
 		context.Background(),
 		&authapi.AuthRequest{
-			Method:      "userpass",
+			Method:      auth.MethodUserPass,
 			Credentials: creds("hello", "world"),
 			Mode:        types.AgentModeAutonomous.String(),
 			Version:     testVersion,

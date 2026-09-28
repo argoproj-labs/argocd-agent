@@ -28,8 +28,10 @@ import (
 	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/version"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/authapi"
@@ -37,6 +39,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	grpchttp1client "golang.stackrox.io/grpc-http1/client"
 	"google.golang.org/grpc"
@@ -110,6 +113,9 @@ type Remote struct {
 
 	// agentNamespace is the namespace where the agent is running.
 	agentNamespace string
+
+	// spireSource provides JWT-SVIDs for SPIFFE authentication
+	spireSource *spire.Source
 
 	// grpcClientMetrics holds gRPC client-side Prometheus metrics
 	grpcClientMetrics *grpcprom.ClientMetrics
@@ -189,6 +195,23 @@ func WithTLSClientCertFromSecret(kube kubernetes.Interface, namespace, name stri
 			return fmt.Errorf("unable to read TLS client from secret: %w", err)
 		}
 		r.tlsConfig.Certificates = append(r.tlsConfig.Certificates, c)
+		return nil
+	}
+}
+
+// WithSPIRE configures the Remote to use SPIRE for TLS and authentication.
+// When useMTLS is true, the agent presents its X.509-SVID as a client certificate
+// for mTLS authentication. When false, only server verification is configured
+// and JWT-SVIDs are used for authentication instead.
+func WithSPIRE(source *spire.Source, useMTLS bool) RemoteOption {
+	return func(r *Remote) error {
+		r.spireSource = source
+		spiffeTLS := tlsconfig.TLSClientConfig(source.X509Source(), tlsconfig.AuthorizeAny())
+		r.tlsConfig.InsecureSkipVerify = spiffeTLS.InsecureSkipVerify
+		r.tlsConfig.VerifyPeerCertificate = spiffeTLS.VerifyPeerCertificate
+		if useMTLS {
+			r.tlsConfig.GetClientCertificate = tlsconfig.GetClientCertificate(source.X509Source())
+		}
 		return nil
 	}
 }
@@ -651,9 +674,21 @@ func (r *Remote) Connect(ctx context.Context, forceReauth bool) error {
 			}
 			authC := authapi.NewAuthenticationClient(conn)
 
+			creds := r.creds
+			// When SPIRE is configured with JWT authentication,
+			// fetch the JWT-SVID and include it in the credentials.
+			if r.spireSource != nil && r.authMethod == auth.MethodSPIFFEJWT {
+				jwtToken, jwtErr := r.spireSource.FetchJWTSVID(ctx, config.SPIREJWTAudience)
+				if jwtErr != nil {
+					logrus.Errorf("Failed to fetch JWT-SVID: %v (retrying in %v)", jwtErr, cBackoff.Step())
+					return jwtErr
+				}
+				creds = auth.Credentials{"token": jwtToken}
+			}
+
 			authReq := &authapi.AuthRequest{
 				Method:         r.authMethod,
-				Credentials:    r.creds,
+				Credentials:    creds,
 				Mode:           r.clientMode.String(),
 				Version:        r.agentVersion,
 				AgentNamespace: r.agentNamespace,

@@ -9,6 +9,7 @@ argocd-agent supports three authentication methods:
 | Method | Security Level | Use Case | Status |
 |--------|---------------|----------|--------|
 | **mTLS** | High | Direct agent-to-principal connections | Recommended |
+| **mTLS + SPIRE** | High | Multi-cluster with automated cert management | Recommended for SPIRE environments |
 | **Header-based** | High | Service mesh deployments (Istio, Linkerd) | Recommended for mesh |
 | **UserPass** | Low | Development only | **Deprecated** |
 
@@ -229,8 +230,73 @@ argocd-agent agent --creds="header:"
 |-----------------|--------------|-------|-------|
 | `--insecure-plaintext=true` + `--auth=header:...` | `--creds=header:` | Yes | Service mesh handles mTLS |
 | `--insecure-plaintext=false` + `--auth=mtls:...` | `--creds=mtls:` | Yes | Direct mTLS to principal |
+| `--spire-agent-socket=...` + `--spire-auth-method=jwt` | `--spire-agent-socket=...` + `--spire-auth-method=jwt` | Yes | SPIRE JWT-SVID authentication |
+| `--spire-agent-socket=...` + `--spire-auth-method=mtls` | `--spire-agent-socket=...` + `--spire-auth-method=mtls` | Yes | SPIRE X.509-SVID mTLS authentication |
+| `--spire-agent-socket=...` (no `--spire-auth-method`) | Any | **No** | `--spire-auth-method` is required when SPIRE is enabled |
 | `--insecure-plaintext=true` + `--auth=mtls:...` | Any | **No** | No client certs in plaintext mode |
 | `--insecure-plaintext=false` + `--auth=header:...` | Any | **No** | Headers not injected without mesh |
+
+## Authentication with SPIRE
+
+When SPIRE is enabled (`--spire-agent-socket`), TLS is handled by SPIRE-issued X.509 SVIDs. The `--spire-auth-method` flag controls how agents authenticate to the principal. Two methods are supported:
+
+### JWT mode (`--spire-auth-method jwt`)
+
+Agent fetches a JWT-SVID from its local SPIRE Agent and sends it as a bearer token. Principal validates the JWT using its SPIRE JWT bundle source. Use this when each cluster has its own SPIRE Server and trust domain (federated setup).
+
+**Principal Configuration:**
+
+```yaml
+# ConfigMap (argocd-agent-params)
+principal.spire.socket-path: "unix:///run/spire/agent-sockets/spire-agent.sock"
+principal.spire.auth-method: "jwt"
+# Auth defaults to spiffe-jwt:spiffe://[^/]+/(.+)
+```
+
+**Agent Configuration:**
+
+```yaml
+# ConfigMap (argocd-agent-params)
+agent.spire.socket-path: "unix:///run/spire/agent-sockets/spire-agent.sock"
+agent.spire.auth-method: "jwt"
+# Creds defaults to spiffe-jwt:
+```
+
+### mTLS mode (`--spire-auth-method mtls`)
+
+Agent presents its X.509-SVID as a TLS client certificate. Principal verifies the cert against the SPIRE trust bundle and extracts identity from the SPIFFE URI in the certificate SAN. Use this when all clusters share a single SPIRE Server (centralized setup), or when your SPIFFE provider doesn't support JWT-SVIDs.
+
+**Principal Configuration:**
+
+```yaml
+# ConfigMap (argocd-agent-params)
+principal.spire.socket-path: "unix:///run/spire/agent-sockets/spire-agent.sock"
+principal.spire.auth-method: "mtls"
+# Auth defaults to mtls:uri:spiffe://[^/]+/(.+)
+```
+
+**Agent Configuration:**
+
+```yaml
+# ConfigMap (argocd-agent-params)
+agent.spire.socket-path: "unix:///run/spire/agent-sockets/spire-agent.sock"
+agent.spire.auth-method: "mtls"
+# Creds defaults to mtls:
+```
+
+### Self-registration (required with SPIRE)
+
+With static certificates, agent registration happens when you run `argocd-agentctl pki issue agent <name>` — this creates the agent's cluster secret on the principal. With SPIRE, there are no per-agent certificate steps, so **self-registration must be enabled** on the principal. When an agent connects for the first time, the principal automatically creates the cluster secret.
+
+```yaml
+# Environment variables on the principal
+ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION: "true"
+ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET: "argocd-agent-shared-client-tls"
+```
+
+The shared client certificate must be created beforehand using `argocd-agentctl pki issue shared-client`. See [TLS & Certificates](tls-certificates.md#using-spire-automated-certificate-management) for the complete setup steps.
+
+No static certificate secrets are needed on the agent cluster. SPIRE provides all credentials automatically.
 
 ## UserPass Authentication (Deprecated)
 

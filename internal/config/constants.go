@@ -24,9 +24,25 @@ const SecretNameProxyTLS = "argocd-agent-resource-proxy-tls"
 // client certificate + key for an agent.
 const SecretNameAgentClientCert = "argocd-agent-client-tls"
 
+// SecretNameSharedClientCert is the name of the secret containing the shared
+// TLS client certificate for the agent.
+const SecretNameSharedClientCert = "argocd-agent-shared-client-tls"
+
+// SecretNameHAAdminTLS is the name of the secret containing the TLS
+// client certificate + key for an HA admin operator.
+const SecretNameHAAdminTLS = "argocd-agent-ha-admin-tls"
+
 // SecretNameJWT is the name of the secret containing the JWT signing key
 // for the principal.
 const SecretNameJWT = "argocd-agent-jwt"
+
+// ConfigMapNameTLSBlocklist is the name of the ConfigMap containing the
+// TLS certificate blocklist for the principal.
+const ConfigMapNameTLSBlocklist = "argocd-agent-tls-blocklist"
+
+// SPIREJWTAudience is the expected audience in SPIFFE JWT-SVIDs from agents
+// to the principal.
+const SPIREJWTAudience = "argocd-agent-principal"
 
 // SkipSyncLabel is the label used to skip sync for an application.
 const SkipSyncLabel = "argocd-agent.argoproj-labs.io/ignore-sync"

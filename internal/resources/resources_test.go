@@ -202,3 +202,29 @@ func Test_AgentResources(t *testing.T) {
 	assert.Empty(t, res.Checksum("first"))
 	assert.Empty(t, res.Checksum("second"))
 }
+
+func Test_AgentResources_RemoveAgent(t *testing.T) {
+	res := NewAgentResources()
+
+	res.Add("agent1", ResourceKey{Name: "app1", Namespace: "ns1"})
+	res.Add("agent1", ResourceKey{Name: "app2", Namespace: "ns1"})
+	res.Add("agent2", ResourceKey{Name: "app3", Namespace: "ns2"})
+
+	assert.Equal(t, 2, res.Len())
+
+	res.RemoveAgent("agent1")
+
+	assert.Equal(t, 1, res.Len())
+	assert.Empty(t, res.GetAllResources("agent1"))
+	assert.Len(t, res.GetAllResources("agent2"), 1)
+}
+
+func Test_AgentResources_RemoveAgent_NonExistent(t *testing.T) {
+	res := NewAgentResources()
+	res.Add("agent1", ResourceKey{Name: "app1", Namespace: "ns1"})
+
+	assert.NotPanics(t, func() {
+		res.RemoveAgent("nonexistent")
+	})
+	assert.Equal(t, 1, res.Len())
+}

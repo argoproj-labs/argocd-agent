@@ -70,11 +70,11 @@ func (s *ApplicationTestSuite) Test_ApplicationManagementAPI() {
 	requires.Eventually(func() bool {
 		createdApp, createErr = s.argoClient.CreateApplication(app)
 		if createErr != nil && strings.Contains(createErr.Error(), "project does not exist") {
-			s.T().Logf("Project does not exist in informer cache, retrying...")
+			s.T().Logf("Project does not exist in informer cache, retrying... (error: %v)", createErr)
 			return false
 		}
 		return true
-	}, 60*time.Second, 2*time.Second)
+	}, 120*time.Second, 2*time.Second)
 	requires.NoError(createErr, "failed to create application")
 	asserts.Equal(appName, createdApp.Name)
 

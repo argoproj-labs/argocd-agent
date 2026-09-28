@@ -10,9 +10,9 @@ Before you begin, ensure you have the following:
 - Kubernetes Cluster: Access to a Kubernetes cluster where you want to deploy the agent.
 
 ## Helm Chart Installation
-Use the following command to install the argocd-agent-agent-helm chart.
+Use the following command to install the argocd-agent-agent chart.
 
-`helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0`
+`helm install argocd-agent oci://ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent --version 0.2.7`
 
 > **Resource naming:** every Kubernetes object that this chart creates is derived from your Helm release name. For example, installing with `helm install agent-prod ...` generates resource name `agent-prod-agent-helm`. Pick a release name that matches how you want the objects to appear in the cluster.
 
@@ -26,13 +26,13 @@ Deploying to a Custom Namespace:
 The chart can be deployed into a specific Kubernetes namespace using `--namespace` flag, and `--create-namespace` to create a namespace if not present. Or, it can also be set using `--set namespaceOverride=agent-namespce`.
 
 ```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 --namespace=argocd --create-namespace
+helm install argocd-agent oci://ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent --version 0.2.7 --namespace=argocd --create-namespace
 ```
 
 OR,
 
 ```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 --set namespaceOverride=argocd
+helm install argocd-agent oci://ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent --version 0.2.7 --set namespaceOverride=argocd
 ```
 
 
@@ -184,7 +184,7 @@ You can override any of the default values in values.yaml during installation:
 
 Using --set for individual values:
 ```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 \
+helm install argocd-agent oci://ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent --version 0.2.7 \
   --set logLevel="debug" \
   --set agentMode="managed" \
   --set server="https://my-argocd-server.com"
@@ -201,7 +201,7 @@ server: "https://argocd.production.com"
 Then, install with:
 
 ```
-helm install argocd-agent ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent-helm --version 0.1.0 \
+helm install argocd-agent oci://ghcr.io/argoproj-labs/argocd-agent/argocd-agent-agent --version 0.2.7 \
   -f my-custom-values.yaml
 ```
 Values provided via -f take precedence over the chart's default values.yaml. You can use multiple -f flags, with the rightmost file taking highest precedence.

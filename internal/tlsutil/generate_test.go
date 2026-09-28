@@ -35,6 +35,7 @@ func Test_GenerateCaCertificate(t *testing.T) {
 	require.NotNil(t, cert.Leaf)
 	require.Equal(t, "test", cert.Leaf.Subject.CommonName)
 	require.True(t, cert.Leaf.IsCA)
+	assert.NotZero(t, cert.Leaf.KeyUsage&x509.KeyUsageCertSign)
 
 	t.Run("Generate client certificate", func(t *testing.T) {
 		certSubj := "abcdefg"
@@ -43,6 +44,8 @@ func Test_GenerateCaCertificate(t *testing.T) {
 		ccert, err := tls.X509KeyPair([]byte(certData), []byte(keyData))
 		require.NoError(t, err)
 		require.NotNil(t, ccert)
+		assert.False(t, ccert.Leaf.IsCA)
+		assert.Zero(t, ccert.Leaf.KeyUsage&x509.KeyUsageCertSign)
 		assert.Contains(t, ccert.Leaf.ExtKeyUsage, x509.ExtKeyUsageClientAuth)
 		assert.NotContains(t, ccert.Leaf.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
 		assert.Equal(t, certSubj, ccert.Leaf.Subject.CommonName)
@@ -56,6 +59,8 @@ func Test_GenerateCaCertificate(t *testing.T) {
 		ccert, err := tls.X509KeyPair([]byte(certData), []byte(keyData))
 		require.NoError(t, err)
 		require.NotNil(t, ccert)
+		assert.False(t, ccert.Leaf.IsCA)
+		assert.Zero(t, ccert.Leaf.KeyUsage&x509.KeyUsageCertSign)
 		assert.Contains(t, ccert.Leaf.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
 		assert.NotContains(t, ccert.Leaf.ExtKeyUsage, x509.ExtKeyUsageClientAuth)
 		assert.Equal(t, certSubj, ccert.Leaf.Subject.CommonName)

@@ -37,6 +37,7 @@ import (
 	kubegpgkey "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/gpgkey"
 	kubenamespace "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/namespace"
 	kuberepository "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/repository"
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
@@ -92,6 +93,7 @@ type Server struct {
 	server      *http.Server
 	grpcServer  *grpc.Server
 	authMethods *auth.Methods
+	blocklist   *blocklist.Blocklist
 	// queues contains events that are EITHER queued to be sent to the agent ('outbox'), OR that have been received by the agent and are waiting to be processed ('inbox').
 	// Server uses clientID/namespace as a key, to refer to each specific agent's queue
 	queues *queue.SendRecvQueues
@@ -491,6 +493,28 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	gpgKeyBackend := kubegpgkey.NewKubernetesBackend(kubeClient.Clientset, namespace, gpgKeyInformer)
 	s.gpgKeyManager = gpgkey.NewManager(gpgKeyBackend, namespace)
 
+	if s.blocklist != nil {
+		fieldSelector := fmt.Sprintf("metadata.name=%s", config.ConfigMapNameTLSBlocklist)
+		blocklistInformerOpts := []informer.InformerOption[*corev1.ConfigMap]{
+			informer.WithListHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
+				opts.FieldSelector = fieldSelector
+				return kubeClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, opts)
+			}),
+			informer.WithWatchHandler[*corev1.ConfigMap](func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+				opts.FieldSelector = fieldSelector
+				return kubeClient.Clientset.CoreV1().ConfigMaps(namespace).Watch(ctx, opts)
+			}),
+			informer.WithAddHandler[*corev1.ConfigMap](s.addBlocklistCallback),
+			informer.WithUpdateHandler[*corev1.ConfigMap](s.updateBlocklistCallback),
+			informer.WithDeleteHandler[*corev1.ConfigMap](s.deleteBlocklistCallback),
+			informer.WithGroupResource[*corev1.ConfigMap]("", "configmaps"),
+		}
+		blocklistInformer, err := informer.NewInformer(ctx, blocklistInformerOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("could not create blocklist informer: %w", err)
+		}
+		s.blocklist.Informer = blocklistInformer
+	}
 	s.clientMap = map[string]string{
 		`{"clientID":"argocd","mode":"autonomous"}`: "argocd",
 	}
@@ -606,6 +630,9 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	if err != nil {
 		return nil, err
 	}
+
+	s.clusterMgr.SetOnClusterDeleted(s.cleanupAgentState)
+	s.clusterMgr.SetOnClusterAdded(s.resyncAppsForAgent)
 
 	s.resources = resources.NewAgentResources()
 	s.logStream = logstream.NewServer()
@@ -727,13 +754,22 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}()
 	}
 
+	syncTimeout := s.options.informerSyncTimeout
+	if syncTimeout == 0 {
+		syncTimeout = waitForSyncedDuration
+	}
+
+	s.events = event.NewEventSource(s.options.serverName)
+
+	if err := s.clusterMgr.Start(); err != nil {
+		return fmt.Errorf("unable to start cluster manager with informer sync timeout %v: %w", syncTimeout, err)
+	}
+
 	go s.RunHandlersOnConnect(s.ctx)
 
 	if err = s.StartEventProcessor(s.ctx); err != nil {
 		return err
 	}
-
-	s.events = event.NewEventSource(s.options.serverName)
 
 	if s.options.labelSelector != "" {
 		log().Infof("Principal informers are using the label selector: %s", s.options.labelSelector)
@@ -801,11 +837,6 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		}
 	}()
 
-	syncTimeout := s.options.informerSyncTimeout
-	if syncTimeout == 0 {
-		syncTimeout = waitForSyncedDuration
-	}
-
 	if err := s.appManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Application informer: %w", err)
 	}
@@ -844,9 +875,6 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		log().Infof("Resource proxy is disabled")
 	}
 
-	if err := s.clusterMgr.Start(); err != nil {
-		return fmt.Errorf("unable to start cluster manager with informer sync timeout %v: %w", syncTimeout, err)
-	}
 	if err := s.namespaceManager.EnsureSynced(syncTimeout); err != nil {
 		return fmt.Errorf("unable to sync Namespace informer: %w", err)
 	}
@@ -872,6 +900,17 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		if err := s.serveGRPC(ctx, s.metrics, s.grpcServerMetrics, errch); err != nil {
 			return err
 		}
+	}
+
+	// Start the blocklist informer
+	if s.blocklist != nil && s.blocklist.Informer != nil {
+		go func() {
+			if err := s.blocklist.Informer.Start(s.ctx); err != nil {
+				logrus.Fatalf("Blocklist informer has exited non-successfully: %v", err)
+			} else {
+				log().Info("Blocklist informer has exited")
+			}
+		}()
 	}
 
 	return nil
@@ -904,6 +943,13 @@ func (rs *resyncStatus) resynced(agentName string) {
 	defer rs.mu.Unlock()
 
 	rs.resync[agentName] = true
+}
+
+func (rs *resyncStatus) remove(agentName string) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+
+	delete(rs.resync, agentName)
 }
 
 // RunHandlersOnConnect runs the registered handlers when an agent connects to the principal
@@ -952,7 +998,7 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 			// When the agent is down, the informer could've dropped events since it doesn't know anything about the agent.
 			// So, we send the current state of AppProjects/Repositories to the agent after it reconnects.
 			logCtx.Trace("Sending current state of AppProjects and Repositories to the agent")
-			if err := s.sendCurrentStateToAgent(agent.Name()); err != nil {
+			if err := s.sendCurrentStateToAgent(agent); err != nil {
 				return fmt.Errorf("failed to send current state to agent: %w", err)
 			}
 		}
@@ -995,11 +1041,11 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 		sendQ.Add(ev)
 		logCtx.Trace("Sent a request for SyncedResourceList")
 	} else {
-		// When the principal restarts, the infomer might start processing the events before the agent is connected.
+		// When the principal restarts, the informer might start processing the events before the agent is connected.
 		// This may lead to principal dropping those events since it doesn't know anything about the agent yet.
 		// So, we send the current state of AppProjects and Repositories to the agent. This ensures that the agent is in sync with the principal.
 		logCtx.Trace("Sending current state of AppProjects and Repositories to the agent")
-		if err := s.sendCurrentStateToAgent(agent.Name()); err != nil {
+		if err := s.sendCurrentStateToAgent(agent); err != nil {
 			return fmt.Errorf("failed to send current state to agent: %w", err)
 		}
 
@@ -1019,15 +1065,22 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 	return nil
 }
 
-func (s *Server) sendCurrentStateToAgent(agent string) error {
+func (s *Server) sendCurrentStateToAgent(agentParam types.Agent) error {
+
+	if agentParam.Mode() == types.AgentModeAutonomous.String() {
+		return fmt.Errorf("sending current state to autonomous agent is not supported")
+	}
+
+	agentName := agentParam.Name()
+
 	ctx, span := tracing.Tracer().Start(s.ctx, "sendCurrentStateToAgent", trace.WithAttributes(
-		tracing.AttrAgentName.String(agent),
+		tracing.AttrAgentName.String(agentName),
 		tracing.AttrComponentType.String("principal"),
 		tracing.AttrEventType.String(event.SpecUpdate.String()),
 	))
 	defer span.End()
 
-	sendQ := s.queues.SendQ(agent)
+	sendQ := s.queues.SendQ(agentName)
 	// Send all the AppProjects to the agent
 	appProjects, err := s.projectManager.List(s.ctx, backend.AppProjectSelector{Namespace: s.namespace})
 	if err != nil {
@@ -1042,7 +1095,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			}
 		}
 
-		if !appproject.DoesAgentMatchWithProject(agent, appProject, s.destinationBasedMapping) {
+		if !appproject.DoesAgentMatchWithProject(agentName, appProject, s.destinationBasedMapping) {
 			continue
 		}
 
@@ -1051,7 +1104,7 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(appProject, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(appProject, agentName, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		tracing.PopulateSpanFromObject(span, &appProject)
 		tracing.InjectTraceContext(ctx, ev)
@@ -1088,12 +1141,12 @@ func (s *Server) sendCurrentStateToAgent(agent string) error {
 				continue
 			}
 
-			if !appproject.DoesAgentMatchWithProject(agent, project, s.destinationBasedMapping) {
+			if !appproject.DoesAgentMatchWithProject(agentName, project, s.destinationBasedMapping) {
 				continue
 			}
 
 			s.projectToRepos.Add(projectName, repository.Name)
-			s.repoToAgents.Add(repository.Name, agent)
+			s.repoToAgents.Add(repository.Name, agentName)
 
 			ev := s.events.RepositoryEvent(event.SpecUpdate, &repository)
 			tracing.PopulateSpanFromObject(span, &repository)
@@ -1192,6 +1245,29 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	if s.options.insecurePlaintext {
 		log().Warn("TLS disabled - running in plaintext mode for service mesh integration")
 		return nil, nil
+	}
+
+	// When SPIRE is configured, use SPIRE SVID instead of TLS certificate and key
+	if s.options.spireSource != nil {
+		log().Infof("Using SPIRE for server TLS credentials")
+		trustBundle, err := s.options.spireSource.TrustBundle()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get SPIRE trust bundle for client verification: %w", err)
+		}
+		clientAuth := tls.VerifyClientCertIfGiven
+		if s.options.requireClientCerts {
+			log().Infof("SPIRE mTLS: requiring client certificates verified against SPIRE trust bundle")
+			clientAuth = tls.RequireAndVerifyClientCert
+		}
+		tlsConfig := &tls.Config{
+			GetCertificate: s.options.spireSource.GetCertificate(),
+			ClientAuth:     clientAuth,
+			ClientCAs:      trustBundle,
+			MinVersion:     s.options.tlsMinVersion,
+			MaxVersion:     s.options.tlsMaxVersion,
+			CipherSuites:   s.options.tlsCiphers,
+		}
+		return tlsConfig, nil
 	}
 
 	var cert tls.Certificate
@@ -1434,6 +1510,97 @@ func (s *Server) GetHAStatus() *HAStatus {
 		return nil
 	}
 	return s.ha.GetHAStatus()
+}
+
+// cleanupAgentState removes all principal-side state for an agent whose cluster
+// secret has been deleted.
+func (s *Server) cleanupAgentState(agentName string) {
+	logCtx := log().WithField("agent", agentName).WithField("component", "AgentCleanup")
+	logCtx.Info("Cleaning up agent state after cluster secret deletion")
+
+	// Disconnect the agent if it is still streaming
+	if s.eventStreamSrv != nil {
+		if s.eventStreamSrv.DisconnectAgent(agentName) {
+			logCtx.Info("Disconnected active agent stream")
+		}
+	}
+
+	// Delete the queue pair
+	if s.queues.HasQueuePair(agentName) {
+		if err := s.queues.Delete(agentName, true); err != nil {
+			logCtx.WithError(err).Error("Failed to delete queue pair")
+		}
+	}
+
+	// Remove event writer
+	s.eventWriters.Remove(agentName)
+
+	// Remove from namespaceMap and agentNamespaces
+	s.clientLock.Lock()
+	delete(s.namespaceMap, agentName)
+	delete(s.agentNamespaces, agentName)
+	s.clientLock.Unlock()
+
+	// Remove tracked resources
+	s.resources.RemoveAgent(agentName)
+
+	// Remove resync status
+	s.resyncStatus.remove(agentName)
+
+	// Clean up routing maps
+	// For destination-based mapping: remove all appToAgent entries pointing to this agent
+	if s.destinationBasedMapping && s.appToAgent != nil {
+		s.appToAgent.DeleteByValue(agentName, func(a, b string) bool { return a == b })
+	}
+	// Remove agent from repo-to-agents mapping (agent could be a value in any repo key)
+	s.repoToAgents.DeleteFromAll(agentName)
+
+	// Delete per-agent metric series to stop cardinality growth
+	if s.metrics != nil {
+		agentLabel := prometheus.Labels{"agent_name": agentName}
+		s.metrics.AgentConnectionCount.DeletePartialMatch(agentLabel)
+		s.metrics.ResourceProxyRequests.DeletePartialMatch(agentLabel)
+		s.metrics.ResourceProxyErrors.DeletePartialMatch(agentLabel)
+		s.metrics.RedisProxyRequests.DeletePartialMatch(agentLabel)
+		s.metrics.RedisProxyErrors.DeletePartialMatch(agentLabel)
+		s.metrics.EventProcessingTime.DeletePartialMatch(agentLabel)
+		s.metrics.EventWriterSendErrors.DeletePartialMatch(agentLabel)
+		s.metrics.EventWriterEventsDiscarded.DeletePartialMatch(agentLabel)
+	}
+
+	logCtx.Info("Agent state cleanup complete")
+}
+
+// resyncAppsForAgent reconciles all the applications for a given agent
+// This is called when a cluster secret is created and all applications for the agent are resynced.
+func (s *Server) resyncAppsForAgent(agentName string) {
+	logCtx := log().WithField("agent", agentName).WithField("component", "AgentResync")
+	logCtx.Info("Resyncing applications after cluster secret creation")
+
+	var selector backend.ApplicationSelector
+	if s.destinationBasedMapping {
+		// In destination-based mapping, apps can live in any namespace.
+		selector = backend.ApplicationSelector{}
+	} else {
+		// In namespace-based mapping, the agent name is the namespace.
+		selector = backend.ApplicationSelector{Namespaces: []string{agentName}}
+	}
+
+	appList, err := s.appManager.List(s.ctx, selector)
+	if err != nil {
+		logCtx.WithError(err).Error("Failed to list applications for resync")
+		return
+	}
+
+	count := 0
+	for _, app := range appList {
+		if s.getAgentNameForApp(&app) == agentName {
+			s.newAppCallback(&app)
+			count++
+		}
+	}
+
+	logCtx.Infof("Resynced %d applications for agent", count)
 }
 
 func (s *Server) isAgentConnected(agentName string) bool {

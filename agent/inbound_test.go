@@ -379,6 +379,80 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		require.False(t, a.appManager.IsManaged(incomingApp.QualifiedName()))
 	})
 
+	t.Run("Delete: App already deleted on the agent must not be recreated", func(t *testing.T) {
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		// The app was deleted on the agent at the same time it was deleted on
+		// the principal, so it is gone from the cluster before the Delete event
+		// from the principal is processed.
+		getMock.Unset()
+		notFoundError := kerrors.NewNotFound(schema.GroupResource{
+			Group: "argoproj.io", Resource: "application",
+		}, incomingApp.Name)
+		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
+
+		a.sourceCache.Application.Set(incomingApp.UID, incomingApp.Spec)
+
+		ev := event.New(evs.ApplicationEvent(event.Delete, incomingApp), targets.Application)
+		err := a.processIncomingApplication(ev)
+		require.NoError(t, err)
+
+		// Identity check and lookup of the existing app, but no Delete or Create
+		expectedCalls := []string{"Get", "Get"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// The stale source cache entry must be dropped and the deletion marked
+		// as expected, so the agent does not recreate the app.
+		require.False(t, a.sourceCache.Application.Contains(incomingApp.UID))
+		require.True(t, a.deletions.RemoveExpected(incomingApp.UID))
+		require.False(t, a.appManager.IsManaged(incomingApp.QualifiedName()))
+	})
+
+	t.Run("Create: Old app gone before delete on UID mismatch must not mark the new UID as expected", func(t *testing.T) {
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+
+		// Start from a clean deletion tracker; earlier sub-tests leave entries.
+		a.deletions.Unmark(incomingApp.UID)
+		a.deletions.Unmark(ktypes.UID("old_uid"))
+
+		// The identity check still sees the old app, but it disappears before
+		// deleteApplication looks it up again.
+		getMock.Unset()
+		notFoundError := kerrors.NewNotFound(schema.GroupResource{
+			Group: "argoproj.io", Resource: "application",
+		}, incomingApp.Name)
+		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil).Once()
+		be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError).Once()
+
+		ev := event.New(evs.ApplicationEvent(event.Create, incomingApp), targets.Application)
+		err := a.processIncomingApplication(ev)
+		require.Error(t, err)
+
+		// The NotFound error must be surfaced, without deleting or creating.
+		expectedCalls := []string{"Get", "Get"}
+		gotCalls := []string{}
+		for _, call := range be.Calls {
+			gotCalls = append(gotCalls, call.Method)
+		}
+		require.Equal(t, expectedCalls, gotCalls)
+
+		// The source UID of the incoming app must not be marked as an expected
+		// deletion, otherwise a later user-initiated deletion of the recreated
+		// app would not be reverted.
+		require.False(t, a.deletions.RemoveExpected(incomingApp.UID))
+		require.False(t, a.deletions.RemoveExpected(ktypes.UID("old_uid")))
+	})
+
 	t.Run("SpecUpdate: upsert policy skips delete and updates in-place", func(t *testing.T) {
 		configureManager(t, manager.ManagerModeManaged)
 		defer unsetMocks(t)
@@ -667,13 +741,14 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.NotNil(t, a)
 
 		// Get is used to retrieve the oldAppProject and compare its UID annotation.
-		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldAppProject, nil)
+		// DeepCopy so updateFn mutations don't pollute later subtests.
+		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldAppProject.DeepCopy(), nil)
 
 		// Create is used to create the latest version of the appProject on the agent.
 		createMock = be.On("Create", mock.Anything, mock.Anything).Return(createdAppProject, nil)
 
 		supportsPatchMock = be.On("SupportsPatch").Return(false)
-		updateMock = be.On("Update", mock.Anything, mock.Anything).Return(oldAppProject, nil)
+		updateMock = be.On("Update", mock.Anything, mock.Anything).Return(oldAppProject.DeepCopy(), nil)
 
 		// Delete is used to delete the oldAppProject from the agent.
 		deleteMock = be.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -698,20 +773,18 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
-		// Check if the API calls were made in the same order:
-		// compare the UID, delete old appProject, and create a new appProject.
-		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
+		// compare UID, re-get for mismatch resolution, delete old, create new
+		expectedCalls := []string{"Get", "Get", "Get", "Delete", "Create"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new app has the updated source UID annotation.
-		appInterface := be.Calls[3].ReturnArguments[0]
-		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
+		// Check the AppProject argument passed to Create has the correct source UID.
+		createdArg, ok := be.Calls[4].Arguments.Get(1).(*v1alpha1.AppProject)
 		require.True(t, ok)
-		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingAppProject.UID), createdArg.Annotations[manager.SourceUIDAnnotation])
 	})
 
 	t.Run("Create: Old appProject with the same UID must be updated", func(t *testing.T) {
@@ -739,10 +812,10 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		appInterface := be.Calls[3].ReturnArguments[0]
-		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
+		// Assert against the object passed to Update (after updateFn applied labels).
+		updatedArg, ok := be.Calls[3].Arguments.Get(1).(*v1alpha1.AppProject)
 		require.True(t, ok)
-		require.Equal(t, newAppProject.Labels, latestAppProject.Labels)
+		require.Equal(t, newAppProject.Labels, updatedArg.Labels)
 	})
 
 	t.Run("Update: Old appProject with diff UID must be deleted and a new appProject must be created", func(t *testing.T) {
@@ -756,21 +829,18 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
-		// Check if the API calls were made in the same order:
-		// compare the UID, delete old appProject, and create a new appProject.
-		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
+		// compare UID, re-get for mismatch resolution, delete old, create new
+		expectedCalls := []string{"Get", "Get", "Get", "Delete", "Create"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 
-		// Check if the new appProject has the updated source UID annotation.
-		appInterface := be.Calls[3].ReturnArguments[0]
-
-		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
+		// Check the AppProject argument passed to Create has the correct source UID.
+		createdArg, ok := be.Calls[4].Arguments.Get(1).(*v1alpha1.AppProject)
 		require.True(t, ok)
-		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
+		require.Equal(t, string(incomingAppProject.UID), createdArg.Annotations[manager.SourceUIDAnnotation])
 	})
 
 	t.Run("Update: incoming appProject must be created if it doesn't exist while handling update event", func(t *testing.T) {
@@ -833,15 +903,12 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.False(t, a.appManager.IsManaged(incomingAppProject.Name))
 	})
 
-	// Missing Source UID Annotation scenarios - when existing AppProject lacks the source UID annotation
-	t.Run("Create: Existing AppProject without source UID annotation should be deleted and recreated", func(t *testing.T) {
-		// Setup separate backend for this test to avoid mock conflicts
+	t.Run("Create: Existing AppProject without source UID annotation should be adopted", func(t *testing.T) {
 		beMissing := backend_mocks.NewAppProject(t)
 		var err error
 		a.projectManager, err = appproject.NewAppProjectManager(beMissing, "argocd", appproject.WithAllowUpsert(true))
 		require.NoError(t, err)
 
-		// Setup for missing source UID scenario
 		existingAppProject := &v1alpha1.AppProject{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test",
@@ -850,49 +917,35 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 			},
 		}
 
-		// Configure separate backend
 		getMockMissing := beMissing.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingAppProject, nil)
-		createMockMissing := beMissing.On("Create", mock.Anything, mock.Anything).Return(createdAppProject, nil)
-		deleteMockMissing := beMissing.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		beMissing.On("SupportsPatch").Return(false)
+		updateMockMissing := beMissing.On("Update", mock.Anything, mock.Anything).Return(createdAppProject, nil)
 
 		defer func() {
 			getMockMissing.Unset()
-			createMockMissing.Unset()
-			deleteMockMissing.Unset()
+			updateMockMissing.Unset()
 		}()
 
-		a.projectManager.Manage(existingAppProject.Name)
-		defer a.projectManager.ClearManaged()
-
+		// Not managed — matches the pre-installed default AppProject failure mode
 		ev := event.New(evs.AppProjectEvent(event.Create, incomingAppProject), targets.AppProject)
 		err = a.processIncomingAppProject(ev)
-
-		// The process should succeed after deleting the existing AppProject and creating the new one
 		require.NoError(t, err)
+		require.True(t, a.projectManager.IsManaged(existingAppProject.Name))
 
-		// Verify the sequence: Get (to compare UID), Delete (existing), Create (new)
-		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
+		expectedCalls := []string{"Get", "Get", "Get", "SupportsPatch", "Update"}
 		gotCalls := []string{}
 		for _, call := range beMissing.Calls {
 			gotCalls = append(gotCalls, call.Method)
 		}
 		require.Equal(t, expectedCalls, gotCalls)
-
-		// Verify the created AppProject has the correct source UID annotation
-		appInterface := beMissing.Calls[3].ReturnArguments[0]
-		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
-		require.True(t, ok)
-		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
 	})
 
-	t.Run("Update: Existing AppProject without source UID annotation should be deleted and recreated", func(t *testing.T) {
-		// Setup separate backend for this test to avoid mock conflicts
+	t.Run("Update: Existing AppProject without source UID annotation should be adopted", func(t *testing.T) {
 		beMissing := backend_mocks.NewAppProject(t)
 		var err error
 		a.projectManager, err = appproject.NewAppProjectManager(beMissing, "argocd", appproject.WithAllowUpsert(true))
 		require.NoError(t, err)
 
-		// Setup for missing source UID scenario
 		existingAppProject := &v1alpha1.AppProject{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      "test",
@@ -901,39 +954,26 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 			},
 		}
 
-		// Configure separate backend
 		getMockMissing := beMissing.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingAppProject, nil)
-		createMockMissing := beMissing.On("Create", mock.Anything, mock.Anything).Return(createdAppProject, nil)
-		deleteMockMissing := beMissing.On("Delete", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		beMissing.On("SupportsPatch").Return(false)
+		updateMockMissing := beMissing.On("Update", mock.Anything, mock.Anything).Return(createdAppProject, nil)
 
 		defer func() {
 			getMockMissing.Unset()
-			createMockMissing.Unset()
-			deleteMockMissing.Unset()
+			updateMockMissing.Unset()
 		}()
-
-		a.projectManager.Manage(existingAppProject.Name)
-		defer a.projectManager.ClearManaged()
 
 		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingAppProject), targets.AppProject)
 		err = a.processIncomingAppProject(ev)
-
-		// The process should succeed after deleting the existing AppProject and creating the new one
 		require.NoError(t, err)
+		require.True(t, a.projectManager.IsManaged(existingAppProject.Name))
 
-		// Verify the sequence: Get (to compare UID), Delete (existing), Create (new)
-		expectedCalls := []string{"Get", "Get", "Delete", "Create"}
+		expectedCalls := []string{"Get", "Get", "Get", "SupportsPatch", "Update"}
 		gotCalls := []string{}
 		for _, call := range beMissing.Calls {
 			gotCalls = append(gotCalls, call.Method)
 		}
 		require.Equal(t, expectedCalls, gotCalls)
-
-		// Verify the created AppProject has the correct source UID annotation
-		appInterface := beMissing.Calls[3].ReturnArguments[0]
-		latestAppProject, ok := appInterface.(*v1alpha1.AppProject)
-		require.True(t, ok)
-		require.Equal(t, string(incomingAppProject.UID), latestAppProject.Annotations[manager.SourceUIDAnnotation])
 	})
 
 	t.Run("Delete: Existing AppProject without source UID annotation should be deleted", func(t *testing.T) {
@@ -979,6 +1019,41 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		require.Equal(t, expectedCalls, gotCalls)
 	})
 
+	t.Run("Create: unmanaged AppProject with mismatched source UID should be adopted", func(t *testing.T) {
+		beUnmanaged := backend_mocks.NewAppProject(t)
+		var err error
+		a.projectManager, err = appproject.NewAppProjectManager(beUnmanaged, "argocd", appproject.WithAllowUpsert(true))
+		require.NoError(t, err)
+
+		existingAppProject := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "default",
+				Namespace: "argocd",
+				UID:       ktypes.UID("local_uid"),
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "stale_uid",
+				},
+			},
+		}
+
+		getMock := beUnmanaged.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existingAppProject, nil)
+		beUnmanaged.On("SupportsPatch").Return(false)
+		updateMock := beUnmanaged.On("Update", mock.Anything, mock.Anything).Return(createdAppProject, nil)
+		defer func() {
+			getMock.Unset()
+			updateMock.Unset()
+		}()
+
+		incomingDefault := incomingAppProject.DeepCopy()
+		incomingDefault.Name = "default"
+		incomingDefault.UID = ktypes.UID("principal_uid")
+
+		ev := event.New(evs.AppProjectEvent(event.SpecUpdate, incomingDefault), targets.AppProject)
+		err = a.processIncomingAppProject(ev)
+		require.NoError(t, err)
+		require.True(t, a.projectManager.IsManaged("default"))
+	})
+
 	t.Run("Create: upsert policy skips delete and updates in-place", func(t *testing.T) {
 		configureManager(t)
 		defer unsetMocks(t)
@@ -992,7 +1067,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
-		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		expectedCalls := []string{"Get", "Get", "Get", "SupportsPatch", "Update"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -1013,7 +1088,7 @@ func Test_ProcessIncomingAppProjectWithUIDMismatch(t *testing.T) {
 		err := a.processIncomingAppProject(ev)
 		require.Nil(t, err)
 
-		expectedCalls := []string{"Get", "Get", "SupportsPatch", "Update"}
+		expectedCalls := []string{"Get", "Get", "Get", "SupportsPatch", "Update"}
 		gotCalls := []string{}
 		for _, call := range be.Calls {
 			gotCalls = append(gotCalls, call.Method)
@@ -1254,12 +1329,18 @@ func Test_UpdateAppProject(t *testing.T) {
 	t.Run("Create the appproject if it doesn't exist", func(t *testing.T) {
 		a.mode = types.AgentModeManaged
 		a.projectManager, err = appproject.NewAppProjectManager(be, "argocd", appproject.WithAllowUpsert(true), appproject.WithMode(manager.ManagerModeManaged), appproject.WithRole(manager.ManagerRoleAgent))
+		notFoundError := kerrors.NewNotFound(schema.GroupResource{
+			Group: "argoproj.io", Resource: "appproject",
+		}, project.Name)
+		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
+		defer getMock.Unset()
 		createMock := be.On("Create", mock.Anything, mock.Anything).Return(&v1alpha1.AppProject{}, nil)
 		defer createMock.Unset()
 		napp, err := a.updateAppProject(project)
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 		require.Empty(t, napp.OwnerReferences, "OwnerReferences should not be applied on managed app project")
+		require.True(t, a.projectManager.IsManaged(project.Name))
 	})
 
 	// Namespace handling tests

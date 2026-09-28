@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -72,13 +73,15 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		return
 	}
 
-	s.resources.Add(agentName, resources.NewResourceKeyFromApp(outbound))
-	s.trackAppToAgent(outbound, agentName)
-
 	ctx, span := s.startSpan(operationcreate, "Application", outbound)
 	defer span.End()
 
 	logCtx = logCtx.WithField("queue", agentName)
+
+	if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+		logCtx.Error("Application is targeting an invalid agent, skipping creation")
+		return
+	}
 
 	if !s.queues.HasQueuePair(agentName) {
 		if err := s.queues.Create(agentName); err != nil {
@@ -92,6 +95,10 @@ func (s *Server) newAppCallback(outbound *v1alpha1.Application) {
 		logCtx.Errorf("Help! queue pair for agent %s disappeared!", agentName)
 		return
 	}
+
+	s.resources.Add(agentName, resources.NewResourceKeyFromApp(outbound))
+	s.trackAppToAgent(outbound, agentName)
+
 	ev := s.events.ApplicationEvent(event.Create, outbound)
 	// Inject trace context into the event for propagation to agent
 	s.stampEvent(ctx, ev)
@@ -130,10 +137,15 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 
+	logCtx = logCtx.WithField("queue", agentName)
+
+	if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+		logCtx.Warn("Application is targeting an invalid agent, skipping update")
+		return
+	}
+
 	s.resources.Add(agentName, resources.NewResourceKeyFromApp(new))
 	s.trackAppToAgent(new, agentName)
-
-	logCtx = logCtx.WithField("queue", agentName)
 
 	if s.isResourceFromAutonomousAgent(new) {
 		// Remove finalizers from autonomous agent applications if it is being deleted
@@ -154,7 +166,7 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		}
 
 		// Revert modifications on autonomous agent applications
-		if s.appManager.RevertAutonomousAppChanges(s.ctx, new, s.sourceCache.Application) {
+		if s.appManager.RevertAutonomousAppChanges(s.ctx, new.DeepCopy(), s.sourceCache.Application) {
 			logCtx.Trace("Modifications to the application are reverted")
 			return
 		}
@@ -255,6 +267,10 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 	}
 
 	if !s.queues.HasQueuePair(agentName) {
+		if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+			logCtx.Warn("Application is targeting an invalid agent, skipping deletion")
+			return
+		}
 		if err := s.queues.Create(agentName); err != nil {
 			logCtx.WithError(err).Error("failed to create a queue pair for agent")
 			return
@@ -310,15 +326,6 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 	ctx, span := s.startSpan(operationcreate, "AppProject", outbound)
 	defer span.End()
 
-	// Return early if no interested agent is connected
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		if err := s.queues.Create(outbound.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing namespace")
-	}
-
 	if s.metrics != nil {
 		s.metrics.AppProjectCreated.Inc()
 	}
@@ -331,7 +338,7 @@ func (s *Server) newAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.Create, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
@@ -400,15 +407,10 @@ func (s *Server) updateAppProjectCallback(old *v1alpha1.AppProject, new *v1alpha
 		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
 		return
 	}
-	if !s.queues.HasQueuePair(old.Namespace) {
-		if err := s.queues.Create(old.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing agent namespace")
-	}
 
-	s.syncAppProjectUpdatesToAgents(ctx, old, new, logCtx)
+	if !s.isAppProjectFromAutonomousAgent(new) {
+		s.syncAppProjectUpdatesToAgents(ctx, old, new, logCtx)
+	} // For the autonomous case, on principal, there is no need to send AppProject updates to autonomous agents.
 
 	ev := s.events.AppProjectEvent(event.SpecUpdate, new)
 	s.ha.ForwardEventForReplication(event.New(ev, targets.AppProject), new.Namespace, replication.DirectionOutbound)
@@ -459,19 +461,6 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	ctx, span := s.startSpan(operationdelete, "AppProject", outbound)
 	defer span.End()
 
-	if !s.queues.HasQueuePair(outbound.Namespace) {
-		if err := s.queues.Create(outbound.Namespace); err != nil {
-			logCtx.WithError(err).Error("failed to create a queue pair for an existing agent namespace")
-			return
-		}
-		logCtx.Trace("Created a new queue pair for the existing agent namespace")
-	}
-	q := s.queues.SendQ(outbound.Namespace)
-	if q == nil {
-		logCtx.Error("Help! Queue pair has disappeared!")
-		return
-	}
-
 	agents := s.mapAppProjectToAgents(*outbound)
 	for agent := range agents {
 		q := s.queues.SendQ(agent)
@@ -480,7 +469,7 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*outbound, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
@@ -772,13 +761,7 @@ func (s *Server) deleteNamespaceCallback(outbound *corev1.Namespace) {
 		return
 	}
 
-	if err := s.queues.Delete(outbound.Name, true); err != nil {
-		logCtx.WithError(err).Error("failed to remove the queue pair for a deleted agent namespace")
-		return
-	}
-
-	// Remove eventwriter associated with this agent
-	s.eventWriters.Remove(outbound.Name)
+	s.cleanupAgentState(outbound.Name)
 
 	logCtx.Tracef("Deleted the queue pair since the agent namespace is deleted")
 }
@@ -793,6 +776,11 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 			continue
 		}
 
+		// Skip agents that don't have a valid agent cluster secret
+		if s.clusterMgr != nil && !s.clusterMgr.HasMapping(agentName) {
+			continue
+		}
+
 		if appproject.DoesAgentMatchWithProject(agentName, appProject, s.destinationBasedMapping) {
 			agents[agentName] = true
 		}
@@ -804,6 +792,11 @@ func (s *Server) mapAppProjectToAgents(appProject v1alpha1.AppProject) map[strin
 // syncAppProjectUpdatesToAgents sends the AppProject update events to the relevant clusters.
 // It sends delete events to the clusters that no longer match the given AppProject.
 func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1alpha1.AppProject, logCtx *logrus.Entry) {
+
+	if s.isAppProjectFromAutonomousAgent(new) || s.isAppProjectFromAutonomousAgent(old) {
+		return
+	}
+
 	oldAgents := s.mapAppProjectToAgents(*old)
 	newAgents := s.mapAppProjectToAgents(*new)
 
@@ -821,7 +814,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.Delete, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
@@ -842,7 +835,7 @@ func (s *Server) syncAppProjectUpdatesToAgents(ctx context.Context, old, new *v1
 			continue
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*new, agent, s.destinationBasedMapping, types.AgentModeManaged)
 		ev := s.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		// Inject trace context into the event for propagation to agent
 		s.stampEvent(ctx, ev)
@@ -1072,8 +1065,10 @@ func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Ap
 		s.resources.Remove(oldAgentName, resources.NewResourceKeyFromApp(old))
 
 		if !s.queues.HasQueuePair(oldAgentName) {
-			if err := s.queues.Create(oldAgentName); err != nil {
-				logCtx.WithError(err).Error("failed to create queue pair for old agent")
+			if s.clusterMgr == nil || s.clusterMgr.HasMapping(oldAgentName) {
+				if err := s.queues.Create(oldAgentName); err != nil {
+					logCtx.WithError(err).Error("failed to create queue pair for old agent")
+				}
 			}
 		}
 		if oldQ := s.queues.SendQ(oldAgentName); oldQ != nil {
@@ -1086,9 +1081,12 @@ func (s *Server) handleAppAgentChange(ctx context.Context, old, new *v1alpha1.Ap
 	}
 
 	if newAgentName != "" {
-		// Add mapping for the new agent
-		s.trackAppToAgent(new, newAgentName)
-		s.resources.Add(newAgentName, resources.NewResourceKeyFromApp(new))
+		// Only map to the new agent if it's actually a connected agent, otherwise we'd
+		// poison the Redis proxy routing for an app that isn't agent-managed.
+		if s.clusterMgr == nil || s.clusterMgr.HasMapping(newAgentName) {
+			s.trackAppToAgent(new, newAgentName)
+			s.resources.Add(newAgentName, resources.NewResourceKeyFromApp(new))
+		}
 	}
 }
 
@@ -1145,4 +1143,71 @@ func (c *concurrentMap[K, V]) Delete(key K) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.m, key)
+}
+
+// DeleteByValue removes all entries whose value equals the given value.
+func (c *concurrentMap[K, V]) DeleteByValue(value V, eq func(a, b V) bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, v := range c.m {
+		if eq(v, value) {
+			delete(c.m, k)
+		}
+	}
+}
+
+// trackAgentFingerprint records the mapping from a certificate fingerprint to
+// the connected agent name. This is used by the blocklist informer callback
+// to disconnect an agent by fingerprint without requiring an agent name in the
+// blocklist entry.
+func (s *Server) trackAgentFingerprint(agentName, fingerprint string) {
+	s.blocklist.TrackAgent(fingerprint, agentName)
+}
+
+// addBlocklistCallback is called by the informer when the blocklist ConfigMap
+// is first added.
+func (s *Server) addBlocklistCallback(cm *corev1.ConfigMap) {
+	s.updateBlocklistCallback(nil, cm)
+}
+
+// updateBlocklistCallback is called by the informer when the blocklist
+// ConfigMap is updated. It replaces the in-memory blocklist with
+// the entries from the ConfigMap and disconnects all blocklisted agents.
+func (s *Server) updateBlocklistCallback(_, newCM *corev1.ConfigMap) {
+	if s.blocklist == nil {
+		return
+	}
+	fingerprints := blocklist.FingerprintsFromConfigMapData(newCM.Data)
+	s.blocklist.Replace(fingerprints)
+	log().Infof("Reloaded TLS blocklist: %d entries", s.blocklist.Len())
+	s.disconnectBlocklisted(fingerprints)
+}
+
+// deleteBlocklistCallback is called by the informer when the blocklist
+// ConfigMap is deleted. It clears the in-memory blocklist so that previously
+// blocked agents can reconnect.
+func (s *Server) deleteBlocklistCallback(cm *corev1.ConfigMap) {
+	if s.blocklist == nil {
+		return
+	}
+	s.blocklist.Replace([]string{})
+	log().Info("Blocklist ConfigMap deleted, cleared in-memory blocklist")
+}
+
+// disconnectBlocklisted terminates active connections for all blocklisted
+// fingerprints. It resolves the agent name from the in-memory
+// fingerprint-to-agent mapping.
+func (s *Server) disconnectBlocklisted(fingerprints []string) {
+	if s.eventStreamSrv == nil {
+		return
+	}
+	for _, fp := range fingerprints {
+		agentName := s.blocklist.AgentForFingerprint(fp)
+		if agentName == "" {
+			continue
+		}
+		if s.eventStreamSrv.DisconnectAgent(agentName) {
+			log().Infof("Disconnected blocklisted agent %s (fingerprint: %s)", agentName, fp)
+		}
+	}
 }

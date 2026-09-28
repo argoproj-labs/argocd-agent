@@ -68,7 +68,7 @@ func newBoundedQueue(maxSize int, name string) *boundedQueue {
 
 func (bq *boundedQueue) Add(item *event.Event) {
 	// We pop the oldest item if the size is going to exceed maxSize.
-	if bq.Len() == bq.maxSize {
+	if bq.Len() >= bq.maxSize {
 		old, _ := bq.Get()
 		bq.Done(old)
 	}

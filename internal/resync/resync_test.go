@@ -23,6 +23,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -571,7 +572,7 @@ func Test_ProcessRequestUpdateEvent(t *testing.T) {
 			Checksum:  checksum,
 		}
 
-		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
 		assert.Nil(t, err)
 		assert.Zero(t, handler.sendQ.Len())
 
@@ -586,7 +587,7 @@ func Test_ProcessRequestUpdateEvent(t *testing.T) {
 			Kind:      "Application",
 		}
 
-		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
 		assert.Nil(t, err)
 
 		ev, shutdown := handler.sendQ.Get()
@@ -610,7 +611,7 @@ func Test_ProcessRequestUpdateEvent(t *testing.T) {
 			Checksum:  []byte("invalid-checksum"),
 		}
 
-		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
 		assert.Nil(t, err)
 
 		ev, shutdown := handler.sendQ.Get()
@@ -713,7 +714,7 @@ func Test_ProcessRequestUpdateEvent_GPGKey(t *testing.T) {
 			Checksum:  checksum,
 		}
 
-		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
 		assert.Nil(t, err)
 		assert.Zero(t, handler.sendQ.Len())
 	})
@@ -728,7 +729,7 @@ func Test_ProcessRequestUpdateEvent_GPGKey(t *testing.T) {
 			Kind:      "GPGKey",
 		}
 
-		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
 		assert.Nil(t, err)
 
 		ev, shutdown := handler.sendQ.Get()
@@ -755,7 +756,7 @@ func Test_ProcessRequestUpdateEvent_GPGKey(t *testing.T) {
 			Checksum:  []byte("invalid-checksum"),
 		}
 
-		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
 		assert.Nil(t, err)
 
 		ev, shutdown := handler.sendQ.Get()
@@ -796,7 +797,7 @@ func Test_ProcessRequestUpdateEvent_PeerNamespaceRemap(t *testing.T) {
 			Checksum:  checksum,
 		}
 
-		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
 		assert.Nil(t, err)
 		assert.Zero(t, handler.sendQ.Len(), "checksum matches, nothing to send")
 	})
@@ -817,7 +818,7 @@ func Test_ProcessRequestUpdateEvent_PeerNamespaceRemap(t *testing.T) {
 			Kind:      "Application",
 		}
 
-		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err := handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
 		assert.Nil(t, err)
 
 		ev, shutdown := handler.sendQ.Get()
@@ -850,7 +851,7 @@ func Test_ProcessRequestUpdateEvent_PeerNamespaceRemap(t *testing.T) {
 			Checksum:  checksum,
 		}
 
-		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
 		assert.Nil(t, err)
 		assert.Zero(t, handler.sendQ.Len(), "checksum matches in tenant namespace, nothing to send")
 	})
@@ -883,7 +884,7 @@ func Test_ProcessRequestUpdateEvent_PeerNamespaceRemap(t *testing.T) {
 			Checksum:  checksum,
 		}
 
-		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, reqUpdate)
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
 		assert.Nil(t, err)
 		assert.Zero(t, handler.sendQ.Len(), "checksum matches in agent namespace, nothing to send")
 	})

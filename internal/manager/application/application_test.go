@@ -35,6 +35,7 @@ import (
 	synccommon "github.com/argoproj/argo-cd/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
+	"github.com/argoproj/argo-cd/v3/util/settings"
 	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
@@ -440,6 +441,71 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		require.NotNil(t, updated.Operation)
 		require.Equal(t, incoming.Operation, updated.Operation)
 	})
+
+	t.Run("Retain principal-owned annotations across an agent status update", func(t *testing.T) {
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					"bar": "foo",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Annotations: map[string]string{
+					// State written on the principal's copy only: the agent's
+					// incoming application does not carry these annotations.
+					manager.SourceUIDAnnotation: "12345",
+					manager.NotifiedAnnotation:  `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`,
+					// A stale value the agent has since changed: the incoming
+					// value must win for annotations the agent owns.
+					"bar": "baz",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		// usePatch=false exercises the update path, which inherits the
+		// incoming annotation set and is where preservation must happen; the
+		// patch path never touches annotations except the refresh marker.
+		be := application.NewKubernetesBackend(appC, "", ai, false)
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.mode = manager.ManagerModeManaged
+		mgr.role = manager.ManagerRolePrincipal
+		updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, "12345", updated.Annotations[manager.SourceUIDAnnotation])
+		assert.Equal(t, `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`, updated.Annotations[manager.NotifiedAnnotation])
+		assert.Equal(t, "foo", updated.Annotations["bar"])
+	})
 }
 
 func Test_ManagerUpdateAutonomous(t *testing.T) {
@@ -509,6 +575,121 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 		assert.Equal(t, "cluster-1", updated.Namespace)
 		require.NotContains(t, updated.ObjectMeta.Annotations, "argocd.argoproj.io/refresh")
 		require.Equal(t, map[string]string{"foo": "bar"}, updated.Labels)
+	})
+	t.Run("Retain principal-owned annotations across an agent update", func(t *testing.T) {
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					"bar": "foo",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Annotations: map[string]string{
+					// State written on the principal's copy only: the agent's
+					// incoming application does not carry these annotations.
+					manager.SourceUIDAnnotation: "12345",
+					manager.NotifiedAnnotation:  `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`,
+					// A stale value the agent has since changed: the incoming
+					// value must win for annotations the agent owns.
+					"bar": "baz",
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.role = manager.ManagerRolePrincipal
+		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, "12345", updated.Annotations[manager.SourceUIDAnnotation])
+		assert.Equal(t, `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`, updated.Annotations[manager.NotifiedAnnotation])
+		assert.Equal(t, "foo", updated.Annotations["bar"])
+	})
+
+	t.Run("Retain principal-owned annotations without patch support", func(t *testing.T) {
+		// The non-patch update path inherits the incoming annotation set the
+		// same way; the incoming application carries no annotations at all,
+		// which also exercises the nil-map initialization.
+		incoming := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "cluster-1",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "12345",
+					manager.NotifiedAnnotation:  `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`,
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+
+		appC, ai := fakeInformer(t, "", existing)
+		be := application.NewKubernetesBackend(appC, "", ai, false)
+		mgr, err := NewApplicationManager(be, "argocd")
+		require.NoError(t, err)
+		mgr.role = manager.ManagerRolePrincipal
+		updated, err := mgr.UpdateAutonomousApp(context.TODO(), "cluster-1", incoming)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, "12345", updated.Annotations[manager.SourceUIDAnnotation])
+		assert.Equal(t, `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`, updated.Annotations[manager.NotifiedAnnotation])
 	})
 }
 
@@ -820,117 +1001,6 @@ func Test_stampLastUpdated(t *testing.T) {
 	})
 }
 
-func Test_CompareSourceUIDForApp(t *testing.T) {
-	oldApp := &v1alpha1.Application{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      "test",
-			Namespace: "argocd",
-			Annotations: map[string]string{
-				manager.SourceUIDAnnotation: "old_uid",
-			},
-		},
-	}
-
-	mockedBackend := appmock.NewApplication(t)
-	getMock := mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
-	m, err := NewApplicationManager(mockedBackend, "")
-	require.Nil(t, err)
-	ctx := context.Background()
-
-	t.Cleanup(func() {
-		getMock.Unset()
-	})
-
-	t.Run("should return true if the UID matches", func(t *testing.T) {
-		incoming := oldApp.DeepCopy()
-		incoming.UID = ktypes.UID("old_uid")
-
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.True(t, exists)
-		require.Nil(t, err)
-		require.True(t, uidMatch)
-	})
-
-	t.Run("should return false if the UID doesn't match", func(t *testing.T) {
-		incoming := oldApp.DeepCopy()
-		// Clear source-uid so comparison falls back to incoming.UID (normal operation path)
-		delete(incoming.Annotations, manager.SourceUIDAnnotation)
-		incoming.UID = ktypes.UID("new_uid")
-
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.True(t, exists)
-		require.Nil(t, err)
-		require.False(t, uidMatch)
-	})
-
-	t.Run("should return true if incoming has matching source-uid annotation", func(t *testing.T) {
-		incoming := oldApp.DeepCopy()
-		incoming.UID = ktypes.UID("agent_uid")
-		incoming.Annotations[manager.SourceUIDAnnotation] = "old_uid"
-
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.True(t, exists)
-		require.Nil(t, err)
-		require.True(t, uidMatch)
-	})
-
-	t.Run("should return an error if there is no UID annotation", func(t *testing.T) {
-		oldApp.Annotations = map[string]string{}
-		mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
-		m, err := NewApplicationManager(mockedBackend, "")
-		require.Nil(t, err)
-		ctx := context.Background()
-
-		incoming := oldApp.DeepCopy()
-		incoming.UID = ktypes.UID("new_uid")
-
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.True(t, exists)
-		require.NotNil(t, err)
-		require.EqualError(t, err, "source UID Annotation is not found for app: test")
-		require.False(t, uidMatch)
-	})
-
-	t.Run("should return False if the app doesn't exist", func(t *testing.T) {
-		expectedErr := errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"},
-			oldApp.Name)
-		getMock.Unset()
-		getMock = mockedBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, expectedErr)
-		m, err := NewApplicationManager(mockedBackend, "")
-		require.Nil(t, err)
-		ctx := context.Background()
-
-		app, err := m.applicationBackend.Get(ctx, oldApp.Name, oldApp.Namespace)
-		require.Nil(t, app)
-		require.True(t, errors.IsNotFound(err))
-
-		incoming := oldApp.DeepCopy()
-		incoming.UID = ktypes.UID("new_uid")
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.False(t, exists)
-		require.False(t, uidMatch)
-		require.Nil(t, err)
-	})
-
-	t.Run("should override incoming namespace", func(t *testing.T) {
-		oldApp.Annotations = map[string]string{manager.SourceUIDAnnotation: "old_uid"}
-		getMock.Unset()
-		getMock = mockedBackend.On("Get", mock.Anything, mock.Anything, "argocd").Return(oldApp, nil)
-		m, err := NewApplicationManager(mockedBackend, oldApp.Namespace)
-		require.Nil(t, err)
-		ctx := context.Background()
-
-		incoming := oldApp.DeepCopy()
-		incoming.Namespace = "foobar"
-		incoming.UID = ktypes.UID("old_uid")
-
-		exists, uidMatch, err := m.CompareSourceUID(ctx, incoming)
-		require.True(t, exists)
-		require.Nil(t, err)
-		require.True(t, uidMatch)
-	})
-}
-
 func Test_CompareIdentity(t *testing.T) {
 	existingApp := &v1alpha1.Application{
 		ObjectMeta: v1.ObjectMeta{
@@ -1077,6 +1147,7 @@ func Test_CompareIdentity(t *testing.T) {
 
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
+	settings.ConfigureGoClientFeatures()
 }
 
 func Test_RevertManagedAppChanges(t *testing.T) {
@@ -1169,6 +1240,7 @@ func Test_ClearOperationState(t *testing.T) {
 		}
 
 		mockedBackend := appmock.NewApplication(t)
+		mockedBackend.On("Get", mock.Anything, "guestbook", "argocd").Return(app, nil)
 		mockedBackend.On("Patch", mock.Anything, "guestbook", "argocd", []byte(`[{"op":"replace","path":"/status/operationState","value":null}]`)).Return(updatedApp, nil)
 
 		m, err := NewApplicationManager(mockedBackend, "argocd")
@@ -1188,6 +1260,7 @@ func Test_ClearOperationState(t *testing.T) {
 		}
 
 		mockedBackend := appmock.NewApplication(t)
+		mockedBackend.On("Get", mock.Anything, "guestbook", "argocd").Return(app, nil)
 		mockedBackend.On("Patch", mock.Anything, "guestbook", "argocd", []byte(`[{"op":"replace","path":"/status/operationState","value":null}]`)).Return(nil, fmt.Errorf("patch failed"))
 
 		m, err := NewApplicationManager(mockedBackend, "argocd")

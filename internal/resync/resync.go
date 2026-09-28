@@ -27,6 +27,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 	"github.com/sirupsen/logrus"
@@ -57,6 +58,7 @@ type RequestHandler struct {
 
 	log *logrus.Entry
 
+	// role refers to the role of the current process, either 'principal'/'agent'
 	role manager.ManagerRole
 
 	namespace string
@@ -280,10 +282,23 @@ func (r *RequestHandler) sendRequestUpdate(ctx context.Context, resource resourc
 	return nil
 }
 
-func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentName string, reqUpdate *event.RequestUpdate) error {
+func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentName string, agentMode types.AgentMode, reqUpdate *event.RequestUpdate) error {
 	logCtx := logCtxForRequestUpdate(r.log, reqUpdate)
 
 	logCtx.Trace("Received a request for the resource update event")
+
+	// Sanity test:
+	// Principal should only accept 'request-update' events from managed agent
+	// Autonomous agent can accept request-update events
+	// Managed agent should never accept request-update events
+	// Agent mode should be set
+	if r.role == manager.ManagerRolePrincipal && agentMode != types.AgentModeManaged {
+		return fmt.Errorf("principal should only process requestUpdate events from managed mode agents")
+	} else if r.role == manager.ManagerRoleAgent && agentMode != types.AgentModeAutonomous {
+		return fmt.Errorf("managed mode agents should not process requestUpdate events; only autonomous agents should process them")
+	} else if agentMode == types.AgentModeUnknown {
+		return fmt.Errorf("agent mode is unknown")
+	}
 
 	gvr, err := getGroupVersionResource(reqUpdate.Kind)
 	if err != nil {
@@ -356,10 +371,20 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 
 	logCtx.Trace("Checksums do not match. Sending a specUpdate event")
 
-	return r.handleUpdatedResource(logCtx, reqUpdate, res, agentName)
+	return r.handleUpdatedResource(logCtx, reqUpdate, res, agentName, agentMode)
 }
 
-func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured, agentName string) error {
+func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *event.RequestUpdate, res *unstructured.Unstructured, agentName string, agentMode types.AgentMode) error {
+
+	// Sanity test the context of this function call
+	if r.role == manager.ManagerRolePrincipal && agentMode != types.AgentModeManaged {
+		return fmt.Errorf("principal should only send specupdates to managed mode agents, not autonomous")
+	} else if r.role == manager.ManagerRoleAgent && agentMode != types.AgentModeAutonomous {
+		return fmt.Errorf("managed mode agents should not send specupdates; only autonomous agents")
+	} else if agentMode == types.AgentModeUnknown {
+		return fmt.Errorf("agent mode is unknown")
+	}
+
 	resBytes, err := res.MarshalJSON()
 	if err != nil {
 		return err
@@ -385,7 +410,7 @@ func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *
 			return err
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName, r.destinationBasedMapping)
+		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName, r.destinationBasedMapping, agentMode)
 		ev := r.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
 		logCtx.Trace("Sending a request to update the appProject")
 		r.sendQ.Add(ev)

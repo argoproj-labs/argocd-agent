@@ -41,9 +41,18 @@ Requirements for a repository secret to be reconciled by the principal:
 The principal distributes a repository secret to a managed agent using a **two-step matching process**:
 
 1. **Project Association**: Repository must include a `project` field referencing an existing AppProject
-2. **Pattern Matching**: Agent name must match **both**:
+2. **Pattern Matching**: The matching logic depends on the active mapping mode:
+
+**Namespace-based mapping** (default): Agent name must match **both**:
+
    - At least one destination pattern via `.spec.destinations` (either `name` or a `server` URL that includes `?agentName=<pattern>`; `*` is allowed)  
    - At least one pattern in the AppProject's `.spec.sourceNamespaces` fields
+
+**Destination-based mapping**: Agent name must match:
+
+   - At least one destination pattern via `.spec.destinations` (either `name` or a `server` URL that includes `?agentName=<pattern>`; `*` is allowed)
+
+   `.spec.sourceNamespaces` is not consulted for routing in destination-based mapping mode.
 
 Learn more about AppProject matching logic in the [AppProjects guide](./appprojects.md).
 
@@ -285,7 +294,8 @@ kubectl get appproject my-project -n argocd -o yaml
 Verify that:
 
 - The AppProject referenced by the secret exists
-- Agent names match patterns in both `.spec.destinations` (either `name` or `server` with `?agentName=`) and `.spec.sourceNamespaces`
+- **Namespace-based mapping**: Agent names match patterns in both `.spec.destinations` (either `name` or `server` with `?agentName=`) and `.spec.sourceNamespaces`
+- **Destination-based mapping**: Agent names match patterns in `.spec.destinations` (either `name` or `server` with `?agentName=`); `.spec.sourceNamespaces` is not used for routing
 - Patterns use correct glob syntax, including any deny patterns (`!pattern`) you intend
 
 #### Check Principal Logs

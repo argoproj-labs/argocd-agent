@@ -90,6 +90,48 @@ Create argocd-redis secret, because principal looks for it to fetch redis authen
 oc create secret generic argocd-redis -n argocd --from-literal=auth="$(oc get secret argocd-redis-initial-password -n argocd -o jsonpath='{.data.admin\.password}' | base64 -d)"
 ```
 
+### Choose a Mapping Mode
+
+argocd-agent supports two mapping modes for routing Applications to managed agents:
+
+- **Namespace-based mapping** (default): Each agent has a dedicated namespace on the control plane. Applications placed in that namespace are routed to the agent. No additional configuration required.
+- **Destination-based mapping**: Applications use `spec.destination.name` to target an agent, regardless of their namespace. Better multi-tenancy support and familiar to traditional Argo CD users.
+
+To enable destination-based mapping, set the corresponding fields in the ArgoCD CR on both clusters. Both sides must have it enabled. These CR fields require **argocd-operator v0.18.0** or later.
+
+**Hub cluster** — add `destinationBasedMapping: true` under the principal spec:
+
+```yaml
+apiVersion: argoproj.io/v1beta1
+kind: ArgoCD
+metadata:
+  name: argocd
+spec:
+  argoCDAgent:
+    principal:
+      enabled: true
+      destinationBasedMapping: true
+      # ... other principal settings
+```
+
+**Agent cluster** — add a `destinationBasedMapping` block under the agent spec:
+
+```yaml
+apiVersion: argoproj.io/v1beta1
+kind: ArgoCD
+metadata:
+  name: argocd
+spec:
+  argoCDAgent:
+    agent:
+      destinationBasedMapping:
+        enabled: true
+        createNamespace: true
+      # ... other agent settings
+```
+
+With this configuration, Applications use `spec.destination.name` to route to agents and do not require a per-agent namespace on the hub cluster. See [Agent Mapping Modes](../../concepts/agent-mapping.md) for a detailed comparison.
+
 ## Setting up agent workload cluster
 
 ### Configure Argo CD for Agent
@@ -155,8 +197,6 @@ Update the configMap with name `argocd-agent-params`  with parameters related to
   agent.tls.secret-name: argocd-agent-client-tls
 ```
 Also Update RBAC, rolebinding/clusterrolebinding with `workload-namespace`, if pod is facing rbac issues.
-
-
 
 ### Configure Agent in Autonomous mode
 

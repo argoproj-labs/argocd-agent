@@ -87,6 +87,26 @@ For each workload cluster, decide on the operational mode:
 !!! tip "Mixed Modes"
     You can run different agents in different modes. For example, development clusters in managed mode and production clusters in autonomous mode.
 
+### Choose Agent Mapping Mode
+
+For managed agents, decide on the mapping mode:
+
+**Namespace-Based Mapping** (default) - Choose when:
+
+- You have a simple one-agent-per-namespace setup
+- Backward compatibility with existing argocd-agent deployments is required
+- You don't need multi-tenant isolation within a single agent
+
+**[Destination-Based Mapping](../concepts/agent-mapping.md)** - Choose when:
+
+- You are migrating from traditional Argo CD (same `destination.name` model)
+- Multiple teams share agents but need namespace isolation
+- You plan to use ApplicationSets targeting multiple agents
+- You want to organize Applications by team/project rather than by agent
+
+!!! tip "Familiar Model"
+    If you are migrating from traditional multi-cluster Argo CD, destination-based mapping will feel the most natural since it uses the same `spec.destination.name` routing model that traditional Argo CD uses with its cluster secrets.
+
 ### Plan Network Architecture
 
 **For the Control Plane:**
@@ -208,7 +228,7 @@ argocd cluster list --context <control-plane-context>
 
 ### 4.1 Migration Strategy by Mode
 
-#### Managed Mode Applications
+#### Managed Mode Applications (Namespace-Based Mapping)
 
 1. **Create Applications on Control Plane**: Applications are created in namespaces named after the target agent
 ```bash
@@ -227,6 +247,30 @@ EOF
 ```
 
 2. **Verify Synchronization**: Check that applications appear and sync on workload clusters
+
+#### Managed Mode Applications (Destination-Based Mapping)
+
+1. **Create Applications on Control Plane**: Applications use `spec.destination.name` for routing
+```bash
+# Application routes to agent via destination.name, not namespace
+kubectl apply -f - <<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: argocd  # Or another namespace if apps-in-any-namespace, allowed-namespaces, and AppProject sourceNamespaces are configured
+spec:
+  # ... application specification
+  destination:
+    name: my-workload-cluster  # Routes to agent by name
+    namespace: my-app-ns
+EOF
+```
+
+2. **Verify Synchronization**: Check that applications appear and sync on workload clusters
+
+!!! tip "Easier Migration with Destination-Based Mapping"
+    If you are migrating from traditional multi-cluster Argo CD, destination-based mapping requires the least changes to your existing Application manifests since traditional Argo CD already uses `spec.destination.name` to target clusters. You may only need to update the destination name to match your agent names.
 
 #### Autonomous Mode Applications
 
@@ -563,5 +607,6 @@ For migration support:
 ## Additional Resources
 
 - [Architecture Overview](../concepts/architecture.md) - Understanding the technical foundations
-- [Agent Modes](../concepts/agent-modes/index.md) - Detailed mode comparisons  
+- [Agent Modes](../concepts/agent-modes/index.md) - Detailed mode comparisons
+- [Agent Mapping Modes](../concepts/agent-mapping.md) - Namespace-based vs destination-based mapping
 - [Configuration Guide](../configuration/index.md) - Advanced configuration options

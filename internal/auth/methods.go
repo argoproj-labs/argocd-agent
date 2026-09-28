@@ -19,6 +19,17 @@ import (
 	"sync"
 )
 
+const (
+	// MethodMTLS is the name of the mTLS authentication method.
+	MethodMTLS = "mtls"
+	// MethodUserPass is the name of the username/password authentication method.
+	MethodUserPass = "userpass"
+	// MethodHeader is the name of the header-based authentication method.
+	MethodHeader = "header"
+	// MethodSPIFFEJWT is the name of the SPIFFE JWT-SVID authentication method.
+	MethodSPIFFEJWT = "spiffe-jwt"
+)
+
 // Methods provide a thread-safe way to register and look up available auth
 // methods.
 type Methods struct {

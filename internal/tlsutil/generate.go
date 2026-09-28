@@ -111,7 +111,7 @@ func GenerateClientCertificate(name string, signerCert *x509.Certificate, signer
 		NotAfter:              time.Now().AddDate(0, 0, validityDays),
 		IsCA:                  false,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true,
 	}
 
@@ -147,7 +147,7 @@ func GenerateServerCertificate(name string, signerCert *x509.Certificate, signer
 		NotAfter:              time.Now().AddDate(0, 0, validityDays),
 		IsCA:                  false,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true,
 		DNSNames:              dnsNames,
 		IPAddresses:           ipAddresses,

@@ -239,7 +239,7 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 			logging.LogActionError(logCtx, "application", "terminate-operation", incomingApp, err)
 		}
 	case event.Delete:
-		err = a.deleteApplication(incomingApp)
+		err = a.deleteApplicationFromEvent(incomingApp)
 		if err != nil {
 			logging.LogActionError(logCtx, "application", "delete", incomingApp, err)
 		}
@@ -469,18 +469,8 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 					return fmt.Errorf("could not update the existing appProject: %w", err)
 				}
 				return nil
-			} else {
-				if a.effectiveMismatchPolicy(incomingAppProject) == manager.MismatchPolicyUpsert {
-					logCtx.Info("AppProject source UID mismatch, upsert policy: updating in-place")
-					stampSourceUID(&incomingAppProject.ObjectMeta, string(incomingAppProject.UID))
-					_, err := a.updateAppProject(incomingAppProject)
-					return err
-				}
-				logCtx.Debug("An appProject already exists with a different source UID. Deleting the existing appProject")
-				if err := a.deleteAppProject(incomingAppProject); err != nil {
-					return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
-				}
 			}
+			return a.resolveAppProjectSourceUIDMismatch(logCtx, incomingAppProject)
 		}
 
 		_, err = a.createAppProject(incomingAppProject)
@@ -497,21 +487,7 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 		}
 
 		if !sourceUIDMatch {
-			if a.effectiveMismatchPolicy(incomingAppProject) == manager.MismatchPolicyUpsert {
-				logCtx.Info("AppProject source UID mismatch, upsert policy: updating in-place")
-				stampSourceUID(&incomingAppProject.ObjectMeta, string(incomingAppProject.UID))
-				_, err := a.updateAppProject(incomingAppProject)
-				return err
-			}
-			logCtx.Debug("Source UID mismatch between the incoming and existing appProject. Deleting the existing appProject")
-			if err := a.deleteAppProject(incomingAppProject); err != nil {
-				return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
-			}
-			logCtx.Debug("Creating the incoming appProject after deleting the existing appProject")
-			if _, err := a.createAppProject(incomingAppProject); err != nil {
-				return fmt.Errorf("could not create incoming appProject after deleting existing appProject: %w", err)
-			}
-			return nil
+			return a.resolveAppProjectSourceUIDMismatch(logCtx, incomingAppProject)
 		}
 
 		_, err = a.updateAppProject(incomingAppProject)
@@ -528,6 +504,43 @@ func (a *Agent) processIncomingAppProject(ev *event.Event) error {
 	}
 
 	return err
+}
+
+// resolveAppProjectSourceUIDMismatch handles Create/SpecUpdate when an AppProject
+// already exists locally with a missing or different source-UID.
+func (a *Agent) resolveAppProjectSourceUIDMismatch(logCtx *logrus.Entry, incoming *v1alpha1.AppProject) error {
+	existing, err := a.projectManager.Get(a.context, incoming.Name, incoming.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed to get existing appProject for source-UID mismatch: %w", err)
+	}
+
+	_, hasSourceUID := existing.Annotations[manager.SourceUIDAnnotation]
+	// Pre-installed AppProjects may not have source-UID annotation and the deletion may fail with "is not managed" error.
+	// Adopt the existing AppProject in-place to avoid this issue.
+	if !hasSourceUID || !a.projectManager.IsManaged(incoming.Name) {
+		logCtx.Info("Adopting existing AppProject (missing source-UID or not managed)")
+		stampSourceUID(&incoming.ObjectMeta, string(incoming.UID))
+		_, err = a.updateAppProject(incoming)
+		return err
+	}
+
+	if a.effectiveMismatchPolicy(incoming) == manager.MismatchPolicyUpsert {
+		logCtx.Info("AppProject source UID mismatch, upsert policy: updating in-place")
+		stampSourceUID(&incoming.ObjectMeta, string(incoming.UID))
+		_, err = a.updateAppProject(incoming)
+		return err
+	}
+
+	logCtx.Debug("Source UID mismatch between the incoming and existing appProject. Deleting the existing appProject")
+	if err := a.deleteAppProject(incoming); err != nil {
+		return fmt.Errorf("could not delete existing appProject prior to creation: %w", err)
+	}
+
+	logCtx.Debug("Creating the incoming appProject after deleting the existing appProject")
+	if _, err := a.createAppProject(incoming); err != nil {
+		return fmt.Errorf("could not create incoming appProject after deleting existing appProject: %w", err)
+	}
+	return nil
 }
 
 func (a *Agent) processIncomingRepository(ev *event.Event) error {
@@ -707,7 +720,7 @@ func (a *Agent) processIncomingResourceResyncEvent(ev *event.Event) error {
 			}
 		}
 
-		return resyncHandler.ProcessRequestUpdateEvent(a.context, agentName, incoming)
+		return resyncHandler.ProcessRequestUpdateEvent(a.context, agentName, a.mode, incoming)
 	case event.EventRequestResourceResync:
 		if a.mode != types.AgentModeManaged {
 			return fmt.Errorf("agent can only handle ResourceResync request in the managed mode")
@@ -840,6 +853,39 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	return napp, err
 }
 
+// deleteApplicationFromEvent processes a Delete event from the principal. The
+// source UID carried by app is the one of the application being deleted, so
+// if the application is already gone from the cluster (e.g. because it was
+// deleted on the agent at the same time it was deleted on the principal) the
+// deletion is still marked as expected and the stale source cache entry is
+// dropped. Otherwise the agent would recreate the application from stale
+// state and the recreated application could never be deleted again.
+//
+// This must only be used for Delete events. On a source UID mismatch, app is
+// the new application, and marking its source UID as an expected deletion
+// would allow a later user-initiated deletion of the recreated application.
+func (a *Agent) deleteApplicationFromEvent(app *v1alpha1.Application) error {
+	sourceUID := sourceUIDForApp(app)
+	err := a.deleteApplication(app)
+	if err == nil || !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"method": "DeleteApplication",
+		"app":    app.QualifiedName(),
+	})
+	logCtx.Debug("application is not found, perhaps it is already deleted")
+	a.deletions.MarkExpected(sourceUID)
+	if a.mode == types.AgentModeManaged {
+		a.sourceCache.Application.Delete(sourceUID)
+	}
+	if err := a.appManager.Unmanage(app.QualifiedName()); err != nil {
+		logCtx.Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
+	}
+	return nil
+}
+
 func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	// Determine the target namespace for the application
 	targetNamespace := a.getTargetNamespaceForApp(app)
@@ -859,6 +905,9 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	}
 
 	// Fetch the source UID of the existing app to mark it as expected deletion.
+	// A NotFound error is returned to the caller on purpose: only the caller
+	// knows whether the source UID of app is the one whose deletion should be
+	// recorded as expected (see deleteApplicationFromEvent).
 	app, err := a.appManager.Get(a.context, app.Name, app.Namespace)
 	if err != nil {
 		return err
@@ -874,6 +923,9 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
 			if a.mode == types.AgentModeManaged {
 				a.sourceCache.Application.Delete(sourceUIDForApp(app))
+			}
+			if err := a.appManager.Unmanage(app.QualifiedName()); err != nil {
+				logCtx.Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
 			}
 			return nil
 		}
@@ -943,9 +995,15 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 		"resourceVersion": incoming.ResourceVersion,
 	})
 
+	newlyManaged := false
 	if !a.projectManager.IsManaged(incoming.Name) {
-		logCtx.Trace("AppProject is not managed on this agent. Creating the new AppProject")
-		return a.createAppProject(incoming)
+		// Prefer update+manage over create when the resource may already exist
+		// locally (e.g. Argo CD's pre-installed default AppProject).
+		logCtx.Trace("AppProject is not managed on this agent. Managing and updating")
+		if err := a.projectManager.Manage(incoming.Name); err != nil {
+			return nil, fmt.Errorf("could not manage appProject prior to update: %w", err)
+		}
+		newlyManaged = true
 	}
 
 	if a.projectManager.IsChangeIgnored(incoming.Name, incoming.ResourceVersion) {
@@ -958,7 +1016,16 @@ func (a *Agent) updateAppProject(incoming *v1alpha1.AppProject) (*v1alpha1.AppPr
 	a.sourceCache.AppProject.Set(incoming.UID, incoming.Spec)
 
 	logCtx.Tracef("Calling update spec for this event")
-	return a.projectManager.UpdateAppProject(a.context, incoming)
+	updated, err := a.projectManager.UpdateAppProject(a.context, incoming)
+	if err != nil {
+		if newlyManaged {
+			if errUnmanage := a.projectManager.Unmanage(incoming.Name); errUnmanage != nil {
+				logCtx.Errorf("Could not unmanage appProject %s: %v", incoming.Name, errUnmanage)
+			}
+		}
+		return nil, err
+	}
+	return updated, nil
 }
 
 func (a *Agent) deleteAppProject(project *v1alpha1.AppProject) error {
