@@ -127,7 +127,7 @@ kubectl create namespace <agent-name> --context <control-plane-context>
 ```
 
 !!! tip "Destination-Based Mapping"
-    If you are using **destination-based mapping**, you do not need to create a namespace per agent on the principal. Applications can live in any namespace. Skip this step and instead ensure `--destination-based-mapping` is enabled on both the principal and agent. See [Agent Mapping Modes](../concepts/agent-mapping.md) for details.
+    If you are using **destination-based mapping**, you do not need to create a namespace per agent on the principal. Applications can live in any namespace. Skip this step and instead ensure `--destination-based-mapping` is enabled on both the principal and agent. See [Agent Mapping Modes](./managed-agent/agent-mapping.md) for details.
 
 ## Step 5: Deploy Agent to Workload Cluster
 
@@ -394,7 +394,9 @@ After successfully adding agents:
 4. **Implement GitOps**: Configure your deployment pipelines
 
 For more information, refer to:
-- [Agent Mapping Modes](../concepts/agent-mapping.md) - Namespace-based vs destination-based mapping
-- [Application Synchronization](./applications.md)
-- [AppProject Synchronization](./appprojects.md)
+- [Agent Mapping Modes](./managed-agent/agent-mapping.md) - Namespace-based vs destination-based mapping
+- [Application synchronization (managed agents)](./managed-agent/applications-managed-mode.md)
+- [Application synchronization (autonomous agents)](./autonomous-agent/applications-autonomous-mode.md)
+- [AppProject synchronization (managed agents)](./managed-agent/appprojects-managed-mode.md)
+- [AppProject synchronization (autonomous agents)](./autonomous-agent/appprojects-autonomous-mode.md)
 - [Live Resources](./live-resources.md) 
