@@ -88,6 +88,9 @@ func (nl *NamedLock) TryRLock(name string) bool {
 func (nl *NamedLock) lock(name string) *sync.RWMutex {
 	nl.l.Lock()
 	defer nl.l.Unlock()
+	if nl.namedLocks == nil {
+		nl.namedLocks = make(map[string]*sync.RWMutex)
+	}
 	if l, ok := nl.namedLocks[name]; ok {
 		return l
 	} else {

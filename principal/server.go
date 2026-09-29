@@ -53,6 +53,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
+	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
@@ -186,6 +187,16 @@ type Server struct {
 	// deletions tracks valid deletions from the source.
 	// This is used to differentiate between valid and invalid deletions
 	deletions *manager.DeletionTracker
+
+	// resourceLocks serializes the queue processor marking a deletion as
+	// expected against the informer callback deciding whether to recreate the
+	// resource. Interleaved, those two orphan the resource on the principal.
+	// Keys come from appProjectLockKey()/applicationLockKey().
+	//
+	// Hold at most one at a time, and acquire watchLock before it, never after.
+	// The zero value is usable.
+	resourceLocks namedlock.NamedLock
+
 	logStream *logstream.Server
 
 	// terminalStreamServer handles bidirectional streaming for web terminal sessions
@@ -1419,6 +1430,18 @@ func (s *Server) setAgentNamespace(agentName, namespace string) {
 func (s *Server) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
+}
+
+// appProjectLockKey and applicationLockKey build the keys for
+// Server.resourceLocks. Both take the resource in its principal-side identity;
+// if the two paths ever derive different keys, the exclusion silently stops
+// working, so the format is defined only here.
+func appProjectLockKey(p *v1alpha1.AppProject) string {
+	return "AppProject/" + p.Namespace + "/" + p.Name
+}
+
+func applicationLockKey(a *v1alpha1.Application) string {
+	return "Application/" + a.Namespace + "/" + a.Name
 }
 
 func (s *Server) populateSourceCache(ctx context.Context) error {

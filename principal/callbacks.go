@@ -157,9 +157,17 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 				logCtx.Debug("Removed finalizers from autonomous application to allow deletion")
 				new = updated
 				// Register the expected deletion so deleteAppCallback won't recreate it.
+				// The lock is redundant while both callbacks share one informer
+				// goroutine, but it is uncontended and keeps every MarkExpected
+				// on the principal consistent. Only place holding both locks.
 				if s.deletions != nil {
 					if srcUID, ok := new.Annotations[manager.SourceUIDAnnotation]; ok && srcUID != "" {
-						s.deletions.MarkExpected(ktypes.UID(srcUID))
+						func() {
+							key := applicationLockKey(new)
+							s.resourceLocks.Lock(key)
+							defer s.resourceLocks.Unlock(key)
+							s.deletions.MarkExpected(ktypes.UID(srcUID))
+						}()
 					}
 				}
 			}
@@ -255,7 +263,14 @@ func (s *Server) deleteAppCallback(outbound *v1alpha1.Application) {
 
 	// Revert user-initiated deletion on autonomous agent applications
 	if s.isResourceFromAutonomousAgent(outbound) {
-		reverted, err := manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.appManager, logCtx)
+		// Locked across the whole check-and-recreate: a mark landing midway
+		// would have us recreate an app the agent has already deleted.
+		reverted, err := func() (bool, error) {
+			key := applicationLockKey(outbound)
+			s.resourceLocks.Lock(key)
+			defer s.resourceLocks.Unlock(key)
+			return manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.appManager, logCtx)
+		}()
 		if err != nil {
 			logCtx.WithError(err).Error("failed to revert invalid deletion of application")
 			return
@@ -434,7 +449,15 @@ func (s *Server) deleteAppProjectCallback(outbound *v1alpha1.AppProject) {
 	// Revert user-initiated deletion on autonomous agent applications
 	if s.isAppProjectFromAutonomousAgent(outbound) {
 		if s.IsActive() {
-			reverted, err := manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.projectManager, logCtx)
+			// The expected-deletion check and the recreate must be atomic with
+			// respect to the queue processor marking an incoming deletion as expected,
+			// otherwise a project the agent has already deleted can be recreated here.
+			reverted, err := func() (bool, error) {
+				key := appProjectLockKey(outbound)
+				s.resourceLocks.Lock(key)
+				defer s.resourceLocks.Unlock(key)
+				return manager.RevertUserInitiatedDeletion(s.ctx, outbound, s.deletions, s.projectManager, logCtx)
+			}()
 			if err != nil {
 				logCtx.WithError(err).Error("failed to revert invalid deletion of appProject")
 				return
