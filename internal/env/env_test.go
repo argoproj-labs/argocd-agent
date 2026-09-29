@@ -17,6 +17,7 @@ package env
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -172,10 +173,18 @@ func Test_StringToMap(t *testing.T) {
 		m := StringToMapWithDefault("BAR", nil, def)
 		assert.Equal(t, def, m)
 	})
-	t.Run("Test invalid pair falls back to default", func(t *testing.T) {
-		t.Setenv("FOO", "notakeyvalue")
-		m := StringToMapWithDefault("FOO", nil, map[string]string{"x": "y"})
-		assert.Equal(t, map[string]string{"x": "y"}, m)
+	t.Run("Test invalid pair is fatal", func(t *testing.T) {
+		if os.Getenv("TEST_FATAL_SUBPROCESS") == "1" {
+			t.Setenv("FOO", "notakeyvalue")
+			StringToMapWithDefault("FOO", nil, map[string]string{"x": "y"})
+			return
+		}
+		cmd := exec.Command(os.Args[0], "-test.run=Test_StringToMap/Test_invalid_pair_is_fatal")
+		cmd.Env = append(os.Environ(), "TEST_FATAL_SUBPROCESS=1")
+		err := cmd.Run()
+		var exitErr *exec.ExitError
+		assert.ErrorAs(t, err, &exitErr, "expected process to exit with non-zero status on malformed map env var")
+		assert.NotEqual(t, 0, exitErr.ExitCode())
 	})
 	t.Run("Test validator", func(t *testing.T) {
 		v := func(s string) error {

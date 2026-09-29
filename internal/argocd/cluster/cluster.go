@@ -40,6 +40,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 )
 
 const LabelKeySelfRegisteredCluster = "argocd-agent.argoproj-labs.io/self-registered-cluster"
@@ -279,15 +280,32 @@ func ApplyClusterSecretLabels(ctx context.Context, kubeclient kubernetes.Interfa
 		return nil, false, fmt.Errorf("secret is nil")
 	}
 
-	if !applyAllSelfRegLabels(secret, agentName, selfRegSecretLabels) {
-		return secret, false, nil
-	}
+	var updated *v1.Secret
+	labelsChanged := false
 
-	updated, err := kubeclient.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		latest, ierr := kubeclient.CoreV1().Secrets(namespace).Get(ctx, secret.Name, metav1.GetOptions{})
+		if ierr != nil {
+			return fmt.Errorf("could not get cluster secret: %w", ierr)
+		}
+
+		if !applyAllSelfRegLabels(latest, agentName, selfRegSecretLabels) {
+			updated = latest
+			labelsChanged = false
+			return nil
+		}
+
+		updated, ierr = kubeclient.CoreV1().Secrets(namespace).Update(ctx, latest, metav1.UpdateOptions{})
+		if ierr != nil {
+			return ierr
+		}
+		labelsChanged = true
+		return nil
+	})
 	if err != nil {
 		return nil, false, fmt.Errorf("could not update cluster secret labels: %w", err)
 	}
-	return updated, true, nil
+	return updated, labelsChanged, nil
 }
 
 // IsClusterSelfRegistered checks if a cluster secret was created by self-registration.

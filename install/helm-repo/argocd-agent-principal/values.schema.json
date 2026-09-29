@@ -533,9 +533,15 @@
               "description": "Name of a Secret (in the principal namespace) containing a shared TLS client cert that gets copied into every self-registered cluster secret.",
               "title": "clientCertSecretName",
               "type": "string"
+            },
+            "secretLabels": {
+              "default": "",
+              "description": "Comma-separated list of key=value labels to apply to self-registered cluster secrets (e.g. \"env=prod,team=platform\"). Optional.",
+              "title": "secretLabels",
+              "type": "string"
             }
           },
-          "required": ["enabled", "clientCertSecretName"],
+          "required": ["enabled", "clientCertSecretName", "secretLabels"],
           "title": "selfRegistration",
           "type": "object"
         }

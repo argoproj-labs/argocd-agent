@@ -201,3 +201,15 @@ data:
   # principal.event-processors: Number of concurrent event processors.
   # Default: 10
   principal.event-processors: "10"
+  # principal.self-registration.enabled: Allow agents with valid credentials to
+  # self-register on connection. Requires resource proxy to be enabled.
+  # Default: false
+  principal.self-registration.enabled: "false"
+  # principal.self-registration.client-cert-secret: Name of the Secret containing
+  # the shared TLS client cert copied into every self-registered cluster secret.
+  # Default: ""
+  principal.self-registration.client-cert-secret: ""
+  # principal.self-registration.secret-labels: Comma-separated list of key=value
+  # labels to apply to self-registered cluster secrets (e.g. "env=prod,team=platform").
+  # Optional. Default: ""
+  principal.self-registration.secret-labels: ""

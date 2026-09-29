@@ -84,10 +84,10 @@ func StringSliceWithDefault(key string, validator func(string) error, def []stri
 func StringToMapWithDefault(key string, validator func(string) error, def map[string]string) map[string]string {
 	ev, err := StringToMap(key, validator)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Print(err)
+		if os.IsNotExist(err) {
+			return def
 		}
-		return def
+		log.Fatalf("invalid environment variable %s: %v", key, err)
 	}
 	return ev
 }

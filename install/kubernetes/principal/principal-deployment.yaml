@@ -267,6 +267,24 @@ spec:
                 name: argocd-agent-params
                 key: principal.event-processors
                 optional: true
+          - name: ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.self-registration.enabled
+                optional: true
+          - name: ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.self-registration.client-cert-secret
+                optional: true
+          - name: ARGOCD_PRINCIPAL_SELF_REGISTRATION_SECRET_LABELS
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.self-registration.secret-labels
+                optional: true
           - name: REDIS_PASSWORD
             valueFrom:
               secretKeyRef:
