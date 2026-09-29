@@ -74,7 +74,7 @@ Enable destination-based mapping mode. When enabled, the agent creates Applicati
 
 Both the principal and agent must have this flag enabled for destination-based mapping to work correctly.
 
-See [Agent Mapping Modes](../../concepts/agent-mapping.md) for a detailed comparison of namespace-based and destination-based mapping.
+See [Agent Mapping Modes](../../user-guide/managed-agent/agent-mapping.md) for a detailed comparison of namespace-based and destination-based mapping.
 
 **Example:**
 

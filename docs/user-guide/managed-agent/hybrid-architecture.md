@@ -1,12 +1,12 @@
 # Hybrid Architecture: Running Agent alongside an existing Argo CD instance
 
-This guide explains how to run argocd-agent (principal + agent) alongside a pre-existing Argo CD installation on the same hub cluster. This enables you to try out argocd-agent without replacing your existing setup, gradually migrate applications, or run both architectures long-term. This document assumes the agent is running in [managed mode](../concepts/agent-mapping.md) with [destination-based mapping](../concepts/agent-mapping.md#destination-based-mapping).
+This guide explains how to run argocd-agent (principal + agent) alongside a pre-existing Argo CD installation on the same hub cluster. This enables you to try out argocd-agent without replacing your existing setup, gradually migrate applications, or run both architectures long-term. This document assumes the agent is running in [managed mode](./index.md) with [destination-based mapping](./agent-mapping.md#destination-based-mapping).
 
 !!! tip "Who is this for?"
-    This guide is for teams that already have a working Argo CD installation managing applications and want to adopt argocd-agent incrementally. If you are setting up argocd-agent from scratch, see the [Getting Started](../getting-started/index.md) guide instead.
+    This guide is for teams that already have a working Argo CD installation managing applications and want to adopt argocd-agent incrementally. If you are setting up argocd-agent from scratch, see the [Getting Started](../../getting-started/index.md) guide instead.
 
 !!! tip "Using this for app-of-apps in managed mode"
-    This architecture is also how to get proper app-of-apps support in [managed mode](../concepts/agent-modes/managed.md). Since the hub gains its own *application-controller*, a parent app-of-apps `Application` can target the hub cluster directly, and its labeled children are routed to agents via `spec.destination.name` like any other managed `Application`.
+    This architecture is also how to get proper app-of-apps support in [managed mode](./index.md). Since the hub gains its own *application-controller*, a parent app-of-apps `Application` can target the hub cluster directly, and its labeled children are routed to agents via `spec.destination.name` like any other managed `Application`.
 
 ## Overview
 
@@ -139,7 +139,7 @@ data:
 ```
 
 !!! note "Destination-based mapping"
-    Enabling destination-based mapping is strongly recommended for hybrid setups. It allows applications to reside in any namespace on the hub and routes to agents based on `spec.destination.name` rather than the application's namespace. This means your existing applications can stay in their current namespaces during migration. Without it, users would have to move applications to the corresponding agent namespaces, making the migration more disruptive. See [destination-based mapping](../concepts/agent-mapping.md#destination-based-mapping) for more details.
+    Enabling destination-based mapping is strongly recommended for hybrid setups. It allows applications to reside in any namespace on the hub and routes to agents based on `spec.destination.name` rather than the application's namespace. This means your existing applications can stay in their current namespaces during migration. Without it, users would have to move applications to the corresponding agent namespaces, making the migration more disruptive. See [destination-based mapping](./agent-mapping.md#destination-based-mapping) for more details.
 
 ### Step 2: Point the Argo CD Server to the Redis Proxy
 
@@ -230,7 +230,7 @@ Migration in this context means moving responsibility for an Application from th
 
 ### Step 1: Sync the AppProject to the spoke cluster
 
-Before migrating Applications, the AppProjects referenced by these Applications need to be synced to the spoke cluster. Update the AppProject on the hub cluster to include the agent name in the project's `.spec.destinations` and `sourceNamespaces` fields. Then add the label (e.g. `argocd-agent=true`) that matches the principal's label selector. See the [AppProjects](appprojects.md) page for full details on how AppProjects are managed and distributed to agents.
+Before migrating Applications, the AppProjects referenced by these Applications need to be synced to the spoke cluster. Since this guide uses destination-based mapping, update the AppProject on the hub cluster to include the agent name in the project's `.spec.destinations` field; `sourceNamespaces` isn't used for routing in this mode, but is preserved on the agent and should list the namespaces where the Applications actually reside. Then add the label (e.g. `argocd-agent=true`) that matches the principal's label selector. See the [AppProjects](./appprojects-managed-mode.md) page for full details on how AppProjects are managed and distributed to agents.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -242,7 +242,7 @@ metadata:
     argocd-agent: "true"    # Matches the principal's label selector
 spec:
   sourceNamespaces:
-    - "agent-spoke-1"  # Must match agent name
+    - "*"  # Not used for routing; controls app namespaces on the workload cluster
   destinations:
     - namespace: '*'
       name: agent-spoke-1   # Must match agent name
@@ -252,7 +252,7 @@ spec:
 
 ### Step 2: Sync the Repository Secrets to the spoke cluster
 
-If your application uses private repositories, ensure the repository secret is project-scoped and labeled. Only project-scoped repository secrets are distributed to agents. See the [Repository](repository.md) page for full details on how repository secrets are managed and distributed to agents.
+If your application uses private repositories, ensure the repository secret is project-scoped and labeled. Only project-scoped repository secrets are distributed to agents. See the [Repository](./repository.md) page for full details on how repository secrets are managed and distributed to agents.
 
 ```yaml
 apiVersion: v1
@@ -305,7 +305,7 @@ argocd app get my-app
 
 ## How the UI Works in Hybrid Mode
 
-The Argo CD UI works seamlessly for both traditional and agent-managed applications. All applications appear in the same UI, and users interact with them the same way. See [Live Resources](../user-guide/live-resources.md) for more details around how Argo CD UI displays resources from the spoke cluster.
+The Argo CD UI works seamlessly for both traditional and agent-managed applications. All applications appear in the same UI, and users interact with them the same way. See [Live Resources](../live-resources.md) for more details around how Argo CD UI displays resources from the spoke cluster.
 
 ## Other Topologies
 
