@@ -31,8 +31,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func setup(t *testing.T, redisAddress string) (string, *Manager) {
@@ -876,6 +880,44 @@ func Test_ApplyClusterSecretLabels(t *testing.T) {
 		require.Contains(t, updatedSecret.Labels, "marker")
 		require.Equal(t, "", updatedSecret.Labels["marker"])
 		require.Equal(t, "marker", updatedSecret.Annotations[AnnotationOwnedClusterSecretLabels])
+	})
+
+	t.Run("Retries on conflict and succeeds on second attempt", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      GetClusterSecretName(agentName),
+				Namespace: testNamespace,
+				Labels: map[string]string{
+					LabelKeyClusterAgentMapping:   "wrong-agent",
+					LabelKeySelfRegisteredCluster: "false",
+					common.LabelKeySecretType:     common.LabelValueSecretTypeCluster,
+				},
+			},
+		}
+		kubeclient := kube.NewFakeClientsetWithResources(secret)
+
+		// Inject a conflict error on the first Update call; the second succeeds normally.
+		updateCount := 0
+		kubeclient.Fake.PrependReactor("update", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			updateCount++
+			if updateCount == 1 {
+				return true, nil, apierrors.NewConflict(
+					schema.GroupResource{Resource: "secrets"},
+					secret.Name,
+					fmt.Errorf("simulated conflict"),
+				)
+			}
+			// Fall through to the default fake reactor for the second attempt.
+			return false, nil, nil
+		})
+
+		updatedSecret, changed, err := ApplyClusterSecretLabels(context.Background(), kubeclient, testNamespace, secret, agentName, map[string]string{"env": "prod"})
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, 2, updateCount, "expected exactly one retry after the conflict")
+		require.Equal(t, agentName, updatedSecret.Labels[LabelKeyClusterAgentMapping])
+		require.Equal(t, "true", updatedSecret.Labels[LabelKeySelfRegisteredCluster])
+		require.Equal(t, "prod", updatedSecret.Labels["env"])
 	})
 }
 
