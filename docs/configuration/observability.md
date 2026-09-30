@@ -173,9 +173,10 @@ All action, event, and informer logs include structured fields for filtering and
 
 ### Debugging Tips
 
-1. **Enable debug logging temporarily** to troubleshoot issues:
+1. **Enable debug logging temporarily** to troubleshoot issues, without restarting the component:
    ```bash
-   kubectl set env deployment/argocd-agent-principal -n argocd ARGOCD_PRINCIPAL_LOG_LEVEL=debug
+   kubectl patch configmap argocd-agent-params -n argocd --type merge \
+     -p '{"data":{"principal.log.level":"debug"}}'
    ```
 
 2. **View logs in real-time**:
@@ -421,31 +422,16 @@ Both components support Go pprof profiling for performance analysis.
 
 ### Enabling Profiling
 
-**Principal:**
+The pprof listener is bound at startup (principal: `6060`, agent: `6161`, changeable with `--pprof-port`) but answers with `403 Forbidden` until profiling is enabled. Enable it without a restart:
 
 ```bash
-argocd-agent principal --pprof-port=6060
+kubectl patch configmap argocd-agent-params -n argocd --type merge \
+  -p '{"data":{"principal.pprof.enabled":"true"}}'
 ```
 
-Via environment variable:
+Use `agent.pprof.enabled` for the agent. It can also be enabled at startup with `--pprof-enabled` / `ARGOCD_PRINCIPAL_PPROF_ENABLED` (`ARGOCD_AGENT_PPROF_ENABLED`), but the ConfigMap value wins once it has been read.
 
-```bash
-export ARGOCD_PRINCIPAL_PPROF_PORT=6060
-```
-
-**Agent:**
-
-```bash
-argocd-agent agent --pprof-port=6060
-```
-
-Via environment variable:
-
-```bash
-export ARGOCD_AGENT_PPROF_PORT=6060
-```
-
-**Default:** Disabled (port 0)
+**Default:** Enabled listener, profiling disabled
 
 !!! warning "Security Warning"
     Only enable profiling in development or when actively debugging. The pprof endpoint exposes sensitive runtime information.
@@ -490,6 +476,25 @@ curl http://localhost:6060/debug/pprof/goroutine?debug=2
 
 For detailed profiling guidance, see the [Operations: Profiling](../operations/profiling.md) documentation.
 
+## Changing Settings Without a Restart
+
+Three debug settings are re-read from the `argocd-agent-params` ConfigMap while the component runs, so they can be changed without restarting it — which matters on the principal, where a restart makes every connected agent reconnect:
+
+| ConfigMap Entry | Effect |
+|---|---|
+| `<component>.log.level` | Log level, globally or per subsystem |
+| `<component>.log.full-detail` | Full-detail logging categories |
+| `<component>.pprof.enabled` | Whether the pprof endpoint answers requests |
+
+`<component>` is `principal` or `agent`; both read the same ConfigMap and are told apart by that prefix. Every other parameter still requires a restart.
+
+```bash
+kubectl patch configmap argocd-agent-params -n argocd --type merge \
+  -p '{"data":{"principal.log.level":"debug"}}'
+```
+
+The change takes effect within a few seconds. Removing the key reverts the setting to the value the component started with, while an empty value is an override in its own right — `principal.log.full-detail: ""` switches full detail off even when the component was started with `--full-detail`. For these three keys the ConfigMap wins once it has been read, including over a command line flag; invalid values are logged and ignored.
+
 ## Configuration Summary
 
 ### Principal Observability Settings
@@ -498,10 +503,11 @@ For detailed profiling guidance, see the [Operations: Profiling](../operations/p
 |-----------|----------|--------------|-----------|---------|
 | Log Level | `--log-level` | `ARGOCD_PRINCIPAL_LOG_LEVEL` | `principal.log.level` | `info` |
 | Log Format | `--log-format` | `ARGOCD_PRINCIPAL_LOG_FORMAT` | N/A | `text` |
-| Full Detail | `--full-detail` | `ARGOCD_PRINCIPAL_FULL_DETAIL` | N/A | disabled |
+| Full Detail | `--full-detail` | `ARGOCD_PRINCIPAL_FULL_DETAIL` | `principal.log.full-detail` | disabled |
 | Metrics Port | `--metrics-port` | `ARGOCD_PRINCIPAL_METRICS_PORT` | `principal.metrics.port` | `8000` |
 | Health Port | `--healthz-port` | `ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT` | `principal.healthz.port` | `8003` |
-| Profiling Port | `--pprof-port` | `ARGOCD_PRINCIPAL_PPROF_PORT` | N/A | `0` (disabled) |
+| Profiling Port | `--pprof-port` | `ARGOCD_PRINCIPAL_PPROF_PORT` | `principal.pprof.port` | `6060` |
+| Profiling Enabled | `--pprof-enabled` | `ARGOCD_PRINCIPAL_PPROF_ENABLED` | `principal.pprof.enabled` | `false` |
 
 ### Agent Observability Settings
 
@@ -509,10 +515,11 @@ For detailed profiling guidance, see the [Operations: Profiling](../operations/p
 |-----------|----------|--------------|-----------|---------|
 | Log Level | `--log-level` | `ARGOCD_AGENT_LOG_LEVEL` | `agent.log.level` | `info` |
 | Log Format | `--log-format` | `ARGOCD_AGENT_LOG_FORMAT` | N/A | `text` |
-| Full Detail | `--full-detail` | `ARGOCD_AGENT_FULL_DETAIL` | N/A | disabled |
+| Full Detail | `--full-detail` | `ARGOCD_AGENT_FULL_DETAIL` | `agent.log.full-detail` | disabled |
 | Metrics Port | `--metrics-port` | `ARGOCD_AGENT_METRICS_PORT` | `agent.metrics.port` | `8181` |
 | Health Port | `--healthz-port` | `ARGOCD_AGENT_HEALTH_CHECK_PORT` | `agent.healthz.port` | `8001` |
-| Profiling Port | `--pprof-port` | `ARGOCD_AGENT_PPROF_PORT` | N/A | `0` (disabled) |
+| Profiling Port | `--pprof-port` | `ARGOCD_AGENT_PPROF_PORT` | `agent.pprof.port` | `6161` |
+| Profiling Enabled | `--pprof-enabled` | `ARGOCD_AGENT_PPROF_ENABLED` | `agent.pprof.enabled` | `false` |
 
 ## Related Documentation
 

@@ -158,9 +158,22 @@ data:
   # more often than the specified interval.
   # Default: 0
   principal.keep-alive.min-interval: "0"
-  # principal.pprof.port: The port the pprof server will listen on.
-  # Default: 0
-  principal.pprof.port: "0"
+  # principal.pprof.port: The port the pprof server listens on, bound to
+  # localhost. A value of 0 means no listener is started at all, which also
+  # makes principal.pprof.enabled inert. Changing the port requires a restart.
+  # Default: 6060
+  principal.pprof.port: "6060"
+  # principal.pprof.enabled: Whether the pprof server answers requests. While
+  # false every endpoint returns 403, so the listener can sit idle at no cost
+  # until profiling is actually needed.
+  # Applied at runtime: editing this key takes effect without a restart.
+  # Default: false
+  principal.pprof.enabled: "false"
+  # principal.log.full-detail: Comma-separated list of categories to log in full
+  # detail. One or more of: all, actions, events, informers.
+  # Applied at runtime: editing this key takes effect without a restart.
+  # Default: none
+  principal.log.full-detail: ""
   # principal.redis.server.address: The address of the Redis server.
   # Default: "argocd-redis:6379"
   principal.redis.server.address: "argocd-redis:6379"

@@ -624,13 +624,14 @@ func (a *Agent) Start(ctx context.Context) error {
 	log().Infof("GPG key informer synced and ready")
 
 	if a.options.healthzPort > 0 {
-		// Endpoint to check if the agent is up and running
-		http.HandleFunc("/healthz", a.healthzHandler)
+		// Endpoint to check if the agent is up and running.
+		healthzMux := http.NewServeMux()
+		healthzMux.HandleFunc("/healthz", a.healthzHandler)
 		healthzAddr := fmt.Sprintf(":%d", a.options.healthzPort)
 
 		log().Infof("Starting healthz server on %s", healthzAddr)
 		//nolint:errcheck
-		go http.ListenAndServe(healthzAddr, nil)
+		go http.ListenAndServe(healthzAddr, healthzMux)
 	}
 
 	// Start the background process of periodic sync of cluster cache info.

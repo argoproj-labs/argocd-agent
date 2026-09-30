@@ -94,9 +94,22 @@ data:
   # a ping to the principal to keep the connection alive.
   # Default: 0
   agent.keep-alive.interval: "0"
-  # agent.pprof.port: The port the pprof server should listen on.
-  # Default: 0
-  agent.pprof.port: "0"
+  # agent.pprof.port: The port the pprof server listens on, bound to localhost.
+  # A value of 0 means no listener is started at all, which also makes
+  # agent.pprof.enabled inert. Changing the port requires a restart.
+  # Default: 6161
+  agent.pprof.port: "6161"
+  # agent.pprof.enabled: Whether the pprof server answers requests. While false
+  # every endpoint returns 403, so the listener can sit idle at no cost until
+  # profiling is actually needed.
+  # Applied at runtime: editing this key takes effect without a restart.
+  # Default: false
+  agent.pprof.enabled: "false"
+  # agent.log.full-detail: Comma-separated list of categories to log in full
+  # detail. One or more of: all, actions, events, informers.
+  # Applied at runtime: editing this key takes effect without a restart.
+  # Default: none
+  agent.log.full-detail: ""
   # agent.resource-proxy.enable: Whether to enable the resource proxy.
   # Default: true
   agent.resource-proxy.enable: "true"

@@ -876,12 +876,13 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		if s.ha != nil {
 			healthzHandler = s.ha.HAHealthzHandler(s.healthzHandler)
 		}
-		http.HandleFunc("/healthz", healthzHandler)
+		healthzMux := http.NewServeMux()
+		healthzMux.HandleFunc("/healthz", healthzHandler)
 		healthzAddr := fmt.Sprintf(":%d", s.options.healthzPort)
 
 		log().Infof("Starting healthz server on %s", healthzAddr)
 		//nolint:errcheck
-		go http.ListenAndServe(healthzAddr, nil)
+		go http.ListenAndServe(healthzAddr, healthzMux)
 	}
 
 	// Finally, start accepting connections from agents

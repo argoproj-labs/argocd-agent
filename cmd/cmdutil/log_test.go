@@ -20,7 +20,7 @@ func Test_parseLogLevels(t *testing.T) {
 		grpcEventExpected           logrus.Level
 		informerEventBufferExpected logrus.Level
 		defaultExpected             logrus.Level
-		expectedMessage             string
+		expectedError               string
 	}{
 		{
 			name:                        "set everything to warning",
@@ -30,7 +30,6 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.WarnLevel,
 			informerEventBufferExpected: logrus.WarnLevel,
 			defaultExpected:             logrus.WarnLevel,
-			expectedMessage:             "",
 		},
 		{
 			name:                        "just resource-proxy ",
@@ -40,7 +39,6 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.InfoLevel,
 			informerEventBufferExpected: logrus.InfoLevel,
 			defaultExpected:             logrus.InfoLevel,
-			expectedMessage:             "",
 		},
 		{
 			name:                        "just redis-proxy ",
@@ -50,7 +48,6 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.InfoLevel,
 			informerEventBufferExpected: logrus.InfoLevel,
 			defaultExpected:             logrus.InfoLevel,
-			expectedMessage:             "",
 		},
 		{
 			name:                        "just grpc-event ",
@@ -60,7 +57,6 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.TraceLevel,
 			informerEventBufferExpected: logrus.InfoLevel,
 			defaultExpected:             logrus.InfoLevel,
-			expectedMessage:             "",
 		},
 		{
 			name:                        "just informer-event-buffer",
@@ -70,7 +66,6 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.InfoLevel,
 			informerEventBufferExpected: logrus.DebugLevel,
 			defaultExpected:             logrus.InfoLevel,
-			expectedMessage:             "",
 		},
 		{
 			name:                        "multiple ",
@@ -80,7 +75,6 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.FatalLevel,
 			informerEventBufferExpected: logrus.InfoLevel,
 			defaultExpected:             logrus.InfoLevel,
-			expectedMessage:             "",
 		},
 		{
 			name:                        "combination of set and general",
@@ -90,7 +84,6 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.WarnLevel,
 			informerEventBufferExpected: logrus.WarnLevel,
 			defaultExpected:             logrus.WarnLevel,
-			expectedMessage:             "",
 		},
 		{
 			name:                        "general is not first argument ",
@@ -100,7 +93,6 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.TraceLevel,
 			informerEventBufferExpected: logrus.FatalLevel,
 			defaultExpected:             logrus.FatalLevel,
-			expectedMessage:             "",
 		},
 		{
 			name:                        "general is last argument",
@@ -110,7 +102,6 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.WarnLevel,
 			informerEventBufferExpected: logrus.FatalLevel,
 			defaultExpected:             logrus.FatalLevel,
-			expectedMessage:             "",
 		},
 		{
 			name:                        "nothing is there",
@@ -120,7 +111,6 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.InfoLevel,
 			informerEventBufferExpected: logrus.InfoLevel,
 			defaultExpected:             logrus.InfoLevel,
-			expectedMessage:             "",
 		},
 		{
 			name:                        "too many =",
@@ -130,17 +120,59 @@ func Test_parseLogLevels(t *testing.T) {
 			grpcEventExpected:           logrus.InfoLevel,
 			informerEventBufferExpected: logrus.InfoLevel,
 			defaultExpected:             logrus.InfoLevel,
-			expectedMessage:             "invalid please use the format subsystem",
+			expectedError:               `"grpc-event=trace=debug" is invalid, please use the format [subsystem=]loglevel`,
 		},
 		{
+			// A single invalid entry rejects the whole input: no level from any
+			// entry, valid or not, is applied.
 			name:                        "too many = and a valid after",
 			logLevels:                   []string{"grpc-event=trace=debug", "redis-proxy=warning"},
 			resourceProxyExpected:       logrus.InfoLevel,
-			redisProxyExpected:          logrus.WarnLevel,
+			redisProxyExpected:          logrus.InfoLevel,
 			grpcEventExpected:           logrus.InfoLevel,
 			informerEventBufferExpected: logrus.InfoLevel,
 			defaultExpected:             logrus.InfoLevel,
-			expectedMessage:             "invalid please use the format subsystem",
+			expectedError:               `"grpc-event=trace=debug" is invalid, please use the format [subsystem=]loglevel`,
+		},
+		{
+			name:                        "a valid entry before an invalid one is not applied",
+			logLevels:                   []string{"debug", "grpc-event=bogus"},
+			resourceProxyExpected:       logrus.InfoLevel,
+			redisProxyExpected:          logrus.InfoLevel,
+			grpcEventExpected:           logrus.InfoLevel,
+			informerEventBufferExpected: logrus.InfoLevel,
+			defaultExpected:             logrus.InfoLevel,
+			expectedError:               `invalid log level "bogus" for subsystem "grpc-event"`,
+		},
+		{
+			name:                        "unknown subsystem",
+			logLevels:                   []string{"grpc-evnt=trace"},
+			resourceProxyExpected:       logrus.InfoLevel,
+			redisProxyExpected:          logrus.InfoLevel,
+			grpcEventExpected:           logrus.InfoLevel,
+			informerEventBufferExpected: logrus.InfoLevel,
+			defaultExpected:             logrus.InfoLevel,
+			expectedError:               `invalid subsystem "grpc-evnt"`,
+		},
+		{
+			name:                        "invalid global log level",
+			logLevels:                   []string{"invalid"},
+			resourceProxyExpected:       logrus.InfoLevel,
+			redisProxyExpected:          logrus.InfoLevel,
+			grpcEventExpected:           logrus.InfoLevel,
+			informerEventBufferExpected: logrus.InfoLevel,
+			defaultExpected:             logrus.InfoLevel,
+			expectedError:               `invalid log level "invalid"`,
+		},
+		{
+			name:                        "invalid log level",
+			logLevels:                   []string{"grpc-event=invalid"},
+			resourceProxyExpected:       logrus.InfoLevel,
+			redisProxyExpected:          logrus.InfoLevel,
+			grpcEventExpected:           logrus.InfoLevel,
+			informerEventBufferExpected: logrus.InfoLevel,
+			defaultExpected:             logrus.InfoLevel,
+			expectedError:               `invalid log level "invalid" for subsystem "grpc-event"`,
 		},
 	}
 
@@ -160,18 +192,18 @@ func Test_parseLogLevels(t *testing.T) {
 			var buf bytes.Buffer
 			logrus.SetOutput(&buf)
 
-			ParseLogLevels(tt.logLevels, &ss)
+			err := ParseAndApplyLogLevels(tt.logLevels, &ss)
+			if tt.expectedError != "" {
+				assert.ErrorContains(t, err, tt.expectedError)
+			} else {
+				assert.NoError(t, err)
+			}
 
-			assert.Equal(t, tt.resourceProxyExpected, ss.ResourceProxyLogger.GetLevel())
+			assert.Equal(t, tt.resourceProxyExpected.String(), ss.ResourceProxyLogger.GetLevel().String())
 			assert.Equal(t, tt.redisProxyExpected, ss.RedisProxyLogger.GetLevel())
 			assert.Equal(t, tt.grpcEventExpected, ss.GrpcEventLogger.GetLevel())
 			assert.Equal(t, tt.informerEventBufferExpected, ss.InformerEventBufferLogger.GetLevel())
 			assert.Equal(t, tt.defaultExpected, logrus.GetLevel())
-
-			if tt.expectedMessage != "" {
-				output := buf.String()
-				assert.Contains(t, output, tt.expectedMessage)
-			}
 		})
 	}
 }

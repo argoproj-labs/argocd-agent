@@ -1,6 +1,6 @@
 # argocd-agent-principal
 
-![Version: 0.3.3](https://img.shields.io/badge/Version-0.3.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
+![Version: 0.3.4](https://img.shields.io/badge/Version-0.3.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
 
 Argo CD Agent Principal component for multi-cluster application management
 
@@ -71,13 +71,15 @@ Kubernetes: `>=1.24.0-0`
 | principal.listen.host | string | `"127.0.0.1"` | Interface address to listen on. Use "127.0.0.1" for header-based auth (prevents bypass); use "" (all interfaces) only with mTLS. |
 | principal.listen.port | int | `8443` | gRPC server port. |
 | principal.log.format | string | `"text"` | Log format (text or json). |
+| principal.log.fullDetail | string | `""` | Comma-separated full-detail logging categories (all, actions, events, informers). Very verbose; for debugging only. Applied at runtime: editing principal.log.full-detail in the params ConfigMap takes effect without a restart. |
 | principal.log.level | string | `"info"` | Log level (trace, debug, info, warn, error). |
 | principal.metrics.port | int | `8000` | Metrics server port. |
 | principal.namespace | string | `"argocd"` | Namespace the principal operates in (syncs ArgoCD apps from/to). |
 | principal.namespaceCreate.enable | bool | `false` | Allow the principal to create namespaces for agents when they don't exist. |
 | principal.namespaceCreate.labels | string | `""` | Labels to apply to auto-created namespaces (e.g. "key=value,key2=value2"). |
 | principal.namespaceCreate.pattern | string | `""` | Regexp pattern to restrict namespace names that may be auto-created. |
-| principal.pprof.port | string | `"0"` | Port for the pprof profiling server. 0 disables it. |
+| principal.pprof.enabled | string | `"false"` | Whether the pprof server answers requests; while false every endpoint returns 403. Applied at runtime: editing principal.pprof.enabled in the params ConfigMap takes effect without a restart. |
+| principal.pprof.port | string | `"6060"` | Port for the pprof profiling server, bound to localhost. 0 starts no listener at all, which also makes `enabled` below inert. |
 | principal.redis.compressionType | string | `"gzip"` | Redis compression type for agent event streams (gzip, none). |
 | principal.redis.proxy.server.tls.certPath | string | `"/app/config/redis-proxy-server-tls/tls.crt"` | Path to the TLS certificate for the Redis proxy server. |
 | principal.redis.proxy.server.tls.keyPath | string | `"/app/config/redis-proxy-server-tls/tls.key"` | Path to the TLS key for the Redis proxy server. |
