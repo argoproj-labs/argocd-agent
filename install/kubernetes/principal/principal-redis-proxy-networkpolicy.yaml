@@ -13,14 +13,37 @@ spec:
   policyTypes:
   - Ingress
   ingress:
-  # Allow Redis proxy port (6379) only from Argo CD components
+  # Allow Redis proxy port (6379) only from Argo CD, and only from this
+  # namespace. Argo CD pods carry app.kubernetes.io/name only; part-of and
+  # component are set on the Deployment metadata, not the pod template, so
+  # each component must be selected by name. Omitting namespaceSelector
+  # restricts the rule to the principal's own namespace.
   - from:
     - podSelector:
         matchLabels:
-          app.kubernetes.io/part-of: argocd
+          app.kubernetes.io/name: argocd-server
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: argocd-repo-server
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: argocd-application-controller
     ports:
     - protocol: TCP
       port: 6379
+  # Allow resource proxy port (9090) only from the Argo CD server, and only
+  # from this namespace. The server is the sole supported client: it proxies
+  # live resource requests to the agents. The hub's application controller is
+  # absent in managed and autonomous mode, and in hybrid mode agent cluster
+  # secrets carry argocd.argoproj.io/skip-reconcile so it does not reach
+  # agent clusters at all.
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: argocd-server
+    ports:
+    - protocol: TCP
+      port: 9090
   # Allow principal gRPC port (8443) from agents
   - from:
     - podSelector:
@@ -40,4 +63,3 @@ spec:
       port: 8000  # metrics
     - protocol: TCP
       port: 8003  # healthz
-
