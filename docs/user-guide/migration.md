@@ -215,7 +215,7 @@ Follow the [Getting Started guide](../getting-started/kubernetes/index.md#step-4
 kubectl logs -n argocd deployment/argocd-agent --context <workload-cluster-context>
 
 # Verify cluster appears in control plane
-argocd cluster list --context <control-plane-context>
+argocd-agentctl agent list --principal-context <control-plane-context>
 ```
 
 #### 3.2.3 Configure Cluster-Specific Settings
@@ -284,8 +284,10 @@ kubectl apply -f my-app.yaml --context <workload-cluster-context>
 
 ### 4.2 ApplicationSet Considerations
 
-!!! warning "ApplicationSet Limitations"
-    ApplicationSets are not fully supported in the current version of argocd-agent. Plan to migrate ApplicationSets to individual Applications or wait for future support.
+ApplicationSets work with argocd-agent by generating Applications that are synced through the normal agent protocol; only the resulting `Application` resources are synced between principal and agent, never the `ApplicationSet` itself. Where you run the `argocd-applicationset-controller` depends on your chosen mode:
+
+- **Managed Mode**: Run the controller on the control plane, alongside the other Argo CD control plane components. See [ApplicationSets (managed agents)](./applicationsets.md#managed-mode-applicationsets-on-the-control-plane).
+- **Autonomous Mode**: Run the controller on the workload cluster. See [ApplicationSets (autonomous agents)](./applicationsets.md#autonomous-mode-applicationsets-on-workload-clusters).
 
 ### 4.3 AppProject Migration
 
@@ -454,8 +456,8 @@ spec:
   roles:
   - name: developers
     policies:
-    - p, proj:production-project:developers, applications, get, production-*, allow
-    - p, proj:production-project:developers, applications, sync, production-*, allow
+    - p, proj:production-project:developers, applications, get, production-project/*, allow
+    - p, proj:production-project:developers, applications, sync, production-project/*, allow
 ```
 
 **Repository Access**: Ensure repository credentials are available:
@@ -516,7 +518,7 @@ Once all clusters and applications are migrated:
 
 ```bash
 # Verify all agents are connected
-kubectl get agents -A --context <control-plane-context>
+argocd-agentctl agent list --principal-context <control-plane-context>
 
 # Check principal logs for any connection issues
 kubectl logs -n argocd deployment/argocd-agent-principal --context <control-plane-context>
