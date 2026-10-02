@@ -65,7 +65,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 		tlsSecretName             string
 		tlsCert                   string
 		tlsKey                    string
-		tlsHotReload              bool
 		jwtSecretName             string
 		jwtKey                    string
 		allowTLSGenerate          bool
@@ -298,11 +297,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 				}
 			}
 
-			if tlsHotReload {
-				if allowTLSGenerate || insecurePlaintext || spireAgentSocket != "" {
-					cmdutil.Fatal("TLS certificate hot reloading is not supported with generated TLS, plaintext, or SPIRE")
-				}
-				opts = append(opts, principal.WithTLSHotReload(tlsHotReload))
+			if !insecurePlaintext || spireAgentSocket != "" {
+				opts = append(opts, principal.WithTLSHotReload(true))
+			} else {
+				logrus.Info("TLS Hot Reloading disabled due to SPIRE or insecurePlaintext being enabled")
 			}
 
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
@@ -638,9 +636,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&rootCaSecretName, "tls-ca-secret-name",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_SECRET_NAME", nil, config.SecretNamePrincipalCA),
 		"Secret name of TLS CA certificate")
-	command.Flags().BoolVar(&tlsHotReload, "tls-hot-reload",
-		env.BoolWithDefault("ARGOCD_PRINCIPAL_TLS_HOT_RELOAD", false),
-		"Enable hot reloading for TLS certificates")
 	command.Flags().StringVar(&rootCaPath, "root-ca-path",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_PATH", nil, ""),
 		"Path to a file containing the root CA certificate for verifying client certs of agents")

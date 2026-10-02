@@ -15,6 +15,7 @@
 package tlsutil
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"math/big"
@@ -77,11 +78,11 @@ func Test_TLSFileProviderOnChange(t *testing.T) {
 		Op:   fsnotify.Write,
 	}
 
-	err = provider.OnChange(event)
+	err = provider.OnChange(context.Background(), event)
 	require.NoError(t, err)
 
 	event.Name = path.Join(tempDir, "test-ca.crt")
-	err = provider.OnChange(event)
+	err = provider.OnChange(context.Background(), event)
 	require.NoError(t, err)
 
 	cert, caPool = provider.Load()
@@ -155,7 +156,7 @@ func Test_ValidateNewClientCert(t *testing.T) {
 		certPEM, keyPEM := fakecerts.CreateSelfSignedCert(t, "rsa", invalidCertTempl)
 		cert, err := tls.X509KeyPair(certPEM, keyPEM)
 		require.NoError(t, err)
-		assert.Error(t, ValidateNewClientCert(cert))
+		assert.Error(t, validateNewClientCert(cert))
 	})
 	t.Run("cert is expired", func(t *testing.T) {
 		invalidCertTempl := clientTempl
@@ -164,7 +165,7 @@ func Test_ValidateNewClientCert(t *testing.T) {
 		certPEM, keyPEM := fakecerts.CreateSelfSignedCert(t, "rsa", invalidCertTempl)
 		cert, err := tls.X509KeyPair(certPEM, keyPEM)
 		require.NoError(t, err)
-		assert.Error(t, ValidateNewClientCert(cert))
+		assert.Error(t, validateNewClientCert(cert))
 	})
 	t.Run("cert is a CA", func(t *testing.T) {
 		invalidCertTempl := clientTempl
@@ -174,13 +175,13 @@ func Test_ValidateNewClientCert(t *testing.T) {
 		certPEM, keyPEM := fakecerts.CreateSelfSignedCert(t, "rsa", invalidCertTempl)
 		cert, err := tls.X509KeyPair(certPEM, keyPEM)
 		require.NoError(t, err)
-		assert.Error(t, ValidateNewClientCert(cert))
+		assert.Error(t, validateNewClientCert(cert))
 	})
 	t.Run("cert is valid", func(t *testing.T) {
 		certPEM, keyPEM := fakecerts.CreateSelfSignedCert(t, "rsa", clientTempl)
 		cert, err := tls.X509KeyPair(certPEM, keyPEM)
 		require.NoError(t, err)
-		assert.NoError(t, ValidateNewClientCert(cert))
+		assert.NoError(t, validateNewClientCert(cert))
 	})
 }
 
@@ -190,14 +191,14 @@ func Test_ValidateNewCACert(t *testing.T) {
 		invalidCATempl.NotBefore = time.Now().Add(1 * time.Hour)
 
 		caPEM, _ := fakecerts.CreateSelfSignedCert(t, "rsa", invalidCATempl)
-		assert.Error(t, ValidateNewCACert(caPEM))
+		assert.Error(t, validateNewCACert(caPEM))
 	})
 	t.Run("ca is expired", func(t *testing.T) {
 		invalidCATempl := caTempl
 		invalidCATempl.NotAfter = time.Now().Add(-1 * time.Hour)
 
 		caPEM, _ := fakecerts.CreateSelfSignedCert(t, "rsa", invalidCATempl)
-		assert.Error(t, ValidateNewCACert(caPEM))
+		assert.Error(t, validateNewCACert(caPEM))
 	})
 	t.Run("ca is not a ca", func(t *testing.T) {
 		invalidCATempl := caTempl
@@ -205,11 +206,11 @@ func Test_ValidateNewCACert(t *testing.T) {
 		invalidCATempl.BasicConstraintsValid = false
 
 		caPEM, _ := fakecerts.CreateSelfSignedCert(t, "rsa", invalidCATempl)
-		assert.Error(t, ValidateNewCACert(caPEM))
+		assert.Error(t, validateNewCACert(caPEM))
 	})
 	t.Run("ca is valid", func(t *testing.T) {
 		caPEM, _ := fakecerts.CreateSelfSignedCert(t, "rsa", caTempl)
-		assert.NoError(t, ValidateNewCACert(caPEM))
+		assert.NoError(t, validateNewCACert(caPEM))
 	})
 	t.Run("multiple CAs provided", func(t *testing.T) {
 		caCerts := []byte{}
@@ -217,7 +218,7 @@ func Test_ValidateNewCACert(t *testing.T) {
 			caPEM, _ := fakecerts.CreateSelfSignedCert(t, "rsa", caTempl)
 			caCerts = append(caCerts, caPEM...)
 		}
-		assert.NoError(t, ValidateNewCACert(caCerts))
+		assert.NoError(t, validateNewCACert(caCerts))
 	})
 	t.Run("multiple CAs with a mix or valid and invalid", func(t *testing.T) {
 		caCerts := []byte{}
@@ -236,6 +237,6 @@ func Test_ValidateNewCACert(t *testing.T) {
 			caPEM, _ := fakecerts.CreateSelfSignedCert(t, "rsa", templ)
 			caCerts = append(caCerts, caPEM...)
 		}
-		assert.Error(t, ValidateNewCACert(caCerts))
+		assert.Error(t, validateNewCACert(caCerts))
 	})
 }

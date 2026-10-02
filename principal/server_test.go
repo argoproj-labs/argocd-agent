@@ -113,8 +113,10 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 	t.Run("With TLS Hot Reloading File Path", func(t *testing.T) {
 		templ := certTempl
 		fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
+		fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-ca"), templ)
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
 			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+			WithTLSRootCaFromFile(path.Join(tempDir, "test-ca.crt")),
 			WithTLSHotReload(true),
 			WithGeneratedTokenSigningKey(),
 			WithRedisProxyDisabled(),

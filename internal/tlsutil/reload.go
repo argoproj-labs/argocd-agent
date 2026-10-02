@@ -5,8 +5,7 @@
 //
 //	http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
+// Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
@@ -33,6 +32,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 )
 
 // TLSMaterial holds the data to be used for TLS Config
@@ -135,11 +135,12 @@ func (t *TLSFileProvider) Watch(ctx context.Context) error {
 				return fmt.Errorf("fsnotify watch event channel unexpectedly closed")
 			}
 
+			logrus.WithField(logfields.FilePath, event.Name).Info("Event received for a filepath being watched")
+
 			if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove) {
-				err := t.OnChange(event)
+				err := t.OnChange(ctx, event)
 				if err != nil {
-					logrus.WithError(err).Warning("error changing certificate, nothing was applied")
-					continue
+					return err
 				}
 			}
 			continue
@@ -155,14 +156,24 @@ func (t *TLSFileProvider) Watch(ctx context.Context) error {
 }
 
 // TLSFileProvider.OnChange handles changing out TLS data based on the event received
-func (t *TLSFileProvider) OnChange(event fsnotify.Event) error {
+func (t *TLSFileProvider) OnChange(ctx context.Context, event fsnotify.Event) error {
 	var err error
+	logrus.WithFields(logrus.Fields{
+		logfields.FileName: event.Name,
+		logfields.Event:    event.Op,
+	}).Info("Change detected in TLS data, updating internal store")
+
+	if filepath.Base(event.Name) == "..data" {
+		return t.Reload(ctx)
+	}
+
 	switch event.Name {
 	case t.CAPath:
 		err = t.caOnChange()
 	case t.ClientCertPath, t.ClientKeyPath:
 		err = t.clientOnChange()
 	}
+	logrus.Info("Successfully updated TLS configuration to have new data")
 	return err
 }
 
@@ -173,7 +184,7 @@ func (t *TLSFileProvider) clientOnChange() error {
 		return err
 	}
 
-	if err := ValidateNewClientCert(cert); err != nil {
+	if err := validateNewClientCert(cert); err != nil {
 		return fmt.Errorf("validation failed on client cert file reload: %v", err)
 	}
 
@@ -201,7 +212,7 @@ func (t *TLSFileProvider) caOnChange() error {
 		return err
 	}
 
-	if err := ValidateNewCACert(bytes); err != nil {
+	if err := validateNewCACert(bytes); err != nil {
 		return fmt.Errorf("validation failed on CA cert file reload: %v", err)
 	}
 
@@ -230,7 +241,8 @@ func (t *TLSFileProvider) caOnChange() error {
 
 // TLSFileProvider.Reload reads the sources for the TLS data and sets them if they are new
 func (t *TLSFileProvider) Reload(ctx context.Context) error {
-	currentCert, currentCAPool := t.Load()
+	logrus.Info("Reloading TLS data")
+
 	newMaterial := &TLSMaterial{}
 
 	cert, err := TLSCertFromFile(t.ClientCertPath, t.ClientKeyPath, true)
@@ -238,38 +250,36 @@ func (t *TLSFileProvider) Reload(ctx context.Context) error {
 		return err
 	}
 
-	if err = ValidateNewClientCert(cert); err == nil {
+	if err = validateNewClientCert(cert); err == nil {
 		newMaterial.Cert = cert
 	} else {
-		logrus.WithError(err).Warn("validation failed on reloading client cert, nothing was changed")
-		newMaterial.Cert = currentCert
+		return fmt.Errorf("failed to validate client cert")
 	}
 
-	if t.CAPath == "" {
+	if t.CAPath != "" {
 		bytes, err := os.ReadFile(t.CAPath)
 		if err != nil {
 			return err
 		}
 
-		if err = ValidateNewCACert(bytes); err == nil {
+		if err = validateNewCACert(bytes); err == nil {
 			caPool := x509.NewCertPool()
 			ok := caPool.AppendCertsFromPEM(bytes)
 			if ok {
 				newMaterial.CAPool = caPool
 			} else {
-				logrus.Warn("ca pem could not be appended to capool, nothing was changed")
-				newMaterial.CAPool = currentCAPool
+				return fmt.Errorf("failed to append ca pem to pool")
 			}
 		} else {
-			logrus.Warn("validation failed on reloading ca pool, nothing was changed")
-			newMaterial.CAPool = currentCAPool
+			return fmt.Errorf("validation failed on reloading ca pool: %v", err)
 		}
 	}
 
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
-
 	t.Material.Store(newMaterial)
+
+	logrus.Info("Successfully reloaded TLS data")
 
 	return nil
 }
@@ -308,13 +318,13 @@ func (t *TLSSecretProvider) Watch(ctx context.Context) error {
 		informer.WithAddHandler[*corev1.Secret](func(secret *corev1.Secret) {
 			err := t.OnChange(secret)
 			if err != nil {
-				logrus.WithError(err).Warn("error changing certificate, nothing was applied")
+				logrus.WithError(err).Fatal("Failed to change certificates")
 			}
 		}),
 		informer.WithUpdateHandler[*corev1.Secret](func(old *corev1.Secret, new *corev1.Secret) {
 			err := t.OnChange(new)
 			if err != nil {
-				logrus.WithError(err).Warn("error changing certificate, nothing was applied")
+				logrus.WithError(err).Fatal("Failed to change certificates")
 			}
 		}),
 	)
@@ -324,7 +334,7 @@ func (t *TLSSecretProvider) Watch(ctx context.Context) error {
 
 	go func() {
 		if err := informer.Start(ctx); err != nil {
-			logrus.WithError(err).Error("TLS secret informer exited non-successfully")
+			logrus.WithError(err).Fatal("TLS secret informer exited non-successfully")
 		}
 	}()
 	<-ctx.Done()
@@ -339,12 +349,16 @@ func (t *TLSSecretProvider) Watch(ctx context.Context) error {
 // TLSSecretProvider.OnChange handles changing TLS data based on which Kubernetes secret is read
 func (t *TLSSecretProvider) OnChange(secret *corev1.Secret) error {
 	var err error
+	logrus.WithFields(logrus.Fields{
+		logfields.SecretName: secret.Name,
+	}).Info("Change detected in TLS data, updating internal store")
 	switch secret.Name {
 	case t.ClientSecretName:
 		err = t.clientOnChange(secret)
 	case t.CASecretName:
 		err = t.caOnChange(secret)
 	}
+	logrus.Info("Successfully updated TLS configuration to have new data")
 	return err
 }
 
@@ -367,7 +381,7 @@ func (t *TLSSecretProvider) clientOnChange(secret *corev1.Secret) error {
 		return fmt.Errorf("cert or key data in %s/%s is invalid", secret.Namespace, secret.Name)
 	}
 
-	if err := ValidateNewClientCert(cert); err != nil {
+	if err := validateNewClientCert(cert); err != nil {
 		return fmt.Errorf("validation failed on client cert secret reload: %v", err)
 	}
 
@@ -393,7 +407,7 @@ func (t *TLSSecretProvider) clientOnChange(secret *corev1.Secret) error {
 func readTLSDataFromKey(caPool *x509.CertPool, key string, secret *corev1.Secret) error {
 	crtBytes, ok := secret.Data[key]
 	if crtBytes != nil && ok {
-		if err := ValidateNewCACert(crtBytes); err != nil {
+		if err := validateNewCACert(crtBytes); err != nil {
 			return err
 		}
 
@@ -416,16 +430,12 @@ func (t *TLSSecretProvider) caOnChange(secret *corev1.Secret) error {
 	certsInPool := 0
 
 	err := readTLSDataFromKey(caPool, "tls.crt", secret)
-	if err != nil {
-		logrus.WithError(err).Warn("failed to read ca cert from tls.crt key, nothing was applied", err)
-	} else {
+	if err == nil {
 		certsInPool++
 	}
 
 	err = readTLSDataFromKey(caPool, "ca.crt", secret)
-	if err != nil {
-		logrus.WithError(err).Warn("failed to read ca cert from ca.crt key, nothing was applied", err)
-	} else {
+	if err == nil {
 		certsInPool++
 	}
 
@@ -451,39 +461,34 @@ func (t *TLSSecretProvider) caOnChange(secret *corev1.Secret) error {
 }
 
 func (t *TLSSecretProvider) Reload(ctx context.Context) error {
-	currentCert, currentCAPool := t.Load()
+	logrus.Info("Reloading TLS data")
 	newMaterial := &TLSMaterial{}
 
 	cert, err := TLSCertFromSecret(ctx, t.kubeClient, t.Namespace, t.ClientSecretName)
 	if err != nil {
 		return err
 	}
-	if err = ValidateNewClientCert(cert); err == nil {
+	if err = validateNewClientCert(cert); err == nil {
 		newMaterial.Cert = cert
 	} else {
-		logrus.Warn("validation failed on reloading client cert, nothing was changed")
-		newMaterial.Cert = currentCert
+		return fmt.Errorf("failed to validate new client cert: %v", err)
 	}
 
 	caPool := x509.NewCertPool()
 	caSecret, err := t.kubeClient.CoreV1().Secrets(t.Namespace).Get(ctx, t.CASecretName, metav1.GetOptions{})
 	if err != nil {
-		logrus.WithError(err).Warn("failed to get ca secret")
+		return err
 	}
 
 	certsInPool := 0
 	if caSecret != nil {
 		err := readTLSDataFromKey(caPool, "tls.crt", caSecret)
-		if err != nil {
-			logrus.WithError(err).Warn("failed to read ca cert from tls.crt key, nothing was applied", err)
-		} else {
+		if err == nil {
 			certsInPool++
 		}
 
 		err = readTLSDataFromKey(caPool, "ca.crt", caSecret)
-		if err != nil {
-			logrus.WithError(err).Warn("failed to read ca cert from ca.crt key, nothing was applied", err)
-		} else {
+		if err == nil {
 			certsInPool++
 		}
 	}
@@ -491,8 +496,7 @@ func (t *TLSSecretProvider) Reload(ctx context.Context) error {
 	if certsInPool > 0 {
 		newMaterial.CAPool = caPool
 	} else {
-		logrus.Warn("no certs loaded on reload, keeping existing CA pool")
-		newMaterial.CAPool = currentCAPool
+		return fmt.Errorf("no certs loaded on reload")
 	}
 
 	t.writeMu.Lock()
@@ -500,11 +504,13 @@ func (t *TLSSecretProvider) Reload(ctx context.Context) error {
 
 	t.Material.Store(newMaterial)
 
+	logrus.Info("Successfully reloaded TLS data")
+
 	return nil
 }
 
-// ValidateNewClientCert is used to validate an incoming client cert. It ensures the cert is not a CA , that it is not expired, and is valid.
-func ValidateNewClientCert(cert tls.Certificate) error {
+// validateNewClientCert is used to validate an incoming client cert. It ensures the cert is not a CA , that it is not expired, and is valid.
+func validateNewClientCert(cert tls.Certificate) error {
 	if len(cert.Certificate) == 0 || cert.Certificate[0] == nil {
 		return fmt.Errorf("no certificate data")
 	}
@@ -529,8 +535,8 @@ func ValidateNewClientCert(cert tls.Certificate) error {
 	return nil
 }
 
-// ValidateNewCACert is used to validate an incoming CA certs. It ensures that the cert is not expired, is valid, and is a CA cert.
-func ValidateNewCACert(caPEM []byte) error {
+// validateNewCACert is used to validate an incoming CA certs. It ensures that the cert is not expired, is valid, and is a CA cert.
+func validateNewCACert(caPEM []byte) error {
 	found := false
 	for {
 		var block *pem.Block
