@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
@@ -3423,4 +3424,123 @@ func TestServer_syncRepositoryUpdatesToAgents_ForwardsToHA(t *testing.T) {
 	assert.Greater(t, after, before, "forwarding should increment sequence number")
 
 	_ = replication.DirectionOutbound
+}
+
+// TestAppProjectDeleteRace_RevertExcludesMarkExpected is the regression test for
+// issue #1112. Rather than trying to hit the interleaving by chance, it asserts
+// the property that makes it unreachable: while the callback is inside its
+// check-and-recreate section, the real queue-processor path cannot mark the
+// deletion as expected.
+func TestAppProjectDeleteRace_RevertExcludesMarkExpected(t *testing.T) {
+	const (
+		agentName   = "agent-autonomous"
+		ns          = "argocd"
+		rawName     = "sample"
+		projectName = "agent-autonomous-sample"
+		sourceUID   = "source-uid-1112"
+	)
+
+	createEntered := make(chan struct{})
+	releaseCreate := make(chan struct{})
+
+	mockProjBackend := &mocks.AppProject{}
+	mockProjBackend.On("Delete", mock.Anything, projectName, ns, mock.Anything).Return(nil)
+	// Block inside Create so the callback is suspended mid-decision: it has
+	// already observed "no expected deletion" and is about to recreate.
+	mockProjBackend.On("Create", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			close(createEntered)
+			<-releaseCreate
+		}).
+		Return(&v1alpha1.AppProject{
+			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: ns},
+		}, nil)
+
+	projectManager, err := appproject.NewAppProjectManager(mockProjBackend, ns)
+	require.NoError(t, err)
+
+	s := &Server{
+		ctx:            context.Background(),
+		namespace:      ns,
+		options:        &ServerOptions{},
+		queues:         queue.NewSendRecvQueues(),
+		events:         event.NewEventSource("test"),
+		resources:      resources.NewAgentResources(),
+		projectManager: projectManager,
+		sourceCache:    cache.NewSourceCache(),
+		deletions:      manager.NewDeletionTracker(),
+		namespaceMap: map[string]types.AgentMode{
+			agentName: types.AgentModeAutonomous,
+		},
+	}
+	require.NoError(t, s.queues.Create(agentName))
+
+	outbound := &v1alpha1.AppProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        projectName,
+			Namespace:   ns,
+			UID:         "principal-uid",
+			Annotations: map[string]string{manager.SourceUIDAnnotation: sourceUID},
+		},
+		Spec: v1alpha1.AppProjectSpec{SourceNamespaces: []string{agentName}},
+	}
+	require.True(t, s.isAppProjectFromAutonomousAgent(outbound),
+		"test fixture must be recognised as coming from an autonomous agent")
+
+	// The informer thread: observes the user's deletion and starts reverting it.
+	callbackDone := make(chan struct{})
+	go func() {
+		defer close(callbackDone)
+		s.deleteAppProjectCallback(outbound)
+	}()
+
+	select {
+	case <-createEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the revert to reach Create")
+	}
+
+	// The queue processor: the agent's own deletion of the same project arrives
+	// while the revert above is still in flight. This drives the real
+	// processAppProjectEvent rather than inlining the lock, so removing the lock
+	// from either path fails this test.
+	incoming := &v1alpha1.AppProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rawName,
+			Namespace: agentName,
+			UID:       sourceUID,
+		},
+	}
+	ev := cloudevents.NewEvent()
+	ev.SetDataSchema("appproject")
+	ev.SetType(event.Delete.String())
+	require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, incoming))
+
+	processed := make(chan error, 1)
+	go func() {
+		processed <- s.processAppProjectEvent(context.Background(), agentName, &ev)
+	}()
+
+	// This is the invariant. Without the lock the mark lands here, the revert's
+	// Create completes afterwards, and the project is orphaned.
+	select {
+	case <-processed:
+		t.Fatal("queue processor marked the deletion while the revert was mid-decision: " +
+			"the two paths are not mutually exclusive and the resource can be orphaned")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(releaseCreate)
+
+	select {
+	case err := <-processed:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("queue processor never acquired the lock after the revert finished")
+	}
+	<-callbackDone
+
+	// The mark the processor took must have been consumed by nothing else, and
+	// the project must actually have been deleted on the backend.
+	mockProjBackend.AssertExpectations(t)
 }
