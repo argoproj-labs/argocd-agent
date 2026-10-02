@@ -149,7 +149,7 @@ func (suite *TerminalStreamingTestSuite) Test_SelfRegisteredSecret_Terminal() {
 	requires.NoError(err)
 
 	// Enable self-registration
-	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, nil))
 	defer func() {
 		// Disable self-registration
 		_ = fixture.DisableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient)

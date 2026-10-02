@@ -98,9 +98,10 @@ Kubernetes: `>=1.24.0-0`
 | principal.resourceProxy.tls.certPath | string | `""` | Path to the resource proxy TLS certificate inside the container. |
 | principal.resourceProxy.tls.keyPath | string | `""` | Path to the resource proxy TLS key inside the container. |
 | principal.resourceProxyAddress | string | `"argocd-agent-resource-proxy:9090"` | Address of the resource proxy as seen by ArgoCD's application controller. |
-| principal.selfRegistration | object | `{"clientCertSecretName":"","enabled":false}` | Self-registration allows agents to auto-create their cluster secret on the principal when they first connect with valid credentials. |
+| principal.selfRegistration | object | `{"clientCertSecretName":"","enabled":false,"secretLabels":""}` | Self-registration allows agents to auto-create their cluster secret on the principal when they first connect with valid credentials. |
 | principal.selfRegistration.clientCertSecretName | string | `""` | Name of a Secret (in the principal namespace) containing a shared TLS client cert that gets copied into every self-registered cluster secret. |
 | principal.selfRegistration.enabled | bool | `false` | Enable self-registration. Requires resourceProxy.enabled=true. |
+| principal.selfRegistration.secretLabels | string | `""` | Comma-separated list of key=value labels to apply to self-registered cluster secrets (e.g. "env=prod,team=platform"). Optional. |
 | principal.spire | object | `{"authMethod":"","enabled":false,"hostSocketDir":"/run/spire/agent-sockets","mountMethod":"hostPath","socketPath":"unix:///run/spire/agent-sockets/spire-agent.sock"}` | SPIRE integration for automatic certificate and identity provisioning. |
 | principal.spire.authMethod | string | `""` | SPIFFE authentication method. Required when SPIRE is enabled. "jwt" uses JWT-SVIDs (for federated SPIRE with multiple trust domains). "mtls" uses X.509-SVIDs (for centralized SPIRE with a single trust domain). |
 | principal.spire.enabled | bool | `false` | Enable SPIRE-based TLS. When enabled, TLS credentials are obtained from the SPIRE Workload API instead of static Kubernetes secrets. |
