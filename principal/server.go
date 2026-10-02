@@ -298,16 +298,16 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 			CAPool: s.options.rootCa,
 		}
 		var err error
-		if s.options.tlsCertPath != "" && s.options.tlsKeyPath != "" {
+		if s.options.tlsCertPath != "" && s.options.tlsKeyPath != "" && s.options.rootCaPath != "" {
 			material.Cert, err = tlsutil.TLSCertFromFile(s.options.tlsCertPath, s.options.tlsKeyPath, false)
 			s.tlsSource = tlsutil.NewTLSFileProvider(s.options.tlsCertPath, s.options.tlsKeyPath, s.options.rootCaPath, material)
 			log().Info("Enabling TLS Hot Reload with File Provider Source")
-		} else if s.options.tlsCert != nil && s.options.tlsKey != nil {
+		} else if s.options.tlsCert != nil && s.options.tlsKey != nil && s.options.rootCa != nil {
 			material.Cert, err = tlsutil.TLSCertFromX509(s.options.tlsCert, s.options.tlsKey)
 			s.tlsSource = tlsutil.NewTLSSecretProvider(s.options.tlsSecretName, s.options.rootCaSecretName, s.namespace, s.kubeClient.Clientset, material)
 			log().Info("Enabling TLS Hot Reload with Secret Provider Source")
 		} else {
-			err = fmt.Errorf("cert and key are not set properly or are not set through the same method")
+			err = fmt.Errorf("CA, tls cert, or tls key is missing, make sure they all exist")
 		}
 		if err != nil {
 			return nil, err
@@ -912,17 +912,9 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		go func() {
 			for {
 				if err := s.tlsSource.Watch(s.ctx); err != nil {
-					logrus.Errorf("TLS Hot Reload watch has exited non-successfully: %v, retrying in 5 seconds", err)
+					log().WithError(err).Fatal("TLS hot reload watch failed")
 				} else {
 					log().Info("TLS Hot Reload Watch has exited")
-				}
-				select {
-				case <-s.ctx.Done():
-					return
-				case <-time.After(5 * time.Second):
-				}
-				if err := s.tlsSource.Reload(s.ctx); err != nil {
-					log().WithError(err).Warn("failed to reload certs, nothing was applied")
 				}
 			}
 		}()
