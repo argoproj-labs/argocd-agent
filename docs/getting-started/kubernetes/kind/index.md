@@ -185,11 +185,17 @@ kubectl get configmap argocd-agent-params \
 ```
 
 ### Open NetworkPolicy for agent traffic
+
+The agent runs on a separate kind cluster, so it reaches the principal as
+external traffic and cannot be matched by pod or namespace selectors. Append a
+rule that allows the gRPC port from any source. Appending to `-` keeps this
+independent of the order of the existing rules.
+
 ```bash
 kubectl patch networkpolicy argocd-agent-redis-proxy \
   -n $NAMESPACE_NAME \
   --context kind-$PRINCIPAL_CLUSTER_NAME \
-  --type='json' -p='[{"op":"remove","path":"/spec/ingress/1/from"}]'
+  --type='json' -p='[{"op":"add","path":"/spec/ingress/-","value":{"ports":[{"protocol":"TCP","port":8443}]}}]'
 ```
 
 ### Update Principal configuration
