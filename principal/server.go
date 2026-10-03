@@ -88,6 +88,8 @@ type Server struct {
 	options     *ServerOptions
 	tlsConfig   *tls.Config
 	tlsConfigMu sync.RWMutex
+	// tlsSource watches a TLS source (a file or Kubernetes secret) for updates and holds the most recent data from those sources
+	tlsSource tlsutil.TLSSource
 	// listener contains GRPC server listener
 	listener *Listener
 	// server is not currently used
@@ -300,6 +302,27 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	// Validate TLS options after all options have been applied
 	if err := tlsutil.ValidateTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers); err != nil {
 		return nil, err
+	}
+
+	if s.options.tlsHotReload {
+		material := &tlsutil.TLSMaterial{
+			CAPool: s.options.rootCa,
+		}
+		var err error
+		if s.options.tlsCertPath != "" && s.options.tlsKeyPath != "" && s.options.rootCaPath != "" {
+			material.Cert, err = tlsutil.TLSCertFromFile(s.options.tlsCertPath, s.options.tlsKeyPath, false)
+			s.tlsSource = tlsutil.NewTLSFileProvider(s.options.tlsCertPath, s.options.tlsKeyPath, s.options.rootCaPath, material)
+			log().Info("Enabling TLS Hot Reload with File Provider Source")
+		} else if s.options.tlsCert != nil && s.options.tlsKey != nil && s.options.rootCa != nil {
+			material.Cert, err = tlsutil.TLSCertFromX509(s.options.tlsCert, s.options.tlsKey)
+			s.tlsSource = tlsutil.NewTLSSecretProvider(s.options.tlsSecretName, s.options.rootCaSecretName, s.namespace, s.kubeClient.Clientset, material)
+			log().Info("Enabling TLS Hot Reload with Secret Provider Source")
+		} else {
+			err = fmt.Errorf("CA, tls cert, or tls key is missing, make sure they all exist")
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	s.handlersOnConnect = []handlersOnConnect{
@@ -896,6 +919,19 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		go http.ListenAndServe(healthzAddr, healthzMux)
 	}
 
+	// Start TLS Hot Reloading if enabled
+	if s.options.tlsHotReload {
+		go func() {
+			for {
+				if err := s.tlsSource.Watch(s.ctx); err != nil {
+					log().WithError(err).Fatal("TLS hot reload watch failed")
+				} else {
+					log().Info("TLS Hot Reload Watch has exited")
+				}
+			}
+		}()
+	}
+
 	// Finally, start accepting connections from agents
 	if s.options.serveGRPC {
 		if err := s.serveGRPC(ctx, s.metrics, s.grpcServerMetrics, errch); err != nil {
@@ -1067,7 +1103,6 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 }
 
 func (s *Server) sendCurrentStateToAgent(agentParam types.Agent) error {
-
 	if agentParam.Mode() == types.AgentModeAutonomous.String() {
 		return fmt.Errorf("sending current state to autonomous agent is not supported")
 	}
@@ -1298,6 +1333,27 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 		log().Infof("This server will require TLS client certs as part of authentication")
 		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 		tlsConfig.ClientCAs = s.options.rootCa
+	}
+
+	// If hot reloading is enabled set the GetConfigForClient callback to load from the TLSSource
+	if s.options.tlsHotReload {
+		tlsConfig.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
+			cert, caPool := s.tlsSource.Load()
+
+			tlsConfig := &tls.Config{
+				Certificates: []tls.Certificate{cert},
+				MinVersion:   s.options.tlsMinVersion,
+				MaxVersion:   s.options.tlsMaxVersion,
+				CipherSuites: s.options.tlsCiphers,
+			}
+
+			if s.options.requireClientCerts {
+				tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+				tlsConfig.ClientCAs = caPool
+			}
+
+			return tlsConfig, nil
+		}
 	}
 
 	return tlsConfig, nil

@@ -292,6 +292,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 				}
 			}
 
+			if !insecurePlaintext || spireAgentSocket != "" {
+				opts = append(opts, principal.WithTLSHotReload(true))
+			} else {
+				logrus.Info("TLS Hot Reloading disabled due to SPIRE or insecurePlaintext being enabled")
+			}
+
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
 			opts = append(opts, principal.WithClientCertSubjectMatch(clientCertSubjectMatch))
 
