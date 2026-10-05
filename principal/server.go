@@ -321,7 +321,8 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 			err = fmt.Errorf("CA, tls cert, or tls key is missing, make sure they all exist")
 		}
 		if err != nil {
-			return nil, err
+			s.tlsSource = nil
+			log().WithError(err).Warn("TLS hot reloading will not be started due to an error")
 		}
 	}
 
@@ -920,7 +921,7 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	}
 
 	// Start TLS Hot Reloading if enabled
-	if s.options.tlsHotReload {
+	if s.options.tlsHotReload && s.tlsSource != nil {
 		go func() {
 			for {
 				if err := s.tlsSource.Watch(s.ctx); err != nil {
