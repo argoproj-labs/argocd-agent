@@ -68,8 +68,6 @@ func TestTLSHotReloadTestSuite(t *testing.T) {
 
 func (suite *TLSHotReloadTestSuite) SetupSuite() {
 	suite.BaseSuite.SetupSuite()
-
-	// Skip if running in cluster because we need to be able to read/write to file paths fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
 }
 
 func (suite *TLSHotReloadTestSuite) TearDownTest() {
@@ -192,6 +190,9 @@ func createTestSecrets(t *testing.T, ctx context.Context, kubeClient fixture.Kub
 
 // Test_ReloadServerCertByFilePath tests to make sure that a server cert and key can be reloaded successfully by file path
 func (suite *TLSHotReloadTestSuite) Test_ReloadServerCertByFilePath() {
+	// Skip if running in cluster because we need to be able to read/write to file paths
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+
 	dir, ca, caPEM, caKeyPEM, _, _ := generateAndWriteInitalCerts(suite.T())
 
 	err := fixture.WriteEnvVarsToFile(map[string]string{
@@ -211,6 +212,9 @@ func (suite *TLSHotReloadTestSuite) Test_ReloadServerCertByFilePath() {
 
 // Test_ReloadCAByFilePath tests to make sure that a server ca can be reloaded successfully by file path
 func (suite *TLSHotReloadTestSuite) Test_ReloadCAByFilePath() {
+	// Skip if running in cluster because we need to be able to read/write to file paths
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+
 	dir, _, _, _, serverPEM, serverKeyPEM := generateAndWriteInitalCerts(suite.T())
 
 	err := fixture.WriteEnvVarsToFile(map[string]string{
@@ -277,6 +281,9 @@ func (suite *TLSHotReloadTestSuite) Test_ReloadCABySecret() {
 
 // Test_PrincipalFailsOnBadReload reloads the cert data with a bad cert and ensures that the principal terminates on a bad reload
 func (suite *TLSHotReloadTestSuite) Test_PrincipalFailsOnBadReload() {
+	// Skip if running in cluster because we need to be able to read/write to file paths
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+
 	dir, _, caPEM, caKeyPEM, _, _ := generateAndWriteInitalCerts(suite.T())
 
 	err := fixture.WriteEnvVarsToFile(map[string]string{
