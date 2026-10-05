@@ -14,10 +14,12 @@ spec:
   - Ingress
   ingress:
   # Allow Redis proxy port (6379) only from Argo CD, and only from this
-  # namespace. Argo CD pods carry app.kubernetes.io/name only; part-of and
-  # component are set on the Deployment metadata, not the pod template, so
-  # each component must be selected by name. Omitting namespaceSelector
-  # restricts the rule to the principal's own namespace.
+  # namespace. Select by app.kubernetes.io/name: the plain manifests set only
+  # that label on pods (part-of lives on the Deployment), and the Helm chart
+  # sets part-of on every Argo CD pod, so part-of is either absent or too
+  # broad. This matches the client set in Argo CD's own
+  # argocd-redis-network-policy. Omitting namespaceSelector restricts the rule
+  # to the principal's own namespace.
   - from:
     - podSelector:
         matchLabels:
