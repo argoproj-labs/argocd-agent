@@ -1348,6 +1348,7 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 				MinVersion:   s.options.tlsMinVersion,
 				MaxVersion:   s.options.tlsMaxVersion,
 				CipherSuites: s.options.tlsCiphers,
+				NextProtos:   []string{"h2"},
 			}
 
 			if s.options.requireClientCerts {
