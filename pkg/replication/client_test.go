@@ -18,11 +18,13 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
@@ -517,4 +519,67 @@ func TestProtoToReplicatedEvent_ConvertsCloudEvent(t *testing.T) {
 		assert.Equal(t, "my-project", gotProj.Name)
 		assert.Equal(t, "argocd", gotProj.Namespace)
 	})
+}
+
+// oversizedSnapshotTestServer serves a snapshot larger than gRPC's 4 MiB
+// default receive limit.
+type oversizedSnapshotTestServer struct {
+	replicationapi.UnimplementedReplicationServer
+	payloadBytes int
+}
+
+func (s *oversizedSnapshotTestServer) GetSnapshot(_ context.Context, _ *replicationapi.SnapshotRequest) (*replicationapi.ReplicationSnapshot, error) {
+	return &replicationapi.ReplicationSnapshot{
+		LastSequenceNum: 42,
+		PrincipalResources: []*replicationapi.Resource{{
+			Kind:      "Application",
+			Namespace: "project-example",
+			Name:      strings.Repeat("a", s.payloadBytes),
+		}},
+	}, nil
+}
+
+func TestClientGetSnapshot_AcceptsSnapshotLargerThanGRPCDefault(t *testing.T) {
+	ctx := context.Background()
+
+	const payloadBytes = 8 * 1024 * 1024
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	replicationapi.RegisterReplicationServer(server, &oversizedSnapshotTestServer{
+		payloadBytes: payloadBytes,
+	})
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	t.Cleanup(server.Stop)
+
+	c := NewClient(ctx,
+		WithPrimaryAddress(listener.Addr().String()),
+		WithInsecure(),
+	)
+	require.NoError(t, c.Connect(ctx))
+	t.Cleanup(func() {
+		require.NoError(t, c.Stop())
+	})
+
+	snapshot, err := c.GetSnapshot(ctx)
+	require.NoError(t, err)
+	require.Len(t, snapshot.PrincipalResources, 1)
+	assert.Equal(t, payloadBytes, len(snapshot.PrincipalResources[0].Name))
+}
+
+func TestClientMaxGRPCMessageByteSize(t *testing.T) {
+	ctx := context.Background()
+
+	assert.Equal(t, grpcutil.DefaultGRPCMaxMessageSize, NewClient(ctx).maxGRPCMessageByteSize,
+		"a client with no explicit size must not fall back to the gRPC default")
+
+	c := NewClient(ctx, WithMaxGRPCMessageByteSize(1234))
+	assert.Equal(t, 1234, c.maxGRPCMessageByteSize)
+
+	c = NewClient(ctx, WithMaxGRPCMessageByteSize(0))
+	assert.Equal(t, grpcutil.DefaultGRPCMaxMessageSize, c.maxGRPCMessageByteSize,
+		"a non-positive size must leave the default in place")
 }
