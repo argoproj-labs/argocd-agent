@@ -378,6 +378,12 @@ spec:
                 name: {{ include "argocd-agent-principal.configMapName" . }}
                 key: principal.self-registration.client-cert-secret
                 optional: true
+          - name: ARGOCD_PRINCIPAL_SELF_REGISTRATION_SECRET_LABELS
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.self-registration.secret-labels
+                optional: true
           - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_ADDRESS
             valueFrom:
               configMapKeyRef:

@@ -165,6 +165,7 @@ data:
   principal.spire.auth-method: {{ ternary .Values.principal.spire.authMethod "" .Values.principal.spire.enabled | quote }}
   principal.self-registration.enabled: {{ .Values.principal.selfRegistration.enabled | quote }}
   principal.self-registration.client-cert-secret: {{ .Values.principal.selfRegistration.clientCertSecretName | quote }}
+  principal.self-registration.secret-labels: {{ .Values.principal.selfRegistration.secretLabels | quote }}
   principal.resource-proxy.address: {{ .Values.principal.resourceProxyAddress | quote }}
   {{- range $key, $value := .Values.configMapData }}
   {{ $key }}: {{ $value | quote }}
