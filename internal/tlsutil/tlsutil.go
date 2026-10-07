@@ -273,7 +273,7 @@ func isTLS13OnlyCurve(curve tls.CurveID) bool {
 // It checks that:
 // - The minimum TLS version is not greater than the maximum TLS version
 // - All configured cipher suites are compatible with the minimum TLS version
-// - All configured curve preferences are usable with the maximum TLS version
+// - At least one configured curve preference is usable with the maximum TLS version
 func ValidateTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16, curvePreferences []tls.CurveID) error {
 	// Check that min version <= max version (if both are set)
 	if minVersion != 0 && maxVersion != 0 {
@@ -301,14 +301,20 @@ func ValidateTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16, cur
 		}
 	}
 
-	// Hybrid/PQ groups are TLS 1.3-only. If max version is capped below TLS 1.3,
-	// reject them so the server cannot accept a config that cannot handshake.
+	// Hybrid/PQ groups are TLS 1.3-only and are ignored by Go for earlier versions.
+	// Allow configurations that still include a classical fallback usable with the
+	// permitted max version; reject only when no configured group can handshake.
 	if len(curvePreferences) > 0 && maxVersion != 0 && maxVersion < tls.VersionTLS13 {
+		hasUsableCurve := false
 		for _, curve := range curvePreferences {
-			if isTLS13OnlyCurve(curve) {
-				return fmt.Errorf("TLS curve preference %s is not supported by maximum TLS version %s",
-					curve.String(), TLSVersionName(maxVersion))
+			if !isTLS13OnlyCurve(curve) {
+				hasUsableCurve = true
+				break
 			}
+		}
+		if !hasUsableCurve {
+			return fmt.Errorf("no configured TLS curve preference is supported by maximum TLS version %s",
+				TLSVersionName(maxVersion))
 		}
 	}
 
@@ -318,17 +324,24 @@ func ValidateTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16, cur
 // SetTLSConfigFromFlags sets the TLS configuration parameters from the command line flags.
 // It returns an error if any of the parameters are invalid.
 // tlsConfig must be a pointer to an initialized tls.Config struct and will be modified in place.
+// Validation uses the effective configuration after merging supplied flags with any
+// values already present on tlsConfig (omitted flags keep existing values).
 func SetTLSConfigFromFlags(tlsConfig *tls.Config, minVersion, maxVersion string, cipherSuites []string, curvePreferences []string) error {
 	var err error
 	if tlsConfig == nil {
 		return fmt.Errorf("tlsConfig is nil")
 	}
-	var (
-		minver  uint16
-		maxver  uint16
-		ciphers []uint16
-		curves  []tls.CurveID
-	)
+
+	setCiphers := len(cipherSuites) > 0 && (len(cipherSuites) != 1 || cipherSuites[0] != "")
+	setCurves := len(curvePreferences) > 0 && (len(curvePreferences) != 1 || curvePreferences[0] != "")
+
+	// Start from existing config so omitted flags are still validated against
+	// the values that will remain after assignment.
+	minver := tlsConfig.MinVersion
+	maxver := tlsConfig.MaxVersion
+	ciphers := tlsConfig.CipherSuites
+	curves := tlsConfig.CurvePreferences
+
 	if minVersion != "" {
 		minver, err = TLSVersionFromName(minVersion)
 		if err != nil {
@@ -341,13 +354,13 @@ func SetTLSConfigFromFlags(tlsConfig *tls.Config, minVersion, maxVersion string,
 			return err
 		}
 	}
-	if len(cipherSuites) > 0 && (len(cipherSuites) != 1 || cipherSuites[0] != "") {
+	if setCiphers {
 		ciphers, err = ParseCipherSuites(cipherSuites)
 		if err != nil {
 			return err
 		}
 	}
-	if len(curvePreferences) > 0 && (len(curvePreferences) != 1 || curvePreferences[0] != "") {
+	if setCurves {
 		curves, err = ParseCurvePreferences(curvePreferences)
 		if err != nil {
 			return err
@@ -362,10 +375,10 @@ func SetTLSConfigFromFlags(tlsConfig *tls.Config, minVersion, maxVersion string,
 	if maxVersion != "" {
 		tlsConfig.MaxVersion = maxver
 	}
-	if len(cipherSuites) > 0 && (len(cipherSuites) != 1 || cipherSuites[0] != "") {
+	if setCiphers {
 		tlsConfig.CipherSuites = ciphers
 	}
-	if len(curvePreferences) > 0 && (len(curvePreferences) != 1 || curvePreferences[0] != "") {
+	if setCurves {
 		tlsConfig.CurvePreferences = curves
 	}
 	return nil

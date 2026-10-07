@@ -296,18 +296,24 @@ func Test_ValidateTLSConfig(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("TLS 1.3-only curve rejected when max version is TLS 1.2", func(t *testing.T) {
+	t.Run("TLS 1.3-only curves rejected when max version is TLS 1.2 and no fallback", func(t *testing.T) {
 		err := ValidateTLSConfig(0, tls.VersionTLS12, nil, []tls.CurveID{tls.X25519MLKEM768})
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "X25519MLKEM768")
+		assert.Contains(t, err.Error(), "no configured TLS curve preference is supported")
 		assert.Contains(t, err.Error(), "maximum TLS version")
 	})
 
-	t.Run("TLS 1.3-only hybrid curves rejected when max version is TLS 1.2", func(t *testing.T) {
-		for _, curve := range []tls.CurveID{tls.X25519MLKEM768, tls.SecP256r1MLKEM768, tls.SecP384r1MLKEM1024} {
-			err := ValidateTLSConfig(tls.VersionTLS12, tls.VersionTLS12, nil, []tls.CurveID{curve})
-			assert.Error(t, err, "curve %s", curve)
-		}
+	t.Run("All TLS 1.3-only hybrid curves rejected when max version is TLS 1.2", func(t *testing.T) {
+		err := ValidateTLSConfig(tls.VersionTLS12, tls.VersionTLS12, nil, []tls.CurveID{
+			tls.X25519MLKEM768, tls.SecP256r1MLKEM768, tls.SecP384r1MLKEM1024,
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no configured TLS curve preference is supported")
+	})
+
+	t.Run("Hybrid curve with classical fallback allowed when max version is TLS 1.2", func(t *testing.T) {
+		err := ValidateTLSConfig(0, tls.VersionTLS12, nil, []tls.CurveID{tls.X25519MLKEM768, tls.X25519})
+		assert.NoError(t, err)
 	})
 
 	t.Run("TLS 1.3-only curve allowed when max version is TLS 1.3", func(t *testing.T) {
@@ -478,17 +484,26 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 	})
 
 	t.Run("Omitted params preserve existing config values", func(t *testing.T) {
-		cs := tls.CipherSuites()[0]
+		// Use a cipher compatible with the new min version so merged validation passes.
+		var tls12Cipher *tls.CipherSuite
+		for _, cs := range tls.CipherSuites() {
+			if slices.Contains(cs.SupportedVersions, tls.VersionTLS12) {
+				tls12Cipher = cs
+				break
+			}
+		}
+		require.NotNil(t, tls12Cipher, "need at least one TLS 1.2 cipher to run this test")
+
 		cfg := &tls.Config{
 			MinVersion:   tls.VersionTLS11,
 			MaxVersion:   tls.VersionTLS13,
-			CipherSuites: []uint16{cs.ID},
+			CipherSuites: []uint16{tls12Cipher.ID},
 		}
 		err := SetTLSConfigFromFlags(cfg, "tls1.2", "", nil, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
 		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion, "maxVersion should be preserved")
-		assert.Equal(t, []uint16{cs.ID}, cfg.CipherSuites, "cipherSuites should be preserved")
+		assert.Equal(t, []uint16{tls12Cipher.ID}, cfg.CipherSuites, "cipherSuites should be preserved")
 	})
 
 	t.Run("Valid curve preferences", func(t *testing.T) {
@@ -513,13 +528,53 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 		assert.Nil(t, cfg.CurvePreferences)
 	})
 
-	t.Run("TLS 1.3-only curve rejected with max version TLS 1.2", func(t *testing.T) {
+	t.Run("TLS 1.3-only curve rejected with max version TLS 1.2 when no fallback", func(t *testing.T) {
 		cfg := &tls.Config{}
 		err := SetTLSConfigFromFlags(cfg, "", "tls1.2", nil, []string{"X25519MLKEM768"})
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "X25519MLKEM768")
+		assert.Contains(t, err.Error(), "no configured TLS curve preference is supported")
 		assert.Nil(t, cfg.CurvePreferences)
 		assert.Equal(t, uint16(0), cfg.MaxVersion)
+	})
+
+	t.Run("Hybrid curve with classical fallback allowed with max version TLS 1.2", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "tls1.2", nil, []string{"X25519MLKEM768", "X25519"})
+		assert.NoError(t, err)
+		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MaxVersion)
+		assert.Equal(t, []tls.CurveID{tls.X25519MLKEM768, tls.X25519}, cfg.CurvePreferences)
+	})
+
+	t.Run("Rejects curves against existing MaxVersion when max flag omitted", func(t *testing.T) {
+		cfg := &tls.Config{
+			MaxVersion: tls.VersionTLS12,
+		}
+		err := SetTLSConfigFromFlags(cfg, "", "", nil, []string{"X25519MLKEM768"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no configured TLS curve preference is supported")
+		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MaxVersion)
+		assert.Nil(t, cfg.CurvePreferences)
+	})
+
+	t.Run("Rejects max version against existing TLS 1.3-only curves when curves flag omitted", func(t *testing.T) {
+		cfg := &tls.Config{
+			CurvePreferences: []tls.CurveID{tls.X25519MLKEM768},
+		}
+		err := SetTLSConfigFromFlags(cfg, "", "tls1.2", nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no configured TLS curve preference is supported")
+		assert.Equal(t, uint16(0), cfg.MaxVersion)
+		assert.Equal(t, []tls.CurveID{tls.X25519MLKEM768}, cfg.CurvePreferences)
+	})
+
+	t.Run("Allows classical curves against existing MaxVersion TLS 1.2", func(t *testing.T) {
+		cfg := &tls.Config{
+			MaxVersion: tls.VersionTLS12,
+		}
+		err := SetTLSConfigFromFlags(cfg, "", "", nil, []string{"X25519"})
+		assert.NoError(t, err)
+		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MaxVersion)
+		assert.Equal(t, []tls.CurveID{tls.X25519}, cfg.CurvePreferences)
 	})
 }
 
