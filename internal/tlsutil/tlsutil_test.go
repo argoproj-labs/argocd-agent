@@ -231,29 +231,29 @@ func Test_ParseCurvePreferences(t *testing.T) {
 
 func Test_ValidateTLSConfig(t *testing.T) {
 	t.Run("Valid configuration with min < max", func(t *testing.T) {
-		err := ValidateTLSConfig(tls.VersionTLS12, tls.VersionTLS13, nil)
+		err := ValidateTLSConfig(tls.VersionTLS12, tls.VersionTLS13, nil, nil)
 		assert.NoError(t, err)
 	})
 
 	t.Run("Valid configuration with min == max", func(t *testing.T) {
-		err := ValidateTLSConfig(tls.VersionTLS12, tls.VersionTLS12, nil)
+		err := ValidateTLSConfig(tls.VersionTLS12, tls.VersionTLS12, nil, nil)
 		assert.NoError(t, err)
 	})
 
 	t.Run("Invalid configuration with min > max", func(t *testing.T) {
-		err := ValidateTLSConfig(tls.VersionTLS13, tls.VersionTLS12, nil)
+		err := ValidateTLSConfig(tls.VersionTLS13, tls.VersionTLS12, nil, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "minimum TLS version")
 		assert.Contains(t, err.Error(), "cannot be higher than maximum TLS version")
 	})
 
 	t.Run("Valid configuration with only min set", func(t *testing.T) {
-		err := ValidateTLSConfig(tls.VersionTLS12, 0, nil)
+		err := ValidateTLSConfig(tls.VersionTLS12, 0, nil, nil)
 		assert.NoError(t, err)
 	})
 
 	t.Run("Valid configuration with only max set", func(t *testing.T) {
-		err := ValidateTLSConfig(0, tls.VersionTLS13, nil)
+		err := ValidateTLSConfig(0, tls.VersionTLS13, nil, nil)
 		assert.NoError(t, err)
 	})
 
@@ -269,7 +269,7 @@ func Test_ValidateTLSConfig(t *testing.T) {
 			}
 		}
 		if tls12Cipher != nil {
-			err := ValidateTLSConfig(tls.VersionTLS12, 0, []uint16{tls12Cipher.ID})
+			err := ValidateTLSConfig(tls.VersionTLS12, 0, []uint16{tls12Cipher.ID}, nil)
 			assert.NoError(t, err)
 		}
 	})
@@ -285,14 +285,43 @@ func Test_ValidateTLSConfig(t *testing.T) {
 			}
 		}
 		if tls12OnlyCipher != nil {
-			err := ValidateTLSConfig(tls.VersionTLS13, 0, []uint16{tls12OnlyCipher.ID})
+			err := ValidateTLSConfig(tls.VersionTLS13, 0, []uint16{tls12OnlyCipher.ID}, nil)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "is not supported by minimum TLS version")
 		}
 	})
 
 	t.Run("Empty cipher suites should pass validation", func(t *testing.T) {
-		err := ValidateTLSConfig(tls.VersionTLS13, 0, []uint16{})
+		err := ValidateTLSConfig(tls.VersionTLS13, 0, []uint16{}, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("TLS 1.3-only curve rejected when max version is TLS 1.2", func(t *testing.T) {
+		err := ValidateTLSConfig(0, tls.VersionTLS12, nil, []tls.CurveID{tls.X25519MLKEM768})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "X25519MLKEM768")
+		assert.Contains(t, err.Error(), "maximum TLS version")
+	})
+
+	t.Run("TLS 1.3-only hybrid curves rejected when max version is TLS 1.2", func(t *testing.T) {
+		for _, curve := range []tls.CurveID{tls.X25519MLKEM768, tls.SecP256r1MLKEM768, tls.SecP384r1MLKEM1024} {
+			err := ValidateTLSConfig(tls.VersionTLS12, tls.VersionTLS12, nil, []tls.CurveID{curve})
+			assert.Error(t, err, "curve %s", curve)
+		}
+	})
+
+	t.Run("TLS 1.3-only curve allowed when max version is TLS 1.3", func(t *testing.T) {
+		err := ValidateTLSConfig(tls.VersionTLS12, tls.VersionTLS13, nil, []tls.CurveID{tls.X25519MLKEM768})
+		assert.NoError(t, err)
+	})
+
+	t.Run("TLS 1.3-only curve allowed when max version unset", func(t *testing.T) {
+		err := ValidateTLSConfig(tls.VersionTLS12, 0, nil, []tls.CurveID{tls.X25519MLKEM768})
+		assert.NoError(t, err)
+	})
+
+	t.Run("Classical curves allowed with max version TLS 1.2", func(t *testing.T) {
+		err := ValidateTLSConfig(0, tls.VersionTLS12, nil, []tls.CurveID{tls.X25519, tls.CurveP256})
 		assert.NoError(t, err)
 	})
 }
@@ -482,6 +511,15 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 		err := SetTLSConfigFromFlags(cfg, "", "", nil, []string{""})
 		assert.NoError(t, err)
 		assert.Nil(t, cfg.CurvePreferences)
+	})
+
+	t.Run("TLS 1.3-only curve rejected with max version TLS 1.2", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "tls1.2", nil, []string{"X25519MLKEM768"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "X25519MLKEM768")
+		assert.Nil(t, cfg.CurvePreferences)
+		assert.Equal(t, uint16(0), cfg.MaxVersion)
 	})
 }
 

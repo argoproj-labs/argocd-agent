@@ -124,6 +124,20 @@ func Test_NewServer(t *testing.T) {
 		assert.Nil(t, s)
 	})
 
+	t.Run("Reject TLS 1.3-only curve when max version is TLS 1.2", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+			WithMinimumTLSVersion("tls1.2"),
+			WithMaximumTLSVersion("tls1.2"),
+			WithTLSCurvePreferences([]string{"X25519MLKEM768"}),
+		)
+		assert.Error(t, err)
+		assert.Nil(t, s)
+		assert.Contains(t, err.Error(), "X25519MLKEM768")
+		assert.Contains(t, err.Error(), "maximum TLS version")
+	})
+
 	t.Run("Redis proxy should be nil when disabled", func(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		assert.NoError(t, err)

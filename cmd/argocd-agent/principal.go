@@ -150,6 +150,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 		Use:   "principal",
 		Short: "Run the argocd-agent principal component",
 		Run: func(c *cobra.Command, args []string) {
+			if len(tlsCurvePreferences) == 1 && tlsCurvePreferences[0] == "list" {
+				cmdutil.PrintAvailableCurvePreferences()
+				return
+			}
 			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
 
@@ -308,10 +312,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 			if len(tlsCipherSuites) > 0 && (len(tlsCipherSuites) != 1 || tlsCipherSuites[0] != "") {
 				opts = append(opts, principal.WithTLSCipherSuites(tlsCipherSuites))
-			}
-			if len(tlsCurvePreferences) == 1 && tlsCurvePreferences[0] == "list" {
-				cmdutil.PrintAvailableCurvePreferences()
-				return
 			}
 			if len(tlsCurvePreferences) > 0 && (len(tlsCurvePreferences) != 1 || tlsCurvePreferences[0] != "") {
 				opts = append(opts, principal.WithTLSCurvePreferences(tlsCurvePreferences))

@@ -415,7 +415,7 @@ func NewRemote(hostname string, port int, opts ...RemoteOption) (*Remote, error)
 	}
 
 	// Validate TLS configuration after all options have been applied
-	if err := tlsutil.ValidateTLSConfig(r.tlsConfig.MinVersion, r.tlsConfig.MaxVersion, r.tlsConfig.CipherSuites); err != nil {
+	if err := tlsutil.ValidateTLSConfig(r.tlsConfig.MinVersion, r.tlsConfig.MaxVersion, r.tlsConfig.CipherSuites, r.tlsConfig.CurvePreferences); err != nil {
 		return nil, err
 	}
 
