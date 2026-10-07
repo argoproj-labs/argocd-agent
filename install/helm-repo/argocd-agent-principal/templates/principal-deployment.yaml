@@ -204,6 +204,12 @@ spec:
                 name: {{ include "argocd-agent-principal.configMapName" . }}
                 key: principal.tls.ciphersuites
                 optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_CURVE_PREFERENCES
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-principal.configMapName" . }}
+                key: principal.tls.curve-preferences
+                optional: true
           - name: ARGOCD_PRINCIPAL_INSECURE_PLAINTEXT
             valueFrom:
               configMapKeyRef:

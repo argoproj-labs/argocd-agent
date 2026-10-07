@@ -229,6 +229,8 @@ principal:
     maxVersion: ""
     # -- Comma-separated list of TLS cipher suites. Empty uses Go defaults.
     ciphersuites: ""
+    # -- Comma-separated list of TLS curve preferences. Empty uses Go defaults.
+    curvePreferences: ""
 
   redis:
     # -- Redis compression type for agent event streams (gzip, none).

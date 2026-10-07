@@ -44,19 +44,20 @@ import (
 )
 
 type ServerOptions struct {
-	serverName    string
-	port          int
-	address       string
-	tlsCertPath   string
-	tlsKeyPath    string
-	tlsCert       *x509.Certificate
-	tlsKey        crypto.PrivateKey
-	tlsCiphers    []uint16
-	tlsMinVersion uint16
-	tlsMaxVersion uint16
-	gracePeriod   time.Duration
-	namespaces    []string
-	signingKey    crypto.PrivateKey
+	serverName          string
+	port                int
+	address             string
+	tlsCertPath         string
+	tlsKeyPath          string
+	tlsCert             *x509.Certificate
+	tlsKey              crypto.PrivateKey
+	tlsCiphers          []uint16
+	tlsCurvePreferences []tls.CurveID
+	tlsMinVersion       uint16
+	tlsMaxVersion       uint16
+	gracePeriod         time.Duration
+	namespaces          []string
+	signingKey          crypto.PrivateKey
 	// unauthMethods is not currently implemented
 	unauthMethods map[string]bool
 	serveGRPC     bool
@@ -376,6 +377,19 @@ func WithTLSCipherSuites(cipherSuites []string) ServerOption {
 			return err
 		}
 		o.options.tlsCiphers = cipherIDs
+		return nil
+	}
+}
+
+// WithTLSCurvePreferences configures the TLS curve / key-exchange preferences
+// to be used by the server. If an unknown curve is specified, an error is returned.
+func WithTLSCurvePreferences(curvePreferences []string) ServerOption {
+	return func(o *Server) error {
+		curves, err := tlsutil.ParseCurvePreferences(curvePreferences)
+		if err != nil {
+			return err
+		}
+		o.options.tlsCurvePreferences = curves
 		return nil
 	}
 }

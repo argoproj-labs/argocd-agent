@@ -286,6 +286,18 @@ Maximum TLS version to accept from connecting agents.
 
 Comma-separated list of TLS cipher suites to use. Use `--tls-ciphersuites=list` to display available options.
 
+### TLS Curve Preferences
+
+| | |
+|---|---|
+| **CLI Flag** | `--tls-curve-preferences` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_TLS_CURVE_PREFERENCES` |
+| **ConfigMap Entry** | `principal.tls.curve-preferences` |
+| **Type** | String (comma-separated) |
+| **Default** | `""` (Go defaults) |
+
+Comma-separated list of TLS curve / key-exchange preferences to use. Use `--tls-curve-preferences=list` to display available options.
+
 ## Resource Proxy Configuration
 
 ### Enable Resource Proxy

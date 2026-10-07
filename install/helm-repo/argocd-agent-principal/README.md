@@ -1,6 +1,6 @@
 # argocd-agent-principal
 
-![Version: 0.3.4](https://img.shields.io/badge/Version-0.3.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
+![Version: 0.3.5](https://img.shields.io/badge/Version-0.3.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
 
 Argo CD Agent Principal component for multi-cluster application management
 
@@ -109,6 +109,7 @@ Kubernetes: `>=1.24.0-0`
 | principal.tls.ciphersuites | string | `""` | Comma-separated list of TLS cipher suites. Empty uses Go defaults. |
 | principal.tls.clientCert.matchSubject | bool | `false` | Match the subject field in the client certificate to the agent's registered name. |
 | principal.tls.clientCert.require | bool | `false` | Require agents to present a client certificate upon connection. |
+| principal.tls.curvePreferences | string | `""` | Comma-separated list of TLS curve preferences. Empty uses Go defaults. |
 | principal.tls.insecurePlaintext | bool | `false` | Disable TLS and accept plaintext connections. Use only with a sidecar (e.g. Istio) that handles TLS. |
 | principal.tls.maxVersion | string | `""` | Maximum TLS version (tls1.1, tls1.2, tls1.3). Empty uses highest available. |
 | principal.tls.minVersion | string | `"tls1.3"` | Minimum TLS version (tls1.1, tls1.2, tls1.3). Empty uses Go default. |

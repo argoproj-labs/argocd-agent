@@ -103,6 +103,42 @@ func Test_WithTLSCipherSuites(t *testing.T) {
 	})
 }
 
+func Test_WithTLSCurvePreferences(t *testing.T) {
+	t.Run("Single valid curve preference", func(t *testing.T) {
+		s := &Server{options: &ServerOptions{}}
+		err := WithTLSCurvePreferences([]string{"X25519"})(s)
+		assert.NoError(t, err)
+		assert.Equal(t, []tls.CurveID{tls.X25519}, s.options.tlsCurvePreferences)
+	})
+
+	t.Run("Multiple valid curve preferences", func(t *testing.T) {
+		s := &Server{options: &ServerOptions{}}
+		err := WithTLSCurvePreferences([]string{"X25519", "CurveP256"})(s)
+		assert.NoError(t, err)
+		assert.Equal(t, []tls.CurveID{tls.X25519, tls.CurveP256}, s.options.tlsCurvePreferences)
+	})
+
+	t.Run("Empty curve preferences", func(t *testing.T) {
+		s := &Server{options: &ServerOptions{}}
+		err := WithTLSCurvePreferences([]string{})(s)
+		assert.NoError(t, err)
+		assert.Nil(t, s.options.tlsCurvePreferences)
+	})
+
+	t.Run("Invalid curve preference", func(t *testing.T) {
+		s := &Server{options: &ServerOptions{}}
+		err := WithTLSCurvePreferences([]string{"cowabunga"})(s)
+		assert.Error(t, err)
+		assert.Nil(t, s.options.tlsCurvePreferences)
+	})
+
+	t.Run("Mix of valid and invalid curve preferences", func(t *testing.T) {
+		s := &Server{options: &ServerOptions{}}
+		err := WithTLSCurvePreferences([]string{"X25519", "invalid"})(s)
+		assert.Error(t, err)
+	})
+}
+
 func Test_WithMinimumTLSVersion(t *testing.T) {
 	t.Run("All valid minimum TLS versions", func(t *testing.T) {
 		versions := map[string]uint16{

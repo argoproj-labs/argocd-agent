@@ -416,11 +416,12 @@ func replicationClientTLSConfig(serverTLSConfig *tls.Config) *tls.Config {
 		return nil
 	}
 	return &tls.Config{
-		Certificates: serverTLSConfig.Certificates,
-		RootCAs:      serverTLSConfig.ClientCAs,
-		MinVersion:   serverTLSConfig.MinVersion,
-		MaxVersion:   serverTLSConfig.MaxVersion,
-		CipherSuites: serverTLSConfig.CipherSuites,
+		Certificates:     serverTLSConfig.Certificates,
+		RootCAs:          serverTLSConfig.ClientCAs,
+		MinVersion:       serverTLSConfig.MinVersion,
+		MaxVersion:       serverTLSConfig.MaxVersion,
+		CipherSuites:     serverTLSConfig.CipherSuites,
+		CurvePreferences: serverTLSConfig.CurvePreferences,
 	}
 }
 
@@ -466,12 +467,13 @@ func (h *HAComponents) loadAdminTLSConfig(haOptions *ha.Options) (*tls.Config, e
 		return nil, fmt.Errorf("main server uses dynamic certificates (e.g. SPIRE); configure --ha-admin-tls-cert, --ha-admin-tls-key, and --ha-admin-ca for the HA admin endpoint")
 	}
 	return &tls.Config{
-		Certificates: serverTLSConfig.Certificates,
-		MinVersion:   serverTLSConfig.MinVersion,
-		MaxVersion:   serverTLSConfig.MaxVersion,
-		CipherSuites: serverTLSConfig.CipherSuites,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    serverTLSConfig.ClientCAs,
+		Certificates:     serverTLSConfig.Certificates,
+		MinVersion:       serverTLSConfig.MinVersion,
+		MaxVersion:       serverTLSConfig.MaxVersion,
+		CipherSuites:     serverTLSConfig.CipherSuites,
+		CurvePreferences: serverTLSConfig.CurvePreferences,
+		ClientAuth:       tls.RequireAndVerifyClientCert,
+		ClientCAs:        serverTLSConfig.ClientCAs,
 	}, nil
 }
 

@@ -16,6 +16,7 @@ package principal
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"math/big"
 	"os"
@@ -122,6 +123,33 @@ func Test_NewServer(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithListenerPort(-1), WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		assert.Error(t, err)
 		assert.Nil(t, s)
+	})
+
+	t.Run("Reject TLS 1.3-only curves when max version is TLS 1.2 and no fallback", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+			WithMinimumTLSVersion("tls1.2"),
+			WithMaximumTLSVersion("tls1.2"),
+			WithTLSCurvePreferences([]string{"X25519MLKEM768"}),
+		)
+		assert.Error(t, err)
+		assert.Nil(t, s)
+		assert.Contains(t, err.Error(), "no configured TLS curve preference is supported")
+		assert.Contains(t, err.Error(), "maximum TLS version")
+	})
+
+	t.Run("Allow hybrid curve with classical fallback when max version is TLS 1.2", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+			WithMinimumTLSVersion("tls1.2"),
+			WithMaximumTLSVersion("tls1.2"),
+			WithTLSCurvePreferences([]string{"X25519MLKEM768", "X25519"}),
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.Equal(t, []tls.CurveID{tls.X25519MLKEM768, tls.X25519}, s.options.tlsCurvePreferences)
 	})
 
 	t.Run("Redis proxy should be nil when disabled", func(t *testing.T) {

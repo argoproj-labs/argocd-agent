@@ -696,6 +696,7 @@ kubectl create secret generic argocd-agent-ca \
 | `principal.tls.min-version` | Minimum TLS version | `"tls1.3"` |
 | `principal.tls.max-version` | Maximum TLS version | `""` (highest) |
 | `principal.tls.ciphersuites` | Allowed cipher suites | `""` (Go defaults) |
+| `principal.tls.curve-preferences` | Allowed curve / key-exchange preferences | `""` (Go defaults) |
 | `principal.tls.client-cert.require` | Require client certificates | `false` |
 | `principal.tls.client-cert.match-subject` | Validate cert CN matches agent name | `false` |
 
@@ -717,10 +718,11 @@ principal.tls.client-cert.match-subject: "true"
 | `agent.tls.ciphersuites` | Allowed cipher suites | `""` (Go defaults) |
 | `agent.tls.client.insecure` | Skip server cert verification | `false` |
 
-**List Available Cipher Suites:**
+**List Available Cipher Suites and Curve Preferences:**
 
 ```bash
 argocd-agent principal --tls-ciphersuites=list
+argocd-agent principal --tls-curve-preferences=list
 argocd-agent agent --tls-ciphersuites=list
 ```
 

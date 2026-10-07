@@ -153,6 +153,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.tls.ciphersuites
                 optional: true
+          - name: ARGOCD_PRINCIPAL_TLS_CURVE_PREFERENCES
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.tls.curve-preferences
+                optional: true
           - name: ARGOCD_PRINCIPAL_RESOURCE_PROXY_SECRET_NAME
             valueFrom:
               configMapKeyRef:
