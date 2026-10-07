@@ -93,6 +93,10 @@ data:
   # Run 'argocd-agent principal --tls-ciphersuites=list' to see available suites.
   # Default: "" (use Go defaults)
   principal.tls.ciphersuites: ""
+  # principal.tls.curve-preferences: Comma-separated list of TLS curve preferences.
+  # Run 'argocd-agent principal --tls-curve-preferences=list' to see available curves.
+  # Default: "" (use Go defaults)
+  principal.tls.curve-preferences: ""
   # principal.resource-proxy.secret-name: The name of the secret containing
   # the TLS certificate and key for the resource proxy.
   # Default: "argocd-agent-resource-proxy-tls"

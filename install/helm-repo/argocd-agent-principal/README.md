@@ -107,6 +107,7 @@ Kubernetes: `>=1.24.0-0`
 | principal.spire.hostSocketDir | string | `"/run/spire/agent-sockets"` | Path to the SPIRE Agent socket directory. Used as the container mountPath and host path. |
 | principal.spire.mountMethod | string | `"hostPath"` | How to mount the SPIRE Agent socket into the pod. "hostPath" mounts the socket directory from the host. |
 | principal.tls.ciphersuites | string | `""` | Comma-separated list of TLS cipher suites. Empty uses Go defaults. |
+| principal.tls.curvePreferences | string | `""` | Comma-separated list of TLS curve preferences. Empty uses Go defaults. |
 | principal.tls.clientCert.matchSubject | bool | `false` | Match the subject field in the client certificate to the agent's registered name. |
 | principal.tls.clientCert.require | bool | `false` | Require agents to present a client certificate upon connection. |
 | principal.tls.insecurePlaintext | bool | `false` | Disable TLS and accept plaintext connections. Use only with a sidecar (e.g. Istio) that handles TLS. |

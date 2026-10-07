@@ -76,14 +76,15 @@ type RedisProxy struct {
 	logger *logging.CentralizedLogger
 
 	// TLS configuration for Redis proxy server (incoming connections from Argo CD)
-	tlsEnabled        bool
-	tlsServerCert     *x509.Certificate
-	tlsServerKey      crypto.PrivateKey
-	tlsServerCertPath string
-	tlsServerKeyPath  string
-	tlsMinVersion     uint16
-	tlsMaxVersion     uint16
-	tlsCipherSuites   []uint16
+	tlsEnabled          bool
+	tlsServerCert       *x509.Certificate
+	tlsServerKey        crypto.PrivateKey
+	tlsServerCertPath   string
+	tlsServerKeyPath    string
+	tlsMinVersion       uint16
+	tlsMaxVersion       uint16
+	tlsCipherSuites     []uint16
+	tlsCurvePreferences []tls.CurveID
 
 	// TLS configuration for Redis (connections to principal's argocd-redis)
 	redisTLSCA       *x509.CertPool
@@ -162,10 +163,11 @@ func (rp *RedisProxy) SetServerTLSFromPath(certPath, keyPath string) {
 }
 
 // SetServerTLSConfig sets the TLS protocol configuration for the Redis proxy server
-func (rp *RedisProxy) SetServerTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16) {
+func (rp *RedisProxy) SetServerTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16, curvePreferences []tls.CurveID) {
 	rp.tlsMinVersion = minVersion
 	rp.tlsMaxVersion = maxVersion
 	rp.tlsCipherSuites = cipherSuites
+	rp.tlsCurvePreferences = curvePreferences
 }
 
 // SetUpstreamTLSCA sets the CA certificate pool for verifying upstream Redis TLS
@@ -204,10 +206,11 @@ func (rp *RedisProxy) createServerTLSConfig() (*tls.Config, error) {
 	}
 
 	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   rp.tlsMinVersion,
-		MaxVersion:   rp.tlsMaxVersion,
-		CipherSuites: rp.tlsCipherSuites,
+		Certificates:     []tls.Certificate{cert},
+		MinVersion:       rp.tlsMinVersion,
+		MaxVersion:       rp.tlsMaxVersion,
+		CipherSuites:     rp.tlsCipherSuites,
+		CurvePreferences: rp.tlsCurvePreferences,
 	}, nil
 }
 

@@ -18,6 +18,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"strings"
+
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 )
 
 // PrintAvailableCipherSuites prints all available TLS cipher suites and their
@@ -41,5 +43,15 @@ func PrintAvailableCipherSuites() {
 		}
 		fmt.Printf("  %s\n", cs.Name)
 		fmt.Printf("    Supported versions: %s\n", strings.Join(versions, ", "))
+	}
+}
+
+// PrintAvailableCurvePreferences prints all available TLS curve / key-exchange
+// preferences to stdout.
+func PrintAvailableCurvePreferences() {
+	fmt.Println("Available TLS curve preferences:")
+	fmt.Println()
+	for _, name := range tlsutil.SupportedCurvePreferenceNames() {
+		fmt.Printf("  %s\n", name)
 	}
 }

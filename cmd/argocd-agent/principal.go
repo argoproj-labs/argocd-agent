@@ -90,9 +90,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 		resourceProxyCaSecretName string
 		resourceProxyCAPath       string
 
-		tlsMinVersion   string
-		tlsMaxVersion   string
-		tlsCipherSuites []string
+		tlsMinVersion       string
+		tlsMaxVersion       string
+		tlsCipherSuites     []string
+		tlsCurvePreferences []string
 
 		// Minimum time duration for agent to wait before sending next keepalive ping to principal
 		// if agent sends ping more often than specified interval then connection will be dropped
@@ -308,6 +309,13 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if len(tlsCipherSuites) > 0 && (len(tlsCipherSuites) != 1 || tlsCipherSuites[0] != "") {
 				opts = append(opts, principal.WithTLSCipherSuites(tlsCipherSuites))
 			}
+			if len(tlsCurvePreferences) == 1 && tlsCurvePreferences[0] == "list" {
+				cmdutil.PrintAvailableCurvePreferences()
+				return
+			}
+			if len(tlsCurvePreferences) > 0 && (len(tlsCurvePreferences) != 1 || tlsCurvePreferences[0] != "") {
+				opts = append(opts, principal.WithTLSCurvePreferences(tlsCurvePreferences))
+			}
 
 			opts = append(opts, principal.WithResourceProxyEnabled(enableResourceProxy))
 
@@ -326,7 +334,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if proxyTLS == nil {
 					cmdutil.Fatal("Could not load resource proxy TLS configuration: result is nil")
 				}
-				if err := tlsutil.SetTLSConfigFromFlags(proxyTLS, tlsMinVersion, tlsMaxVersion, tlsCipherSuites); err != nil {
+				if err := tlsutil.SetTLSConfigFromFlags(proxyTLS, tlsMinVersion, tlsMaxVersion, tlsCipherSuites, tlsCurvePreferences); err != nil {
 					cmdutil.Fatal("Could not set TLS configuration for resource proxy: %v", err)
 				}
 				opts = append(opts, principal.WithResourceProxyTLS(proxyTLS))
@@ -641,6 +649,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&tlsCipherSuites, "tls-ciphersuites",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_TLS_CIPHERSUITES", nil, []string{}),
 		"Comma-separated list of TLS cipher suites to use. Use 'list' to show available cipher suites and exit")
+	command.Flags().StringSliceVar(&tlsCurvePreferences, "tls-curve-preferences",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_TLS_CURVE_PREFERENCES", nil, []string{}),
+		"Comma-separated list of TLS curve preferences to use. Use 'list' to show available curve preferences and exit")
 
 	command.Flags().StringVar(&resourceProxySecretName, "resource-proxy-secret-name",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_SECRET_NAME", nil, config.SecretNameProxyTLS),

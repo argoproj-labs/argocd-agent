@@ -150,6 +150,7 @@ data:
   principal.tls.min-version: {{ .Values.principal.tls.minVersion | quote }}
   principal.tls.max-version: {{ .Values.principal.tls.maxVersion | quote }}
   principal.tls.ciphersuites: {{ .Values.principal.tls.ciphersuites | quote }}
+  principal.tls.curve-preferences: {{ .Values.principal.tls.curvePreferences | quote }}
   principal.tls.insecure-plaintext: {{ .Values.principal.tls.insecurePlaintext | quote }}
   principal.destination-based-mapping: {{ .Values.principal.destinationBasedMapping | quote }}
   principal.label-selector: {{ .Values.principal.labelSelector | quote }}

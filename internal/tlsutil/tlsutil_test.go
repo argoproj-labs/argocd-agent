@@ -197,6 +197,38 @@ func Test_ParseCipherSuites(t *testing.T) {
 	})
 }
 
+func Test_ParseCurvePreferences(t *testing.T) {
+	t.Run("Single valid curve preference", func(t *testing.T) {
+		ids, err := ParseCurvePreferences([]string{"X25519"})
+		assert.NoError(t, err)
+		assert.Equal(t, []tls.CurveID{tls.X25519}, ids)
+	})
+
+	t.Run("Multiple valid curve preferences", func(t *testing.T) {
+		ids, err := ParseCurvePreferences([]string{"X25519", "CurveP256", "X25519MLKEM768"})
+		assert.NoError(t, err)
+		assert.Equal(t, []tls.CurveID{tls.X25519, tls.CurveP256, tls.X25519MLKEM768}, ids)
+	})
+
+	t.Run("Empty curve preferences", func(t *testing.T) {
+		ids, err := ParseCurvePreferences([]string{})
+		assert.NoError(t, err)
+		assert.Nil(t, ids)
+	})
+
+	t.Run("Invalid curve preference", func(t *testing.T) {
+		ids, err := ParseCurvePreferences([]string{"cowabunga"})
+		assert.Error(t, err)
+		assert.Nil(t, ids)
+	})
+
+	t.Run("Mix of valid and invalid curve preferences", func(t *testing.T) {
+		ids, err := ParseCurvePreferences([]string{"X25519", "invalid"})
+		assert.Error(t, err)
+		assert.Nil(t, ids)
+	})
+}
+
 func Test_ValidateTLSConfig(t *testing.T) {
 	t.Run("Valid configuration with min < max", func(t *testing.T) {
 		err := ValidateTLSConfig(tls.VersionTLS12, tls.VersionTLS13, nil)
@@ -267,14 +299,14 @@ func Test_ValidateTLSConfig(t *testing.T) {
 
 func Test_SetTLSConfigFromFlags(t *testing.T) {
 	t.Run("Nil tlsConfig returns error", func(t *testing.T) {
-		err := SetTLSConfigFromFlags(nil, "", "", nil)
+		err := SetTLSConfigFromFlags(nil, "", "", nil, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "tlsConfig is nil")
 	})
 
 	t.Run("All empty params is a no-op", func(t *testing.T) {
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "", "", nil)
+		err := SetTLSConfigFromFlags(cfg, "", "", nil, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, uint16(0), cfg.MinVersion)
 		assert.Equal(t, uint16(0), cfg.MaxVersion)
@@ -283,7 +315,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 
 	t.Run("Valid minVersion only", func(t *testing.T) {
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "tls1.2", "", nil)
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "", nil, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
 		assert.Equal(t, uint16(0), cfg.MaxVersion)
@@ -291,7 +323,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 
 	t.Run("Valid maxVersion only", func(t *testing.T) {
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "", "tls1.3", nil)
+		err := SetTLSConfigFromFlags(cfg, "", "tls1.3", nil, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, uint16(0), cfg.MinVersion)
 		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion)
@@ -299,7 +331,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 
 	t.Run("Valid minVersion and maxVersion", func(t *testing.T) {
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "tls1.2", "tls1.3", nil)
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "tls1.3", nil, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
 		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion)
@@ -307,7 +339,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 
 	t.Run("Invalid minVersion returns error", func(t *testing.T) {
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "ssl3.0", "", nil)
+		err := SetTLSConfigFromFlags(cfg, "ssl3.0", "", nil, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not supported")
 		assert.Equal(t, uint16(0), cfg.MinVersion)
@@ -315,7 +347,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 
 	t.Run("Invalid maxVersion returns error", func(t *testing.T) {
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "tls1.2", "invalid", nil)
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "invalid", nil, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not supported")
 	})
@@ -323,28 +355,28 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 	t.Run("Valid cipher suites", func(t *testing.T) {
 		cs := tls.CipherSuites()[0]
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "", "", []string{cs.Name})
+		err := SetTLSConfigFromFlags(cfg, "", "", []string{cs.Name}, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, []uint16{cs.ID}, cfg.CipherSuites)
 	})
 
 	t.Run("Invalid cipher suite returns error", func(t *testing.T) {
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "", "", []string{"not-a-cipher"})
+		err := SetTLSConfigFromFlags(cfg, "", "", []string{"not-a-cipher"}, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no such cipher suite")
 	})
 
 	t.Run("Single empty string in cipher suites is treated as empty", func(t *testing.T) {
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "", "", []string{""})
+		err := SetTLSConfigFromFlags(cfg, "", "", []string{""}, nil)
 		assert.NoError(t, err)
 		assert.Nil(t, cfg.CipherSuites)
 	})
 
 	t.Run("Empty slice of cipher suites is a no-op", func(t *testing.T) {
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "", "", []string{})
+		err := SetTLSConfigFromFlags(cfg, "", "", []string{}, nil)
 		assert.NoError(t, err)
 		assert.Nil(t, cfg.CipherSuites)
 	})
@@ -366,7 +398,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 		require.NotEmpty(t, cipherName, "need at least one TLS 1.2 cipher to run this test")
 
 		cfg := &tls.Config{}
-		err := SetTLSConfigFromFlags(cfg, "tls1.2", "tls1.3", []string{cipherName})
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "tls1.3", []string{cipherName}, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
 		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion)
@@ -377,7 +409,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 		cfg := &tls.Config{
 			ServerName: "example.com",
 		}
-		err := SetTLSConfigFromFlags(cfg, "tls1.2", "", nil)
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "", nil, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, "example.com", cfg.ServerName)
 		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
@@ -388,7 +420,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 			MinVersion: tls.VersionTLS11,
 			MaxVersion: tls.VersionTLS13,
 		}
-		err := SetTLSConfigFromFlags(cfg, "tls1.2", "bogus", nil)
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "bogus", nil, nil)
 		assert.Error(t, err)
 		assert.Equal(t, uint16(tls.VersionTLS11), cfg.MinVersion)
 		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion)
@@ -399,7 +431,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 		cfg := &tls.Config{
 			MinVersion: tls.VersionTLS11,
 		}
-		err := SetTLSConfigFromFlags(cfg, "tls1.2", "tls1.3", []string{"not-a-cipher"})
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "tls1.3", []string{"not-a-cipher"}, nil)
 		assert.Error(t, err)
 		assert.Equal(t, uint16(tls.VersionTLS11), cfg.MinVersion)
 		assert.Equal(t, uint16(0), cfg.MaxVersion)
@@ -410,7 +442,7 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 		cfg := &tls.Config{
 			MaxVersion: tls.VersionTLS12,
 		}
-		err := SetTLSConfigFromFlags(cfg, "bogus", "tls1.3", nil)
+		err := SetTLSConfigFromFlags(cfg, "bogus", "tls1.3", nil, nil)
 		assert.Error(t, err)
 		assert.Equal(t, uint16(0), cfg.MinVersion)
 		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MaxVersion)
@@ -423,11 +455,33 @@ func Test_SetTLSConfigFromFlags(t *testing.T) {
 			MaxVersion:   tls.VersionTLS13,
 			CipherSuites: []uint16{cs.ID},
 		}
-		err := SetTLSConfigFromFlags(cfg, "tls1.2", "", nil)
+		err := SetTLSConfigFromFlags(cfg, "tls1.2", "", nil, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
 		assert.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion, "maxVersion should be preserved")
 		assert.Equal(t, []uint16{cs.ID}, cfg.CipherSuites, "cipherSuites should be preserved")
+	})
+
+	t.Run("Valid curve preferences", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "", nil, []string{"X25519", "CurveP256"})
+		assert.NoError(t, err)
+		assert.Equal(t, []tls.CurveID{tls.X25519, tls.CurveP256}, cfg.CurvePreferences)
+	})
+
+	t.Run("Invalid curve preference returns error", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "", nil, []string{"not-a-curve"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no such TLS curve preference")
+		assert.Nil(t, cfg.CurvePreferences)
+	})
+
+	t.Run("Single empty string in curve preferences is treated as empty", func(t *testing.T) {
+		cfg := &tls.Config{}
+		err := SetTLSConfigFromFlags(cfg, "", "", nil, []string{""})
+		assert.NoError(t, err)
+		assert.Nil(t, cfg.CurvePreferences)
 	})
 }
 

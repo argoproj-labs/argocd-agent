@@ -555,7 +555,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 			}
 
 			// Apply global TLS configuration to Redis proxy server
-			s.redisProxy.SetServerTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers)
+			s.redisProxy.SetServerTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers, s.options.tlsCurvePreferences)
 
 			// Redis TLS (for connections to principal's argocd-redis)
 			if s.options.redisTLSInsecure {
@@ -1261,12 +1261,13 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 			clientAuth = tls.RequireAndVerifyClientCert
 		}
 		tlsConfig := &tls.Config{
-			GetCertificate: s.options.spireSource.GetCertificate(),
-			ClientAuth:     clientAuth,
-			ClientCAs:      trustBundle,
-			MinVersion:     s.options.tlsMinVersion,
-			MaxVersion:     s.options.tlsMaxVersion,
-			CipherSuites:   s.options.tlsCiphers,
+			GetCertificate:   s.options.spireSource.GetCertificate(),
+			ClientAuth:       clientAuth,
+			ClientCAs:        trustBundle,
+			MinVersion:       s.options.tlsMinVersion,
+			MaxVersion:       s.options.tlsMaxVersion,
+			CipherSuites:     s.options.tlsCiphers,
+			CurvePreferences: s.options.tlsCurvePreferences,
 		}
 		return tlsConfig, nil
 	}
@@ -1284,10 +1285,11 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	}
 
 	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   s.options.tlsMinVersion,
-		MaxVersion:   s.options.tlsMaxVersion,
-		CipherSuites: s.options.tlsCiphers,
+		Certificates:     []tls.Certificate{cert},
+		MinVersion:       s.options.tlsMinVersion,
+		MaxVersion:       s.options.tlsMaxVersion,
+		CipherSuites:     s.options.tlsCiphers,
+		CurvePreferences: s.options.tlsCurvePreferences,
 	}
 
 	// If the server is configured to require client certificates, set up the
