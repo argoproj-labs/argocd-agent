@@ -64,16 +64,16 @@ func downgradeToHTTP1Handler(target string, agentCert tls.Certificate) http.Hand
 
 		// Use reverse proxy with HTTP/1.1 enforcement
 		proxy := &httputil.ReverseProxy{
-			Director: func(req *http.Request) {
-				req.URL.Host = target
-				if req.URL.Scheme == "" {
-					req.URL.Scheme = "https"
+			Rewrite: func(r *httputil.ProxyRequest) {
+				r.Out.URL.Host = target
+				if r.Out.URL.Scheme == "" {
+					r.Out.URL.Scheme = "https"
 				}
 
 				// Ensure the request is downgraded to HTTP/1.1
-				req.ProtoMajor, req.ProtoMinor, req.Proto = 1, 1, "HTTP/1.1"
+				r.Out.ProtoMajor, r.Out.ProtoMinor, r.Out.Proto = 1, 1, "HTTP/1.1"
 
-				fmt.Printf("Proxying %s request to %s (downgraded to %s)\n", req.Method, req.URL, req.Proto)
+				fmt.Printf("Proxying %s request to %s (downgraded to %s)\n", r.Out.Method, r.Out.URL, r.Out.Proto)
 			},
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{

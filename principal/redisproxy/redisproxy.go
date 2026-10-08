@@ -301,15 +301,12 @@ func (rp *RedisProxy) handleConnection(fromArgoCDConn net.Conn) {
 	go func() {
 		// Any traffic sent from principal redis will be automatically forwarded back to principal argocd, without any modification.
 		// - As of this writing, there is no need to proxy/MITM any traffic in the direction of (principal redis) -> (principal argo cd)
-		if err := forwardTrafficSimple("r->a", redisReader, argocdWriter, logCtx); err != nil {
-
-			if strings.Contains(err.Error(), "use of closed network connection") {
-				logCtx.WithError(err).Trace("forwardTraffic exited due to closed network connection, this is usually expected behaviour.")
-			} else {
-				logCtx.WithError(err).Error("traffic forwarder returned unexpected error")
-			}
-
-			return
+		// forwardTrafficSimple only returns on read/write failure (never nil).
+		err := forwardTrafficSimple("r->a", redisReader, argocdWriter, logCtx)
+		if strings.Contains(err.Error(), "use of closed network connection") {
+			logCtx.WithError(err).Trace("forwardTraffic exited due to closed network connection, this is usually expected behaviour.")
+		} else {
+			logCtx.WithError(err).Error("traffic forwarder returned unexpected error")
 		}
 	}()
 
