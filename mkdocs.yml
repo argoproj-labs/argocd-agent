@@ -43,18 +43,18 @@ nav:
       - Managed Agents:
           - Introduction: user-guide/managed-agent/index.md
           - Agent mapping: user-guide/managed-agent/agent-mapping.md
-          - Applications: user-guide/managed-agent/applications-managed-mode.md
-          - AppProjects: user-guide/managed-agent/appprojects-managed-mode.md
-          - ApplicationSets: user-guide/managed-agent/applicationsets-managed-mode.md
+          - Application synchronization: user-guide/managed-agent/applications-managed-mode.md
+          - AppProject synchronization: user-guide/managed-agent/appprojects-managed-mode.md
+          - ApplicationSet synchronization: user-guide/managed-agent/applicationsets-managed-mode.md
           - Repository management: user-guide/managed-agent/repository.md
           - Web-based terminal: user-guide/managed-agent/web-terminal.md
-          - GPG Key Synchronization: user-guide/managed-agent/gpg-keys.md
+          - GPG Key synchronization: user-guide/managed-agent/gpg-keys.md
           - Hybrid Architecture: user-guide/managed-agent/hybrid-architecture.md
       - Autonomous Agents:
           - Introduction: user-guide/autonomous-agent/index.md
-          - Applications: user-guide/autonomous-agent/applications-autonomous-mode.md
-          - AppProjects: user-guide/autonomous-agent/appprojects-autonomous-mode.md
-          - ApplicationSets: user-guide/autonomous-agent/applicationsets-autonomous-mode.md
+          - Application synchronization: user-guide/autonomous-agent/applications-autonomous-mode.md
+          - AppProject synchronization: user-guide/autonomous-agent/appprojects-autonomous-mode.md
+          - ApplicationSet synchronization: user-guide/autonomous-agent/applicationsets-autonomous-mode.md
           - Repository management: user-guide/autonomous-agent/repository.md
       - Adding an agent: user-guide/adding-agents.md
       - Agent self-registration: user-guide/self-registration.md
@@ -83,16 +83,6 @@ nav:
       - Verifying artifacts: operations/provenance.md
       - JWT signing keys: operations/jwt-signing-keys.md
       - OpenTelemetry tracing: operations/tracing.md
-  - Technical reference:
-      - Web terminal workflow: technical/web-terminal-workflow.md
-      - Sync protocol: concepts/sync-protocol.md
-      - Proposals:
-          - HA failover proposal: proposals/ha-failover.md
-          - Sync protocol proposal: proposals/Argo-CD-Agent-Sync-Proposal.md
-      - Design notes:
-          - General architectural considerations: technical/general.md
-          - Application sync design: technical/applications.md
-          - AppProject sync design: technical/appprojects.md
   - Contributing:
       - Overview: contributing/index.md
       - Local development: contributing/local.md

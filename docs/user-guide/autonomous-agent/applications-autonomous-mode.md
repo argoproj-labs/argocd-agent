@@ -6,7 +6,7 @@ For **managed** agents, see [Application synchronization (managed agents)](../ma
 
 ## Overview
 
-Application synchronization in argocd-agent maps Applications to agents using **namespaces** on the principal that correspond to each agent.
+Application synchronization in argocd-agent maps Applications to autonomous agents using **namespaces** on the principal that correspond to each autonomous agent.
 
 For autonomous agents, Applications are created on the agent and synchronized to the principal; the principal acts as a read-only mirror for specifications but can still perform sync, refresh, and resource actions.
 
@@ -40,18 +40,41 @@ spec:
 
 ### Principal-Side Placement
 
-When an Application is received from an autonomous agent, the principal places it in a namespace corresponding to the agent name:
+When an Application is received from an autonomous agent, the principal doesn't mirror it verbatim. In addition to moving it into a namespace named after the agent, the principal also rewrites the `project` and `destination` fields:
 
 - **Agent**: `production-agent`
 - **Application created on agent**: `my-app`
 - **Application on principal**: `my-app` in namespace `production-agent`
+- **Project**: prefixed with the agent name, e.g. `default` becomes `production-agent-default`
+- **Destination**: `destination.server` is replaced with `destination.name`, set to the name of the cluster registered for the agent on the principal — by convention this is the agent name itself (`destination.server` is cleared)
+
+On principal, the above Application would appear as follows:
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: production-agent
+spec:
+  project: production-agent-default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    name: production-agent  # the cluster registered for this agent on the principal
+    namespace: guestbook
+  syncPolicy:
+    syncOptions:
+    - CreateNamespace=true
+```
 
 ### Project Name Transformation
 
-Applications from autonomous agents may have their project references transformed to avoid conflicts:
+Applications from autonomous agents always have their project reference prefixed with the agent name, to avoid conflicts between same-named projects from different agents:
 
-- If the Application uses a non-default project, it may be prefixed with the agent name
 - Example: `my-project` becomes `production-agent-my-project` on the principal
+- This applies even to the `default` project, which becomes `production-agent-default`
 
 For more information, refer to [Managing AppProjects](appprojects-autonomous-mode.md).
 

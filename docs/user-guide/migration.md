@@ -286,8 +286,8 @@ kubectl apply -f my-app.yaml --context <workload-cluster-context>
 
 ApplicationSets work with argocd-agent by generating Applications that are synced through the normal agent protocol; only the resulting `Application` resources are synced between principal and agent, never the `ApplicationSet` itself. Where you run the `argocd-applicationset-controller` depends on your chosen mode:
 
-- **Managed Mode**: Run the controller on the control plane, alongside the other Argo CD control plane components. See [ApplicationSets (managed agents)](./applicationsets.md#managed-mode-applicationsets-on-the-control-plane).
-- **Autonomous Mode**: Run the controller on the workload cluster. See [ApplicationSets (autonomous agents)](./applicationsets.md#autonomous-mode-applicationsets-on-workload-clusters).
+- **Managed Mode**: Run the controller on the control plane, alongside the other Argo CD control plane components. See [ApplicationSets (managed agents)](./managed-agent/applicationsets-managed-mode.md#managed-mode-applicationsets-on-the-control-plane).
+- **Autonomous Mode**: Run the controller on the workload cluster. See [ApplicationSets (autonomous agents)](./autonomous-agent/applicationsets-autonomous-mode.md#autonomous-mode-applicationsets-on-workload-clusters).
 
 ### 4.3 AppProject Migration
 
