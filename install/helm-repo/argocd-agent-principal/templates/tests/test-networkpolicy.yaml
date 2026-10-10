@@ -1,0 +1,193 @@
+{{- if and .Values.tests.enabled .Values.networkPolicy.enabled }}
+{{/*
+Number of ingress rules principal-networkpolicy.yaml is expected to emit for
+the current values. User-supplied `extraRules` are appended after these, and
+are deliberately left unchecked: values.yaml points operators at `extraRules`
+for topologies the chart does not model, so the test must not constrain them.
+*/}}
+{{- $chartRules := 0 }}
+{{- if .Values.networkPolicy.ingress.grpc.enabled }}
+{{- $chartRules = add1 $chartRules }}
+{{- end }}
+{{- if and .Values.principal.redisProxy.enabled .Values.networkPolicy.ingress.redisProxy.enabled }}
+{{- $chartRules = add1 $chartRules }}
+{{- end }}
+{{- if and .Values.principal.resourceProxy.enabled .Values.networkPolicy.ingress.resourceProxy.enabled }}
+{{- $chartRules = add1 $chartRules }}
+{{- end }}
+{{- if .Values.networkPolicy.ingress.metrics.enabled }}
+{{- $chartRules = add1 $chartRules }}
+{{- end }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-networkpolicy" (include "argocd-agent-principal.testResourceName" .) | quote }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "argocd-agent-principal.testResourceName" . }}
+  containers:
+    - name: kubectl
+      image: "{{ .Values.tests.image }}:{{ .Values.tests.tag }}"
+      command:
+        - sh
+        - -c
+        - |
+          echo "Testing NetworkPolicy configuration..."
+
+          NETPOL={{ include "argocd-agent-principal.fullname" . | quote }}
+          NAMESPACE={{ include "argocd-agent-principal.namespace" . | quote }}
+
+          # Ports that identify each rule. The chart emits one rule per port
+          # set, so the ports are what the assertions below dispatch on.
+          GRPC_PORTS={{ .Values.principal.listen.port | quote }}
+          REDIS_PROXY_PORTS="6379"
+          RESOURCE_PROXY_PORTS="9090"
+          METRICS_PORTS="{{ .Values.principal.metrics.port }} {{ .Values.principal.healthz.port }}"
+
+          # Read a jsonpath expression off the NetworkPolicy.
+          netpol() {
+            kubectl get networkpolicy "$NETPOL" -n "$NAMESPACE" -o jsonpath="$1"
+          }
+
+          # Read a jsonpath expression off ingress rule $1.
+          rule() {
+            netpol "{.spec.ingress[$1]$2}"
+          }
+
+          fail() {
+            echo "✗ $1"
+            kubectl get networkpolicy "$NETPOL" -n "$NAMESPACE" -o yaml
+            exit 1
+          }
+
+          if kubectl get networkpolicy "$NETPOL" -n "$NAMESPACE"; then
+            echo "✓ NetworkPolicy exists"
+          else
+            echo "✗ NetworkPolicy not found"
+            exit 1
+          fi
+
+          POLICY_TYPES=$(netpol '{.spec.policyTypes[*]}')
+          if [ "$POLICY_TYPES" = "Ingress" ]; then
+            echo "✓ NetworkPolicy restricts ingress only: $POLICY_TYPES"
+          else
+            fail "NetworkPolicy has unexpected policy types: $POLICY_TYPES (expected Ingress)"
+          fi
+
+          POD_SELECTOR=$(netpol '{.spec.podSelector.matchLabels.app\.kubernetes\.io/name}')
+          if [ "$POD_SELECTOR" = "argocd-agent-principal" ]; then
+            echo "✓ NetworkPolicy targets the principal pod: $POD_SELECTOR"
+          else
+            fail "NetworkPolicy targets the wrong pod: $POD_SELECTOR (expected argocd-agent-principal)"
+          fi
+
+          # extraRules are appended last, so the chart's own rules are the
+          # leading CHART_RULES entries.
+          TOTAL_RULES=$(netpol '{range .spec.ingress[*]}{"rule"}{"\n"}{end}' | grep -c .)
+          EXTRA_RULES={{ len (default list .Values.networkPolicy.ingress.extraRules) }}
+          CHART_RULES=$((TOTAL_RULES - EXTRA_RULES))
+          if [ "$CHART_RULES" = "{{ $chartRules }}" ]; then
+            echo "✓ NetworkPolicy has {{ $chartRules }} chart-managed ingress rule(s) and $EXTRA_RULES extra rule(s)"
+          else
+            fail "NetworkPolicy has $CHART_RULES chart-managed ingress rule(s), expected {{ $chartRules }}"
+          fi
+
+          # Fail if rule $1 reaches beyond the principal's own namespace.
+          assert_same_namespace() {
+            if [ -n "$(rule "$1" '.from[*].namespaceSelector')" ]; then
+              fail "$2 rule admits other namespaces (it has a namespaceSelector)"
+            fi
+            if [ -n "$(rule "$1" '.from[*].ipBlock')" ]; then
+              fail "$2 rule admits off-cluster traffic (it has an ipBlock)"
+            fi
+          }
+
+          SEEN_GRPC=0
+          SEEN_REDIS_PROXY=0
+          SEEN_RESOURCE_PROXY=0
+          SEEN_METRICS=0
+
+          RULE=0
+          while [ "$RULE" -lt "$CHART_RULES" ]; do
+            PORTS=$(rule "$RULE" '.ports[*].port')
+            PODS=$(rule "$RULE" '.from[*].podSelector.matchLabels.app\.kubernetes\.io/name')
+
+            # An empty `from` admits every pod in the cluster.
+            if [ -z "$(rule "$RULE" '.from[0]')" ]; then
+              fail "Ingress rule $RULE has an empty 'from' and admits all pods"
+            fi
+
+            case "$PORTS" in
+
+            "$GRPC_PORTS")
+              COMPONENTS=$(rule "$RULE" '.from[*].podSelector.matchLabels.app\.kubernetes\.io/component')
+              if [ "$COMPONENTS" != "agent" ]; then
+                fail "gRPC port $PORTS allows unexpected sources: $COMPONENTS (expected agent)"
+              fi
+              {{- if .Values.networkPolicy.ingress.grpc.allNamespaces }}
+              if [ -z "$(rule "$RULE" '.from[*].namespaceSelector')" ]; then
+                fail "gRPC rule has no namespaceSelector, but grpc.allNamespaces is true"
+              fi
+              echo "✓ gRPC port $PORTS is allowed from agent pods in any namespace (allNamespaces=true)"
+              {{- else }}
+              assert_same_namespace "$RULE" "gRPC"
+              echo "✓ gRPC port $PORTS is allowed from agent pods in the principal namespace only"
+              {{- end }}
+              SEEN_GRPC=1
+              ;;
+
+            "$REDIS_PROXY_PORTS")
+              if [ "$PODS" != "argocd-server argocd-repo-server argocd-application-controller" ]; then
+                fail "Redis proxy port $PORTS allows unexpected sources: $PODS (expected argocd-server argocd-repo-server argocd-application-controller)"
+              fi
+              assert_same_namespace "$RULE" "Redis proxy"
+              echo "✓ Redis proxy port $PORTS is allowed from Argo CD server, repo-server and application-controller in the principal namespace only"
+              SEEN_REDIS_PROXY=1
+              ;;
+
+            "$RESOURCE_PROXY_PORTS")
+              if [ "$PODS" != "argocd-server" ]; then
+                fail "Resource proxy port $PORTS allows unexpected sources: $PODS (expected argocd-server)"
+              fi
+              assert_same_namespace "$RULE" "Resource proxy"
+              echo "✓ Resource proxy port $PORTS is allowed from Argo CD server in the principal namespace only"
+              SEEN_RESOURCE_PROXY=1
+              ;;
+
+            "$METRICS_PORTS")
+              SCRAPE_NS=$(rule "$RULE" '.from[*].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name')
+              if [ "$SCRAPE_NS" != {{ .Values.networkPolicy.ingress.metrics.namespaceSelector | quote }} ]; then
+                fail "Metrics ports $PORTS are allowed from the wrong namespace: $SCRAPE_NS (expected {{ .Values.networkPolicy.ingress.metrics.namespaceSelector }})"
+              fi
+              echo "✓ Metrics ports $PORTS are allowed from the $SCRAPE_NS namespace only"
+              SEEN_METRICS=1
+              ;;
+
+            *)
+              fail "Ingress rule $RULE opens unexpected ports: $PORTS"
+              ;;
+
+            esac
+
+            RULE=$((RULE + 1))
+          done
+
+          # Every rule the values ask for must actually be present. Without
+          # this a silently dropped rule would leave the loop with nothing to
+          # check and the test would pass.
+          assert_seen() {
+            if [ "$1" != "$2" ]; then
+              fail "$3 rule: expected $2 occurrence(s) in the policy, found $1"
+            fi
+          }
+          assert_seen "$SEEN_GRPC" "{{ ternary 1 0 .Values.networkPolicy.ingress.grpc.enabled }}" "gRPC"
+          assert_seen "$SEEN_REDIS_PROXY" "{{ ternary 1 0 (and .Values.principal.redisProxy.enabled .Values.networkPolicy.ingress.redisProxy.enabled) }}" "Redis proxy"
+          assert_seen "$SEEN_RESOURCE_PROXY" "{{ ternary 1 0 (and .Values.principal.resourceProxy.enabled .Values.networkPolicy.ingress.resourceProxy.enabled) }}" "Resource proxy"
+          assert_seen "$SEEN_METRICS" "{{ ternary 1 0 .Values.networkPolicy.ingress.metrics.enabled }}" "Metrics"
+          echo "✓ Every ingress rule enabled in values is present exactly once"
+
+          echo "NetworkPolicy configuration verified successfully!"
+  restartPolicy: Never
+{{- end }}
