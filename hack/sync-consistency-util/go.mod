@@ -1,6 +1,6 @@
 module github.com/argoproj-labs/argocd-agent/hack/sync-consistency-util
 
-go 1.27
+go 1.26.0
 
 require (
 	github.com/argoproj/argo-cd/v3 v3.4.3

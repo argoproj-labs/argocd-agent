@@ -225,7 +225,6 @@ var supportedCurvePreferences = map[string]tls.CurveID{
 	"X25519MLKEM768":     tls.X25519MLKEM768,
 	"SecP256r1MLKEM768":  tls.SecP256r1MLKEM768,
 	"SecP384r1MLKEM1024": tls.SecP384r1MLKEM1024,
-	"MLKEM1024":          tls.MLKEM1024,
 }
 
 // SupportedCurvePreferenceNames returns the supported TLS curve preference names
@@ -239,7 +238,6 @@ func SupportedCurvePreferenceNames() []string {
 		"CurveP256",
 		"CurveP384",
 		"CurveP521",
-		"MLKEM1024",
 	}
 }
 
