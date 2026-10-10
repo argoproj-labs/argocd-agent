@@ -14,7 +14,7 @@ In the diagrams throughout this document:
 * **Light blue boxes** represent Argo CD components  
 * **Light red boxes** represent external systems and components
 
-Components with dotted outlines indicate their deployment location depends on the selected [operational mode](./agent-modes/index.md) of the agent.
+Components with dotted outlines indicate their deployment location depends on the selected [operational mode](./agent-modes.md) of the agent.
 
 !!! warning "Integration Pattern Selection"
     The choice between integration patterns is a fundamental architectural decision that affects your entire GitOps infrastructure. While agents can operate in different modes within the same environment, all workload clusters must use the same integration pattern. Switching between patterns requires service interruption and careful migration planning.
@@ -54,7 +54,7 @@ This architecture enables workload clusters to perform all GitOps operations loc
 
 **Advantages of this pattern**
 
-* **True operational autonomy**: Workload clusters continue functioning independently during control plane outages, with only configuration updates and observability affected. When combined with [autonomous mode](./agent-modes/autonomous.md), clusters maintain full GitOps capabilities even during extended control plane unavailability
+* **True operational autonomy**: Workload clusters continue functioning independently during control plane outages, with only configuration updates and observability affected. When combined with [autonomous mode](../user-guide/autonomous-agent/index.md), clusters maintain full GitOps capabilities even during extended control plane unavailability
 * **Reduced network traffic**: Minimal communication required between workload and control plane clusters, eliminating bandwidth bottlenecks and reducing inter-cluster network costs
 * **Distributed scaling**: Each workload cluster scales its Argo CD components independently based on local requirements, enabling optimal resource utilization
 * **Simplified networking**: Single ingress point required on the control plane cluster for agent communication, reducing network complexity and security surface area
@@ -102,6 +102,6 @@ When implementing the autonomous pattern:
 * Ensure workload clusters have adequate resources for the full Argo CD stack (typically requiring an additional 1-2 CPU cores and 2-4GB RAM)
 * Plan for Git repository access from all workload clusters, including necessary network policies and credentials
 * Implement monitoring and alerting for distributed Argo CD components
-* Consider using [autonomous mode](./agent-modes/autonomous.md) to maximize resilience during control plane outages
+* Consider using [autonomous mode](../user-guide/autonomous-agent/index.md) to maximize resilience during control plane outages
 
 The additional resource investment in autonomous clusters typically pays dividends through improved reliability, performance, and operational flexibility in production environments.
