@@ -110,7 +110,7 @@ var ErrNoWatchFunc = errors.New("no watch func defined")
 //
 // Resource callbacks can be provided at the time of instantiation
 // using WithAddHandler, WithUpdateHandler and WithDeleteHandler options.
-func NewInformer[T runtime.Object](_ context.Context, opts ...InformerOption[T]) (*Informer[T], error) {
+func NewInformer[T runtime.Object](ctx context.Context, opts ...InformerOption[T]) (*Informer[T], error) {
 	i := &Informer[T]{}
 	var r T
 	i.resType = reflect.TypeOf(r)
@@ -132,7 +132,7 @@ func NewInformer[T runtime.Object](_ context.Context, opts ...InformerOption[T])
 	if i.watchFunc == nil {
 		return nil, ErrNoWatchFunc
 	}
-	i.createSharedInformer()
+	i.createSharedInformer(ctx)
 	if err := i.installEventHandlers(); err != nil {
 		return nil, err
 	}
@@ -142,11 +142,11 @@ func NewInformer[T runtime.Object](_ context.Context, opts ...InformerOption[T])
 
 // createSharedInformer creates the underlying shared index informer for the
 // Informer i.
-func (i *Informer[T]) createSharedInformer() {
+func (i *Informer[T]) createSharedInformer(ctx context.Context) {
 	var r T
 	i.informer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
-			ListWithContextFunc: func(ctx context.Context, options v1.ListOptions) (runtime.Object, error) {
+			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				if i.listFunc == nil {
 					panic("no list func defined")
 				}
@@ -158,7 +158,7 @@ func (i *Informer[T]) createSharedInformer() {
 				i.logger.Trace("Done listing resources")
 				return objs, err
 			},
-			WatchFuncWithContext: func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if i.watchFunc == nil {
 					panic("no watch func defined")
 				}
