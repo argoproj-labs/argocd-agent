@@ -14,9 +14,9 @@ argocd-agent transforms traditional multi-cluster Argo CD deployments by inverti
 
 ### Operational Modes
 
-**[Managed Mode](../concepts/agent-modes/managed.md)**: Applications are defined on the control plane and distributed to agents. Ideal for centralized governance and policy enforcement across multiple clusters.
+**[Managed Mode](../user-guide/managed-agent/index.md)**: Applications are defined on the control plane and distributed to agents. Ideal for centralized governance and policy enforcement across multiple clusters.
 
-**[Autonomous Mode](../concepts/agent-modes/autonomous.md)**: Applications are defined locally on workload clusters and synchronized back for observability. Perfect for edge deployments, air-gapped environments, or scenarios requiring local autonomy.
+**[Autonomous Mode](../user-guide/autonomous-agent/index.md)**: Applications are defined locally on workload clusters and synchronized back for observability. Perfect for edge deployments, air-gapped environments, or scenarios requiring local autonomy.
 
 ### Communication Protocol
 
@@ -30,9 +30,9 @@ argocd-agent transforms traditional multi-cluster Argo CD deployments by inverti
 
 ### Mapping Modes
 
-**[Namespace-Based Mapping](../concepts/agent-mapping.md#namespace-based-mapping-default)** (default): Applications are routed to agents based on their namespace on the control plane. Each agent has a dedicated namespace, and any Application placed in that namespace is synced to the corresponding agent. Simple to configure with no additional flags required.
+**[Namespace-Based Mapping](../user-guide/managed-agent/agent-mapping.md#namespace-based-mapping-default)** (default): Applications are routed to agents based on their namespace on the control plane. Each agent has a dedicated namespace, and any Application placed in that namespace is synced to the corresponding agent. Simple to configure with no additional flags required.
 
-**[Destination-Based Mapping](../concepts/agent-mapping.md#destination-based-mapping)**: Applications are routed to agents based on `spec.destination.name`, matching the same targeting model that traditional Argo CD uses with cluster secrets. Multiple namespaces can target the same agent, enabling multi-tenancy and team-based namespace isolation.
+**[Destination-Based Mapping](../user-guide/managed-agent/agent-mapping.md#destination-based-mapping)**: Applications are routed to agents based on `spec.destination.name`, matching the same targeting model that traditional Argo CD uses with cluster secrets. Multiple namespaces can target the same agent, enabling multi-tenancy and team-based namespace isolation.
 
 ### Resource Management
 
@@ -44,7 +44,7 @@ argocd-agent transforms traditional multi-cluster Argo CD deployments by inverti
 
 **Custom Resource Actions**: Full support for executing Argo CD resource actions on workload clusters, allowing custom operations and workflows to be triggered from the central control plane.
 
-**[ApplicationSet Support](../user-guide/applicationsets.md)**: ApplicationSets can run on either the control plane or the agent, with generated Applications synced through the normal agent protocol. In Managed mode, destination-based agent mapping enables ApplicationSets to generate Applications that are routed to the appropriate agents according to their target cluster destinations. ApplicationSet resources themselves are not synced between principal and agent, as the architecture operates at the Application level.
+**[ApplicationSet Support — managed agents](../user-guide/managed-agent/applicationsets-managed-mode.md)**, **[ApplicationSet Support — autonomous agents](../user-guide/autonomous-agent/applicationsets-autonomous-mode.md)**: ApplicationSets can run on either the control plane or the agent, with generated Applications synced through the normal agent protocol. In Managed mode, destination-based agent mapping enables ApplicationSets to generate Applications that are routed to the appropriate agents according to their target cluster destinations. ApplicationSet resources themselves are not synced between principal and agent, as the architecture operates at the Application level.
 
 **Terminal Access**: Web-based terminal access to pods running on remote clusters, accessible directly from the Argo CD UI. The principal bridges WebSocket connections from the browser to agents via gRPC, and agents execute into pods using the Kubernetes exec API.
 
@@ -69,7 +69,6 @@ argocd-agent is in active development. Current functionality provides a solid fo
 
 ### Near and Mid-term
 
-- [Desired manifest access](https://github.com/argoproj-labs/argocd-agent/issues/344) for better debugging
 - [First-class SPIFFE authentication](https://github.com/argoproj-labs/argocd-agent/issues/345) via the SPIFFE Workload API
 
 ### Long-term Vision

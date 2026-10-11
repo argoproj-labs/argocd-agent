@@ -1,86 +1,94 @@
 site_name: argocd-agent
-repo_url: https://github.com/argoproj-labs/argocd-agent
+repo_url: 'https://github.com/argoproj-labs/argocd-agent'
 strict: true
-theme: 
+theme:
   name: material
   palette:
     primary: teal
   logo: assets/logo.png
-  favicon: "assets/favicon.png"
+  favicon: assets/favicon.png
   features:
-  - content.code.copy
-markdown_extensions: 
-- codehilite
-- admonition
-- tables
-- toc:
-    permalink: true
-    toc_depth: 3
-- pymdownx.superfences:
-    custom_fences:
-    - name: mermaid
-      class: mermaid
-      format: !!python/name:pymdownx.superfences.fence_code_format
+    - content.code.copy
+markdown_extensions:
+  - codehilite
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
 nav:
   - Overview: index.md
   - Features:
-    - Overview: features/index.md
-  - Concepts: 
-    - Components & terminology: concepts/components-terminology.md
-    - General architecture: concepts/architecture.md
-    - Integration with Argo CD: concepts/argocd-integration.md
-    - Agent modes:
-      - Overview: concepts/agent-modes/index.md
-      - Managed mode: concepts/agent-modes/managed.md
-      - Autonomous mode: concepts/agent-modes/autonomous.md
-    - Agent mapping: concepts/agent-mapping.md
-    - Sync protocol: concepts/sync-protocol.md
-    - High availability: concepts/ha.md
+      - Overview: features/index.md
+  - Concepts:
+      - Components & terminology: concepts/components-terminology.md
+      - General architecture: concepts/architecture.md
+      - Integration with Argo CD: concepts/argocd-integration.md
+      - Agent mode overview: concepts/agent-modes.md
+      - High availability: concepts/ha.md
   - Getting started:
-    - Overview: getting-started/index.md
-    - Kubernetes: getting-started/kubernetes/index.md
-    - Kind: getting-started/kubernetes/kind/index.md
-    - Istio: getting-started/kubernetes/istio/index.md
-    - OpenShift: getting-started/openshift/index.md
-    - OCM-io: getting-started/ocm-io/index.md
+      - Overview: getting-started/index.md
+      - Kubernetes: getting-started/kubernetes/index.md
+      - Kind: getting-started/kubernetes/kind/index.md
+      - Istio: getting-started/kubernetes/istio/index.md
+      - OpenShift: getting-started/openshift/index.md
+      - OCM-io: getting-started/ocm-io/index.md
   - User guide:
-    - Managing Applications: user-guide/applications.md
-    - Managing AppProjects: user-guide/appprojects.md
-    - ApplicationSets: user-guide/applicationsets.md
-    - Managing Repositories: user-guide/repository.md
-    - GPG Key Synchronization: user-guide/gpg-keys.md
-    - Adding an agent: user-guide/adding-agents.md
-    - Agent self-registration: user-guide/self-registration.md
-    - Accessing live resources on workload clusters: user-guide/live-resources.md
-    - Web-based terminal: user-guide/web-terminal.md
-    - Migration from classical multi-cluster Argo CD: user-guide/migration.md
-    - Hybrid Architecture: user-guide/hybrid-architecture.md
+      - Managed Agents:
+          - Introduction: user-guide/managed-agent/index.md
+          - Agent mapping: user-guide/managed-agent/agent-mapping.md
+          - Application synchronization: user-guide/managed-agent/applications-managed-mode.md
+          - AppProject synchronization: user-guide/managed-agent/appprojects-managed-mode.md
+          - ApplicationSet synchronization: user-guide/managed-agent/applicationsets-managed-mode.md
+          - Repository management: user-guide/managed-agent/repository.md
+          - Web-based terminal: user-guide/managed-agent/web-terminal.md
+          - GPG Key synchronization: user-guide/managed-agent/gpg-keys.md
+          - Hybrid Architecture: user-guide/managed-agent/hybrid-architecture.md
+      - Autonomous Agents:
+          - Introduction: user-guide/autonomous-agent/index.md
+          - Application synchronization: user-guide/autonomous-agent/applications-autonomous-mode.md
+          - AppProject synchronization: user-guide/autonomous-agent/appprojects-autonomous-mode.md
+          - ApplicationSet synchronization: user-guide/autonomous-agent/applicationsets-autonomous-mode.md
+          - Repository management: user-guide/autonomous-agent/repository.md
+      - Adding an agent: user-guide/adding-agents.md
+      - Agent self-registration: user-guide/self-registration.md
+      - Accessing live resources on workload clusters: user-guide/live-resources.md
+      - Migration from classical multi-cluster Argo CD: user-guide/migration.md
+      - Ignore sync label: user-guide/ignore-sync.md
   - Configuration:
-    - Overview: configuration/index.md
-    - Authentication: configuration/authentication.md
-    - TLS & Certificates: configuration/tls-certificates.md
-    - Namespaces: configuration/namespaces.md
-    - Networking: configuration/networking.md
-    - Service Mesh: configuration/service-mesh.md
-    - Observability: configuration/observability.md
-    - High availability: configuration/ha.md
-    - CTL: configuration/ctl.md
-    - Reference:
-        - Overview: configuration/reference/index.md
-        - Principal: configuration/reference/principal.md
-        - Agent: configuration/reference/agent.md
+      - Overview: configuration/index.md
+      - Authentication: configuration/authentication.md
+      - TLS & Certificates: configuration/tls-certificates.md
+      - Namespaces: configuration/namespaces.md
+      - Networking: configuration/networking.md
+      - Service Mesh: configuration/service-mesh.md
+      - Observability: configuration/observability.md
+      - High availability: configuration/ha.md
+      - CTL: configuration/ctl.md
+      - Reference:
+          - Overview: configuration/reference/index.md
+          - Principal: configuration/reference/principal.md
+          - Agent: configuration/reference/agent.md
   - Operations:
-    - Metrics: operations/metrics.md
-    - Profiling: operations/profiling.md
-    - High availability: operations/ha-failover.md
-    - TLS Certificate Blocklist: operations/blocklist.md
-    - Verifying artifacts: operations/provenance.md
+      - Metrics: operations/metrics.md
+      - Profiling: operations/profiling.md
+      - High availability: operations/ha-failover.md
+      - TLS Certificate Blocklist: operations/blocklist.md
+      - Verifying artifacts: operations/provenance.md
+      - JWT signing keys: operations/jwt-signing-keys.md
+      - OpenTelemetry tracing: operations/tracing.md
   - Contributing:
-    - Overview: contributing/index.md
-    - Local development: contributing/local.md
-    - Coding guidelines: contributing/code.md 
-    - Documentation guidelines: contributing/docs.md 
-    - Submitting PRs: contributing/prs.md
-    - Code reviewing guide: contributing/review.md
-    - Logging Guidelines for Contributors: contributing/logging.md
+      - Overview: contributing/index.md
+      - Local development: contributing/local.md
+      - Coding guidelines: contributing/code.md
+      - Documentation guidelines: contributing/docs.md
+      - Submitting PRs: contributing/prs.md
+      - Code reviewing guide: contributing/review.md
+      - Logging Guidelines for Contributors: contributing/logging.md
   - FAQ: faq/index.md

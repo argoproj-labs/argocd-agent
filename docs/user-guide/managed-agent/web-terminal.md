@@ -81,5 +81,5 @@ data:
 ## Related Documentation
 
 - [Argo CD Web-Terminal Documentation](https://argo-cd.readthedocs.io/en/stable/operator-manual/web_based_terminal/) - Argo CD documentation for web-terminal configurations
-- [Accessing live resources on workload clusters](live-resources.md) - Resource proxy configuration and RBAC setup
-- [Web Terminal Architecture](../technical/web-terminal-workflow.md) - Technical architecture diagram
+- [Accessing live resources on workload clusters](../live-resources.md) - Resource proxy configuration and RBAC setup
+- [Web Terminal Architecture](../../technical/web-terminal-workflow.md) - Technical architecture diagram

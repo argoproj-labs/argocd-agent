@@ -36,7 +36,7 @@ The *agent* is a component that gets installed to each workload cluster. It will
 
 Depending on the features an *agent* should provide, it will require limited to extended set of privileges on the workload cluster.
 
-Each *agent* can run in one of the following modes: *managed* or *autonomous*. For more information, refer to the chapter about [agent modes](./agent-modes/index.md).
+Each *agent* can run in one of the following modes: *managed* or *autonomous*. For more information, refer to the chapter about [agent modes](./agent-modes.md).
 
 ## Hub
 

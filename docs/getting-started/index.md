@@ -29,15 +29,15 @@ When choosing a name, consider the following:
 
 ## Choosing the right operational mode for each agent
 
-As described in the chapter about [operational modes of agents](../concepts/agent-modes/index.md), each agent can operate in one of several modes. Each mode comes with its own pros and cons, and you want to consider the right mode for each agent.
+As described in the chapter about [operational modes of agents](../concepts/agent-modes.md), each agent can operate in one of several modes. Each mode comes with its own pros and cons, and you want to consider the right mode for each agent.
 
 It's perfectly fine to run a mixed-mode scenario, where some of the agents run in one mode while other agents run in different modes.
 
-If in doubt, it's recommended to start using the [managed mode](../concepts/agent-modes/managed.md) for your agents.
+If in doubt, it's recommended to start using the [managed mode](../user-guide/managed-agent/index.md) for your agents.
 
 ## Choosing the agent mapping mode
 
-In addition to the operational mode, you must choose how Applications are routed to managed agents. argocd-agent supports two [mapping modes](../concepts/agent-mapping.md):
+In addition to the operational mode, you must choose how Applications are routed to managed agents. argocd-agent supports two [mapping modes](../user-guide/managed-agent/agent-mapping.md):
 
 * **Namespace-based mapping** (default): Each agent has a dedicated namespace on the control plane. Applications placed in that namespace are routed to the agent. Simple to set up but limited multi-tenancy.
 
@@ -45,7 +45,7 @@ In addition to the operational mode, you must choose how Applications are routed
 
 If you are migrating from a traditional multi-cluster Argo CD setup, destination-based mapping provides the most familiar experience since it uses the same `spec.destination.name` field.
 
-See [Agent Mapping Modes](../concepts/agent-mapping.md) for a detailed comparison.
+See [Agent Mapping Modes](../user-guide/managed-agent/agent-mapping.md) for a detailed comparison.
 
 ## Argo CD Component Placement
 

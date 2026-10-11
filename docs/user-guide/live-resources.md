@@ -2,6 +2,8 @@
 
 This document explains the live resources functionality in argocd-agent, which allows users to view and interact with Kubernetes resources on agent clusters directly from the principal (control plane) through the Argo CD UI.
 
+Live resources functionality is supported for both managed and autonomous mode agents.
+
 ## Overview
 
 The resource proxy is a core feature of argocd-agent that enables transparent access to live resources on agent clusters. When users view resources in the Argo CD UI, requests are automatically proxied through the principal to the appropriate agent, allowing seamless resource inspection without direct network connectivity to the workload clusters.
@@ -578,6 +580,7 @@ curl -k --cert client.crt --key client.key \
 
 - [Agent Configuration Reference](../configuration/reference/agent.md#resource-proxy-configuration) - Agent resource proxy configuration options
 - [Principal Configuration Reference](../configuration/reference/principal.md#resource-proxy-configuration) - Principal resource proxy configuration options
-- [Application Synchronization](./applications.md) - How Applications are managed
-- [Agent Modes](../concepts/agent-modes/index.md) - Understanding managed vs autonomous modes
+- [Application synchronization (managed agents)](./managed-agent/applications-managed-mode.md) - How Applications are managed with managed-mode agents
+- [Application synchronization (autonomous agents)](./autonomous-agent/applications-autonomous-mode.md) - How Applications are managed with autonomous agents
+- [Agent Modes](../concepts/agent-modes.md) - Understanding managed vs autonomous modes
 - [Architecture](../concepts/architecture.md) - Overall system architecture 

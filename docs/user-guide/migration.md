@@ -3,7 +3,7 @@
 This guide outlines the strategy for migrating from a traditional, multi-cluster Argo CD installation to argocd-agent. The migration involves transitioning from a **push-based architecture** (where the control plane reaches out to workload clusters) to a **pull-based architecture** (where agents reach back to the control plane).
 
 !!! note "Hybrid Architecture"
-    It is now possible to install and run argocd-agent alongside an existing Argo CD setup. The hybrid architecture enables you to try out argocd-agent without replacing your existing setup, gradually migrate applications, or run both architectures long-term. Please see [Hybrid Architecture](./hybrid-architecture.md) page for more details.
+    It is now possible to install and run argocd-agent alongside an existing Argo CD setup. The hybrid architecture enables you to try out argocd-agent without replacing your existing setup, gradually migrate applications, or run both architectures long-term. Please see [Hybrid Architecture](./managed-agent/hybrid-architecture.md) page for more details.
 
 !!! warning "Migration Complexity"
     Migration from traditional Argo CD to argocd-agent requires careful planning and will involve service interruption. This is an architectural change that affects your entire GitOps infrastructure.
@@ -70,14 +70,14 @@ kubectl get applicationsets -A
 
 For each workload cluster, decide on the operational mode:
 
-**[Managed Mode](../concepts/agent-modes/managed.md)** - Choose when:
+**[Managed Mode](./managed-agent/index.md)** - Choose when:
 
 - You want centralized application management
 - Applications are deployed from the control plane
 - You need consistent policy enforcement across clusters
 - Network connectivity is generally reliable
 
-**[Autonomous Mode](../concepts/agent-modes/autonomous.md)** - Choose when:
+**[Autonomous Mode](./autonomous-agent/index.md)** - Choose when:
 
 - Clusters need to operate independently
 - Applications are managed via GitOps (app-of-apps pattern) directly on the workload clusters
@@ -97,7 +97,7 @@ For managed agents, decide on the mapping mode:
 - Backward compatibility with existing argocd-agent deployments is required
 - You don't need multi-tenant isolation within a single agent
 
-**[Destination-Based Mapping](../concepts/agent-mapping.md)** - Choose when:
+**[Destination-Based Mapping](./managed-agent/agent-mapping.md)** - Choose when:
 
 - You are migrating from traditional Argo CD (same `destination.name` model)
 - Multiple teams share agents but need namespace isolation
@@ -286,15 +286,15 @@ kubectl apply -f my-app.yaml --context <workload-cluster-context>
 
 ApplicationSets work with argocd-agent by generating Applications that are synced through the normal agent protocol; only the resulting `Application` resources are synced between principal and agent, never the `ApplicationSet` itself. Where you run the `argocd-applicationset-controller` depends on your chosen mode:
 
-- **Managed Mode**: Run the controller on the control plane, alongside the other Argo CD control plane components. See [ApplicationSets (managed agents)](./applicationsets.md#managed-mode-applicationsets-on-the-control-plane).
-- **Autonomous Mode**: Run the controller on the workload cluster. See [ApplicationSets (autonomous agents)](./applicationsets.md#autonomous-mode-applicationsets-on-workload-clusters).
+- **Managed Mode**: Run the controller on the control plane, alongside the other Argo CD control plane components. See [ApplicationSets (managed agents)](./managed-agent/applicationsets-managed-mode.md#managed-mode-applicationsets-on-the-control-plane).
+- **Autonomous Mode**: Run the controller on the workload cluster. See [ApplicationSets (autonomous agents)](./autonomous-agent/applicationsets-autonomous-mode.md#autonomous-mode-applicationsets-on-workload-clusters).
 
 ### 4.3 AppProject Migration
 
 AppProjects in argocd-agent work differently from traditional Argo CD due to the distributed nature of the architecture. The migration approach depends on your chosen agent mode.
 
 !!! info "AppProject Behavior Changes"
-    Unlike traditional Argo CD where AppProjects are shared across all clusters, argocd-agent uses different synchronization strategies based on agent mode. See [AppProject Synchronization](./appprojects.md) for detailed behavior.
+    Unlike traditional Argo CD where AppProjects are shared across all clusters, argocd-agent uses different synchronization strategies based on agent mode. See [AppProject synchronization (managed agents)](./managed-agent/appprojects-managed-mode.md) and [AppProject synchronization (autonomous agents)](./autonomous-agent/appprojects-autonomous-mode.md) for detailed behavior.
 
 #### Understanding AppProject Distribution
 
@@ -609,6 +609,6 @@ For migration support:
 ## Additional Resources
 
 - [Architecture Overview](../concepts/architecture.md) - Understanding the technical foundations
-- [Agent Modes](../concepts/agent-modes/index.md) - Detailed mode comparisons
-- [Agent Mapping Modes](../concepts/agent-mapping.md) - Namespace-based vs destination-based mapping
+- [Agent Modes](../concepts/agent-modes.md) - Detailed mode comparisons
+- [Agent Mapping Modes](./managed-agent/agent-mapping.md) - Namespace-based vs destination-based mapping
 - [Configuration Guide](../configuration/index.md) - Advanced configuration options
