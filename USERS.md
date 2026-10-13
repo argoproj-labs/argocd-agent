@@ -1,6 +1,6 @@
 # argocd-agent Users
 
-This page lists organizations and users who have deployed argocd-agent in their environments. If you're using argocd-agent, please add your organization to this list—it helps the project demonstrate real-world adoption and impact.
+This page lists organizations and users who have deployed argocd-agent. If you're using argocd-agent in production, please add your organization to this list—it helps the project demonstrate real-world adoption and impact.
 
 ## Users
 
