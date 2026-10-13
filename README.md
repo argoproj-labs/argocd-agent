@@ -93,6 +93,12 @@ Mix and match modes across your fleet - some clusters managed, others autonomous
 - **Self-healing**: Agents automatically reconnect and recover
 - **Easy upgrades**: Rolling updates without downtime
 
+## 📝 Blogs & Presentations
+
+- **[Scaling GitOps with Pull Architecture for Global Fleets](https://developers.redhat.com/articles/2026/09/24/scaling-gitops-pull-architecture-global-fleets)** - Red Hat engineers share performance benchmarks and real-world testing results across hundreds of clusters
+
+Have you written a blog post or given a presentation about argocd-agent? We'd love to feature it here! Submit a PR to add your content to this list.
+
 ## 🚧 Current Status
 
 Track our progress and vision in the [**milestones**](https://github.com/argoproj-labs/argocd-agent/milestones) on GitHub.
@@ -117,14 +123,12 @@ We're building argocd-agent together! Whether you're a GitOps veteran or just ge
 
 ## 🏢 Ready to Deploy?
 
-argocd-agent is evolving into a **stable and reliable** project ready for adoption! The project has reached a state mature enough where users are encouraged to install and run it. We continue working toward GA, and we kindly ask for help from everyone to battle-test it.
+**Get involved:**
 
-**Help us by:**
-
-- **🤝 Contributing to development** - Help us reach GA faster
-- **💡 Giving feedback** - Together, we can build a better product
-- **💼 Adoption** - Give it a spin, in any of your environments
-- **🗣️ Sharing your success stories** - We love hearing about your use cases
+- **💼 Deploy in your environment** - See our [getting started guide](https://argocd-agent.readthedocs.io/latest/getting-started/) for installation
+- **📋 Add your organization** - Using argocd-agent? Add yourself to our [USERS.md](USERS.md) file
+- **💡 Share feedback** - Help shape the future through [discussions](https://github.com/argoproj-labs/argocd-agent/discussions)
+- **🤝 Contribute** - Check out our [contributing guide](https://argocd-agent.readthedocs.io/latest/contributing/)
 
 Ready to get started? [**Jump into our getting started guide**](https://argocd-agent.readthedocs.io/latest/getting-started/) or [**start a discussion**](https://github.com/argoproj-labs/argocd-agent/discussions) to share your plans!
 
