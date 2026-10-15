@@ -70,3 +70,26 @@ func TestResyncOnStart(t *testing.T) {
 		assert.True(t, a.resyncedOnStart)
 	})
 }
+
+func Test_requestResyncInFlight(t *testing.T) {
+	a, _ := newAgent(t)
+	a.emitter = event.NewEventSource("test")
+	a.kubeClient.RestConfig = &rest.Config{}
+	a.mode = types.AgentModeAutonomous
+	logCtx := log()
+
+	t.Run("skip the round while another one is in flight", func(t *testing.T) {
+		a.resyncInFlight.Store(true)
+		err := a.requestResync(logCtx)
+		assert.Nil(t, err)
+		assert.Zero(t, a.queues.SendQ(defaultQueueName).Len())
+		a.resyncInFlight.Store(false)
+	})
+
+	t.Run("the in-flight flag is released after a completed round", func(t *testing.T) {
+		err := a.requestResync(logCtx)
+		assert.Nil(t, err)
+		assert.Equal(t, 1, a.queues.SendQ(defaultQueueName).Len())
+		assert.False(t, a.resyncInFlight.Load())
+	})
+}

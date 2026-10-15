@@ -22,6 +22,7 @@ Here is the list of available metrics:
 | `argocd_principal_connected_agents` | gauge | The total number of agents connected with principal. |
 | `principal_agent_avg_connection_time` | gauge | The average time all agents are connected for (in minutes). |
 | `argocd_principal_agent_connections_total` | counterVec | The total number of successful connections from each agent to the principal. |
+| `argocd_principal_resync_requests_total` | counterVec | The total number of resync rounds requested by agents, by result (accepted or refused). |
 | `principal_applications_created` | counter | The total number of applications created on the control plane. |
 | `principal_applications_updated` | counter | The total number of applications updated on the control plane. |
 | `principal_applications_deleted` | counter | The total number of applications deleted on the control plane. |
