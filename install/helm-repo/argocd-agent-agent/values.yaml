@@ -99,6 +99,15 @@ rbac:
   # across multiple namespaces. Leave `false` to keep the agent strictly
   # namespace-scoped.
   createClusterRole: true
+  # -- Extra rules for the agent's Role (requires `rbac.create`). Each item is a standard
+  # RBAC PolicyRule. Rules that differ only in their verbs are merged.
+  extraRules: []
+  # -- Extra rules for the agent's ClusterRole (requires `rbac.create` and
+  # `rbac.createClusterRole`). Each item is a standard RBAC PolicyRule. Rules that differ
+  # only in their verbs are merged. The default rules do not cover application workloads,
+  # so grant read access here for the resource proxy to serve live resources (see the live
+  # resources documentation). Grant only what the applications need.
+  extraClusterRules: []
 
 ## @section Pod Scheduling and Metadata
 # -- Node selector for scheduling the agent Pod.

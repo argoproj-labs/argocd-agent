@@ -5,26 +5,8 @@ metadata:
   name: {{ include "argocd-agent-agent.clusterRoleName" . }}
   labels:
     {{- include "argocd-agent-agent.labels" . | nindent 4 }}
+{{- $defaults := include "argocd-agent-agent.defaultClusterRoleRules" . | fromYamlArray }}
+{{- $extras := default (list) .Values.rbac.extraClusterRules }}
 rules:
-- apiGroups:
-  - ""
-  resources:
-  - namespaces
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-- apiGroups:
-  - argoproj.io
-  resources:
-  - applications
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - delete
-  - patch
+{{- include "argocd-agent-agent.mergeRules" (list $defaults $extras) | nindent 0 }}
 {{- end }}

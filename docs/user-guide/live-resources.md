@@ -306,6 +306,34 @@ subjects:
 EOF
 ```
 
+### Extending RBAC with the Helm Chart
+
+If you install the agent with the `argocd-agent-agent` Helm chart, you can add rules to the chart-managed roles instead of maintaining a separate ClusterRole and binding. The default rules are not changed, and both values are empty by default.
+
+The chart merges these rules with its default rules. Rules that only differ in their verbs, meaning they have the same `apiGroups`, `resources`, `resourceNames` and `nonResourceURLs` (the order of the items does not matter), are combined into one rule with the union of their verbs. If the combined verbs contain `*`, they are reduced to `*`. All other rules are added as separate entries.
+
+| Value | Merged into | Scope |
+|-------|-------------|-------|
+| `rbac.extraClusterRules` | The agent `ClusterRole` | Cluster-wide. Requires both `rbac.create=true` and `rbac.createClusterRole=true`. |
+| `rbac.extraRules` | The agent `Role` | The namespace the agent is installed in. Requires `rbac.create=true`. |
+
+Both values work the same way for managed and autonomous agents. Each entry is a standard RBAC `PolicyRule`.
+
+The following example grants read access to the resources commonly shown in the Argo CD UI, without granting access to Secrets:
+
+```yaml
+rbac:
+  extraClusterRules:
+    - apiGroups: [""]
+      resources: ["pods", "pods/log", "services", "endpoints", "configmaps", "serviceaccounts", "persistentvolumeclaims", "events"]
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["apps"]
+      resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+      verbs: ["get", "list", "watch"]
+```
+
+Alternatively, bind the built-in `view` ClusterRole (which also excludes Secrets) to the agent's ServiceAccount.
+
 ### Security Considerations for Enhanced RBAC
 
 While enhanced RBAC enables full resource proxy functionality, consider these security implications:
