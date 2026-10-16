@@ -78,6 +78,9 @@ When you create an agent using `argocd-agentctl agent create`, the resulting clu
 
 This is the key mechanism that prevents the hub's application controller from interfering with applications that have been migrated to the agent. The agent cluster secret can coexist with a traditional cluster secret for the same physical spoke cluster because they have different names and point to different endpoints (the agent secret points to the resource proxy).
 
+!!! warning "Agent names must differ from existing cluster names"
+    The two cluster secrets **must** have different names. If they share a name, Argo CD cannot resolve `spec.destination.name` and fails with `there are 2 clusters with the same name`. Choose an agent name that differs from the name of the traditional cluster secret (for example by adding an `-agent` suffix). `argocd-agentctl agent create` refuses to create an agent whose name is already used by another cluster secret.
+
 **Required on every agent cluster secret.** This annotation must be present on any cluster secret that points to an agent-managed cluster, to ensure the hub's Argo CD application controller does not reconcile applications targeting that cluster. `argocd-agentctl agent create` applies it automatically. If you create cluster secrets by other means (e.g. manually or via GitOps), add the annotation explicitly.
 
 !!! warning "Requires Argo CD v3.4+"
