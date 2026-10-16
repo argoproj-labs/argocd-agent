@@ -185,3 +185,111 @@ Expand the namespace of the release.
 {{- define "argocd-agent-agent.namespace" -}}
 {{- default .Release.Namespace .Values.namespaceOverride | trunc 63 | trimSuffix "-" -}}
 {{- end }}
+
+{{/*
+Default rules of the agent's namespaced Role.
+*/}}
+{{- define "argocd-agent-agent.defaultRoleRules" -}}
+- apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  - appprojects
+  - applicationsets
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - delete
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  - configmaps
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - list
+{{- end }}
+
+{{/*
+Default rules of the agent's ClusterRole.
+*/}}
+{{- define "argocd-agent-agent.defaultClusterRoleRules" -}}
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - delete
+  - patch
+{{- end }}
+
+{{/*
+Merges default and extra RBAC rules into a single list of rules.
+
+Rules are grouped by apiGroups, resources, resourceNames and nonResourceURLs,
+compared as sorted, de-duplicated sets, and the verbs of each group are combined.
+If a group's verbs contain "*", they are reduced to "*". The first occurrence of
+a group determines the position of its rule and the order of its list items.
+*/}}
+{{- define "argocd-agent-agent.mergeRules" -}}
+{{- $defaults := index . 0 -}}
+{{- $extras := index . 1 -}}
+{{- $keys := list -}}
+{{- $merged := dict -}}
+{{- range $rule := concat $defaults $extras -}}
+{{- $signature := dict -}}
+{{- range $field := list "apiGroups" "resources" "resourceNames" "nonResourceURLs" -}}
+{{- if hasKey $rule $field -}}
+{{- $_ := set $signature $field (get $rule $field | sortAlpha | uniq) -}}
+{{- end -}}
+{{- end -}}
+{{- $key := toJson $signature -}}
+{{- if hasKey $merged $key -}}
+{{- $existing := get $merged $key -}}
+{{- $verbs := concat (default (list) $existing.verbs) (default (list) $rule.verbs) -}}
+{{- $_ := set $existing "verbs" (uniq $verbs) -}}
+{{- else -}}
+{{- $_ := set $merged $key (deepCopy $rule) -}}
+{{- $keys = append $keys $key -}}
+{{- end -}}
+{{- end -}}
+{{- $rules := list -}}
+{{- range $keys -}}
+{{- $rule := get $merged . -}}
+{{- if has "*" (default (list) $rule.verbs) -}}
+{{- $_ := set $rule "verbs" (list "*") -}}
+{{- end -}}
+{{- $rules = append $rules $rule -}}
+{{- end -}}
+{{- toYaml $rules -}}
+{{- end }}

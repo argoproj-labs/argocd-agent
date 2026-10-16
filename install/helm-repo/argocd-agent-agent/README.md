@@ -1,6 +1,6 @@
 # argocd-agent-agent
 
-![Version: 0.2.8](https://img.shields.io/badge/Version-0.2.8-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
+![Version: 0.2.9](https://img.shields.io/badge/Version-0.2.9-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.10.0](https://img.shields.io/badge/AppVersion-v0.10.0-informational?style=flat-square)
 
 Argo CD Agent for connecting managed clusters to a Principal
 
@@ -77,6 +77,8 @@ Kubernetes: `>=1.24.0-0`
 | progressDeadlineSeconds | int | `600` | Time allowed for the Deployment to make progress before the controller reports failure. |
 | rbac.create | bool | `true` | Create namespace-scoped Role and RoleBinding for the agent. |
 | rbac.createClusterRole | bool | `true` | Create cluster-scoped ClusterRole and ClusterRoleBinding. Required for destination-based mapping, create-namespace, and resource-proxy discovery across multiple namespaces. Leave `false` to keep the agent strictly namespace-scoped. |
+| rbac.extraClusterRules | list | `[]` | Extra rules for the agent's ClusterRole (requires `rbac.create` and `rbac.createClusterRole`). Each item is a standard RBAC PolicyRule. Rules that differ only in their verbs are merged. The default rules do not cover application workloads, so grant read access here for the resource proxy to serve live resources (see the live resources documentation). Grant only what the applications need. |
+| rbac.extraRules | list | `[]` | Extra rules for the agent's Role (requires `rbac.create`). Each item is a standard RBAC PolicyRule. Rules that differ only in their verbs are merged. |
 | redisAddress | string | `"argocd-redis:6379"` | Redis address used by the agent. |
 | redisTLS | object | `{"caPath":"/app/config/redis-tls/ca.crt","enabled":false,"insecure":false,"secretName":"argocd-redis-tls"}` | Redis TLS configuration. |
 | redisTLS.caPath | string | `"/app/config/redis-tls/ca.crt"` | Path to CA certificate for verifying Redis TLS certificate. This path is where the CA certificate will be mounted inside the container. |
