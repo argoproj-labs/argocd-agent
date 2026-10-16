@@ -20,11 +20,13 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/test/testutil"
+	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -596,4 +598,135 @@ func Test_readTLSFromExistingSecrets(t *testing.T) {
 		assert.Equal(t, string(keyPem), clientKey)
 		assert.Equal(t, string(certPem), caData)
 	})
+}
+
+func Test_checkClusterNameConflict(t *testing.T) {
+	const ns = "argocd"
+
+	clusterSecret := func(secretName, clusterName, server string) *v1.Secret {
+		return &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: ns,
+				Labels: map[string]string{
+					common.LabelKeySecretType: common.LabelValueSecretTypeCluster,
+				},
+			},
+			Data: map[string][]byte{
+				"name":   []byte(clusterName),
+				"server": []byte(server),
+			},
+		}
+	}
+
+	tests := []struct {
+		name      string
+		agentName string
+		secrets   []*v1.Secret
+		wantErr   []string
+	}{
+		{
+			name:      "no cluster secrets exist",
+			agentName: "my-agent",
+		},
+		{
+			name:      "only the agent's own cluster secret exists",
+			agentName: "my-agent",
+			secrets: []*v1.Secret{
+				clusterSecret("cluster-my-agent", "my-agent", "https://argocd-agent-resource-proxy:9090?agentName=my-agent"),
+			},
+		},
+		{
+			name:      "other cluster secrets use different names",
+			agentName: "my-agent",
+			secrets: []*v1.Secret{
+				clusterSecret("cluster-a", "cluster-a", "https://a.example.com"),
+				clusterSecret("cluster-b", "cluster-b", "https://b.example.com"),
+			},
+		},
+		{
+			name:      "another cluster secret uses the agent's name",
+			agentName: "my-agent",
+			secrets: []*v1.Secret{
+				clusterSecret("registered-cluster", "my-agent", "https://my-agent.eks.amazonaws.com"),
+			},
+			wantErr: []string{`"my-agent"`, `"registered-cluster"`, "https://my-agent.eks.amazonaws.com"},
+		},
+		{
+			name:      "conflict is detected even if the agent's own secret exists",
+			agentName: "my-agent",
+			secrets: []*v1.Secret{
+				clusterSecret("cluster-my-agent", "my-agent", "https://argocd-agent-resource-proxy:9090?agentName=my-agent"),
+				clusterSecret("registered-cluster", "my-agent", "https://my-agent.eks.amazonaws.com"),
+			},
+			wantErr: []string{`"registered-cluster"`},
+		},
+		{
+			name:      "cluster secret without a name field is ignored",
+			agentName: "my-agent",
+			secrets: []*v1.Secret{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "no-name",
+						Namespace: ns,
+						Labels: map[string]string{
+							common.LabelKeySecretType: common.LabelValueSecretTypeCluster,
+						},
+					},
+					Data: map[string][]byte{"server": []byte("https://example.com")},
+				},
+			},
+		},
+		{
+			name:      "secrets that are not cluster secrets are ignored",
+			agentName: "my-agent",
+			secrets: []*v1.Secret{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "some-secret",
+						Namespace: ns,
+						Labels: map[string]string{
+							common.LabelKeySecretType: common.LabelValueSecretTypeRepository,
+						},
+					},
+					Data: map[string][]byte{"name": []byte("my-agent")},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "unlabeled", Namespace: ns},
+					Data:       map[string][]byte{"name": []byte("my-agent")},
+				},
+			},
+		},
+		{
+			name:      "cluster secrets in other namespaces are ignored",
+			agentName: "my-agent",
+			secrets: []*v1.Secret{
+				func() *v1.Secret {
+					s := clusterSecret("registered-cluster", "my-agent", "https://my-agent.example.com")
+					s.Namespace = "other"
+					return s
+				}(),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objs := make([]runtime.Object, 0, len(tt.secrets))
+			for _, s := range tt.secrets {
+				objs = append(objs, s)
+			}
+			clientset := kubefake.NewSimpleClientset(objs...)
+
+			err := checkClusterNameConflict(context.TODO(), clientset, ns, tt.agentName)
+			if len(tt.wantErr) == 0 {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			for _, want := range tt.wantErr {
+				assert.Contains(t, err.Error(), want)
+			}
+		})
+	}
 }
