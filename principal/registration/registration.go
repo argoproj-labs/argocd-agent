@@ -31,17 +31,19 @@ type AgentRegistrationManager struct {
 	namespace                    string
 	resourceProxyAddress         string
 	clientCertSecretName         string
+	selfRegSecretLabels          map[string]string
 	kubeclient                   kubernetes.Interface
 	issuer                       issuer.Issuer
 }
 
 func NewAgentRegistrationManager(selfAgentRegistrationEnabled bool, namespace, resourceProxyAddress, clientCertSecretName string,
-	kubeclient kubernetes.Interface, iss issuer.Issuer) *AgentRegistrationManager {
+	kubeclient kubernetes.Interface, iss issuer.Issuer, selfRegSecretLabels map[string]string) *AgentRegistrationManager {
 	return &AgentRegistrationManager{
 		selfAgentRegistrationEnabled: selfAgentRegistrationEnabled,
 		namespace:                    namespace,
 		resourceProxyAddress:         resourceProxyAddress,
 		clientCertSecretName:         clientCertSecretName,
+		selfRegSecretLabels:          selfRegSecretLabels,
 		kubeclient:                   kubeclient,
 		issuer:                       iss,
 	}
@@ -73,6 +75,14 @@ func (mgr *AgentRegistrationManager) RegisterAgent(ctx context.Context, agentNam
 		}
 
 		logCtx.Debug("Existing cluster secret is self-registered")
+
+		existingSecret, labelsUpdated, err := cluster.ApplyClusterSecretLabels(ctx, mgr.kubeclient, mgr.namespace, existingSecret, agentName, mgr.selfRegSecretLabels)
+		if err != nil {
+			return fmt.Errorf("failed to update cluster secret labels: %w", err)
+		}
+		if labelsUpdated {
+			logCtx.Debug("Cluster secret labels updated")
+		}
 
 		// Validate existing token, refresh if invalid
 		valid, err := mgr.validateClusterTokenFromSecret(existingSecret, agentName)
@@ -119,7 +129,7 @@ func (mgr *AgentRegistrationManager) RegisterAgent(ctx context.Context, agentNam
 	// Create new cluster secret
 	logCtx.Info("Creating self-registered cluster secret for agent")
 
-	if err := cluster.CreateClusterWithBearerToken(ctx, mgr.kubeclient, mgr.namespace, agentName, mgr.resourceProxyAddress, mgr.issuer, mgr.clientCertSecretName); err != nil {
+	if err := cluster.CreateClusterWithBearerToken(ctx, mgr.kubeclient, mgr.namespace, agentName, mgr.resourceProxyAddress, mgr.issuer, mgr.clientCertSecretName, mgr.selfRegSecretLabels); err != nil {
 		return fmt.Errorf("failed to create self-registered cluster secret: %w", err)
 	}
 
