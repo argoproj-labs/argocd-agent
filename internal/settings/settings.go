@@ -119,7 +119,7 @@ func (m *Manager) applyLogLevel(data map[string]string) {
 	// Re-establish the default configuration first so a removed key or a subsystem-only
 	// override cannot leak levels from a previous revision.
 	if err := cmdutil.ParseAndApplyLogLevels(m.defaultConfig.LogLevels, m.subLoggers); err != nil {
-		m.logger.WithError(err).Warnf("could not apply default log level")
+		m.logger.WithError(err).Errorf("could not apply default log level")
 	}
 
 	key := m.key(KeyLogLevel)
@@ -131,7 +131,7 @@ func (m *Manager) applyLogLevel(data map[string]string) {
 	// ParseAndApplyLogLevels validates before mutating, so a failure leaves the
 	// default configuration in effect.
 	if err := cmdutil.ParseAndApplyLogLevels(levels, m.subLoggers); err != nil {
-		m.logger.WithError(err).Warnf("Ignoring invalid %q value from the params ConfigMap", key)
+		m.logger.WithError(err).Errorf("could not apply log level from the params ConfigMap")
 		return
 	}
 
@@ -156,7 +156,7 @@ func (m *Manager) applyPprof(data map[string]string) {
 	enabled := m.defaultConfig.PprofEnabled
 	if val, ok := data[key]; ok {
 		if b, err := strconv.ParseBool(strings.TrimSpace(val)); err != nil {
-			m.logger.WithError(err).Warnf("Ignoring invalid %q value from the params ConfigMap", key)
+			m.logger.WithError(err).Errorf("could not apply pprof enabled from the params ConfigMap")
 		} else {
 			enabled = b
 			m.logOverride(key, strconv.FormatBool(m.defaultConfig.PprofEnabled), strconv.FormatBool(b))
