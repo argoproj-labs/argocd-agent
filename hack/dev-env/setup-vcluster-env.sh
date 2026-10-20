@@ -122,11 +122,9 @@ apply() {
     # Comment out 'loadBalancerIP:' lines on OpenShift
     if [[ "$OPENSHIFT" != "" ]]; then
         sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/redis-service.yaml
-        sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/repo-server-service.yaml
         sed -i.bak -e '/loadBalancerIP/s/^/#/' $TMP_DIR/control-plane/server-service.yaml
     else
         sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/redis-service.yaml
-        sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/repo-server-service.yaml
         sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/control-plane/server-service.yaml
         sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/agent-managed/redis-service.yaml
         sed -i.bak -e "/loadBalancerIP/s/192\.168\.56/${LB_NETWORK}/" $TMP_DIR/agent-autonomous/redis-service.yaml
@@ -197,49 +195,6 @@ apply() {
     # Use --server-side to avoid "metadata.annotations: Too long" error with large CRDs like applicationsets.argoproj.io
     kubectl --context vcluster-$cluster apply --server-side -n $namespace -k ${TMP_DIR}/${cluster} || true
     kubectl --context vcluster-$cluster apply --server-side -n $namespace -k ${TMP_DIR}/${cluster}
-
-    if [[ "$OPENSHIFT" != "" ]]; then
-
-        # echo "-> Waiting for Redis load balancer on control plane Argo CD"
-
-        # while [ true ]
-        # do
-        #     REDIS_ADDR=`kubectl --context vcluster-control-plane -n argocd   get service/argocd-redis -o json | jq -r '.status.loadBalancer.ingress[0].hostname'`
-
-        #     if [[ "$REDIS_ADDR" != "" ]] && [[ "$REDIS_ADDR" != "null" ]]; then
-        #         break
-        #     fi
-
-        #     sleep 2
-        # done
-
-        echo "-> Waiting for repo-server load balancer on control plane Argo CD"
-
-        while [ true ]
-        do
-            REPO_SERVER_ADDR=`kubectl --context vcluster-control-plane -n ${ARGOCD_PRINCIPAL_NAMESPACE}   get service/argocd-repo-server -o json | jq -r '.status.loadBalancer.ingress[0].hostname'`
-
-            if [[ "$REPO_SERVER_ADDR" != "" ]] && [[ "$REPO_SERVER_ADDR" != "null" ]]; then
-                break
-            fi
-            sleep 2
-
-        done
-
-    else
-        # For all other cases, use hardcoded values
-        REPO_SERVER_ADDR="${LB_NETWORK}.222"
-        # REDIS_ADDR="${LB_NETWORK}.221"
-    fi
-
-    REDIS_ADDR=argocd-redis # Now that redis proxy is implemented, agent can connect to its own redis (I've left the existing logic above, for debugging purposes, to be removed at a later time)
-
-    echo "Redis on control plane: $REDIS_ADDR"
-    echo "Repo server URL on control plane: $REPO_SERVER_ADDR"
-
-    # Update the Argo CD repo-server/redis addresses that agent-managed Argo CD instance connects to
-    sed -i.bak "s/repo-server-address/$REPO_SERVER_ADDR/g" "$TMP_DIR/agent-managed/argocd-cmd-params-cm.yaml"
-    sed -i.bak "s/redis-server-address/$REDIS_ADDR/g" "$TMP_DIR/agent-managed/argocd-cmd-params-cm.yaml"
 
     echo "-> Creating Argo CD instances in vclusters"
     for c in $VCLUSTERS_AGENTS; do
