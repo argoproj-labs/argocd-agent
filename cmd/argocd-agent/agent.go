@@ -169,7 +169,13 @@ func NewAgentRunCommand() *cobra.Command {
 			if len(logLevels) > 0 {
 				err := cmdutil.ParseAndApplyLogLevels(logLevels, &subLoggers)
 				if err != nil {
-					cmdutil.Fatal("Failed to parse and apply log levels: %v", err)
+					logrus.Errorf("Failed to parse and apply log levels: %v", err)
+
+					logLevels = []string{"info"}
+					logrus.Info("Switching to the default log level: info")
+					if err := cmdutil.ParseAndApplyLogLevels(logLevels, &subLoggers); err != nil {
+						logrus.Errorf("Failed to parse and apply log levels: %v", err)
+					}
 				}
 			}
 
