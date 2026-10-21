@@ -27,7 +27,10 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9/maintnotifications"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
@@ -74,6 +77,7 @@ type ClusterDetails struct {
 // HasConnectionStatus checks if the connection info for a given server matches
 // the expected connection state in principal cluster.
 func HasConnectionStatus(agentName string, expected appv1.ConnectionState, clusterDetails *ClusterDetails) bool {
+
 	actual, err := GetPrincipalClusterInfo(agentName, clusterDetails)
 
 	if err != nil {
@@ -288,11 +292,27 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 		}
 	}
 
+	// Fall back to an OpenShift Route (if available). 'hack/dev-env/reverse-tunnels/openshift-routes/setup.sh' exposes argocd-redis this way.
+	// However: That Route lives on the *host* cluster, in the
+	// 'vcluster-agent-managed' namespace (not the vcluster's own 'argocd-managed' namespace),
+	// since the route.openshift.io API isn't available from inside the vcluster.
+	var redisTLSEnabled bool
 	if redisAddr == "" {
-		return fmt.Errorf("could not get Redis server address from LoadBalancer ingress")
+		routeHost, err := getRouteHost(ctx, "vcluster-agent-managed", "argocd-redis")
+		if err != nil {
+			return err
+		}
+		if routeHost != "" {
+			redisAddr = fmt.Sprintf("%s:443", routeHost)
+			redisTLSEnabled = true
+		}
 	}
 
-	clusterDetails.ManagedAgentRedisTLSEnabled = false
+	if redisAddr == "" {
+		return fmt.Errorf("could not get Redis server address from LoadBalancer ingress or Route")
+	}
+
+	clusterDetails.ManagedAgentRedisTLSEnabled = redisTLSEnabled
 	clusterDetails.ManagedAgentRedisAddr = redisAddr
 
 	// Fetch Redis secret to get the password
@@ -312,6 +332,43 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 	clusterDetails.ManagedAgentRedisPassword = string(authData)
 
 	return nil
+}
+
+// getRouteHost looks up the hostname of the named OpenShift Route in the given namespace on the
+// *host* cluster (not one of the vcluster-* contexts: those don't expose the route.openshift.io
+// API, since it's an OpenShift extension API not synced into the vcluster).
+//
+// Returns an empty string (with no error) if the Route API isn't available on the host cluster or no such Route exists, so
+// callers can fall back to other address discovery mechanisms (e.g. a LoadBalancer Service).
+func getRouteHost(ctx context.Context, hostNamespace string, routeName string) (string, error) {
+	hostConfig, err := GetSystemKubeConfig("")
+	if err != nil {
+		return "", fmt.Errorf("failed to load host cluster kubeconfig: %w", err)
+	}
+
+	hostClient, err := NewKubeClient(hostConfig)
+	if err != nil {
+		return "", fmt.Errorf("failed to create host cluster client: %w", err)
+	}
+
+	if hostClient.dclient == nil {
+		return "", nil
+	}
+
+	gvr := schema.GroupVersionResource{Group: "route.openshift.io", Version: "v1", Resource: "routes"}
+	route, err := hostClient.dclient.Resource(gvr).Namespace(hostNamespace).Get(ctx, routeName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get %s Route: %w", routeName, err)
+	}
+
+	host, _, err := unstructured.NestedString(route.Object, "spec", "host")
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s Route host: %w", routeName, err)
+	}
+	return host, nil
 }
 
 // getPrincipalRedisConfig gets the principal Redis config from the principal cluster
@@ -335,11 +392,29 @@ func getPrincipalRedisConfig(ctx context.Context, principalClient KubeClient, cl
 		}
 	}
 
+	// Optional: fall back to an OpenShift Route (if available).
+	// 'hack/dev-env/reverse-tunnels/openshift-routes/setup.sh' exposes argocd-redis
+	// this way.
+	// However: That Route lives on the *host* cluster, in the
+	// 'vcluster-control-plane' namespace (not the vcluster's own 'argocd-principal' namespace),
+	// since the route.openshift.io API isn't available from inside the vcluster.
+	var redisTLSEnabled bool
+	if redisAddr == "" {
+		routeHost, err := getRouteHost(ctx, "vcluster-control-plane", "argocd-redis")
+		if err != nil {
+			return err
+		}
+		if routeHost != "" {
+			redisAddr = fmt.Sprintf("%s:443", routeHost)
+			redisTLSEnabled = true
+		}
+	}
+
 	if redisAddr == "" {
 		return fmt.Errorf("redis service does not have a LoadBalancer IP or hostname")
 	}
 
-	clusterDetails.PrincipalRedisTLSEnabled = false
+	clusterDetails.PrincipalRedisTLSEnabled = redisTLSEnabled
 	clusterDetails.PrincipalRedisAddr = redisAddr
 
 	// Fetch Redis secret to get the password

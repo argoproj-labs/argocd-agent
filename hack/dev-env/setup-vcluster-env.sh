@@ -71,6 +71,112 @@ check_for_openshift() {
 
 }
 
+# Optional: expose_vcluster_via_route creates a passthrough OpenShift Route for the (not yet created)
+# vcluster Service, and prints the path to a generated Helm values file that configures the
+# vcluster to be signed for, and reachable at, that Route's host. This is used instead of
+# 'vcluster create --expose' (which provisions a cloud LoadBalancer Service) since LoadBalancers
+# can be expensive on public cloud, or unavailable entirely.
+# OpenShift assigns a Route a host as soon as it's created, regardless of whether the Service it
+# targets exists yet, which is what allows the vcluster's proxy certificate to be signed for that
+# host (controlPlane.proxy.extraSANs), and its exported kubeconfig to point at it
+# (exportKubeConfig.server), from values passed to the 'vcluster create' call that follows.
+#
+# Arguments: vcluster name (also used as its namespace, by convention of this script).
+expose_vcluster_via_route() {
+    local name="$1"
+
+    cat <<EOF | kubectl --context=${initial_context} -n ${name} apply -f - >&2
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: ${name}
+spec:
+  to:
+    kind: Service
+    name: ${name}
+  port:
+    targetPort: https
+  tls:
+    termination: passthrough
+EOF
+
+    local route_host=
+    for ((i = 1; i <= 60; i++)); do
+        route_host=$(kubectl --context=${initial_context} -n ${name} get route ${name} -o jsonpath='{.spec.host}') || true
+        if [ -n "$route_host" ]; then
+            break
+        fi
+        sleep 2
+    done
+    if [ -z "$route_host" ]; then
+        echo "ERROR: Failed to obtain Route host for ${name}" >&2
+        exit 1
+    fi
+    echo "Route host for ${name} is ${route_host}" >&2
+
+    local values_file=$(mktemp)
+    cat <<EOF > ${values_file}
+exportKubeConfig:
+  server: https://${route_host}:443
+controlPlane:
+  proxy:
+    extraSANs:
+    - ${route_host}
+EOF
+    echo ${values_file}
+}
+
+# Optional: wait_for_vcluster_kubeconfig_for_route polls for the Secret vcluster generates with its own, pre-signed
+# kubeconfig (named 'vc-<name>', available as soon as the vcluster control plane is up - well
+# before it would respond successfully through the Route), and merges it into the local
+# kubeconfig under the given context name. 
+# 
+# This allow the vcluster K8s API to be accessed (via exposure via Route) after this setup script has completed.
+#
+# - This replaces the kubeconfig setup normally done by 'vcluster create --connect', which (lacking a LoadBalancer address to use) would otherwise try to reach the vcluster via local port-forwarding. But this doesn't give us the stable, directly reachable context the rest of this dev-env's scripts expect.
+#
+# Arguments: vcluster name (also used as its namespace), context name to write locally.
+wait_for_vcluster_kubeconfig_for_route() {
+    local name="$1"
+    local context_name="$2"
+
+    echo "-> Waiting for vcluster $name kubeconfig Secret"
+    local tmp_kubeconfig=$(mktemp)
+    for ((i = 1; i <= 60; i++)); do
+        kubectl --context=${initial_context} -n ${name} get secret vc-${name} -o jsonpath='{.data.config}' 2>/dev/null | base64 -d > ${tmp_kubeconfig} || true
+        if [ -s "$tmp_kubeconfig" ]; then
+            break
+        fi
+        sleep 5
+    done
+    if [ ! -s "$tmp_kubeconfig" ]; then
+        echo "ERROR: Failed to obtain kubeconfig Secret vc-${name}" >&2
+        exit 1
+    fi
+
+    local server=$(kubectl --kubeconfig=${tmp_kubeconfig} config view --minify --raw -o jsonpath='{.clusters[0].cluster.server}')
+    local cert_dir=$(mktemp -d)
+    kubectl --kubeconfig=${tmp_kubeconfig} config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > ${cert_dir}/ca.crt
+    kubectl --kubeconfig=${tmp_kubeconfig} config view --minify --raw -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d > ${cert_dir}/client.crt
+    kubectl --kubeconfig=${tmp_kubeconfig} config view --minify --raw -o jsonpath='{.users[0].user.client-key-data}' | base64 -d > ${cert_dir}/client.key
+    rm -f ${tmp_kubeconfig}
+
+    kubectl config set-cluster ${context_name} --server="${server}" --certificate-authority="${cert_dir}/ca.crt" --embed-certs=true
+    kubectl config set-credentials ${context_name} --client-certificate="${cert_dir}/client.crt" --client-key="${cert_dir}/client.key" --embed-certs=true
+    kubectl config set-context ${context_name} --cluster=${context_name} --user=${context_name}
+    rm -rf ${cert_dir}
+
+    echo "-> Waiting for vcluster $name API to become reachable via Route"
+    for ((i = 1; i <= 60; i++)); do
+        if kubectl --context=${context_name} get --raw /healthz >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 5
+    done
+    echo "ERROR: vcluster $name API not reachable via Route after waiting" >&2
+    exit 1
+}
+
 
 # wait_for_pods waits for all Pods in the given context and namespace to be running.
 # Arguments: context, component, namespace
@@ -193,8 +299,8 @@ apply() {
     # Run 'kubectl apply' twice, to avoid the following error that occurs during the first invocation:
     # - 'error: resource mapping not found for name: "default" namespace: "" from "(...)": no matches for kind "AppProject" in version "argoproj.io/v1alpha1"'
     # Use --server-side to avoid "metadata.annotations: Too long" error with large CRDs like applicationsets.argoproj.io
-    kubectl --context vcluster-$cluster apply --server-side -n $namespace -k ${TMP_DIR}/${cluster} || true
-    kubectl --context vcluster-$cluster apply --server-side -n $namespace -k ${TMP_DIR}/${cluster}
+    kubectl --context vcluster-$cluster apply --force-conflicts --server-side -n $namespace -k ${TMP_DIR}/${cluster} || true
+    kubectl --context vcluster-$cluster apply --force-conflicts --server-side -n $namespace -k ${TMP_DIR}/${cluster}
 
     echo "-> Creating Argo CD instances in vclusters"
     for c in $VCLUSTERS_AGENTS; do
@@ -205,8 +311,8 @@ apply() {
 
         # Run 'kubectl apply' twice, to avoid error that occurs during the first invocation (see above for error)
         # Use --server-side to avoid "metadata.annotations: Too long" error with large CRDs like applicationsets.argoproj.io
-        kubectl --context vcluster-$cluster apply --server-side -n $namespace -k ${TMP_DIR}/${cluster} || true
-        kubectl --context vcluster-$cluster apply --server-side -n $namespace -k ${TMP_DIR}/${cluster}
+        kubectl --context vcluster-$cluster apply --force-conflicts --server-side -n $namespace -k ${TMP_DIR}/${cluster} || true
+        kubectl --context vcluster-$cluster apply --force-conflicts --server-side -n $namespace -k ${TMP_DIR}/${cluster}
     done
 
     kubectl --context vcluster-control-plane create ns agent-autonomous || true
@@ -247,6 +353,8 @@ create)
     kubectl create ns vcluster-agent-autonomous --context=${initial_context} || true
 
     EXTRA_VCLUSTER_PARAMS=""
+    EXPOSE_FLAG="--expose"
+    CONNECT_FLAG="--connect"
 
     if [[ "$OPENSHIFT" != "" ]]; then
 
@@ -260,18 +368,31 @@ create)
         oc adm policy add-scc-to-group anyuid-seccomp-netbind system:serviceaccounts:vcluster-agent-autonomous --context=${initial_context}
 
         EXTRA_VCLUSTER_PARAMS="-f ${SCRIPTPATH}/resources/vcluster.yaml"
+
+        # On OpenShift, each vcluster is exposed via a Route. '--connect' is disabled since its readiness check
+        # requires reaching the vcluster directly (e.g. via '--expose' or local port-forwarding),
+        # neither of which apply here; wait_for_vcluster_kubeconfig_for_route replaces it below.
+        EXPOSE_FLAG=""
+        CONNECT_FLAG="--connect=false"
     fi
 
     echo "-> Creating required vclusters"
     for c in $VCLUSTERS; do
         cluster=$(cluster $c)
         echo "  --> Creating vcluster $cluster"
-        vcluster create --context=${initial_context} ${EXTRA_VCLUSTER_PARAMS} -n vcluster-${cluster} --expose --kube-config-context-name vcluster-${cluster} vcluster-${cluster}
 
-        # I found a sleep statement here was beneficial to allow time for the load balancer to become available. If we find this is not required, these commented out lines should be removed.
-        # if [[ "$OPENSHIFT" != "" ]]; then
-        #   sleep 60
-        # fi
+        CLUSTER_EXTRA_PARAMS="$EXTRA_VCLUSTER_PARAMS"
+        if [[ "$OPENSHIFT" != "" ]]; then
+            ROUTE_VALUES_FILE=$(expose_vcluster_via_route vcluster-${cluster})
+            CLUSTER_EXTRA_PARAMS="$CLUSTER_EXTRA_PARAMS -f ${ROUTE_VALUES_FILE}"
+        fi
+
+        vcluster create --context=${initial_context} ${CLUSTER_EXTRA_PARAMS} ${EXPOSE_FLAG} ${CONNECT_FLAG} -n vcluster-${cluster} --kube-config-context-name vcluster-${cluster} vcluster-${cluster}
+
+        if [[ "$OPENSHIFT" != "" ]]; then
+            wait_for_vcluster_kubeconfig_for_route vcluster-${cluster} vcluster-${cluster}
+        fi
+
     done
     sleep 2
     if test "$1" != "--skip-argo"; then

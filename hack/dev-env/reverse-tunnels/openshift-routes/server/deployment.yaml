@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frp-container
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: frp-container
+  template:
+    metadata:
+      labels:
+        app: frp-container
+    spec:
+      containers:
+        - image: 'docker.io/fatedier/frps:v0.71.0@sha256:cd8b947ba61678b200baa4f71ccc33f3c52e4e2cc0059700ba3b8354e36af7c3'
+          name: frp-container
+          ports:
+            - containerPort: 2333
+              protocol: TCP
+            - containerPort: 6379
+              protocol: TCP
+            - containerPort: 9090
+              protocol: TCP
+          args:
+            - '-c'
+            - /config/frps.toml
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+      volumes:
+        - name: config-volume
+          secret:
+            secretName: frp-container

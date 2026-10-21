@@ -471,6 +471,22 @@ func GetArgoCDServerEndpoint(k8sClient KubeClient) (string, error) {
 		}
 	}
 
+	// Optional: use OpenShift Route, where available. 'hack/dev-env/reverse-tunnels/openshift-routes/setup.sh' exposes argocd-server this way .
+	// However: that Route lives on the *host* cluster, in the 'vcluster-control-plane'
+	// namespace (not the vcluster's own 'argocd-principal' namespace), since the
+	// route.openshift.io API isn't available from inside the vcluster.
+	if argoEndpoint == "" {
+		routeHost, err := getRouteHost(context.Background(), "vcluster-control-plane", "argocd-server")
+		if err != nil {
+			return "", err
+		}
+		argoEndpoint = routeHost
+	}
+
+	if argoEndpoint == "" {
+		return "", fmt.Errorf("argocd-server service does not have a LoadBalancer IP/hostname or Route")
+	}
+
 	return argoEndpoint, nil
 }
 
