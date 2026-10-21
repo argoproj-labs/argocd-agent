@@ -23,6 +23,5 @@ patches:
 - path: argocd-rbac-cm.yaml
 - path: argocd-secret.yaml
 - path: server-service.yaml
-- path: repo-server-service.yaml
 - path: redis-service.yaml
 - path: appproject-default.yaml
