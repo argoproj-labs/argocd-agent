@@ -24,15 +24,15 @@ To setup the test environment on the cluster, execute the following command from
 make setup-e2e
 ```
 
-**Note:** Redis proxy and resource proxy tests require a reverse tunnel because vcluster pods cannot reach the host machine's IP address where the principal's Redis Proxy runs. The tunnel bridges this gap by routing traffic from the vcluster to your local machine.
+### Reverse Tunnels (optional)
 
-To setup the reverse tunnel (in a separate terminal):
+The default E2E test environment assumes that the E2E tests are running in microk8s with MetalLB on a specific port range. For non-microk8s-based environments, the redis proxy and resource proxy tests require a reverse tunnel because cluster pods cannot reach the host machine's IP address where the principal's Redis/Resource Proxy runs. 
 
-```shell
-./hack/dev-env/reverse-tunnel/setup.sh
-```
+The tunnel bridges this gap by routing traffic from the vcluster to your local machine.
 
-Keep this terminal running while executing the tests. See [hack/dev-env/reverse-tunnel/README.md](../../hack/dev-env/reverse-tunnel/README.md) for details.
+See [hack/dev-env/reverse-tunnels](../../hack/dev-env/reverse-tunnels) for details.
+
+### Starting the tests
 
 To run the principal and agents, execute the following command from the repository root:
 
