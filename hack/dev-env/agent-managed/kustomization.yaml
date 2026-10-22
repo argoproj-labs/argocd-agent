@@ -10,6 +10,8 @@ resources:
 images:
 - name: quay.io/argoproj/argocd
   newTag: LatestReleaseTag
+- name: public.ecr.aws/docker/library/redis
+  newName: quay.io/jgwest-redhat/redis
 
 transformers:
 - namespace-transformer.yaml
