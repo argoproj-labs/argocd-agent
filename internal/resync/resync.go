@@ -410,8 +410,14 @@ func (r *RequestHandler) handleUpdatedResource(logCtx *logrus.Entry, reqUpdate *
 			return err
 		}
 
-		agentAppProject := appproject.AgentSpecificAppProject(*appProject, agentName, r.destinationBasedMapping, agentMode)
-		ev := r.events.AppProjectEvent(event.SpecUpdate, &agentAppProject)
+		// The principal narrows an AppProject down to what is relevant for a
+		// managed agent. An autonomous agent sends its AppProject as it is,
+		// like it does for live updates, because the principal translates the
+		// destinations itself and would otherwise be left with none.
+		if r.role == manager.ManagerRolePrincipal {
+			*appProject = appproject.AgentSpecificAppProject(*appProject, agentName, r.destinationBasedMapping, agentMode)
+		}
+		ev := r.events.AppProjectEvent(event.SpecUpdate, appProject)
 		logCtx.Trace("Sending a request to update the appProject")
 		r.sendQ.Add(ev)
 
