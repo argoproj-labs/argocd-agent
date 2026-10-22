@@ -6,39 +6,8 @@ metadata:
   namespace: {{ include "argocd-agent-agent.namespace" . }}
   labels:
     {{- include "argocd-agent-agent.labels" . | nindent 4 }}
+{{- $defaults := include "argocd-agent-agent.defaultRoleRules" . | fromYamlArray }}
+{{- $extras := default (list) .Values.rbac.extraRules }}
 rules:
-- apiGroups:
-  - argoproj.io
-  resources:
-  - applications
-  - appprojects
-  - applicationsets
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - delete
-  - patch
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  - configmaps
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - patch
-  - delete
-- apiGroups:
-  - ""
-  resources:
-  - events
-  verbs:
-  - create
-  - list
+{{- include "argocd-agent-agent.mergeRules" (list $defaults $extras) | nindent 0 }}
 {{- end }}

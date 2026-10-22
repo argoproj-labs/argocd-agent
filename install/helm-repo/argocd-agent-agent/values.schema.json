@@ -475,11 +475,29 @@
           "description": "Create cluster-scoped ClusterRole and ClusterRoleBinding. Required for\ndestination-based mapping, create-namespace, and resource-proxy discovery\nacross multiple namespaces. Leave `false` to keep the agent strictly\nnamespace-scoped.",
           "title": "createClusterRole",
           "type": "boolean"
+        },
+        "extraClusterRules": {
+          "description": "Extra rules for the agent's ClusterRole (requires `rbac.create` and `rbac.createClusterRole`). Each item is a standard RBAC PolicyRule. Rules that differ\nonly in their verbs are merged. The default rules do not cover application workloads,\nso grant read access here for the resource proxy to serve live resources (see the live\nresources documentation). Grant only what the applications need.",
+          "items": {
+            "required": []
+          },
+          "title": "extraClusterRules",
+          "type": "array"
+        },
+        "extraRules": {
+          "description": "Extra rules for the agent's Role (requires `rbac.create`). Each item is a standard\nRBAC PolicyRule. Rules that differ only in their verbs are merged.",
+          "items": {
+            "required": []
+          },
+          "title": "extraRules",
+          "type": "array"
         }
       },
       "required": [
         "create",
-        "createClusterRole"
+        "createClusterRole",
+        "extraRules",
+        "extraClusterRules"
       ],
       "title": "rbac",
       "type": "object"
