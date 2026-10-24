@@ -271,10 +271,10 @@ func NewAgentRunCommand() *cobra.Command {
 					remoteOpts = append(remoteOpts, client.WithInsecureSkipTLSVerify())
 				} else if rootCAPath != "" {
 					logrus.Infof("Loading root CA certificate from file %s", rootCAPath)
-					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromFile(rootCAPath))
+					remoteOpts = append(remoteOpts, client.WithRootCAReloadFromFile(rootCAPath))
 				} else {
 					logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCASecretName)
-					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, namespace, rootCASecretName, ""))
+					remoteOpts = append(remoteOpts, client.WithRootCAReloadFromSecret(kubeConfig.Clientset, namespace, rootCASecretName))
 				}
 
 				// If both a certificate and a key are specified on the command
@@ -282,20 +282,12 @@ func NewAgentRunCommand() *cobra.Command {
 				// Otherwise, it will try and load the TLS keypair from a secret.
 				if tlsClientCrt != "" && tlsClientKey != "" {
 					logrus.Infof("Loading client TLS configuration from files cert=%s and key=%s", tlsClientCrt, tlsClientKey)
-					caPath := ""
-					if !insecure {
-						caPath = rootCAPath
-					}
-					remoteOpts = append(remoteOpts, client.WithTLSReloadFromFile(tlsClientCrt, tlsClientKey, caPath))
+					remoteOpts = append(remoteOpts, client.WithTLSReloadFromFile(tlsClientCrt, tlsClientKey))
 				} else if (tlsClientCrt != "" && tlsClientKey == "") || (tlsClientCrt == "" && tlsClientKey != "") {
 					cmdutil.Fatal("Both --tls-client-cert and --tls-client-key have to be given")
 				} else {
 					logrus.Infof("Loading client TLS certificate from secret %s/%s", namespace, tlsSecretName)
-					caSecretName := ""
-					if !insecure && rootCAPath == "" {
-						caSecretName = rootCASecretName
-					}
-					remoteOpts = append(remoteOpts, client.WithTLSReloadFromSecret(kubeConfig.Clientset, namespace, tlsSecretName, caSecretName))
+					remoteOpts = append(remoteOpts, client.WithTLSReloadFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
 				}
 			}
 
@@ -333,7 +325,7 @@ func NewAgentRunCommand() *cobra.Command {
 			if remote == nil {
 				cmdutil.Fatal("No remote specified")
 			}
-			// Watch the client certificate so the next handshake can use renewed material.
+			// Watch the client certificate and root CA so the next handshake can use renewed material.
 			remote.StartTLSReload(ctx)
 
 			agentOpts = append(agentOpts, agent.WithRemote(remote))

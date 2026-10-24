@@ -19,7 +19,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
@@ -28,29 +27,14 @@ import (
 )
 
 // WithTLSReloadFromFile loads the client certificate from files and reloads it
-// when those files change. caPath can be empty when server verification is disabled.
-func WithTLSReloadFromFile(certPath, keyPath, caPath string) RemoteOption {
+// when those files change.
+func WithTLSReloadFromFile(certPath, keyPath string) RemoteOption {
 	return func(r *Remote) error {
 		cert, err := tlsutil.TLSCertFromFile(certPath, keyPath, true)
 		if err != nil {
 			return fmt.Errorf("unable to read TLS client cert: %w", err)
 		}
-		material := &tlsutil.TLSMaterial{Cert: cert}
-		if caPath != "" {
-			pemData, err := os.ReadFile(caPath)
-			if err != nil {
-				return err
-			}
-			pool := x509.NewCertPool()
-			if !pool.AppendCertsFromPEM(pemData) {
-				return fmt.Errorf("invalid PEM data in %s", caPath)
-			}
-			material.CAPool = pool
-			if !r.tlsConfig.InsecureSkipVerify {
-				r.tlsConfig.RootCAs = pool
-			}
-		}
-		provider := tlsutil.NewTLSFileProvider(certPath, keyPath, caPath, material)
+		provider := tlsutil.NewTLSFileProvider(certPath, keyPath, "", &tlsutil.TLSMaterial{Cert: cert})
 		provider.KeepPreviousCertificate()
 		r.enableTLSReload(provider)
 		return nil
@@ -58,44 +42,73 @@ func WithTLSReloadFromFile(certPath, keyPath, caPath string) RemoteOption {
 }
 
 // WithTLSReloadFromSecret loads the client certificate from a Kubernetes Secret
-// and reloads it when that Secret changes. caSecretName can be empty when the
-// CA comes from another source or server verification is disabled.
-func WithTLSReloadFromSecret(kube kubernetes.Interface, namespace, certSecretName, caSecretName string) RemoteOption {
+// and reloads it when that Secret changes.
+func WithTLSReloadFromSecret(kube kubernetes.Interface, namespace, certSecretName string) RemoteOption {
 	return func(r *Remote) error {
 		cert, err := tlsutil.TLSCertFromSecret(context.Background(), kube, namespace, certSecretName)
 		if err != nil {
 			return fmt.Errorf("unable to read TLS client from secret: %w", err)
 		}
-		material := &tlsutil.TLSMaterial{Cert: cert}
-		if caSecretName != "" {
-			pool, err := tlsutil.X509CertPoolFromSecret(context.Background(), kube, namespace, caSecretName)
-			if err != nil {
-				return err
-			}
-			material.CAPool = pool
-			if !r.tlsConfig.InsecureSkipVerify {
-				r.tlsConfig.RootCAs = pool
-			}
-		}
-		provider := tlsutil.NewTLSSecretProvider(certSecretName, caSecretName, namespace, kube, material)
+		provider := tlsutil.NewTLSSecretProvider(certSecretName, "", namespace, kube, &tlsutil.TLSMaterial{Cert: cert})
 		provider.KeepPreviousCertificate()
 		r.enableTLSReload(provider)
 		return nil
 	}
 }
 
+// WithRootCAReloadFromFile loads the root CA pool from a file and reloads it
+// when that file changes.
+func WithRootCAReloadFromFile(caPath string) RemoteOption {
+	return func(r *Remote) error {
+		if err := WithRootAuthoritiesFromFile(caPath)(r); err != nil {
+			return err
+		}
+		provider := tlsutil.NewTLSFileProvider("", "", caPath, &tlsutil.TLSMaterial{CAPool: r.tlsConfig.RootCAs})
+		provider.KeepPreviousCertificate()
+		r.enableRootCAReload(provider)
+		return nil
+	}
+}
+
+// WithRootCAReloadFromSecret loads the root CA pool from a Kubernetes Secret
+// and reloads it when that Secret changes.
+func WithRootCAReloadFromSecret(kube kubernetes.Interface, namespace, caSecretName string) RemoteOption {
+	return func(r *Remote) error {
+		if err := WithRootAuthoritiesFromSecret(kube, namespace, caSecretName)(r); err != nil {
+			return err
+		}
+		provider := tlsutil.NewTLSSecretProvider("", caSecretName, namespace, kube, &tlsutil.TLSMaterial{CAPool: r.tlsConfig.RootCAs})
+		provider.KeepPreviousCertificate()
+		r.enableRootCAReload(provider)
+		return nil
+	}
+}
+
 func (r *Remote) enableTLSReload(source tlsutil.TLSSource) {
 	r.tlsSource = source
-	switch provider := source.(type) {
-	case *tlsutil.TLSFileProvider:
-		provider.SetUpdateHandler(r.onTLSMaterial)
-	case *tlsutil.TLSSecretProvider:
-		provider.SetUpdateHandler(r.onTLSMaterial)
-	}
-	_, pool := source.Load()
-	r.storeRootCAs(pool)
+	setUpdateHandler(source, func(cert tls.Certificate, _ *x509.CertPool) {
+		r.noteClientCertificate(cert)
+	})
 	r.tlsConfig.GetClientCertificate = r.getClientCertificate
 	r.noteClientCertificate(currentCertificate(source))
+}
+
+func (r *Remote) enableRootCAReload(source tlsutil.TLSSource) {
+	r.caSource = source
+	setUpdateHandler(source, func(_ tls.Certificate, pool *x509.CertPool) {
+		r.storeRootCAs(pool)
+	})
+	_, pool := source.Load()
+	r.storeRootCAs(pool)
+}
+
+func setUpdateHandler(source tlsutil.TLSSource, fn func(tls.Certificate, *x509.CertPool)) {
+	switch provider := source.(type) {
+	case *tlsutil.TLSFileProvider:
+		provider.SetUpdateHandler(fn)
+	case *tlsutil.TLSSecretProvider:
+		provider.SetUpdateHandler(fn)
+	}
 }
 
 func (r *Remote) storeRootCAs(pool *x509.CertPool) {
@@ -119,11 +132,6 @@ func (r *Remote) tlsConfigForDial() *tls.Config {
 func currentCertificate(source tlsutil.TLSSource) tls.Certificate {
 	cert, _ := source.Load()
 	return cert
-}
-
-func (r *Remote) onTLSMaterial(cert tls.Certificate, pool *x509.CertPool) {
-	r.storeRootCAs(pool)
-	r.noteClientCertificate(cert)
 }
 
 func (r *Remote) getClientCertificate(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
@@ -183,33 +191,37 @@ func certificateIdentity(leaf *x509.Certificate) string {
 	return identity
 }
 
-// StartTLSReload watches the configured certificate source until ctx is canceled.
-// A failed watch is retried. An invalid certificate does not replace the current one.
+// StartTLSReload watches the configured client certificate and root CA sources
+// until ctx is canceled. A failed watch is retried. Invalid data does not
+// replace the current certificate or CA pool.
 func (r *Remote) StartTLSReload(ctx context.Context) {
-	if r.tlsSource == nil {
-		return
-	}
-	go func() {
-		backoff := time.Second
-		for {
-			err := r.tlsSource.Watch(ctx)
-			if ctx.Err() != nil {
-				return
-			}
-			if err == nil {
-				return
-			}
-			log().WithError(err).Error("TLS client certificate reload watch stopped; retrying")
-			timer := time.NewTimer(backoff)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-			}
-			if backoff < 30*time.Second {
-				backoff *= 2
-			}
+	for _, source := range []tlsutil.TLSSource{r.tlsSource, r.caSource} {
+		if source != nil {
+			go watchTLSSource(ctx, source)
 		}
-	}()
+	}
+}
+
+func watchTLSSource(ctx context.Context, source tlsutil.TLSSource) {
+	backoff := time.Second
+	for {
+		err := source.Watch(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			return
+		}
+		log().WithError(err).Error("TLS reload watch stopped; retrying")
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		if backoff < 30*time.Second {
+			backoff *= 2
+		}
+	}
 }

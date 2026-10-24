@@ -189,15 +189,15 @@ argocd-agent-client-tls                   kubernetes.io/tls     2      4m
 
 ## Agent client certificate reload
 
-The agent watches the client certificate Secret (default `argocd-agent-client-tls`). It also watches the client certificate files when those are set. The next TLS handshake uses the new certificate. The agent process does not restart.
+The agent watches the client certificate Secret (default `argocd-agent-client-tls`), or the client certificate files when those are set. It also watches the root CA, from the CA Secret (default `argocd-agent-ca`) or from the `--root-ca-path` file. The client certificate and the root CA can come from different sources. The next TLS handshake uses the new certificate. The agent process does not restart.
 
 An open connection keeps the TLS session that started it. The new certificate is used when the agent connects again.
 
 The renewed certificate must keep the same agent identity. The principal reads the agent name from the certificate subject, or from a URI SAN when it uses `mtls:uri:` authentication. A different name is a different agent. The agent logs a warning when a reloaded certificate has a different subject or URI SANs.
 
-An invalid certificate does not replace the current certificate. The agent logs the error and keeps the previous certificate. The same rule applies to the CA Secret (default `argocd-agent-ca`) when that Secret is the CA source. A new CA pool is used when the agent opens a new connection.
+An invalid certificate does not replace the current certificate. The agent logs the error and keeps the previous certificate. The same rule applies to the root CA. A new CA pool is used when the agent opens a new connection.
 
-The metric `argocd_agent_client_certificate_expiry_timestamp_seconds` is the Unix time when the client certificate expires. It is present when the agent metrics port is not `0`. See [Agent Metrics](../operations/metrics.md#agent-metrics).
+The metric `argocd_agent_client_certificate_expiry_timestamp_seconds` is the Unix time when the client certificate expires. It is present when the agent metrics port is not `0`. The value is `0` when the agent does not load a client certificate from a Secret or from files, for example in SPIRE mode or with `--insecure-plaintext`. Exclude the value `0` from alert rules. See [Agent Metrics](../operations/metrics.md#agent-metrics).
 
 This reload does not issue a new certificate. Write the new Secret, or the new certificate files, before the current certificate expires.
 

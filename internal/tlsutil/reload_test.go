@@ -267,6 +267,27 @@ func Test_TLSFileProviderKeepPreviousCertificate(t *testing.T) {
 	})
 }
 
+// Test_TLSFileProviderReload checks that a provider with only a CA path reloads
+// the CA, for example when a mounted Secret volume swaps its ..data link.
+func Test_TLSFileProviderReload(t *testing.T) {
+	tempDir := t.TempDir()
+	caPath := path.Join(tempDir, "ca.crt")
+	caPEM, _ := fakecerts.CreateSelfSignedCert(t, "rsa", caTempl)
+	caPool := x509.NewCertPool()
+	require.True(t, caPool.AppendCertsFromPEM(caPEM))
+	newCAPEM, _ := fakecerts.CreateSelfSignedCert(t, "rsa", caTempl)
+	require.NoError(t, os.WriteFile(caPath, newCAPEM, 0o600))
+
+	provider := NewTLSFileProvider("", "", caPath, &TLSMaterial{CAPool: caPool})
+	require.NoError(t, provider.OnChange(context.Background(), fsnotify.Event{Name: path.Join(tempDir, "..data"), Op: fsnotify.Create}))
+
+	cert, pool := provider.Load()
+	assert.Empty(t, cert.Certificate)
+	want := x509.NewCertPool()
+	require.True(t, want.AppendCertsFromPEM(newCAPEM))
+	assert.True(t, want.Equal(pool))
+}
+
 // captureFatal makes logrus Fatal calls record the exit instead of ending the test process.
 func captureFatal(t *testing.T) *bool {
 	t.Helper()

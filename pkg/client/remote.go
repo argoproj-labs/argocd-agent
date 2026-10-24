@@ -124,9 +124,11 @@ type Remote struct {
 	onAuthenticated onAuthenticatedFunc
 	onAuthFailure   func()
 
-	// tlsSource watches the static client certificate and CA so a later handshake
+	// tlsSource watches the static client certificate so a later handshake
 	// can use renewed material without a process restart.
 	tlsSource tlsutil.TLSSource
+	// caSource watches the root CA pool used to verify the principal.
+	caSource tlsutil.TLSSource
 	// rootCAs is the latest CA pool. A new connection copies it. An active
 	// handshake does not read this field, so a reload does not race with it.
 	rootCAs atomic.Pointer[x509.CertPool]

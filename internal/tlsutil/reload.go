@@ -152,13 +152,17 @@ func (t *TLSFileProvider) Watch(ctx context.Context) error {
 			return err
 		}
 	}
-	err = watcher.Add(filepath.Dir(t.ClientCertPath))
-	if err != nil {
-		return err
+	if t.ClientCertPath != "" {
+		err = watcher.Add(filepath.Dir(t.ClientCertPath))
+		if err != nil {
+			return err
+		}
 	}
-	err = watcher.Add(filepath.Dir(t.ClientKeyPath))
-	if err != nil {
-		return err
+	if t.ClientKeyPath != "" {
+		err = watcher.Add(filepath.Dir(t.ClientKeyPath))
+		if err != nil {
+			return err
+		}
 	}
 
 	for {
@@ -284,15 +288,17 @@ func (t *TLSFileProvider) Reload(ctx context.Context) error {
 
 	newMaterial := &TLSMaterial{}
 
-	cert, err := TLSCertFromFile(t.ClientCertPath, t.ClientKeyPath, true)
-	if err != nil {
-		return err
-	}
+	if t.ClientCertPath != "" {
+		cert, err := TLSCertFromFile(t.ClientCertPath, t.ClientKeyPath, true)
+		if err != nil {
+			return err
+		}
 
-	if err = validateNewClientCert(cert); err == nil {
-		newMaterial.Cert = cert
-	} else {
-		return fmt.Errorf("failed to validate client cert")
+		if err = validateNewClientCert(cert); err == nil {
+			newMaterial.Cert = cert
+		} else {
+			return fmt.Errorf("failed to validate client cert")
+		}
 	}
 
 	if t.CAPath != "" {

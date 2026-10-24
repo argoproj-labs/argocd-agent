@@ -39,15 +39,13 @@ import (
 )
 
 func Test_WithTLSReloadFromFile(t *testing.T) {
-	caPEM, _, certPEM, keyPEM := testClientCertificate(t, "agent-v1")
+	_, _, certPEM, keyPEM := testClientCertificate(t, "agent-v1")
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "tls.crt")
 	keyPath := filepath.Join(dir, "tls.key")
-	caPath := filepath.Join(dir, "ca.crt")
 	writeKeyPair(t, certPath, keyPath, certPEM, keyPEM)
-	require.NoError(t, os.WriteFile(caPath, []byte(caPEM), 0o600))
 
-	remote, err := NewRemote("principal.example.com", 443, WithTLSReloadFromFile(certPath, keyPath, caPath))
+	remote, err := NewRemote("principal.example.com", 443, WithTLSReloadFromFile(certPath, keyPath))
 	require.NoError(t, err)
 	first, err := remote.clientCertificate()
 	require.NoError(t, err)
@@ -89,14 +87,8 @@ func Test_WithTLSReloadFromSecret(t *testing.T) {
 	ca, err := tls.X509KeyPair([]byte(caPEM), []byte(caKeyPEM))
 	require.NoError(t, err)
 
-	kube := fake.NewSimpleClientset(
-		clientTLSSecret(certPEM, keyPEM),
-		&corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "argocd-agent-ca", Namespace: "argocd"},
-			Data:       map[string][]byte{"ca.crt": []byte(caPEM)},
-		},
-	)
-	remote, err := NewRemote("principal.example.com", 443, WithTLSReloadFromSecret(kube, "argocd", "argocd-agent-client-tls", "argocd-agent-ca"))
+	kube := fake.NewSimpleClientset(clientTLSSecret(certPEM, keyPEM))
+	remote, err := NewRemote("principal.example.com", 443, WithTLSReloadFromSecret(kube, "argocd", "argocd-agent-client-tls"))
 	require.NoError(t, err)
 	first, err := remote.clientCertificate()
 	require.NoError(t, err)
@@ -105,8 +97,7 @@ func Test_WithTLSReloadFromSecret(t *testing.T) {
 	updates := recordUpdates(t, remote)
 	remote.StartTLSReload(t.Context())
 
-	// The informer lists the client Secret and the CA Secret before it watches.
-	require.True(t, receivedUpdate(updates, "agent-v1", 10*time.Second))
+	// The informer lists the client Secret before it watches.
 	require.True(t, receivedUpdate(updates, "agent-v1", 10*time.Second))
 
 	nextCert, nextKey := testClientCertificateFromCA(t, "agent-v2", ca)
@@ -185,15 +176,12 @@ func Test_tlsConfigForDial(t *testing.T) {
 		}
 	}()
 
-	kube := fake.NewSimpleClientset(
-		clientTLSSecret(certPEM, keyPEM),
-		&corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "argocd-agent-ca", Namespace: "argocd"},
-			Data:       map[string][]byte{"ca.crt": []byte(caPEM)},
-		},
-	)
+	kube := fake.NewSimpleClientset(clientTLSSecret(certPEM, keyPEM), caSecret(caPEM))
 	port := listener.Addr().(*net.TCPAddr).Port
-	remote, err := NewRemote("localhost", port, WithTLSReloadFromSecret(kube, "argocd", "argocd-agent-client-tls", "argocd-agent-ca"))
+	remote, err := NewRemote("localhost", port,
+		WithRootCAReloadFromSecret(kube, "argocd", "argocd-agent-ca"),
+		WithTLSReloadFromSecret(kube, "argocd", "argocd-agent-client-tls"),
+	)
 	require.NoError(t, err)
 	updates := recordUpdates(t, remote)
 	remote.StartTLSReload(t.Context())
@@ -234,95 +222,99 @@ func Test_tlsConfigForDial(t *testing.T) {
 	require.Error(t, dial())
 
 	require.Eventually(t, func() bool {
-		_, err := kube.CoreV1().Secrets("argocd").Update(t.Context(), &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "argocd-agent-ca", Namespace: "argocd"},
-			Data:       map[string][]byte{"ca.crt": []byte(newCAPEM)},
-		}, metav1.UpdateOptions{})
+		_, err := kube.CoreV1().Secrets("argocd").Update(t.Context(), caSecret(newCAPEM), metav1.UpdateOptions{})
 		require.NoError(t, err)
 		return dial() == nil
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
-// Test_enableTLSReload covers the CA sources the agent command combines with a reloaded client certificate.
-func Test_enableTLSReload(t *testing.T) {
+// Test_WithRootCAReload checks that the CA source is watched whichever source
+// the client certificate comes from.
+func Test_WithRootCAReload(t *testing.T) {
 	caPEM, _, certPEM, keyPEM := testClientCertificate(t, "agent-v1")
-	dir := t.TempDir()
-	certPath := filepath.Join(dir, "tls.crt")
-	keyPath := filepath.Join(dir, "tls.key")
-	caPath := filepath.Join(dir, "ca.crt")
-	writeKeyPair(t, certPath, keyPath, certPEM, keyPEM)
-	require.NoError(t, os.WriteFile(caPath, []byte(caPEM), 0o600))
-	caPool := x509.NewCertPool()
-	require.True(t, caPool.AppendCertsFromPEM([]byte(caPEM)))
-	newKube := func() kubernetes.Interface {
-		return fake.NewSimpleClientset(
-			clientTLSSecret(certPEM, keyPEM),
-			&corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: "argocd-agent-ca", Namespace: "argocd"},
-				Data:       map[string][]byte{"ca.crt": []byte(caPEM)},
-			},
-		)
+	newCAPEM, _, err := tlsutil.GenerateCaCertificate("test-ca-2", 30, tlsutil.KeyGenOptions{})
+	require.NoError(t, err)
+
+	type sources struct {
+		kube                      kubernetes.Interface
+		certPath, keyPath, caPath string
 	}
+	newSources := func(t *testing.T) sources {
+		dir := t.TempDir()
+		s := sources{
+			kube: fake.NewSimpleClientset(
+				clientTLSSecret(certPEM, keyPEM),
+				caSecret(caPEM),
+			),
+			certPath: filepath.Join(dir, "tls.crt"),
+			keyPath:  filepath.Join(dir, "tls.key"),
+			caPath:   filepath.Join(dir, "ca.crt"),
+		}
+		writeKeyPair(t, s.certPath, s.keyPath, certPEM, keyPEM)
+		require.NoError(t, os.WriteFile(s.caPath, []byte(caPEM), 0o600))
+		return s
+	}
+	writeCASecret := func(t *testing.T, s sources, pemData string) {
+		_, err := s.kube.CoreV1().Secrets("argocd").Update(t.Context(), caSecret(pemData), metav1.UpdateOptions{})
+		require.NoError(t, err)
+	}
+	writeCAFile := func(t *testing.T, s sources, pemData string) {
+		require.NoError(t, os.WriteFile(s.caPath, []byte(pemData), 0o600))
+	}
+	certFromSecret := func(s sources) RemoteOption {
+		return WithTLSReloadFromSecret(s.kube, "argocd", "argocd-agent-client-tls")
+	}
+	certFromFiles := func(s sources) RemoteOption { return WithTLSReloadFromFile(s.certPath, s.keyPath) }
+	caFromSecret := func(s sources) RemoteOption { return WithRootCAReloadFromSecret(s.kube, "argocd", "argocd-agent-ca") }
+	caFromFile := func(s sources) RemoteOption { return WithRootCAReloadFromFile(s.caPath) }
 
 	tests := []struct {
-		name     string
-		opts     func(kube kubernetes.Interface) []RemoteOption
-		insecure bool
+		name    string
+		cert    func(sources) RemoteOption
+		ca      func(sources) RemoteOption
+		writeCA func(*testing.T, sources, string)
 	}{
-		{
-			name: "secret certificate and CA secret",
-			opts: func(kube kubernetes.Interface) []RemoteOption {
-				return []RemoteOption{
-					WithRootAuthoritiesFromSecret(kube, "argocd", "argocd-agent-ca", ""),
-					WithTLSReloadFromSecret(kube, "argocd", "argocd-agent-client-tls", "argocd-agent-ca"),
-				}
-			},
-		},
-		{
-			name: "secret certificate and CA file",
-			opts: func(kube kubernetes.Interface) []RemoteOption {
-				return []RemoteOption{
-					WithRootAuthoritiesFromFile(caPath),
-					WithTLSReloadFromSecret(kube, "argocd", "argocd-agent-client-tls", ""),
-				}
-			},
-		},
-		{
-			name: "certificate files and CA secret",
-			opts: func(kube kubernetes.Interface) []RemoteOption {
-				return []RemoteOption{
-					WithRootAuthoritiesFromSecret(kube, "argocd", "argocd-agent-ca", ""),
-					WithTLSReloadFromFile(certPath, keyPath, ""),
-				}
-			},
-		},
-		{
-			name: "secret certificate without server verification",
-			opts: func(kube kubernetes.Interface) []RemoteOption {
-				return []RemoteOption{
-					WithInsecureSkipTLSVerify(),
-					WithTLSReloadFromSecret(kube, "argocd", "argocd-agent-client-tls", ""),
-				}
-			},
-			insecure: true,
-		},
+		{"secret certificate and CA secret", certFromSecret, caFromSecret, writeCASecret},
+		{"secret certificate and CA file", certFromSecret, caFromFile, writeCAFile},
+		{"certificate files and CA secret", certFromFiles, caFromSecret, writeCASecret},
+		{"certificate files and CA file", certFromFiles, caFromFile, writeCAFile},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			remote, err := NewRemote("principal.example.com", 443, tt.opts(newKube())...)
+			s := newSources(t)
+			remote, err := NewRemote("principal.example.com", 443, tt.ca(s), tt.cert(s))
 			require.NoError(t, err)
+			require.True(t, certPool(t, caPEM).Equal(remote.tlsConfigForDial().RootCAs))
+
+			remote.StartTLSReload(t.Context())
+			// Invalid CA data is rejected, and the watch goes on to load the next valid CA.
+			want := certPool(t, newCAPEM)
+			require.Eventually(t, func() bool {
+				tt.writeCA(t, s, "not a certificate")
+				tt.writeCA(t, s, newCAPEM)
+				pool := remote.tlsConfigForDial().RootCAs
+				require.NotNil(t, pool)
+				return want.Equal(pool)
+			}, 10*time.Second, 100*time.Millisecond)
+
 			cert, err := remote.clientCertificate()
 			require.NoError(t, err)
-			require.Equal(t, "agent-v1", certificateName(t, cert))
-
-			cfg := remote.tlsConfigForDial()
-			require.Equal(t, tt.insecure, cfg.InsecureSkipVerify)
-			if !tt.insecure {
-				require.NotNil(t, cfg.RootCAs)
-				require.True(t, caPool.Equal(cfg.RootCAs))
-			}
+			require.Equal(t, "agent-v1", certificateName(t, cert), "a CA reload must not change the client certificate")
 		})
 	}
+
+	t.Run("secret certificate without server verification", func(t *testing.T) {
+		s := newSources(t)
+		remote, err := NewRemote("principal.example.com", 443, WithInsecureSkipTLSVerify(), certFromSecret(s))
+		require.NoError(t, err)
+		require.Nil(t, remote.caSource)
+		cfg := remote.tlsConfigForDial()
+		require.True(t, cfg.InsecureSkipVerify)
+		require.Nil(t, cfg.RootCAs)
+		cert, err := remote.clientCertificate()
+		require.NoError(t, err)
+		require.Equal(t, "agent-v1", certificateName(t, cert))
+	})
 }
 
 func Test_SetClientCertificateObserver(t *testing.T) {
@@ -330,7 +322,7 @@ func Test_SetClientCertificateObserver(t *testing.T) {
 	ca, err := tls.X509KeyPair([]byte(caPEM), []byte(caKeyPEM))
 	require.NoError(t, err)
 	kube := fake.NewSimpleClientset(clientTLSSecret(certPEM, keyPEM))
-	remote, err := NewRemote("principal.example.com", 443, WithTLSReloadFromSecret(kube, "argocd", "argocd-agent-client-tls", ""))
+	remote, err := NewRemote("principal.example.com", 443, WithTLSReloadFromSecret(kube, "argocd", "argocd-agent-client-tls"))
 	require.NoError(t, err)
 
 	expiry := make(chan time.Time, 100)
@@ -370,8 +362,8 @@ func (r *Remote) clientCertificate() (tls.Certificate, error) {
 func recordUpdates(t *testing.T, r *Remote) <-chan string {
 	t.Helper()
 	updates := make(chan string, 1000)
-	handler := func(cert tls.Certificate, pool *x509.CertPool) {
-		r.onTLSMaterial(cert, pool)
+	handler := func(cert tls.Certificate, _ *x509.CertPool) {
+		r.noteClientCertificate(cert)
 		name := ""
 		if len(cert.Certificate) > 0 {
 			if leaf, err := x509.ParseCertificate(cert.Certificate[0]); err == nil {
@@ -453,6 +445,20 @@ func clientTLSSecret(certPEM, keyPEM string) *corev1.Secret {
 			"tls.key": []byte(keyPEM),
 		},
 	}
+}
+
+func caSecret(caPEM string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "argocd-agent-ca", Namespace: "argocd"},
+		Data:       map[string][]byte{"ca.crt": []byte(caPEM)},
+	}
+}
+
+func certPool(t *testing.T, caPEM string) *x509.CertPool {
+	t.Helper()
+	pool := x509.NewCertPool()
+	require.True(t, pool.AppendCertsFromPEM([]byte(caPEM)))
+	return pool
 }
 
 func updateClientTLSSecret(t *testing.T, kube kubernetes.Interface, certPEM, keyPEM string) {
