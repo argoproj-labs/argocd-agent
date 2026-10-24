@@ -64,6 +64,7 @@ Here is the list of available metrics:
 | `argocd_agent_resource_proxy_errors_total` | counter | The total number of resource proxy request failures on the agent. |
 | `argocd_agent_redis_proxy_requests_total` | counterVec | The total number of Redis proxy requests processed by the agent. |
 | `argocd_agent_redis_proxy_errors_total` | counterVec | The total number of Redis proxy request failures on the agent. |
+| `argocd_agent_client_certificate_expiry_timestamp_seconds` | gauge | Unix timestamp when the agent client certificate expires. A renewed certificate updates this value without a process restart. |
 
 ### Labels
 

@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"math/big"
+	"os"
 	"path"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ import (
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -146,6 +148,134 @@ func Test_TLSSecretProviderOnChange(t *testing.T) {
 	cert, caPool = provider.Load()
 	assert.NotEqual(t, startingMaterial.Cert, cert)
 	assert.False(t, startingMaterial.CAPool.Equal(caPool))
+}
+
+// Test_TLSSourceLoad checks that both providers load material without a CA pool.
+func Test_TLSSourceLoad(t *testing.T) {
+	certPEM, keyPEM := fakecerts.CreateSelfSignedCert(t, "rsa", clientTempl)
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+
+	sources := map[string]TLSSource{
+		"file":   NewTLSFileProvider("tls.crt", "tls.key", "", &TLSMaterial{Cert: cert}),
+		"secret": NewTLSSecretProvider("client-tls", "", "argocd", &kubernetes.Clientset{}, &TLSMaterial{Cert: cert}),
+	}
+	for name, source := range sources {
+		t.Run(name, func(t *testing.T) {
+			loaded, pool := source.Load()
+			assert.Equal(t, cert.Certificate, loaded.Certificate)
+			assert.Nil(t, pool)
+		})
+	}
+}
+
+func Test_TLSSecretProviderHandleChange(t *testing.T) {
+	certPEM, keyPEM := fakecerts.CreateSelfSignedCert(t, "rsa", clientTempl)
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+	newCertPEM, newKeyPEM := fakecerts.CreateSelfSignedCert(t, "rsa", clientTempl)
+
+	clientSecret := func(name string, crt, key []byte) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd"},
+			Type:       corev1.SecretTypeTLS,
+			Data:       map[string][]byte{"tls.crt": crt, "tls.key": key},
+		}
+	}
+	newProvider := func(t *testing.T) (*TLSSecretProvider, *int) {
+		t.Helper()
+		provider := NewTLSSecretProvider("client-tls", "agent-ca", "argocd", &kubernetes.Clientset{}, &TLSMaterial{Cert: cert})
+		updates := 0
+		provider.SetUpdateHandler(func(tls.Certificate, *x509.CertPool) { updates++ })
+		return provider, &updates
+	}
+
+	t.Run("invalid data keeps the previous certificate", func(t *testing.T) {
+		exited := captureFatal(t)
+		provider, updates := newProvider(t)
+		provider.KeepPreviousCertificate()
+
+		provider.handleChange(clientSecret("client-tls", []byte("bad"), []byte("bad")))
+
+		assert.False(t, *exited)
+		assert.Equal(t, 0, *updates)
+		loaded, _ := provider.Load()
+		assert.Equal(t, cert.Certificate, loaded.Certificate)
+	})
+	t.Run("invalid data is fatal without KeepPreviousCertificate", func(t *testing.T) {
+		exited := captureFatal(t)
+		provider, updates := newProvider(t)
+
+		provider.handleChange(clientSecret("client-tls", []byte("bad"), []byte("bad")))
+
+		assert.True(t, *exited)
+		assert.Equal(t, 0, *updates)
+		loaded, _ := provider.Load()
+		assert.Equal(t, cert.Certificate, loaded.Certificate)
+	})
+	t.Run("other Secrets are ignored", func(t *testing.T) {
+		exited := captureFatal(t)
+		provider, updates := newProvider(t)
+
+		require.NoError(t, provider.OnChange(clientSecret("argocd-secret", []byte("bad"), []byte("bad"))))
+		provider.handleChange(clientSecret("argocd-secret", newCertPEM, newKeyPEM))
+
+		assert.False(t, *exited)
+		assert.Equal(t, 0, *updates)
+		loaded, _ := provider.Load()
+		assert.Equal(t, cert.Certificate, loaded.Certificate)
+	})
+	t.Run("valid data calls the update handler", func(t *testing.T) {
+		provider, updates := newProvider(t)
+		provider.KeepPreviousCertificate()
+
+		provider.handleChange(clientSecret("client-tls", newCertPEM, newKeyPEM))
+
+		assert.Equal(t, 1, *updates)
+		loaded, _ := provider.Load()
+		assert.NotEqual(t, cert.Certificate, loaded.Certificate)
+	})
+}
+
+func Test_TLSFileProviderKeepPreviousCertificate(t *testing.T) {
+	tempDir := t.TempDir()
+	certPath := path.Join(tempDir, "tls.crt")
+	keyPath := path.Join(tempDir, "tls.key")
+	certPEM, keyPEM := fakecerts.CreateSelfSignedCert(t, "rsa", clientTempl)
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(certPath, []byte("bad"), 0o600))
+	require.NoError(t, os.WriteFile(keyPath, keyPEM, 0o600))
+	event := fsnotify.Event{Name: certPath, Op: fsnotify.Write}
+
+	t.Run("invalid data keeps the previous certificate", func(t *testing.T) {
+		provider := NewTLSFileProvider(certPath, keyPath, "", &TLSMaterial{Cert: cert})
+		provider.KeepPreviousCertificate()
+
+		require.NoError(t, provider.OnChange(context.Background(), event))
+
+		loaded, _ := provider.Load()
+		assert.Equal(t, cert.Certificate, loaded.Certificate)
+	})
+	t.Run("invalid data returns an error without KeepPreviousCertificate", func(t *testing.T) {
+		provider := NewTLSFileProvider(certPath, keyPath, "", &TLSMaterial{Cert: cert})
+
+		require.Error(t, provider.OnChange(context.Background(), event))
+
+		loaded, _ := provider.Load()
+		assert.Equal(t, cert.Certificate, loaded.Certificate)
+	})
+}
+
+// captureFatal makes logrus Fatal calls record the exit instead of ending the test process.
+func captureFatal(t *testing.T) *bool {
+	t.Helper()
+	exited := false
+	logger := logrus.StandardLogger()
+	previous := logger.ExitFunc
+	logger.ExitFunc = func(int) { exited = true }
+	t.Cleanup(func() { logger.ExitFunc = previous })
+	return &exited
 }
 
 func Test_ValidateNewClientCert(t *testing.T) {

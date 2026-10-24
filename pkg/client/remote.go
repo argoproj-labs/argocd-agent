@@ -23,6 +23,7 @@ import (
 	"math"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
@@ -122,6 +123,19 @@ type Remote struct {
 
 	onAuthenticated onAuthenticatedFunc
 	onAuthFailure   func()
+
+	// tlsSource watches the static client certificate and CA so a later handshake
+	// can use renewed material without a process restart.
+	tlsSource tlsutil.TLSSource
+	// rootCAs is the latest CA pool. A new connection copies it. An active
+	// handshake does not read this field, so a reload does not race with it.
+	rootCAs atomic.Pointer[x509.CertPool]
+	// certObserver receives the client certificate end time after a load or reload.
+	certObserver func(time.Time)
+	// certIdentity is the subject and URI SANs of the current client certificate.
+	certIdentity string
+	// tlsMu guards certObserver and certIdentity.
+	tlsMu sync.Mutex
 }
 
 type RemoteOption func(r *Remote) error
@@ -575,7 +589,7 @@ func (r *Remote) newClientConn(ctx context.Context, opts ...grpc.DialOption) (*g
 		// Use nil TLS config for plaintext mode (WebSocket over HTTP)
 		var tlsCfg *tls.Config
 		if !r.insecurePlaintext {
-			tlsCfg = r.tlsConfig
+			tlsCfg = r.tlsConfigForDial()
 		}
 		conn, err = grpchttp1client.ConnectViaProxy(ctx, r.Addr(), tlsCfg, grpcHTTP1Opts...)
 	} else {
@@ -583,7 +597,7 @@ func (r *Remote) newClientConn(ctx context.Context, opts ...grpc.DialOption) (*g
 		if r.insecurePlaintext {
 			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		} else {
-			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(r.tlsConfig)))
+			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(r.tlsConfigForDial())))
 		}
 
 		conn, err = grpc.NewClient(r.Addr(), opts...)

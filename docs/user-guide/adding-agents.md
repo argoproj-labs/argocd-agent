@@ -379,7 +379,7 @@ kubectl delete -n argocd \
 ## Security Best Practices
 
 1. **Use Strong Passwords**: Generate secure passwords for resource proxy authentication
-2. **Regular Certificate Rotation**: Periodically regenerate client certificates
+2. **Regular Certificate Rotation**: Periodically regenerate client certificates. The agent reloads the client certificate Secret (default `argocd-agent-client-tls`) without a restart when the new certificate keeps the same agent identity. See [Agent client certificate reload](../configuration/tls-certificates.md#agent-client-certificate-reload).
 3. **Network Security**: Restrict network access to principal endpoints
 4. **Audit Logging**: Monitor agent connection and authentication logs
 5. **Principle of Least Privilege**: Only grant necessary permissions to agents

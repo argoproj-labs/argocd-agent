@@ -282,12 +282,20 @@ func NewAgentRunCommand() *cobra.Command {
 				// Otherwise, it will try and load the TLS keypair from a secret.
 				if tlsClientCrt != "" && tlsClientKey != "" {
 					logrus.Infof("Loading client TLS configuration from files cert=%s and key=%s", tlsClientCrt, tlsClientKey)
-					remoteOpts = append(remoteOpts, client.WithTLSClientCertFromFile(tlsClientCrt, tlsClientKey))
+					caPath := ""
+					if !insecure {
+						caPath = rootCAPath
+					}
+					remoteOpts = append(remoteOpts, client.WithTLSReloadFromFile(tlsClientCrt, tlsClientKey, caPath))
 				} else if (tlsClientCrt != "" && tlsClientKey == "") || (tlsClientCrt == "" && tlsClientKey != "") {
 					cmdutil.Fatal("Both --tls-client-cert and --tls-client-key have to be given")
 				} else {
 					logrus.Infof("Loading client TLS certificate from secret %s/%s", namespace, tlsSecretName)
-					remoteOpts = append(remoteOpts, client.WithTLSClientCertFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
+					caSecretName := ""
+					if !insecure && rootCAPath == "" {
+						caSecretName = rootCASecretName
+					}
+					remoteOpts = append(remoteOpts, client.WithTLSReloadFromSecret(kubeConfig.Clientset, namespace, tlsSecretName, caSecretName))
 				}
 			}
 
@@ -325,6 +333,8 @@ func NewAgentRunCommand() *cobra.Command {
 			if remote == nil {
 				cmdutil.Fatal("No remote specified")
 			}
+			// Watch the client certificate so the next handshake can use renewed material.
+			remote.StartTLSReload(ctx)
 
 			agentOpts = append(agentOpts, agent.WithRemote(remote))
 			agentOpts = append(agentOpts, agent.WithMode(agentMode))
@@ -394,6 +404,11 @@ func NewAgentRunCommand() *cobra.Command {
 			ag, err := agent.NewAgent(ctx, kubeConfig, namespace, agentOpts...)
 			if err != nil {
 				cmdutil.Fatal("Could not create a new agent instance: %v", err)
+			}
+			if ag.Metrics() != nil {
+				remote.SetClientCertificateObserver(func(notAfter time.Time) {
+					ag.Metrics().ClientCertificateExpiryTimestamp.Set(float64(notAfter.Unix()))
+				})
 			}
 
 			// Watch the agent's settings ConfigMap for runtime overrides.

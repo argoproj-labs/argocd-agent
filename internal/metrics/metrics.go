@@ -98,6 +98,8 @@ type AgentMetrics struct {
 	ResourceProxyErrors   prometheus.Counter
 	RedisProxyRequests    *prometheus.CounterVec
 	RedisProxyErrors      *prometheus.CounterVec
+
+	ClientCertificateExpiryTimestamp prometheus.Gauge
 }
 
 func NewInformerMetrics(label string) *InformerMetrics {
@@ -300,6 +302,10 @@ func NewAgentMetrics() *AgentMetrics {
 			Name: "argocd_agent_redis_proxy_errors_total",
 			Help: "The total number of Redis proxy request failures on the agent",
 		}, []string{"command"}),
+		ClientCertificateExpiryTimestamp: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "argocd_agent_client_certificate_expiry_timestamp_seconds",
+			Help: "Unix timestamp when the agent client certificate expires. A renewed certificate updates this value without a process restart.",
+		}),
 	}
 }
 

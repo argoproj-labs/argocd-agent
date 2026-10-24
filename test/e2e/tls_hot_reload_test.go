@@ -17,14 +17,22 @@ package e2e
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
@@ -277,6 +285,106 @@ func (suite *TLSHotReloadTestSuite) Test_ReloadCABySecret() {
 	// Cleanup Secrets created
 	suite.PrincipalClient.Delete(suite.Ctx, caSecret, metav1.DeleteOptions{})
 	suite.PrincipalClient.Delete(suite.Ctx, serverSecret, metav1.DeleteOptions{})
+}
+
+// Test_AgentUsesRenewedClientCertificateWithoutRestart updates the agent client
+// certificate Secret, checks that the running agent loads it, and checks that
+// the agent authenticates with it after a principal restart.
+func (suite *TLSHotReloadTestSuite) Test_AgentUsesRenewedClientCertificateWithoutRestart() {
+	// The agent metrics endpoint and the process status are only reachable when the agent runs locally.
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+	requires := suite.Require()
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{Name: "argocd-agent-client-tls", Namespace: fixture.AutonomousAgentNamespace}
+	requires.NoError(suite.AutonomousAgentClient.Get(suite.Ctx, key, secret, metav1.GetOptions{}))
+	originalCert := append([]byte(nil), secret.Data["tls.crt"]...)
+	originalKey := append([]byte(nil), secret.Data["tls.key"]...)
+	defer func() {
+		current := &corev1.Secret{}
+		if err := suite.AutonomousAgentClient.Get(suite.Ctx, key, current, metav1.GetOptions{}); err != nil {
+			suite.T().Logf("Could not restore the original client certificate: %v", err)
+			return
+		}
+		current.Data["tls.crt"] = originalCert
+		current.Data["tls.key"] = originalKey
+		if err := suite.AutonomousAgentClient.Update(suite.Ctx, current, metav1.UpdateOptions{}); err != nil {
+			suite.T().Logf("Could not restore the original client certificate: %v", err)
+		}
+	}()
+
+	caSecret := &corev1.Secret{}
+	caKey := types.NamespacedName{Name: "argocd-agent-ca", Namespace: fixture.PrincipalNamespace}
+	requires.NoError(suite.PrincipalClient.Get(suite.Ctx, caKey, caSecret, metav1.GetOptions{}))
+	ca, err := tls.X509KeyPair(caSecret.Data["tls.crt"], caSecret.Data["tls.key"])
+	requires.NoError(err)
+	ca.Leaf, err = x509.ParseCertificate(ca.Certificate[0])
+	requires.NoError(err)
+
+	current := parsePEMCertificate(suite.T(), secret.Data["tls.crt"])
+	requires.Eventually(func() bool {
+		return agentClientCertificateExpiry() == current.NotAfter.Unix()
+	}, 60*time.Second, 2*time.Second, "the expiry metric should report the current client certificate")
+
+	newCert, newKey, err := tlsutil.GenerateClientCertificate(current.Subject.CommonName, ca.Leaf, ca.PrivateKey, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
+	requires.NoError(err)
+	renewed := parsePEMCertificate(suite.T(), []byte(newCert))
+	requires.NotEqual(current.NotAfter.Unix(), renewed.NotAfter.Unix())
+	secret.Data["tls.crt"] = []byte(newCert)
+	secret.Data["tls.key"] = []byte(newKey)
+	requires.NoError(suite.AutonomousAgentClient.Update(suite.Ctx, secret, metav1.UpdateOptions{}))
+
+	requires.Eventually(func() bool {
+		return agentClientCertificateExpiry() == renewed.NotAfter.Unix()
+	}, 120*time.Second, 2*time.Second, "the agent should load the renewed client certificate")
+	requires.True(fixture.IsProcessRunning(fixture.AgentAutonomousName, suite.T()))
+
+	// The principal logs the fingerprint of the client certificate that authenticated.
+	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
+	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+	fixture.VerifyProcessLogs(suite.T(), fixture.PrincipalName, []string{"fingerprint=" + tlsutil.CertificateFingerprint(renewed)})
+	requires.True(fixture.IsProcessRunning(fixture.AgentAutonomousName, suite.T()))
+	requires.Equal(renewed.NotAfter.Unix(), agentClientCertificateExpiry())
+}
+
+const autonomousAgentMetricsURL = "http://localhost:8182/metrics"
+
+// agentClientCertificateExpiry returns the expiry metric of the autonomous agent, or 0 when it cannot be read.
+func agentClientCertificateExpiry() int64 {
+	value, ok := agentMetric("argocd_agent_client_certificate_expiry_timestamp_seconds")
+	if !ok {
+		return 0
+	}
+	return int64(value)
+}
+
+// agentMetric reads an unlabeled metric from the autonomous agent metrics endpoint.
+func agentMetric(name string) (float64, bool) {
+	resp, err := http.Get(autonomousAgentMetricsURL)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == name {
+			value, err := strconv.ParseFloat(fields[1], 64)
+			return value, err == nil
+		}
+	}
+	return 0, false
+}
+
+func parsePEMCertificate(t *testing.T, data []byte) *x509.Certificate {
+	t.Helper()
+	block, _ := pem.Decode(data)
+	require.NotNil(t, block)
+	cert, err := x509.ParseCertificate(block.Bytes)
+	require.NoError(t, err)
+	return cert
 }
 
 // Test_PrincipalFailsOnBadReload reloads the cert data with a bad cert and ensures that the principal terminates on a bad reload
