@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -623,6 +624,63 @@ func Test_ProcessRequestUpdateEvent(t *testing.T) {
 	})
 }
 
+func Test_ProcessRequestUpdateEvent_AppProject(t *testing.T) {
+	ctx := context.Background()
+	gvr, err := getGroupVersionResource("AppProject")
+	require.NoError(t, err)
+
+	sendSpecUpdate := func(t *testing.T, handler *RequestHandler, mode types.AgentMode, res *unstructured.Unstructured) *v1alpha1.AppProject {
+		t.Helper()
+		_, err := handler.dynClient.Resource(gvr).Namespace(handler.namespace).Create(ctx, res, v1.CreateOptions{})
+		require.NoError(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      res.GetName(),
+			Namespace: handler.namespace,
+			Kind:      "AppProject",
+			Checksum:  []byte("invalid-checksum"),
+		}
+		require.NoError(t, handler.ProcessRequestUpdateEvent(ctx, testAgentName, mode, reqUpdate))
+		require.Equal(t, 1, handler.sendQ.Len())
+
+		ev, shutdown := handler.sendQ.Get()
+		require.False(t, shutdown)
+		require.Equal(t, event.SpecUpdate.String(), ev.Type())
+		got := &v1alpha1.AppProject{}
+		require.NoError(t, ev.DataAs(got))
+		return got
+	}
+
+	// The principal translates the destinations of an autonomous agent's
+	// AppProject itself, so the agent must send them exactly as they are on
+	// its own cluster, even when they don't name the agent.
+	t.Run("autonomous agent resync keeps the destinations of its AppProject", func(t *testing.T) {
+		destinations := []v1alpha1.ApplicationDestination{
+			{Server: "https://kubernetes.default.svc", Namespace: "*"},
+			{Name: "in-cluster", Namespace: "guestbook"},
+		}
+		handler := createFakeHandler(t)
+
+		got := sendSpecUpdate(t, handler, types.AgentModeAutonomous, fakeUnresAppProject("p1", destinations))
+		assert.Equal(t, destinations, got.Spec.Destinations)
+	})
+
+	// The principal only sends the destinations that are relevant to a managed
+	// agent, rewritten to the agent's local cluster.
+	t.Run("principal resync sends the destinations of the managed agent", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+
+		got := sendSpecUpdate(t, handler, types.AgentModeManaged, fakeUnresAppProject("p1", []v1alpha1.ApplicationDestination{
+			{Name: testAgentName, Server: "*", Namespace: "apps"},
+			{Name: "other-agent", Server: "*", Namespace: "apps"},
+		}))
+		assert.Equal(t, []v1alpha1.ApplicationDestination{
+			{Name: "in-cluster", Server: "https://kubernetes.default.svc", Namespace: "apps"},
+		}, got.Spec.Destinations)
+	})
+}
+
 func Test_generateSpecChecksum_ConfigMap(t *testing.T) {
 	t.Run("generate checksum for ConfigMap using data field", func(t *testing.T) {
 		resource := fakeUnresGPGKey()
@@ -1032,6 +1090,27 @@ func fakeUnresApp() *unstructured.Unstructured {
 	resource.SetUID("test-uid")
 	resource.Object["spec"] = map[string]any{
 		"project": "default",
+	}
+	return resource
+}
+
+func fakeUnresAppProject(name string, destinations []v1alpha1.ApplicationDestination) *unstructured.Unstructured {
+	dsts := make([]any, 0, len(destinations))
+	for _, d := range destinations {
+		dsts = append(dsts, map[string]any{"name": d.Name, "server": d.Server, "namespace": d.Namespace})
+	}
+	resource := &unstructured.Unstructured{}
+	resource.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "argoproj.io",
+		Version: "v1alpha1",
+		Kind:    "AppProject",
+	})
+	resource.SetName(name)
+	resource.SetNamespace("argocd")
+	resource.SetUID("project-uid")
+	resource.Object["spec"] = map[string]any{
+		"destinations":     dsts,
+		"sourceNamespaces": []any{testAgentName},
 	}
 	return resource
 }
