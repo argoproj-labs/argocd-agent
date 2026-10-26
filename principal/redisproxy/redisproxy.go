@@ -715,8 +715,8 @@ func (rp *RedisProxy) handleAgentSubscribe(connState *connectionState, channelNa
 	// This function will wait for a response
 	response := rp.sendSynchronousMessageToAgentFn(agentName, connState.connUUID, cmdBody)
 	if response == nil {
-		logCtx.Error("unexpected nil in get response")
-		return fmt.Errorf("unexpected nil in get response")
+		logCtx.Error("unexpected nil in subscribe response")
+		return fmt.Errorf("unexpected nil in subscribe response")
 	}
 
 	// Example response to subscribe, to send back to Argo CD:

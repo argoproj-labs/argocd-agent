@@ -462,6 +462,33 @@ func Test_handleAgentSubscribe(t *testing.T) {
 		// Check that ping routine was started
 		require.True(t, connState.pingRoutineStarted[agentName])
 	})
+
+	t.Run("nil response from agent is reported as a subscribe failure", func(t *testing.T) {
+		mockWriter := &mockArgoCDRedisWriter{}
+		mockSendFunc := &mockSendSynchronousMessageToAgentFunc{responseToReturn: nil}
+
+		rp := &RedisProxy{
+			sendSynchronousMessageToAgentFn: mockSendFunc.call,
+			ConnectionIDTracker:             nil,
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		connState := &connectionState{
+			connectionCtx:               ctx,
+			connectionCancelFn:          cancel,
+			connUUID:                    uuid.New().String(),
+			connectionUUIDEventsChannel: make(chan *cloudevents.Event, 1),
+			pingRoutineStarted:          make(map[string]bool),
+		}
+
+		err := rp.handleAgentSubscribe(connState, "app|managed-resources|test-agent_my-app|1.8.3", "test-agent", mockWriter, rp.log())
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "subscribe response")
+		require.NotContains(t, err.Error(), "get response")
+		require.False(t, mockWriter.writeToArgoCDRedisSocketCalled)
+	})
 }
 
 func Test_handleAgentSubscribe_forwarderStopsWhenConnectionCloses(t *testing.T) {
