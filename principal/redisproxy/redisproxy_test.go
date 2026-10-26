@@ -551,6 +551,119 @@ func Test_readNextMessageFromArgoCDOrInternal_closedInternalChannel(t *testing.T
 	require.True(t, result.connContextCancelled)
 }
 
+// newTestConnection returns a connection state as handleConnection would create it
+func newTestConnection(t *testing.T) *connectionState {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return &connectionState{
+		connectionCtx:      ctx,
+		connectionCancelFn: cancel,
+		connUUID:           uuid.New().String(),
+		pingRoutineStarted: make(map[string]bool),
+	}
+}
+
+// subscribeOnTestConnection runs a SUBSCRIBE for agentName on connState through rp
+func subscribeOnTestConnection(rp *RedisProxy, connState *connectionState, agentName string) error {
+	channelName := fmt.Sprintf("app|managed-resources|%s_my-app|1.8.3", agentName)
+	return rp.handleAgentSubscribe(connState, channelName, agentName, &mockArgoCDRedisWriter{}, rp.log())
+}
+
+// subscribeTestConnection runs a successful SUBSCRIBE for agentName through rp and returns the connection state
+func subscribeTestConnection(t *testing.T, rp *RedisProxy, agentName string) *connectionState {
+	t.Helper()
+	connState := newTestConnection(t)
+	require.NoError(t, subscribeOnTestConnection(rp, connState, agentName))
+	return connState
+}
+
+// requireCancelled fails the test unless connState's context is cancelled within a second
+func requireCancelled(t *testing.T, connState *connectionState) {
+	t.Helper()
+	select {
+	case <-connState.connectionCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("connection was not cancelled")
+	}
+}
+
+func newTestRedisProxy(mockSendFunc *mockSendSynchronousMessageToAgentFunc) *RedisProxy {
+	return &RedisProxy{
+		sendSynchronousMessageToAgentFn: mockSendFunc.call,
+		ConnectionIDTracker:             tracker.New(),
+	}
+}
+
+func Test_CloseAgentConnections(t *testing.T) {
+	subscribeOK := &event.RedisResponseBody{SubscribeResponse: &event.RedisResponseBodySubscribeResponse{}}
+
+	t.Run("closes only the subscribed connections of the given agent", func(t *testing.T) {
+		rp := newTestRedisProxy(&mockSendSynchronousMessageToAgentFunc{responseToReturn: subscribeOK})
+
+		connA := subscribeTestConnection(t, rp, "agent-a")
+		connB := subscribeTestConnection(t, rp, "agent-b")
+
+		require.Equal(t, 1, rp.CloseAgentConnections("agent-a"))
+		requireCancelled(t, connA)
+		require.NoError(t, connB.connectionCtx.Err())
+
+		// A closed connection is forgotten, so a second call has nothing to do
+		require.Eventually(t, func() bool { return rp.CloseAgentConnections("agent-a") == 0 }, time.Second, 10*time.Millisecond)
+
+		// An agent without subscribed connections is a no-op
+		require.Equal(t, 0, rp.CloseAgentConnections("agent-unknown"))
+	})
+
+	t.Run("a connection subscribed to several agents is closed when any of them reconnects", func(t *testing.T) {
+		rp := newTestRedisProxy(&mockSendSynchronousMessageToAgentFunc{responseToReturn: subscribeOK})
+
+		connState := newTestConnection(t)
+		require.NoError(t, subscribeOnTestConnection(rp, connState, "agent-a"))
+		require.NoError(t, subscribeOnTestConnection(rp, connState, "agent-b"))
+
+		require.Equal(t, 1, rp.CloseAgentConnections("agent-b"))
+		requireCancelled(t, connState)
+	})
+
+	t.Run("a connection whose subscribe failed is not tracked", func(t *testing.T) {
+		rp := newTestRedisProxy(&mockSendSynchronousMessageToAgentFunc{responseToReturn: nil})
+
+		connState := newTestConnection(t)
+		require.Error(t, subscribeOnTestConnection(rp, connState, "agent-a"))
+
+		require.Equal(t, 0, rp.CloseAgentConnections("agent-a"))
+		require.NoError(t, connState.connectionCtx.Err())
+	})
+
+	t.Run("an agent reconnecting while the subscribe is in flight closes the connection", func(t *testing.T) {
+		// The agent answers the subscribe and restarts right away, so the response describes a subscription
+		// the new agent does not have. The connection must already be tracked when the reconnect is handled.
+		rp := &RedisProxy{ConnectionIDTracker: tracker.New()}
+		rp.sendSynchronousMessageToAgentFn = func(agentName, connUUID string, body event.RedisCommandBody) *event.RedisResponseBody {
+			require.Equal(t, 1, rp.CloseAgentConnections(agentName), "connection must be tracked before the agent answers")
+			return subscribeOK
+		}
+
+		connState := newTestConnection(t)
+		_ = subscribeOnTestConnection(rp, connState, "agent-a")
+		requireCancelled(t, connState)
+	})
+
+	t.Run("a failed subscribe on a connection subscribed to another agent keeps that agent tracked", func(t *testing.T) {
+		rp := newTestRedisProxy(&mockSendSynchronousMessageToAgentFunc{responseToReturn: subscribeOK})
+		connState := newTestConnection(t)
+		require.NoError(t, subscribeOnTestConnection(rp, connState, "agent-a"))
+
+		rp.sendSynchronousMessageToAgentFn = (&mockSendSynchronousMessageToAgentFunc{responseToReturn: nil}).call
+		require.Error(t, subscribeOnTestConnection(rp, connState, "agent-b"))
+
+		require.Equal(t, 0, rp.CloseAgentConnections("agent-b"))
+		require.Equal(t, 1, rp.CloseAgentConnections("agent-a"))
+		requireCancelled(t, connState)
+	})
+}
+
 func Test_rewriteResourcesTreeNamespace(t *testing.T) {
 	t.Run("rewrites namespace for Application- and ApplicationSet-kind nodes, gzip'd", func(t *testing.T) {
 		tree := &v1alpha1.ApplicationTree{
