@@ -5,7 +5,7 @@ SCRIPTPATH="$(
     pwd -P
 )"
 
-source ${SCRIPTPATH}/../namespaces.sh
+source ${SCRIPTPATH}/../../namespaces.sh
 
 DOCKER_BIN=${DOCKER_BIN:-"docker"}
 
@@ -19,7 +19,7 @@ DOCKER_BIN=${DOCKER_BIN:-"docker"}
 # 'vcluster-control-plane'). Override HOST_K8S_CONTEXT if that assumption doesn't hold for you.
 HOST_K8S_CONTEXT=${HOST_K8S_CONTEXT:-"--context=$(kubectl config current-context)"}
 
-BASEPATH="$( cd -- "${SCRIPTPATH}/../../.." >/dev/null 2>&1 || exit; pwd -P )"
+BASEPATH="$( cd -- "${SCRIPTPATH}/../../../.." >/dev/null 2>&1 || exit; pwd -P )"
 AGENTCTL=${AGENTCTL:-"${BASEPATH}/dist/argocd-agentctl"}
 
 TEMP_DIR=$(mktemp -d)
