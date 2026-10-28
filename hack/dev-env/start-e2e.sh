@@ -58,7 +58,7 @@ getExternalLoadBalancerIP() {
     fi
 
     if [ -n "$ROUTE_HOST_NAMESPACE" ]; then
-      ROUTE_HOST=$(kubectl get route $SERVICE_NAME $HOST_K8S_CONTEXT -n $ROUTE_HOST_NAMESPACE -o jsonpath='{.spec.host}' 2>/dev/null)
+      ROUTE_HOST=$(kubectl get route $SERVICE_NAME "$HOST_K8S_CONTEXT" -n $ROUTE_HOST_NAMESPACE -o jsonpath='{.spec.host}' 2>/dev/null)
       if [ -n "$ROUTE_HOST" ]; then
         echo "Route host for $SERVICE_NAME on $HOST_K8S_CONTEXT/$ROUTE_HOST_NAMESPACE is $ROUTE_HOST"
         EXTERNAL_IP=$ROUTE_HOST

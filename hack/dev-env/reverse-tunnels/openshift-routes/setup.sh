@@ -317,7 +317,7 @@ patchClusterSecretForTunnel() {
 
   # remove .data.config.tlsClientConfig.caData and set '.data.config.tlsClientConfig.insecure = true'
   local TLS_CLIENT_CONFIG=`echo "$CONFIG_FIELD_VALUE" | jq -r '.tlsClientConfig' | jq 'del(.caData)' | jq '.insecure = true'`
-  CONFIG_FIELD_VALUE=`echo $CONFIG_FIELD_VALUE | jq ".tlsClientConfig = $TLS_CLIENT_CONFIG"`
+  CONFIG_FIELD_VALUE=`echo "$CONFIG_FIELD_VALUE" | jq ".tlsClientConfig = $TLS_CLIENT_CONFIG"`
 
   local CONFIG_FIELD_VALUE_BASE64=$(echo -n "$CONFIG_FIELD_VALUE" | base64 -w 0)
 

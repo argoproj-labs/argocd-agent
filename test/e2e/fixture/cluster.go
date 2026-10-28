@@ -19,6 +19,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"time"
 
 	appv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -334,6 +336,16 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 	return nil
 }
 
+// hostK8sContext returns the kubeconfig context name to use for *host* cluster lookups (see
+// getRouteHost), honoring the HOST_K8S_CONTEXT env var used by the hack/dev-env scripts
+// (hack/dev-env/start-e2e.sh, hack/dev-env/reverse-tunnels/openshift-routes/setup.sh) - those
+// scripts set it to a "--context=<name>" kubectl flag rather than a bare context name, hence the
+// trim. Returns "" (GetSystemKubeConfig's "use the kubeconfig's current-context" default) when
+// the env var is unset, preserving prior behavior.
+func hostK8sContext() string {
+	return strings.TrimPrefix(os.Getenv("HOST_K8S_CONTEXT"), "--context=")
+}
+
 // getRouteHost looks up the hostname of the named OpenShift Route in the given namespace on the
 // *host* cluster (not one of the vcluster-* contexts: those don't expose the route.openshift.io
 // API, since it's an OpenShift extension API not synced into the vcluster).
@@ -341,7 +353,7 @@ func getManagedAgentRedisConfig(ctx context.Context, managedAgentClient KubeClie
 // Returns an empty string (with no error) if the Route API isn't available on the host cluster or no such Route exists, so
 // callers can fall back to other address discovery mechanisms (e.g. a LoadBalancer Service).
 func getRouteHost(ctx context.Context, hostNamespace string, routeName string) (string, error) {
-	hostConfig, err := GetSystemKubeConfig("")
+	hostConfig, err := GetSystemKubeConfig(hostK8sContext())
 	if err != nil {
 		return "", fmt.Errorf("failed to load host cluster kubeconfig: %w", err)
 	}
