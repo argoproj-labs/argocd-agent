@@ -119,10 +119,12 @@ const (
 	HTTPHeaders = "httpHeaders"
 
 	// TLS/Security
-	TLSVersion  = "tlsVersion"
-	CertSubject = "certSubject"
-	CertIssuer  = "certIssuer"
-	CertExpiry  = "certExpiry"
+	TLSVersion           = "tlsVersion"
+	CertSubject          = "certSubject"
+	CertIssuer           = "certIssuer"
+	CertExpiry           = "certExpiry"
+	CertIdentity         = "certIdentity"
+	PreviousCertIdentity = "previousCertIdentity"
 
 	// Performance metrics
 	CPU          = "cpu"

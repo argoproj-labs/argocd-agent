@@ -719,6 +719,11 @@ func (a *Agent) Stop() error {
 	return nil
 }
 
+// Metrics returns the agent metrics, or nil when the metrics port is not set.
+func (a *Agent) Metrics() *metrics.AgentMetrics {
+	return a.metrics
+}
+
 // IsConnected returns whether the agent is connected to the principal
 func (a *Agent) IsConnected() bool {
 	return a.remote != nil && a.connected.Load()
