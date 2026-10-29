@@ -199,6 +199,8 @@ jobs:
           persist-credentials: false
       - name: Setup Golang
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        with:
+          go-version-file: go.mod
       - name: GH actions workaround - Kill XSP4 process
         run: |
           sudo pkill mono || true
