@@ -93,6 +93,20 @@ type RedisProxy struct {
 
 	onRequest func(agentName, command string)
 	onError   func(agentName, command string)
+
+	// subscribedConns tracks the Argo CD connections that hold a subscription to an agent, keyed by connection UUID.
+	// - The agent keeps its side of a subscription in memory only, so it is lost when the agent restarts. These
+	//   connections are closed when the agent reconnects, which makes Argo CD subscribe again.
+	// - acquire subscribedConnsLock before accessing
+	subscribedConnsLock sync.Mutex
+	subscribedConns     map[string]subscribedConnection
+}
+
+// subscribedConnection is what we need to know about a subscribed Argo CD connection in order to close it
+type subscribedConnection struct {
+	// agentNames are the agents this connection holds subscriptions to (usually just one)
+	agentNames map[string]bool
+	cancelFn   context.CancelFunc
 }
 
 const (
@@ -296,6 +310,7 @@ func (rp *RedisProxy) handleConnection(fromArgoCDConn net.Conn) {
 	defer func() {
 		logCtx.Trace("cancelling connection context")
 		connectionCancelFn()
+		rp.untrackSubscribedConnection(connUUID)
 	}()
 
 	go func() {
@@ -712,11 +727,18 @@ func (rp *RedisProxy) handleAgentSubscribe(connState *connectionState, channelNa
 		},
 	}
 
+	// Remember the subscription before asking the agent for it, so that an agent reconnecting while the request is in
+	// flight still closes this connection: if the old agent answered and died right after, nothing serves the
+	// subscription and only the reconnect handling can recover it. Closing a connection whose subscribe did land on
+	// the new agent only costs Argo CD a second subscribe.
+	rp.trackSubscribedConnection(connState, agentName)
+
 	// This function will wait for a response
 	response := rp.sendSynchronousMessageToAgentFn(agentName, connState.connUUID, cmdBody)
 	if response == nil {
-		logCtx.Error("unexpected nil in get response")
-		return fmt.Errorf("unexpected nil in get response")
+		rp.untrackSubscribedAgent(connState.connUUID, agentName)
+		logCtx.Error("unexpected nil in subscribe response")
+		return fmt.Errorf("unexpected nil in subscribe response")
 	}
 
 	// Example response to subscribe, to send back to Argo CD:
@@ -736,6 +758,72 @@ func (rp *RedisProxy) handleAgentSubscribe(connState *connectionState, channelNa
 	}
 
 	return nil
+}
+
+// trackSubscribedConnection remembers that the Argo CD connection in connState holds a subscription to agentName
+func (rp *RedisProxy) trackSubscribedConnection(connState *connectionState, agentName string) {
+	rp.subscribedConnsLock.Lock()
+	defer rp.subscribedConnsLock.Unlock()
+	if rp.subscribedConns == nil {
+		rp.subscribedConns = map[string]subscribedConnection{}
+	}
+	conn, exists := rp.subscribedConns[connState.connUUID]
+	if !exists {
+		conn = subscribedConnection{
+			agentNames: map[string]bool{},
+			cancelFn:   connState.connectionCancelFn,
+		}
+		rp.subscribedConns[connState.connUUID] = conn
+	}
+	conn.agentNames[agentName] = true
+}
+
+// untrackSubscribedConnection forgets the connection identified by connUUID, usually because it has been closed
+func (rp *RedisProxy) untrackSubscribedConnection(connUUID string) {
+	rp.subscribedConnsLock.Lock()
+	defer rp.subscribedConnsLock.Unlock()
+	delete(rp.subscribedConns, connUUID)
+}
+
+// untrackSubscribedAgent forgets that the connection identified by connUUID holds a subscription to agentName, because
+// the subscribe failed. The connection stays tracked for its other agents, if any.
+func (rp *RedisProxy) untrackSubscribedAgent(connUUID string, agentName string) {
+	rp.subscribedConnsLock.Lock()
+	defer rp.subscribedConnsLock.Unlock()
+	conn, exists := rp.subscribedConns[connUUID]
+	if !exists {
+		return
+	}
+	delete(conn.agentNames, agentName)
+	if len(conn.agentNames) == 0 {
+		delete(rp.subscribedConns, connUUID)
+	}
+}
+
+// CloseAgentConnections closes all Argo CD connections that hold a subscription to the given agent, and returns how many were closed.
+//   - It is meant to be called when an agent (re)connects: the agent keeps its subscriptions in memory only, so after an agent
+//     restart they are gone while the Argo CD side still waits for notifications that will never come. Closing the connection
+//     makes Argo CD's redis client reconnect and subscribe again, which re-creates the subscription on the agent.
+func (rp *RedisProxy) CloseAgentConnections(agentName string) int {
+	rp.subscribedConnsLock.Lock()
+	var toClose []context.CancelFunc
+	for connUUID, conn := range rp.subscribedConns {
+		if conn.agentNames[agentName] {
+			toClose = append(toClose, conn.cancelFn)
+			delete(rp.subscribedConns, connUUID)
+		}
+	}
+	rp.subscribedConnsLock.Unlock()
+
+	for _, cancelFn := range toClose {
+		cancelFn()
+	}
+
+	if len(toClose) > 0 {
+		rp.log().WithField("agent-name", agentName).Infof("Closed %d subscribed redis connection(s) so that Argo CD subscribes again on the reconnected agent", len(toClose))
+	}
+
+	return len(toClose)
 }
 
 // beginPingGoRoutineIfNeeded starts a go routine that sends 'ping' messages to the agent for as long as the redis connection is active.

@@ -327,6 +327,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	s.handlersOnConnect = []handlersOnConnect{
+		s.handleRedisProxyOnConnect,
 		s.handleResyncOnConnect,
 	}
 
@@ -1013,6 +1014,18 @@ func (s *Server) RunHandlersOnConnect(ctx context.Context) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// handleRedisProxyOnConnect is called whenever an agent connects. It closes the Argo CD redis connections that
+// hold a subscription to this agent, because the agent keeps its side of a subscription in memory only: after an
+// agent restart, those subscriptions are gone and the live resource view would never be notified again. Closing
+// the connections makes Argo CD subscribe again on the freshly connected agent.
+func (s *Server) handleRedisProxyOnConnect(agent types.Agent) error {
+	if s.redisProxy == nil {
+		return nil
+	}
+	s.redisProxy.CloseAgentConnections(agent.Name())
+	return nil
 }
 
 // handleResyncOnConnect is called whenever an agent connects and it determines if an agent needs to be
