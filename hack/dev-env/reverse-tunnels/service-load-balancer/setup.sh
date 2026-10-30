@@ -5,7 +5,7 @@ SCRIPTPATH="$(
     pwd -P
 )"
 
-source ${SCRIPTPATH}/../namespaces.sh
+source ${SCRIPTPATH}/../../namespaces.sh
 
 DOCKER_BIN=${DOCKER_BIN:-"docker"}
 
