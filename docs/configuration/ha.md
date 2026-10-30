@@ -9,6 +9,7 @@ This page covers configuration for running the principal in active/passive HA mo
 
 - Two principal deployments in **separate Kubernetes clusters**
 - Shared CA so both principals can verify each other's client certificates
+- Principal server certificates with both `serverAuth` and `clientAuth` extended key usage (the replica reuses its server certificate as a client certificate for replication). Certificates issued by `argocd-agentctl pki issue principal` include both automatically.
 - A DNS/GSLB endpoint (or simple DNS A record) pointing to the active principal
 
 ## Principal Configuration
