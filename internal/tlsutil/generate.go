@@ -146,7 +146,7 @@ func GenerateServerCertificate(name string, signerCert *x509.Certificate, signer
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(0, 0, validityDays),
 		IsCA:                  false,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true,
 		DNSNames:              dnsNames,

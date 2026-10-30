@@ -355,7 +355,7 @@ func WithGeneratedTLS(serverName string) ServerOption {
 			Issuer:                pkix.Name{CommonName: serverName},
 			NotBefore:             time.Now().Add(-1 * time.Hour),
 			NotAfter:              time.Now().Add(1 * time.Hour),
-			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 			BasicConstraintsValid: true,
 		}
 		pKey, err := rsa.GenerateKey(rand.Reader, 2048)

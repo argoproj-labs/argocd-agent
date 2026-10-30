@@ -62,7 +62,7 @@ func Test_GenerateCaCertificate(t *testing.T) {
 		assert.False(t, ccert.Leaf.IsCA)
 		assert.Zero(t, ccert.Leaf.KeyUsage&x509.KeyUsageCertSign)
 		assert.Contains(t, ccert.Leaf.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
-		assert.NotContains(t, ccert.Leaf.ExtKeyUsage, x509.ExtKeyUsageClientAuth)
+		assert.Contains(t, ccert.Leaf.ExtKeyUsage, x509.ExtKeyUsageClientAuth)
 		assert.Equal(t, certSubj, ccert.Leaf.Subject.CommonName)
 		assert.Equal(t, "test", ccert.Leaf.Issuer.CommonName)
 		ip := net.ParseIP("127.0.0.1")

@@ -56,6 +56,7 @@ func (s *StrictCertificateTestSuite) Test_VerifyGeneratedCertificates() {
 		certPEM string
 	}{
 		{name: "server", purpose: "sslserver", certPEM: serverPEM},
+		{name: "server-as-client", purpose: "sslclient", certPEM: serverPEM},
 		{name: "client", purpose: "sslclient", certPEM: clientPEM},
 	} {
 		s.Run(tc.name, func() {
