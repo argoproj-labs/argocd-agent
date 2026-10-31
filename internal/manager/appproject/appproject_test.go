@@ -876,11 +876,150 @@ func TestAgentSpecificAppProject(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:       "filters destination service accounts for matching agent",
+			dstMapping: false,
+			mode:       types.AgentModeManaged,
+			appProject: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-project",
+					Namespace: "argocd",
+				},
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{
+							Name:      "cluster-prod",
+							Namespace: "default",
+							Server:    "https://prod-cluster.example.com",
+						},
+					},
+					DestinationServiceAccounts: []v1alpha1.ApplicationDestinationServiceAccount{
+						{
+							DefaultServiceAccount: "argocd",
+							Namespace:             "guestbook",
+							Server:                "https://resource-proxy.argocd.svc.cluster.local:9090?agentName=cluster-prod",
+						},
+						{
+							DefaultServiceAccount: "argocd",
+							Namespace:             "guestbook",
+							Server:                "https://resource-proxy.argocd.svc.cluster.local:9090?agentName=cluster-dev",
+						},
+					},
+					SourceNamespaces: []string{"argocd"},
+				},
+			},
+			agent: "cluster-prod",
+			want: v1alpha1.AppProject{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-project",
+					Namespace: "argocd",
+				},
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{
+							Name:      "in-cluster",
+							Namespace: "default",
+							Server:    "https://kubernetes.default.svc",
+						},
+					},
+					DestinationServiceAccounts: []v1alpha1.ApplicationDestinationServiceAccount{
+						{
+							DefaultServiceAccount: "argocd",
+							Namespace:             "guestbook",
+							Server:                "https://kubernetes.default.svc",
+						},
+					},
+					SourceNamespaces: nil,
+					Roles:            []v1alpha1.ProjectRole{},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := AgentSpecificAppProject(tt.appProject, tt.agent, tt.dstMapping, tt.mode)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAgentSpecificDestinationServiceAccounts(t *testing.T) {
+	const resourceProxy = "https://argocd-agent-principal-resource-proxy.argocd.svc.cluster.local:9090"
+
+	tests := []struct {
+		name    string
+		destSAs []v1alpha1.ApplicationDestinationServiceAccount
+		agent   string
+		want    []v1alpha1.ApplicationDestinationServiceAccount
+	}{
+		{
+			name:  "keeps only the entries of the given agent",
+			agent: "workload-dev-local",
+			destSAs: []v1alpha1.ApplicationDestinationServiceAccount{
+				{DefaultServiceAccount: "argocd", Namespace: "petclinic-argocd", Server: "https://kubernetes.default.svc"},
+				{DefaultServiceAccount: "argocd", Namespace: "petclinic-ci", Server: resourceProxy + "?agentName=workload-dev-local"},
+				{DefaultServiceAccount: "argocd", Namespace: "petclinic-dev", Server: resourceProxy + "?agentName=workload-dev-local"},
+				{DefaultServiceAccount: "argocd", Namespace: "petclinic-prod", Server: resourceProxy + "?agentName=workload-prod-local"},
+				{DefaultServiceAccount: "argocd", Namespace: "petclinic-stage", Server: resourceProxy + "?agentName=workload-prod-local"},
+				{DefaultServiceAccount: "argocd", Namespace: "petclinic-argocd", Server: resourceProxy + "?agentName=workload-dev-local"},
+				{DefaultServiceAccount: "argocd", Namespace: "petclinic-argocd", Server: resourceProxy + "?agentName=workload-prod-local"},
+			},
+			want: []v1alpha1.ApplicationDestinationServiceAccount{
+				{DefaultServiceAccount: "argocd", Namespace: "petclinic-ci", Server: "https://kubernetes.default.svc"},
+				{DefaultServiceAccount: "argocd", Namespace: "petclinic-dev", Server: "https://kubernetes.default.svc"},
+				{DefaultServiceAccount: "argocd", Namespace: "petclinic-argocd", Server: "https://kubernetes.default.svc"},
+			},
+		},
+		{
+			name:  "matches the agent name as a glob pattern",
+			agent: "workload-dev-local",
+			destSAs: []v1alpha1.ApplicationDestinationServiceAccount{
+				{DefaultServiceAccount: "argocd", Namespace: "dev", Server: resourceProxy + "?agentName=workload-dev-*"},
+				{DefaultServiceAccount: "argocd", Namespace: "prod", Server: resourceProxy + "?agentName=workload-prod-*"},
+			},
+			want: []v1alpha1.ApplicationDestinationServiceAccount{
+				{DefaultServiceAccount: "argocd", Namespace: "dev", Server: "https://kubernetes.default.svc"},
+			},
+		},
+		{
+			name:  "keeps wildcard servers for every agent",
+			agent: "workload-dev-local",
+			destSAs: []v1alpha1.ApplicationDestinationServiceAccount{
+				{DefaultServiceAccount: "argocd", Namespace: "guestbook", Server: "*"},
+			},
+			want: []v1alpha1.ApplicationDestinationServiceAccount{
+				{DefaultServiceAccount: "argocd", Namespace: "guestbook", Server: "https://kubernetes.default.svc"},
+			},
+		},
+		{
+			name:  "keeps the first of the entries collapsing onto the same namespace",
+			agent: "workload-dev-local",
+			destSAs: []v1alpha1.ApplicationDestinationServiceAccount{
+				{DefaultServiceAccount: "first", Namespace: "guestbook", Server: resourceProxy + "?agentName=workload-dev-local"},
+				{DefaultServiceAccount: "second", Namespace: "guestbook", Server: resourceProxy + "?agentName=workload-dev-*"},
+				{DefaultServiceAccount: "third", Namespace: "guestbook", Server: "*"},
+			},
+			want: []v1alpha1.ApplicationDestinationServiceAccount{
+				{DefaultServiceAccount: "first", Namespace: "guestbook", Server: "https://kubernetes.default.svc"},
+			},
+		},
+		{
+			name:  "drops entries without an agent name and entries with an unparseable server",
+			agent: "workload-dev-local",
+			destSAs: []v1alpha1.ApplicationDestinationServiceAccount{
+				{DefaultServiceAccount: "argocd", Namespace: "guestbook", Server: "https://kubernetes.default.svc"},
+				{DefaultServiceAccount: "argocd", Namespace: "guestbook", Server: resourceProxy},
+				{DefaultServiceAccount: "argocd", Namespace: "guestbook", Server: "https://control plane?agentName=workload-dev-local"},
+				{DefaultServiceAccount: "argocd", Namespace: "guestbook", Server: ""},
+			},
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := agentSpecificDestinationServiceAccounts(tt.destSAs, tt.agent)
 			assert.Equal(t, tt.want, got)
 		})
 	}
