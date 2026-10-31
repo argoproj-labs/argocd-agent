@@ -68,6 +68,19 @@ jobs:
         env:
           INPUTS_TARGET_VERSION: ${{ inputs.TARGET_VERSION }}
 
+      # The script is taken from the commit this workflow runs from, as the
+      # release branch might not have it yet. fetch-depth: 0 makes it available.
+      - name: Update Helm charts
+        run: |
+          set -euo pipefail
+
+          git show "${GITHUB_SHA}:hack/update-helm-chart-app-version.sh" > "${RUNNER_TEMP}/update-helm-chart-app-version.sh"
+          bash "${RUNNER_TEMP}/update-helm-chart-app-version.sh" "${INPUTS_TARGET_VERSION}"
+
+          make generate-helm-docs
+        env:
+          INPUTS_TARGET_VERSION: ${{ inputs.TARGET_VERSION }}
+
       - name: Print changes to be pushed
         run: git --no-pager diff HEAD
 
@@ -76,7 +89,7 @@ jobs:
         with:
           commit-message: "release: Publish release ${{ inputs.TARGET_VERSION }}"
           title: "release: init ${{ inputs.TARGET_VERSION }} release on branch ${{ inputs.TARGET_BRANCH }}"
-          body: "Updating VERSION and manifests to use ${{ inputs.TARGET_VERSION }}"
+          body: "Updating VERSION, manifests and Helm charts to use ${{ inputs.TARGET_VERSION }}"
           branch: init-release
           branch-suffix: random
           signoff: true
