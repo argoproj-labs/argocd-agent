@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
@@ -249,6 +250,74 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		latestApp, ok := appInterface.(*v1alpha1.Application)
 		require.True(t, ok)
 		require.Equal(t, newApp.Labels, latestApp.Labels)
+	})
+
+	// The principal deletes the app and immediately creates it again with the
+	// same name. The informer cache keeps returning oldApp until it observes
+	// the deletion; liveGet is what the cluster returns in the meantime.
+	recreateWithStaleCache := func(t *testing.T, liveGet func(name string) (*v1alpha1.Application, error)) (calls []string, err error) {
+		t.Helper()
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+		prevCtx := a.context
+		a.context = context.Background()
+		defer func() { a.context = prevCtx }()
+
+		getMock.Unset()
+		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(
+			func(ctx context.Context, name, _ string) (*v1alpha1.Application, error) {
+				if forUpdate, _ := ctx.Value(backend.ForUpdateContextKey).(bool); forUpdate {
+					return liveGet(name)
+				}
+				return oldApp, nil
+			}, nil)
+
+		deletedApp := oldApp.DeepCopy()
+		deletedApp.UID = ktypes.UID("old_uid")
+		ev := event.New(evs.ApplicationEvent(event.Delete, deletedApp), targets.Application)
+		require.NoError(t, a.processIncomingApplication(ev))
+		deleteCallIdx := len(be.Calls)
+
+		ev = event.New(evs.ApplicationEvent(event.Create, incomingApp), targets.Application)
+		err = a.processIncomingApplication(ev)
+		for _, call := range be.Calls[deleteCallIdx:] {
+			calls = append(calls, call.Method)
+		}
+		if err == nil {
+			require.True(t, a.appManager.IsManaged(incomingApp.QualifiedName()))
+			created, ok := be.Calls[len(be.Calls)-1].Arguments[1].(*v1alpha1.Application)
+			require.True(t, ok)
+			require.Equal(t, string(incomingApp.UID), created.Annotations[manager.SourceUIDAnnotation])
+		}
+		return calls, err
+	}
+
+	t.Run("Create: Re-created app must be created when the informer cache still holds the deleted app", func(t *testing.T) {
+		calls, err := recreateWithStaleCache(t, func(name string) (*v1alpha1.Application, error) {
+			return nil, kerrors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "application"}, name)
+		})
+		require.NoError(t, err)
+		require.Equal(t, []string{"Get", "Get", "Create"}, calls)
+	})
+
+	t.Run("Create: Unmanaged app still present in the cluster must not be deleted", func(t *testing.T) {
+		calls, err := recreateWithStaleCache(t, func(string) (*v1alpha1.Application, error) {
+			return oldApp, nil
+		})
+		require.ErrorContains(t, err, "is not managed")
+		require.NotContains(t, calls, "Delete")
+		require.NotContains(t, calls, "Create")
+	})
+
+	t.Run("Create: Error reading the app from the cluster must be returned", func(t *testing.T) {
+		calls, err := recreateWithStaleCache(t, func(string) (*v1alpha1.Application, error) {
+			return nil, kerrors.NewTooManyRequests("slow down", 1)
+		})
+		require.True(t, kerrors.IsTooManyRequests(err))
+		require.NotContains(t, calls, "Delete")
+		require.NotContains(t, calls, "Create")
 	})
 
 	t.Run("Update: Old app with diff UID must be deleted and a new app must be created", func(t *testing.T) {

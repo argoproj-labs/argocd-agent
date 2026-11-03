@@ -15,6 +15,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -352,6 +353,23 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 			}
 			return nil
 		default:
+			// The informer cache can still hold an app this agent has already
+			// deleted, e.g. when the principal deletes and immediately re-creates
+			// it. Check the cluster before refusing to replace an unmanaged app.
+			if !a.appManager.IsManaged(incomingApp.QualifiedName()) {
+				ctx := context.WithValue(a.context, backend.ForUpdateContextKey, true)
+				_, err := a.appManager.Get(ctx, incomingApp.Name, incomingApp.Namespace)
+				if apierrors.IsNotFound(err) {
+					logCtx.Debug("Source UID mismatch, but existing app is already deleted. Creating incoming app")
+					if _, err := a.createApplication(incomingApp, principalUID); err != nil {
+						return fmt.Errorf("could not create incoming app: %w", err)
+					}
+					return nil
+				}
+				if err != nil {
+					return fmt.Errorf("could not get existing app: %w", err)
+				}
+			}
 			logCtx.Debug("Source UID mismatch. Deleting existing app")
 			if err := a.deleteApplication(incomingApp); err != nil {
 				return fmt.Errorf("could not delete existing app: %w", err)
