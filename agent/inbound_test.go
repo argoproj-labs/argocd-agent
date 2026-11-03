@@ -320,6 +320,98 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		require.NotContains(t, calls, "Create")
 	})
 
+	// deleteWithLiveGet processes a Delete event for deleted, sent by the
+	// principal with principalUID, while liveGet returns what the cluster holds.
+	deleteWithLiveGet := func(t *testing.T, principalUID string, deleted *v1alpha1.Application, liveGet func() (*v1alpha1.Application, error)) (calls []string, managed bool, err error) {
+		t.Helper()
+		configureManager(t, manager.ManagerModeManaged)
+		defer unsetMocks(t)
+		a.appManager.Manage(oldApp.QualifiedName())
+		defer a.appManager.ClearManaged()
+		prevCtx := a.context
+		a.context = context.Background()
+		defer func() { a.context = prevCtx }()
+
+		getMock.Unset()
+		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(
+			func(ctx context.Context, _, _ string) (*v1alpha1.Application, error) {
+				if forUpdate, _ := ctx.Value(backend.ForUpdateContextKey).(bool); forUpdate {
+					return liveGet()
+				}
+				return oldApp, nil
+			}, nil)
+
+		ce := evs.ApplicationEvent(event.Delete, deleted)
+		if principalUID != "" {
+			event.SetPrincipalUID(ce, principalUID)
+		}
+		err = a.processIncomingApplication(event.New(ce, targets.Application))
+		for _, call := range be.Calls {
+			calls = append(calls, call.Method)
+		}
+		return calls, a.appManager.IsManaged(oldApp.QualifiedName()), err
+	}
+
+	liveAppWith := func(sourceUID, principalUID string) func() (*v1alpha1.Application, error) {
+		return func() (*v1alpha1.Application, error) {
+			app := oldApp.DeepCopy()
+			app.Annotations = map[string]string{
+				manager.SourceUIDAnnotation:    sourceUID,
+				manager.PrincipalUIDAnnotation: principalUID,
+			}
+			return app, nil
+		}
+	}
+
+	// deletedApp is the app with source UID old_uid that the principal deletes.
+	deletedApp := func() *v1alpha1.Application {
+		app := oldApp.DeepCopy()
+		app.UID = ktypes.UID("old_uid")
+		return app
+	}
+
+	t.Run("Delete: Stale delete must not delete the app that replaced it", func(t *testing.T) {
+		calls, managed, err := deleteWithLiveGet(t, "principal-A", deletedApp(), liveAppWith("new_uid", "principal-A"))
+		require.NoError(t, err)
+		require.NotContains(t, calls, "Delete")
+		require.True(t, managed)
+	})
+
+	t.Run("Delete: App with the same source UID must be deleted", func(t *testing.T) {
+		calls, _, err := deleteWithLiveGet(t, "principal-A", deletedApp(), liveAppWith("old_uid", "principal-A"))
+		require.NoError(t, err)
+		require.Contains(t, calls, "Delete")
+	})
+
+	t.Run("Delete: App stamped with the UID of the deleted app must be deleted", func(t *testing.T) {
+		deleted := deletedApp()
+		deleted.Annotations = map[string]string{manager.SourceUIDAnnotation: "primary_uid"}
+		calls, _, err := deleteWithLiveGet(t, "principal-A", deleted, liveAppWith("old_uid", "principal-A"))
+		require.NoError(t, err)
+		require.Contains(t, calls, "Delete")
+	})
+
+	t.Run("Delete: App stamped by another principal must be deleted", func(t *testing.T) {
+		calls, _, err := deleteWithLiveGet(t, "principal-A", deletedApp(), liveAppWith("new_uid", "principal-B"))
+		require.NoError(t, err)
+		require.Contains(t, calls, "Delete")
+	})
+
+	t.Run("Delete: Event without principal UID must delete the app", func(t *testing.T) {
+		calls, _, err := deleteWithLiveGet(t, "", deletedApp(), liveAppWith("new_uid", "principal-A"))
+		require.NoError(t, err)
+		require.Contains(t, calls, "Delete")
+	})
+
+	t.Run("Delete: Error reading the app from the cluster must be returned", func(t *testing.T) {
+		calls, managed, err := deleteWithLiveGet(t, "principal-A", deletedApp(), func() (*v1alpha1.Application, error) {
+			return nil, kerrors.NewTooManyRequests("slow down", 1)
+		})
+		require.True(t, kerrors.IsTooManyRequests(err))
+		require.NotContains(t, calls, "Delete")
+		require.True(t, managed)
+	})
+
 	t.Run("Update: Old app with diff UID must be deleted and a new app must be created", func(t *testing.T) {
 		configureManager(t, manager.ManagerModeManaged)
 		defer unsetMocks(t)

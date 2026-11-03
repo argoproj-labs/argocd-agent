@@ -272,7 +272,7 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 			logging.LogActionError(logCtx, "application", "terminate-operation", incomingApp, err)
 		}
 	case event.Delete:
-		err = a.deleteApplicationFromEvent(incomingApp)
+		err = a.deleteApplicationFromEvent(incomingApp, principalUID)
 		if err != nil {
 			logging.LogActionError(logCtx, "application", "delete", incomingApp, err)
 		}
@@ -914,17 +914,38 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 // This must only be used for Delete events. On a source UID mismatch, app is
 // the new application, and marking its source UID as an expected deletion
 // would allow a later user-initiated deletion of the recreated application.
-func (a *Agent) deleteApplicationFromEvent(app *v1alpha1.Application) error {
+//
+// The principal sends the Delete of an application and the Create of its
+// replacement under different resource IDs, so they can reach the agent in
+// any order. If the application on the cluster was already replaced by a
+// newer one from the same principal, the Delete is stale and is ignored.
+func (a *Agent) deleteApplicationFromEvent(app *v1alpha1.Application, principalUID string) error {
 	sourceUID := sourceUIDForApp(app)
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"method": "DeleteApplication",
+		"app":    app.QualifiedName(),
+	})
+
+	if a.mode == types.AgentModeManaged && principalUID != "" {
+		ctx := context.WithValue(a.context, backend.ForUpdateContextKey, true)
+		existing, err := a.appManager.Get(ctx, app.Name, a.getTargetNamespaceForApp(app))
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("could not get existing app: %w", err)
+		}
+		if err == nil && existing.Annotations[manager.PrincipalUIDAnnotation] == principalUID {
+			if existingSourceUID := existing.Annotations[manager.SourceUIDAnnotation]; existingSourceUID != "" &&
+				existingSourceUID != string(sourceUID) && existingSourceUID != string(app.UID) {
+				logCtx.Infof("Ignoring delete of source UID %s, application was already replaced by source UID %s", sourceUID, existingSourceUID)
+				return nil
+			}
+		}
+	}
+
 	err := a.deleteApplication(app)
 	if err == nil || !apierrors.IsNotFound(err) {
 		return err
 	}
 
-	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
-		"method": "DeleteApplication",
-		"app":    app.QualifiedName(),
-	})
 	logCtx.Debug("application is not found, perhaps it is already deleted")
 	a.deletions.MarkExpected(sourceUID)
 	if a.mode == types.AgentModeManaged {
