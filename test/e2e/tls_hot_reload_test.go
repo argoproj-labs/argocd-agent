@@ -97,7 +97,7 @@ func generateAndWriteInitalCerts(t *testing.T) (string, tls.Certificate, string,
 	ca, err := tls.X509KeyPair([]byte(caPEM), []byte(caKeyPEM))
 	require.NoError(t, err)
 
-	serverPEM, serverKeyPEM, err := tlsutil.GenerateServerCertificate("principal", ca.Leaf, ca.PrivateKey, nil, []string{"localhost", "127.0.0.1"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
+	serverPEM, serverKeyPEM, err := tlsutil.GenerateServerCertificate("principal", ca.Leaf, ca.PrivateKey, nil, []string{"localhost", "127.0.0.1"}, tlsutil.DefaultLeafCertValidityDays, true, tlsutil.KeyGenOptions{})
 	require.NoError(t, err)
 
 	writeCertsToDir(t, initialDir, caPEM, caKeyPEM, serverPEM, serverKeyPEM)
@@ -114,7 +114,7 @@ func generateAndWriteInitalCerts(t *testing.T) (string, tls.Certificate, string,
 func createNewServerCert(t *testing.T, ca tls.Certificate, caPEM, caKeyPEM, dir string) {
 	newDir := filepath.Join(dir, "new-certs")
 
-	serverPEM, serverKeyPEM, err := tlsutil.GenerateServerCertificate("principal-v2", ca.Leaf, ca.PrivateKey, nil, []string{"localhost", "127.0.0.1"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
+	serverPEM, serverKeyPEM, err := tlsutil.GenerateServerCertificate("principal-v2", ca.Leaf, ca.PrivateKey, nil, []string{"localhost", "127.0.0.1"}, tlsutil.DefaultLeafCertValidityDays, true, tlsutil.KeyGenOptions{})
 	require.NoError(t, err)
 
 	writeCertsToDir(t, newDir, caPEM, caKeyPEM, serverPEM, serverKeyPEM)
@@ -157,7 +157,7 @@ func createTestSecrets(t *testing.T, ctx context.Context, kubeClient fixture.Kub
 	ca, err := tls.X509KeyPair([]byte(caPEM), []byte(caKeyPEM))
 	require.NoError(t, err)
 
-	serverPEM, serverKeyPEM, err := tlsutil.GenerateServerCertificate("principal", ca.Leaf, ca.PrivateKey, nil, []string{"localhost", "127.0.0.1"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
+	serverPEM, serverKeyPEM, err := tlsutil.GenerateServerCertificate("principal", ca.Leaf, ca.PrivateKey, nil, []string{"localhost", "127.0.0.1"}, tlsutil.DefaultLeafCertValidityDays, true, tlsutil.KeyGenOptions{})
 	require.NoError(t, err)
 
 	caSecret := &corev1.Secret{
@@ -246,7 +246,7 @@ func (suite *TLSHotReloadTestSuite) Test_ReloadServerCertBySecret() {
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
 	newServerCertPEM, newServerCertKeyPEM, err := tlsutil.GenerateServerCertificate("new-server", ca.Leaf, ca.PrivateKey, nil, []string{"localhost", "127.0.0.1"},
-		tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
+		tlsutil.DefaultLeafCertValidityDays, true, tlsutil.KeyGenOptions{})
 	serverSecret.Data["tls.crt"] = []byte(newServerCertPEM)
 	serverSecret.Data["tls.key"] = []byte(newServerCertKeyPEM)
 	suite.PrincipalClient.Update(suite.Ctx, serverSecret, metav1.UpdateOptions{})

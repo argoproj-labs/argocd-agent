@@ -42,7 +42,7 @@ func (s *StrictCertificateTestSuite) Test_VerifyGeneratedCertificates() {
 	ca, err := tls.X509KeyPair([]byte(caPEM), []byte(caKeyPEM))
 	s.Require().NoError(err)
 
-	serverPEM, _, err := tlsutil.GenerateServerCertificate("test-principal", ca.Leaf, ca.PrivateKey, nil, []string{"principal.example.test"}, tlsutil.DefaultLeafCertValidityDays, opts)
+	serverPEM, _, err := tlsutil.GenerateServerCertificate("test-principal", ca.Leaf, ca.PrivateKey, nil, []string{"principal.example.test"}, tlsutil.DefaultLeafCertValidityDays, true, opts)
 	s.Require().NoError(err)
 	clientPEM, _, err := tlsutil.GenerateClientCertificate("test-agent", ca.Leaf, ca.PrivateKey, tlsutil.DefaultLeafCertValidityDays, opts)
 	s.Require().NoError(err)
