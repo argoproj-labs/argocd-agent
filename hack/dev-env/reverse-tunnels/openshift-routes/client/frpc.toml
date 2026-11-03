@@ -1,0 +1,32 @@
+# frpc.toml
+serverAddr = "EXTERNAL-HOSTNAME" # The hostname of the OpenShift Route
+serverPort = 443 # Passthrough routes are only reachable via the router's HTTPS port
+
+# frpc defaults to exiting immediately if the first login attempt fails, unlike rathole (which
+# retries forever). setup.sh restarts the frps Deployment shortly before launching this client,
+# so the first connection attempt can easily race the new pod's startup - keep retrying instead
+# of giving up.
+loginFailExit = false
+
+auth.method = "token"
+auth.token = "AUTHENTICATION_TOKEN" # Must be the same as frps's token, to pass authentication
+
+# Client Side Configuration
+[transport.tls]
+enable = true
+trustedCaFile = "/app/frp-ca.crt"
+serverName = "EXTERNAL-HOSTNAME"
+
+[[proxies]]
+name = "one"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 9090 # The address of the service that needs to be forwarded
+remotePort = 9090 # The port that exposes `one` to the Internet, on the frps side
+
+[[proxies]]
+name = "two"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 6379 # The address of the service that needs to be forwarded
+remotePort = 6379 # The port that exposes `two` to the Internet, on the frps side
