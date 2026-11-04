@@ -30,9 +30,9 @@ argocd-agent transforms traditional multi-cluster Argo CD deployments by inverti
 
 ### Mapping Modes
 
-**[Namespace-Based Mapping](../user-guide/managed-agent/agent-mapping.md#namespace-based-mapping-default)** (default): Applications are routed to agents based on their namespace on the control plane. Each agent has a dedicated namespace, and any Application placed in that namespace is synced to the corresponding agent. Simple to configure with no additional flags required.
+**[Namespace-Based Mapping](../user-guide/managed-agent/agent-mapping.md#namespace-based-mapping-deprecated)** (deprecated, the default before v1.0.0): Applications are routed to agents based on their namespace on the control plane. Each agent has a dedicated namespace, and any Application placed in that namespace is synced to the corresponding agent. Since v1.0.0 it requires `--destination-based-mapping=false` on the principal and on every managed agent.
 
-**[Destination-Based Mapping](../user-guide/managed-agent/agent-mapping.md#destination-based-mapping)**: Applications are routed to agents based on `spec.destination.name`, matching the same targeting model that traditional Argo CD uses with cluster secrets. Multiple namespaces can target the same agent, enabling multi-tenancy and team-based namespace isolation.
+**[Destination-Based Mapping](../user-guide/managed-agent/agent-mapping.md#destination-based-mapping)** (default since v1.0.0): Applications are routed to agents based on `spec.destination.name`, matching the same targeting model that traditional Argo CD uses with cluster secrets. Multiple namespaces can target the same agent, enabling multi-tenancy and team-based namespace isolation.
 
 ### Resource Management
 

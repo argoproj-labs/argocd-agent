@@ -1,9 +1,9 @@
 # Agent Mapping Modes
 
-argocd-agent supports two modes for mapping applications to agents: **namespace-based mapping** (default) and **destination-based mapping**. This document explains both approaches, their trade-offs, and when to use each.
+argocd-agent supports two modes for mapping applications to agents: **destination-based mapping** (the default since v1.0.0) and **namespace-based mapping** (deprecated). This document explains both approaches, their trade-offs, and when to use each.
 
-!!! warning "Namespace-based mapping is deprecated"
-    Namespace-based mapping is still the default, but it is deprecated for managed agents and will be removed in a future release. New installations should use destination-based mapping. See the [Migration Guide](#migration-guide) to switch existing ones.
+!!! warning "Breaking change in v1.0.0: destination-based mapping is now the default"
+    Since v1.0.0, the principal and managed agents use destination-based mapping unless `--destination-based-mapping=false` is set. Namespace-based mapping is deprecated and will be removed in a future release. If you upgrade an existing installation, read [Upgrading to v1.0.0](#upgrading-to-v100) first.
 
 !!! important "Managed Mode Only"
     Destination-based mapping only applies to **managed agents**. Autonomous agents do not require this feature because the agent is the source of truth and controls where applications are stored locally. On the principal, autonomous apps are always stored in the `{agentName}` namespace for clear ownership.
@@ -20,14 +20,14 @@ When an Application is created on the control plane (principal), argocd-agent ne
 | Routing mechanism        | Application namespace                    | `spec.destination.name` on principal   |
 | App namespaces per agent | Single namespace                         | Multiple namespaces                    |
 | Multi-tenancy            | Limited                                  | Full support                           |
-| Configuration            | Default (no config)                      | Requires flag                          |
+| Configuration            | Requires `--destination-based-mapping=false` (since v1.0.0) | Default (since v1.0.0) |
 | App namespace on agent   | Agent's namespace (typically `argocd`)   | Preserves original namespace           |
 | Supported agent modes    | Managed and Autonomous                   | Managed only                           |
 | Familiar to Argo CD users | argocd-agent specific concept            | Same `destination.name` targeting as traditional Argo CD |
 
-## Namespace-Based Mapping (Default)
+## Namespace-Based Mapping (Deprecated)
 
-In namespace-based mapping, the **namespace of the Application resource** determines which agent handles it. This is the default behavior and requires no additional configuration.
+In namespace-based mapping, the **namespace of the Application resource** determines which agent handles it. This was the default before v1.0.0. It is deprecated and has to be enabled explicitly with `--destination-based-mapping=false` on the principal and on every managed agent.
 
 ### How It Works
 
@@ -246,6 +246,23 @@ Unlike namespace-based mapping, where the `sourceNamespaces` field is removed, t
 
 ## Migration Guide
 
+### Upgrading to v1.0.0
+
+Before v1.0.0, namespace-based mapping was the default everywhere. Since v1.0.0 the defaults are:
+
+| Component | Default before v1.0.0 | Default since v1.0.0 |
+|-----------|-----------------------|----------------------|
+| Principal | `--destination-based-mapping=false` | `--destination-based-mapping=true` |
+| Managed agent | `--destination-based-mapping=false` | `--destination-based-mapping=true` |
+| Autonomous agent | `--destination-based-mapping=false` | unchanged (not supported) |
+
+The Helm charts and the kustomize manifests follow the same defaults.
+
+If your installation never set the flag, upgrading changes how Applications are routed: the principal starts picking the agent from `spec.destination.name` instead of the Application namespace, and managed agents watch all namespaces instead of their own. Applications without a matching `spec.destination.name` are no longer routed to any agent. Pick one of these before upgrading:
+
+- **Keep namespace-based mapping for now**: set `--destination-based-mapping=false` on the principal and on every managed agent (`principal.destination-based-mapping: "false"` and `agent.destination-based-mapping: "false"` in the params ConfigMaps, or `principal.destinationBasedMapping: false` in the principal chart values and `destinationBasedMapping: false` in the agent chart values). The components log a deprecation warning at startup, and nothing else changes.
+- **Migrate**: follow the steps below, with the flag pinned to `false` until step 5.
+
 ### From Namespace-Based to Destination-Based
 
 !!! warning "Breaking Change"
@@ -283,24 +300,21 @@ When migrating, be aware of these changes:
        namespace: my-app-namespace
    ```
 
-4. **Delete apps from agent** (optional but recommended): This ensures clean recreation in new namespaces.
+4. **Delete apps from agent** (optional but recommended): This ensures clean recreation in new namespaces. Stop the agent first: while it runs, a managed agent reverts the deletion of Applications it received from the principal and recreates them.
 
-5. **Enable on Principal**: Add `--destination-based-mapping` flag and restart.
+5. **Enable on Principal**: Remove `--destination-based-mapping=false` (the default is `true` since v1.0.0) and restart.
 
-6. **Enable on Agent**: Add `--destination-based-mapping` and `--create-namespace` flags and restart.
+6. **Enable on Agent**: Remove `--destination-based-mapping=false`, add `--create-namespace` and restart.
 
 7. **Verify**: Check apps appear in correct namespaces on the agent.
 
-8. **Cleanup**: Delete orphaned apps from `argocd` namespace on agent if step 4 was skipped.
+8. **Cleanup**: Delete orphaned apps from `argocd` namespace on agent if step 4 was skipped. Stop the agent before deleting them, for the same reason as in step 4.
 
 ## Choosing the Right Mode
 
 ### Use Namespace-Based Mapping When:
 
-- You have a simple setup with one application namespace per agent
-- You don't need multi-tenant isolation
-- You want the simplest possible configuration
-- Backward compatibility with existing deployments is required
+- You are upgrading an existing deployment and are not ready to migrate yet (see [Upgrading to v1.0.0](#upgrading-to-v100))
 
 ### Use Destination-Based Mapping When:
 

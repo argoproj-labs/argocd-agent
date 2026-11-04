@@ -40,7 +40,7 @@ The principal distributes a repository secret to a managed agent using a **two-s
 1. **Project Association**: Repository must include a `project` field referencing an existing AppProject
 2. **Pattern Matching**: The matching logic depends on the active mapping mode:
 
-**Namespace-based mapping** (default): Agent name must match **both**:
+**Namespace-based mapping** (deprecated, the default before v1.0.0): Agent name must match **both**:
 
    - At least one destination pattern via `.spec.destinations` (either `name` or a `server` URL that includes `?agentName=<pattern>`; `*` is allowed)  
    - At least one pattern in the AppProject's `.spec.sourceNamespaces` fields
