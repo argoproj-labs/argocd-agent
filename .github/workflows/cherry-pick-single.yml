@@ -1,0 +1,161 @@
+name: Cherry Pick Single
+
+on:
+  workflow_call:
+    inputs:
+      merge_commit_sha:
+        required: true
+        type: string
+        description: "The merge commit SHA to cherry-pick"
+      version_number:
+        required: true
+        type: string
+        description: "The version number (from cherry-pick/ label)"
+      pr_number:
+        required: true
+        type: number
+        description: "The original PR number"
+      pr_title:
+        required: true
+        type: string
+        description: "The original PR title"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cherry-pick:
+    name: Cherry Pick to release-${{ inputs.version_number }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Cherry pick commit
+        id: cherry-pick
+        run: |
+          set -e
+
+          MERGE_COMMIT="${INPUTS_MERGE_COMMIT_SHA}"
+          TARGET_BRANCH="release-${INPUTS_VERSION_NUMBER}"
+
+          echo "🍒 Cherry-picking commit $MERGE_COMMIT to branch $TARGET_BRANCH"
+
+          # Check if target branch exists
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$TARGET_BRANCH"; then
+            echo "❌ Target branch '$TARGET_BRANCH' does not exist"
+            echo "branch_exists=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          echo "branch_exists=true" >> "$GITHUB_OUTPUT"
+
+          # Create new branch for cherry-pick
+          CHERRY_PICK_BRANCH="cherry-pick-${INPUTS_PR_NUMBER}-to-release-${INPUTS_VERSION_NUMBER}"
+
+          git checkout -b "$CHERRY_PICK_BRANCH" "origin/$TARGET_BRANCH"
+
+          # Perform cherry-pick
+          if git cherry-pick -m 1 "$MERGE_COMMIT"; then
+            echo "✅ Cherry-pick successful"
+
+            # Push the new branch. Force push to ensure that in case the original cherry-pick branch is stale,
+            # that the current state of the $TARGET_BRANCH + cherry-pick gets in $CHERRY_PICK_BRANCH.
+            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" -f "$CHERRY_PICK_BRANCH"
+
+            # Save data for PR creation
+            echo "branch_name=$CHERRY_PICK_BRANCH" >> "$GITHUB_OUTPUT"
+            echo "target_branch=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+            echo "success=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "❌ Cherry-pick failed due to conflicts"
+            git cherry-pick --abort
+            echo "success=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUTS_MERGE_COMMIT_SHA: ${{ inputs.merge_commit_sha }}
+          INPUTS_VERSION_NUMBER: ${{ inputs.version_number }}
+          INPUTS_PR_NUMBER: ${{ inputs.pr_number }}
+
+      - name: Create Pull Request
+        if: steps.cherry-pick.outputs.success == 'true'
+        run: |
+          # Determine semantic prefix from original title or default to 'fix:'
+          # Most cherry-picks are bug fixes to release branches
+          if [[ "$PR_TITLE" =~ ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?:\ .+ ]]; then
+            # Extract the prefix (e.g., "fix:" or "feat(scope):")
+            PREFIX=$(echo "$PR_TITLE" | sed -E 's/^((feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?:).*/\1/')
+            # Remove the prefix from the original title to avoid duplication
+            TITLE_WITHOUT_PREFIX=$(echo "$PR_TITLE" | sed -E 's/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?:\ //')
+            TITLE="${PREFIX} ${TITLE_WITHOUT_PREFIX} (cherry-pick #${INPUTS_PR_NUMBER} for ${INPUTS_VERSION_NUMBER})"
+          else
+            # Original title doesn't have semantic prefix, add 'fix:' prefix
+            TITLE="fix: ${PR_TITLE} (cherry-pick #${INPUTS_PR_NUMBER} for ${INPUTS_VERSION_NUMBER})"
+          fi
+
+          BODY=$(cat <<EOF
+          Cherry-picked ${PR_TITLE} (#${INPUTS_PR_NUMBER})
+
+          This is an automated cherry-pick of #${INPUTS_PR_NUMBER} to release-${INPUTS_VERSION_NUMBER}.
+
+          **Original PR**: #${INPUTS_PR_NUMBER}
+          **Target release**: ${INPUTS_VERSION_NUMBER}
+
+          Please review the changes and ensure they apply cleanly to this release branch.
+          EOF
+          )
+
+          gh pr create \
+            --title "$TITLE" \
+            --body "$BODY" \
+            --base "${STEPS_CHERRY_PICK_OUTPUTS_TARGET_BRANCH}" \
+            --head "${STEPS_CHERRY_PICK_OUTPUTS_BRANCH_NAME}"
+
+          # Get the PR number of the newly created PR
+          NEW_PR_NUMBER=$(gh pr list --head "${STEPS_CHERRY_PICK_OUTPUTS_BRANCH_NAME}" --json number --jq '.[0].number')
+
+          # Comment on original PR
+          gh pr comment ${INPUTS_PR_NUMBER} \
+            --body "🍒 Cherry-pick PR created for ${INPUTS_VERSION_NUMBER}: #${NEW_PR_NUMBER}"
+        env:
+          PR_TITLE: ${{ inputs.pr_title }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUTS_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUTS_VERSION_NUMBER: ${{ inputs.version_number }}
+          STEPS_CHERRY_PICK_OUTPUTS_TARGET_BRANCH: ${{ steps.cherry-pick.outputs.target_branch }}
+          STEPS_CHERRY_PICK_OUTPUTS_BRANCH_NAME: ${{ steps.cherry-pick.outputs.branch_name }}
+
+      - name: Comment on failure
+        if: failure() && steps.cherry-pick.outputs.branch_exists != 'false'
+        run: |
+          gh pr comment ${INPUTS_PR_NUMBER} \
+            --body "❌ Cherry-pick failed for ${INPUTS_VERSION_NUMBER}. Please check the [workflow logs](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) for details.
+
+          The cherry-pick encountered conflicts and requires manual resolution."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUTS_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUTS_VERSION_NUMBER: ${{ inputs.version_number }}
+
+      - name: Comment on missing branch
+        if: failure() && steps.cherry-pick.outputs.branch_exists == 'false'
+        run: |
+          gh pr comment ${INPUTS_PR_NUMBER} \
+            --body "❌ Cherry-pick failed for ${INPUTS_VERSION_NUMBER}. Target branch 'release-${INPUTS_VERSION_NUMBER}' does not exist."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUTS_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUTS_VERSION_NUMBER: ${{ inputs.version_number }}
