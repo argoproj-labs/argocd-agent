@@ -71,10 +71,12 @@
       "type": "object"
     },
     "destinationBasedMapping": {
-      "default": false,
-      "description": "#\nWhether to enable destination-based mapping. When enabled, the agent\ncreates applications in their original namespace (preserving the namespace\nfrom the principal) instead of the agent's own namespace.",
+      "description": "#\nWhether to enable destination-based mapping. When enabled, the agent\ncreates applications in their original namespace (preserving the namespace\nfrom the principal) instead of the agent's own namespace. When unset, it\nfollows agentMode: true for managed agents, false for autonomous agents.",
       "title": "destinationBasedMapping",
-      "type": "boolean"
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "dnsConfig": {
       "additionalProperties": true,
@@ -1144,7 +1146,6 @@
     "tlsCipherSuites",
     "allowedNamespaces",
     "tlsInsecurePlaintext",
-    "destinationBasedMapping",
     "createNamespace",
     "labelSelector",
     "redisTLS",
