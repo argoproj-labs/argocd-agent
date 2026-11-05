@@ -146,7 +146,7 @@ argocd-agentctl pki issue resource-proxy \
 
 Replace placeholders:
 
-- `<principal-external-ip>`: External IP where agents will reach the principal
+- `<principal-external-ip>`: External IP where agents will reach the principal (the address of a node if you expose the principal with a NodePort service)
 - `<principal-dns-name>`: DNS name for the principal service
 - `<resource-proxy-ip>`: IP for the resource proxy (usually cluster-internal)
 - `<resource-proxy-dns>`: DNS name for resource proxy
@@ -181,13 +181,15 @@ kubectl get configmap argocd-agent-params -n argocd --context <control-plane-con
 # Should output: mtls:CN=([^,]+)
 ```
 
-Update principal configuration:
+Update principal configuration. The manifests make the principal listen on `127.0.0.1`, which is only reachable from a sidecar in the same pod. With mTLS authentication it has to listen on all interfaces so that agents can connect:
 
 ```bash
-# Allow principal to operate in agent's namespace
+# Allow principal to operate in agent's namespace and to accept
+# connections from outside its pod
 kubectl patch configmap argocd-agent-params -n argocd --context <control-plane-context> \
   --patch "{\"data\":{
-    \"principal.allowed-namespaces\":\"my-first-agent\"
+    \"principal.allowed-namespaces\":\"my-first-agent\",
+    \"principal.listen.host\":\"0.0.0.0\"
   }}"
 
 # Restart the principal to apply changes
@@ -205,8 +207,19 @@ kubectl patch svc argocd-agent-principal -n argocd --context <control-plane-cont
 
 # Option 2: NodePort
 kubectl patch svc argocd-agent-principal -n argocd --context <control-plane-context> \
-  --patch '{"spec":{"type":"NodePort","ports":[{"port":8443,"nodePort":30443}]}}'
+  --patch '{"spec":{"type":"NodePort","ports":[{"port":443,"nodePort":30443}]}}'
 ```
+
+The service listens on port 443 and forwards to the principal's gRPC port 8443. Agents connect to port 443 of the load balancer, or to the node port.
+
+The principal manifests also install a NetworkPolicy, `argocd-agent-redis-proxy`, that only admits the gRPC port from agent pods in the principal's own namespace. An agent on another cluster reaches the principal as external traffic and cannot be matched by pod or namespace selectors, so on clusters that enforce NetworkPolicies its connection times out. Append a rule that allows the gRPC port:
+
+```bash
+kubectl patch networkpolicy argocd-agent-redis-proxy -n argocd --context <control-plane-context> \
+  --type='json' -p='[{"op":"add","path":"/spec/ingress/-","value":{"ports":[{"protocol":"TCP","port":8443}]}}]'
+```
+
+This rule admits any source. To restrict it, add a `from` entry with an `ipBlock` for the addresses your agents connect from. Keep in mind that the source address may be rewritten before the policy is applied. Depending on the service type and the cluster's network setup, the policy can see the address of a node or of the load balancer instead of the agent's own, so the `ipBlock` has to cover those addresses, or the service has to preserve the client address, for example with `externalTrafficPolicy: Local`. With that setting only the nodes that run the principal accept the traffic.
 
 ### 3.3 Verify Principal Installation
 
@@ -217,10 +230,9 @@ kubectl get pods -n argocd --context <control-plane-context> | grep principal
 # Check logs
 kubectl logs -n argocd deployment/argocd-agent-principal --context <control-plane-context>
 
-# Expected log output:
-# INFO[0001] Starting argocd-agent-principal v0.1.0
-# INFO[0002] gRPC server listening on :8443
-# INFO[0003] Resource proxy started on :9090
+# The log should contain these messages:
+# Now listening on [::]:8443
+# Resource proxy started
 ```
 
 ## Step 4: Workload Cluster Setup
@@ -277,9 +289,7 @@ This configuration includes:
 argocd-agentctl agent create my-first-agent \
   --principal-context <control-plane-context> \
   --principal-namespace argocd \
-  --resource-proxy-server <principal-external-ip>:9090 \
-  --resource-proxy-username my-first-agent \
-  --resource-proxy-password "$(openssl rand -base64 32)"
+  --resource-proxy-server <resource-proxy-dns>:9090
 ```
 
 ### 5.2 Issue Agent Client Certificate
@@ -294,12 +304,15 @@ argocd-agentctl pki issue agent my-first-agent \
 
 ### 5.3 Propagate Certificate Authority to Agent
 
+Step 5.2 already installs the certificate authority on the workload cluster, in the secret `argocd-agent-ca`. Run this step only to replace that secret, for example after the certificate authority was regenerated. `--force` is required because the secret exists:
+
 ```bash
 argocd-agentctl pki propagate \
   --principal-context <control-plane-context> \
   --principal-namespace argocd \
   --agent-context <workload-cluster-context> \
-  --agent-namespace argocd
+  --agent-namespace argocd \
+  --force
 ```
 
 ### 5.4 Verify Certificate Installation
@@ -337,13 +350,13 @@ kubectl apply -n argocd \
 
 ### 5.7 Configure Agent Connection
 
-Update the agent configuration to connect to your principal using mTLS authentication:
+Update the agent configuration to connect to your principal using mTLS authentication. Port 443 is the port of the LoadBalancer service; with a NodePort service, use the address of a node as `<principal-external-ip>` and the node port (30443 in the example above) instead:
 
 ```bash
 kubectl patch configmap argocd-agent-params -n argocd --context <workload-cluster-context> \
   --patch "{\"data\":{
     \"agent.server.address\":\"<principal-external-ip>\",
-    \"agent.server.port\":\"8443\",
+    \"agent.server.port\":\"443\",
     \"agent.mode\":\"managed\",
     \"agent.creds\":\"mtls:any\"
   }}"
@@ -418,7 +431,7 @@ spec:
     targetRevision: HEAD
     path: guestbook
   destination:
-    server: https://<principal-external-ip:port>?agentName=my-first-agent # For example, https://172.18.255.200:443?agentName=my-first-agent
+    server: https://<resource-proxy-dns>:9090?agentName=my-first-agent # The address given to --resource-proxy-server in step 5.1
     namespace: guestbook
   syncPolicy:
     syncOptions:
@@ -559,9 +572,10 @@ kubectl get applications -n team-ns --context <workload-cluster-context>
 
 **Agent Cannot Connect**:
 ```bash
-# Check network connectivity
+# Check network connectivity (with a NodePort service, use the node port
+# instead of 443, 30443 in this guide)
 kubectl run debug --rm -it --image=busybox --context <workload-cluster-context> \
-  -- nc -zv <principal-external-ip> 8443
+  -- nc -zv -w 5 <principal-external-ip> 443
 
 # Verify certificates
 kubectl get secrets -n argocd --context <workload-cluster-context> | grep tls
