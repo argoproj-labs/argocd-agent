@@ -109,6 +109,22 @@ Common resource-specific helpers.
 {{- include "argocd-agent-agent.resourceName" (dict "root" . "suffix" "clusterrolebinding") }}
 {{- end }}
 
+{{- define "argocd-agent-agent.extraRoleName" -}}
+{{- include "argocd-agent-agent.resourceName" (dict "root" . "suffix" "extra-role") }}
+{{- end }}
+
+{{- define "argocd-agent-agent.extraRoleBindingName" -}}
+{{- include "argocd-agent-agent.resourceName" (dict "root" . "suffix" "extra-rolebinding") }}
+{{- end }}
+
+{{- define "argocd-agent-agent.extraClusterRoleName" -}}
+{{- include "argocd-agent-agent.resourceName" (dict "root" . "suffix" "extra-clusterrole") }}
+{{- end }}
+
+{{- define "argocd-agent-agent.extraClusterRoleBindingName" -}}
+{{- include "argocd-agent-agent.resourceName" (dict "root" . "suffix" "extra-clusterrolebinding") }}
+{{- end }}
+
 {{/*
 Name for resources used exclusively by Helm tests.
 */}}

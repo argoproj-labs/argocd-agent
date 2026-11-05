@@ -475,11 +475,127 @@
           "description": "Create cluster-scoped ClusterRole and ClusterRoleBinding. Required for\ndestination-based mapping, create-namespace, and resource-proxy discovery\nacross multiple namespaces. Leave `false` to keep the agent strictly\nnamespace-scoped.",
           "title": "createClusterRole",
           "type": "boolean"
+        },
+        "extraClusterRules": {
+          "description": "Additional PolicyRules for a separate ClusterRole and ClusterRoleBinding (requires\n`rbac.create` and `rbac.createClusterRole`).",
+          "items": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "apiGroups": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "resourceNames": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "resources": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "verbs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "apiGroups",
+                  "resources",
+                  "verbs"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "nonResourceURLs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "verbs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "nonResourceURLs",
+                  "verbs"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "title": "extraClusterRules",
+          "type": "array"
+        },
+        "extraRules": {
+          "description": "Additional PolicyRules for a separate Role and RoleBinding (requires `rbac.create`).",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "apiGroups": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "resourceNames": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "verbs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "apiGroups",
+              "resources",
+              "verbs"
+            ],
+            "type": "object"
+          },
+          "title": "extraRules",
+          "type": "array"
         }
       },
       "required": [
         "create",
-        "createClusterRole"
+        "createClusterRole",
+        "extraRules",
+        "extraClusterRules"
       ],
       "title": "rbac",
       "type": "object"
