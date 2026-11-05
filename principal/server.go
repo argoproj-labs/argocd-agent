@@ -300,7 +300,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	// Validate TLS options after all options have been applied
-	if err := tlsutil.ValidateTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers, s.options.tlsCurvePreferences); err != nil {
+	if err := tlsutil.ValidateTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers); err != nil {
 		return nil, err
 	}
 
