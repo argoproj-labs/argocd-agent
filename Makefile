@@ -56,6 +56,7 @@ PROTOC_GEN_GO_GRPC_VERSION=v1.2
 GOLANG_CI_LINT_VERSION=v2.12.2
 MOCKERY_V2_VERSION?=v2.43.0
 HELM_DOCS_VERSION?=v1.14.2
+GOREMAN_VERSION?=v0.3.19
 
 GO_BIN_DIR=$(shell go env GOPATH)/bin
 
@@ -146,7 +147,7 @@ clean-all: clean
 	GOBIN=$(current_dir)/build/bin go install github.com/vektra/mockery/v2@$(MOCKERY_V2_VERSION)
 
 $(GO_BIN_DIR)/goreman:
-	go install github.com/mattn/goreman@latest
+	go install github.com/mattn/goreman@$(GOREMAN_VERSION)
 
 .PHONY: install-mockery
 install-mockery: ./build/bin/mockery

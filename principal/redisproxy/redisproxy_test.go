@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/principal/tracker"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
@@ -460,6 +462,66 @@ func Test_handleAgentSubscribe(t *testing.T) {
 		// Check that ping routine was started
 		require.True(t, connState.pingRoutineStarted[agentName])
 	})
+}
+
+func Test_handleAgentSubscribe_forwarderStopsWhenConnectionCloses(t *testing.T) {
+	mockSendFunc := &mockSendSynchronousMessageToAgentFunc{
+		responseToReturn: &event.RedisResponseBody{
+			SubscribeResponse: &event.RedisResponseBodySubscribeResponse{},
+		},
+	}
+	rp := &RedisProxy{
+		sendSynchronousMessageToAgentFn: mockSendFunc.call,
+		ConnectionIDTracker:             tracker.New(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connState := &connectionState{
+		connectionCtx:      ctx,
+		connectionCancelFn: cancel,
+		connUUID:           uuid.New().String(),
+		pingRoutineStarted: make(map[string]bool),
+	}
+	err := rp.handleAgentSubscribe(connState, "app|managed-resources|test-agent_my-app|1.8.3", "test-agent", &mockArgoCDRedisWriter{}, rp.log())
+	require.NoError(t, err)
+
+	// A notification from the agent arrives, but nobody reads the connection's channel anymore
+	// (the connection's message loop has exited), so the forwarder sits on the send...
+	_, evCh := rp.ConnectionIDTracker.Tracked(connState.connUUID)
+	require.NotNil(t, evCh)
+	ev := cloudevents.NewEvent()
+	evCh <- &ev
+	require.Eventually(t, func() bool { return len(evCh) == 0 }, time.Second, 5*time.Millisecond, "forwarder did not pick up the event")
+
+	// ...and then the connection goes away
+	cancel()
+
+	// The forwarder must give up on the send, exit, and stop tracking the connection
+	require.Eventually(t, func() bool {
+		_, ch := rp.ConnectionIDTracker.Tracked(connState.connUUID)
+		return ch == nil
+	}, time.Second, 10*time.Millisecond, "forwarder did not stop tracking the closed connection")
+}
+
+func Test_readNextMessageFromArgoCDOrInternal_closedInternalChannel(t *testing.T) {
+	rp := &RedisProxy{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connState := &connectionState{
+		connectionCtx:               ctx,
+		connectionCancelFn:          cancel,
+		connUUID:                    uuid.New().String(),
+		connectionUUIDEventsChannel: make(chan *cloudevents.Event),
+		pingRoutineStarted:          make(map[string]bool),
+	}
+
+	// The forwarder goroutine closes this channel when it exits
+	close(connState.connectionUUIDEventsChannel)
+
+	// Must not panic, and must tell the message loop to stop
+	result := readNextMessageFromArgoCDOrInternal(connState, make(chan parsedRedisCommand), rp.log())
+	require.True(t, result.connContextCancelled)
 }
 
 func Test_rewriteResourcesTreeNamespace(t *testing.T) {

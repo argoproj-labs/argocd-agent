@@ -75,7 +75,9 @@ if [ -f "$E2E_ENV_FILE" ]; then
     fi
 fi
 
-ARGOCD_AGENT_RESOURCE_PROXY=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+if test "${ARGOCD_AGENT_RESOURCE_PROXY}" = ""; then
+    ARGOCD_AGENT_RESOURCE_PROXY=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+fi
 export ARGOCD_AGENT_RESOURCE_PROXY
 
 RACE_FLAG=""

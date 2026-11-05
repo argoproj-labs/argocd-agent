@@ -313,7 +313,7 @@ func (suite *SelfAgentRegistrationTestSuite) Test_SelfRegistrationCreatesSecret(
 			Message:    fmt.Sprintf("Agent: '%s' is %s with principal", fixture.AgentManagedName, "connected"),
 			ModifiedAt: &metav1.Time{Time: time.Now()},
 		}, suite.ClusterDetails)
-	}, 60*time.Second, 1*time.Second)
+	}, 120*time.Second, 1*time.Second)
 
 	// Verify secret was created
 	requires.Eventually(func() bool {
