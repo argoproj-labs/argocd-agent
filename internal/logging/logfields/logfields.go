@@ -69,6 +69,7 @@ const (
 	ResourceVersion    = "resourceVersion"
 	NewResourceVersion = "newResourceVersion"
 	OldResourceVersion = "oldResourceVersion"
+	SecretName         = "secretName"
 
 	// Queue operations
 	SendQueueLen  = "sendq_len"

@@ -93,6 +93,10 @@ data:
   # Run 'argocd-agent principal --tls-ciphersuites=list' to see available suites.
   # Default: "" (use Go defaults)
   principal.tls.ciphersuites: ""
+  # principal.tls.curve-preferences: Comma-separated list of TLS curve preferences.
+  # Run 'argocd-agent principal --tls-curve-preferences=list' to see available curves.
+  # Default: "" (use Go defaults)
+  principal.tls.curve-preferences: ""
   # principal.resource-proxy.secret-name: The name of the secret containing
   # the TLS certificate and key for the resource proxy.
   # Default: "argocd-agent-resource-proxy-tls"
@@ -158,9 +162,22 @@ data:
   # more often than the specified interval.
   # Default: 0
   principal.keep-alive.min-interval: "0"
-  # principal.pprof.port: The port the pprof server will listen on.
-  # Default: 0
-  principal.pprof.port: "0"
+  # principal.pprof.port: The port the pprof server listens on, bound to
+  # localhost. A value of 0 means no listener is started at all, which also
+  # makes principal.pprof.enabled inert. Changing the port requires a restart.
+  # Default: 6060
+  principal.pprof.port: "6060"
+  # principal.pprof.enabled: Whether the pprof server answers requests. While
+  # false every endpoint returns 403, so the listener can sit idle at no cost
+  # until profiling is actually needed.
+  # Applied at runtime: editing this key takes effect without a restart.
+  # Default: false
+  principal.pprof.enabled: "false"
+  # principal.log.full-detail: Comma-separated list of categories to log in full
+  # detail. One or more of: all, actions, events, informers.
+  # Applied at runtime: editing this key takes effect without a restart.
+  # Default: none
+  principal.log.full-detail: ""
   # principal.redis.server.address: The address of the Redis server.
   # Default: "argocd-redis:6379"
   principal.redis.server.address: "argocd-redis:6379"
@@ -201,3 +218,15 @@ data:
   # principal.event-processors: Number of concurrent event processors.
   # Default: 10
   principal.event-processors: "10"
+  # principal.self-registration.enabled: Allow agents with valid credentials to
+  # self-register on connection. Requires resource proxy to be enabled.
+  # Default: false
+  principal.self-registration.enabled: "false"
+  # principal.self-registration.client-cert-secret: Name of the Secret containing
+  # the shared TLS client cert copied into every self-registered cluster secret.
+  # Default: ""
+  principal.self-registration.client-cert-secret: ""
+  # principal.self-registration.secret-labels: Comma-separated list of key=value
+  # labels to apply to self-registered cluster secrets (e.g. "env=prod,team=platform").
+  # Optional. Default: ""
+  principal.self-registration.secret-labels: ""

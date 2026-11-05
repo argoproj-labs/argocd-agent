@@ -1,7 +1,7 @@
 # Getting started
 
-!!! warning
-    The argocd-agent project is currently rather complex to set-up and operate. Right now, tt is not for the faint of heart. As the project progresses and hopefully gains more contributors, we will come up with means to smoothen both, the initial installation and day 2 operations.
+!!! note
+    argocd-agent setup involves several components including certificate management, Argo CD configuration, and principal/agent deployment. This guide walks you through each step. As the project progresses and hopefully gains more contributors, we will come up with means to smoothen both, the initial installation and day 2 operations.
 
 ## Preface
 
@@ -24,20 +24,21 @@ When choosing a name, consider the following:
 
 * Naming rules for an agent are equal to [naming rules for Kubernetes namespaces](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names), and must follow the [DNS label standard](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names).
 * The name of an agent should clearly identify the agent, and the cluster it is running on. The name of an agent will be visible as the destination cluster in Argo CD.
+* The name of an agent must be unique among all clusters known to Argo CD. In particular, it must not be the same as the name of a cluster that is already registered in Argo CD (for example, a regular cluster secret for the cluster the agent runs on), otherwise Argo CD is unable to resolve `spec.destination.name` and reports `there are 2 clusters with the same name`. A suffix such as `-agent` can be used to tell the two apart (e.g. `my-cluster-agent`).
 * With namespace-based mapping (the default), a namespace with the same name as the agent will be created on the control plane cluster. These namespaces must be accessible by the Argo CD API server on the control plane through apps-in-any-namespace configuration. With destination-based mapping, per-agent namespaces are not required.
 * The name of the agent must be part of its TLS client certificate's subject
 
 ## Choosing the right operational mode for each agent
 
-As described in the chapter about [operational modes of agents](../concepts/agent-modes/index.md), each agent can operate in one of several modes. Each mode comes with its own pros and cons, and you want to consider the right mode for each agent.
+As described in the chapter about [operational modes of agents](../concepts/agent-modes.md), each agent can operate in one of several modes. Each mode comes with its own pros and cons, and you want to consider the right mode for each agent.
 
 It's perfectly fine to run a mixed-mode scenario, where some of the agents run in one mode while other agents run in different modes.
 
-If in doubt, it's recommended to start using the [managed mode](../concepts/agent-modes/managed.md) for your agents.
+If in doubt, it's recommended to start using the [managed mode](../user-guide/managed-agent/index.md) for your agents.
 
 ## Choosing the agent mapping mode
 
-In addition to the operational mode, you must choose how Applications are routed to managed agents. argocd-agent supports two [mapping modes](../concepts/agent-mapping.md):
+In addition to the operational mode, you must choose how Applications are routed to managed agents. argocd-agent supports two [mapping modes](../user-guide/managed-agent/agent-mapping.md):
 
 * **Namespace-based mapping** (default): Each agent has a dedicated namespace on the control plane. Applications placed in that namespace are routed to the agent. Simple to set up but limited multi-tenancy.
 
@@ -45,7 +46,7 @@ In addition to the operational mode, you must choose how Applications are routed
 
 If you are migrating from a traditional multi-cluster Argo CD setup, destination-based mapping provides the most familiar experience since it uses the same `spec.destination.name` field.
 
-See [Agent Mapping Modes](../concepts/agent-mapping.md) for a detailed comparison.
+See [Agent Mapping Modes](../user-guide/managed-agent/agent-mapping.md) for a detailed comparison.
 
 ## Argo CD Component Placement
 

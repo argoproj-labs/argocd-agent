@@ -18,8 +18,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"net/http"
-	_ "net/http/pprof"
 	"regexp"
 	"runtime"
 	"strings"
@@ -37,6 +35,8 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
+	"github.com/argoproj-labs/argocd-agent/internal/profile"
+	"github.com/argoproj-labs/argocd-agent/internal/settings"
 	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
@@ -82,15 +82,18 @@ func NewPrincipalRunCommand() *cobra.Command {
 		enableResourceProxy       bool
 		resourceProxyAddress      string
 		pprofPort                 int
+		pprofEnabled              bool
+		paramsConfigMap           string
 		resourceProxySecretName   string
 		resourceProxyCertPath     string
 		resourceProxyKeyPath      string
 		resourceProxyCaSecretName string
 		resourceProxyCAPath       string
 
-		tlsMinVersion   string
-		tlsMaxVersion   string
-		tlsCipherSuites []string
+		tlsMinVersion       string
+		tlsMaxVersion       string
+		tlsCipherSuites     []string
+		tlsCurvePreferences []string
 
 		// Minimum time duration for agent to wait before sending next keepalive ping to principal
 		// if agent sends ping more often than specified interval then connection will be dropped
@@ -117,6 +120,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 		enableSelfClusterRegistration bool
 		selfRegClientCertSecretName   string
+		selfRegSecretLabels           map[string]string
 		// Redis TLS configuration
 		redisTLSEnabled               bool
 		redisProxyServerTLSCertPath   string
@@ -134,6 +138,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 		haAdminPort                    int
 		haAllowedReplClients           []string
 		haReplicationInitialAckTimeout time.Duration
+		haAdminAuth                    string
+		haAdminTLSCert                 string
+		haAdminTLSKey                  string
+		haAdminCA                      string
 
 		// SPIRE integration
 		spireAgentSocket string
@@ -143,6 +151,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 		Use:   "principal",
 		Short: "Run the argocd-agent principal component",
 		Run: func(c *cobra.Command, args []string) {
+			if len(tlsCurvePreferences) == 1 && tlsCurvePreferences[0] == "list" {
+				cmdutil.PrintAvailableCurvePreferences()
+				return
+			}
 			ctx, cancelFn := context.WithCancel(context.Background())
 			defer cancelFn()
 
@@ -158,17 +170,6 @@ func NewPrincipalRunCommand() *cobra.Command {
 					}
 				}()
 				logrus.Infof("OpenTelemetry tracing initialized (address=%s)", otlpAddress)
-			}
-
-			if pprofPort > 0 {
-				logrus.Infof("Starting pprof server on 127.0.0.1:%d", pprofPort)
-
-				go func() {
-					err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", pprofPort), nil)
-					if err != nil {
-						cmdutil.Fatal("Error starting pprof server: %v", err)
-					}
-				}()
 			}
 
 			opts := []principal.ServerOption{}
@@ -189,12 +190,36 @@ func NewPrincipalRunCommand() *cobra.Command {
 				logLevels = append(logLevels, "info")
 			}
 			if len(logLevels) > 0 {
-				cmdutil.ParseLogLevels(logLevels, &subLoggers)
+				err := cmdutil.ParseAndApplyLogLevels(logLevels, &subLoggers)
+				if err != nil {
+					logrus.Errorf("Failed to parse and apply log levels: %v", err)
+
+					logLevels = []string{"info"}
+					logrus.Info("Switching to the default log level: info")
+					if err := cmdutil.ParseAndApplyLogLevels(logLevels, &subLoggers); err != nil {
+						logrus.Errorf("Failed to parse and apply log levels: %v", err)
+					}
+				}
 			}
 
 			opts = append(opts, principal.WithSubsystemLoggers(subLoggers.ResourceProxyLogger, subLoggers.RedisProxyLogger, subLoggers.GrpcEventLogger))
 
 			cmdutil.ParseFullDetail(fullDetailCategories)
+
+			settingsManager := settings.NewManager(settings.PrincipalKeyPrefix, settings.DefaultConfig{
+				LogLevels:    logLevels,
+				FullDetail:   fullDetailCategories,
+				PprofEnabled: pprofEnabled,
+			}, &subLoggers)
+
+			if pprofPort > 0 {
+				pprofServer := profile.NewPprofServer(fmt.Sprintf("127.0.0.1:%d", pprofPort), func() bool {
+					return settingsManager.PprofEnabled()
+				})
+				if err := pprofServer.Start(ctx); err != nil {
+					cmdutil.Fatal("Failed to start pprof server: %v", err)
+				}
+			}
 
 			kubeConfig, err := cmdutil.GetKubeConfig(ctx, namespace, kubeConfig, kubeContext)
 			if err != nil {
@@ -279,6 +304,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 				}
 			}
 
+			if !insecurePlaintext && spireAgentSocket == "" {
+				opts = append(opts, principal.WithTLSHotReload(true))
+			} else {
+				logrus.Info("TLS Hot Reloading disabled due to SPIRE or insecurePlaintext being enabled")
+			}
+
 			opts = append(opts, principal.WithRequireClientCerts(requireClientCerts))
 			opts = append(opts, principal.WithClientCertSubjectMatch(clientCertSubjectMatch))
 
@@ -294,6 +325,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 			if len(tlsCipherSuites) > 0 && (len(tlsCipherSuites) != 1 || tlsCipherSuites[0] != "") {
 				opts = append(opts, principal.WithTLSCipherSuites(tlsCipherSuites))
+			}
+			if len(tlsCurvePreferences) > 0 && (len(tlsCurvePreferences) != 1 || tlsCurvePreferences[0] != "") {
+				opts = append(opts, principal.WithTLSCurvePreferences(tlsCurvePreferences))
 			}
 
 			opts = append(opts, principal.WithResourceProxyEnabled(enableResourceProxy))
@@ -313,7 +347,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if proxyTLS == nil {
 					cmdutil.Fatal("Could not load resource proxy TLS configuration: result is nil")
 				}
-				if err := tlsutil.SetTLSConfigFromFlags(proxyTLS, tlsMinVersion, tlsMaxVersion, tlsCipherSuites); err != nil {
+				if err := tlsutil.SetTLSConfigFromFlags(proxyTLS, tlsMinVersion, tlsMaxVersion, tlsCipherSuites, tlsCurvePreferences); err != nil {
 					cmdutil.Fatal("Could not set TLS configuration for resource proxy: %v", err)
 				}
 				opts = append(opts, principal.WithResourceProxyTLS(proxyTLS))
@@ -460,6 +494,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 				opts = append(opts, principal.WithClientCertSecretName(selfRegClientCertSecretName))
 			}
 
+			// If selfRegSecretLabels is set, add it to the options
+			if len(selfRegSecretLabels) > 0 {
+				opts = append(opts, principal.WithSelfRegSecretLabels(selfRegSecretLabels))
+			}
+
 			// Configure Redis TLS
 			opts = append(opts, principal.WithRedisTLSEnabled(redisTLSEnabled))
 			if redisTLSEnabled {
@@ -525,6 +564,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if haReplicationInitialAckTimeout > 0 {
 					haOpts = append(haOpts, ha.WithReplicationInitialAckTimeout(haReplicationInitialAckTimeout))
 				}
+				if haAdminAuth != "" {
+					haOpts = append(haOpts, ha.WithAdminAuth(haAdminAuth))
+				}
+				if haAdminTLSCert != "" || haAdminTLSKey != "" || haAdminCA != "" {
+					haOpts = append(haOpts, ha.WithAdminTLS(haAdminTLSCert, haAdminTLSKey, haAdminCA))
+				}
 				opts = append(opts, principal.WithHA(haOpts...))
 				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
 			}
@@ -533,6 +578,10 @@ func NewPrincipalRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not create new server instance: %v", err)
 			}
+
+			// Watch the principal's settings ConfigMap for runtime overrides.
+			settingsManager.StartWatcher(ctx, kubeConfig, kubeConfig.Namespace, paramsConfigMap)
+
 			errch := make(chan error)
 			err = s.Start(ctx, errch)
 			if err != nil {
@@ -557,6 +606,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&fullDetailCategories, "full-detail",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_FULL_DETAIL", nil, nil),
 		"Enable full detail logging for specified categories. Comma-separated list of: "+cmdutil.AvailableFullDetailCategories)
+	command.Flags().StringVar(&paramsConfigMap, "params-configmap",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_PARAMS_CONFIGMAP", nil, settings.DefaultConfigMapName),
+		"Name of the ConfigMap used for principal configurations")
 
 	command.Flags().IntVar(&metricsPort, "metrics-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_METRICS_PORT", cmdutil.ValidPort, 8000),
@@ -615,6 +667,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&tlsCipherSuites, "tls-ciphersuites",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_TLS_CIPHERSUITES", nil, []string{}),
 		"Comma-separated list of TLS cipher suites to use. Use 'list' to show available cipher suites and exit")
+	command.Flags().StringSliceVar(&tlsCurvePreferences, "tls-curve-preferences",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_TLS_CURVE_PREFERENCES", nil, []string{}),
+		"Comma-separated list of TLS curve preferences to use. Use 'list' to show available curve preferences and exit")
 
 	command.Flags().StringVar(&resourceProxySecretName, "resource-proxy-secret-name",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_RESOURCE_PROXY_SECRET_NAME", nil, config.SecretNameProxyTLS),
@@ -679,8 +734,11 @@ func NewPrincipalRunCommand() *cobra.Command {
 		env.StringWithDefault("ARGOCD_PRINCIPAL_REDIS_COMPRESSION_TYPE", nil, string(cacheutil.RedisCompressionGZip)),
 		"Compression algorithm required by Redis. (possible values: gzip, none. Default value: gzip)")
 	command.Flags().IntVar(&pprofPort, "pprof-port",
-		env.NumWithDefault("ARGOCD_PRINCIPAL_PPROF_PORT", cmdutil.ValidPort, 0),
-		"Port the pprof server will listen on")
+		env.NumWithDefault("ARGOCD_PRINCIPAL_PPROF_PORT", cmdutil.ValidPort, 6060),
+		"Port the pprof server will listen on, bound to localhost. Set to 0 to not listen at all.")
+	command.Flags().BoolVar(&pprofEnabled, "pprof-enabled",
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_PPROF_ENABLED", false),
+		"Enable or disable profiling for the principal")
 	command.Flags().IntVar(&healthzPort, "healthz-port",
 		env.NumWithDefault("ARGOCD_PRINCIPAL_HEALTH_CHECK_PORT", cmdutil.ValidPort, 8003),
 		"Port the health check server will listen on")
@@ -746,6 +804,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&selfRegClientCertSecretName, "self-registration-client-cert-secret",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET", nil, ""),
 		"TLS secret containing shared client cert for self-registered cluster secrets (must have tls.crt, tls.key, ca.crt)")
+	command.Flags().StringToStringVar(&selfRegSecretLabels, "self-registration-secret-labels",
+		env.StringToMapWithDefault("ARGOCD_PRINCIPAL_SELF_REGISTRATION_SECRET_LABELS", nil, map[string]string{}),
+		"Comma-separated list of key=value labels to apply to self-registered cluster secrets")
 
 	command.Flags().BoolVar(&haEnabled, "ha-enabled",
 		env.BoolWithDefault("ARGOCD_PRINCIPAL_HA_ENABLED", false),
@@ -768,6 +829,18 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().DurationVar(&haReplicationInitialAckTimeout, "ha-replication-initial-ack-timeout",
 		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_INITIAL_ACK_TIMEOUT", nil, 0),
 		"How long the primary waits for the replica's initial ACK after snapshot fetch (default: 5m)")
+	command.Flags().StringVar(&haAdminAuth, "ha-admin-auth",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_AUTH", nil, ""),
+		"Authorization for HA admin endpoint, format: mtls:subject:<regex> or mtls:uri:<regex>")
+	command.Flags().StringVar(&haAdminTLSCert, "ha-admin-tls-cert",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_TLS_CERT", nil, ""),
+		"Path to TLS certificate for the HA admin endpoint (enables independent TLS, separate from main gRPC)")
+	command.Flags().StringVar(&haAdminTLSKey, "ha-admin-tls-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_TLS_KEY", nil, ""),
+		"Path to TLS private key for the HA admin endpoint")
+	command.Flags().StringVar(&haAdminCA, "ha-admin-ca",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_CA", nil, ""),
+		"Path to CA certificate for verifying HA admin client certs")
 
 	return command
 }

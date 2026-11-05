@@ -49,6 +49,9 @@ type redisProxyMsgHandler struct {
 	// connections maintains statistics about redis connections from principal
 	connections *connectionEntries
 
+	// connectionCheckInterval is how often a subscription checks whether its connection is still alive. Zero means the default (1 minute).
+	connectionCheckInterval time.Duration
+
 	// Redis TLS configuration
 	redisTLSEnabled  bool
 	redisTLSCAPath   string
@@ -70,12 +73,27 @@ type connectionEntries struct {
 type connectionEntry struct {
 	// lastPing the time at which the last ping message was received from principal
 	lastPing time.Time
+
+	// subscriptions is the number of redis subscriptions (goroutines) currently served for this connection. The entry
+	// is removed once the last of them exits.
+	subscriptions int
 }
 
 const (
 	// principalRedisConnectionTimeout is the length of time the agent will wait to receive redis communication from principal, before it will close the connection. e.g. if we receive no requests for 10 minutes, we receive no heartbeats (pings) the connection is no longer required.
 	principalRedisConnectionTimeout = 10 * time.Minute
+
+	// defaultConnectionCheckInterval is how often a subscription checks whether its connection has timed out
+	defaultConnectionCheckInterval = 1 * time.Minute
 )
+
+// checkInterval returns the configured connection check interval, or the default if none was set
+func (h *redisProxyMsgHandler) checkInterval() time.Duration {
+	if h.connectionCheckInterval > 0 {
+		return h.connectionCheckInterval
+	}
+	return defaultConnectionCheckInterval
+}
 
 // processIncomingRedisRequest handles incoming redis-specific events from principal, including get/subscribe (from argo cd) and ping (internal).
 func (a *Agent) processIncomingRedisRequest(ev *event.Event) error {
@@ -127,9 +145,9 @@ func (a *Agent) processIncomingRedisRequest(ev *event.Event) error {
 		connections := a.redisProxyMsgHandler.connections
 
 		connections.lock.Lock()
-		connections.connMap[rreq.ConnectionUUID] = connectionEntry{
-			lastPing: time.Now(),
-		}
+		entry := connections.connMap[rreq.ConnectionUUID]
+		entry.lastPing = time.Now()
+		connections.connMap[rreq.ConnectionUUID] = entry
 		connections.lock.Unlock()
 
 		// Send pong back to principal
@@ -190,9 +208,10 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 
 	connLifecycle.lock.Lock()
 	defer connLifecycle.lock.Unlock()
-	connLifecycle.connMap[rreq.ConnectionUUID] = connectionEntry{
-		lastPing: time.Now(),
-	}
+	entry := connLifecycle.connMap[rreq.ConnectionUUID]
+	entry.lastPing = time.Now()
+	entry.subscriptions++
+	connLifecycle.connMap[rreq.ConnectionUUID] = entry
 
 	// Start a new go-routine to read the redis subscribe channel for events, and send them back asynchronously
 	go func() {
@@ -205,13 +224,22 @@ func (a *Agent) handleRedisSubscribeMessage(logCtx *logrus.Entry, rreq *event.Re
 // forwardRedisSubscribeNotificationsToPrincipal reads subscription events from agent Argo CD redis, then sends them to principal.
 // - This function will also close local redis connections for principal connections that are no longer active (based on pings received)
 func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubSub, rreq *event.RedisRequest, channelName string, logCtx *logrus.Entry) {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(a.redisProxyMsgHandler.checkInterval())
 	defer ticker.Stop()
 	defer pubsub.Close()
 	defer func() {
+		// This subscription is over. The connection entry is shared with the other subscriptions on the same
+		// connection, so only remove it once the last one is gone.
 		connections := a.redisProxyMsgHandler.connections
 		connections.lock.Lock()
-		delete(connections.connMap, rreq.ConnectionUUID)
+		if entry, ok := connections.connMap[rreq.ConnectionUUID]; ok {
+			entry.subscriptions--
+			if entry.subscriptions <= 0 {
+				delete(connections.connMap, rreq.ConnectionUUID)
+			} else {
+				connections.connMap[rreq.ConnectionUUID] = entry
+			}
+		}
 		connections.lock.Unlock()
 	}()
 
@@ -235,8 +263,10 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 			connLifecycle.lock.RUnlock()
 
 			if lastPing == nil {
-				logCtx.Error("lastPing for a connection should never be nil")
-				continue
+				// The entry is removed when a subscription on this connection decides the connection is gone. If there
+				// are several subscriptions on the same connection, the others find out here and must stop as well.
+				logCtx.Trace("closing redis subscription because its connection is no longer tracked")
+				return
 			}
 
 			// If the connection has not been active for X minutes, close the connection
@@ -245,7 +275,12 @@ func (a *Agent) forwardRedisSubscribeNotificationsToPrincipal(pubsub *redis.PubS
 				return
 			}
 
-		case readFromChannel := <-ch:
+		case readFromChannel, ok := <-ch:
+			if !ok {
+				// The PubSub was closed underneath us (e.g. the redis client shut down), nothing more to forward
+				logCtx.Trace("closing redis subscription because its channel was closed")
+				return
+			}
 
 			logCtx.Tracef("Redis subscription '%s' returned value of %d bytes", channelName, len(readFromChannel.Payload))
 			// We don't output the content of the returned value, as it may contain sensitive information (and also because it's often binary)

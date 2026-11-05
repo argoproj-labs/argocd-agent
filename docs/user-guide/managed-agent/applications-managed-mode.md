@@ -1,6 +1,8 @@
-# Application Synchronization
+# Application Synchronization (managed agents)
 
-This document explains how Argo CD `Applications` are synchronized between the principal (control plane) and agents (workload clusters), covering both managed and autonomous agent modes.
+This document covers how Argo CD `Applications` are synchronized between the principal (control plane) and **managed** agents on workload clusters.
+
+For **autonomous** agents, see [Application synchronization (autonomous agents)](../autonomous-agent/applications-autonomous-mode.md). For how managed and autonomous modes differ at a conceptual level, see [Agent modes](../../concepts/agent-modes.md).
 
 ## Overview
 
@@ -9,13 +11,10 @@ Application synchronization in argocd-agent supports two mapping modes that dete
 - **Namespace-based mapping** (default): Applications are mapped to agents using **namespaces**, where each namespace on the principal corresponds to a specific agent.
 - **Destination-based mapping**: Applications are mapped to agents using `spec.destination.name`, allowing multiple namespaces to route to the same agent.
 
-The synchronization mechanism also varies depending on the agent mode:
-
-- **Managed agents**: Applications are created on the principal and distributed to agents; agents send status updates back
-- **Autonomous agents**: Applications are created on the agent and synchronized to the principal; principal acts as a read-only mirror for specifications but can still perform sync, refresh, and resource actions
+For managed agents, Applications are created on the principal and distributed to agents; agents send status updates back to the principal.
 
 !!! tip "Choosing a Mapping Mode"
-    If you are unsure which mode to use, see [Agent Mapping Modes](../concepts/agent-mapping.md) for a detailed comparison. Destination-based mapping is recommended for multi-tenant environments and when using ApplicationSets targeting multiple agents.
+    If you are unsure which mode to use, see [Agent Mapping Modes](./agent-mapping.md) for a detailed comparison. Destination-based mapping is recommended for multi-tenant environments and when using ApplicationSets targeting multiple agents.
 
 ## Managed Agent Mode
 
@@ -154,70 +153,9 @@ If an Application is modified directly on the managed agent cluster (outside of 
 - **Deletion**: Delete Applications on the principal; they're automatically removed from the agent
 - **Agent Connection**: When an agent connects, it receives all Applications that are mapped to it
 
-## Autonomous Agent Mode
+## Best practices
 
-### Creating Applications
-
-In autonomous mode, Applications are created directly on the **agent cluster**. The agent then synchronizes these Applications to the principal, where they appear in a dedicated namespace named after the agent on the control plane.
-
-### Example: Creating an Application on an Autonomous Agent
-
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: my-app
-  namespace: argocd  # Local namespace on the agent
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/argoproj/argocd-example-apps
-    targetRevision: HEAD
-    path: guestbook
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: guestbook
-  syncPolicy:
-    syncOptions:
-    - CreateNamespace=true
-```
-
-### Principal-Side Placement
-
-When an Application is received from an autonomous agent, the principal places it in a namespace corresponding to the agent name:
-
-- **Agent**: `production-agent`
-- **Application created on agent**: `my-app`
-- **Application on principal**: `my-app` in namespace `production-agent`
-
-### Project Name Transformation
-
-Applications from autonomous agents may have their project references transformed to avoid conflicts:
-
-- If the Application uses a non-default project, it may be prefixed with the agent name
-- Example: `my-project` becomes `production-agent-my-project` on the principal
-
-For more information, refer to [Managing AppProjects](./appprojects.md#autonomous-agent-mode)
-
-### Status Synchronization
-
-In autonomous mode, the agent is the source of truth:
-
-- **Agent → Principal**: Both spec and status changes
-- **Principal → Agent**: Spec modifications are reverted; sync and terminate operations are forwarded
-
-The principal serves as a centralized view of all Applications across autonomous agents but doesn't control their configuration.
-
-### Lifecycle Management
-
-- **Creation**: Create Applications on the agent; they automatically appear on the principal
-- **Updates**: Modify Applications on the agent; changes are propagated to the principal
-- **Deletion**: Delete Applications on the agent; they're automatically removed from the principal
-- **Local Control**: The agent maintains full control over its Applications
-
-## Best Practices
-
-### For Managed Agents (Namespace-Based Mapping)
+### Namespace-Based Mapping
 
 1. **Namespace Organization**: Use clear, descriptive namespace names that match your agent names:
 ```
@@ -238,7 +176,7 @@ The principal serves as a centralized view of all Applications across autonomous
 
 4. **Avoid Direct Changes**: Never modify Applications directly on agent clusters; always use the principal
 
-### For Managed Agents (Destination-Based Mapping)
+### Destination-Based Mapping
 
 1. **Use Consistent destination.name**: Ensure `spec.destination.name` exactly matches the agent name:
 ```yaml
@@ -261,18 +199,6 @@ The principal serves as a centralized view of all Applications across autonomous
 
 5. **AppProject sourceNamespaces**: Ensure your AppProjects have `sourceNamespaces` configured to allow Applications from the namespaces you use
 
-### For Autonomous Agents
-
-1. **Project Management**: Be mindful of project names as they may be prefixed on the principal:
-```yaml
-   spec:
-     project: microservices  # Becomes "agent-name-microservices" on principal
-```
-
-2. **Local Ownership**: Manage Applications entirely on the agent cluster
-
-3. **Principal Monitoring**: Use the principal for centralized visibility across all autonomous agents
-
 ## Troubleshooting
 
 ### Application Not Appearing on Agent (Managed Mode)
@@ -283,13 +209,6 @@ The principal serves as a centralized view of all Applications across autonomous
 4. **Review Logs**: Check principal logs for distribution events and agent logs for reception
 5. **Check Source UID**: Look for source UID annotations to verify proper synchronization
 6. **Check Allowed Namespaces** (destination-based mapping): Verify the Application's namespace is included in `--allowed-namespaces` on both principal and agent
-
-### Application Not Appearing on Principal (Autonomous Mode)
-
-1. **Check Agent Mode**: Ensure the agent is running in autonomous mode
-2. **Verify Creation**: Confirm the Application was created on the agent cluster  
-3. **Check Connectivity**: Ensure the agent can communicate with the principal
-4. **Review Project Names**: Look for prefixed project names on the principal
 
 ### Status Not Updating
 
@@ -310,14 +229,14 @@ The principal serves as a centralized view of all Applications across autonomous
     - Delete and recreate the Application if automatic resolution fails
     - Ensure the principal has the desired specification
 
-## Monitoring and Observability
+## Monitoring and observability
 
 ### Key Metrics to Monitor
 
 - **Application Creation/Update/Delete Events**: Track synchronization activity
 - **Status Update Frequency**: Monitor how often agents report status changes
 - **Sync Errors**: Watch for failed synchronization attempts
-- **Cache Hit/Miss Rates**: For managed agents, monitor cache effectiveness
+- **Cache Hit/Miss Rates**: Monitor cache effectiveness on managed agents
 
 ### Log Events to Watch
 
@@ -338,19 +257,9 @@ The principal serves as a centralized view of all Applications across autonomous
 - **Agent**: Verify Application backend is running and synced
 - **Network**: Ensure stable gRPC connection between principal and agents
 
-## Skip Sync Label
+## Ignore Sync Label
 
-The skip sync label allows you to prevent specific Applications from being synchronized between the principal and agents. This is useful when you want to create Applications that should only exist on one side of the synchronization.
-
-### Label Details
-
-- **Label Key**: `argocd-agent.argoproj-labs.io/ignore-sync`
-- **Label Value**: `"true"` (must be the exact string "true", case-sensitive)
-- **Scope**: Works for both managed and autonomous agent modes
-
-### Usage Examples
-
-#### Preventing Application Sync to Agent (Managed Mode)
+Applications can be labeled with `argocd-agent.argoproj-labs.io/ignore-sync: "true"` to keep them on the principal only, exempting them from distribution to the matching agent — for example, control-plane infrastructure Applications that should never be sent to a workload cluster.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -373,51 +282,14 @@ spec:
 
 This Application will remain only on the principal cluster and will not be sent to the `production-cluster` agent, even though it's created in that agent's namespace.
 
-#### Preventing Application Sync to Principal (Autonomous Mode)
-
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: agent-only-app
-  namespace: argocd
-  labels:
-    argocd-agent.argoproj-labs.io/ignore-sync: "true"  # Skip sync to principal
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/argoproj/argocd-example-apps
-    targetRevision: HEAD
-    path: guestbook
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: guestbook
-```
-
-This Application will remain only on the autonomous agent cluster and will not be synchronized back to the principal.
-
-### Important Notes
-
-1. **Case Sensitivity**: The label value must be exactly `"true"` (lowercase). Values like `"TRUE"`, `"True"`, `"false"`, or empty strings will **not** trigger the skip sync behavior.
-
-2. **Label Removal**: If you remove the skip sync label from an existing Application, it will begin synchronizing according to the normal rules for your agent mode.
-
-3. **Routing Rules Still Apply**: The skip sync label doesn't override the normal mapping mode rules. Applications must still be in allowed namespaces to be processed.
-
-### Use Cases
-
-- **Principal-Only Applications**: Applications that manage the control plane infrastructure itself
-- **Agent-Only Applications**: Local utilities or monitoring applications specific to a workload cluster
-- **Temporary Isolation**: Temporarily preventing sync during maintenance or testing
-- **Staged Rollouts**: Controlling which Applications are synchronized during gradual agent deployments
+See [Ignore sync label](../ignore-sync.md) for the full label reference, including behavior for AppProjects.
 
 ## Security Considerations
 
 ### Access Control
 
 - **Managed Mode**: Principal controls all Application specifications; implement RBAC on the principal
-- **Autonomous Mode**: Agents have full control; implement proper RBAC on each agent cluster
-- **Network Security**: Ensure encrypted communication channels between principal and agents
+- **Network Security**: Ensure encrypted communication channels between principal and agents.
 
 ### Isolation
 
@@ -429,4 +301,4 @@ This Application will remain only on the autonomous agent cluster and will not b
 
 - **Change Tracking**: All Application changes are logged and auditable
 - **Source Tracking**: Source UID annotations provide clear provenance
-- **Access Logs**: Monitor who creates/modifies Applications on the principal 
+- **Access Logs**: Monitor who creates/modifies Applications on the principal

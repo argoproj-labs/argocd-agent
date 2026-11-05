@@ -43,6 +43,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 func NewAgentCommand() *cobra.Command {
@@ -229,6 +230,11 @@ func NewAgentCreateCommand() *cobra.Command {
 				cmdutil.Fatal("Reading cluster secret: %s", err)
 			} else if err == nil {
 				cmdutil.Fatal("Agent %s exists.", agentName)
+			}
+
+			// Make sure no other cluster secret uses the agent's name as its cluster name
+			if err := checkClusterNameConflict(ctx, clt.Clientset, principalCfg.Namespace, agentName); err != nil {
+				cmdutil.Fatal("%v", err)
 			}
 
 			var clientCert, clientKey, caData string
@@ -527,6 +533,34 @@ func NewAgentReconfigureCommand() *cobra.Command {
 
 func clusterSecretName(agentName string) string {
 	return "cluster-" + agentName
+}
+
+func checkClusterNameConflict(ctx context.Context, clientset kubernetes.Interface, namespace, agentName string) error {
+	secrets, err := clientset.CoreV1().Secrets(namespace).List(
+		ctx, metav1.ListOptions{
+			LabelSelector: common.LabelKeySecretType + "=" + common.LabelValueSecretTypeCluster,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("could not list cluster secrets: %w", err)
+	}
+	ownSecret := clusterSecretName(agentName)
+	for _, s := range secrets.Items {
+		if s.Name == ownSecret {
+			continue
+		}
+		// The cluster name and server are stored as plain fields in the secret
+		// data, exactly as Argo CD reads them.
+		if string(s.Data["name"]) == agentName {
+			return fmt.Errorf(
+				"cluster name %q is already used by cluster secret %q (server: %s); "+
+					"Argo CD requires cluster names to be unique to resolve destination.name, "+
+					"please choose a different name for the agent",
+				agentName, s.Name, string(s.Data["server"]),
+			)
+		}
+	}
+	return nil
 }
 
 func serverURL(address, agentName string) (string, error) {

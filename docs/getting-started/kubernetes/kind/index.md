@@ -135,7 +135,7 @@ This configuration includes:
 - ✅ **argocd-redis** (state storage)
 - ✅ **argocd-repo-server** (Git repository access)
 - ❌ **argocd-application-controller** (runs on workload clusters only)
-- **argocd-applicationset-controller** (optional, see [ApplicationSets](../../../user-guide/applicationsets.md))
+- **argocd-applicationset-controller** (optional)
 
 !!! warning "Critical Component Placement"
     The **argocd-application-controller** must **never** be deployed on the control plane cluster. It can only run on workload clusters where it has direct access to manage Kubernetes resources. Running it on the control plane is not supported and is out of scope for this project.
@@ -185,11 +185,17 @@ kubectl get configmap argocd-agent-params \
 ```
 
 ### Open NetworkPolicy for agent traffic
+
+The agent runs on a separate kind cluster, so it reaches the principal as
+external traffic and cannot be matched by pod or namespace selectors. Append a
+rule that allows the gRPC port from any source. Appending to `-` keeps this
+independent of the order of the existing rules.
+
 ```bash
 kubectl patch networkpolicy argocd-agent-redis-proxy \
   -n $NAMESPACE_NAME \
   --context kind-$PRINCIPAL_CLUSTER_NAME \
-  --type='json' -p='[{"op":"remove","path":"/spec/ingress/1/from"}]'
+  --type='json' -p='[{"op":"add","path":"/spec/ingress/-","value":{"ports":[{"protocol":"TCP","port":8443}]}}]'
 ```
 
 ### Update Principal configuration
@@ -367,7 +373,7 @@ This configuration includes:
 - ✅ **argocd-redis** (local state for the application controller)
 - ❌ **argocd-server** (runs on control plane only)
 - ❌ **argocd-dex-server** (runs on control plane only)
-- ❌ **argocd-applicationset-controller** (not included by default, see [ApplicationSets](../../../user-guide/applicationsets.md))
+- ❌ **argocd-applicationset-controller** (managed agents don't run their own, see [ApplicationSets — managed agents](../../../user-guide/managed-agent/applicationsets-managed-mode.md))
 
 !!! info "Why Application Controller Runs Here"
     The **argocd-application-controller** runs on workload clusters because it needs direct access to the Kubernetes API to create, update, and delete resources. The argocd-agent facilitates communication between the control plane and these controllers, enabling centralized management while maintaining local execution.

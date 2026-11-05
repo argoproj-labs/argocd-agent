@@ -1,0 +1,17 @@
+# frps.toml
+bindPort = 2333 # `2333` specifies the port that frp listens on for the frpc client to connect to
+
+auth.method = "token"
+auth.token = "AUTHENTICATION_TOKEN" # Must be the same as frpc's token, to pass authentication
+
+# Restrict frpc to only bind the ports needed by the two tunneled services, rather than any port.
+allowPorts = [
+  { single = 9090 }, # `9090` specifies the port that exposes `one` to the Internet
+  { single = 6379 }, # `6379` specifies the port that exposes `two` to the Internet
+]
+
+# Server Side Configuration
+[transport.tls]
+force = true # Only accept TLS-encrypted connections from frpc
+certFile = "/config/server.crt"
+keyFile = "/config/server.key"

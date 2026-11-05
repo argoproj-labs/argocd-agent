@@ -167,6 +167,10 @@ agentMode: "autonomous"
 auth: "mtls:any"
 # -- Log level for the agent.
 logLevel: "info"
+# -- Comma-separated full-detail logging categories (all, actions, events,
+# informers). Very verbose; for debugging only. Applied at runtime: editing
+# agent.log.full-detail in the params ConfigMap takes effect without a restart.
+logFullDetail: ""
 # -- Log format for the agent (text or json).
 logFormat: "text"
 # -- Principal server address (hostname or host:port).
@@ -191,8 +195,13 @@ argoCdRedisPasswordKey: "auth"
 enableWebSocket: false
 # -- Whether to enable gRPC compression.
 enableCompression: false
-# -- Port for pprof server (0 disables pprof).
-pprofPort: "0"
+# -- Port for the pprof server, bound to localhost. 0 starts no listener at
+# all, which also makes pprofEnabled below inert.
+pprofPort: "6161"
+# -- Whether the pprof server answers requests; while false every endpoint
+# returns 403. Applied at runtime: editing agent.pprof.enabled in the params
+# ConfigMap takes effect without a restart.
+pprofEnabled: "false"
 # -- Whether to enable resource proxy.
 enableResourceProxy: true
 # -- Cache refresh interval.

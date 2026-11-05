@@ -59,6 +59,9 @@ spec:
           args:
             - agent
           env:
+          # The ConfigMap used to configure the agent.
+          - name: ARGOCD_AGENT_PARAMS_CONFIGMAP
+            value: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
           - name: ARGOCD_AGENT_REMOTE_SERVER
             valueFrom:
               configMapKeyRef:
@@ -76,6 +79,12 @@ spec:
               configMapKeyRef:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.log.level
+                optional: true
+          - name: ARGOCD_AGENT_FULL_DETAIL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.log.full-detail
                 optional: true
           - name: ARGOCD_AGENT_NAMESPACE
             valueFrom:
@@ -238,6 +247,12 @@ spec:
               configMapKeyRef:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.pprof.port
+                optional: true
+          - name: ARGOCD_AGENT_PPROF_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.pprof.enabled
                 optional: true
           - name: ARGOCD_AGENT_ENABLE_RESOURCE_PROXY
             valueFrom:

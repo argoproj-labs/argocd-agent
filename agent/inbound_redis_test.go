@@ -15,17 +15,170 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	rediscache "github.com/go-redis/cache/v9"
 	"github.com/go-redis/redismock/v9"
+	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAgent_forwardRedisSubscribeNotificationsToPrincipal_Lifecycle(t *testing.T) {
+	logCtx := logrus.NewEntry(logrus.New())
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	connections := &connectionEntries{connMap: make(map[string]connectionEntry)}
+	agent := &Agent{
+		mode: types.AgentModeManaged,
+		redisProxyMsgHandler: &redisProxyMsgHandler{
+			argoCDRedisClient:       client,
+			connections:             connections,
+			connectionCheckInterval: 10 * time.Millisecond,
+		},
+	}
+	const connectionUUID = "test-connection-uuid"
+	request := &event.RedisRequest{
+		UUID:           "test-uuid",
+		ConnectionUUID: connectionUUID,
+		Body: event.RedisCommandBody{
+			Subscribe: &event.RedisCommandBodySubscribe{ChannelName: "app|managed-resources|agent_my-app|1.8.3"},
+		},
+	}
+
+	t.Run("exits when the entry for its connection is gone", func(t *testing.T) {
+		pubsub := client.Subscribe(context.Background(), "some-channel")
+
+		done := make(chan struct{})
+		go func() {
+			agent.forwardRedisSubscribeNotificationsToPrincipal(pubsub, request, "some-channel", logCtx)
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("forwarder kept running although its connection entry does not exist")
+		}
+	})
+
+	t.Run("exits instead of panicking when the PubSub is closed underneath it", func(t *testing.T) {
+		connections.lock.Lock()
+		connections.connMap[connectionUUID] = connectionEntry{lastPing: time.Now()}
+		connections.lock.Unlock()
+
+		pubsub := client.Subscribe(context.Background(), "some-channel")
+		done := make(chan struct{})
+		go func() {
+			agent.forwardRedisSubscribeNotificationsToPrincipal(pubsub, request, "some-channel", logCtx)
+			close(done)
+		}()
+
+		require.NoError(t, pubsub.Close())
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("forwarder kept running after its PubSub was closed")
+		}
+	})
+
+	t.Run("a subscription that ends on its own does not take the connection's other subscriptions down", func(t *testing.T) {
+		connections.lock.Lock()
+		connections.connMap[connectionUUID] = connectionEntry{lastPing: time.Now(), subscriptions: 2}
+		connections.lock.Unlock()
+
+		pubsubA := client.Subscribe(context.Background(), "channel-a")
+		pubsubB := client.Subscribe(context.Background(), "channel-b")
+		doneA, doneB := make(chan struct{}), make(chan struct{})
+		go func() {
+			agent.forwardRedisSubscribeNotificationsToPrincipal(pubsubA, request, "channel-a", logCtx)
+			close(doneA)
+		}()
+		go func() {
+			agent.forwardRedisSubscribeNotificationsToPrincipal(pubsubB, request, "channel-b", logCtx)
+			close(doneB)
+		}()
+		require.Eventually(t, func() bool { return mr.CurrentConnectionCount() == 2 }, 2*time.Second, 10*time.Millisecond)
+
+		// A goes away for a reason that has nothing to do with the connection
+		require.NoError(t, pubsubA.Close())
+		<-doneA
+
+		// B must keep running, and the connection must still be tracked with one subscription left
+		time.Sleep(5 * agent.redisProxyMsgHandler.connectionCheckInterval)
+		select {
+		case <-doneB:
+			t.Fatal("subscription B stopped although its connection is still alive")
+		default:
+		}
+		connections.lock.RLock()
+		entry, exists := connections.connMap[connectionUUID]
+		connections.lock.RUnlock()
+		require.True(t, exists, "connection entry must survive while a subscription is still running")
+		require.Equal(t, 1, entry.subscriptions)
+
+		// Once the connection goes idle, B stops and the entry is gone
+		connections.lock.Lock()
+		connections.connMap[connectionUUID] = connectionEntry{lastPing: time.Now().Add(-2 * principalRedisConnectionTimeout), subscriptions: 1}
+		connections.lock.Unlock()
+		select {
+		case <-doneB:
+		case <-time.After(2 * time.Second):
+			t.Fatal("subscription B kept running on an idle connection")
+		}
+		connections.lock.RLock()
+		_, exists = connections.connMap[connectionUUID]
+		connections.lock.RUnlock()
+		require.False(t, exists, "connection entry must be removed with the last subscription")
+	})
+
+	t.Run("a ping keeps the subscription count of the connection", func(t *testing.T) {
+		connections.lock.Lock()
+		connections.connMap[connectionUUID] = connectionEntry{lastPing: time.Now().Add(-time.Hour), subscriptions: 2}
+		connections.lock.Unlock()
+
+		// processIncomingRedisRequest answers on the default queue; we only care about the connMap side effect here
+		agent.queues = queue.NewSendRecvQueues()
+		require.NoError(t, agent.queues.Create(defaultQueueName))
+		agent.emitter = event.NewEventSource("test")
+		pingRequest, err := agent.emitter.NewRedisRequestEvent(connectionUUID, event.RedisCommandBody{Ping: &event.RedisCommandBodyPing{}})
+		require.NoError(t, err)
+		require.NoError(t, agent.processIncomingRedisRequest(event.New(pingRequest, targets.Redis)))
+
+		connections.lock.RLock()
+		entry := connections.connMap[connectionUUID]
+		connections.lock.RUnlock()
+		require.WithinDuration(t, time.Now(), entry.lastPing, 5*time.Second)
+		require.Equal(t, 2, entry.subscriptions)
+	})
+
+	t.Run("two subscriptions on one connection both stop once the connection goes idle", func(t *testing.T) {
+		_, err := agent.handleRedisSubscribeMessage(logCtx, request)
+		require.NoError(t, err)
+		_, err = agent.handleRedisSubscribeMessage(logCtx, request)
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return mr.CurrentConnectionCount() == 2 }, 2*time.Second, 10*time.Millisecond)
+
+		// The principal stops pinging: the connection is idle for longer than the timeout
+		connections.lock.Lock()
+		connections.connMap[connectionUUID] = connectionEntry{lastPing: time.Now().Add(-2 * principalRedisConnectionTimeout)}
+		connections.lock.Unlock()
+
+		require.Eventually(t, func() bool { return mr.CurrentConnectionCount() == 0 }, 3*time.Second, 20*time.Millisecond,
+			"a subscription goroutine is still holding a redis connection")
+	})
+}
 
 func Test_stripNamespaceFromKeyForAutonomousAgent(t *testing.T) {
 

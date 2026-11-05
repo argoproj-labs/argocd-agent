@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/config"
@@ -33,7 +34,7 @@ const (
 	SharedClientCertSecretName = "argocd-agent-shared-client-cert"
 )
 
-func EnableSelfAgentRegistration(ctx context.Context, principalClient, agentClient KubeClient) error {
+func EnableSelfAgentRegistration(ctx context.Context, principalClient, agentClient KubeClient, secretLabels map[string]string) error {
 	// Create the shared client cert secret for self-registration
 	if err := CreateSharedClientCertSecret(ctx, principalClient, agentClient); err != nil {
 		return fmt.Errorf("failed to create shared client cert secret: %w", err)
@@ -41,6 +42,13 @@ func EnableSelfAgentRegistration(ctx context.Context, principalClient, agentClie
 
 	// Set both the enable flag and the client cert secret name environment variables
 	envVars := fmt.Sprintf("ARGOCD_PRINCIPAL_ENABLE_SELF_CLUSTER_REGISTRATION=true\nARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET=%s\n", SharedClientCertSecretName)
+	if len(secretLabels) > 0 {
+		pairs := make([]string, 0, len(secretLabels))
+		for key, value := range secretLabels {
+			pairs = append(pairs, fmt.Sprintf("%s=%s", key, value))
+		}
+		envVars += fmt.Sprintf("ARGOCD_PRINCIPAL_SELF_REGISTRATION_SECRET_LABELS=%s\n", strings.Join(pairs, ","))
+	}
 
 	return os.WriteFile(EnvVariablesFromE2EFile, []byte(envVars), 0644)
 }

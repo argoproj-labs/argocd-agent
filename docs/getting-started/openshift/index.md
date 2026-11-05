@@ -130,7 +130,7 @@ spec:
       # ... other agent settings
 ```
 
-With this configuration, Applications use `spec.destination.name` to route to agents and do not require a per-agent namespace on the hub cluster. See [Agent Mapping Modes](../../concepts/agent-mapping.md) for a detailed comparison.
+With this configuration, Applications use `spec.destination.name` to route to agents and do not require a per-agent namespace on the hub cluster. See [Agent Mapping Modes](../../user-guide/managed-agent/agent-mapping.md) for a detailed comparison.
 
 ## Setting up agent workload cluster
 
@@ -261,4 +261,4 @@ kubectl patch clusterrolebinding argocd-agent-agent --type='json' -p='[{"op": "r
 ```
 Unable to create application: app is not allowed in project "default", or the project does not exist
 ```
-refer to doc for [AppProject Synchronization](https://argocd-agent.readthedocs.io/latest/user-guide/appprojects/#managed-agent-mode).
+refer to doc for [AppProject synchronization (managed agents)](https://argocd-agent.readthedocs.io/latest/user-guide/managed-agent/appprojects-managed-mode/).

@@ -27,6 +27,7 @@ import (
 	"maps"
 	"reflect"
 	"strings"
+	"sync/atomic"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/go-cmp/cmp"
@@ -77,16 +78,28 @@ type FullDetailConfig struct {
 	Informers bool
 }
 
-var fullDetailConfig FullDetailConfig
+// fullDetailConfig holds the global full detail logging configuration. It is
+// stored behind an atomic pointer because it can be updated at runtime (e.g. by
+// the debug ConfigMap watcher) while being read concurrently on hot logging
+// paths.
+var fullDetailConfig atomic.Pointer[FullDetailConfig]
 
-// SetFullDetailConfig sets the global full detail logging configuration.
+// SetFullDetailConfig sets the global full detail logging configuration. It is
+// safe to call concurrently with GetFullDetailConfig.
 func SetFullDetailConfig(cfg FullDetailConfig) {
-	fullDetailConfig = cfg
+	// Store a copy so that later mutations of the caller's struct do not affect
+	// the stored configuration.
+	c := cfg
+	fullDetailConfig.Store(&c)
 }
 
 // GetFullDetailConfig returns the current global full detail logging configuration.
+// It is safe to call concurrently with SetFullDetailConfig.
 func GetFullDetailConfig() FullDetailConfig {
-	return fullDetailConfig
+	if c := fullDetailConfig.Load(); c != nil {
+		return *c
+	}
+	return FullDetailConfig{}
 }
 
 func init() {
@@ -386,7 +399,7 @@ func LogActionCreate(logCtx *logrus.Entry, resourceType string, obj any) {
 	})
 
 	// Include the full resource in the log if full detail is enabled
-	if fullDetailConfig.Actions {
+	if GetFullDetailConfig().Actions {
 		logCtx = logCtx.WithField(logfields.Detail, marshalResource(obj))
 	}
 
@@ -406,7 +419,7 @@ func LogActionUpdate(logCtx *logrus.Entry, resourceType string, oldObj, newObj a
 	})
 
 	// Include the diff in the log if full detail is enabled
-	if fullDetailConfig.Actions && oldObj != nil && newObj != nil && !isSecret(newObj) {
+	if GetFullDetailConfig().Actions && oldObj != nil && newObj != nil && !isSecret(newObj) {
 		// Only include the diff if it is non-empty
 		if diff := cmp.Diff(dropMetadataManagedFields(oldObj), dropMetadataManagedFields(newObj)); diff != "" {
 			logCtx = logCtx.WithField(logfields.Detail, diff)
@@ -443,7 +456,7 @@ func LogActionError(logCtx *logrus.Entry, resourceType, action string, obj any, 
 	})
 
 	// Include the full resource in the log if full detail is enabled
-	if fullDetailConfig.Actions {
+	if GetFullDetailConfig().Actions {
 		logCtx = logCtx.WithField(logfields.Detail, marshalResource(obj))
 	}
 	logCtx.WithError(err).Errorf("Error performing action %s on %s %s/%s", action, resourceType, namespace, name)
@@ -471,7 +484,7 @@ func LogEventSent(logCtx *logrus.Entry, ev *cloudevents.Event) {
 
 	// Sensitive events never include detail. Large events only include detail
 	// when FULL_DETAIL is enabled. Small events always include detail.
-	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) && (!isLargeEvent(ev) || fullDetailConfig.Events) {
+	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) && (!isLargeEvent(ev) || GetFullDetailConfig().Events) {
 		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
 	}
 	logCtx.Infof("Event sent: %s %s", target, action)
@@ -499,7 +512,7 @@ func LogEventReceived(logCtx *logrus.Entry, ev *cloudevents.Event) {
 
 	// Sensitive events never include detail. Large events only include detail
 	// when FULL_DETAIL is enabled. Small events always include detail.
-	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) && (!isLargeEvent(ev) || fullDetailConfig.Events) {
+	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) && (!isLargeEvent(ev) || GetFullDetailConfig().Events) {
 		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
 	}
 	logCtx.Infof("Event received: %s %s", target, action)
@@ -519,7 +532,7 @@ func LogEventError(logCtx *logrus.Entry, ev *cloudevents.Event, err error) {
 
 	// Sensitive events never include detail. Large events only include detail
 	// when FULL_DETAIL is enabled. Small events always include detail.
-	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) && (!isLargeEvent(ev) || fullDetailConfig.Events) {
+	if hasEventData(ev.Data()) && !isSensitiveEvent(ev) && (!isLargeEvent(ev) || GetFullDetailConfig().Events) {
 		logCtx = logCtx.WithField(logfields.Detail, string(ev.Data()))
 	}
 	logCtx.WithError(err).Errorf("Error processing event: %s %s", target, action)
@@ -538,7 +551,7 @@ func LogInformerAdd(logCtx *logrus.Entry, obj any) {
 		logfields.Namespace:    namespace,
 	})
 
-	if fullDetailConfig.Informers {
+	if GetFullDetailConfig().Informers {
 		logCtx = logCtx.WithField(logfields.Detail, marshalResource(obj))
 	}
 	logCtx.Debugf("Informer add: %s %s/%s", resType, namespace, name)
@@ -559,7 +572,7 @@ func LogInformerUpdate(logCtx *logrus.Entry, oldObj, newObj any) {
 
 	// Include the diff in the log if full detail is enabled
 	// but not for secret as they are confidential
-	if fullDetailConfig.Informers && !isSecret(newObj) {
+	if GetFullDetailConfig().Informers && !isSecret(newObj) {
 		if diff := cmp.Diff(dropMetadataManagedFields(oldObj), dropMetadataManagedFields(newObj)); diff != "" {
 			logCtx = logCtx.WithField(logfields.Detail, diff)
 		}

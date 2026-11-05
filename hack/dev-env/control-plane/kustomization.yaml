@@ -13,6 +13,8 @@ resources:
 images:
 - name: quay.io/argoproj/argocd
   newTag: LatestReleaseTag
+- name: public.ecr.aws/docker/library/redis
+  newName: mirror.gcr.io/library/redis
 
 transformers:
 - namespace-transformer.yaml
@@ -23,6 +25,5 @@ patches:
 - path: argocd-rbac-cm.yaml
 - path: argocd-secret.yaml
 - path: server-service.yaml
-- path: repo-server-service.yaml
 - path: redis-service.yaml
 - path: appproject-default.yaml

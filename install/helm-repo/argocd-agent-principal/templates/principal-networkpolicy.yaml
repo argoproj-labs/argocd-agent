@@ -19,7 +19,9 @@ spec:
             matchLabels:
               app.kubernetes.io/part-of: argocd-agent
               app.kubernetes.io/component: agent
+          {{- if .Values.networkPolicy.ingress.grpc.allNamespaces }}
           namespaceSelector: {}
+          {{- end }}
       ports:
         - protocol: TCP
           port: {{ .Values.principal.listen.port }}
@@ -28,11 +30,25 @@ spec:
     - from:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/part-of: argocd
-          namespaceSelector: {}
+              app.kubernetes.io/name: argocd-server
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-repo-server
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-application-controller
       ports:
         - protocol: TCP
           port: 6379
+    {{- end }}
+    {{- if and .Values.principal.resourceProxy.enabled .Values.networkPolicy.ingress.resourceProxy.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-server
+      ports:
+        - protocol: TCP
+          port: 9090
     {{- end }}
     {{- if .Values.networkPolicy.ingress.metrics.enabled }}
     - from:

@@ -16,6 +16,7 @@ package principal
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"math/big"
 	"os"
@@ -37,6 +38,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
+	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
@@ -107,6 +109,61 @@ func Test_ServerWithTLSConfig(t *testing.T) {
 		assert.ErrorContains(t, err, "failed to find any PEM data")
 		assert.Nil(t, tlsConfig)
 	})
+
+	t.Run("With TLS Hot Reloading File Path", func(t *testing.T) {
+		templ := certTempl
+		fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
+		fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-ca"), templ)
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithTLSKeyPairFromPath(path.Join(tempDir, "test-cert.crt"), path.Join(tempDir, "test-cert.key")),
+			WithTLSRootCaFromFile(path.Join(tempDir, "test-ca.crt")),
+			WithTLSHotReload(true),
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		require.IsType(t, &tlsutil.TLSFileProvider{}, s.tlsSource)
+		tlsConfig, err := s.loadTLSConfig()
+		assert.NoError(t, err)
+		require.NotNil(t, tlsConfig)
+		require.NotNil(t, tlsConfig.GetConfigForClient)
+	})
+	t.Run("With TLS Hot Reloading Kubernetes Secret", func(t *testing.T) {
+		templ := certTempl
+		testSecretName := "test-tls-secret"
+
+		certPEM, keyPEM := fakecerts.CreateSelfSignedCert(t, "rsa", templ)
+		tlsSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: testNamespace,
+				Name:      testSecretName,
+			},
+			Type: corev1.SecretTypeTLS,
+			Data: map[string][]byte{
+				"tls.crt": certPEM,
+				"tls.key": keyPEM,
+			},
+		}
+
+		kubeClient := kube.NewKubernetesFakeClientWithResources(tlsSecret)
+
+		fakecerts.WriteSelfSignedCert(t, "rsa", path.Join(tempDir, "test-cert"), templ)
+		s, err := NewServer(context.TODO(), kubeClient, testNamespace,
+			WithTLSKeyPairFromSecret(kubeClient.Clientset, testNamespace, testSecretName),
+			WithTLSHotReload(true),
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+		)
+
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		require.IsType(t, &tlsutil.TLSSecretProvider{}, s.tlsSource)
+		tlsConfig, err := s.loadTLSConfig()
+		assert.NoError(t, err)
+		require.NotNil(t, tlsConfig)
+		require.NotNil(t, tlsConfig.GetConfigForClient)
+	})
 }
 
 func Test_NewServer(t *testing.T) {
@@ -122,6 +179,33 @@ func Test_NewServer(t *testing.T) {
 		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, WithListenerPort(-1), WithGeneratedTokenSigningKey(), WithRedisProxyDisabled())
 		assert.Error(t, err)
 		assert.Nil(t, s)
+	})
+
+	t.Run("Reject TLS 1.3-only curves when max version is TLS 1.2 and no fallback", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+			WithMinimumTLSVersion("tls1.2"),
+			WithMaximumTLSVersion("tls1.2"),
+			WithTLSCurvePreferences([]string{"X25519MLKEM768"}),
+		)
+		assert.Error(t, err)
+		assert.Nil(t, s)
+		assert.Contains(t, err.Error(), "no configured TLS curve preference is supported")
+		assert.Contains(t, err.Error(), "maximum TLS version")
+	})
+
+	t.Run("Allow hybrid curve with classical fallback when max version is TLS 1.2", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+			WithMinimumTLSVersion("tls1.2"),
+			WithMaximumTLSVersion("tls1.2"),
+			WithTLSCurvePreferences([]string{"X25519MLKEM768", "X25519"}),
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, s)
+		assert.Equal(t, []tls.CurveID{tls.X25519MLKEM768, tls.X25519}, s.options.tlsCurvePreferences)
 	})
 
 	t.Run("Redis proxy should be nil when disabled", func(t *testing.T) {
@@ -700,7 +784,6 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		sendQ := s.queues.SendQ(agentName)
 		assert.Equal(t, 2, sendQ.Len())
 	})
-
 }
 
 func Test_cleanupAgentState(t *testing.T) {

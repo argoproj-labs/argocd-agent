@@ -7,7 +7,7 @@ Primarily this enables the resource-proxy feature when developing on remote K8s 
 This also allows all the E2E tests to pass in this configuration. Previously, the resource proxy E2E tests were failing when running against a remote cluster.
 
 
-**NOTE**: The current implementation requires Service LoadBalancer support from K8s (which is available from, for example, Red Hat's 'clusterbot' service).
+**NOTE**: The current implementation requires Service LoadBalancer support from K8s.
 
 The tunnel that is enabled is:
 * Argo CD 'server' workload  (on vcluster-control-plane) -> managed-agent cluster Secret (on vcluster-control-plane) -> rathole Deployment (on vcluster) -> rathole Container (running on local machine) -> argocd-agent 'principal' OS process (local machine)

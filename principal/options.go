@@ -44,19 +44,22 @@ import (
 )
 
 type ServerOptions struct {
-	serverName    string
-	port          int
-	address       string
-	tlsCertPath   string
-	tlsKeyPath    string
-	tlsCert       *x509.Certificate
-	tlsKey        crypto.PrivateKey
-	tlsCiphers    []uint16
-	tlsMinVersion uint16
-	tlsMaxVersion uint16
-	gracePeriod   time.Duration
-	namespaces    []string
-	signingKey    crypto.PrivateKey
+	serverName          string
+	port                int
+	address             string
+	tlsHotReload        bool
+	tlsSecretName       string
+	tlsCertPath         string
+	tlsKeyPath          string
+	tlsCert             *x509.Certificate
+	tlsKey              crypto.PrivateKey
+	tlsCiphers          []uint16
+	tlsCurvePreferences []tls.CurveID
+	tlsMinVersion       uint16
+	tlsMaxVersion       uint16
+	gracePeriod         time.Duration
+	namespaces          []string
+	signingKey          crypto.PrivateKey
 	// unauthMethods is not currently implemented
 	unauthMethods map[string]bool
 	serveGRPC     bool
@@ -67,6 +70,8 @@ type ServerOptions struct {
 	metricsEnabled         bool
 	metricsPort            int
 	requireClientCerts     bool
+	rootCaPath             string
+	rootCaSecretName       string
 	rootCa                 *x509.CertPool
 	clientCertSubjectMatch bool
 	redisAddress           string
@@ -98,6 +103,7 @@ type ServerOptions struct {
 	selfAgentRegistrationEnabled bool
 	resourceProxyAddress         string
 	clientCertSecretName         string
+	selfRegSecretLabels          map[string]string
 	// Redis TLS configuration
 	redisTLSEnabled             bool
 	redisProxyServerTLSCert     *x509.Certificate
@@ -250,6 +256,7 @@ func WithTLSRootCaFromFile(caPath string) ServerOption {
 		if !ok {
 			return fmt.Errorf("invalid certificate data in %s", caPath)
 		}
+		o.options.rootCaPath = caPath
 		return nil
 	}
 }
@@ -266,6 +273,7 @@ func WithTLSRootCaFromSecret(kube kubernetes.Interface, namespace, name string, 
 			return err
 		}
 		o.options.rootCa = pool
+		o.options.rootCaSecretName = name
 		return nil
 	}
 }
@@ -327,6 +335,7 @@ func WithTLSKeyPairFromSecret(kube kubernetes.Interface, namespace, name string)
 		}
 		o.options.tlsCert = cert
 		o.options.tlsKey = c.PrivateKey
+		o.options.tlsSecretName = name
 		return nil
 	}
 }
@@ -376,6 +385,19 @@ func WithTLSCipherSuites(cipherSuites []string) ServerOption {
 			return err
 		}
 		o.options.tlsCiphers = cipherIDs
+		return nil
+	}
+}
+
+// WithTLSCurvePreferences configures the TLS curve / key-exchange preferences
+// to be used by the server. If an unknown curve is specified, an error is returned.
+func WithTLSCurvePreferences(curvePreferences []string) ServerOption {
+	return func(o *Server) error {
+		curves, err := tlsutil.ParseCurvePreferences(curvePreferences)
+		if err != nil {
+			return err
+		}
+		o.options.tlsCurvePreferences = curves
 		return nil
 	}
 }
@@ -648,6 +670,13 @@ func WithClientCertSecretName(name string) ServerOption {
 	}
 }
 
+func WithSelfRegSecretLabels(labels map[string]string) ServerOption {
+	return func(o *Server) error {
+		o.options.selfRegSecretLabels = labels
+		return nil
+	}
+}
+
 // WithRedisTLSEnabled enables or disables TLS for Redis connections
 func WithRedisTLSEnabled(enabled bool) ServerOption {
 	return func(o *Server) error {
@@ -718,6 +747,14 @@ func WithRedisTLSInsecure(insecure bool) ServerOption {
 func WithHA(opts ...ha.Option) ServerOption {
 	return func(o *Server) error {
 		o.options.haOptions = append(o.options.haOptions, opts...)
+		return nil
+	}
+}
+
+// WithTLSHotReload allows for hot reloading to be enabled for TLS certificates
+func WithTLSHotReload(enabled bool) ServerOption {
+	return func(o *Server) error {
+		o.options.tlsHotReload = enabled
 		return nil
 	}
 }

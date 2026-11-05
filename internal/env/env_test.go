@@ -17,6 +17,8 @@ package env
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,6 +154,49 @@ func Test_StringSlice(t *testing.T) {
 		t.Setenv("FOO", "foo, bar, baz")
 		_, err = StringSlice("FOO", v)
 		assert.ErrorContains(t, err, "invalid")
+	})
+}
+
+func Test_StringToMap(t *testing.T) {
+	t.Run("Test valid string-to-map from env", func(t *testing.T) {
+		t.Setenv("FOO", "a=1")
+		m, err := StringToMap("FOO", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]string{"a": "1"}, m)
+		t.Setenv("FOO", "a=1, b=2, c=3")
+		m, err = StringToMap("FOO", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]string{"a": "1", "b": "2", "c": "3"}, m)
+	})
+	t.Run("Test default when unset", func(t *testing.T) {
+		def := map[string]string{"x": "y"}
+		m := StringToMapWithDefault("BAR", nil, def)
+		assert.Equal(t, def, m)
+	})
+	t.Run("Test invalid pair is fatal", func(t *testing.T) {
+		if os.Getenv("TEST_FATAL_SUBPROCESS") == "1" {
+			t.Setenv("FOO", "notakeyvalue")
+			StringToMapWithDefault("FOO", nil, map[string]string{"x": "y"})
+			return
+		}
+		cmd := exec.Command(os.Args[0], "-test.run=Test_StringToMap/Test_invalid_pair_is_fatal")
+		cmd.Env = append(os.Environ(), "TEST_FATAL_SUBPROCESS=1")
+		err := cmd.Run()
+		var exitErr *exec.ExitError
+		assert.ErrorAs(t, err, &exitErr, "expected process to exit with non-zero status on malformed map env var")
+		assert.NotEqual(t, 0, exitErr.ExitCode())
+	})
+	t.Run("Test validator", func(t *testing.T) {
+		v := func(s string) error {
+			if !strings.Contains(s, "=") {
+				return fmt.Errorf("invalid")
+			}
+			return nil
+		}
+		t.Setenv("FOO", "a=1")
+		m, err := StringToMap("FOO", v)
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]string{"a": "1"}, m)
 	})
 }
 

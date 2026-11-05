@@ -172,6 +172,92 @@ func TestWithAllowedReplicationClients(t *testing.T) {
 	})
 }
 
+func TestWithAdminAuth(t *testing.T) {
+	t.Run("valid subject regex", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminAuth("mtls:subject:CN=ha-admin")(opts)
+		require.NoError(t, err)
+		assert.NotNil(t, opts.AdminAuthRegex)
+		assert.Equal(t, "subject", opts.AdminAuthSource)
+		assert.True(t, opts.AdminAuthRegex.MatchString("CN=ha-admin"))
+	})
+
+	t.Run("valid uri regex", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminAuth("mtls:uri:spiffe://cluster/ns/admin/sa/ha")(opts)
+		require.NoError(t, err)
+		assert.NotNil(t, opts.AdminAuthRegex)
+		assert.Equal(t, "uri", opts.AdminAuthSource)
+	})
+
+	t.Run("empty string is no-op", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminAuth("")(opts)
+		require.NoError(t, err)
+		assert.Nil(t, opts.AdminAuthRegex)
+	})
+
+	t.Run("missing mtls prefix", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminAuth("subject:CN=ha-admin")(opts)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must start with 'mtls:'")
+	})
+
+	t.Run("missing source", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminAuth("mtls:CN=ha-admin")(opts)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must specify source")
+	})
+
+	t.Run("empty regex pattern", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminAuth("mtls:subject:")(opts)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "regex pattern cannot be empty")
+	})
+
+	t.Run("invalid regex", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminAuth("mtls:subject:[invalid")(opts)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "regex compile error")
+	})
+}
+
+func TestWithAdminTLS(t *testing.T) {
+	t.Run("all paths provided", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminTLS("/path/cert.pem", "/path/key.pem", "/path/ca.pem")(opts)
+		require.NoError(t, err)
+		assert.Equal(t, "/path/cert.pem", opts.AdminTLSCertPath)
+		assert.Equal(t, "/path/key.pem", opts.AdminTLSKeyPath)
+		assert.Equal(t, "/path/ca.pem", opts.AdminCAPath)
+	})
+
+	t.Run("all empty is no-op", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminTLS("", "", "")(opts)
+		require.NoError(t, err)
+		assert.Empty(t, opts.AdminTLSCertPath)
+	})
+
+	t.Run("partial paths returns error", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminTLS("/path/cert.pem", "", "")(opts)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ha-admin-tls requires all three")
+	})
+
+	t.Run("missing key returns error", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAdminTLS("/path/cert.pem", "", "/path/ca.pem")(opts)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ha-admin-tls requires all three")
+	})
+}
+
 func TestOptionsValidate(t *testing.T) {
 	t.Run("disabled is always valid", func(t *testing.T) {
 		opts := DefaultOptions()

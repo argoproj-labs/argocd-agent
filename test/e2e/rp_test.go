@@ -273,7 +273,7 @@ func (suite *ResourceProxyTestSuite) Test_SelfRegisteredSecret_ResourceProxy() {
 	requires.NoError(err)
 
 	// Enable self-registration
-	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient))
+	requires.NoError(fixture.EnableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient, suite.ManagedAgentClient, nil))
 	defer func() {
 		// Disable self-registration
 		_ = fixture.DisableSelfAgentRegistration(suite.Ctx, suite.PrincipalClient)
@@ -376,18 +376,8 @@ func (suite *ResourceProxyTestSuite) Test_ResourceProxy_ResourceActions() {
 	}()
 
 	// Get the Argo server endpoint to use
-	srvService := &corev1.Service{}
-	err := suite.PrincipalClient.Get(context.Background(),
-		types.NamespacedName{Namespace: fixture.PrincipalNamespace, Name: "argocd-server"}, srvService, v1.GetOptions{})
+	argoEndpoint, err := fixture.GetArgoCDServerEndpoint(suite.PrincipalClient)
 	requires.NoError(err)
-	argoEndpoint := srvService.Spec.LoadBalancerIP
-
-	if len(srvService.Status.LoadBalancer.Ingress) > 0 {
-		hostname := srvService.Status.LoadBalancer.Ingress[0].Hostname
-		if hostname != "" {
-			argoEndpoint = hostname
-		}
-	}
 	appName := "guestbook-ui"
 
 	// Read admin secret from principal's cluster

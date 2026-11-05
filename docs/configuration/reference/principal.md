@@ -113,7 +113,7 @@ Enable destination-based mapping mode. When enabled, the principal routes Applic
 
 Both the principal and agent must have this flag enabled for destination-based mapping to work correctly.
 
-See [Agent Mapping Modes](../../concepts/agent-mapping.md) for a detailed comparison of namespace-based and destination-based mapping.
+See [Agent Mapping Modes](../../user-guide/managed-agent/agent-mapping.md) for a detailed comparison of namespace-based and destination-based mapping.
 
 **Example:**
 
@@ -285,6 +285,18 @@ Maximum TLS version to accept from connecting agents.
 | **Default** | `""` (Go defaults) |
 
 Comma-separated list of TLS cipher suites to use. Use `--tls-ciphersuites=list` to display available options.
+
+### TLS Curve Preferences
+
+| | |
+|---|---|
+| **CLI Flag** | `--tls-curve-preferences` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_TLS_CURVE_PREFERENCES` |
+| **ConfigMap Entry** | `principal.tls.curve-preferences` |
+| **Type** | String (comma-separated) |
+| **Default** | `""` (Go defaults) |
+
+Comma-separated list of TLS curve / key-exchange preferences to use. Use `--tls-curve-preferences=list` to display available options.
 
 ## Resource Proxy Configuration
 
@@ -467,7 +479,7 @@ Authentication method and corresponding configuration.
 
 !!! warning "Header Authentication Security"
 
-    Header-based authentication must only be used with a service mesh (Istio, Linkerd) that handles mTLS at the sidecar level. Without proper network isolation, attackers could inject arbitrary identity headers and impersonate any agent. See [Networking: Service Mesh Security](../networking.md#service-mesh-security-considerations) for required security measures.
+    Header-based authentication must only be used with a service mesh (Istio, Linkerd) that handles mTLS at the sidecar level. Without proper network isolation, attackers could inject arbitrary identity headers and impersonate any agent. See [Service mesh: security considerations](../service-mesh.md#security-considerations) for required security measures.
 
 ## Logging and Debugging
 
@@ -483,8 +495,23 @@ Authentication method and corresponding configuration.
 | **Format** | `[<component>=]<level>` |
 | **Valid Values (component)** | `resource-proxy`, `redis-proxy`, `grpc-event` |
 | **Valid Values (level)** | `trace`, `debug`, `info`, `warning`, `error` |
+| **Applied at runtime** | Yes |
 
-The log level for the general logger and subsystem loggers for the principal.
+The log level for the general logger and subsystem loggers for the principal. Changing the ConfigMap entry takes effect without a restart.
+
+### Full Detail
+
+| | |
+|---|---|
+| **CLI Flag** | `--full-detail` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_FULL_DETAIL` |
+| **ConfigMap Entry** | `principal.log.full-detail` |
+| **Type** | String (comma-separated list) |
+| **Default** | empty (disabled) |
+| **Valid Values** | `all`, `actions`, `events`, `informers` |
+| **Applied at runtime** | Yes |
+
+Categories for which logs carry full resource payloads and diffs. See [Observability: Full-Detail Logging](../observability.md#full-detail-logging).
 
 ### Log Format
 
@@ -505,12 +532,37 @@ The log format to use.
 |---|---|
 | **CLI Flag** | `--pprof-port` |
 | **Environment Variable** | `ARGOCD_PRINCIPAL_PPROF_PORT` |
-| **ConfigMap Entry** | N/A |
+| **ConfigMap Entry** | `principal.pprof.port` |
 | **Type** | Integer |
-| **Default** | `0` (disabled) |
+| **Default** | `6060` |
 | **Range** | 0, 1024-65535 |
 
-Port the pprof server will listen on. Set to 0 to disable.
+Port the pprof server will listen on, bound to localhost. The listener always starts, but its endpoints stay behind `--pprof-enabled`. Set to 0 to not listen at all.
+
+### Profiling Enabled
+
+| | |
+|---|---|
+| **CLI Flag** | `--pprof-enabled` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_PPROF_ENABLED` |
+| **ConfigMap Entry** | `principal.pprof.enabled` |
+| **Type** | Boolean |
+| **Default** | `false` |
+| **Applied at runtime** | Yes |
+
+Whether the pprof endpoints answer requests; they return `403` while disabled. See [Operations: Profiling](../../operations/profiling.md).
+
+### Params ConfigMap
+
+| | |
+|---|---|
+| **CLI Flag** | `--params-configmap` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_PARAMS_CONFIGMAP` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `argocd-agent-params` |
+
+Name of the ConfigMap the principal reads its parameters from, and watches for the settings marked *Applied at runtime* above. The Helm chart names it `<release>-params` and sets this accordingly.
 
 ## Monitoring and Health
 
@@ -634,6 +686,120 @@ Cannot be used together with `--redis-password`, or its respective environment v
 | **Default** | `""` |
 
 The password to connect to redis with. Prefer `--redis-creds-dir-path` for added security benefits.
+
+## High Availability Configuration
+
+### HA Enabled
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-enabled` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ENABLED` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Enable HA mode.
+
+### HA Preferred Role
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-preferred-role` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_PREFERRED_ROLE` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `primary` |
+| **Valid Values** | `primary`, `replica` |
+
+Role this principal prefers on startup.
+
+### HA Peer Address
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-peer-address` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_PEER_ADDRESS` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+
+Address of the peer principal's gRPC server (`host:port`). Required on the replica.
+
+### HA Allowed Replication Clients
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-allowed-replication-clients` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String slice (comma-separated) |
+| **Default** | `[]` |
+
+Explicit allowlist of peer identities permitted for replication.
+
+### HA Admin Port
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-port` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_PORT` |
+| **ConfigMap Entry** | N/A |
+| **Type** | Integer |
+| **Default** | `8405` |
+
+Port for the HAAdmin gRPC server.
+
+### HA Admin Auth
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-auth` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_AUTH` |
+| **ConfigMap Entry** | N/A |
+| **Type** | String |
+| **Default** | `""` |
+| **Format** | `mtls:subject:<regex>` or `mtls:uri:<regex>` |
+
+Authorization policy for the HA admin endpoint. The regex is matched against the client certificate's subject DN or URI SANs. When TLS is active and this flag is not set, all admin calls are denied (secure by default).
+
+**Examples:**
+
+- `mtls:subject:CN=ha-admin`
+- `mtls:uri:spiffe://cluster\.local/ns/argocd/sa/ha-admin`
+
+### HA Admin TLS Certificate
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-tls-cert` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_TLS_CERT` |
+| **Type** | String (file path) |
+| **Default** | `""` |
+
+Path to the TLS server certificate for the HA admin endpoint. When set (along with `--ha-admin-tls-key` and `--ha-admin-ca`), the admin endpoint uses its own TLS configuration independent of the main gRPC server.
+
+### HA Admin TLS Key
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-tls-key` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_TLS_KEY` |
+| **Type** | String (file path) |
+| **Default** | `""` |
+
+Path to the TLS private key for the HA admin endpoint.
+
+### HA Admin CA
+
+| | |
+|---|---|
+| **CLI Flag** | `--ha-admin-ca` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ADMIN_CA` |
+| **Type** | String (file path) |
+| **Default** | `""` |
+
+Path to the CA certificate used to verify HA admin client certificates. All three admin TLS flags must be provided together.
 
 ## Kubernetes Configuration
 

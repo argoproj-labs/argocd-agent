@@ -52,6 +52,9 @@ if [ -f "$E2E_ENV_FILE" ]; then
     if [ -n "$ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET" ]; then
         export ARGOCD_PRINCIPAL_SELF_REGISTRATION_CLIENT_CERT_SECRET
     fi
+    if [ -n "$ARGOCD_PRINCIPAL_SELF_REGISTRATION_SECRET_LABELS" ]; then
+        export ARGOCD_PRINCIPAL_SELF_REGISTRATION_SECRET_LABELS
+    fi
     if [ -n "$ARGOCD_PRINCIPAL_SPIRE_AGENT_SOCKET" ]; then
         export ARGOCD_PRINCIPAL_SPIRE_AGENT_SOCKET
         export ARGOCD_PRINCIPAL_SPIRE_AUTH_METHOD="${ARGOCD_PRINCIPAL_SPIRE_AUTH_METHOD:-jwt}"
@@ -61,9 +64,20 @@ if [ -f "$E2E_ENV_FILE" ]; then
             PRINCIPAL_AUTH='spiffe-jwt:spiffe://[^/]+/(.+)'
         fi
     fi
+    if [ -n "$ARGOCD_PRINCIPAL_TLS_SERVER_CERT_PATH" ]; then
+      export ARGOCD_PRINCIPAL_TLS_SERVER_CERT_PATH
+      export ARGOCD_PRINCIPAL_TLS_SERVER_KEY_PATH
+      export ARGOCD_PRINCIPAL_TLS_SERVER_ROOT_CA_PATH
+    fi
+    if [ -n "$ARGOCD_PRINCIPAL_TLS_SECRET_NAME" ]; then
+      export ARGOCD_PRINCIPAL_TLS_SECRET_NAME
+      export ARGOCD_PRINCIPAL_ROOT_CA_SECRET_NAME
+    fi
 fi
 
-ARGOCD_AGENT_RESOURCE_PROXY=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+if test "${ARGOCD_AGENT_RESOURCE_PROXY}" = ""; then
+    ARGOCD_AGENT_RESOURCE_PROXY=$(ip r show default | sed -e 's,.*\ src\ ,,' | sed -e 's,\ metric.*$,,')
+fi
 export ARGOCD_AGENT_RESOURCE_PROXY
 
 RACE_FLAG=""

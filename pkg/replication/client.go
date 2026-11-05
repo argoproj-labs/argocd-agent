@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -55,10 +56,11 @@ type Client struct {
 	mu sync.RWMutex
 
 	// Connection settings
-	primaryAddr string
-	tlsConfig   *tls.Config
-	tlsConfigFn func() *tls.Config
-	insecure    bool
+	primaryAddr            string
+	tlsConfig              *tls.Config
+	tlsConfigFn            func() *tls.Config
+	insecure               bool
+	maxGRPCMessageByteSize int
 
 	// gRPC connection
 	conn *grpc.ClientConn
@@ -213,6 +215,19 @@ func WithInsecure() ClientOption {
 	}
 }
 
+// WithMaxGRPCMessageByteSize sets the largest gRPC message the client will send
+// or receive. A value of zero or less leaves the default in place.
+func WithMaxGRPCMessageByteSize(sizeBytes int) ClientOption {
+	return func(c *Client) {
+		if sizeBytes <= 0 {
+			log().Warnf("ignoring non-positive gRPC max message size %d; keeping %d",
+				sizeBytes, c.maxGRPCMessageByteSize)
+			return
+		}
+		c.maxGRPCMessageByteSize = sizeBytes
+	}
+}
+
 // WithEventHandler sets the callback for processing replicated events
 func WithEventHandler(handler EventHandler) ClientOption {
 	return func(c *Client) {
@@ -271,6 +286,13 @@ func WithOnSyncComplete(fn func()) ClientOption {
 	}
 }
 
+// MaxGRPCMessageByteSize reports the message size limit the client dials with.
+func (c *Client) MaxGRPCMessageByteSize() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.maxGRPCMessageByteSize
+}
+
 // NewClient creates a new replication client
 func NewClient(ctx context.Context, opts ...ClientOption) *Client {
 	c := &Client{
@@ -281,6 +303,7 @@ func NewClient(ctx context.Context, opts ...ClientOption) *Client {
 		currentReconnectBackoff: 1 * time.Second,
 		ackInterval:             5 * time.Second,
 		reconcileInterval:       1 * time.Minute,
+		maxGRPCMessageByteSize:  grpcutil.DefaultGRPCMaxMessageSize,
 		metrics:                 NewClientMetrics(),
 	}
 
@@ -304,7 +327,22 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	c.setState(ClientStateConnecting)
 
-	dialOpts := []grpc.DialOption{}
+	// The initial snapshot is one message carrying every agent's state, so it grows
+	// with the fleet and passes gRPC's 4 MiB default well before the principal's own
+	// limit. Match the limit the primary serves it at, since a snapshot the client
+	// refuses fails the sync that the replication stream depends on. The
+	// interceptors warn at 80% of the limit, which is the only notice that the fleet
+	// is approaching it.
+	dialOpts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(c.maxGRPCMessageByteSize),
+			grpc.MaxCallSendMsgSize(c.maxGRPCMessageByteSize),
+		),
+		grpc.WithChainUnaryInterceptor(
+			grpcutil.UnaryClientMsgSizeInterceptor(c.maxGRPCMessageByteSize)),
+		grpc.WithChainStreamInterceptor(
+			grpcutil.StreamClientMsgSizeInterceptor(c.maxGRPCMessageByteSize)),
+	}
 
 	tlsCfg := c.tlsConfig
 	if tlsCfg == nil && c.tlsConfigFn != nil {

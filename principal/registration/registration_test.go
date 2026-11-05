@@ -103,19 +103,21 @@ func Test_NewAgentRegistrationManager(t *testing.T) {
 		kubeclient := kube.NewFakeClientsetWithResources()
 		iss := createMockIssuer(t)
 		clientCertSecretName := createTestClientCertSecret(t, kubeclient)
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+		customLabels := map[string]string{"env": "prod"}
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, customLabels)
 
 		require.NotNil(t, mgr)
 		assert.True(t, mgr.selfAgentRegistrationEnabled)
 		assert.Equal(t, testNamespace, mgr.namespace)
 		assert.Equal(t, testResourceProxyAddr, mgr.resourceProxyAddress)
+		assert.Equal(t, customLabels, mgr.selfRegSecretLabels)
 		assert.NotNil(t, mgr.kubeclient)
 	})
 
 	t.Run("Create manager with self agent registration disabled", func(t *testing.T) {
 		kubeclient := kube.NewFakeClientsetWithResources()
 		iss := createMockIssuer(t)
-		mgr := NewAgentRegistrationManager(false, testNamespace, testResourceProxyAddr, "", kubeclient, iss)
+		mgr := NewAgentRegistrationManager(false, testNamespace, testResourceProxyAddr, "", kubeclient, iss, nil)
 
 		require.NotNil(t, mgr)
 		assert.False(t, mgr.selfAgentRegistrationEnabled)
@@ -128,7 +130,7 @@ func Test_RegisterAgent(t *testing.T) {
 	t.Run("Returns nil when self agent registration is disabled", func(t *testing.T) {
 		kubeclient := kube.NewFakeKubeClient(testNamespace)
 		iss := createMockIssuer(t)
-		mgr := NewAgentRegistrationManager(false, testNamespace, testResourceProxyAddr, "", kubeclient, iss)
+		mgr := NewAgentRegistrationManager(false, testNamespace, testResourceProxyAddr, "", kubeclient, iss, nil)
 
 		err := mgr.RegisterAgent(context.Background(), testAgentName)
 
@@ -150,7 +152,7 @@ func Test_RegisterAgent(t *testing.T) {
 		iss := issuermocks.NewIssuer(t)
 		iss.On("IssueResourceProxyToken", testAgentName).Return("test-bearer-token", nil)
 
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, nil)
 
 		err := mgr.RegisterAgent(context.Background(), testAgentName)
 
@@ -167,13 +169,37 @@ func Test_RegisterAgent(t *testing.T) {
 		assert.Equal(t, cluster.GetClusterSecretName(testAgentName), secret.Name)
 	})
 
+	t.Run("Creates cluster secret with configured custom labels", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+		clientCertSecretName := createTestClientCertSecret(t, kubeclient)
+
+		iss := issuermocks.NewIssuer(t)
+		iss.On("IssueResourceProxyToken", testAgentName).Return("test-bearer-token", nil)
+
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, map[string]string{
+			"e2e.test/registration": "custom-label",
+		})
+
+		err := mgr.RegisterAgent(context.Background(), testAgentName)
+		require.NoError(t, err)
+
+		secret, err := kubeclient.CoreV1().Secrets(testNamespace).Get(
+			context.Background(),
+			cluster.GetClusterSecretName(testAgentName),
+			metav1.GetOptions{},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "custom-label", secret.Labels["e2e.test/registration"])
+		assert.Equal(t, "true", secret.Labels[cluster.LabelKeySelfRegisteredCluster])
+	})
+
 	t.Run("Returns error when client cert secret is missing", func(t *testing.T) {
 		kubeclient := kube.NewFakeClientsetWithResources()
 
 		iss := issuermocks.NewIssuer(t)
 		iss.On("IssueResourceProxyToken", testAgentName).Return("test-bearer-token", nil)
 
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, "nonexistent-secret", kubeclient, iss)
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, "nonexistent-secret", kubeclient, iss, nil)
 
 		err := mgr.RegisterAgent(context.Background(), testAgentName)
 
@@ -189,7 +215,7 @@ func Test_RegisterAgent(t *testing.T) {
 		iss := issuermocks.NewIssuer(t)
 		iss.On("IssueResourceProxyToken", agentName).Return("test-bearer-token", nil)
 
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, nil)
 
 		err := mgr.RegisterAgent(context.Background(), agentName)
 
@@ -224,7 +250,7 @@ func Test_RegisterAgent(t *testing.T) {
 
 		iss := issuermocks.NewIssuer(t)
 
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, nil)
 
 		err := mgr.RegisterAgent(context.Background(), testAgentName)
 
@@ -246,19 +272,44 @@ func Test_AgentRegistrationManager_IsSelfAgentRegistrationEnabled(t *testing.T) 
 		kubeclient := kube.NewFakeClientsetWithResources()
 		iss := createMockIssuer(t)
 		clientCertSecretName := createTestClientCertSecret(t, kubeclient)
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, nil)
 		assert.True(t, mgr.IsSelfAgentRegistrationEnabled())
 	})
 
 	t.Run("Returns false when disabled", func(t *testing.T) {
 		kubeclient := kube.NewFakeClientsetWithResources()
 		iss := createMockIssuer(t)
-		mgr := NewAgentRegistrationManager(false, testNamespace, testResourceProxyAddr, "", kubeclient, iss)
+		mgr := NewAgentRegistrationManager(false, testNamespace, testResourceProxyAddr, "", kubeclient, iss, nil)
 		assert.False(t, mgr.IsSelfAgentRegistrationEnabled())
 	})
 }
 
 func Test_RegisterCluster_TokenValidation(t *testing.T) {
+	t.Run("Updates custom labels on existing self-registered secret", func(t *testing.T) {
+		kubeclient := kube.NewFakeClientsetWithResources()
+		clientCertSecretName := createTestClientCertSecret(t, kubeclient)
+
+		iss := issuermocks.NewIssuer(t)
+		iss.On("IssueResourceProxyToken", testAgentName).Return("valid-token", nil)
+		mockClaims := issuermocks.NewClaims(t)
+		mockClaims.On("GetSubject").Return(testAgentName, nil)
+		iss.On("ValidateResourceProxyToken", "valid-token").Return(mockClaims, nil)
+
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, map[string]string{"env": "dev"})
+		require.NoError(t, mgr.RegisterAgent(context.Background(), testAgentName))
+
+		mgr = NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, map[string]string{"env": "prod"})
+		require.NoError(t, mgr.RegisterAgent(context.Background(), testAgentName))
+
+		secret, err := kubeclient.CoreV1().Secrets(testNamespace).Get(
+			context.Background(),
+			cluster.GetClusterSecretName(testAgentName),
+			metav1.GetOptions{},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "prod", secret.Labels["env"])
+	})
+
 	t.Run("Skips registration when cluster secret exists with valid token", func(t *testing.T) {
 		kubeclient := kube.NewFakeClientsetWithResources()
 		clientCertSecretName := createTestClientCertSecret(t, kubeclient)
@@ -272,7 +323,7 @@ func Test_RegisterCluster_TokenValidation(t *testing.T) {
 		mockClaims.On("GetSubject").Return(testAgentName, nil)
 		iss.On("ValidateResourceProxyToken", "valid-token").Return(mockClaims, nil)
 
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, nil)
 
 		// First registration - creates secret
 		err := mgr.RegisterAgent(context.Background(), testAgentName)
@@ -294,7 +345,7 @@ func Test_RegisterCluster_TokenValidation(t *testing.T) {
 		mockClaims.On("GetSubject").Return(testAgentName, nil)
 		iss.On("ValidateResourceProxyToken", "valid-token").Return(mockClaims, nil)
 
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, nil)
 
 		err := mgr.RegisterAgent(context.Background(), testAgentName)
 		require.NoError(t, err)
@@ -332,7 +383,7 @@ func Test_RegisterCluster_TokenValidation(t *testing.T) {
 		// First call creates secret, subsequent calls validate/refresh
 		iss.On("ValidateResourceProxyToken", "new-token").Return(nil, fmt.Errorf("token validation failed"))
 
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, nil)
 
 		// First registration - creates secret
 		err := mgr.RegisterAgent(context.Background(), testAgentName)
@@ -351,7 +402,7 @@ func Test_RegisterCluster_TokenValidation(t *testing.T) {
 		iss.On("IssueResourceProxyToken", testAgentName).Return("new-token", nil)
 		iss.On("ValidateResourceProxyToken", "new-token").Return(nil, fmt.Errorf("token validation failed"))
 
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, nil)
 
 		err := mgr.RegisterAgent(context.Background(), testAgentName)
 		require.NoError(t, err)
@@ -423,7 +474,7 @@ func Test_RegisterCluster_TokenValidation(t *testing.T) {
 		mockClaims.On("GetSubject").Return("different-agent", nil)
 		iss.On("ValidateResourceProxyToken", "token-for-agent").Return(mockClaims, nil)
 
-		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss)
+		mgr := NewAgentRegistrationManager(true, testNamespace, testResourceProxyAddr, clientCertSecretName, kubeclient, iss, nil)
 
 		// First registration - creates secret
 		err := mgr.RegisterAgent(context.Background(), testAgentName)

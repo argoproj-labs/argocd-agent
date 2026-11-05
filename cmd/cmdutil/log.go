@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
@@ -131,74 +130,106 @@ func CreateLogger(logFormat string) *logrus.Logger {
 	return logger
 }
 
-// ParseLogLevels parses the slice produced by the log level flag and sets log levels
-// for subsystems and the default logger accordingly
-func ParseLogLevels(input []string, ss *SubSystemLoggers) {
-	seen := []string{}
+// logLevelPlan is the validated result of parsing the log level
+type logLevelPlan struct {
+	// global is the level for the standard logger and for any subsystem that is
+	// not explicitly assigned a level. It is nil when the input contains no bare
+	// (non "subsystem=level") entry, in which case the global level is left
+	// untouched.
+	global *logrus.Level
+	// subsystems maps a known subsystem name to its explicitly requested level.
+	subsystems map[string]logrus.Level
+}
+
+// parseLogLevelPlan parses and validates the log level slice without applying
+// it. It has no side effects: any invalid entry rejects the whole input with an
+// error, so the caller can decide whether to abort (startup) or skip the change
+// (runtime) without the loggers having been left half-updated.
+func parseLogLevelPlan(input []string) (*logLevelPlan, error) {
+	plan := &logLevelPlan{
+		subsystems: make(map[string]logrus.Level),
+	}
 
 	for _, e := range input {
+		// A well-formed entry is either "level" or "subsystem=level".
 		split := strings.Split(e, "=")
-		if len(split) > 2 || len(split) == 0 {
-			logrus.Warnf("%s is invalid please use the format subsystem=loglevel, skipping", e)
-			continue
+		if len(split) > 2 {
+			return nil, fmt.Errorf("%q is invalid, please use the format [subsystem=]loglevel", e)
 		}
 
-		split[0] = strings.TrimSpace(split[0])
-		if len(split) > 1 {
-			split[1] = strings.TrimSpace(split[1])
-		}
-
+		// Global log level
 		if len(split) == 1 {
-			if split[0] == "" {
-				split[0] = "info"
+			levelStr := strings.TrimSpace(split[0])
+			if levelStr == "" {
+				levelStr = "info"
 			}
-
-			level, err := StringToLoglevel(split[0])
+			level, err := StringToLoglevel(levelStr)
 			if err != nil {
-				Fatal("an invalid log level was entered: %s. Available levels are %s", split[0], AvailableLogLevels())
+				return nil, fmt.Errorf("invalid log level %q: available levels are %s", levelStr, AvailableLogLevels())
 			}
-			logrus.SetLevel(level)
-
-			if !slices.Contains(seen, "resource-proxy") {
-				ss.ResourceProxyLogger.SetLevel(level)
-			}
-			if !slices.Contains(seen, "redis-proxy") {
-				ss.RedisProxyLogger.SetLevel(level)
-			}
-			if !slices.Contains(seen, "grpc-event") {
-				ss.GrpcEventLogger.SetLevel(level)
-			}
-			if !slices.Contains(seen, "informer-event-buffer") {
-				ss.InformerEventBufferLogger.SetLevel(level)
-			}
+			plan.global = &level
 			continue
 		}
 
-		if split[1] == "" {
-			split[1] = "info"
+		subsystem := strings.TrimSpace(split[0])
+		switch subsystem {
+		case "resource-proxy", "redis-proxy", "grpc-event", "informer-event-buffer":
+		default:
+			return nil, fmt.Errorf("invalid subsystem %q: available subsystems are %s", subsystem, AvailableSubSystems)
 		}
 
-		level, err := StringToLoglevel(split[1])
-		if err != nil {
-			Fatal("an invalid log level was entered: %s for %s. Available levels are %s", split[1], split[0], AvailableLogLevels())
+		levelStr := strings.TrimSpace(split[1])
+		if levelStr == "" {
+			levelStr = "info"
 		}
-		switch split[0] {
-		case "resource-proxy":
-			ss.ResourceProxyLogger.SetLevel(level)
-			seen = append(seen, "resource-proxy")
-		case "redis-proxy":
-			ss.RedisProxyLogger.SetLevel(level)
-			seen = append(seen, "redis-proxy")
-		case "grpc-event":
-			ss.GrpcEventLogger.SetLevel(level)
-			seen = append(seen, "grpc-event")
-		case "informer-event-buffer":
-			ss.InformerEventBufferLogger.SetLevel(level)
-			seen = append(seen, "informer-event-buffer")
-		default:
-			logrus.Warnf("an invalid subsystem %s was specified. subsystems are %s, skipping", split[0], AvailableSubSystems)
+		level, err := StringToLoglevel(levelStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid log level %q for subsystem %q: available levels are %s", levelStr, subsystem, AvailableLogLevels())
+		}
+		plan.subsystems[subsystem] = level
+	}
+
+	return plan, nil
+}
+
+// applyLogLevelPlan applies a validated plan to the standard logger and the subsystem loggers.
+func applyLogLevelPlan(plan *logLevelPlan, ss *SubSystemLoggers) {
+	loggers := map[string]*logrus.Logger{}
+	if ss != nil {
+		loggers["resource-proxy"] = ss.ResourceProxyLogger
+		loggers["redis-proxy"] = ss.RedisProxyLogger
+		loggers["grpc-event"] = ss.GrpcEventLogger
+		loggers["informer-event-buffer"] = ss.InformerEventBufferLogger
+	}
+
+	if plan.global != nil {
+		logrus.SetLevel(*plan.global)
+		for name, logger := range loggers {
+			if _, ok := plan.subsystems[name]; !ok {
+				if logger != nil {
+					logger.SetLevel(*plan.global)
+				}
+			}
 		}
 	}
+
+	for name, level := range plan.subsystems {
+		if logger := loggers[name]; logger != nil {
+			logger.SetLevel(level)
+		}
+	}
+}
+
+// ParseAndApplyLogLevels parses the slice produced by the log level flag and sets log
+// levels for subsystems and the default logger accordingly.
+func ParseAndApplyLogLevels(input []string, ss *SubSystemLoggers) error {
+	plan, err := parseLogLevelPlan(input)
+	if err != nil {
+		return err
+	}
+
+	applyLogLevelPlan(plan, ss)
+	return nil
 }
 
 const AvailableFullDetailCategories = "all, actions, events, informers"

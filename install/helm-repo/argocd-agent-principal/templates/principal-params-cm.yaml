@@ -18,6 +18,12 @@ data:
   # warn or error.
   # Default: info
   principal.log.level: {{ .Values.principal.log.level | default "info" | quote }}
+{{- with .Values.principal.log.fullDetail }}
+  # principal.log.full-detail: Comma-separated full-detail logging categories
+  # (all, actions, events, informers). Very verbose; for debugging only.
+  # Applied at runtime: editing this key takes effect without a restart.
+  principal.log.full-detail: {{ . | quote }}
+{{- end }}
   # principal.log.format: The log format principal should use. Valid values are
   # "json" or "text".
   # Default: "text"
@@ -133,11 +139,18 @@ data:
   principal.redis.compression.type: {{ .Values.principal.redis.compressionType | quote }}
   principal.resource-proxy.enable: {{ .Values.principal.resourceProxy.enabled | quote }}
   principal.keep-alive.min-interval: {{ .Values.principal.keepAlive.minInterval | quote }}
+  # principal.pprof.port: Port for the pprof server, bound to localhost. 0
+  # starts no listener at all, which also makes principal.pprof.enabled inert.
   principal.pprof.port: {{ .Values.principal.pprof.port | quote }}
+  # principal.pprof.enabled: Whether the pprof server answers requests; while
+  # false every endpoint returns 403.
+  # Applied at runtime: editing this key takes effect without a restart.
+  principal.pprof.enabled: {{ .Values.principal.pprof.enabled | quote }}
   principal.redis.server.address: {{ .Values.principal.redis.server.address | quote }}
   principal.tls.min-version: {{ .Values.principal.tls.minVersion | quote }}
   principal.tls.max-version: {{ .Values.principal.tls.maxVersion | quote }}
   principal.tls.ciphersuites: {{ .Values.principal.tls.ciphersuites | quote }}
+  principal.tls.curve-preferences: {{ .Values.principal.tls.curvePreferences | quote }}
   principal.tls.insecure-plaintext: {{ .Values.principal.tls.insecurePlaintext | quote }}
   principal.destination-based-mapping: {{ .Values.principal.destinationBasedMapping | quote }}
   principal.label-selector: {{ .Values.principal.labelSelector | quote }}
@@ -153,6 +166,7 @@ data:
   principal.spire.auth-method: {{ ternary .Values.principal.spire.authMethod "" .Values.principal.spire.enabled | quote }}
   principal.self-registration.enabled: {{ .Values.principal.selfRegistration.enabled | quote }}
   principal.self-registration.client-cert-secret: {{ .Values.principal.selfRegistration.clientCertSecretName | quote }}
+  principal.self-registration.secret-labels: {{ .Values.principal.selfRegistration.secretLabels | quote }}
   principal.resource-proxy.address: {{ .Values.principal.resourceProxyAddress | quote }}
   {{- range $key, $value := .Values.configMapData }}
   {{ $key }}: {{ $value | quote }}

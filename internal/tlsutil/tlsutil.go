@@ -215,11 +215,66 @@ func ParseCipherSuites(names []string) ([]uint16, error) {
 	return cipherIDs, nil
 }
 
+// supportedCurvePreferences maps TLS curve / key-exchange names to their CurveIDs.
+// Names match the Go crypto/tls.CurveID String() values.
+var supportedCurvePreferences = map[string]tls.CurveID{
+	"CurveP256":          tls.CurveP256,
+	"CurveP384":          tls.CurveP384,
+	"CurveP521":          tls.CurveP521,
+	"X25519":             tls.X25519,
+	"X25519MLKEM768":     tls.X25519MLKEM768,
+	"SecP256r1MLKEM768":  tls.SecP256r1MLKEM768,
+	"SecP384r1MLKEM1024": tls.SecP384r1MLKEM1024,
+}
+
+// SupportedCurvePreferenceNames returns the supported TLS curve preference names
+// in a stable order for display.
+func SupportedCurvePreferenceNames() []string {
+	return []string{
+		"X25519MLKEM768",
+		"SecP256r1MLKEM768",
+		"SecP384r1MLKEM1024",
+		"X25519",
+		"CurveP256",
+		"CurveP384",
+		"CurveP521",
+	}
+}
+
+// ParseCurvePreferences converts a list of curve / key-exchange names to their
+// corresponding tls.CurveID values. Returns an error if any name is not recognized.
+func ParseCurvePreferences(names []string) ([]tls.CurveID, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	curves := make([]tls.CurveID, 0, len(names))
+	for _, name := range names {
+		id, ok := supportedCurvePreferences[name]
+		if !ok {
+			return nil, fmt.Errorf("no such TLS curve preference: %s", name)
+		}
+		curves = append(curves, id)
+	}
+	return curves, nil
+}
+
+// isTLS13OnlyCurve reports whether the curve / key-exchange is only usable with
+// TLS 1.3. Matches crypto/tls behavior in Go 1.24+.
+func isTLS13OnlyCurve(curve tls.CurveID) bool {
+	switch curve {
+	case tls.X25519MLKEM768, tls.SecP256r1MLKEM768, tls.SecP384r1MLKEM1024:
+		return true
+	default:
+		return false
+	}
+}
+
 // ValidateTLSConfig validates the TLS configuration parameters.
 // It checks that:
 // - The minimum TLS version is not greater than the maximum TLS version
 // - All configured cipher suites are compatible with the minimum TLS version
-func ValidateTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16) error {
+// - At least one configured curve preference is usable with the maximum TLS version
+func ValidateTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16, curvePreferences []tls.CurveID) error {
 	// Check that min version <= max version (if both are set)
 	if minVersion != 0 && maxVersion != 0 {
 		if minVersion > maxVersion {
@@ -246,22 +301,47 @@ func ValidateTLSConfig(minVersion, maxVersion uint16, cipherSuites []uint16) err
 		}
 	}
 
+	// Hybrid/PQ groups are TLS 1.3-only and are ignored by Go for earlier versions.
+	// Allow configurations that still include a classical fallback usable with the
+	// permitted max version; reject only when no configured group can handshake.
+	if len(curvePreferences) > 0 && maxVersion != 0 && maxVersion < tls.VersionTLS13 {
+		hasUsableCurve := false
+		for _, curve := range curvePreferences {
+			if !isTLS13OnlyCurve(curve) {
+				hasUsableCurve = true
+				break
+			}
+		}
+		if !hasUsableCurve {
+			return fmt.Errorf("no configured TLS curve preference is supported by maximum TLS version %s",
+				TLSVersionName(maxVersion))
+		}
+	}
+
 	return nil
 }
 
 // SetTLSConfigFromFlags sets the TLS configuration parameters from the command line flags.
 // It returns an error if any of the parameters are invalid.
 // tlsConfig must be a pointer to an initialized tls.Config struct and will be modified in place.
-func SetTLSConfigFromFlags(tlsConfig *tls.Config, minVersion, maxVersion string, cipherSuites []string) error {
+// Validation uses the effective configuration after merging supplied flags with any
+// values already present on tlsConfig (omitted flags keep existing values).
+func SetTLSConfigFromFlags(tlsConfig *tls.Config, minVersion, maxVersion string, cipherSuites []string, curvePreferences []string) error {
 	var err error
 	if tlsConfig == nil {
 		return fmt.Errorf("tlsConfig is nil")
 	}
-	var (
-		minver  uint16
-		maxver  uint16
-		ciphers []uint16
-	)
+
+	setCiphers := len(cipherSuites) > 0 && (len(cipherSuites) != 1 || cipherSuites[0] != "")
+	setCurves := len(curvePreferences) > 0 && (len(curvePreferences) != 1 || curvePreferences[0] != "")
+
+	// Start from existing config so omitted flags are still validated against
+	// the values that will remain after assignment.
+	minver := tlsConfig.MinVersion
+	maxver := tlsConfig.MaxVersion
+	ciphers := tlsConfig.CipherSuites
+	curves := tlsConfig.CurvePreferences
+
 	if minVersion != "" {
 		minver, err = TLSVersionFromName(minVersion)
 		if err != nil {
@@ -274,13 +354,19 @@ func SetTLSConfigFromFlags(tlsConfig *tls.Config, minVersion, maxVersion string,
 			return err
 		}
 	}
-	if len(cipherSuites) > 0 && (len(cipherSuites) != 1 || cipherSuites[0] != "") {
+	if setCiphers {
 		ciphers, err = ParseCipherSuites(cipherSuites)
 		if err != nil {
 			return err
 		}
 	}
-	if err := ValidateTLSConfig(minver, maxver, ciphers); err != nil {
+	if setCurves {
+		curves, err = ParseCurvePreferences(curvePreferences)
+		if err != nil {
+			return err
+		}
+	}
+	if err := ValidateTLSConfig(minver, maxver, ciphers, curves); err != nil {
 		return err
 	}
 	if minVersion != "" {
@@ -289,8 +375,11 @@ func SetTLSConfigFromFlags(tlsConfig *tls.Config, minVersion, maxVersion string,
 	if maxVersion != "" {
 		tlsConfig.MaxVersion = maxver
 	}
-	if len(cipherSuites) > 0 && (len(cipherSuites) != 1 || cipherSuites[0] != "") {
+	if setCiphers {
 		tlsConfig.CipherSuites = ciphers
+	}
+	if setCurves {
+		tlsConfig.CurvePreferences = curves
 	}
 	return nil
 }

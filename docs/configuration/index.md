@@ -20,16 +20,33 @@ If you set a parameter via all three methods:
 
 ```bash
 # Command line (wins)
-argocd-agent principal --log-level=debug
+argocd-agent principal --metrics-port=9000
 
 # Environment variable (overridden)
-export ARGOCD_PRINCIPAL_LOG_LEVEL=warn
+export ARGOCD_PRINCIPAL_METRICS_PORT=8500
 
 # ConfigMap (overridden)
-# principal.log.level: "info"
+# principal.metrics.port: "8000"
 ```
 
-The effective value will be `debug` (from the command line flag).
+The effective value will be `9000` (from the command line flag).
+
+### Exception: Runtime-Switchable Debug Settings
+
+Three debug settings are re-read from the `argocd-agent-params` ConfigMap while
+the component runs, so that they can be changed without a restart:
+
+* `<component>.log.level`
+* `<component>.log.full-detail`
+* `<component>.pprof.enabled`
+
+For these keys the precedence above is reversed: the flag or environment
+variable provides the value the component starts with, but once the ConfigMap
+has been read its value wins, including over a command line flag. Removing the
+key reverts the setting to the startup value. Invalid values are logged and ignored.
+
+See [Observability](observability.md#changing-settings-without-a-restart) for
+details.
 
 ## ConfigMap Configuration
 
@@ -92,7 +109,7 @@ This section is organized by task to help you find what you need:
 | [Reference: Agent](reference/agent.md) | Complete agent parameter reference |
 
 !!! tip "Mapping Mode Configuration"
-    argocd-agent supports two mapping modes: **namespace-based** (default) and **destination-based**. If you plan to use destination-based mapping, both principal and agent must have `--destination-based-mapping` enabled. See [Agent Mapping Modes](../concepts/agent-mapping.md) for a conceptual overview, or the [Principal](reference/principal.md#destination-based-mapping) and [Agent](reference/agent.md#destination-based-mapping) reference pages for configuration details.
+    argocd-agent supports two mapping modes: **namespace-based** (default) and **destination-based**. If you plan to use destination-based mapping, both principal and agent must have `--destination-based-mapping` enabled. See [Agent Mapping Modes](../user-guide/managed-agent/agent-mapping.md) for a conceptual overview, or the [Principal](reference/principal.md#destination-based-mapping) and [Agent](reference/agent.md#destination-based-mapping) reference pages for configuration details.
 
 ## Quick Start
 
@@ -118,7 +135,7 @@ agent.creds: "mtls:"
 ## Security Best Practices
 
 1. **Use mTLS authentication** for production deployments
-2. **Never use `--insecure-*` flags** in production, with one exception: `--insecure-plaintext` is required when running behind a service mesh (Istio, Linkerd) that handles TLS at the sidecar level. See [Networking](networking.md#service-mesh-integration) for details.
+2. **Never use `--insecure-*` flags** in production, with one exception: `--insecure-plaintext` is required when running behind a service mesh (Istio, Linkerd) that handles TLS at the sidecar level. See [Service mesh integration](service-mesh.md) for details.
 3. **Store secrets properly** - TLS certificates and JWT keys should be in Kubernetes Secrets, not ConfigMaps
 4. **Rotate certificates regularly** - Implement automated certificate rotation
 5. **Restrict network access** - Use network policies to limit access to metrics and health endpoints

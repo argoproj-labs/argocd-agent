@@ -323,10 +323,18 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	// App deletion
 	case event.Delete.String():
 		if agentMode.IsAutonomous() {
-			s.deletions.MarkExpected(incoming.UID)
-
 			// Autonomous apps are always stored in the agent's namespace on the principal
 			incoming.SetNamespace(agentName)
+
+			// The mark must not interleave with the delete callback's recreate
+			// decision; see Server.resourceLocks. The callback races the mark,
+			// not the Delete, so Delete stays outside the lock.
+			func() {
+				key := applicationLockKey(incoming)
+				s.resourceLocks.Lock(key)
+				defer s.resourceLocks.Unlock(key)
+				s.deletions.MarkExpected(incoming.UID)
+			}()
 
 			deletionPropagation := backend.DeletePropagationForeground
 			err = s.appManager.Delete(ctx, agentName, incoming, &deletionPropagation)
@@ -602,7 +610,13 @@ func (s *Server) processAppProjectEvent(ctx context.Context, agentName string, e
 
 		incoming.SetNamespace(s.namespace)
 
-		s.deletions.MarkExpected(incoming.UID)
+		// The mark must be atomic with respect to the informer callback's recreate decision.
+		func() {
+			key := appProjectLockKey(incoming)
+			s.resourceLocks.Lock(key)
+			defer s.resourceLocks.Unlock(key)
+			s.deletions.MarkExpected(incoming.UID)
+		}()
 
 		deletionPropagation := backend.DeletePropagationForeground
 		err := s.projectManager.Delete(ctx, incoming, &deletionPropagation)

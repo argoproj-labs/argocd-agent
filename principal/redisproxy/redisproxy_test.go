@@ -15,12 +15,19 @@
 package redisproxy
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"testing"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/principal/tracker"
+	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -458,5 +465,212 @@ func Test_handleAgentSubscribe(t *testing.T) {
 
 		// Check that ping routine was started
 		require.True(t, connState.pingRoutineStarted[agentName])
+	})
+}
+
+func Test_handleAgentSubscribe_forwarderStopsWhenConnectionCloses(t *testing.T) {
+	mockSendFunc := &mockSendSynchronousMessageToAgentFunc{
+		responseToReturn: &event.RedisResponseBody{
+			SubscribeResponse: &event.RedisResponseBodySubscribeResponse{},
+		},
+	}
+	rp := &RedisProxy{
+		sendSynchronousMessageToAgentFn: mockSendFunc.call,
+		ConnectionIDTracker:             tracker.New(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connState := &connectionState{
+		connectionCtx:      ctx,
+		connectionCancelFn: cancel,
+		connUUID:           uuid.New().String(),
+		pingRoutineStarted: make(map[string]bool),
+	}
+	err := rp.handleAgentSubscribe(connState, "app|managed-resources|test-agent_my-app|1.8.3", "test-agent", &mockArgoCDRedisWriter{}, rp.log())
+	require.NoError(t, err)
+
+	// A notification from the agent arrives, but nobody reads the connection's channel anymore
+	// (the connection's message loop has exited), so the forwarder sits on the send...
+	_, evCh := rp.ConnectionIDTracker.Tracked(connState.connUUID)
+	require.NotNil(t, evCh)
+	ev := cloudevents.NewEvent()
+	evCh <- &ev
+	require.Eventually(t, func() bool { return len(evCh) == 0 }, time.Second, 5*time.Millisecond, "forwarder did not pick up the event")
+
+	// ...and then the connection goes away
+	cancel()
+
+	// The forwarder must give up on the send, exit, and stop tracking the connection
+	require.Eventually(t, func() bool {
+		_, ch := rp.ConnectionIDTracker.Tracked(connState.connUUID)
+		return ch == nil
+	}, time.Second, 10*time.Millisecond, "forwarder did not stop tracking the closed connection")
+}
+
+func Test_readNextMessageFromArgoCDOrInternal_closedInternalChannel(t *testing.T) {
+	rp := &RedisProxy{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connState := &connectionState{
+		connectionCtx:               ctx,
+		connectionCancelFn:          cancel,
+		connUUID:                    uuid.New().String(),
+		connectionUUIDEventsChannel: make(chan *cloudevents.Event),
+		pingRoutineStarted:          make(map[string]bool),
+	}
+
+	// The forwarder goroutine closes this channel when it exits
+	close(connState.connectionUUIDEventsChannel)
+
+	// Must not panic, and must tell the message loop to stop
+	result := readNextMessageFromArgoCDOrInternal(connState, make(chan parsedRedisCommand), rp.log())
+	require.True(t, result.connContextCancelled)
+}
+
+func Test_rewriteResourcesTreeNamespace(t *testing.T) {
+	t.Run("rewrites namespace for Application- and ApplicationSet-kind nodes, gzip'd", func(t *testing.T) {
+		tree := &v1alpha1.ApplicationTree{
+			Nodes: []v1alpha1.ResourceNode{
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "Application", Namespace: "argocd", Name: "child-app",
+					},
+				},
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "ApplicationSet", Namespace: "argocd", Name: "generator",
+					},
+				},
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "apps", Kind: "Deployment", Namespace: "default", Name: "some-deployment",
+					},
+				},
+			},
+		}
+		raw, err := json.Marshal(tree)
+		require.NoError(t, err)
+
+		buf := &bytes.Buffer{}
+		gzipWriter := gzip.NewWriter(buf)
+		_, err = gzipWriter.Write(raw)
+		require.NoError(t, err)
+		require.NoError(t, gzipWriter.Close())
+
+		rewritten, err := rewriteResourcesTreeNamespace(buf.Bytes(), "agent-staging")
+		require.NoError(t, err)
+
+		gzipReader, err := gzip.NewReader(bytes.NewReader(rewritten))
+		require.NoError(t, err)
+		decompressed, err := io.ReadAll(gzipReader)
+		require.NoError(t, err)
+
+		var got v1alpha1.ApplicationTree
+		require.NoError(t, json.Unmarshal(decompressed, &got))
+
+		require.Equal(t, "agent-staging", got.Nodes[0].Namespace, "Application node namespace should be rewritten")
+		require.Equal(t, "agent-staging", got.Nodes[1].Namespace, "ApplicationSet node namespace should be rewritten")
+		require.Equal(t, "default", got.Nodes[2].Namespace, "non-argoproj.io node namespace should be untouched")
+	})
+
+	t.Run("rewrites namespace for Application-kind nodes, uncompressed", func(t *testing.T) {
+		tree := &v1alpha1.ApplicationTree{
+			Nodes: []v1alpha1.ResourceNode{
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "Application", Namespace: "argocd", Name: "child-app",
+					},
+				},
+			},
+		}
+		raw, err := json.Marshal(tree)
+		require.NoError(t, err)
+
+		rewritten, err := rewriteResourcesTreeNamespace(raw, "agent-staging")
+		require.NoError(t, err)
+
+		var got v1alpha1.ApplicationTree
+		require.NoError(t, json.Unmarshal(rewritten, &got))
+		require.Equal(t, "agent-staging", got.Nodes[0].Namespace)
+	})
+
+	t.Run("ApplicationSet-generated child ends up with the same namespace as its ApplicationSet parent", func(t *testing.T) {
+		tree := &v1alpha1.ApplicationTree{
+			Nodes: []v1alpha1.ResourceNode{
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "ApplicationSet", Namespace: "argocd", Name: "generator", UID: "appset-uid",
+					},
+				},
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "Application", Namespace: "argocd", Name: "generated-app",
+					},
+					ParentRefs: []v1alpha1.ResourceRef{
+						{Group: "argoproj.io", Kind: "ApplicationSet", Namespace: "argocd", Name: "generator", UID: "appset-uid"},
+					},
+				},
+			},
+		}
+		raw, err := json.Marshal(tree)
+		require.NoError(t, err)
+
+		rewritten, err := rewriteResourcesTreeNamespace(raw, "agent-staging")
+		require.NoError(t, err)
+
+		var got v1alpha1.ApplicationTree
+		require.NoError(t, json.Unmarshal(rewritten, &got))
+		require.Equal(t, got.Nodes[0].Namespace, got.Nodes[1].Namespace, "ApplicationSet and its generated child must end up with matching namespaces so the UI draws the connecting edge between them")
+	})
+
+	t.Run("rewrites namespace for orphaned Application/ApplicationSet nodes", func(t *testing.T) {
+		tree := &v1alpha1.ApplicationTree{
+			OrphanedNodes: []v1alpha1.ResourceNode{
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "argoproj.io", Kind: "Application", Namespace: "argocd", Name: "orphaned-app",
+					},
+				},
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "apps", Kind: "Deployment", Namespace: "default", Name: "orphaned-deployment",
+					},
+				},
+			},
+		}
+		raw, err := json.Marshal(tree)
+		require.NoError(t, err)
+
+		rewritten, err := rewriteResourcesTreeNamespace(raw, "agent-staging")
+		require.NoError(t, err)
+
+		var got v1alpha1.ApplicationTree
+		require.NoError(t, json.Unmarshal(rewritten, &got))
+		require.Equal(t, "agent-staging", got.OrphanedNodes[0].Namespace, "orphaned Application node namespace should be rewritten")
+		require.Equal(t, "default", got.OrphanedNodes[1].Namespace, "non-argoproj.io orphaned node namespace should be untouched")
+	})
+
+	t.Run("no Application/ApplicationSet nodes: returns original bytes untouched", func(t *testing.T) {
+		tree := &v1alpha1.ApplicationTree{
+			Nodes: []v1alpha1.ResourceNode{
+				{
+					ResourceRef: v1alpha1.ResourceRef{
+						Group: "apps", Kind: "Deployment", Namespace: "default", Name: "some-deployment",
+					},
+				},
+			},
+		}
+		raw, err := json.Marshal(tree)
+		require.NoError(t, err)
+
+		rewritten, err := rewriteResourcesTreeNamespace(raw, "agent-staging")
+		require.NoError(t, err)
+		require.Equal(t, raw, rewritten)
+	})
+
+	t.Run("invalid data: returns an error", func(t *testing.T) {
+		_, err := rewriteResourcesTreeNamespace([]byte("not json"), "agent-staging")
+		require.Error(t, err)
 	})
 }

@@ -53,6 +53,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/manager/gpgkey"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/metrics"
+	"github.com/argoproj-labs/argocd-agent/internal/namedlock"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/internal/resync"
@@ -87,6 +88,8 @@ type Server struct {
 	options     *ServerOptions
 	tlsConfig   *tls.Config
 	tlsConfigMu sync.RWMutex
+	// tlsSource watches a TLS source (a file or Kubernetes secret) for updates and holds the most recent data from those sources
+	tlsSource tlsutil.TLSSource
 	// listener contains GRPC server listener
 	listener *Listener
 	// server is not currently used
@@ -186,6 +189,16 @@ type Server struct {
 	// deletions tracks valid deletions from the source.
 	// This is used to differentiate between valid and invalid deletions
 	deletions *manager.DeletionTracker
+
+	// resourceLocks serializes the queue processor marking a deletion as
+	// expected against the informer callback deciding whether to recreate the
+	// resource. Interleaved, those two orphan the resource on the principal.
+	// Keys come from appProjectLockKey()/applicationLockKey().
+	//
+	// Hold at most one at a time, and acquire watchLock before it, never after.
+	// The zero value is usable.
+	resourceLocks namedlock.NamedLock
+
 	logStream *logstream.Server
 
 	// terminalStreamServer handles bidirectional streaming for web terminal sessions
@@ -287,8 +300,30 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 	}
 
 	// Validate TLS options after all options have been applied
-	if err := tlsutil.ValidateTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers); err != nil {
+	if err := tlsutil.ValidateTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers, s.options.tlsCurvePreferences); err != nil {
 		return nil, err
+	}
+
+	if s.options.tlsHotReload {
+		material := &tlsutil.TLSMaterial{
+			CAPool: s.options.rootCa,
+		}
+		var err error
+		if s.options.tlsCertPath != "" && s.options.tlsKeyPath != "" && s.options.rootCaPath != "" {
+			material.Cert, err = tlsutil.TLSCertFromFile(s.options.tlsCertPath, s.options.tlsKeyPath, false)
+			s.tlsSource = tlsutil.NewTLSFileProvider(s.options.tlsCertPath, s.options.tlsKeyPath, s.options.rootCaPath, material)
+			log().Info("Enabling TLS Hot Reload with File Provider Source")
+		} else if s.options.tlsCert != nil && s.options.tlsKey != nil && s.options.rootCa != nil {
+			material.Cert, err = tlsutil.TLSCertFromX509(s.options.tlsCert, s.options.tlsKey)
+			s.tlsSource = tlsutil.NewTLSSecretProvider(s.options.tlsSecretName, s.options.rootCaSecretName, s.namespace, s.kubeClient.Clientset, material)
+			log().Info("Enabling TLS Hot Reload with Secret Provider Source")
+		} else {
+			err = fmt.Errorf("CA, tls cert, or tls key is missing, make sure they all exist")
+		}
+		if err != nil {
+			s.tlsSource = nil
+			log().WithError(err).Warn("TLS hot reloading will not be started due to an error")
+		}
 	}
 
 	s.handlersOnConnect = []handlersOnConnect{
@@ -544,7 +579,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 			}
 
 			// Apply global TLS configuration to Redis proxy server
-			s.redisProxy.SetServerTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers)
+			s.redisProxy.SetServerTLSConfig(s.options.tlsMinVersion, s.options.tlsMaxVersion, s.options.tlsCiphers, s.options.tlsCurvePreferences)
 
 			// Redis TLS (for connections to principal's argocd-redis)
 			if s.options.redisTLSInsecure {
@@ -635,6 +670,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		s.options.clientCertSecretName,
 		kubeClient.Clientset,
 		s.issuer,
+		s.options.selfRegSecretLabels,
 	)
 
 	// Initialize HA components if HA options are configured
@@ -876,12 +912,26 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		if s.ha != nil {
 			healthzHandler = s.ha.HAHealthzHandler(s.healthzHandler)
 		}
-		http.HandleFunc("/healthz", healthzHandler)
+		healthzMux := http.NewServeMux()
+		healthzMux.HandleFunc("/healthz", healthzHandler)
 		healthzAddr := fmt.Sprintf(":%d", s.options.healthzPort)
 
 		log().Infof("Starting healthz server on %s", healthzAddr)
 		//nolint:errcheck
-		go http.ListenAndServe(healthzAddr, nil)
+		go http.ListenAndServe(healthzAddr, healthzMux)
+	}
+
+	// Start TLS Hot Reloading if enabled
+	if s.options.tlsHotReload && s.tlsSource != nil {
+		go func() {
+			for {
+				if err := s.tlsSource.Watch(s.ctx); err != nil {
+					log().WithError(err).Fatal("TLS hot reload watch failed")
+				} else {
+					log().Info("TLS Hot Reload Watch has exited")
+				}
+			}
+		}()
 	}
 
 	// Finally, start accepting connections from agents
@@ -1055,7 +1105,6 @@ func (s *Server) handleResyncOnConnect(agent types.Agent) error {
 }
 
 func (s *Server) sendCurrentStateToAgent(agentParam types.Agent) error {
-
 	if agentParam.Mode() == types.AgentModeAutonomous.String() {
 		return fmt.Errorf("sending current state to autonomous agent is not supported")
 	}
@@ -1249,12 +1298,13 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 			clientAuth = tls.RequireAndVerifyClientCert
 		}
 		tlsConfig := &tls.Config{
-			GetCertificate: s.options.spireSource.GetCertificate(),
-			ClientAuth:     clientAuth,
-			ClientCAs:      trustBundle,
-			MinVersion:     s.options.tlsMinVersion,
-			MaxVersion:     s.options.tlsMaxVersion,
-			CipherSuites:   s.options.tlsCiphers,
+			GetCertificate:   s.options.spireSource.GetCertificate(),
+			ClientAuth:       clientAuth,
+			ClientCAs:        trustBundle,
+			MinVersion:       s.options.tlsMinVersion,
+			MaxVersion:       s.options.tlsMaxVersion,
+			CipherSuites:     s.options.tlsCiphers,
+			CurvePreferences: s.options.tlsCurvePreferences,
 		}
 		return tlsConfig, nil
 	}
@@ -1272,10 +1322,11 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 	}
 
 	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   s.options.tlsMinVersion,
-		MaxVersion:   s.options.tlsMaxVersion,
-		CipherSuites: s.options.tlsCiphers,
+		Certificates:     []tls.Certificate{cert},
+		MinVersion:       s.options.tlsMinVersion,
+		MaxVersion:       s.options.tlsMaxVersion,
+		CipherSuites:     s.options.tlsCiphers,
+		CurvePreferences: s.options.tlsCurvePreferences,
 	}
 
 	// If the server is configured to require client certificates, set up the
@@ -1286,6 +1337,28 @@ func (s *Server) loadTLSConfig() (*tls.Config, error) {
 		log().Infof("This server will require TLS client certs as part of authentication")
 		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 		tlsConfig.ClientCAs = s.options.rootCa
+	}
+
+	// If hot reloading is enabled set the GetConfigForClient callback to load from the TLSSource
+	if s.options.tlsHotReload {
+		tlsConfig.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
+			cert, caPool := s.tlsSource.Load()
+
+			tlsConfig := &tls.Config{
+				Certificates: []tls.Certificate{cert},
+				MinVersion:   s.options.tlsMinVersion,
+				MaxVersion:   s.options.tlsMaxVersion,
+				CipherSuites: s.options.tlsCiphers,
+				NextProtos:   []string{"h2"},
+			}
+
+			if s.options.requireClientCerts {
+				tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+				tlsConfig.ClientCAs = caPool
+			}
+
+			return tlsConfig, nil
+		}
 	}
 
 	return tlsConfig, nil
@@ -1419,6 +1492,18 @@ func (s *Server) setAgentNamespace(agentName, namespace string) {
 func (s *Server) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
+}
+
+// appProjectLockKey and applicationLockKey build the keys for
+// Server.resourceLocks. Both take the resource in its principal-side identity;
+// if the two paths ever derive different keys, the exclusion silently stops
+// working, so the format is defined only here.
+func appProjectLockKey(p *v1alpha1.AppProject) string {
+	return "AppProject/" + p.Namespace + "/" + p.Name
+}
+
+func applicationLockKey(a *v1alpha1.Application) string {
+	return "Application/" + a.Namespace + "/" + a.Name
 }
 
 func (s *Server) populateSourceCache(ctx context.Context) error {

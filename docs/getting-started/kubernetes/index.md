@@ -82,7 +82,7 @@ This configuration includes:
 - ✅ **argocd-redis** (state storage)
 - ✅ **argocd-repo-server** (Git repository access)
 - ❌ **argocd-application-controller** (runs on workload clusters only)
-- **argocd-applicationset-controller** (optional, see [ApplicationSets](../../user-guide/applicationsets.md))
+- **argocd-applicationset-controller** (optional)
 
 !!! warning "Critical Component Placement"
     The **argocd-application-controller** must **never** be deployed on the control plane cluster. It can only run on workload clusters where it has direct access to manage Kubernetes resources. Running it on the control plane is not supported and is out of scope for this project.
@@ -263,7 +263,7 @@ This configuration includes:
 - ✅ **argocd-redis** (local state for the application controller)
 - ❌ **argocd-server** (runs on control plane only)
 - ❌ **argocd-dex-server** (runs on control plane only)
-- ❌ **argocd-applicationset-controller** (managed agents don't run their own, see [ApplicationSets](../../user-guide/applicationsets.md))
+- ❌ **argocd-applicationset-controller** (managed agents don't run their own, see [ApplicationSets — managed agents](../../user-guide/managed-agent/applicationsets-managed-mode.md))
 
 !!! info "Why Application Controller Runs Here"
     The **argocd-application-controller** runs on workload clusters because it needs direct access to the Kubernetes API to create, update, and delete resources. The argocd-agent facilitates communication between the control plane and these controllers, enabling centralized management while maintaining local execution.
@@ -624,8 +624,10 @@ kubectl patch secret argocd-secret -n argocd \
 
 ## Related Documentation
 
-- [Agent Modes](../../concepts/agent-modes/index.md) - Understanding autonomous vs managed modes
+- [Agent Modes](../../concepts/agent-modes.md) - Understanding autonomous vs managed modes
 - [Adding More Agents](../../user-guide/adding-agents.md) - Scale your deployment
-- [Application Synchronization](../../user-guide/applications.md) - How apps sync between clusters
-- [AppProject Synchronization](../../user-guide/appprojects.md) - Managing project boundaries
+- [Application Synchronization — managed agents](../../user-guide/managed-agent/applications-managed-mode.md) - How apps sync between clusters (managed mode)
+- [Application Synchronization — autonomous agents](../../user-guide/autonomous-agent/applications-autonomous-mode.md) - How apps sync between clusters (autonomous mode)
+- [AppProject synchronization — managed agents](../../user-guide/managed-agent/appprojects-managed-mode.md) - Managing project boundaries (managed mode)
+- [AppProject synchronization — autonomous agents](../../user-guide/autonomous-agent/appprojects-autonomous-mode.md) - Managing project boundaries (autonomous mode)
 - [Live Resources](../../user-guide/live-resources.md) - Viewing resources across clusters

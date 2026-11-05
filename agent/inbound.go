@@ -15,6 +15,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -51,6 +52,14 @@ were received from a server.
 */
 
 const defaultResourceRequestTimeout = 5 * time.Second
+
+// defaultResourceProxyConcurrency is the default number of resource requests
+// the agent is willing to process concurrently. The control plane's cluster
+// cache sync issues one discovery request per API group in a burst, so this
+// should be high enough to absorb such a burst without queueing. It can be
+// overridden with the ARGOCD_AGENT_RESOURCE_PROXY_CONCURRENCY environment
+// variable.
+const defaultResourceProxyConcurrency = 50
 
 func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	// Extract trace context from the incoming event
@@ -95,7 +104,31 @@ func (a *Agent) processIncomingEvent(ev *event.Event) error {
 	case targets.GPGKey:
 		err = a.processIncomingGPGKey(ev)
 	case targets.Resource:
-		err = a.processIncomingResourceRequest(ev)
+		// Process resource requests in separate goroutines, so that a burst
+		// of them does not serialize on the event thread. The control plane
+		// syncing its cluster cache issues one discovery request per API
+		// group, and each request blocks on a round trip to the local API
+		// server; served one at a time, total latency grows linearly with
+		// the number of API groups and trips the control plane's timeouts.
+		// Concurrency is bounded by a semaphore to protect the local API
+		// server.
+		select {
+		case a.resourceProcSem <- struct{}{}:
+		case <-a.context.Done():
+			return nil
+		}
+		go func() {
+			defer func() { <-a.resourceProcSem }()
+			_, resourceSpan := tracing.Tracer().Start(ctx, "resource.async_processing")
+			defer resourceSpan.End()
+			resErr := a.processIncomingResourceRequest(ev)
+			if resErr != nil {
+				tracing.RecordError(resourceSpan, resErr)
+				a.logGrpcEvent().WithError(resErr).Errorf("Unable to process incoming resource request event")
+			} else {
+				tracing.SetSpanOK(resourceSpan)
+			}
+		}()
 	case targets.ResourceResync:
 		err = a.processIncomingResourceResyncEvent(ev)
 	case targets.Redis:
@@ -239,7 +272,7 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 			logging.LogActionError(logCtx, "application", "terminate-operation", incomingApp, err)
 		}
 	case event.Delete:
-		err = a.deleteApplication(incomingApp)
+		err = a.deleteApplicationFromEvent(incomingApp, principalUID)
 		if err != nil {
 			logging.LogActionError(logCtx, "application", "delete", incomingApp, err)
 		}
@@ -320,6 +353,23 @@ func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alph
 			}
 			return nil
 		default:
+			// The informer cache can still hold an app this agent has already
+			// deleted, e.g. when the principal deletes and immediately re-creates
+			// it. Check the cluster before refusing to replace an unmanaged app.
+			if !a.appManager.IsManaged(incomingApp.QualifiedName()) {
+				ctx := context.WithValue(a.context, backend.ForUpdateContextKey, true)
+				_, err := a.appManager.Get(ctx, incomingApp.Name, incomingApp.Namespace)
+				if apierrors.IsNotFound(err) {
+					logCtx.Debug("Source UID mismatch, but existing app is already deleted. Creating incoming app")
+					if _, err := a.createApplication(incomingApp, principalUID); err != nil {
+						return fmt.Errorf("could not create incoming app: %w", err)
+					}
+					return nil
+				}
+				if err != nil {
+					return fmt.Errorf("could not get existing app: %w", err)
+				}
+			}
 			logCtx.Debug("Source UID mismatch. Deleting existing app")
 			if err := a.deleteApplication(incomingApp); err != nil {
 				return fmt.Errorf("could not delete existing app: %w", err)
@@ -853,6 +903,60 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 	return napp, err
 }
 
+// deleteApplicationFromEvent processes a Delete event from the principal. The
+// source UID carried by app is the one of the application being deleted, so
+// if the application is already gone from the cluster (e.g. because it was
+// deleted on the agent at the same time it was deleted on the principal) the
+// deletion is still marked as expected and the stale source cache entry is
+// dropped. Otherwise the agent would recreate the application from stale
+// state and the recreated application could never be deleted again.
+//
+// This must only be used for Delete events. On a source UID mismatch, app is
+// the new application, and marking its source UID as an expected deletion
+// would allow a later user-initiated deletion of the recreated application.
+//
+// The principal sends the Delete of an application and the Create of its
+// replacement under different resource IDs, so they can reach the agent in
+// any order. If the application on the cluster was already replaced by a
+// newer one from the same principal, the Delete is stale and is ignored.
+func (a *Agent) deleteApplicationFromEvent(app *v1alpha1.Application, principalUID string) error {
+	sourceUID := sourceUIDForApp(app)
+	logCtx := a.logGrpcEvent().WithFields(logrus.Fields{
+		"method": "DeleteApplication",
+		"app":    app.QualifiedName(),
+	})
+
+	if a.mode == types.AgentModeManaged && principalUID != "" {
+		ctx := context.WithValue(a.context, backend.ForUpdateContextKey, true)
+		existing, err := a.appManager.Get(ctx, app.Name, a.getTargetNamespaceForApp(app))
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("could not get existing app: %w", err)
+		}
+		if err == nil && existing.Annotations[manager.PrincipalUIDAnnotation] == principalUID {
+			if existingSourceUID := existing.Annotations[manager.SourceUIDAnnotation]; existingSourceUID != "" &&
+				existingSourceUID != string(sourceUID) && existingSourceUID != string(app.UID) {
+				logCtx.Infof("Ignoring delete of source UID %s, application was already replaced by source UID %s", sourceUID, existingSourceUID)
+				return nil
+			}
+		}
+	}
+
+	err := a.deleteApplication(app)
+	if err == nil || !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	logCtx.Debug("application is not found, perhaps it is already deleted")
+	a.deletions.MarkExpected(sourceUID)
+	if a.mode == types.AgentModeManaged {
+		a.sourceCache.Application.Delete(sourceUID)
+	}
+	if err := a.appManager.Unmanage(app.QualifiedName()); err != nil {
+		logCtx.Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
+	}
+	return nil
+}
+
 func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	// Determine the target namespace for the application
 	targetNamespace := a.getTargetNamespaceForApp(app)
@@ -872,6 +976,9 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 	}
 
 	// Fetch the source UID of the existing app to mark it as expected deletion.
+	// A NotFound error is returned to the caller on purpose: only the caller
+	// knows whether the source UID of app is the one whose deletion should be
+	// recorded as expected (see deleteApplicationFromEvent).
 	app, err := a.appManager.Get(a.context, app.Name, app.Namespace)
 	if err != nil {
 		return err
@@ -887,6 +994,9 @@ func (a *Agent) deleteApplication(app *v1alpha1.Application) error {
 			logCtx.Debug("application is not found, perhaps it is already deleted")
 			if a.mode == types.AgentModeManaged {
 				a.sourceCache.Application.Delete(sourceUIDForApp(app))
+			}
+			if err := a.appManager.Unmanage(app.QualifiedName()); err != nil {
+				logCtx.Warnf("Could not unmanage app %s: %v", app.QualifiedName(), err)
 			}
 			return nil
 		}
