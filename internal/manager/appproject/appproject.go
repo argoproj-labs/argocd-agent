@@ -588,6 +588,7 @@ func agentSpecificDestinationServiceAccounts(destSAs []v1alpha1.ApplicationDesti
 			// Server URL will be the resource proxy URL https://<rp-hostname>:<port>?agentName=<agent-name>
 			server, err := url.Parse(destSA.Server)
 			if err != nil {
+				log().Warnf("Skipping destinationServiceAccount for namespace %s: could not parse server %q: %v", destSA.Namespace, destSA.Server, err)
 				continue
 			}
 
