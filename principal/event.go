@@ -315,6 +315,17 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
 		}
 
+		// The incoming namespace is agent-supplied. Make sure it identifies an
+		// application that is actually mapped to this agent before applying
+		// the status (and any .operation) it carries.
+		if err := s.assertManagedAgentOwnsApp(ctx, agentName, incoming.Namespace, incoming.Name); err != nil {
+			if event.IsEventNotAllowed(err) {
+				logCtx.WithError(err).Warn("Rejecting status update for an application the agent does not own")
+				return err
+			}
+			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
+		}
+
 		_, err := s.appManager.UpdateStatus(ctx, agentName, incoming)
 		if err != nil {
 			return fmt.Errorf("could not update application status for %s: %w", incoming.QualifiedName(), err)
@@ -356,6 +367,19 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			if !s.destinationBasedMapping {
 				incoming.SetNamespace(agentName)
 			}
+
+			// The incoming namespace is agent-supplied, so check that the
+			// application really is this agent's before acting on it.
+			if err := s.assertManagedAgentOwnsApp(ctx, agentName, incoming.Namespace, incoming.Name); err != nil {
+				if kerrors.IsNotFound(err) {
+					return nil // nothing to delete
+				}
+				if event.IsEventNotAllowed(err) {
+					logCtx.WithError(err).Warn("Rejecting delete for an application the agent does not own")
+				}
+				return err
+			}
+
 			app, err := s.appManager.Get(ctx, incoming.Name, incoming.Namespace)
 			if err != nil {
 				if kerrors.IsNotFound(err) {
@@ -403,6 +427,17 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 		if !agentMode.IsManaged() {
 			logCtx.Debug("Discarding event, because agent is not in managed mode")
 			return event.NewEventNotAllowedErr("event type not allowed when mode is not managed")
+		}
+
+		// errData.ResourceName/Namespace are agent-supplied and address the
+		// application directly, so the ownership check applies here too.
+		if err := s.assertManagedAgentOwnsApp(ctx, agentName, errData.ResourceNamespace, errData.ResourceName); err != nil {
+			if event.IsEventNotAllowed(err) {
+				logCtx.WithError(err).Warn("Rejecting error event for an application the agent does not own")
+				return err
+			}
+			return fmt.Errorf("could not update application status for %s/%s: %w",
+				errData.ResourceNamespace, errData.ResourceName, err)
 		}
 
 		app := &v1alpha1.Application{
@@ -832,7 +867,8 @@ func (s *Server) processIncomingResourceResyncEvent(ctx context.Context, agentNa
 	resyncHandler := resync.NewRequestHandler(dynClient, sendQ, s.events, s.resources.Get(agentName), logCtx, manager.ManagerRolePrincipal, s.namespace).
 		WithDestinationBasedMapping(s.destinationBasedMapping).
 		WithPrincipalUID(s.principalUID).
-		WithPeerNamespace(s.agentNamespace(agentName))
+		WithPeerNamespace(s.agentNamespace(agentName)).
+		WithAppOwnerResolver(s.getAgentNameForApp)
 
 	switch ev.Type() {
 	case event.SyncedResourceList.String():
@@ -1046,4 +1082,50 @@ func agentPrefixedProjectName(project, agent string) (string, error) {
 			validation.DNS1123SubdomainMaxLength, project)
 	}
 	return project, nil
+}
+
+// assertManagedAgentOwnsApp verifies that the incoming Application identified by
+// (namespace, name) is actually mapped to the authenticated managed agent agentName.
+//
+// Without this check a managed agent could send status-update, error or
+// delete events naming an Application that belongs to a *different* agent,
+// and the principal would apply them (a confused-deputy). The check is only
+// needed with destination-based mapping: with namespace-based mapping an
+// agent's applications always live in a namespace equal to the agent name,
+// and every write path pins the namespace to agentName before touching the
+// backend, so cross-agent addressing is impossible by construction.
+//
+// Ownership is resolved with getAgentNameForApp - the very same predicate the
+// principal uses to route applications *to* agents. Using one predicate for
+// both directions guarantees that anything the principal would ever send to
+// an agent is also accepted back from it, so the check cannot reject
+// legitimate traffic.
+//
+// Errors from looking up the application (including NotFound) are returned
+// unwrapped so that callers can keep their existing not-found semantics.
+func (s *Server) assertManagedAgentOwnsApp(ctx context.Context, agentName, namespace, name string) error {
+	if !s.destinationBasedMapping {
+		return nil
+	}
+
+	existing, err := s.appManager.Get(ctx, name, namespace)
+	if err != nil {
+		return err
+	}
+
+	// A managed agent shouldn't update an application owned by an
+	// autonomous agent.
+	if s.isResourceFromAutonomousAgent(existing) {
+		return event.NewEventNotAllowedErr(
+			"managed agent %q may not modify application %s/%s, which belongs to an autonomous agent",
+			agentName, namespace, name)
+	}
+
+	if owner := s.getAgentNameForApp(existing); owner != agentName {
+		return event.NewEventNotAllowedErr(
+			"agent %q may not modify application %s/%s, which is mapped to agent %q",
+			agentName, namespace, name, owner)
+	}
+
+	return nil
 }
