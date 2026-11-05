@@ -57,6 +57,7 @@ nav:
           - ApplicationSet synchronization: user-guide/autonomous-agent/applicationsets-autonomous-mode.md
           - Repository management: user-guide/autonomous-agent/repository.md
       - Adding an agent: user-guide/adding-agents.md
+      - Adding agents declaratively: user-guide/declarative-agents.md
       - Agent self-registration: user-guide/self-registration.md
       - Accessing live resources on workload clusters: user-guide/live-resources.md
       - Migration from classical multi-cluster Argo CD: user-guide/migration.md
