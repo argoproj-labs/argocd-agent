@@ -80,6 +80,13 @@ type RequestHandler struct {
 	// is installed. Used with destinationBasedMapping to remap namespaces
 	// during resync lookups when agent and principal are in different namespaces.
 	peerNamespace string
+
+	// appOwnerResolver resolves the name of the agent an Application is mapped
+	// to. It is only set by the principal, which needs it to verify that a
+	// resync request from an agent refers to one of that agent's own
+	// Applications. It is nil on agents, where resync requests always come
+	// from the principal and no such check applies.
+	appOwnerResolver func(app *v1alpha1.Application) string
 }
 
 func NewRequestHandler(dynClient dynamic.Interface, queue workqueue.TypedRateLimitingInterface[*cloudevent.Event], events *event.EventSource, resources *resources.Resources, log *logrus.Entry, role manager.ManagerRole, namespace string) *RequestHandler {
@@ -111,6 +118,15 @@ func (r *RequestHandler) WithDestinationBasedMapping(enabled bool) *RequestHandl
 // WithPeerNamespace sets the namespace of the peer (agent or principal).
 func (r *RequestHandler) WithPeerNamespace(ns string) *RequestHandler {
 	r.peerNamespace = ns
+	return r
+}
+
+// WithAppOwnerResolver sets the function used to resolve which agent an
+// Application is mapped to. Only the principal sets this; it must be the same
+// predicate the principal uses to route Applications to agents, so that the
+// ownership check can never reject a legitimate request.
+func (r *RequestHandler) WithAppOwnerResolver(fn func(app *v1alpha1.Application) string) *RequestHandler {
+	r.appOwnerResolver = fn
 	return r
 }
 
@@ -344,6 +360,23 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 		return r.handleDeletedResource(logCtx, reqUpdate)
 	}
 
+	// Verify the Application really is mapped to the requesting agent before
+	// replying with its spec, otherwise any managed agent could read (and keep resyncing)
+	// another agent's Applications.
+	//
+	// This deliberately only applies to the principal: ProcessRequestUpdateEvent
+	// is shared with autonomous agents, which legitimately receive request
+	// updates from the principal and must not be subjected to this check.
+	if r.role == manager.ManagerRolePrincipal && reqUpdate.Kind == "Application" && r.destinationBasedMapping {
+		isRelevant, err := r.isApplicationRelevant(logCtx, agentName, res)
+		if err != nil {
+			return err
+		}
+		if !isRelevant {
+			return nil
+		}
+	}
+
 	// If the resource is AppProject/Repository, we need to ensure that it is still relevant with the current AppProject rules.
 	if r.role == manager.ManagerRolePrincipal && (reqUpdate.Kind == "AppProject" || reqUpdate.Kind == "Repository") {
 		err, isRelevant := r.isAppProjectRelevant(ctx, logCtx, agentName, reqUpdate, res)
@@ -442,6 +475,33 @@ func (r *RequestHandler) stampPrincipalUID(ev *cloudevent.Event) {
 	if r.principalUID != "" {
 		event.SetPrincipalUID(ev, r.principalUID)
 	}
+}
+
+// isApplicationRelevant reports whether the Application res is mapped to
+// agentName, i.e. whether the principal would route this Application to that
+// agent in the first place.
+func (r *RequestHandler) isApplicationRelevant(logCtx *logrus.Entry, agentName string, res *unstructured.Unstructured) (bool, error) {
+	if r.appOwnerResolver == nil {
+		return true, nil
+	}
+
+	resBytes, err := res.MarshalJSON()
+	if err != nil {
+		return false, err
+	}
+
+	app := &v1alpha1.Application{}
+	if err := json.Unmarshal(resBytes, app); err != nil {
+		return false, fmt.Errorf("could not unmarshal application for ownership check: %w", err)
+	}
+
+	owner := r.appOwnerResolver(app)
+	if owner != agentName {
+		logCtx.WithField("owner", owner).Trace("Application is not mapped to the requesting agent, ignoring the request update")
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // isAppProjectRelevant checks if the incoming AppProject/Repository is still relevant to the agent based on the AppProject rules.

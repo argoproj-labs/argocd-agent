@@ -1130,3 +1130,243 @@ func fakeUnresGPGKey() *unstructured.Unstructured {
 	}
 	return resource
 }
+
+// destinationOwnerResolver mimics the principal's getAgentNameForApp for
+// managed applications under destination-based mapping: the owning agent is
+// spec.destination.name.
+func destinationOwnerResolver(app *v1alpha1.Application) string {
+	return app.Spec.Destination.Name
+}
+
+// fakeUnresAppWithDestination builds an unstructured Application in namespace
+// that is mapped to destName via spec.destination.name.
+func fakeUnresAppWithDestination(name, namespace, destName string) *unstructured.Unstructured {
+	resource := fakeUnresApp()
+	resource.SetName(name)
+	resource.SetNamespace(namespace)
+	resource.SetAnnotations(map[string]string{
+		manager.SourceUIDAnnotation: "source-uid",
+	})
+	resource.Object["spec"] = map[string]any{
+		"project": "default",
+		"destination": map[string]any{
+			"name":      destName,
+			"namespace": "guestbook",
+		},
+	}
+	return resource
+}
+
+// Test_ProcessRequestUpdateEvent_Ownership covers the check that stops a
+// managed agent from using a resync request update to read back (and keep
+// resyncing) an Application that belongs to a different agent. Under
+// destination-based mapping the namespace in the request is agent-supplied
+// and therefore does not identify the owner on its own.
+func Test_ProcessRequestUpdateEvent_Ownership(t *testing.T) {
+	ctx := context.Background()
+	gvr, err := getGroupVersionResource("Application")
+	require.Nil(t, err)
+
+	const victimAgent = "agent-owner"
+
+	newPrincipalHandler := func(t *testing.T, destinationBasedMapping bool) *RequestHandler {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = destinationBasedMapping
+		handler.peerNamespace = "argocd-agent"
+		return handler.WithAppOwnerResolver(destinationOwnerResolver)
+	}
+
+	t.Run("principal ignores a request update for another agent's application", func(t *testing.T) {
+		handler := newPrincipalHandler(t, true)
+
+		// The application lives in a tenant namespace and belongs to
+		// victimAgent, not to the requesting agent (testAgentName).
+		resource := fakeUnresAppWithDestination("victim-app", "tenant-apps", victimAgent)
+		_, err := handler.dynClient.Resource(gvr).Namespace("tenant-apps").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		// A deliberately mismatched checksum: without the ownership check
+		// this would make the principal reply with the full Application spec.
+		reqUpdate := &event.RequestUpdate{
+			Name:      "victim-app",
+			Namespace: "tenant-apps",
+			Kind:      "Application",
+			Checksum:  []byte("deliberately-wrong"),
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
+		assert.Nil(t, err, "an unauthorised request should be ignored, not surfaced as an error")
+		assert.Zero(t, handler.sendQ.Len(),
+			"the principal must not leak another agent's Application spec back to the requester")
+	})
+
+	t.Run("principal answers a request update for the agent's own application", func(t *testing.T) {
+		handler := newPrincipalHandler(t, true)
+
+		resource := fakeUnresAppWithDestination("own-app", "tenant-apps", testAgentName)
+		_, err := handler.dynClient.Resource(gvr).Namespace("tenant-apps").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "own-app",
+			Namespace: "tenant-apps",
+			Kind:      "Application",
+			Checksum:  []byte("deliberately-wrong"),
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
+		assert.Nil(t, err)
+
+		require.Equal(t, 1, handler.sendQ.Len(), "the owning agent should receive a spec update")
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+	})
+
+	t.Run("namespace-based mapping is unaffected by the ownership check", func(t *testing.T) {
+		handler := newPrincipalHandler(t, false)
+
+		// With namespace-based mapping the lookup namespace is forced to the
+		// agent name, so the agent can only ever address its own apps. The
+		// destination name is irrelevant here and must not cause a rejection.
+		resource := fakeUnresAppWithDestination("own-app", testAgentName, "some-other-cluster")
+		_, err := handler.dynClient.Resource(gvr).Namespace(testAgentName).Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "own-app",
+			Namespace: "whatever-the-agent-claims",
+			Kind:      "Application",
+			Checksum:  []byte("deliberately-wrong"),
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
+		assert.Nil(t, err)
+
+		require.Equal(t, 1, handler.sendQ.Len(), "namespace-based mapping must keep working unchanged")
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+	})
+
+	t.Run("autonomous agent side is never subjected to the check", func(t *testing.T) {
+		// ProcessRequestUpdateEvent is shared with autonomous agents, which
+		// legitimately receive request updates from the principal. The role
+		// guard must keep them out of the ownership check entirely - this is
+		// the regression this subtest exists for.
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRoleAgent
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		// An agent never has a resolver, but set one that would reject
+		// everything to prove the role guard - not the nil check - is what
+		// keeps the agent path open.
+		handler = handler.WithAppOwnerResolver(func(app *v1alpha1.Application) string { return "never-matches" })
+
+		resource := fakeUnresAppWithDestination("auto-app", "argocd", "some-cluster")
+		_, err := handler.dynClient.Resource(gvr).Namespace("argocd").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "auto-app",
+			Namespace: "argocd",
+			Kind:      "Application",
+			Checksum:  []byte("deliberately-wrong"),
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeAutonomous, reqUpdate)
+		assert.Nil(t, err)
+
+		require.Equal(t, 1, handler.sendQ.Len(),
+			"an autonomous agent must still answer request updates from the principal")
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.SpecUpdate.String(), ev.Type())
+	})
+
+	t.Run("missing resolver falls back to the previous behaviour", func(t *testing.T) {
+		handler := createFakeHandler(t)
+		handler.role = manager.ManagerRolePrincipal
+		handler.namespace = "argocd"
+		handler.destinationBasedMapping = true
+		handler.peerNamespace = "argocd-agent"
+		// No WithAppOwnerResolver call.
+
+		resource := fakeUnresAppWithDestination("own-app", "tenant-apps", testAgentName)
+		_, err := handler.dynClient.Resource(gvr).Namespace("tenant-apps").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "own-app",
+			Namespace: "tenant-apps",
+			Kind:      "Application",
+			Checksum:  []byte("deliberately-wrong"),
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
+		assert.Nil(t, err)
+		assert.Equal(t, 1, handler.sendQ.Len())
+	})
+
+	t.Run("AppProject requests are not affected by the Application check", func(t *testing.T) {
+		handler := newPrincipalHandler(t, true)
+
+		appProject := fakeUnresAppProject("default", []v1alpha1.ApplicationDestination{
+			{Name: testAgentName, Namespace: "*"},
+		})
+		projGVR, err := getGroupVersionResource("AppProject")
+		require.Nil(t, err)
+		_, err = handler.dynClient.Resource(projGVR).Namespace("argocd").Create(ctx, appProject, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "default",
+			Namespace: "argocd",
+			Kind:      "AppProject",
+			Checksum:  []byte("deliberately-wrong"),
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
+		assert.Nil(t, err)
+		assert.Equal(t, 1, handler.sendQ.Len(), "AppProject resync must keep using its own relevance check")
+	})
+}
+
+func Test_isApplicationRelevant(t *testing.T) {
+	handler := createFakeHandler(t)
+	logCtx := handler.log
+
+	t.Run("nil resolver skips the check", func(t *testing.T) {
+		res := fakeUnresAppWithDestination("app", "ns", "other-agent")
+		relevant, err := handler.isApplicationRelevant(logCtx, testAgentName, res)
+		require.Nil(t, err)
+		assert.True(t, relevant)
+	})
+
+	withResolver := createFakeHandler(t).WithAppOwnerResolver(destinationOwnerResolver)
+
+	t.Run("owner matches", func(t *testing.T) {
+		res := fakeUnresAppWithDestination("app", "ns", testAgentName)
+		relevant, err := withResolver.isApplicationRelevant(logCtx, testAgentName, res)
+		require.Nil(t, err)
+		assert.True(t, relevant)
+	})
+
+	t.Run("owner differs", func(t *testing.T) {
+		res := fakeUnresAppWithDestination("app", "ns", "other-agent")
+		relevant, err := withResolver.isApplicationRelevant(logCtx, testAgentName, res)
+		require.Nil(t, err)
+		assert.False(t, relevant)
+	})
+
+	t.Run("empty destination name is never owned", func(t *testing.T) {
+		// An Application without a destination name cannot be routed to any
+		// agent under destination-based mapping, so it must not be claimable.
+		res := fakeUnresAppWithDestination("app", "ns", "")
+		relevant, err := withResolver.isApplicationRelevant(logCtx, testAgentName, res)
+		require.Nil(t, err)
+		assert.False(t, relevant)
+	})
+}
