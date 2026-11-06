@@ -230,6 +230,8 @@ kubectl exec -it <replica-pod> -- curl -sS http://<primary-addr>:8003/healthz
 
 Check that the server's `--auth` method is configured correctly — the replica needs a client certificate the primary trusts, and the extracted identity must be in `--ha-allowed-replication-clients`.
 
+If you see `certificate specifies an incompatible key usage` errors, ensure the principal's server certificate includes both `serverAuth` and `clientAuth` extended key usage. In HA mode the replica reuses its server certificate as a client certificate when connecting to the peer. Certificates issued by `argocd-agentctl pki issue principal` include both by default. For custom certificates, add `extendedKeyUsage=serverAuth,clientAuth` to the certificate extensions.
+
 ### Promote refuses (replication stream active)
 
 The safety check prevents promoting while still receiving events from a peer. If you're certain the primary is dead but the stream hasn't timed out:

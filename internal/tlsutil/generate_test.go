@@ -54,7 +54,7 @@ func Test_GenerateCaCertificate(t *testing.T) {
 
 	t.Run("Generate server certificate", func(t *testing.T) {
 		certSubj := "abcdefg"
-		certData, keyData, err := GenerateServerCertificate(certSubj, cert.Leaf, cert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, DefaultLeafCertValidityDays, KeyGenOptions{})
+		certData, keyData, err := GenerateServerCertificate(certSubj, cert.Leaf, cert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, DefaultLeafCertValidityDays, false, KeyGenOptions{})
 		require.NoError(t, err)
 		ccert, err := tls.X509KeyPair([]byte(certData), []byte(keyData))
 		require.NoError(t, err)
@@ -68,6 +68,18 @@ func Test_GenerateCaCertificate(t *testing.T) {
 		ip := net.ParseIP("127.0.0.1")
 		assert.Contains(t, ccert.Leaf.IPAddresses, ip[len(ip)-4:])
 		assert.Contains(t, ccert.Leaf.DNSNames, "localhost")
+	})
+
+	t.Run("Generate server certificate with clientAuth", func(t *testing.T) {
+		certSubj := "principal"
+		certData, keyData, err := GenerateServerCertificate(certSubj, cert.Leaf, cert.PrivateKey, []string{"127.0.0.1"}, []string{"localhost"}, DefaultLeafCertValidityDays, true, KeyGenOptions{})
+		require.NoError(t, err)
+		ccert, err := tls.X509KeyPair([]byte(certData), []byte(keyData))
+		require.NoError(t, err)
+		require.NotNil(t, ccert)
+		assert.Contains(t, ccert.Leaf.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
+		assert.Contains(t, ccert.Leaf.ExtKeyUsage, x509.ExtKeyUsageClientAuth)
+		assert.Equal(t, certSubj, ccert.Leaf.Subject.CommonName)
 	})
 
 	t.Run("custom validity days", func(t *testing.T) {

@@ -395,7 +395,7 @@ func NewPKIIssuePrincipalCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
 			issueAndSaveSecret(principalCfg.KubeContext, "argocd-agent-principal-tls", principalCfg.Namespace, upsert, days, keyOpts, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
-				return tlsutil.GenerateServerCertificate("argocd-agent-principal", c, pk, ips, dns, days, keyOpts)
+				return tlsutil.GenerateServerCertificate("argocd-agent-principal", c, pk, ips, dns, days, true, keyOpts)
 			})
 		},
 	}
@@ -427,7 +427,7 @@ func NewPKIIssueResourceProxyCommand() *cobra.Command {
 			}
 			keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
 			issueAndSaveSecret(principalCfg.KubeContext, "argocd-agent-resource-proxy-tls", principalCfg.Namespace, upsert, days, keyOpts, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
-				return tlsutil.GenerateServerCertificate("argocd-agent-resource-proxy", c, pk, ips, dns, days, keyOpts)
+				return tlsutil.GenerateServerCertificate("argocd-agent-resource-proxy", c, pk, ips, dns, days, false, keyOpts)
 			})
 		},
 	}
