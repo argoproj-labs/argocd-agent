@@ -187,6 +187,22 @@ argocd-agent-ca                           Opaque                1      5m
 argocd-agent-client-tls                   kubernetes.io/tls     2      4m
 ```
 
+## Agent client certificate reload
+
+The agent watches the client certificate Secret (default `argocd-agent-client-tls`), or the client certificate files when those are set. It also watches the root CA, from the CA Secret (default `argocd-agent-ca`) or from the `--root-ca-path` file. The client certificate and the root CA can come from different sources. The next TLS handshake uses the new certificate. The agent process does not restart.
+
+An open connection keeps the TLS session that started it. The new certificate is used when the agent connects again.
+
+The renewed certificate must keep the same agent identity. The principal reads the agent name from the certificate subject, or from a URI SAN when it uses `mtls:uri:` authentication. A different name is a different agent. The agent logs `Loaded client certificate` with the subject, fingerprint and expiry of each new certificate, and logs a warning when a reloaded certificate has a different subject or URI SANs.
+
+An invalid certificate or root CA is fatal, as it is for the principal. The agent logs the error and exits, and it does not start again until the Secret or files hold valid material. The agent does not keep using the previous certificate, because a rotation may be replacing a compromised one. A new CA pool is used when the agent opens a new connection.
+
+When the certificate and key are files, replace them together, for example with the atomic `..data` swap that Kubernetes uses for a mounted Secret. If the certificate file is written before the key file, the agent can read a certificate and key that do not match, and exit.
+
+This reload does not issue a new certificate. Write the new Secret, or the new certificate files, before the current certificate expires.
+
+SPIRE mode is not affected. SPIRE rotates its own certificates.
+
 ## Using cert-manager
 
 The [cert-manager](https://cert-manager.io/docs/) operator can automate certificate management using a CA issuer.
