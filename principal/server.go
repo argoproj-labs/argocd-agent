@@ -738,6 +738,8 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 
 	if s.destinationBasedMapping {
 		log().Info("Destination-based mapping is enabled on the principal")
+	} else {
+		log().Warn("DEPRECATED: Namespace-based mapping for managed agents will be removed in a future release. See the migration guide in the agent mapping docs before enabling destination-based mapping")
 	}
 
 	if s.namespace == "" {

@@ -545,6 +545,8 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	if a.destinationBasedMapping {
 		log().Info("Destination-based mapping is enabled")
+	} else if a.mode.IsManaged() {
+		log().Warn("DEPRECATED: Namespace-based mapping will be removed in a future release. See the migration guide in the agent mapping docs before enabling destination-based mapping")
 	}
 
 	// For managed-agent we need to maintain a cache to keep resources in sync with last known state of

@@ -2,6 +2,9 @@
 
 argocd-agent supports two modes for mapping applications to agents: **namespace-based mapping** (default) and **destination-based mapping**. This document explains both approaches, their trade-offs, and when to use each.
 
+!!! warning "Namespace-based mapping is deprecated"
+    Namespace-based mapping is still the default, but it is deprecated for managed agents and will be removed in a future release. New installations should use destination-based mapping. See the [Migration Guide](#migration-guide) to switch existing ones.
+
 !!! important "Managed Mode Only"
     Destination-based mapping only applies to **managed agents**. Autonomous agents do not require this feature because the agent is the source of truth and controls where applications are stored locally. On the principal, autonomous apps are always stored in the `{agentName}` namespace for clear ownership.
 
