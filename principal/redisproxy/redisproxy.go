@@ -693,7 +693,13 @@ func (rp *RedisProxy) handleAgentSubscribe(connState *connectionState, channelNa
 					return
 				case event := <-subscriptionChannel:
 					logCtx.Trace("received redis subscription event from agent, forwarding to connection channel")
-					connState.connectionUUIDEventsChannel <- event
+					// The connection's message loop is the only reader. If it has already exited, don't wait for it forever.
+					select {
+					case connState.connectionUUIDEventsChannel <- event:
+					case <-connState.connectionCtx.Done():
+						logCtx.Debug("dropping redis subscription event, the connection was closed before it could be forwarded")
+						return
+					}
 				}
 			}
 		}()
@@ -795,7 +801,12 @@ func readNextMessageFromArgoCDOrInternal(connState *connectionState, receiverCha
 		return rcMessage
 
 	// Read internal (subscribe notify) messages sent to us by an agent
-	case channelMessage := <-connState.connectionUUIDEventsChannel:
+	case channelMessage, ok := <-connState.connectionUUIDEventsChannel:
+		if !ok {
+			// The forwarder goroutine closes this channel when it exits, which only happens once the connection context is cancelled
+			logCtx.Debug("subscription forwarding channel has closed")
+			return parsedRedisCommand{connContextCancelled: true}
+		}
 
 		// Get the resource out of the event
 		resp := &event.RedisResponse{}

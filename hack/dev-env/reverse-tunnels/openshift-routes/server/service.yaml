@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: frp-container-external
+spec:
+  selector:
+    app: frp-container
+  type: ClusterIP
+  ports:
+    - protocol: TCP
+      name: "2333"
+      port: 2333 # The port the service listens on inside the cluster
+      targetPort: 2333 # The port your application is listening on in the pod
+#      nodePort: 30000 # The static port exposed on each node (optional, Kubernetes assigns if omitted)

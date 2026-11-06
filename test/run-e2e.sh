@@ -21,6 +21,35 @@ if ! kubectl config get-contexts | tail -n +2 | awk '{ print $2 }' | grep -qE '^
     exit 1
 fi
 
+# Wait until an agent reports itself as connected to the principal. The
+# agent's /healthz only returns 200 once its event stream with the principal is
+# up, i.e. after authentication. The processes started by 'make start-e2e' may
+# still be compiling (with -race, from a cold cache this takes minutes), and the
+# principal only sends events to agents that have already authenticated, so
+# running the tests before that makes the first CleanUp miss the agents.
+waitForAgent() {
+    AGENT_NAME=$1
+    HEALTHZ_PORT=$2
+    MAX_ATTEMPTS=${E2E_WAIT_FOR_AGENTS_ATTEMPTS:-120}
+    for ((i=1; i<=MAX_ATTEMPTS; i++)); do
+        if curl -sf --max-time 5 "http://localhost:${HEALTHZ_PORT}/healthz" >/dev/null; then
+            echo "Agent ${AGENT_NAME} is connected to the principal"
+            return 0
+        fi
+        echo "Agent ${AGENT_NAME} is not connected yet, attempting again in 5 seconds..."
+        sleep 5
+    done
+    echo "Agent ${AGENT_NAME} did not connect after ${MAX_ATTEMPTS} attempts." >&2
+    return 1
+}
+
+# The healthz ports are only reachable when the agents run locally (goreman);
+# see hack/dev-env/start-agent-*.sh for the port assignments.
+if test "${ARGOCD_AGENT_IN_CLUSTER}" = ""; then
+    waitForAgent agent-managed 8001
+    waitForAgent agent-autonomous 8002
+fi
+
 E2E_DESTINATION_BASED_MAPPING="${E2E_DESTINATION_BASED_MAPPING:-}" \
 go test -count=1 -v -race -timeout 60m github.com/argoproj-labs/argocd-agent/test/e2e
 
