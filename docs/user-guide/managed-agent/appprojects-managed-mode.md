@@ -95,11 +95,25 @@ When an AppProject is sent to an agent, it undergoes transformation to make it a
      namespace: "guestbook"  # Preserves original namespace restrictions
 ```
 
-2. **Source Namespaces**:
+2. **Destination Service Accounts**: Only the [impersonation](https://argo-cd.readthedocs.io/en/latest/operator-manual/app-sync-using-impersonation/) entries belonging to the agent are kept, and their server is rewritten to the local cluster:
+```yaml
+   destinationServiceAccounts:
+   - defaultServiceAccount: "argocd"
+     namespace: "guestbook"
+     server: "https://kubernetes.default.svc"
+```
+
+    Because `destinationServiceAccounts` has no `name` field, the agent is identified from the `?agentName=` parameter of the resource proxy URL in `server`. Entries whose server carries no such parameter — for example one pointing at the principal's own cluster — belong to no agent and are dropped, as are entries belonging to other agents. A `server` of `*` matches every cluster and is kept for all agents.
+
+    Argo CD requires the server and namespace pair of each entry to be unique. Where rewriting the server would leave two entries sharing a namespace, only the first is kept, matching the order in which Argo CD resolves the service account to impersonate.
+
+    Service accounts, roles and role bindings themselves are **not** synchronized. Making sure they exist on every workload cluster remains the platform team's responsibility.
+
+3. **Source Namespaces**:
     - **Namespace-based mapping**: removed from the AppProject sent to the agent, since it was only used on the principal for routing.
     - **Destination-based mapping**: preserved on the AppProject sent to the agent, where it controls which namespaces Applications may be created in on the workload cluster.
 
-3. **Roles**: Removed since they're not relevant on the workload cluster
+4. **Roles**: Removed since they're not relevant on the workload cluster
 
 ### Lifecycle Management
 

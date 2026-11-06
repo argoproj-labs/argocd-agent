@@ -111,6 +111,84 @@ func (suite *AppProjectTestSuite) Test_AppProject_Managed() {
 	}, 30*time.Second, 1*time.Second)
 }
 
+// Ensure that the destinationServiceAccounts of an AppProject are narrowed down to the
+// entries of the receiving agent, with their server rewritten to the agent's local cluster.
+func (suite *AppProjectTestSuite) Test_AppProject_Managed_DestinationServiceAccounts() {
+	requires := suite.Require()
+
+	const resourceProxy = "https://argocd-agent-principal-resource-proxy.argocd.svc.cluster.local:9090"
+
+	// Create an appProject on the principal's cluster holding impersonation entries for
+	// the managed agent, for another agent, and for the control plane's own cluster
+	appProject := argoapp.AppProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sample-dest-sa",
+			Namespace: fixture.PrincipalNamespace,
+		},
+		Spec: argoapp.AppProjectSpec{
+			Destinations: []argoapp.ApplicationDestination{
+				{
+					Namespace: "*",
+					Name:      "agent-*",
+				},
+			},
+			SourceNamespaces: []string{"agent-*"},
+			DestinationServiceAccounts: []argoapp.ApplicationDestinationServiceAccount{
+				{
+					DefaultServiceAccount: "argocd",
+					Namespace:             "guestbook",
+					Server:                resourceProxy + "?agentName=agent-managed",
+				},
+				{
+					DefaultServiceAccount: "other-agent",
+					Namespace:             "other-ns",
+					Server:                resourceProxy + "?agentName=agent-autonomous",
+				},
+				{
+					DefaultServiceAccount: "control-plane",
+					Namespace:             "control-plane-ns",
+					Server:                "https://kubernetes.default.svc",
+				},
+			},
+		},
+	}
+
+	err := suite.PrincipalClient.Create(suite.Ctx, &appProject, metav1.CreateOptions{})
+	requires.NoError(err)
+
+	managedKey := types.NamespacedName{Name: appProject.Name, Namespace: fixture.ManagedAgentNamespace}
+
+	// Ensure the appProject has been pushed to the managed-agent
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, managedKey, &appProject, metav1.GetOptions{})
+		return err == nil
+	}, 30*time.Second, 1*time.Second, "GET appProject from managed-agent")
+
+	// Only the entry of the managed agent survives, pointing at the local cluster
+	mappProject := argoapp.AppProject{}
+	err = suite.ManagedAgentClient.Get(suite.Ctx, managedKey, &mappProject, metav1.GetOptions{})
+	requires.NoError(err)
+	requires.Equal([]argoapp.ApplicationDestinationServiceAccount{
+		{
+			DefaultServiceAccount: "argocd",
+			Namespace:             "guestbook",
+			Server:                "https://kubernetes.default.svc",
+		},
+	}, mappProject.Spec.DestinationServiceAccounts)
+
+	// Delete the appProject from the principal
+	err = suite.PrincipalClient.Delete(suite.Ctx, &appProject, metav1.DeleteOptions{})
+	requires.NoError(err)
+
+	// Ensure the appProject has been deleted from the managed-agent
+	requires.Eventually(func() bool {
+		appProject := argoapp.AppProject{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, managedKey, &appProject, metav1.GetOptions{})
+		return errors.IsNotFound(err)
+	}, 30*time.Second, 1*time.Second)
+}
+
 // Ensure that when an (autonomous) AppProject is created with roles already defined, that these are correctly to principal
 func (suite *AppProjectTestSuite) Test_AppProject_Autonomous_CreateWithProjectRole() {
 	requires := suite.Require()
