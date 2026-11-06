@@ -104,46 +104,57 @@ func generateAndWriteInitalCerts(t *testing.T) (string, tls.Certificate, string,
 	serverPEM, serverKeyPEM, err := tlsutil.GenerateServerCertificate("principal", ca.Leaf, ca.PrivateKey, nil, []string{"localhost", "127.0.0.1"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 	require.NoError(t, err)
 
-	writeCertsToDir(t, initialDir, caPEM, caKeyPEM, serverPEM, serverKeyPEM)
-	swapSymlink(t, dir, initialDir)
-
-	require.NoError(t, os.Symlink(filepath.Join(symlinkDir, hotReloadCACertFileName), filepath.Join(dir, hotReloadCACertFileName)))
-	require.NoError(t, os.Symlink(filepath.Join(symlinkDir, hotReloadServerCertFileName), filepath.Join(dir, hotReloadServerCertFileName)))
-	require.NoError(t, os.Symlink(filepath.Join(symlinkDir, hotReloadServerKeyFileName), filepath.Join(dir, hotReloadServerKeyFileName)))
+	swapCertFiles(t, dir, initialDir, principalCertFiles(caPEM, caKeyPEM, serverPEM, serverKeyPEM))
+	linkCertFiles(t, dir, hotReloadCACertFileName, hotReloadServerCertFileName, hotReloadServerKeyFileName)
 
 	return dir, ca, caPEM, caKeyPEM, serverPEM, serverKeyPEM
 }
 
 // createNewServerCert creates a new server cert and then symlinks it to the ..data directory
 func createNewServerCert(t *testing.T, ca tls.Certificate, caPEM, caKeyPEM, dir string) {
-	newDir := filepath.Join(dir, "new-certs")
-
 	serverPEM, serverKeyPEM, err := tlsutil.GenerateServerCertificate("principal-v2", ca.Leaf, ca.PrivateKey, nil, []string{"localhost", "127.0.0.1"}, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
 	require.NoError(t, err)
 
-	writeCertsToDir(t, newDir, caPEM, caKeyPEM, serverPEM, serverKeyPEM)
-	swapSymlink(t, dir, newDir)
+	swapCertFiles(t, dir, filepath.Join(dir, "new-certs"), principalCertFiles(caPEM, caKeyPEM, serverPEM, serverKeyPEM))
 }
 
 // createNewCACert creates a new CA cert and then symlinks it to the ..data directory
 func createNewCACert(t *testing.T, serverPEM, serverKeyPEM, dir string) {
-	newDir := filepath.Join(dir, "new-ca")
-
 	caPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate("test-ca", tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
 	require.NoError(t, err)
 
-	writeCertsToDir(t, newDir, caPEM, caKeyPEM, serverPEM, serverKeyPEM)
-	swapSymlink(t, dir, newDir)
+	swapCertFiles(t, dir, filepath.Join(dir, "new-ca"), principalCertFiles(caPEM, caKeyPEM, serverPEM, serverKeyPEM))
 }
 
-// writeCertsToDir writes the passed certificates to a directory
-func writeCertsToDir(t *testing.T, dir, caPEM, caKeyPEM, serverPEM, serverKeyPEM string) {
-	err := os.MkdirAll(dir, 0o755)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, hotReloadCACertFileName), []byte(caPEM), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, hotReloadCAKeyFileName), []byte(caKeyPEM), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, hotReloadServerCertFileName), []byte(serverPEM), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, hotReloadServerKeyFileName), []byte(serverKeyPEM), 0o644))
+// principalCertFiles returns the principal's CA and server certificate files, keyed by file name
+func principalCertFiles(caPEM, caKeyPEM, serverPEM, serverKeyPEM string) map[string]string {
+	return map[string]string{
+		hotReloadCACertFileName:     caPEM,
+		hotReloadCAKeyFileName:      caKeyPEM,
+		hotReloadServerCertFileName: serverPEM,
+		hotReloadServerKeyFileName:  serverKeyPEM,
+	}
+}
+
+// writeCertsToDir writes each file, keyed by file name, to a directory
+func writeCertsToDir(t *testing.T, dir string, files map[string]string) {
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	for name, data := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(data), 0o644))
+	}
+}
+
+// swapCertFiles writes the files to targetDir and then points the ..data symlink in baseDir to it
+func swapCertFiles(t *testing.T, baseDir, targetDir string, files map[string]string) {
+	writeCertsToDir(t, targetDir, files)
+	swapSymlink(t, baseDir, targetDir)
+}
+
+// linkCertFiles symlinks each file name in baseDir to the same name in the ..data directory
+func linkCertFiles(t *testing.T, baseDir string, names ...string) {
+	for _, name := range names {
+		require.NoError(t, os.Symlink(filepath.Join(symlinkDir, name), filepath.Join(baseDir, name)))
+	}
 }
 
 // swapSymlink creates a temp symlink and then renames it to be the expected directory
@@ -303,16 +314,7 @@ func (suite *TLSHotReloadTestSuite) Test_AgentUsesRenewedClientCertificateWithou
 	// The agent logs the fingerprint of each client certificate it loads.
 	fixture.VerifyProcessLogs(suite.T(), fixture.AgentAutonomousName, []string{"certFingerprint=" + tlsutil.CertificateFingerprint(current)})
 
-	caSecret := &corev1.Secret{}
-	caKey := types.NamespacedName{Name: agentCASecretName, Namespace: fixture.PrincipalNamespace}
-	requires.NoError(suite.PrincipalClient.Get(suite.Ctx, caKey, caSecret, metav1.GetOptions{}))
-	ca, err := tls.X509KeyPair(caSecret.Data["tls.crt"], caSecret.Data["tls.key"])
-	requires.NoError(err)
-	ca.Leaf, err = x509.ParseCertificate(ca.Certificate[0])
-	requires.NoError(err)
-
-	newCert, newKey, err := tlsutil.GenerateClientCertificate(current.Subject.CommonName, ca.Leaf, ca.PrivateKey, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
-	requires.NoError(err)
+	newCert, newKey := suite.newAgentClientCertificate()
 	renewed := parsePEMCertificate(suite.T(), []byte(newCert))
 	restore := suite.updateAgentSecret(agentClientTLSSecretName, map[string][]byte{"tls.crt": []byte(newCert), "tls.key": []byte(newKey)})
 	defer restore()
@@ -337,7 +339,7 @@ func (suite *TLSHotReloadTestSuite) Test_AgentExitsOnInvalidClientCertificate() 
 	restore := suite.updateAgentSecret(agentClientTLSSecretName, map[string][]byte{"tls.crt": []byte(caPEM), "tls.key": []byte(caKeyPEM)})
 	defer restore()
 
-	suite.requireAgentExit("certificate provided is a CA")
+	suite.requireAgentExit("Failed to change certificates", "certificate provided is a CA")
 }
 
 // Test_AgentExitsOnInvalidRootCA writes invalid data to the agent CA Secret and
@@ -348,7 +350,120 @@ func (suite *TLSHotReloadTestSuite) Test_AgentExitsOnInvalidRootCA() {
 	restore := suite.updateAgentSecret(agentCASecretName, map[string][]byte{"ca.crt": []byte("not a certificate")})
 	defer restore()
 
-	suite.requireAgentExit("no certs were found under correct keys")
+	suite.requireAgentExit("Failed to change certificates", "no certs were found under correct keys")
+}
+
+// Test_AgentUsesSwappedClientCertificateFileWithoutRestart swaps the agent's
+// file-based client certificate, checks that the running agent loads it, and
+// checks that the agent authenticates with it after a principal restart.
+func (suite *TLSHotReloadTestSuite) Test_AgentUsesSwappedClientCertificateFileWithoutRestart() {
+	// Skip if running in cluster because we need to be able to read/write to file paths
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+	dir, files := suite.startAgentWithCertFiles()
+
+	newCert, newKey := suite.newAgentClientCertificate()
+	renewed := parsePEMCertificate(suite.T(), []byte(newCert))
+	files[hotReloadServerCertFileName] = newCert
+	files[hotReloadServerKeyFileName] = newKey
+	swapCertFiles(suite.T(), dir, filepath.Join(dir, "renewed"), files)
+
+	fixture.VerifyProcessLogs(suite.T(), fixture.AgentAutonomousName, []string{"certFingerprint=" + tlsutil.CertificateFingerprint(renewed)})
+	suite.Require().True(fixture.IsProcessRunning(fixture.AgentAutonomousName, suite.T()))
+
+	// The principal logs the fingerprint of the client certificate that authenticated.
+	fixture.RestartAgent(suite.T(), fixture.PrincipalName)
+	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+	fixture.VerifyProcessLogs(suite.T(), fixture.PrincipalName, []string{"fingerprint=" + tlsutil.CertificateFingerprint(renewed)})
+	suite.Require().True(fixture.IsProcessRunning(fixture.AgentAutonomousName, suite.T()))
+}
+
+// Test_AgentExitsOnInvalidClientCertificateFile swaps a CA certificate into the
+// agent's client certificate file and checks that the agent exits.
+func (suite *TLSHotReloadTestSuite) Test_AgentExitsOnInvalidClientCertificateFile() {
+	// Skip if running in cluster because we need to be able to read/write to file paths
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+	dir, files := suite.startAgentWithCertFiles()
+
+	caPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate("not-a-client", tlsutil.DefaultCACertValidityDays, tlsutil.KeyGenOptions{})
+	suite.Require().NoError(err)
+	files[hotReloadServerCertFileName] = caPEM
+	files[hotReloadServerKeyFileName] = caKeyPEM
+	swapCertFiles(suite.T(), dir, filepath.Join(dir, "invalid"), files)
+
+	suite.requireAgentExit("TLS hot reload watch failed", "failed to validate client cert")
+}
+
+// Test_AgentExitsOnInvalidRootCAFile swaps invalid data into the agent's root CA
+// file and checks that the agent exits.
+func (suite *TLSHotReloadTestSuite) Test_AgentExitsOnInvalidRootCAFile() {
+	// Skip if running in cluster because we need to be able to read/write to file paths
+	fixture.SkipIfAgentInClusterEnvVarIsSet(suite.T())
+	dir, files := suite.startAgentWithCertFiles()
+
+	files[hotReloadCACertFileName] = "not a certificate"
+	swapCertFiles(suite.T(), dir, filepath.Join(dir, "invalid"), files)
+
+	suite.requireAgentExit("TLS hot reload watch failed", "validation failed on reloading ca pool")
+}
+
+// startAgentWithCertFiles writes a new client certificate and the agent's root
+// CA to a Kubernetes style mounted directory, restarts the autonomous agent to
+// load them from files, and returns the directory and the files it holds.
+// TearDownTest clears the file paths and restarts the agent with its Secrets.
+func (suite *TLSHotReloadTestSuite) startAgentWithCertFiles() (string, map[string]string) {
+	requires := suite.Require()
+	caSecret := &corev1.Secret{}
+	caKey := types.NamespacedName{Name: agentCASecretName, Namespace: fixture.AutonomousAgentNamespace}
+	requires.NoError(suite.AutonomousAgentClient.Get(suite.Ctx, caKey, caSecret, metav1.GetOptions{}))
+	certPEM, keyPEM := suite.newAgentClientCertificate()
+
+	dir := suite.T().TempDir()
+	files := map[string]string{
+		hotReloadCACertFileName:     string(caSecret.Data["ca.crt"]),
+		hotReloadServerCertFileName: certPEM,
+		hotReloadServerKeyFileName:  keyPEM,
+	}
+	swapCertFiles(suite.T(), dir, filepath.Join(dir, "initial"), files)
+	linkCertFiles(suite.T(), dir, hotReloadCACertFileName, hotReloadServerCertFileName, hotReloadServerKeyFileName)
+
+	certPath := filepath.Join(dir, hotReloadServerCertFileName)
+	requires.NoError(fixture.WriteEnvVarsToFile(map[string]string{
+		"ARGOCD_AUTONOMOUS_AGENT_TLS_CLIENT_CERT_PATH": certPath,
+		"ARGOCD_AUTONOMOUS_AGENT_TLS_CLIENT_KEY_PATH":  filepath.Join(dir, hotReloadServerKeyFileName),
+		"ARGOCD_AUTONOMOUS_AGENT_TLS_ROOT_CA_PATH":     filepath.Join(dir, hotReloadCACertFileName),
+	}))
+	fixture.RestartAgent(suite.T(), fixture.AgentAutonomousName)
+	fixture.CheckReadiness(suite.T(), fixture.AgentAutonomousName)
+
+	cert := parsePEMCertificate(suite.T(), []byte(certPEM))
+	fixture.VerifyProcessLogs(suite.T(), fixture.AgentAutonomousName, []string{
+		"Loading client TLS configuration from files cert=" + certPath,
+		"certFingerprint=" + tlsutil.CertificateFingerprint(cert),
+	})
+
+	return dir, files
+}
+
+// newAgentClientCertificate returns a new client certificate for the
+// autonomous agent's identity, signed by the principal CA.
+func (suite *TLSHotReloadTestSuite) newAgentClientCertificate() (string, string) {
+	requires := suite.Require()
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{Name: agentClientTLSSecretName, Namespace: fixture.AutonomousAgentNamespace}
+	requires.NoError(suite.AutonomousAgentClient.Get(suite.Ctx, key, secret, metav1.GetOptions{}))
+	current := parsePEMCertificate(suite.T(), secret.Data["tls.crt"])
+
+	caSecret := &corev1.Secret{}
+	caKey := types.NamespacedName{Name: agentCASecretName, Namespace: fixture.PrincipalNamespace}
+	requires.NoError(suite.PrincipalClient.Get(suite.Ctx, caKey, caSecret, metav1.GetOptions{}))
+	ca, err := tls.X509KeyPair(caSecret.Data["tls.crt"], caSecret.Data["tls.key"])
+	requires.NoError(err)
+	ca.Leaf, err = x509.ParseCertificate(ca.Certificate[0])
+	requires.NoError(err)
+
+	certPEM, keyPEM, err := tlsutil.GenerateClientCertificate(current.Subject.CommonName, ca.Leaf, ca.PrivateKey, tlsutil.DefaultLeafCertValidityDays, tlsutil.KeyGenOptions{})
+	requires.NoError(err)
+	return certPEM, keyPEM
 }
 
 // updateAgentSecret sets data keys in a Secret of the autonomous agent and
@@ -378,9 +493,9 @@ func (suite *TLSHotReloadTestSuite) updateAgentSecret(name string, data map[stri
 }
 
 // requireAgentExit checks that the autonomous agent logged the fatal reload
-// error with the given reason and that its process stopped.
-func (suite *TLSHotReloadTestSuite) requireAgentExit(reason string) {
-	fixture.VerifyProcessLogs(suite.T(), fixture.AgentAutonomousName, []string{"Failed to change certificates", reason})
+// message with the given reason and that its process stopped.
+func (suite *TLSHotReloadTestSuite) requireAgentExit(message, reason string) {
+	fixture.VerifyProcessLogs(suite.T(), fixture.AgentAutonomousName, []string{message, reason})
 	suite.Require().Eventually(func() bool {
 		return !fixture.IsProcessRunning(fixture.AgentAutonomousName, suite.T())
 	}, 60*time.Second, 2*time.Second, "the agent should exit on invalid TLS material")
@@ -413,9 +528,7 @@ func (suite *TLSHotReloadTestSuite) Test_PrincipalFailsOnBadReload() {
 	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 
 	// Make invalid by writing CA to server cert file
-	newDir := filepath.Join(dir, "invalid")
-	writeCertsToDir(suite.T(), newDir, caPEM, caKeyPEM, caPEM, caKeyPEM)
-	swapSymlink(suite.T(), dir, newDir)
+	swapCertFiles(suite.T(), dir, filepath.Join(dir, "invalid"), principalCertFiles(caPEM, caKeyPEM, caPEM, caKeyPEM))
 
 	fixture.VerifyProcessLogs(suite.T(), fixture.PrincipalName, fileProviderExpectedFailLogs)
 }
