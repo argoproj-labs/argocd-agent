@@ -190,19 +190,7 @@ func Test_TLSSecretProviderHandleChange(t *testing.T) {
 		return provider, &updates
 	}
 
-	t.Run("invalid data keeps the previous certificate", func(t *testing.T) {
-		exited := captureFatal(t)
-		provider, updates := newProvider(t)
-		provider.KeepPreviousCertificate()
-
-		provider.handleChange(clientSecret("client-tls", []byte("bad"), []byte("bad")))
-
-		assert.False(t, *exited)
-		assert.Equal(t, 0, *updates)
-		loaded, _ := provider.Load()
-		assert.Equal(t, cert.Certificate, loaded.Certificate)
-	})
-	t.Run("invalid data is fatal without KeepPreviousCertificate", func(t *testing.T) {
+	t.Run("invalid data is fatal", func(t *testing.T) {
 		exited := captureFatal(t)
 		provider, updates := newProvider(t)
 
@@ -226,18 +214,21 @@ func Test_TLSSecretProviderHandleChange(t *testing.T) {
 		assert.Equal(t, cert.Certificate, loaded.Certificate)
 	})
 	t.Run("valid data calls the update handler", func(t *testing.T) {
+		exited := captureFatal(t)
 		provider, updates := newProvider(t)
-		provider.KeepPreviousCertificate()
 
 		provider.handleChange(clientSecret("client-tls", newCertPEM, newKeyPEM))
 
+		assert.False(t, *exited)
 		assert.Equal(t, 1, *updates)
 		loaded, _ := provider.Load()
 		assert.NotEqual(t, cert.Certificate, loaded.Certificate)
 	})
 }
 
-func Test_TLSFileProviderKeepPreviousCertificate(t *testing.T) {
+// Test_TLSFileProviderOnChangeInvalid checks that invalid files return an
+// error, which ends Watch, and do not replace the current certificate.
+func Test_TLSFileProviderOnChangeInvalid(t *testing.T) {
 	tempDir := t.TempDir()
 	certPath := path.Join(tempDir, "tls.crt")
 	keyPath := path.Join(tempDir, "tls.key")
@@ -246,25 +237,23 @@ func Test_TLSFileProviderKeepPreviousCertificate(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(certPath, []byte("bad"), 0o600))
 	require.NoError(t, os.WriteFile(keyPath, keyPEM, 0o600))
-	event := fsnotify.Event{Name: certPath, Op: fsnotify.Write}
 
-	t.Run("invalid data keeps the previous certificate", func(t *testing.T) {
-		provider := NewTLSFileProvider(certPath, keyPath, "", &TLSMaterial{Cert: cert})
-		provider.KeepPreviousCertificate()
+	for name, event := range map[string]fsnotify.Event{
+		"file write":  {Name: certPath, Op: fsnotify.Write},
+		"..data swap": {Name: path.Join(tempDir, "..data"), Op: fsnotify.Create},
+	} {
+		t.Run(name, func(t *testing.T) {
+			provider := NewTLSFileProvider(certPath, keyPath, "", &TLSMaterial{Cert: cert})
+			updates := 0
+			provider.SetUpdateHandler(func(tls.Certificate, *x509.CertPool) { updates++ })
 
-		require.NoError(t, provider.OnChange(context.Background(), event))
+			require.Error(t, provider.OnChange(context.Background(), event))
 
-		loaded, _ := provider.Load()
-		assert.Equal(t, cert.Certificate, loaded.Certificate)
-	})
-	t.Run("invalid data returns an error without KeepPreviousCertificate", func(t *testing.T) {
-		provider := NewTLSFileProvider(certPath, keyPath, "", &TLSMaterial{Cert: cert})
-
-		require.Error(t, provider.OnChange(context.Background(), event))
-
-		loaded, _ := provider.Load()
-		assert.Equal(t, cert.Certificate, loaded.Certificate)
-	})
+			assert.Equal(t, 0, updates)
+			loaded, _ := provider.Load()
+			assert.Equal(t, cert.Certificate, loaded.Certificate)
+		})
+	}
 }
 
 // Test_TLSFileProviderReload checks that a provider with only a CA path reloads

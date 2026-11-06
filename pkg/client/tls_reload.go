@@ -34,9 +34,7 @@ func WithTLSReloadFromFile(certPath, keyPath string) RemoteOption {
 		if err != nil {
 			return fmt.Errorf("unable to read TLS client cert: %w", err)
 		}
-		provider := tlsutil.NewTLSFileProvider(certPath, keyPath, "", &tlsutil.TLSMaterial{Cert: cert})
-		provider.KeepPreviousCertificate()
-		r.enableTLSReload(provider)
+		r.enableTLSReload(tlsutil.NewTLSFileProvider(certPath, keyPath, "", &tlsutil.TLSMaterial{Cert: cert}))
 		return nil
 	}
 }
@@ -49,9 +47,7 @@ func WithTLSReloadFromSecret(kube kubernetes.Interface, namespace, certSecretNam
 		if err != nil {
 			return fmt.Errorf("unable to read TLS client from secret: %w", err)
 		}
-		provider := tlsutil.NewTLSSecretProvider(certSecretName, "", namespace, kube, &tlsutil.TLSMaterial{Cert: cert})
-		provider.KeepPreviousCertificate()
-		r.enableTLSReload(provider)
+		r.enableTLSReload(tlsutil.NewTLSSecretProvider(certSecretName, "", namespace, kube, &tlsutil.TLSMaterial{Cert: cert}))
 		return nil
 	}
 }
@@ -63,9 +59,7 @@ func WithRootCAReloadFromFile(caPath string) RemoteOption {
 		if err := WithRootAuthoritiesFromFile(caPath)(r); err != nil {
 			return err
 		}
-		provider := tlsutil.NewTLSFileProvider("", "", caPath, &tlsutil.TLSMaterial{CAPool: r.tlsConfig.RootCAs})
-		provider.KeepPreviousCertificate()
-		r.enableRootCAReload(provider)
+		r.enableRootCAReload(tlsutil.NewTLSFileProvider("", "", caPath, &tlsutil.TLSMaterial{CAPool: r.tlsConfig.RootCAs}))
 		return nil
 	}
 }
@@ -77,9 +71,7 @@ func WithRootCAReloadFromSecret(kube kubernetes.Interface, namespace, caSecretNa
 		if err := WithRootAuthoritiesFromSecret(kube, namespace, caSecretName)(r); err != nil {
 			return err
 		}
-		provider := tlsutil.NewTLSSecretProvider("", caSecretName, namespace, kube, &tlsutil.TLSMaterial{CAPool: r.tlsConfig.RootCAs})
-		provider.KeepPreviousCertificate()
-		r.enableRootCAReload(provider)
+		r.enableRootCAReload(tlsutil.NewTLSSecretProvider("", caSecretName, namespace, kube, &tlsutil.TLSMaterial{CAPool: r.tlsConfig.RootCAs}))
 		return nil
 	}
 }
@@ -145,17 +137,8 @@ func (r *Remote) getClientCertificate(*tls.CertificateRequestInfo) (*tls.Certifi
 	return &cert, nil
 }
 
-// SetClientCertificateObserver records the client certificate end time.
-// The observer is called for the current certificate and after each reload.
-func (r *Remote) SetClientCertificateObserver(fn func(time.Time)) {
-	r.tlsMu.Lock()
-	r.certObserver = fn
-	r.tlsMu.Unlock()
-	if r.tlsSource != nil {
-		r.noteClientCertificate(currentCertificate(r.tlsSource))
-	}
-}
-
+// noteClientCertificate logs a newly loaded client certificate, and warns when
+// its identity differs from the previous certificate.
 func (r *Remote) noteClientCertificate(cert tls.Certificate) {
 	if len(cert.Certificate) == 0 {
 		return
@@ -166,18 +149,24 @@ func (r *Remote) noteClientCertificate(cert tls.Certificate) {
 		return
 	}
 	identity := certificateIdentity(leaf)
+	fingerprint := tlsutil.CertificateFingerprint(leaf)
 	r.tlsMu.Lock()
-	previous := r.certIdentity
+	previousIdentity := r.certIdentity
+	previousFingerprint := r.certFingerprint
 	r.certIdentity = identity
-	observer := r.certObserver
+	r.certFingerprint = fingerprint
 	r.tlsMu.Unlock()
-	if previous != "" && previous != identity {
-		log().WithField(logfields.PreviousCertIdentity, previous).
+	if fingerprint == previousFingerprint {
+		return
+	}
+	log().WithField(logfields.CertSubject, leaf.Subject.String()).
+		WithField(logfields.CertFingerprint, fingerprint).
+		WithField(logfields.CertExpiry, leaf.NotAfter.UTC().Format(time.RFC3339)).
+		Info("Loaded client certificate")
+	if previousIdentity != "" && previousIdentity != identity {
+		log().WithField(logfields.PreviousCertIdentity, previousIdentity).
 			WithField(logfields.CertIdentity, identity).
 			Warn("The reloaded client certificate has a different identity; the principal may treat it as a different agent")
-	}
-	if observer != nil {
-		observer(leaf.NotAfter)
 	}
 }
 
@@ -192,8 +181,8 @@ func certificateIdentity(leaf *x509.Certificate) string {
 }
 
 // StartTLSReload watches the configured client certificate and root CA sources
-// until ctx is canceled. A failed watch is retried. Invalid data does not
-// replace the current certificate or CA pool.
+// until ctx is canceled. As on the principal, invalid material or a failed
+// watch is fatal.
 func (r *Remote) StartTLSReload(ctx context.Context) {
 	for _, source := range []tlsutil.TLSSource{r.tlsSource, r.caSource} {
 		if source != nil {
@@ -202,26 +191,10 @@ func (r *Remote) StartTLSReload(ctx context.Context) {
 	}
 }
 
+// watchTLSSource exits the process when the watch fails. Invalid files end the
+// watch with an error; invalid Secret data exits in the Secret provider.
 func watchTLSSource(ctx context.Context, source tlsutil.TLSSource) {
-	backoff := time.Second
-	for {
-		err := source.Watch(ctx)
-		if ctx.Err() != nil {
-			return
-		}
-		if err == nil {
-			return
-		}
-		log().WithError(err).Error("TLS reload watch stopped; retrying")
-		timer := time.NewTimer(backoff)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
-		if backoff < 30*time.Second {
-			backoff *= 2
-		}
+	if err := source.Watch(ctx); err != nil && ctx.Err() == nil {
+		log().WithError(err).Fatal("TLS hot reload watch failed")
 	}
 }

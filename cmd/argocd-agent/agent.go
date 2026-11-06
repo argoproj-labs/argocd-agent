@@ -325,8 +325,6 @@ func NewAgentRunCommand() *cobra.Command {
 			if remote == nil {
 				cmdutil.Fatal("No remote specified")
 			}
-			// Watch the client certificate and root CA so the next handshake can use renewed material.
-			remote.StartTLSReload(ctx)
 
 			agentOpts = append(agentOpts, agent.WithRemote(remote))
 			agentOpts = append(agentOpts, agent.WithMode(agentMode))
@@ -397,11 +395,12 @@ func NewAgentRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not create a new agent instance: %v", err)
 			}
-			if ag.Metrics() != nil {
-				remote.SetClientCertificateObserver(func(notAfter time.Time) {
-					ag.Metrics().ClientCertificateExpiryTimestamp.Set(float64(notAfter.Unix()))
-				})
-			}
+
+			// Watch the client certificate and root CA so the next handshake
+			// can use renewed material. This must start after NewAgent: it
+			// registers the client-go metrics globals that the watchers'
+			// Kubernetes API requests read.
+			remote.StartTLSReload(ctx)
 
 			// Watch the agent's settings ConfigMap for runtime overrides.
 			settingsManager.StartWatcher(ctx, kubeConfig, kubeConfig.Namespace, paramsConfigMap)

@@ -193,11 +193,11 @@ The agent watches the client certificate Secret (default `argocd-agent-client-tl
 
 An open connection keeps the TLS session that started it. The new certificate is used when the agent connects again.
 
-The renewed certificate must keep the same agent identity. The principal reads the agent name from the certificate subject, or from a URI SAN when it uses `mtls:uri:` authentication. A different name is a different agent. The agent logs a warning when a reloaded certificate has a different subject or URI SANs.
+The renewed certificate must keep the same agent identity. The principal reads the agent name from the certificate subject, or from a URI SAN when it uses `mtls:uri:` authentication. A different name is a different agent. The agent logs `Loaded client certificate` with the subject, fingerprint and expiry of each new certificate, and logs a warning when a reloaded certificate has a different subject or URI SANs.
 
-An invalid certificate does not replace the current certificate. The agent logs the error and keeps the previous certificate. The same rule applies to the root CA. A new CA pool is used when the agent opens a new connection.
+An invalid certificate or root CA is fatal, as it is for the principal. The agent logs the error and exits, and it does not start again until the Secret or files hold valid material. The agent does not keep using the previous certificate, because a rotation may be replacing a compromised one. A new CA pool is used when the agent opens a new connection.
 
-The metric `argocd_agent_client_certificate_expiry_timestamp_seconds` is the Unix time when the client certificate expires. It is present when the agent metrics port is not `0`. The value is `0` when the agent does not load a client certificate from a Secret or from files, for example in SPIRE mode or with `--insecure-plaintext`. Exclude the value `0` from alert rules. See [Agent Metrics](../operations/metrics.md#agent-metrics).
+When the certificate and key are files, replace them together, for example with the atomic `..data` swap that Kubernetes uses for a mounted Secret. If the certificate file is written before the key file, the agent can read a certificate and key that do not match, and exit.
 
 This reload does not issue a new certificate. Write the new Secret, or the new certificate files, before the current certificate expires.
 

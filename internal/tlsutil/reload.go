@@ -55,8 +55,6 @@ type TLSFileProvider struct {
 	Material atomic.Pointer[TLSMaterial]
 	// writeMu is used for concurrent on writing only
 	writeMu sync.Mutex
-	// keepPreviousOnError keeps the last valid certificate when new material is invalid.
-	keepPreviousOnError bool
 	// onUpdate is called after valid TLS material is stored.
 	onUpdate func(tls.Certificate, *x509.CertPool)
 }
@@ -75,8 +73,6 @@ type TLSSecretProvider struct {
 	kubeClient kubernetes.Interface
 	// writeMu is used for concurrent on writing only
 	writeMu sync.Mutex
-	// keepPreviousOnError keeps the last valid certificate when new material is invalid.
-	keepPreviousOnError bool
 	// onUpdate is called after valid TLS material is stored.
 	onUpdate func(tls.Certificate, *x509.CertPool)
 }
@@ -101,11 +97,6 @@ func NewTLSFileProvider(clientCertPath, clientKeyPath, caCertPath string, materi
 	provider.Material.Store(material)
 
 	return provider
-}
-
-// KeepPreviousCertificate makes an invalid certificate update keep the last valid certificate.
-func (t *TLSFileProvider) KeepPreviousCertificate() {
-	t.keepPreviousOnError = true
 }
 
 // SetUpdateHandler sets the function called after valid TLS material is stored.
@@ -209,10 +200,6 @@ func (t *TLSFileProvider) OnChange(ctx context.Context, event fsnotify.Event) er
 		case t.ClientCertPath, t.ClientKeyPath:
 			err = t.clientOnChange()
 		}
-	}
-	if err != nil && t.keepPreviousOnError {
-		logrus.WithError(err).WithField(logfields.FileName, event.Name).Error("Failed to reload TLS data; keeping the previous certificate")
-		return nil
 	}
 	if err == nil {
 		logrus.Info("Successfully updated TLS configuration to have new data")
@@ -342,11 +329,6 @@ func NewTLSSecretProvider(clientSecretName, caSecretName, namespace string, kube
 	return provider
 }
 
-// KeepPreviousCertificate makes an invalid certificate update keep the last valid certificate.
-func (t *TLSSecretProvider) KeepPreviousCertificate() {
-	t.keepPreviousOnError = true
-}
-
 // SetUpdateHandler sets the function called after valid TLS material is stored.
 func (t *TLSSecretProvider) SetUpdateHandler(fn func(tls.Certificate, *x509.CertPool)) {
 	t.onUpdate = fn
@@ -399,15 +381,9 @@ func (t *TLSSecretProvider) Watch(ctx context.Context) error {
 }
 
 func (t *TLSSecretProvider) handleChange(secret *corev1.Secret) {
-	err := t.OnChange(secret)
-	if err == nil {
-		return
+	if err := t.OnChange(secret); err != nil {
+		logrus.WithError(err).WithField(logfields.SecretName, secret.Name).Fatal("Failed to change certificates")
 	}
-	if t.keepPreviousOnError {
-		logrus.WithError(err).WithField(logfields.SecretName, secret.Name).Error("Failed to change certificates; keeping the previous certificate")
-		return
-	}
-	logrus.WithError(err).Fatal("Failed to change certificates")
 }
 
 // TLSSecretProvider.OnChange handles changing TLS data based on which Kubernetes secret is read

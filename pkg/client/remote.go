@@ -132,11 +132,11 @@ type Remote struct {
 	// rootCAs is the latest CA pool. A new connection copies it. An active
 	// handshake does not read this field, so a reload does not race with it.
 	rootCAs atomic.Pointer[x509.CertPool]
-	// certObserver receives the client certificate end time after a load or reload.
-	certObserver func(time.Time)
 	// certIdentity is the subject and URI SANs of the current client certificate.
 	certIdentity string
-	// tlsMu guards certObserver and certIdentity.
+	// certFingerprint is the SHA-256 fingerprint of the current client certificate.
+	certFingerprint string
+	// tlsMu guards certIdentity and certFingerprint.
 	tlsMu sync.Mutex
 }
 

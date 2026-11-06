@@ -123,6 +123,7 @@ const (
 	CertSubject          = "certSubject"
 	CertIssuer           = "certIssuer"
 	CertExpiry           = "certExpiry"
+	CertFingerprint      = "certFingerprint"
 	CertIdentity         = "certIdentity"
 	PreviousCertIdentity = "previousCertIdentity"
 

@@ -15,10 +15,12 @@
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
 	"net/url"
@@ -28,9 +30,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/fsnotify/fsnotify"
+	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,46 +45,72 @@ import (
 
 func Test_WithTLSReloadFromFile(t *testing.T) {
 	_, _, certPEM, keyPEM := testClientCertificate(t, "agent-v1")
-	dir := t.TempDir()
-	certPath := filepath.Join(dir, "tls.crt")
-	keyPath := filepath.Join(dir, "tls.key")
-	writeKeyPair(t, certPath, keyPath, certPEM, keyPEM)
+	files := newMountedFiles(t, map[string]string{"tls.crt": certPEM, "tls.key": keyPEM})
 
-	remote, err := NewRemote("principal.example.com", 443, WithTLSReloadFromFile(certPath, keyPath))
+	remote, err := NewRemote("principal.example.com", 443, WithTLSReloadFromFile(files.path("tls.crt"), files.path("tls.key")))
 	require.NoError(t, err)
 	first, err := remote.clientCertificate()
 	require.NoError(t, err)
 	require.Equal(t, "agent-v1", certificateName(t, first))
 
+	provider := fileProvider(t, remote.tlsSource)
 	updates := recordUpdates(t, remote)
-	remote.StartTLSReload(t.Context())
 
-	// The writes repeat because the watch can start after the first write.
 	_, _, nextCert, nextKey := testClientCertificate(t, "agent-v2")
-	require.Eventually(t, func() bool {
-		writeKeyPair(t, certPath, keyPath, nextCert, nextKey)
-		return receivedUpdate(updates, "agent-v2", 250*time.Millisecond)
-	}, 10*time.Second, 10*time.Millisecond)
+	files.update(t, map[string]string{"tls.crt": nextCert, "tls.key": nextKey})
+	require.NoError(t, provider.OnChange(t.Context(), files.swapEvent()))
+	require.Equal(t, []string{"agent-v2"}, drainUpdates(updates))
 	current, err := remote.clientCertificate()
 	require.NoError(t, err)
 	require.Equal(t, "agent-v2", certificateName(t, current))
 
-	// The provider handles the expired files without an error and keeps the current certificate.
-	drainUpdates(updates)
+	// Invalid files return an error, which ends the watch and exits the agent
+	// (see Test_watchTLSSource), and are never used.
 	expiredCert, expiredKey := expiredClientCertificate(t, "agent-expired")
-	writeKeyPair(t, certPath, keyPath, expiredCert, expiredKey)
-	provider, ok := remote.tlsSource.(*tlsutil.TLSFileProvider)
-	require.True(t, ok)
-	require.NoError(t, provider.OnChange(t.Context(), fsnotify.Event{Name: certPath, Op: fsnotify.Write}))
-	current, err = remote.clientCertificate()
-	require.NoError(t, err)
-	require.Equal(t, "agent-v2", certificateName(t, current))
+	caCert, caKey := caTestCertificate(t)
+	_, otherKey := testClientCertificateFromCA(t, "agent-other", caTLSCertificate(t, caCert, caKey))
+	for name, data := range map[string][2]string{
+		"unparsable":     {"bad", "bad"},
+		"expired":        {expiredCert, expiredKey},
+		"CA certificate": {caCert, caKey},
+		"mismatched key": {nextCert, otherKey},
+	} {
+		t.Run(name, func(t *testing.T) {
+			files.update(t, map[string]string{"tls.crt": data[0], "tls.key": data[1]})
+			require.Error(t, provider.OnChange(t.Context(), files.swapEvent()))
+			require.Empty(t, drainUpdates(updates))
+			current, err := remote.clientCertificate()
+			require.NoError(t, err)
+			require.Equal(t, "agent-v2", certificateName(t, current))
+		})
+	}
+}
 
-	_, _, lastCert, lastKey := testClientCertificate(t, "agent-v3")
-	writeKeyPair(t, certPath, keyPath, lastCert, lastKey)
-	stored := updatesUntil(updates, "agent-v3", 10*time.Second)
-	require.Contains(t, stored, "agent-v3", "the watch should continue after invalid data")
-	require.NotContains(t, stored, "agent-expired")
+// Test_watchTLSSource checks that a failed watch exits the agent, as on the
+// principal, and that a watch ended by shutdown does not.
+func Test_watchTLSSource(t *testing.T) {
+	t.Run("failed watch exits", func(t *testing.T) {
+		exits := captureExit(t)
+		watchTLSSource(t.Context(), watchResult{err: errors.New("invalid CA file")})
+		requireExit(t, exits)
+	})
+	t.Run("canceled watch does not exit", func(t *testing.T) {
+		exits := captureExit(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		watchTLSSource(ctx, watchResult{err: context.Canceled})
+		require.Empty(t, exits)
+	})
+}
+
+// watchResult is a TLS source whose Watch returns err.
+type watchResult struct {
+	tlsutil.TLSSource
+	err error
+}
+
+func (w watchResult) Watch(context.Context) error {
+	return w.err
 }
 
 func Test_WithTLSReloadFromSecret(t *testing.T) {
@@ -94,6 +125,7 @@ func Test_WithTLSReloadFromSecret(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "agent-v1", certificateName(t, first))
 
+	exits := captureExit(t)
 	updates := recordUpdates(t, remote)
 	remote.StartTLSReload(t.Context())
 
@@ -108,20 +140,25 @@ func Test_WithTLSReloadFromSecret(t *testing.T) {
 	current, err := remote.clientCertificate()
 	require.NoError(t, err)
 	require.Equal(t, "agent-v2", certificateName(t, current))
+	require.Empty(t, exits)
 
-	// The informer delivers each Secret version in order, so every update
-	// before agent-v3 was handled first. None of them stored the invalid data.
-	drainUpdates(updates)
-	updateClientTLSSecret(t, kube, "bad", "bad")
+	// Each kind of invalid Secret data exits the agent and is never used.
 	expiredCert, expiredKey := expiredClientCertificate(t, "agent-expired")
-	updateClientTLSSecret(t, kube, expiredCert, expiredKey)
-	lastCert, lastKey := testClientCertificateFromCA(t, "agent-v3", ca)
-	updateClientTLSSecret(t, kube, lastCert, lastKey)
-	stored := updatesUntil(updates, "agent-v3", 10*time.Second)
-	require.NotEmpty(t, stored)
-	require.Equal(t, "agent-v3", stored[len(stored)-1])
-	for _, name := range stored[:len(stored)-1] {
-		require.Equal(t, "agent-v2", name, "invalid Secret data must not replace the certificate")
+	caCert, caKey := caTestCertificate(t)
+	for name, data := range map[string][2]string{
+		"unparsable":     {"bad", "bad"},
+		"expired":        {expiredCert, expiredKey},
+		"CA certificate": {caCert, caKey},
+	} {
+		t.Run(name, func(t *testing.T) {
+			drainUpdates(updates)
+			updateClientTLSSecret(t, kube, data[0], data[1])
+			requireExit(t, exits)
+			require.Empty(t, drainUpdates(updates))
+			current, err := remote.clientCertificate()
+			require.NoError(t, err)
+			require.Equal(t, "agent-v2", certificateName(t, current))
+		})
 	}
 }
 
@@ -236,48 +273,51 @@ func Test_WithRootCAReload(t *testing.T) {
 	require.NoError(t, err)
 
 	type sources struct {
-		kube                      kubernetes.Interface
-		certPath, keyPath, caPath string
+		kube      kubernetes.Interface
+		certFiles mountedFiles
+		caFile    mountedFiles
 	}
 	newSources := func(t *testing.T) sources {
-		dir := t.TempDir()
-		s := sources{
+		return sources{
 			kube: fake.NewSimpleClientset(
 				clientTLSSecret(certPEM, keyPEM),
 				caSecret(caPEM),
 			),
-			certPath: filepath.Join(dir, "tls.crt"),
-			keyPath:  filepath.Join(dir, "tls.key"),
-			caPath:   filepath.Join(dir, "ca.crt"),
+			certFiles: newMountedFiles(t, map[string]string{"tls.crt": certPEM, "tls.key": keyPEM}),
+			caFile:    newMountedFiles(t, map[string]string{"ca.crt": caPEM}),
 		}
-		writeKeyPair(t, s.certPath, s.keyPath, certPEM, keyPEM)
-		require.NoError(t, os.WriteFile(s.caPath, []byte(caPEM), 0o600))
-		return s
 	}
-	writeCASecret := func(t *testing.T, s sources, pemData string) {
+	// writeCASecret updates the CA Secret; the running informer picks it up.
+	writeCASecret := func(t *testing.T, _ *Remote, s sources, pemData string) error {
 		_, err := s.kube.CoreV1().Secrets("argocd").Update(t.Context(), caSecret(pemData), metav1.UpdateOptions{})
 		require.NoError(t, err)
+		return nil
 	}
-	writeCAFile := func(t *testing.T, s sources, pemData string) {
-		require.NoError(t, os.WriteFile(s.caPath, []byte(pemData), 0o600))
+	// writeCAFile swaps the CA file and delivers the swap event to the provider.
+	writeCAFile := func(t *testing.T, r *Remote, s sources, pemData string) error {
+		s.caFile.update(t, map[string]string{"ca.crt": pemData})
+		return fileProvider(t, r.caSource).OnChange(t.Context(), s.caFile.swapEvent())
 	}
 	certFromSecret := func(s sources) RemoteOption {
 		return WithTLSReloadFromSecret(s.kube, "argocd", "argocd-agent-client-tls")
 	}
-	certFromFiles := func(s sources) RemoteOption { return WithTLSReloadFromFile(s.certPath, s.keyPath) }
+	certFromFiles := func(s sources) RemoteOption {
+		return WithTLSReloadFromFile(s.certFiles.path("tls.crt"), s.certFiles.path("tls.key"))
+	}
 	caFromSecret := func(s sources) RemoteOption { return WithRootCAReloadFromSecret(s.kube, "argocd", "argocd-agent-ca") }
-	caFromFile := func(s sources) RemoteOption { return WithRootCAReloadFromFile(s.caPath) }
+	caFromFile := func(s sources) RemoteOption { return WithRootCAReloadFromFile(s.caFile.path("ca.crt")) }
 
 	tests := []struct {
 		name    string
 		cert    func(sources) RemoteOption
 		ca      func(sources) RemoteOption
-		writeCA func(*testing.T, sources, string)
+		writeCA func(*testing.T, *Remote, sources, string) error
+		caFile  bool
 	}{
-		{"secret certificate and CA secret", certFromSecret, caFromSecret, writeCASecret},
-		{"secret certificate and CA file", certFromSecret, caFromFile, writeCAFile},
-		{"certificate files and CA secret", certFromFiles, caFromSecret, writeCASecret},
-		{"certificate files and CA file", certFromFiles, caFromFile, writeCAFile},
+		{"secret certificate and CA secret", certFromSecret, caFromSecret, writeCASecret, false},
+		{"secret certificate and CA file", certFromSecret, caFromFile, writeCAFile, true},
+		{"certificate files and CA secret", certFromFiles, caFromSecret, writeCASecret, false},
+		{"certificate files and CA file", certFromFiles, caFromFile, writeCAFile, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -286,20 +326,31 @@ func Test_WithRootCAReload(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, certPool(t, caPEM).Equal(remote.tlsConfigForDial().RootCAs))
 
+			exits := captureExit(t)
 			remote.StartTLSReload(t.Context())
-			// Invalid CA data is rejected, and the watch goes on to load the next valid CA.
 			want := certPool(t, newCAPEM)
+			require.NoError(t, tt.writeCA(t, remote, s, newCAPEM))
 			require.Eventually(t, func() bool {
-				tt.writeCA(t, s, "not a certificate")
-				tt.writeCA(t, s, newCAPEM)
 				pool := remote.tlsConfigForDial().RootCAs
 				require.NotNil(t, pool)
 				return want.Equal(pool)
 			}, 10*time.Second, 100*time.Millisecond)
+			require.Empty(t, exits)
 
 			cert, err := remote.clientCertificate()
 			require.NoError(t, err)
 			require.Equal(t, "agent-v1", certificateName(t, cert), "a CA reload must not change the client certificate")
+
+			// Invalid CA data is never used. A CA Secret exits the agent from
+			// the informer; a CA file returns the error that ends the watch.
+			err = tt.writeCA(t, remote, s, "not a certificate")
+			if tt.caFile {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				requireExit(t, exits)
+			}
+			require.True(t, want.Equal(remote.tlsConfigForDial().RootCAs))
 		})
 	}
 
@@ -317,36 +368,72 @@ func Test_WithRootCAReload(t *testing.T) {
 	})
 }
 
-func Test_SetClientCertificateObserver(t *testing.T) {
-	caPEM, caKeyPEM, certPEM, keyPEM := testClientCertificate(t, "agent-v1")
+// Test_noteClientCertificate checks that each new client certificate is logged
+// once with its fingerprint and expiry, and that an identity change is a warning.
+func Test_noteClientCertificate(t *testing.T) {
+	caPEM, caKeyPEM, certPEM, keyPEM := testClientCertificate(t, "agent-a")
 	ca, err := tls.X509KeyPair([]byte(caPEM), []byte(caKeyPEM))
 	require.NoError(t, err)
+	logger := logrus.StandardLogger()
+	previousLevel := logger.GetLevel()
+	previousHooks := logger.ReplaceHooks(make(logrus.LevelHooks))
+	logger.SetLevel(logrus.InfoLevel)
+	hook := logtest.NewLocal(logger)
+	t.Cleanup(func() {
+		logger.ReplaceHooks(previousHooks)
+		logger.SetLevel(previousLevel)
+	})
+
 	kube := fake.NewSimpleClientset(clientTLSSecret(certPEM, keyPEM))
 	remote, err := NewRemote("principal.example.com", 443, WithTLSReloadFromSecret(kube, "argocd", "argocd-agent-client-tls"))
 	require.NoError(t, err)
 
-	expiry := make(chan time.Time, 100)
-	remote.SetClientCertificateObserver(func(notAfter time.Time) { expiry <- notAfter })
-	require.True(t, certificateNotAfter(t, certPEM).Equal(<-expiry))
-
-	remote.StartTLSReload(t.Context())
-	// A longer validity gives the renewed certificate a different end time.
-	nextCert, nextKey, err := tlsutil.GenerateClientCertificate("agent-v1", ca.Leaf, ca.PrivateKey, 60, tlsutil.KeyGenOptions{})
-	require.NoError(t, err)
-	want := certificateNotAfter(t, nextCert)
-	require.Eventually(t, func() bool {
-		updateClientTLSSecret(t, kube, nextCert, nextKey)
-		for {
-			select {
-			case got := <-expiry:
-				if got.Equal(want) {
-					return true
-				}
-			case <-time.After(250 * time.Millisecond):
-				return false
+	loaded := func() []*logrus.Entry {
+		var entries []*logrus.Entry
+		for _, entry := range hook.AllEntries() {
+			if entry.Message == "Loaded client certificate" {
+				entries = append(entries, entry)
 			}
 		}
-	}, 10*time.Second, 10*time.Millisecond)
+		return entries
+	}
+	warnings := func() int {
+		count := 0
+		for _, entry := range hook.AllEntries() {
+			if entry.Level == logrus.WarnLevel && entry.Data[logfields.PreviousCertIdentity] != nil {
+				count++
+			}
+		}
+		return count
+	}
+	keyPair := func(certPEM, keyPEM string) tls.Certificate {
+		cert, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+		require.NoError(t, err)
+		return cert
+	}
+
+	first := loaded()
+	require.Len(t, first, 1)
+	leaf := parseLeaf(t, certPEM)
+	require.Equal(t, tlsutil.CertificateFingerprint(leaf), first[0].Data[logfields.CertFingerprint])
+	require.Equal(t, leaf.NotAfter.UTC().Format(time.RFC3339), first[0].Data[logfields.CertExpiry])
+
+	// The same certificate again, as on the informer's first list, is not logged.
+	remote.noteClientCertificate(keyPair(certPEM, keyPEM))
+	require.Len(t, loaded(), 1)
+
+	// A renewed certificate with the same identity is logged without a warning.
+	renewedCert, renewedKey := testClientCertificateFromCA(t, "agent-a", ca)
+	remote.noteClientCertificate(keyPair(renewedCert, renewedKey))
+	require.Len(t, loaded(), 2)
+	require.Equal(t, tlsutil.CertificateFingerprint(parseLeaf(t, renewedCert)), loaded()[1].Data[logfields.CertFingerprint])
+	require.Zero(t, warnings())
+
+	// A certificate for another agent name is logged with a warning.
+	otherCert, otherKey := testClientCertificateFromCA(t, "agent-b", ca)
+	remote.noteClientCertificate(keyPair(otherCert, otherKey))
+	require.Len(t, loaded(), 3)
+	require.Equal(t, 1, warnings())
 }
 
 // clientCertificate returns the client certificate the next handshake will present.
@@ -411,29 +498,85 @@ func drainUpdates(updates <-chan string) []string {
 	}
 }
 
-// updatesUntil returns the names of the stored certificates up to and including
-// the first one with the given name, or all names seen before timeout.
-func updatesUntil(updates <-chan string, name string, timeout time.Duration) []string {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	var names []string
-	for {
-		select {
-		case got := <-updates:
-			names = append(names, got)
-			if got == name {
-				return names
-			}
-		case <-timer.C:
-			return names
-		}
+// mountedFiles lays out files like a mounted Secret volume: each file is a
+// link into ..data, and an update swaps ..data to a new directory in one rename.
+type mountedFiles struct {
+	dir string
+}
+
+func newMountedFiles(t *testing.T, files map[string]string) mountedFiles {
+	t.Helper()
+	m := mountedFiles{dir: t.TempDir()}
+	m.update(t, files)
+	for name := range files {
+		require.NoError(t, os.Symlink(filepath.Join("..data", name), m.path(name)))
+	}
+	return m
+}
+
+func (m mountedFiles) path(name string) string {
+	return filepath.Join(m.dir, name)
+}
+
+func (m mountedFiles) update(t *testing.T, files map[string]string) {
+	t.Helper()
+	version, err := os.MkdirTemp(m.dir, "..version_")
+	require.NoError(t, err)
+	for name, data := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(version, name), []byte(data), 0o600))
+	}
+	link := filepath.Join(m.dir, "..data_tmp")
+	require.NoError(t, os.Symlink(filepath.Base(version), link))
+	require.NoError(t, os.Rename(link, filepath.Join(m.dir, "..data")))
+}
+
+// swapEvent is the event inotify reports for the ..data swap. kqueue on macOS
+// does not report a rename over an existing link, so tests deliver it directly.
+func (m mountedFiles) swapEvent() fsnotify.Event {
+	return fsnotify.Event{Name: filepath.Join(m.dir, "..data"), Op: fsnotify.Create}
+}
+
+func fileProvider(t *testing.T, source tlsutil.TLSSource) *tlsutil.TLSFileProvider {
+	t.Helper()
+	provider, ok := source.(*tlsutil.TLSFileProvider)
+	require.True(t, ok)
+	return provider
+}
+
+func caTLSCertificate(t *testing.T, caPEM, caKeyPEM string) tls.Certificate {
+	t.Helper()
+	ca, err := tls.X509KeyPair([]byte(caPEM), []byte(caKeyPEM))
+	require.NoError(t, err)
+	return ca
+}
+
+// captureExit makes logrus Fatal calls send the exit code to the returned
+// channel instead of ending the test process.
+func captureExit(t *testing.T) <-chan int {
+	t.Helper()
+	exits := make(chan int, 100)
+	logger := logrus.StandardLogger()
+	previous := logger.ExitFunc
+	logger.ExitFunc = func(code int) { exits <- code }
+	t.Cleanup(func() { logger.ExitFunc = previous })
+	return exits
+}
+
+func requireExit(t *testing.T, exits <-chan int) {
+	t.Helper()
+	select {
+	case code := <-exits:
+		require.Equal(t, 1, code)
+	case <-time.After(10 * time.Second):
+		t.Fatal("invalid TLS material did not exit the agent")
 	}
 }
 
-func writeKeyPair(t *testing.T, certPath, keyPath, certPEM, keyPEM string) {
+func caTestCertificate(t *testing.T) (string, string) {
 	t.Helper()
-	require.NoError(t, os.WriteFile(certPath, []byte(certPEM), 0o600))
-	require.NoError(t, os.WriteFile(keyPath, []byte(keyPEM), 0o600))
+	caPEM, caKeyPEM, err := tlsutil.GenerateCaCertificate("test-ca-3", 30, tlsutil.KeyGenOptions{})
+	require.NoError(t, err)
+	return caPEM, caKeyPEM
 }
 
 func clientTLSSecret(certPEM, keyPEM string) *corev1.Secret {
@@ -515,11 +658,11 @@ func certificateName(t *testing.T, cert tls.Certificate) string {
 	return leaf.Subject.CommonName
 }
 
-func certificateNotAfter(t *testing.T, certPEM string) time.Time {
+func parseLeaf(t *testing.T, certPEM string) *x509.Certificate {
 	t.Helper()
 	block, _ := pem.Decode([]byte(certPEM))
 	require.NotNil(t, block)
 	leaf, err := x509.ParseCertificate(block.Bytes)
 	require.NoError(t, err)
-	return leaf.NotAfter
+	return leaf
 }
