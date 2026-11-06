@@ -316,7 +316,7 @@ kubectl get secret argocd-agent-ca -n argocd --context <workload-cluster-context
 
 ### 5.5 Create Agent Namespace on Principal
 
-For managed agents using **namespace-based mapping** (the default), create a namespace on the principal where the agent's Applications will be created and managed:
+For managed agents using **namespace-based mapping** (deprecated, the default before v1.0.0), create a namespace on the principal where the agent's Applications will be created and managed:
 
 ```bash
 kubectl create namespace my-first-agent --context <control-plane-context>
@@ -440,7 +440,7 @@ Access the Argo CD UI to see your agent and its applications!
 
 ## Configuring Destination-Based Mapping
 
-If you prefer to use destination-based mapping instead of the default namespace-based mapping, follow these additional steps after completing the basic setup above.
+Destination-based mapping is the default since v1.0.0, so a fresh installation that follows the steps above already uses it. Follow these additional steps if your installation pinned `--destination-based-mapping=false`, or if you are upgrading from a release before v1.0.0 and want to switch.
 
 ### Why Use Destination-Based Mapping?
 

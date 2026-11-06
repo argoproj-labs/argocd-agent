@@ -379,6 +379,7 @@ func NewAgentRunCommand() *cobra.Command {
 			agentOpts = append(agentOpts, agent.WithApplicationInformerEventBufferInterval(bufferK8sInformerEvents))
 			agentOpts = append(agentOpts, agent.WithHeartbeatInterval(heartbeatInterval))
 			agentOpts = append(agentOpts, agent.WithCreateNamespace(createNamespace))
+			destinationBasedMapping = resolveDestinationBasedMapping(c.Flags().Changed("destination-based-mapping"), agentMode, destinationBasedMapping)
 			agentOpts = append(agentOpts, agent.WithDestinationBasedMapping(destinationBasedMapping))
 			agentOpts = append(agentOpts, agent.WithIgnoreUnmanagedApps(ignoreUnmanagedApps))
 			agentOpts = append(agentOpts, agent.WithSourceUIDMismatchPolicy(sourceMismatchPolicy))
@@ -548,7 +549,7 @@ func NewAgentRunCommand() *cobra.Command {
 
 	command.Flags().BoolVar(&destinationBasedMapping, "destination-based-mapping",
 		env.BoolWithDefault("ARGOCD_AGENT_DESTINATION_BASED_MAPPING", false),
-		"Enable destination-based mapping. When enabled, applications are synced to their original namespace and the agent watches all namespaces")
+		"Enable destination-based mapping. When enabled, applications are synced to their original namespace and the agent watches all namespaces. Defaults to true for managed agents and false for autonomous agents")
 	command.Flags().BoolVar(&createNamespace, "create-namespace",
 		env.BoolWithDefault("ARGOCD_AGENT_CREATE_NAMESPACE", false),
 		"Create target namespace if it doesn't exist when syncing applications (used with destination-based-mapping)")
@@ -661,4 +662,19 @@ func redisCreds(credsDirPath string, username string, password string) (outUsern
 	}
 
 	return username, password, nil
+}
+
+// resolveDestinationBasedMapping returns the effective value of
+// --destination-based-mapping. The flag and its environment variable win when
+// set. Otherwise, including when the variable cannot be parsed, the default
+// follows the agent mode: enabled for managed agents, disabled for autonomous
+// agents, which do not support it.
+func resolveDestinationBasedMapping(flagChanged bool, agentMode string, value bool) bool {
+	if flagChanged {
+		return value
+	}
+	if _, err := env.Bool("ARGOCD_AGENT_DESTINATION_BASED_MAPPING"); err == nil {
+		return value
+	}
+	return types.AgentModeFromString(agentMode).IsManaged()
 }

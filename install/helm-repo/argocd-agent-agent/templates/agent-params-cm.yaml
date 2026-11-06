@@ -122,8 +122,12 @@ data:
   # agent.destination-based-mapping: Whether to enable destination-based mapping.
   # When enabled, the agent creates applications in their original namespace
   # (preserving the namespace from the principal) instead of the agent's own namespace.
-  # Default: false
+  # Default: true for managed agents, false for autonomous agents
+  {{- if not (kindIs "invalid" .Values.destinationBasedMapping) }}
   agent.destination-based-mapping: {{ .Values.destinationBasedMapping | quote }}
+  {{- else if eq .Values.agentMode "managed" }}
+  agent.destination-based-mapping: "true"
+  {{- end }}
   # agent.create-namespace: Whether to create target namespaces automatically.
   # Default: false
   agent.create-namespace: {{ .Values.createNamespace | quote }}

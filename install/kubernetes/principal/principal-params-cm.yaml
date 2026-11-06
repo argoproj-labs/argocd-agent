@@ -183,8 +183,9 @@ data:
   principal.redis.server.address: "argocd-redis:6379"
   # principal.destination-based-mapping: Whether to use destination-based mapping
   # for routing applications to agents based on spec.destination.name instead of namespace.
-  # Default: false
-  principal.destination-based-mapping: "false"
+  # Set to "false" for the deprecated namespace-based mapping.
+  # Default: true
+  principal.destination-based-mapping: "true"
   # principal.label-selector: Kubernetes label selector to restrict which
   # resources the principal watches. Only matching resources will be
   # listed, watched, and processed. Used in hybrid architectures where a

@@ -25,7 +25,7 @@ When choosing a name, consider the following:
 * Naming rules for an agent are equal to [naming rules for Kubernetes namespaces](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names), and must follow the [DNS label standard](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names).
 * The name of an agent should clearly identify the agent, and the cluster it is running on. The name of an agent will be visible as the destination cluster in Argo CD.
 * The name of an agent must be unique among all clusters known to Argo CD. In particular, it must not be the same as the name of a cluster that is already registered in Argo CD (for example, a regular cluster secret for the cluster the agent runs on), otherwise Argo CD is unable to resolve `spec.destination.name` and reports `there are 2 clusters with the same name`. A suffix such as `-agent` can be used to tell the two apart (e.g. `my-cluster-agent`).
-* With namespace-based mapping (the default), a namespace with the same name as the agent will be created on the control plane cluster. These namespaces must be accessible by the Argo CD API server on the control plane through apps-in-any-namespace configuration. With destination-based mapping, per-agent namespaces are not required.
+* With namespace-based mapping (deprecated, the default before v1.0.0), a namespace with the same name as the agent will be created on the control plane cluster. These namespaces must be accessible by the Argo CD API server on the control plane through apps-in-any-namespace configuration. With destination-based mapping, per-agent namespaces are not required.
 * The name of the agent must be part of its TLS client certificate's subject
 
 ## Choosing the right operational mode for each agent
@@ -40,7 +40,7 @@ If in doubt, it's recommended to start using the [managed mode](../user-guide/ma
 
 In addition to the operational mode, you must choose how Applications are routed to managed agents. argocd-agent supports two [mapping modes](../user-guide/managed-agent/agent-mapping.md):
 
-* **Namespace-based mapping** (default): Each agent has a dedicated namespace on the control plane. Applications placed in that namespace are routed to the agent. Simple to set up but limited multi-tenancy.
+* **Namespace-based mapping** (deprecated, the default before v1.0.0): Each agent has a dedicated namespace on the control plane. Applications placed in that namespace are routed to the agent. Simple to set up but limited multi-tenancy.
 
 * **Destination-based mapping**: Applications use `spec.destination.name` to specify the target agent, regardless of their namespace. Provides better multi-tenancy support and matches traditional Argo CD's routing model.
 
