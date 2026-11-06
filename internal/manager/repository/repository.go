@@ -134,7 +134,8 @@ func (m *RepositoryManager) Get(ctx context.Context, name, namespace string) (*c
 // UpdateManagedRepository updates the Repository resource on the agent when it is in
 // managed mode.
 //
-// The repository on the agent will inherit labels and annotations as well as the data of the incoming repository.
+// The repository on the agent will inherit labels, annotations, finalizers and
+// owner references as well as the data of the incoming repository.
 func (m *RepositoryManager) UpdateManagedRepository(ctx context.Context, incoming *corev1.Secret) (*corev1.Secret, error) {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "UpdateManaged",
@@ -155,6 +156,7 @@ func (m *RepositoryManager) UpdateManagedRepository(ctx context.Context, incomin
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
 		existing.Finalizers = incoming.Finalizers
+		existing.OwnerReferences = incoming.OwnerReferences
 		existing.Data = incoming.Data
 	}, func(existing, incoming *corev1.Secret) (jsondiff.Patch, error) {
 		if v, ok := existing.Annotations[manager.SourceUIDAnnotation]; ok {
@@ -166,16 +168,18 @@ func (m *RepositoryManager) UpdateManagedRepository(ctx context.Context, incomin
 
 		target := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
-				Annotations: incoming.Annotations,
-				Labels:      incoming.Labels,
-				Finalizers:  incoming.Finalizers,
+				Annotations:     incoming.Annotations,
+				Labels:          incoming.Labels,
+				Finalizers:      incoming.Finalizers,
+				OwnerReferences: incoming.OwnerReferences,
 			},
 			Data: incoming.Data,
 		}
 		source := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
-				Annotations: existing.Annotations,
-				Labels:      existing.Labels,
+				Annotations:     existing.Annotations,
+				Labels:          existing.Labels,
+				OwnerReferences: existing.OwnerReferences,
 			},
 			Data: existing.Data,
 		}

@@ -495,7 +495,13 @@ func (a *Agent) handleRepositoryDeletion(repo *corev1.Secret) {
 	logCtx.Debugf("Delete repository event")
 
 	if isResourceFromPrincipal(repo) {
-		reverted, err := manager.RevertUserInitiatedDeletion(a.context, repo, a.deletions, a.repoManager, logCtx)
+		// Drop ownerReferences from the recreated repository, so that a copy that
+		// still references an owner missing on the agent cluster is not garbage
+		// collected again.
+		dropOwnerReferences := func(r *corev1.Secret) {
+			r.OwnerReferences = nil
+		}
+		reverted, err := manager.RevertUserInitiatedDeletion(a.context, repo, a.deletions, a.repoManager, logCtx, dropOwnerReferences)
 		if err != nil {
 			logCtx.WithError(err).Error("failed to revert invalid deletion of repository")
 			return
