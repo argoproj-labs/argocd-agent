@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -963,4 +964,139 @@ func Test_RedisProxy_establishConnectionToPrincipalRedis(t *testing.T) {
 		require.Nil(t, conn)
 		require.ErrorContains(t, err, "failed to load CA certificate")
 	})
+
+	t.Run("returns a plain connection and warns when server TLS is on but upstream TLS is off", func(t *testing.T) {
+		l := fakeUpstreamListener(t)
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetTLSEnabled(true) // server TLS on, no upstream TLS configured
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		_ = conn.Close()
+	})
+
+	t.Run("insecure upstream TLS reports a handshake failure against a non-TLS server", func(t *testing.T) {
+		l := closingUpstreamListener(t)
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSInsecure(true)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.Nil(t, conn)
+		require.ErrorContains(t, err, "TLS handshake failed")
+	})
+
+	t.Run("establishes a verified TLS connection with a CA pool", func(t *testing.T) {
+		certPEM, serverCert := upstreamTLSServerCert(t)
+		l := tlsUpstreamServer(t, serverCert)
+
+		pool := x509.NewCertPool()
+		require.True(t, pool.AppendCertsFromPEM(certPEM))
+
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSCA(pool)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		require.IsType(t, &tls.Conn{}, conn)
+		_ = conn.Close()
+	})
+
+	t.Run("establishes a verified TLS connection with a CA from a file", func(t *testing.T) {
+		certPEM, serverCert := upstreamTLSServerCert(t)
+		l := tlsUpstreamServer(t, serverCert)
+
+		caPath := filepath.Join(t.TempDir(), "ca.pem")
+		require.NoError(t, os.WriteFile(caPath, certPEM, 0o600))
+
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSCAPath(caPath)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		require.IsType(t, &tls.Conn{}, conn)
+		_ = conn.Close()
+	})
+}
+
+// closingUpstreamListener accepts connections and immediately closes them, so a
+// TLS handshake against it fails fast (EOF) instead of blocking on the dial
+// deadline.
+func closingUpstreamListener(t *testing.T) net.Listener {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+
+	t.Cleanup(func() { _ = l.Close() })
+	return l
+}
+
+// upstreamTLSServerCert returns a self-signed certificate (PEM) valid for
+// 127.0.0.1 and the matching tls.Certificate, for use as a trusted upstream
+// Redis TLS server.
+func upstreamTLSServerCert(t *testing.T) (certPEM []byte, serverCert tls.Certificate) {
+	t.Helper()
+	templ := testcerts.DefaultCertTempl
+	templ.IsCA = true
+	templ.KeyUsage |= x509.KeyUsageCertSign
+	templ.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
+
+	certPEM, keyPEM := testcerts.CreateSelfSignedCert(t, "rsa", templ)
+	serverCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+	return certPEM, serverCert
+}
+
+// tlsUpstreamServer starts a TLS listener on a loopback ephemeral port that
+// drives the server side of the handshake and holds accepted connections until
+// the test ends.
+func tlsUpstreamServer(t *testing.T, serverCert tls.Certificate) net.Listener {
+	t.Helper()
+	l, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{serverCert}})
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+			// Drive the server side of the handshake so the client's completes.
+			if tc, ok := c.(*tls.Conn); ok {
+				go func() { _ = tc.Handshake() }()
+			}
+		}
+	}()
+
+	t.Cleanup(func() {
+		_ = l.Close()
+		mu.Lock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		mu.Unlock()
+	})
+
+	return l
 }
