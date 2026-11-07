@@ -18,15 +18,19 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/principal/tracker"
+	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
@@ -669,4 +673,143 @@ func Test_rewriteResourcesTreeNamespace(t *testing.T) {
 		_, err := rewriteResourcesTreeNamespace([]byte("not json"), "agent-staging")
 		require.Error(t, err)
 	})
+}
+
+func Test_New(t *testing.T) {
+	sendSync := func(agentName, connectionUUID string, body event.RedisCommandBody) *event.RedisResponseBody {
+		return nil
+	}
+
+	t.Run("stores the provided fields", func(t *testing.T) {
+		customLogger := logging.New(logrus.New())
+		rp := New("127.0.0.1:6379", "redis:6379", sendSync, customLogger)
+
+		require.NotNil(t, rp)
+		require.Equal(t, "127.0.0.1:6379", rp.listenAddress)
+		require.Equal(t, "redis:6379", rp.principalRedisAddress)
+		require.Same(t, customLogger, rp.logger)
+		require.NotNil(t, rp.EventIDTracker)
+		require.NotNil(t, rp.ConnectionIDTracker)
+		require.NotNil(t, rp.sendSynchronousMessageToAgentFn)
+	})
+
+	t.Run("defaults the logger to the default one when nil", func(t *testing.T) {
+		rp := New("addr", "redis", nil, nil)
+
+		require.NotNil(t, rp.logger)
+		require.Same(t, logging.GetDefaultLogger(), rp.logger)
+	})
+}
+
+func Test_RedisProxy_createServerTLSConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, rp *RedisProxy)
+		wantErr string
+		check   func(t *testing.T, cfg *tls.Config)
+	}{
+		{
+			name:    "no certificate configured",
+			setup:   func(t *testing.T, rp *RedisProxy) {},
+			wantErr: "no TLS certificate configured",
+		},
+		{
+			name: "in-memory certificate carries the protocol config",
+			setup: func(t *testing.T, rp *RedisProxy) {
+				certPEM, keyPEM := testcerts.CreateSelfSignedCert(t, "rsa", testcerts.DefaultCertTempl)
+				pair, err := tls.X509KeyPair(certPEM, keyPEM)
+				require.NoError(t, err)
+				leaf, err := x509.ParseCertificate(pair.Certificate[0])
+				require.NoError(t, err)
+
+				rp.SetServerTLS(leaf, pair.PrivateKey)
+				rp.SetServerTLSConfig(tls.VersionTLS12, tls.VersionTLS13,
+					[]uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
+					[]tls.CurveID{tls.CurveP256})
+			},
+			check: func(t *testing.T, cfg *tls.Config) {
+				require.Len(t, cfg.Certificates, 1)
+				require.NotNil(t, cfg.Certificates[0].Leaf)
+				require.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
+				require.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion)
+				require.Equal(t, []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}, cfg.CipherSuites)
+				require.Equal(t, []tls.CurveID{tls.CurveP256}, cfg.CurvePreferences)
+			},
+		},
+		{
+			name: "certificate loaded from valid paths",
+			setup: func(t *testing.T, rp *RedisProxy) {
+				base := filepath.Join(t.TempDir(), "server")
+				testcerts.WriteSelfSignedCert(t, "rsa", base, testcerts.DefaultCertTempl)
+				rp.SetServerTLSFromPath(base+".crt", base+".key")
+			},
+			check: func(t *testing.T, cfg *tls.Config) {
+				require.Len(t, cfg.Certificates, 1)
+			},
+		},
+		{
+			name: "missing certificate paths are reported",
+			setup: func(t *testing.T, rp *RedisProxy) {
+				dir := t.TempDir()
+				rp.SetServerTLSFromPath(filepath.Join(dir, "missing.crt"), filepath.Join(dir, "missing.key"))
+			},
+			wantErr: "failed to load TLS certificate",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rp := New("addr", "redis", nil, nil)
+			tt.setup(t, rp)
+
+			cfg, err := rp.createServerTLSConfig()
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				require.Nil(t, cfg)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, cfg)
+			if tt.check != nil {
+				tt.check(t, cfg)
+			}
+		})
+	}
+}
+
+func Test_parsedRedisCommand_generateParsedCommandDebugString(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  parsedRedisCommand
+		want string
+	}{
+		{
+			name: "parse error is surfaced",
+			cmd:  parsedRedisCommand{err: fmt.Errorf("boom")},
+			want: "error occurred: boom",
+		},
+		{
+			name: "internal message is labelled",
+			cmd:  parsedRedisCommand{internalMsg: []string{"internal-notify", "chan"}},
+			want: "internal message: [internal-notify chan]",
+		},
+		{
+			name: "parsed ASCII command is shown verbatim",
+			cmd:  parsedRedisCommand{parsedReceived: []string{"PING"}},
+			want: "(a->r) 'PING' | ",
+		},
+		{
+			name: "non-ASCII command is summarized by byte length",
+			cmd:  parsedRedisCommand{parsedReceived: []string{"café"}},
+			want: "(a->r) '( 5 bytes )' | ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.cmd.generateParsedCommandDebugString())
+		})
+	}
 }
