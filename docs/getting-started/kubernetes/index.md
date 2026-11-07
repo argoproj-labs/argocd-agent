@@ -231,7 +231,7 @@ kubectl get pods -n argocd --context <control-plane-context> | grep principal
 kubectl logs -n argocd deployment/argocd-agent-principal --context <control-plane-context>
 
 # The log should contain these messages:
-# Now listening on [::]:8443
+# Now listening on [::]:8443    (or 0.0.0.0:8443 on some systems)
 # Resource proxy started
 ```
 
