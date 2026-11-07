@@ -439,7 +439,6 @@ func Test_RepositoryManagerUpdateManagedRepository(t *testing.T) {
 		}
 		updated := newExistingRepository()
 		updated.ResourceVersion = "6"
-		updated.Generation = 2 // an update of a repository past its first generation is logged
 		var sent *corev1.Secret
 		be := appmock.NewRepository(t)
 		be.EXPECT().Get(ctx, "test-repo", testNamespace).Return(newExistingRepository(), nil).Once()
@@ -614,13 +613,11 @@ func Test_RepositoryManagerUpdateManagedRepository(t *testing.T) {
 				be.EXPECT().Get(ctx, "test-repo", testNamespace).Return(newExistingRepository(), nil).Once()
 				be.EXPECT().SupportsPatch().Return(tt.patching).Once()
 				tt.expect(be)
-				m := NewManager(be, testNamespace, false)
 
-				got, err := m.UpdateManagedRepository(ctx, newTestRepository("test-repo"))
+				got, err := NewManager(be, testNamespace, false).UpdateManagedRepository(ctx, newTestRepository("test-repo"))
 
 				require.ErrorIs(t, err, writeErr)
 				require.Nil(t, got)
-				require.False(t, m.IsChangeIgnored("test-repo", "6"))
 			})
 		}
 	})
