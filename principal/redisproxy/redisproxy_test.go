@@ -15,15 +15,20 @@
 package redisproxy
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -812,4 +817,150 @@ func Test_parsedRedisCommand_generateParsedCommandDebugString(t *testing.T) {
 			require.Equal(t, tt.want, tt.cmd.generateParsedCommandDebugString())
 		})
 	}
+}
+
+var errWriteFailed = errors.New("write failed")
+
+// failingWriter is an io.Writer whose Write always fails, to exercise the
+// write-error paths of the proxy's forwarding code.
+type failingWriter struct{}
+
+func (failingWriter) Write(p []byte) (int, error) { return 0, errWriteFailed }
+
+func Test_argoCDRedisWriterInternal_writeToArgoCDRedisSocket(t *testing.T) {
+	logEntry := logging.GetDefaultLogger().ModuleLogger("RedisProxy")
+
+	t.Run("writes and flushes the bytes to the socket", func(t *testing.T) {
+		var out bytes.Buffer
+		w := &argoCDRedisWriterInternal{
+			fromArgoCDWrite: bufio.NewWriter(&out),
+			argoCDWriteLock: &sync.Mutex{},
+		}
+
+		require.NoError(t, w.writeToArgoCDRedisSocket(logEntry, []byte("hello")))
+		require.Equal(t, "hello", out.String())
+	})
+
+	t.Run("returns the error when the socket write fails", func(t *testing.T) {
+		w := &argoCDRedisWriterInternal{
+			fromArgoCDWrite: bufio.NewWriterSize(failingWriter{}, 1),
+			argoCDWriteLock: &sync.Mutex{},
+		}
+
+		require.ErrorIs(t, w.writeToArgoCDRedisSocket(logEntry, []byte("hello")), errWriteFailed)
+	})
+}
+
+func Test_forwardTrafficSimple(t *testing.T) {
+	logEntry := logging.GetDefaultLogger().ModuleLogger("RedisProxy")
+
+	t.Run("forwards all input and returns when the reader is exhausted", func(t *testing.T) {
+		var out bytes.Buffer
+		w := &argoCDRedisWriterInternal{
+			fromArgoCDWrite: bufio.NewWriter(&out),
+			argoCDWriteLock: &sync.Mutex{},
+		}
+		r := bufio.NewReader(strings.NewReader("+PONG\r\n"))
+
+		err := forwardTrafficSimple("r->a", r, w, logEntry)
+
+		require.ErrorIs(t, err, io.EOF)
+		require.Equal(t, "+PONG\r\n", out.String())
+	})
+
+	t.Run("returns the write error when the destination fails", func(t *testing.T) {
+		w := &argoCDRedisWriterInternal{
+			fromArgoCDWrite: bufio.NewWriterSize(failingWriter{}, 1),
+			argoCDWriteLock: &sync.Mutex{},
+		}
+		r := bufio.NewReader(strings.NewReader("data"))
+
+		err := forwardTrafficSimple("r->a", r, w, logEntry)
+
+		require.ErrorIs(t, err, errWriteFailed)
+	})
+}
+
+// fakeUpstreamListener starts a TCP listener on a loopback ephemeral port that
+// accepts and holds connections, so a dial to it succeeds. The listener and any
+// accepted connections are closed when the test ends.
+func fakeUpstreamListener(t *testing.T) net.Listener {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+
+	t.Cleanup(func() {
+		_ = l.Close()
+		mu.Lock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		mu.Unlock()
+	})
+
+	return l
+}
+
+func Test_RedisProxy_establishConnectionToPrincipalRedis(t *testing.T) {
+	logEntry := logging.GetDefaultLogger().ModuleLogger("RedisProxy")
+
+	t.Run("resolve error for an address without a port", func(t *testing.T) {
+		rp := New("addr", "missing-port", nil, nil)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.Nil(t, conn)
+		require.ErrorContains(t, err, "unable to resolve address")
+	})
+
+	t.Run("connection error when nothing is listening", func(t *testing.T) {
+		// Reserve then release a loopback port so the dial is refused deterministically.
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		addr := l.Addr().String()
+		require.NoError(t, l.Close())
+
+		rp := New("addr", addr, nil, nil)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.Nil(t, conn)
+		require.ErrorContains(t, err, "unable to connect to redis")
+	})
+
+	t.Run("returns the connection when the upstream accepts without TLS", func(t *testing.T) {
+		l := fakeUpstreamListener(t)
+		rp := New("addr", l.Addr().String(), nil, nil)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		_ = conn.Close()
+	})
+
+	t.Run("reports a failure to load the upstream CA certificate", func(t *testing.T) {
+		l := fakeUpstreamListener(t)
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSCAPath(filepath.Join(t.TempDir(), "missing-ca.pem"))
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.Nil(t, conn)
+		require.ErrorContains(t, err, "failed to load CA certificate")
+	})
 }
