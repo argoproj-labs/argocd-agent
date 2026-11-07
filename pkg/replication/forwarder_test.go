@@ -17,6 +17,8 @@ package replication
 import (
 	"context"
 	"errors"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,6 +53,18 @@ func (s *fakeReplicaStream) Send(ev *ReplicatedEvent) error {
 }
 
 func (s *fakeReplicaStream) Context() context.Context { return s.ctx }
+
+// reregisteringStream runs onContext the first time its context is asked for.
+type reregisteringStream struct {
+	*fakeReplicaStream
+	once      sync.Once
+	onContext func()
+}
+
+func (s *reregisteringStream) Context() context.Context {
+	s.once.Do(s.onContext)
+	return s.ctx
+}
 
 func newTestEvent(t *testing.T) *event.Event {
 	t.Helper()
@@ -295,6 +309,43 @@ func TestForwarder_broadcastToReplicas(t *testing.T) {
 		require.Equal(t, 1, f.ReplicaCount())
 		require.Equal(t, -1.0, connected())
 		require.Equal(t, 1.0, forwarded())
+	})
+
+	t.Run("a replica that re-registers while it is being removed is kept", func(t *testing.T) {
+		f := NewForwarder()
+		deadCtx, cancel := context.WithCancel(t.Context())
+		cancel()
+		alive := newFakeReplicaStream(t.Context())
+		reregistered := make(chan struct{})
+		// While the broadcast holds the read lock and inspects the dead stream,
+		// the same replica id reconnects. The registration blocks on the write
+		// lock until the broadcast lets go of the read lock, which is before the
+		// broadcast takes the write lock to remove the dead replicas.
+		dead := &reregisteringStream{
+			fakeReplicaStream: newFakeReplicaStream(deadCtx),
+			onContext: func() {
+				go func() {
+					defer close(reregistered)
+					f.RegisterReplica("r1", alive)
+				}()
+				// A pending writer makes TryRLock fail, so once it does the
+				// registration is queued behind the broadcast's read lock.
+				for f.mu.TryRLock() {
+					f.mu.RUnlock()
+					runtime.Gosched()
+				}
+			},
+		}
+		f.RegisterReplica("r1", dead)
+		connected := deltaOf(f.metrics.ReplicasConnected)
+
+		f.broadcastToReplicas(ev)
+		requireDone(t, reregistered)
+
+		require.Equal(t, 1, f.ReplicaCount())
+		require.Zero(t, connected())
+		f.broadcastToReplicas(ev)
+		require.Same(t, ev, recvReplicated(t, alive.sent))
 	})
 
 	t.Run("an event with no replicas is not counted as forwarded or failed", func(t *testing.T) {
