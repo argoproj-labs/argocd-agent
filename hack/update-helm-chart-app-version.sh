@@ -39,18 +39,29 @@ if [[ ${#CHARTS[@]} -eq 0 ]]; then
 fi
 
 for CHART in "${CHARTS[@]}"; do
-	APP_VERSION=$(awk '/^appVersion:/ {print $2}' "${CHART}" | tr -d '"')
+	for FIELD in version appVersion; do
+		if ! grep -q "^${FIELD}:" "${CHART}"; then
+			echo "Error: ${CHART} has no top-level ${FIELD} field" >&2
+			exit 1
+		fi
+	done
+
+	CHART_VERSION=$(awk '/^version:/ {print $2; exit}' "${CHART}" | tr -d '"')
+	if ! echo "${CHART_VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+		echo "Error: cannot bump chart version '${CHART_VERSION}' in ${CHART}, expected X.Y.Z" >&2
+		exit 1
+	fi
+done
+
+for CHART in "${CHARTS[@]}"; do
+	APP_VERSION=$(awk '/^appVersion:/ {print $2; exit}' "${CHART}" | tr -d '"')
 	if [[ "${APP_VERSION}" == "v${TARGET_VERSION}" ]]; then
 		echo "${CHART} already has appVersion v${TARGET_VERSION}"
 		continue
 	fi
 
-	CHART_VERSION=$(awk '/^version:/ {print $2}' "${CHART}" | tr -d '"')
-	if ! echo "${CHART_VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-		echo "Error: cannot bump chart version '${CHART_VERSION}' in ${CHART}, expected X.Y.Z" >&2
-		exit 1
-	fi
-	NEW_CHART_VERSION="${CHART_VERSION%.*}.$((${CHART_VERSION##*.} + 1))"
+	CHART_VERSION=$(awk '/^version:/ {print $2; exit}' "${CHART}" | tr -d '"')
+	NEW_CHART_VERSION="${CHART_VERSION%.*}.$((10#${CHART_VERSION##*.} + 1))"
 
 	echo "${CHART}: appVersion ${APP_VERSION} -> v${TARGET_VERSION}, version ${CHART_VERSION} -> ${NEW_CHART_VERSION}"
 	sed -E \
