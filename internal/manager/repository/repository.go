@@ -179,6 +179,7 @@ func (m *RepositoryManager) UpdateManagedRepository(ctx context.Context, incomin
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations:     existing.Annotations,
 				Labels:          existing.Labels,
+				Finalizers:      existing.Finalizers,
 				OwnerReferences: existing.OwnerReferences,
 			},
 			Data: existing.Data,

@@ -808,6 +808,43 @@ func Test_handleRepositoryDeletion(t *testing.T) {
 		assert.Equal(t, "source-uid", string(recreated.UID))
 		assert.NotEmpty(t, deleted.OwnerReferences, "the deleted object must not be modified")
 	})
+
+	t.Run("Recreate repository keeps owner references in autonomous mode", func(t *testing.T) {
+		a.mode = types.AgentModeAutonomous
+		defer func() { a.mode = types.AgentModeManaged }()
+		be := backend_mocks.NewRepository(t)
+		oldRepoManager := a.repoManager
+		a.repoManager = repository.NewManager(be, "argocd", true)
+		defer func() { a.repoManager = oldRepoManager }()
+
+		deleted := &corev1.Secret{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-repo",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "source-uid",
+				},
+				OwnerReferences: []v1.OwnerReference{
+					{
+						APIVersion: "external-secrets.io/v1",
+						Kind:       "ExternalSecret",
+						Name:       "test-repo",
+						UID:        "owner-uid",
+					},
+				},
+			},
+		}
+
+		var recreated *corev1.Secret
+		be.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			recreated = args.Get(1).(*corev1.Secret)
+		}).Return(deleted, nil)
+
+		a.handleRepositoryDeletion(deleted)
+
+		require.NotNil(t, recreated)
+		assert.Equal(t, deleted.OwnerReferences, recreated.OwnerReferences)
+	})
 }
 
 func Test_handleGPGKeyCreation(t *testing.T) {

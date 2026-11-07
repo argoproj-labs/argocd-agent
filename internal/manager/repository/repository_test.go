@@ -286,4 +286,57 @@ func Test_UpdateManagedRepository(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, string(patch), `{"op":"remove","path":"/metadata/ownerReferences"}`)
 	})
+
+	ownedIncoming := incoming.DeepCopy()
+	ownedIncoming.OwnerReferences = []metav1.OwnerReference{
+		{
+			APIVersion: "v1",
+			Kind:       "ConfigMap",
+			Name:       "owner",
+			UID:        "new-owner-uid",
+		},
+	}
+
+	t.Run("Update applies incoming owner references", func(t *testing.T) {
+		be := appmock.NewRepository(t)
+		be.On("Get", mock.Anything, "test-repo", "argocd").Return(existing.DeepCopy(), nil)
+		be.On("SupportsPatch").Return(false)
+		be.On("Update", mock.Anything, mock.Anything).Return(func(_ context.Context, s *corev1.Secret) (*corev1.Secret, error) {
+			return s, nil
+		}, nil)
+
+		updated, err := newManager(be).UpdateManagedRepository(context.Background(), ownedIncoming.DeepCopy())
+		require.NoError(t, err)
+		require.Equal(t, ownedIncoming.OwnerReferences, updated.OwnerReferences)
+	})
+
+	t.Run("Patch applies incoming owner references", func(t *testing.T) {
+		be := appmock.NewRepository(t)
+		be.On("Get", mock.Anything, "test-repo", "argocd").Return(existing.DeepCopy(), nil)
+		be.On("SupportsPatch").Return(true)
+		var patch []byte
+		be.On("Patch", mock.Anything, "test-repo", "argocd", mock.Anything).Run(func(args mock.Arguments) {
+			patch = args.Get(3).([]byte)
+		}).Return(&corev1.Secret{}, nil)
+
+		_, err := newManager(be).UpdateManagedRepository(context.Background(), ownedIncoming.DeepCopy())
+		require.NoError(t, err)
+		require.Contains(t, string(patch), `{"value":"new-owner-uid","op":"replace","path":"/metadata/ownerReferences/0/uid"}`)
+	})
+
+	t.Run("Patch removes stale finalizers", func(t *testing.T) {
+		withFinalizers := existing.DeepCopy()
+		withFinalizers.Finalizers = []string{"example.com/finalizer"}
+		be := appmock.NewRepository(t)
+		be.On("Get", mock.Anything, "test-repo", "argocd").Return(withFinalizers, nil)
+		be.On("SupportsPatch").Return(true)
+		var patch []byte
+		be.On("Patch", mock.Anything, "test-repo", "argocd", mock.Anything).Run(func(args mock.Arguments) {
+			patch = args.Get(3).([]byte)
+		}).Return(&corev1.Secret{}, nil)
+
+		_, err := newManager(be).UpdateManagedRepository(context.Background(), incoming.DeepCopy())
+		require.NoError(t, err)
+		require.Contains(t, string(patch), `{"op":"remove","path":"/metadata/finalizers"}`)
+	})
 }
