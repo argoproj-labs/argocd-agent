@@ -84,10 +84,22 @@ const (
 type sendErrorObservingSubscribeServer struct {
 	eventstreamapi.EventStream_SubscribeServer
 	onSendError func(error)
+
+	// sendMu serializes Send. When an agent reconnects while the principal still
+	// holds its previous stream, the previous SendWaitingEvents loop keeps running
+	// until its client context is canceled, and it sends to the EventWriter's
+	// current target, which is this stream. gRPC does not allow concurrent SendMsg
+	// on one stream: two senders blocked on the stream's write quota can lose a
+	// wakeup, and one of them then waits until the stream ends while holding the
+	// event's lock in retrySentEvent. The other loop blocks on that lock, and the
+	// stream stays open without delivering another event.
+	sendMu sync.Mutex
 }
 
 func (s *sendErrorObservingSubscribeServer) Send(ev *eventstreamapi.Event) error {
+	s.sendMu.Lock()
 	err := s.EventStream_SubscribeServer.Send(ev)
+	s.sendMu.Unlock()
 	if err != nil && s.onSendError != nil {
 		s.onSendError(err)
 	}
