@@ -67,10 +67,11 @@ The agent's name has to follow the [agent naming requirements](./adding-agents.m
 
 ### The Client Certificate
 
-Argo CD connects to the resource proxy with the client certificate stored in `config`. The resource proxy takes the agent's name from the certificate, so the certificate has to meet two conditions:
+Argo CD connects to the resource proxy with the client certificate stored in `config`. The resource proxy takes the agent's name from the certificate, so the certificate has to meet three conditions:
 
 * Its common name (CN) is the agent's name.
 * It is signed by the certificate authority the resource proxy trusts for client certificates. That is the secret `argocd-agent-ca` in the principal's namespace, unless the principal is started with a different `--resource-proxy-ca-secret-name`.
+* Its extended key usage allows client authentication. Either the certificate has no extended key usage, or the list includes `client auth`. A certificate limited to `server auth` is rejected.
 
 `caData` is the certificate of the authority that signed the resource proxy's server certificate. Argo CD uses it to verify the resource proxy.
 
@@ -83,10 +84,11 @@ RESOURCE_PROXY=argocd-agent-resource-proxy.${NAMESPACE}.svc.cluster.local:9090
 
 CERT=$(kubectl get secret "${AGENT}-principal" -n "${NAMESPACE}" -o jsonpath='{.data.tls\.crt}')
 KEY=$(kubectl get secret "${AGENT}-principal" -n "${NAMESPACE}" -o jsonpath='{.data.tls\.key}')
-CA=$(kubectl get secret "${AGENT}-principal" -n "${NAMESPACE}" -o jsonpath='{.data.ca\.crt}')
+CA=$(kubectl get secret argocd-agent-resource-proxy-tls -n "${NAMESPACE}" -o jsonpath='{.data.ca\.crt}')
+CA=${CA:-$(kubectl get secret argocd-agent-ca -n "${NAMESPACE}" -o jsonpath='{.data.tls\.crt}')}
 
 if [ -z "${CERT}" ] || [ -z "${KEY}" ] || [ -z "${CA}" ]; then
-  echo "secret ${AGENT}-principal is missing tls.crt, tls.key or ca.crt" >&2
+  echo "secret ${AGENT}-principal is missing tls.crt or tls.key, or no CA was found in argocd-agent-resource-proxy-tls (ca.crt) or argocd-agent-ca (tls.crt)" >&2
   exit 1
 fi
 
@@ -122,14 +124,16 @@ stringData:
 EOF
 ```
 
-The example takes `caData` from the `ca.crt` of the client certificate's secret. That is correct when the same authority also signs the resource proxy's server certificate, as it does in that guide. If a different authority signs the server certificate, set `caData` to that authority's certificate instead, otherwise Argo CD cannot verify the resource proxy.
+The example takes `caData` from the `ca.crt` of the secret `argocd-agent-resource-proxy-tls`, which is the authority that signed the resource proxy's server certificate. Certificates made with `argocd-agentctl pki issue` or by hand have no `ca.crt`, so the example falls back to `tls.crt` of the secret `argocd-agent-ca`, the authority that signs the certificates in that guide. If a different authority signed your server certificate, set `caData` to its certificate instead.
 
 cert-manager only fills `ca.crt` for issuers that expose their certificate authority, such as the CA issuer used in that guide. With certificate files created by hand, encode them first, for example with `base64 < client.crt | tr -d '\n'`.
+
+cert-manager renews the client certificate in the secret `<cluster-name>-principal` before it expires, but it does not update the cluster secret built from it, which keeps the copy of the old certificate. Once that certificate expires, the resource proxy rejects the connections from Argo CD. Repeat the steps above after each renewal and apply the new manifest, or let the tool that manages the cluster secret do it.
 
 !!! warning "The secret contains a private key"
     Do not commit the generated manifest to Git as it is. Store it with the secret management tool you already use for Argo CD cluster secrets, such as Sealed Secrets or External Secrets.
 
-If you only want to avoid the PKI managed by `argocd-agentctl`, the CLI can also build the cluster secret from certificates you provide. `argocd-agentctl agent create <agent-name> --tls-from-secret <secret> --ca-from-secret <secret>` reads `tls.crt`, `tls.key` and `ca.crt` from existing secrets instead of issuing a new certificate.
+If you only want to avoid the PKI managed by `argocd-agentctl`, the CLI can also build the cluster secret from certificates you provide. `argocd-agentctl agent create <agent-name> --tls-from-secret <secret> --ca-from-secret <secret> --resource-proxy-server argocd-agent-resource-proxy.argocd.svc.cluster.local:9090` reads `tls.crt`, `tls.key` and `ca.crt` from existing secrets instead of issuing a new certificate. Without `--resource-proxy-server` the CLI writes `argocd-agent-resource-proxy:9090`, a name that the resource proxy certificates in [TLS & Certificates](../configuration/tls-certificates.md) do not contain, so Argo CD would fail to verify them. Use a host that is in your resource proxy certificate.
 
 ### How an Agent Is Mapped
 
@@ -176,7 +180,7 @@ The agent authenticates to the principal with a client certificate of its own, s
 | Secret | Namespace | Keys | Content |
 |--------|-----------|------|---------|
 | `argocd-agent-client-tls` | The agent's namespace | `tls.crt`, `tls.key` | Client certificate with the agent's name as CN, signed by the principal's certificate authority |
-| `argocd-agent-ca` | The agent's namespace | `ca.crt` or `tls.crt` | Certificate of that authority, without the private key |
+| `argocd-agent-ca` | The agent's namespace | `ca.crt` or `tls.crt` | Certificate of the authority that signed the principal's server certificate, without the private key. The agent uses it to verify the principal and reads every key of the secret as a certificate, so the secret must not contain a private key. In [TLS & Certificates](../configuration/tls-certificates.md) the same authority also signs the client certificates, but if your server certificate comes from a different authority, use that one here |
 
 [TLS & Certificates](../configuration/tls-certificates.md) shows how to issue both with [cert-manager](../configuration/tls-certificates.md#using-cert-manager) or [by hand](../configuration/tls-certificates.md#manual-certificate-management). The agent itself is deployed and configured as described in [Adding New Agents](./adding-agents.md#step-5-deploy-agent-to-workload-cluster).
 
