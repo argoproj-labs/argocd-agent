@@ -252,7 +252,7 @@ func (f *Forwarder) Run(ctx context.Context) {
 
 // broadcastToReplicas sends an event to all connected replicas
 func (f *Forwarder) broadcastToReplicas(ev *ReplicatedEvent) {
-	var dead []string
+	var dead []*replicaConnection
 
 	f.mu.RLock()
 	if len(f.replicas) == 0 {
@@ -263,7 +263,7 @@ func (f *Forwarder) broadcastToReplicas(ev *ReplicatedEvent) {
 	for id, replica := range f.replicas {
 		select {
 		case <-replica.stream.Context().Done():
-			dead = append(dead, id)
+			dead = append(dead, replica)
 			continue
 		default:
 		}
@@ -279,11 +279,13 @@ func (f *Forwarder) broadcastToReplicas(ev *ReplicatedEvent) {
 
 	if len(dead) > 0 {
 		f.mu.Lock()
-		for _, id := range dead {
-			if _, ok := f.replicas[id]; ok {
-				delete(f.replicas, id)
+		for _, replica := range dead {
+			// The replica may have re-registered since it was found dead, in
+			// which case the entry is a new, live connection that must stay.
+			if current, ok := f.replicas[replica.id]; ok && current == replica {
+				delete(f.replicas, replica.id)
 				f.metrics.ReplicasConnected.Dec()
-				log().WithField("replica_id", id).Info("Removed dead replica during broadcast")
+				log().WithField("replica_id", replica.id).Info("Removed dead replica during broadcast")
 			}
 		}
 		f.mu.Unlock()
