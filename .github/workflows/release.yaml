@@ -29,7 +29,8 @@ jobs:
           set -xue
           git fetch --prune --tags --force
 
-          LATEST_RELEASE_TAG=$(git tag --list --sort=version:refname | tail -n 1)
+          # Pre-release tags never count as the latest release
+          LATEST_RELEASE_TAG=$(git tag --list --sort=version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | tail -n 1)
           IS_LATEST_RELEASE=false
           if [[ "$LATEST_RELEASE_TAG" == "${GITHUB_REF_NAME}" ]]; then
             IS_LATEST_RELEASE=true
@@ -284,3 +285,61 @@ jobs:
       base64-subjects: "${{ needs.sbom.outputs.hash }}"
       provenance-name: "argocd-agent_${{ needs.setup-variables.outputs.trimmed_tag }}_sbom.intoto.jsonl"
       upload-assets: true
+
+  # Helm charts are only published from main, so the released version must also land there
+  update-main-helm-charts:
+    name: Update Helm charts on main
+    needs:
+      - setup-variables
+      - container-image
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-24.04
+    if: (github.repository == 'argoproj-labs/argocd-agent' || needs.setup-variables.outputs.allow_fork_releases == 'true') && needs.setup-variables.outputs.is_latest_release == 'true'
+    # Runs for releases tagged close together update the PR branch one at a time
+    concurrency:
+      group: ${{ github.workflow }}-update-main-helm-charts
+      cancel-in-progress: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          ref: main
+          persist-credentials: false
+
+      # A newer release may have been tagged while this run was building or waiting,
+      # and its run may get cancelled while queued behind this one. Always write the
+      # latest stable release, so whichever run updates the PR branch last is right.
+      - name: Find the latest release
+        id: latest
+        run: |
+          set -xue
+          git fetch --tags --force
+
+          LATEST_RELEASE_TAG=$(git tag --list --sort=version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | tail -n 1)
+          if [[ "$LATEST_RELEASE_TAG" != "${GITHUB_REF_NAME}" ]]; then
+            echo "::notice::${LATEST_RELEASE_TAG} was released after ${GITHUB_REF_NAME}, updating the Helm charts to ${LATEST_RELEASE_TAG}"
+          fi
+          echo "tag=$LATEST_RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Update Helm charts
+        run: |
+          ./hack/update-helm-chart-app-version.sh "${STEPS_LATEST_OUTPUTS_TAG#v}"
+          make generate-helm-docs
+        env:
+          STEPS_LATEST_OUTPUTS_TAG: ${{ steps.latest.outputs.tag }}
+
+      - name: Print changes to be pushed
+        run: git --no-pager diff HEAD
+
+      # No PR is opened when main already has this appVersion
+      - name: Create PR
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+        with:
+          commit-message: "chore(helm): Set chart app version to ${{ steps.latest.outputs.tag }}"
+          title: "chore(helm): set chart app version to ${{ steps.latest.outputs.tag }}"
+          body: "Updating the Helm charts on main to use the ${{ steps.latest.outputs.tag }} release"
+          # A fixed branch makes a later run update the open PR instead of adding one
+          branch: release-helm-charts
+          signoff: true

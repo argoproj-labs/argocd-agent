@@ -66,9 +66,13 @@ echo "*** generating new manifests"
 	kustomize edit set image argocd-agent=quay.io/argoprojlabs/argocd-agent:${TARGET_TAG}
 )
 
+echo "*** updating Helm charts"
+./hack/update-helm-chart-app-version.sh "${TARGET_VERSION}"
+make generate-helm-docs
+
 echo "*** committing changes to release branch"
 
-git add VERSION install/kubernetes/{agent,principal}/kustomization.yaml
+git add VERSION install/kubernetes/{agent,principal}/kustomization.yaml install/helm-repo
 git commit -S -s -m "release: Publish release ${TARGET_VERSION}"
 
 echo "*** building release images"
