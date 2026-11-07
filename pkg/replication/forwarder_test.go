@@ -17,7 +17,6 @@ package replication
 import (
 	"context"
 	"errors"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -64,6 +63,28 @@ type reregisteringStream struct {
 func (s *reregisteringStream) Context() context.Context {
 	s.once.Do(s.onContext)
 	return s.ctx
+}
+
+// blockingStream is a replica whose Send blocks until release is closed.
+type blockingStream struct {
+	*fakeReplicaStream
+	enteredOnce sync.Once
+	entered     chan struct{}
+	release     chan struct{}
+}
+
+func newBlockingStream(ctx context.Context) *blockingStream {
+	return &blockingStream{
+		fakeReplicaStream: newFakeReplicaStream(ctx),
+		entered:           make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+}
+
+func (s *blockingStream) Send(ev *ReplicatedEvent) error {
+	s.enteredOnce.Do(func() { close(s.entered) })
+	<-s.release
+	return s.fakeReplicaStream.Send(ev)
 }
 
 func newTestEvent(t *testing.T) *event.Event {
@@ -316,36 +337,64 @@ func TestForwarder_broadcastToReplicas(t *testing.T) {
 		deadCtx, cancel := context.WithCancel(t.Context())
 		cancel()
 		alive := newFakeReplicaStream(t.Context())
-		reregistered := make(chan struct{})
-		// While the broadcast holds the read lock and inspects the dead stream,
-		// the same replica id reconnects. The registration blocks on the write
-		// lock until the broadcast lets go of the read lock, which is before the
-		// broadcast takes the write lock to remove the dead replicas.
+		// The same replica id reconnects while the broadcast is looking at the
+		// dead stream, before it removes the dead replicas.
 		dead := &reregisteringStream{
 			fakeReplicaStream: newFakeReplicaStream(deadCtx),
-			onContext: func() {
-				go func() {
-					defer close(reregistered)
-					f.RegisterReplica("r1", alive)
-				}()
-				// A pending writer makes TryRLock fail, so once it does the
-				// registration is queued behind the broadcast's read lock.
-				for f.mu.TryRLock() {
-					f.mu.RUnlock()
-					runtime.Gosched()
-				}
-			},
+			onContext:         func() { f.RegisterReplica("r1", alive) },
 		}
 		f.RegisterReplica("r1", dead)
 		connected := deltaOf(f.metrics.ReplicasConnected)
 
 		f.broadcastToReplicas(ev)
-		requireDone(t, reregistered)
 
 		require.Equal(t, 1, f.ReplicaCount())
 		require.Zero(t, connected())
 		f.broadcastToReplicas(ev)
 		require.Same(t, ev, recvReplicated(t, alive.sent))
+	})
+
+	t.Run("a replica that blocks in Send does not block the rest of the forwarder", func(t *testing.T) {
+		f := NewForwarder()
+		slow := newBlockingStream(t.Context())
+		var releaseOnce sync.Once
+		releaseSlow := func() { releaseOnce.Do(func() { close(slow.release) }) }
+		t.Cleanup(releaseSlow) // do not leave Send blocked if the test fails
+		f.RegisterReplica("slow", slow)
+		broadcast := make(chan struct{})
+		go func() {
+			defer close(broadcast)
+			f.broadcastToReplicas(ev)
+		}()
+		requireDone(t, slow.entered)
+
+		// Everything that needs the forwarder's lock must still work while the
+		// broadcast is stuck in Send.
+		f.sequenceNum.Store(5)
+		other := newFakeReplicaStream(t.Context())
+		busy := make(chan struct{})
+		var lag uint64
+		var status *ForwarderStatus
+		go func() {
+			defer close(busy)
+			f.RegisterReplica("other", other)
+			f.UpdateReplicaAck("slow", 1)
+			lag = f.GetReplicaLag("slow")
+			status = f.GetStatus()
+			f.UnregisterReplica("other")
+		}()
+		select {
+		case <-busy:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the forwarder is blocked while a replica is blocked in Send")
+		}
+		require.Equal(t, uint64(4), lag)
+		require.Equal(t, 2, status.ConnectedReplicas)
+
+		releaseSlow()
+		requireDone(t, broadcast)
+		require.Same(t, ev, recvReplicated(t, slow.sent))
+		require.Equal(t, 1, f.ReplicaCount())
 	})
 
 	t.Run("an event with no replicas is not counted as forwarded or failed", func(t *testing.T) {
