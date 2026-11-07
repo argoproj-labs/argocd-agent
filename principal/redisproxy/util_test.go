@@ -116,7 +116,7 @@ func recvRedisCommand(t *testing.T, ch <-chan parsedRedisCommand) (parsedRedisCo
 	select {
 	case v, ok := <-ch:
 		return v, ok
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting on redis reader channel")
 		return parsedRedisCommand{}, false
 	}

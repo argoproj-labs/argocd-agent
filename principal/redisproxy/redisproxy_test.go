@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -754,6 +755,48 @@ func Test_RedisProxy_createServerTLSConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "certificate paths take precedence over the in-memory certificate",
+			setup: func(t *testing.T, rp *RedisProxy) {
+				memPEM, memKeyPEM := testcerts.CreateSelfSignedCert(t, "rsa", testcerts.DefaultCertTempl)
+				memPair, err := tls.X509KeyPair(memPEM, memKeyPEM)
+				require.NoError(t, err)
+				memLeaf, err := x509.ParseCertificate(memPair.Certificate[0])
+				require.NoError(t, err)
+				rp.SetServerTLS(memLeaf, memPair.PrivateKey)
+
+				pathTempl := testcerts.DefaultCertTempl
+				pathTempl.SerialNumber = big.NewInt(42)
+				base := filepath.Join(t.TempDir(), "server")
+				testcerts.WriteSelfSignedCert(t, "rsa", base, pathTempl)
+				rp.SetServerTLSFromPath(base+".crt", base+".key")
+			},
+			check: func(t *testing.T, cfg *tls.Config) {
+				require.Len(t, cfg.Certificates, 1)
+				leaf, err := x509.ParseCertificate(cfg.Certificates[0].Certificate[0])
+				require.NoError(t, err)
+				require.Equal(t, int64(42), leaf.SerialNumber.Int64(), "expected the certificate loaded from the paths")
+			},
+		},
+		{
+			name: "a single certificate path falls back to the in-memory certificate",
+			setup: func(t *testing.T, rp *RedisProxy) {
+				memPEM, memKeyPEM := testcerts.CreateSelfSignedCert(t, "rsa", testcerts.DefaultCertTempl)
+				memPair, err := tls.X509KeyPair(memPEM, memKeyPEM)
+				require.NoError(t, err)
+				memLeaf, err := x509.ParseCertificate(memPair.Certificate[0])
+				require.NoError(t, err)
+				rp.SetServerTLS(memLeaf, memPair.PrivateKey)
+
+				rp.SetServerTLSFromPath(filepath.Join(t.TempDir(), "only.crt"), "")
+			},
+			check: func(t *testing.T, cfg *tls.Config) {
+				require.Len(t, cfg.Certificates, 1)
+				leaf, err := x509.ParseCertificate(cfg.Certificates[0].Certificate[0])
+				require.NoError(t, err)
+				require.Equal(t, int64(1), leaf.SerialNumber.Int64(), "expected the in-memory certificate")
+			},
+		},
+		{
 			name: "missing certificate paths are reported",
 			setup: func(t *testing.T, rp *RedisProxy) {
 				dir := t.TempDir()
@@ -977,7 +1020,7 @@ func Test_RedisProxy_establishConnectionToPrincipalRedis(t *testing.T) {
 		_ = conn.Close()
 	})
 
-	t.Run("insecure upstream TLS reports a handshake failure against a non-TLS server", func(t *testing.T) {
+	t.Run("a handshake failure is reported as such", func(t *testing.T) {
 		l := closingUpstreamListener(t)
 		rp := New("addr", l.Addr().String(), nil, nil)
 		rp.SetUpstreamTLSInsecure(true)
@@ -986,6 +1029,40 @@ func Test_RedisProxy_establishConnectionToPrincipalRedis(t *testing.T) {
 
 		require.Nil(t, conn)
 		require.ErrorContains(t, err, "TLS handshake failed")
+	})
+
+	t.Run("insecure upstream TLS accepts a certificate that no configured CA trusts", func(t *testing.T) {
+		_, serverCert := upstreamTLSServerCert(t)
+		l := tlsUpstreamServer(t, serverCert)
+
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSInsecure(true)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		require.IsType(t, &tls.Conn{}, conn)
+		_ = conn.Close()
+	})
+
+	t.Run("rejects a server certificate that the configured CA does not trust", func(t *testing.T) {
+		_, serverCert := upstreamTLSServerCert(t)
+		l := tlsUpstreamServer(t, serverCert)
+
+		otherCAPEM, _ := upstreamTLSServerCert(t)
+		pool := x509.NewCertPool()
+		require.True(t, pool.AppendCertsFromPEM(otherCAPEM))
+
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSCA(pool)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.Nil(t, conn)
+		require.ErrorContains(t, err, "TLS handshake failed")
+		var verifyErr *tls.CertificateVerificationError
+		require.ErrorAs(t, err, &verifyErr)
 	})
 
 	t.Run("establishes a verified TLS connection with a CA pool", func(t *testing.T) {
