@@ -252,15 +252,16 @@ func (f *Forwarder) Run(ctx context.Context) {
 
 // broadcastToReplicas sends an event to all connected replicas
 func (f *Forwarder) broadcastToReplicas(ev *ReplicatedEvent) {
-	var dead []*replicaConnection
-
+	// Copy the replicas so a blocking Send does not hold the lock.
 	f.mu.RLock()
-	if len(f.replicas) == 0 {
-		f.mu.RUnlock()
-		return
+	replicas := make([]*replicaConnection, 0, len(f.replicas))
+	for _, replica := range f.replicas {
+		replicas = append(replicas, replica)
 	}
+	f.mu.RUnlock()
 
-	for id, replica := range f.replicas {
+	var dead []*replicaConnection
+	for _, replica := range replicas {
 		select {
 		case <-replica.stream.Context().Done():
 			dead = append(dead, replica)
@@ -269,13 +270,12 @@ func (f *Forwarder) broadcastToReplicas(ev *ReplicatedEvent) {
 		}
 
 		if err := replica.stream.Send(ev); err != nil {
-			log().WithField("replica_id", id).WithError(err).Warn("Failed to send event to replica")
+			log().WithField("replica_id", replica.id).WithError(err).Warn("Failed to send event to replica")
 			f.metrics.ForwardingErrors.Inc()
 		} else {
 			f.metrics.EventsForwarded.Inc()
 		}
 	}
-	f.mu.RUnlock()
 
 	if len(dead) > 0 {
 		f.mu.Lock()
