@@ -17,6 +17,7 @@ package tlsutil
 import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -149,4 +150,71 @@ func Test_GeneratePrivateKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_GeneratePrivateKey_Errors(t *testing.T) {
+	t.Run("an RSA key below 2048 bits is refused", func(t *testing.T) {
+		key, err := GeneratePrivateKey(KeyGenOptions{Algorithm: "rsa", RSABits: 1024})
+
+		require.ErrorContains(t, err, "at least 2048 bits")
+		assert.Nil(t, key)
+	})
+
+	t.Run("an algorithm that is not supported is refused", func(t *testing.T) {
+		key, err := GeneratePrivateKey(KeyGenOptions{Algorithm: "dsa"})
+
+		require.ErrorContains(t, err, "unsupported key algorithm: dsa")
+		assert.Nil(t, key)
+	})
+}
+
+func Test_ParsePrivateKeyFromPEM_Formats(t *testing.T) {
+	t.Run("SEC1 EC key", func(t *testing.T) {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		der, err := x509.MarshalECPrivateKey(key)
+		require.NoError(t, err)
+
+		parsed, err := ParsePrivateKeyFromPEM(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}))
+
+		require.NoError(t, err)
+		assert.True(t, key.Equal(parsed))
+	})
+
+	tests := []struct {
+		name    string
+		data    []byte
+		wantErr string // empty when the error comes from the parser of the key
+	}{
+		{name: "data that is not PEM", data: []byte("junk"), wantErr: "no valid PEM data found"},
+		{name: "a PEM type that is not a private key", data: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("x")}), wantErr: "unsupported private key PEM type: CERTIFICATE"},
+		{name: "a PKCS#8 block that is damaged", data: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("junk")})},
+		{name: "a PKCS#1 block that is damaged", data: pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: []byte("junk")})},
+		{name: "an EC block that is damaged", data: pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: []byte("junk")})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, err := ParsePrivateKeyFromPEM(tt.data)
+
+			require.Error(t, err)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+			}
+			assert.Nil(t, key)
+		})
+	}
+}
+
+func Test_publicKey_Unsupported(t *testing.T) {
+	pub, err := publicKey("not a key")
+
+	require.ErrorContains(t, err, "unsupported private key type: string")
+	assert.Nil(t, pub)
+}
+
+func Test_PublicKeySummary_Unknown(t *testing.T) {
+	keyType, keyLength := PublicKeySummary("not a key")
+
+	assert.Equal(t, "string", keyType)
+	assert.Zero(t, keyLength)
 }

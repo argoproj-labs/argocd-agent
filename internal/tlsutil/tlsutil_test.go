@@ -16,13 +16,17 @@ package tlsutil
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io/fs"
+	"os"
 	"path"
 	"slices"
 	"strings"
@@ -122,6 +126,110 @@ func Test_TlsCertFromX509(t *testing.T) {
 	})
 }
 
+func Test_TlsCertFromX509_KeysAndInputs(t *testing.T) {
+	key := testcerts.GeneratePrivateKey(t, "rsa").(*rsa.PrivateKey)
+	raw, err := x509.CreateCertificate(rand.Reader, &testcerts.DefaultCertTempl, &testcerts.DefaultCertTempl, &key.PublicKey, key)
+	require.NoError(t, err)
+	cert := testcerts.DefaultCertTempl
+	cert.Raw = raw
+
+	t.Run("Ed25519 certificate", func(t *testing.T) {
+		_, edKey, err := ed25519.GenerateKey(rand.Reader)
+		require.NoError(t, err)
+		edRaw, err := x509.CreateCertificate(rand.Reader, &testcerts.DefaultCertTempl, &testcerts.DefaultCertTempl, edKey.Public(), edKey)
+		require.NoError(t, err)
+		edCert := testcerts.DefaultCertTempl
+		edCert.Raw = edRaw
+
+		tlsCert, err := TLSCertFromX509(&edCert, edKey)
+
+		require.NoError(t, err)
+		assert.Equal(t, [][]byte{edRaw}, tlsCert.Certificate)
+	})
+
+	tests := []struct {
+		name string
+		cert *x509.Certificate
+		key  any
+		want string
+	}{
+		{name: "no certificate", key: key, want: "unexpected input"},
+		{name: "no key", cert: &cert, want: "unexpected input"},
+		{name: "a key of a type that is not supported", cert: &cert, key: "not a key", want: "unknown private key type: string"},
+		{name: "a key that does not belong to the certificate", cert: &cert, key: testcerts.GeneratePrivateKey(t, "rsa"), want: "error creating key pair"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tlsCert, err := TLSCertFromX509(tt.cert, tt.key)
+
+			require.ErrorContains(t, err, tt.want)
+			assert.Empty(t, tlsCert.Certificate)
+		})
+	}
+}
+
+func Test_X509CertPoolFromFile(t *testing.T) {
+	t.Run("a file with certificates gives a pool with them", func(t *testing.T) {
+		certPEM, _ := testcerts.CreateSelfSignedCert(t, "rsa", testcerts.DefaultCertTempl)
+		file := path.Join(t.TempDir(), "ca.crt")
+		require.NoError(t, os.WriteFile(file, certPEM, 0o600))
+		want := x509.NewCertPool()
+		require.True(t, want.AppendCertsFromPEM(certPEM))
+
+		pool, err := X509CertPoolFromFile(file)
+
+		require.NoError(t, err)
+		assert.True(t, want.Equal(pool))
+	})
+
+	t.Run("a file that does not exist is an error", func(t *testing.T) {
+		pool, err := X509CertPoolFromFile(path.Join(t.TempDir(), "missing.crt"))
+
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		assert.Nil(t, pool)
+	})
+
+	t.Run("a file without certificates is an error that names the file", func(t *testing.T) {
+		file := path.Join(t.TempDir(), "junk.crt")
+		require.NoError(t, os.WriteFile(file, []byte("not a certificate"), 0o600))
+
+		pool, err := X509CertPoolFromFile(file)
+
+		require.ErrorContains(t, err, file+": invalid PEM data")
+		assert.Nil(t, pool)
+	})
+}
+
+func Test_KeyDataToPEM(t *testing.T) {
+	_, edKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	keys := map[string]crypto.PrivateKey{
+		"rsa":     testcerts.GeneratePrivateKey(t, "rsa"),
+		"ecdsa":   testcerts.GeneratePrivateKey(t, "ecdsa"),
+		"ed25519": edKey,
+	}
+	for keyType, key := range keys {
+		t.Run("a "+keyType+" key survives the round trip", func(t *testing.T) {
+			pemData, err := KeyDataToPEM(key)
+
+			require.NoError(t, err)
+			assert.True(t, strings.HasPrefix(pemData, "-----BEGIN PRIVATE KEY-----"))
+			parsed, err := ParsePrivateKeyFromPEM([]byte(pemData))
+			require.NoError(t, err)
+			comparable, ok := key.(interface{ Equal(crypto.PrivateKey) bool })
+			require.True(t, ok, "%T cannot be compared", key)
+			assert.True(t, comparable.Equal(parsed))
+		})
+	}
+
+	t.Run("a key of a type that is not supported is an error", func(t *testing.T) {
+		pemData, err := KeyDataToPEM("not a key")
+
+		require.Error(t, err)
+		assert.Empty(t, pemData)
+	})
+}
+
 func Test_TLSVersionName(t *testing.T) {
 	t.Run("Known TLS versions", func(t *testing.T) {
 		assert.Equal(t, "tls1.1", TLSVersionName(tls.VersionTLS11))
@@ -195,6 +303,21 @@ func Test_ParseCipherSuites(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, ids)
 	})
+}
+
+func Test_SupportedCurvePreferenceNames(t *testing.T) {
+	names := SupportedCurvePreferenceNames()
+
+	// The list is what users are told they can pass, so every name must be
+	// accepted, and every name that is accepted must be listed.
+	supported := make([]string, 0, len(supportedCurvePreferences))
+	for name := range supportedCurvePreferences {
+		supported = append(supported, name)
+	}
+	assert.ElementsMatch(t, supported, names)
+	curves, err := ParseCurvePreferences(names)
+	require.NoError(t, err)
+	assert.Len(t, curves, len(names))
 }
 
 func Test_ParseCurvePreferences(t *testing.T) {
