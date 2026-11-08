@@ -554,6 +554,8 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string, dstMa
 	}
 	appProject.Spec.Destinations = filteredDst
 
+	appProject.Spec.DestinationServiceAccounts = agentSpecificDestinationServiceAccounts(appProject.Spec.DestinationServiceAccounts, agent)
+
 	// Preserve sourceNamespaces to allow apps in any namespace on the workload cluster
 	// This is required for destination-based mapping where Applications can be created
 	// in namespaces other than argocd.
@@ -569,6 +571,49 @@ func AgentSpecificAppProject(appProject v1alpha1.AppProject, agent string, dstMa
 	}
 
 	return appProject
+}
+
+// agentSpecificDestinationServiceAccounts returns the destination service accounts of an
+// AppProject that are relevant to the given agent, with their server rewritten to the agent's
+// local Kubernetes API. Entries whose server carries no agentName parameter refer to a cluster
+// the control plane reaches directly, and are dropped along with those of other agents.
+func agentSpecificDestinationServiceAccounts(destSAs []v1alpha1.ApplicationDestinationServiceAccount, agent string) []v1alpha1.ApplicationDestinationServiceAccount {
+	// Keep this nil when nothing matches: the AppProject read back from the cluster will have it
+	// unset too, and the two are compared for equality when reverting local modifications.
+	var filtered []v1alpha1.ApplicationDestinationServiceAccount
+
+	seen := map[string]bool{}
+	for _, destSA := range destSAs {
+		if destSA.Server != "*" {
+			// Server URL will be the resource proxy URL https://<rp-hostname>:<port>?agentName=<agent-name>
+			server, err := url.Parse(destSA.Server)
+			if err != nil {
+				log().Warnf("Skipping destinationServiceAccount for namespace %s: could not parse server %q: %v", destSA.Namespace, destSA.Server, err)
+				continue
+			}
+
+			serverAgentName := server.Query().Get("agentName")
+			if serverAgentName == "" || !glob.Match(serverAgentName, agent) {
+				continue
+			}
+		}
+
+		destSA.Server = "https://kubernetes.default.svc"
+
+		// Argo CD requires the server and namespace pair of every entry to be unique, and
+		// impersonates using the first entry matching the application's destination. Rewriting
+		// the server collapses entries of different agents onto the same pair, so keep only the
+		// first of them to stay within what Argo CD accepts.
+		key := destSA.Server + "/" + destSA.Namespace
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		filtered = append(filtered, destSA)
+	}
+
+	return filtered
 }
 
 func log() *logrus.Entry {
