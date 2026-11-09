@@ -59,6 +59,19 @@ func TestReceiverEndsStreamOnAnyRecvError(t *testing.T) {
 	}
 }
 
+func TestReceiveEventsDisconnectsWhenTheStreamEnds(t *testing.T) {
+	for _, code := range []codes.Code{codes.DeadlineExceeded, codes.ResourceExhausted, codes.Unavailable} {
+		t.Run(code.String(), func(t *testing.T) {
+			a, _ := newAgent(t)
+			a.SetConnected(true)
+
+			a.receiveEvents(log(), &failingStream{err: status.Error(code, "stream ended")})
+
+			assert.False(t, a.IsConnected())
+		})
+	}
+}
+
 func TestResyncOnStart(t *testing.T) {
 	a, _ := newAgent(t)
 	a.emitter = event.NewEventSource("test")

@@ -171,6 +171,34 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 	return nil
 }
 
+// receiveEvents receives and processes events from the event stream until the
+// stream ends or the agent disconnects. When the stream ends, it marks the
+// agent disconnected, so that maintainConnection subscribes again.
+func (a *Agent) receiveEvents(logCtx *logrus.Entry, stream eventstreamapi.EventStream_SubscribeClient) {
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"direction": "recv",
+	})
+	logCtx.Info("Starting to receive events from event stream")
+	var err error
+	// Continuously retrieve events from the event stream 'inbox' and process them, while the stream is connected
+	for a.IsConnected() && err == nil {
+		err = a.receiver(stream)
+		if err != nil {
+			if errors.Is(err, errStreamEnded) || grpcutil.NeedReconnectOnError(err) {
+				logCtx.Infof("Reconnecting: %v", err)
+				a.SetConnected(false)
+			} else {
+				logCtx.Errorf("Error while receiving from stream: %v", err)
+			}
+		}
+
+		if a.metrics != nil {
+			// count no of events received from principal
+			a.metrics.EventReceived.Inc()
+		}
+	}
+}
+
 func (a *Agent) handleStreamEvents() error {
 	conn := a.remote.Conn()
 	client := eventstreamapi.NewEventStreamClient(conn)
@@ -215,30 +243,7 @@ func (a *Agent) handleStreamEvents() error {
 	}
 
 	// Receive events from the subscription stream
-	go func() {
-		logCtx := logCtx.WithFields(logrus.Fields{
-			"direction": "recv",
-		})
-		logCtx.Info("Starting to receive events from event stream")
-		var err error
-		// Continuously retrieve events from the event stream 'inbox' and process them, while the stream is connected
-		for a.IsConnected() && err == nil {
-			err = a.receiver(stream)
-			if err != nil {
-				if errors.Is(err, errStreamEnded) || grpcutil.NeedReconnectOnError(err) {
-					logCtx.Infof("Reconnecting: %v", err)
-					a.SetConnected(false)
-				} else {
-					logCtx.Errorf("Error while receiving from stream: %v", err)
-				}
-			}
-
-			if a.metrics != nil {
-				// count no of events received from principal
-				a.metrics.EventReceived.Inc()
-			}
-		}
-	}()
+	go a.receiveEvents(logCtx, stream)
 
 	// Send events in the sendq to the event stream
 	go func() {
