@@ -15,13 +15,49 @@
 package agent
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"k8s.io/client-go/rest"
 )
+
+// failingStream is an event stream whose Recv always fails with err.
+type failingStream struct {
+	grpc.ClientStream
+	err error
+}
+
+func (s *failingStream) Recv() (*eventstreamapi.Event, error) { return nil, s.err }
+func (s *failingStream) Send(*eventstreamapi.Event) error { return nil }
+func (s *failingStream) Context() context.Context { return context.Background() }
+
+func TestReceiverEndsStreamOnAnyRecvError(t *testing.T) {
+	a, _ := newAgent(t)
+	for _, recvErr := range []error{
+		status.Error(codes.DeadlineExceeded, "context deadline exceeded"),
+		status.Error(codes.ResourceExhausted, "too many streams"),
+		status.Error(codes.Unavailable, "transport is closing"),
+		io.EOF,
+		fmt.Errorf("not a gRPC status"),
+	} {
+		t.Run(recvErr.Error(), func(t *testing.T) {
+			err := a.receiver(&failingStream{err: recvErr})
+
+			assert.True(t, errors.Is(err, errStreamEnded), "got %v", err)
+			assert.True(t, errors.Is(err, recvErr), "got %v", err)
+		})
+	}
+}
 
 func TestResyncOnStart(t *testing.T) {
 	a, _ := newAgent(t)
