@@ -146,6 +146,8 @@ func (i *Informer[T]) createSharedInformer(ctx context.Context) {
 	var r T
 	i.informer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
+			// TODO: Fix deprecation
+			//nolint:staticcheck // SA1019 - ListFunc is deprecated: use ListWithContext instead
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				if i.listFunc == nil {
 					panic("no list func defined")
@@ -158,6 +160,8 @@ func (i *Informer[T]) createSharedInformer(ctx context.Context) {
 				i.logger.Trace("Done listing resources")
 				return objs, err
 			},
+			// TODO: Fix deprecation
+			//nolint:staticcheck // SA1019 - WatchFunc is deprecated: use WatchWithContext instead
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if i.watchFunc == nil {
 					panic("no watch func defined")
