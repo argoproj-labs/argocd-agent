@@ -185,7 +185,7 @@ func (suite *DestinationMappingTestSuite) TestStatusUpdateConfusedDeputy() {
 		},
 	}
 
-	t.Log("FIXED: the principal must never apply the attacker's forged status to the victim's application")
+	t.Log("the principal must never apply the attacker's forged status to the victim's application")
 	// The forged event is re-sent continuously rather than once, so the
 	// assertion covers a sustained attack and does not depend on catching a
 	// narrow window. The principal accepts the event onto its receive queue
@@ -280,7 +280,7 @@ func (suite *DestinationMappingTestSuite) TestOperationPropagationConfusedDeputy
 	})
 	defer stop()
 
-	t.Log("FIXED: the forged operation must never land on the principal's copy of the victim's application")
+	t.Log("the forged operation must never land on the principal's copy of the victim's application")
 	requires.Never(func() bool {
 		principalApp := &v1alpha1.Application{}
 		if err := suite.PrincipalClient.Get(suite.Ctx, victimKey, principalApp, metav1.GetOptions{}); err != nil {
@@ -362,7 +362,7 @@ func (suite *DestinationMappingTestSuite) TestDeleteConfusedDeputy() {
 		ObjectMeta: metav1.ObjectMeta{Name: appName, Namespace: destMapAgentNamespace},
 	}
 
-	t.Log("FIXED: the attacker must not be able to strip the finalizer or complete the deletion")
+	t.Log("the attacker must not be able to strip the finalizer or complete the deletion")
 	stop := startForgedEventSender(suite.Ctx, t, attacker, 1*time.Second, func() *cloudevents.Event {
 		return event.NewEventSource(attackerAgentName).ApplicationEvent(event.Delete, forged)
 	})
@@ -473,14 +473,18 @@ func (suite *DestinationMappingTestSuite) TestResyncRequestUpdateConfusedDeputy(
 
 	requires.NoError(sendForgedEvent(suite.Ctx, attacker, reqEv))
 
-	t.Log("FIXED: the principal must not send the victim's application spec to an agent that does not own it")
+	t.Log("the principal must answer with a spec-free delete, never with the victim's application spec")
 	deadline := time.After(10 * time.Second)
 	resend := time.NewTicker(2 * time.Second)
 	defer resend.Stop()
 
+	sawDelete := false
 	for {
 		select {
 		case <-deadline:
+			requires.True(sawDelete,
+				"the principal never answered the forged request-update; the test cannot tell whether the "+
+					"ownership check ran or the request simply went nowhere")
 			t.Log("No spec for the victim application was leaked to the attacker")
 			return
 		case <-resend.C:
@@ -492,13 +496,22 @@ func (suite *DestinationMappingTestSuite) TestResyncRequestUpdateConfusedDeputy(
 				requires.Fail("the attacker's subscribe stream closed before the assertion window elapsed; " +
 					"the test cannot prove anything - investigate rather than ignoring this")
 			}
-			leaked := &v1alpha1.Application{}
-			if err := cev.DataAs(leaked); err != nil {
+			got := &v1alpha1.Application{}
+			if err := cev.DataAs(got); err != nil {
 				continue
 			}
-			requires.NotEqual(appName, leaked.Name,
-				"the principal leaked the spec of an Application owned by another agent (event type %q); "+
-					"the ownership check in internal/resync (isApplicationRelevant) has regressed", cev.Type())
+			if got.Name != appName {
+				continue
+			}
+
+			requires.Equal(event.Delete.String(), cev.Type(),
+				"the principal sent the attacker a %q event for an Application owned by another agent; only a "+
+					"spec-free delete is allowed here", cev.Type())
+
+			// Even a delete must not carry the owner's spec.
+			requires.Nil(got.Spec.Source, "the delete event must not carry the owner's spec")
+			requires.Empty(got.Spec.Destination.Name, "the delete event must not carry the owner's spec")
+			sawDelete = true
 		}
 	}
 }
