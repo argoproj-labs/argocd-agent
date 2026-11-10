@@ -3,7 +3,7 @@ module github.com/argoproj-labs/argocd-agent
 go 1.27.3
 
 require (
-	github.com/Shopify/toxiproxy/v2 v2.12.0
+	github.com/Shopify/toxiproxy/v2 v2.13.0
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/argoproj/argo-cd/gitops-engine/v3 v3.6.1
 	github.com/argoproj/argo-cd/v3 v3.6.1
