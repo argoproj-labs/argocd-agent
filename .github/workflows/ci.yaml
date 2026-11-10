@@ -268,31 +268,31 @@ jobs:
           kubectl --context vcluster-control-plane logs -n argocd-principal deployment/argocd-server > /tmp/vcluster-control-plane-server.log
         if: ${{ failure() }}
       - name: Upload e2e-argocd-agent logs
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-argocd-agent-${{ matrix.mapping-mode }}.log
           path: /tmp/e2e-argocd-agent.log
         if: ${{ failure() }}
       - name: Upload test logs
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-e2e-${{ matrix.mapping-mode }}.log
           path: /tmp/test-e2e.log
         if: ${{ failure() }}
       - name: Upload vcluster-agent-autonomous-controller logs
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vcluster-agent-autonomous-controller-${{ matrix.mapping-mode }}.log
           path: /tmp/vcluster-agent-autonomous-controller.log
         if: ${{ failure() }}
       - name: Upload vcluster-agent-managed-controller logs
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vcluster-agent-managed-controller-${{ matrix.mapping-mode }}.log
           path: /tmp/vcluster-agent-managed-controller.log
         if: ${{ failure() }}
       - name: Upload vcluster-control-plane-server logs
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vcluster-control-plane-server-${{ matrix.mapping-mode }}.log
           path: /tmp/vcluster-control-plane-server.log
