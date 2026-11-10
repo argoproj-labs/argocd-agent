@@ -1,6 +1,6 @@
 module github.com/argoproj-labs/argocd-agent
 
-go 1.27.0
+go 1.27.3
 
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0
