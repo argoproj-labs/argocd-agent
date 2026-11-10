@@ -23,18 +23,22 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+
+	realkube "github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	wqmock "github.com/argoproj-labs/argocd-agent/test/mocks/k8s-workqueue"
+	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 )
 
@@ -477,6 +481,7 @@ func Test_StatusUpdateEvents(t *testing.T) {
 					Path:           ".",
 					TargetRevision: "HEAD",
 				},
+				Destination: v1alpha1.ApplicationDestination{Name: agentName},
 			},
 			Status: v1alpha1.ApplicationStatus{
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeOutOfSync},
@@ -539,6 +544,7 @@ func Test_StatusUpdateEvents(t *testing.T) {
 					Path:           ".",
 					TargetRevision: "HEAD",
 				},
+				Destination: v1alpha1.ApplicationDestination{Name: agentName},
 			},
 			Status: v1alpha1.ApplicationStatus{
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeOutOfSync},
@@ -598,6 +604,7 @@ func Test_StatusUpdateEvents(t *testing.T) {
 					Path:           ".",
 					TargetRevision: "HEAD",
 				},
+				Destination: v1alpha1.ApplicationDestination{Name: agentName},
 			},
 			Status: v1alpha1.ApplicationStatus{
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeOutOfSync},
@@ -654,6 +661,7 @@ func Test_StatusUpdateEvents(t *testing.T) {
 					Path:           ".",
 					TargetRevision: "HEAD",
 				},
+				Destination: v1alpha1.ApplicationDestination{Name: agentName},
 			},
 			Status: v1alpha1.ApplicationStatus{
 				Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeOutOfSync},
@@ -1872,5 +1880,356 @@ func Test_processClusterCacheInfoUpdateEvent(t *testing.T) {
 		// as goal of this test is to verify only processClusterCacheInfoUpdateEvent logic
 		assert.Error(t, err)
 		assert.ErrorContains(t, err, "not mapped to any cluster")
+	})
+}
+
+// These tests cover the ownership checks that stop one managed agent from
+// addressing another agent's Application through the inbound event path.
+
+const (
+	ownerAgent    = "agent-owner"
+	attackerAgent = "agent-attacker"
+	ownerPrincNs  = "argocd"
+)
+
+// ownedApp builds a managed Application that is mapped to agentName via
+// spec.destination.name, which is what destination-based mapping routes on.
+func ownedApp(name, namespace, agentName string) *v1alpha1.Application {
+	return &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: v1alpha1.ApplicationSpec{
+			Source: &v1alpha1.ApplicationSource{
+				RepoURL:        "foo",
+				Path:           ".",
+				TargetRevision: "HEAD",
+			},
+			Destination: v1alpha1.ApplicationDestination{Name: agentName},
+		},
+		Status: v1alpha1.ApplicationStatus{
+			Sync:   v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeOutOfSync},
+			Health: v1alpha1.AppHealthStatus{Status: health.HealthStatusHealthy},
+		},
+	}
+}
+
+// newOwnershipTestServer starts a principal with the given mapping mode and
+// the supplied applications already present in its backend.
+func newOwnershipTestServer(t *testing.T, ctx context.Context, destinationBasedMapping bool, apps ...*v1alpha1.Application) (*Server, *realkube.KubernetesClient) {
+	t.Helper()
+
+	objs := make([]runtime.Object, 0, len(apps))
+	for _, a := range apps {
+		objs = append(objs, a)
+	}
+
+	fac := kube.NewKubernetesFakeClientWithApps(ownerPrincNs, objs...)
+
+	opts := []ServerOption{
+		WithGeneratedTokenSigningKey(),
+		WithRedisProxyDisabled(),
+	}
+	if destinationBasedMapping {
+		opts = append(opts, WithDestinationBasedMapping(true))
+	}
+
+	s, err := NewServer(ctx, fac, ownerPrincNs, opts...)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Shutdown() })
+
+	require.NoError(t, s.Start(ctx, make(chan error)))
+	return s, fac
+}
+
+func statusUpdateEvent(t *testing.T, app *v1alpha1.Application) cloudevents.Event {
+	t.Helper()
+	ev := cloudevents.NewEvent()
+	ev.SetDataSchema("application")
+	ev.SetType(event.StatusUpdate.String())
+	require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, app))
+	return ev
+}
+
+func Test_assertManagedAgentOwnsApp(t *testing.T) {
+	victim := ownedApp("victim", ownerPrincNs, ownerAgent)
+
+	autonomousApp := ownedApp("auto-app", "agent-autonomous", "some-cluster")
+	autonomousApp.Annotations = map[string]string{manager.SourceUIDAnnotation: "uid-1"}
+
+	t.Run("namespace-based mapping skips the check entirely", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, _ := newOwnershipTestServer(t, ctx, false, victim)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+		s.setAgentMode(attackerAgent, types.AgentModeManaged)
+
+		// Even naming another agent's application is fine here: the caller
+		// pins the namespace to the agent name before touching the backend,
+		// so the address can never resolve to a foreign application.
+		require.NoError(t, s.assertManagedAgentOwnsApp(ctx, attackerAgent, ownerPrincNs, "victim"))
+	})
+
+	t.Run("destination-based mapping allows the owning agent", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, _ := newOwnershipTestServer(t, ctx, true, victim)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+
+		require.NoError(t, s.assertManagedAgentOwnsApp(ctx, ownerAgent, ownerPrincNs, "victim"))
+	})
+
+	t.Run("destination-based mapping rejects a foreign agent", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, _ := newOwnershipTestServer(t, ctx, true, victim)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+		s.setAgentMode(attackerAgent, types.AgentModeManaged)
+
+		err := s.assertManagedAgentOwnsApp(ctx, attackerAgent, ownerPrincNs, "victim")
+		require.Error(t, err)
+		assert.True(t, event.IsEventNotAllowed(err), "expected an EventNotAllowed error, got %v", err)
+	})
+
+	t.Run("destination-based mapping rejects a managed agent targeting an autonomous app", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, _ := newOwnershipTestServer(t, ctx, true, autonomousApp)
+		s.setAgentMode("agent-autonomous", types.AgentModeAutonomous)
+		s.setAgentMode(attackerAgent, types.AgentModeManaged)
+
+		err := s.assertManagedAgentOwnsApp(ctx, attackerAgent, "agent-autonomous", "auto-app")
+		require.Error(t, err)
+		assert.True(t, event.IsEventNotAllowed(err), "expected an EventNotAllowed error, got %v", err)
+	})
+
+	t.Run("destination-based mapping surfaces not-found unchanged", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, _ := newOwnershipTestServer(t, ctx, true)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+
+		err := s.assertManagedAgentOwnsApp(ctx, ownerAgent, ownerPrincNs, "does-not-exist")
+		require.Error(t, err)
+		assert.True(t, apierrors.IsNotFound(err), "not-found must stay recognisable to callers, got %v", err)
+	})
+}
+
+func Test_StatusUpdateOwnership(t *testing.T) {
+	t.Run("destination-based mapping rejects a cross-agent status update", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		victim := ownedApp("victim", ownerPrincNs, ownerAgent)
+		s, fac := newOwnershipTestServer(t, ctx, true, victim)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+		s.setAgentMode(attackerAgent, types.AgentModeManaged)
+
+		forged := victim.DeepCopy()
+		forged.Status.Health.Status = health.HealthStatusDegraded
+		forged.Operation = &v1alpha1.Operation{Sync: &v1alpha1.SyncOperation{}}
+		ev := statusUpdateEvent(t, forged)
+
+		err := s.processApplicationEvent(ctx, attackerAgent, &ev)
+		require.Error(t, err)
+		assert.True(t, event.IsEventNotAllowed(err), "expected an EventNotAllowed error, got %v", err)
+
+		// Neither the status nor the planted operation may have landed.
+		after, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(ownerPrincNs).Get(ctx, "victim", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, health.HealthStatusHealthy, after.Status.Health.Status)
+		assert.Nil(t, after.Operation)
+	})
+
+	t.Run("destination-based mapping accepts the owning agent", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		app := ownedApp("mine", ownerPrincNs, ownerAgent)
+		s, fac := newOwnershipTestServer(t, ctx, true, app)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+
+		update := app.DeepCopy()
+		update.Status.Sync.Status = v1alpha1.SyncStatusCodeSynced
+		ev := statusUpdateEvent(t, update)
+
+		require.NoError(t, s.processApplicationEvent(ctx, ownerAgent, &ev))
+
+		after, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(ownerPrincNs).Get(ctx, "mine", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, after.Status.Sync.Status)
+	})
+
+	t.Run("namespace-based mapping confines a forged namespace to the sender", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Under namespace-based mapping each agent's apps live in a namespace
+		// named after the agent. The attacker names the victim's namespace.
+		victim := ownedApp("victim", ownerAgent, ownerAgent)
+		attackersOwn := ownedApp("victim", attackerAgent, attackerAgent)
+
+		s, fac := newOwnershipTestServer(t, ctx, false, victim, attackersOwn)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+		s.setAgentMode(attackerAgent, types.AgentModeManaged)
+
+		forged := victim.DeepCopy()
+		forged.Status.Health.Status = health.HealthStatusDegraded
+		ev := statusUpdateEvent(t, forged)
+
+		// This succeeds, but the write is pinned into the attacker's own
+		// namespace - that pinning is precisely why namespace-based mapping
+		// never had this issue, and it must keep working unchanged.
+		require.NoError(t, s.processApplicationEvent(ctx, attackerAgent, &ev))
+
+		untouched, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(ownerAgent).Get(ctx, "victim", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, health.HealthStatusHealthy, untouched.Status.Health.Status,
+			"the victim's application must not be affected by another agent's status update")
+
+		own, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(attackerAgent).Get(ctx, "victim", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, health.HealthStatusDegraded, own.Status.Health.Status,
+			"the agent's own application should still receive the update")
+	})
+}
+
+func Test_ErrorEventOwnership(t *testing.T) {
+	errorEvent := func(t *testing.T, namespace, name string) cloudevents.Event {
+		t.Helper()
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("application")
+		ev.SetType(event.Error.String())
+		require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, &event.ErrorData{
+			ResourceName:      name,
+			ResourceNamespace: namespace,
+			Message:           "something went wrong",
+		}))
+		return ev
+	}
+
+	t.Run("destination-based mapping rejects a cross-agent error event", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		victim := ownedApp("victim", ownerPrincNs, ownerAgent)
+		s, fac := newOwnershipTestServer(t, ctx, true, victim)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+		s.setAgentMode(attackerAgent, types.AgentModeManaged)
+
+		ev := errorEvent(t, ownerPrincNs, "victim")
+		err := s.processApplicationEvent(ctx, attackerAgent, &ev)
+		require.Error(t, err)
+		assert.True(t, event.IsEventNotAllowed(err), "expected an EventNotAllowed error, got %v", err)
+
+		after, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(ownerPrincNs).Get(ctx, "victim", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, health.HealthStatusHealthy, after.Status.Health.Status)
+		assert.Empty(t, after.Status.Conditions)
+	})
+
+	t.Run("destination-based mapping keeps an app that truly lives in the agent namespace", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		app := ownedApp("mine", "argocd-agent", ownerAgent)
+		s, fac := newOwnershipTestServer(t, ctx, true, app)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+		s.setAgentNamespace(ownerAgent, "argocd-agent")
+
+		ev := errorEvent(t, "argocd-agent", "mine")
+		require.NoError(t, s.processApplicationEvent(ctx, ownerAgent, &ev))
+
+		after, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications("argocd-agent").Get(ctx, "mine", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, health.HealthStatusDegraded, after.Status.Health.Status)
+	})
+
+	t.Run("namespace-based mapping applies the error in the agent namespace", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		app := ownedApp("mine", ownerAgent, ownerAgent)
+		s, fac := newOwnershipTestServer(t, ctx, false, app)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+
+		ev := errorEvent(t, "argocd", "mine")
+		require.NoError(t, s.processApplicationEvent(ctx, ownerAgent, &ev))
+
+		after, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(ownerAgent).Get(ctx, "mine", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, health.HealthStatusDegraded, after.Status.Health.Status)
+	})
+}
+
+func Test_DeleteEventOwnership_ManagedMode(t *testing.T) {
+	deleteEvent := func(t *testing.T, app *v1alpha1.Application) cloudevents.Event {
+		t.Helper()
+		ev := cloudevents.NewEvent()
+		ev.SetDataSchema("application")
+		ev.SetType(event.Delete.String())
+		require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, app))
+		return ev
+	}
+
+	deletingApp := func(name, namespace, agentName string) *v1alpha1.Application {
+		app := ownedApp(name, namespace, agentName)
+		app.Finalizers = []string{"resources-finalizer.argocd.argoproj.io"}
+		app.DeletionTimestamp = new(v1.Time{Time: time.Now()})
+		return app
+	}
+
+	t.Run("destination-based mapping rejects a cross-agent delete of a deleting app", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		victim := deletingApp("victim", ownerPrincNs, ownerAgent)
+		s, fac := newOwnershipTestServer(t, ctx, true, victim)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+		s.setAgentMode(attackerAgent, types.AgentModeManaged)
+
+		ev := deleteEvent(t, victim)
+		err := s.processApplicationEvent(ctx, attackerAgent, &ev)
+		require.Error(t, err)
+		assert.True(t, event.IsEventNotAllowed(err), "expected an EventNotAllowed error, got %v", err)
+
+		// The finalizer must survive: stripping it would let the application
+		// disappear before the real owner finished cleaning up its cluster.
+		after, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(ownerPrincNs).Get(ctx, "victim", v1.GetOptions{})
+		require.NoError(t, err)
+		assert.NotEmpty(t, after.Finalizers, "a foreign agent must not be able to strip finalizers")
+	})
+
+	t.Run("destination-based mapping allows the owning agent to complete a delete", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		app := deletingApp("mine", ownerPrincNs, ownerAgent)
+		s, fac := newOwnershipTestServer(t, ctx, true, app)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+
+		ev := deleteEvent(t, app)
+		require.NoError(t, s.processApplicationEvent(ctx, ownerAgent, &ev))
+
+		_, err := fac.ApplicationsClientset.ArgoprojV1alpha1().Applications(ownerPrincNs).Get(ctx, "mine", v1.GetOptions{})
+		assert.True(t, apierrors.IsNotFound(err), "the owning agent's delete should have gone through, got %v", err)
+	})
+
+	t.Run("destination-based mapping ignores a delete for an unknown app", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		s, _ := newOwnershipTestServer(t, ctx, true)
+		s.setAgentMode(ownerAgent, types.AgentModeManaged)
+
+		ev := deleteEvent(t, ownedApp("ghost", ownerPrincNs, ownerAgent))
+		// Not-found must stay a silent no-op, exactly as before the check.
+		require.NoError(t, s.processApplicationEvent(ctx, ownerAgent, &ev))
 	})
 }
