@@ -1696,6 +1696,88 @@ func Test_UpdateAppProject(t *testing.T) {
 	})
 }
 
+func Test_ProcessIncomingRepositoryDropsOwnerReferences(t *testing.T) {
+	evs := event.NewEventSource("test")
+	incomingRepo := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-repo",
+			Namespace: "argocd",
+			UID:       ktypes.UID("source_uid"),
+			OwnerReferences: []v1.OwnerReference{
+				{
+					APIVersion: "external-secrets.io/v1",
+					Kind:       "ExternalSecret",
+					Name:       "test-repo",
+					UID:        "owner_uid",
+				},
+			},
+		},
+		Data: map[string][]byte{
+			"url": []byte("https://github.com/test/repo"),
+		},
+	}
+
+	a, _ := newAgent(t)
+	a.mode = types.AgentModeManaged
+	be := backend_mocks.NewRepository(t)
+	a.repoManager = repository.NewManager(be, "argocd", true)
+
+	notFound := kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, incomingRepo.Name)
+	be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFound)
+	var created *corev1.Secret
+	be.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		created = args.Get(1).(*corev1.Secret)
+	}).Return(incomingRepo, nil)
+
+	ev := event.New(evs.RepositoryEvent(event.Create, incomingRepo), targets.Repository)
+	require.NoError(t, a.processIncomingRepository(ev))
+	require.NotNil(t, created)
+	require.Empty(t, created.OwnerReferences, "OwnerReferences should not be applied on managed repository")
+}
+
+func Test_ProcessIncomingRepositoryUpdateDropsOwnerReferences(t *testing.T) {
+	evs := event.NewEventSource("test")
+	incomingRepo := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-repo",
+			Namespace: "argocd",
+			UID:       ktypes.UID("source_uid"),
+			OwnerReferences: []v1.OwnerReference{
+				{
+					APIVersion: "external-secrets.io/v1",
+					Kind:       "ExternalSecret",
+					Name:       "test-repo",
+					UID:        "owner_uid",
+				},
+			},
+		},
+		Data: map[string][]byte{
+			"url": []byte("https://github.com/test/repo"),
+		},
+	}
+	existing := incomingRepo.DeepCopy()
+	existing.UID = ""
+	existing.Annotations = map[string]string{manager.SourceUIDAnnotation: "source_uid"}
+
+	a, _ := newAgent(t)
+	a.mode = types.AgentModeManaged
+	be := backend_mocks.NewRepository(t)
+	a.repoManager = repository.NewManager(be, "argocd", true)
+	require.NoError(t, a.repoManager.Manage(incomingRepo.Name))
+
+	be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(existing, nil)
+	be.On("SupportsPatch").Return(false)
+	var updated *corev1.Secret
+	be.On("Update", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		updated = args.Get(1).(*corev1.Secret)
+	}).Return(existing, nil)
+
+	ev := event.New(evs.RepositoryEvent(event.SpecUpdate, incomingRepo), targets.Repository)
+	require.NoError(t, a.processIncomingRepository(ev))
+	require.NotNil(t, updated)
+	require.Empty(t, updated.OwnerReferences, "OwnerReferences should be removed from managed repository on update")
+}
+
 func Test_ProcessIncomingRepositoryWithUIDMismatch(t *testing.T) {
 	evs := event.NewEventSource("test")
 
