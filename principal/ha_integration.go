@@ -332,6 +332,9 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 		if haOptions.PeerClientCertPath == "" || haOptions.PeerClientKeyPath == "" {
 			return nil, fmt.Errorf("HA replication requires --ha-peer-tls-cert and --ha-peer-tls-key when TLS is enabled")
 		}
+		if _, err := tlsutil.TLSCertFromFile(haOptions.PeerClientCertPath, haOptions.PeerClientKeyPath, false); err != nil {
+			return nil, fmt.Errorf("could not load HA peer client certificate: %w", err)
+		}
 	}
 
 	// Replication server — no TLS/auth options; the main gRPC server handles that

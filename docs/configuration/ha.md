@@ -14,7 +14,7 @@ This page covers configuration for running the principal in active/passive HA mo
 
 ## Shared CA Setup
 
-Both principals must be signed by, and trust, the exact same CA. This isn't If each principal has its own independent CA, certificates issued on one side won't be trusted on the other. In particular, if the active principal fails over to the other region, agents will be unable to reconnect to the newly active principal, their client certificates were signed by a CA the new principal doesn't trust, and the new principal's server certificate was signed by a CA the agents don't trust either. TLS handshakes fail in both directions and agents stay disconnected until the CA mismatch is fixed.
+Both principals must be signed by, and trust, the same CA. If each principal has its own independent CA, certificates issued on one side are not trusted on the other. If the active principal fails over to the other region, agents cannot reconnect to the newly active principal. Their client certificates were signed by a CA the new principal does not trust. The new principal's server certificate was signed by a CA the agents do not trust. TLS handshakes fail in both directions and agents stay disconnected until the CA mismatch is fixed.
 
 Set this up before issuing any other certificates:
 
