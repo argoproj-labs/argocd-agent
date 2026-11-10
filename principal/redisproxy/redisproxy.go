@@ -879,6 +879,7 @@ type parsedRedisCommand struct {
 
 // forwardTrafficSimple reads from 'r' and writes to 'argocdWriter'. Traffic is MITMed so that it can be output via debug.
 // - 'simple' in the sense that we read/write with any modification to that data.
+//
 //nolint:staticcheck // SA4023 forwardTrafficSimple never returns a nil interface value (staticcheck)
 func forwardTrafficSimple(debugStr string, r *bufio.Reader, argocdWriter *argoCDRedisWriterInternal, logCtx *logrus.Entry) error {
 	// Maintains a record of bytes forwarded, so we can output via debug log
