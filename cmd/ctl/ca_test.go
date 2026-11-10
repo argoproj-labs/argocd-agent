@@ -447,3 +447,32 @@ func TestReadAndSummarizeCertificate_GetSecretError(t *testing.T) {
 		assert.Zero(t, summary.KeyLength)
 	})
 }
+
+func TestNewPKIIssueCommand_Subcommands(t *testing.T) {
+	cmd := NewPKIIssueCommand()
+	subcommands := map[string]bool{}
+	for _, c := range cmd.Commands() {
+		subcommands[c.Name()] = true
+	}
+
+	assert.True(t, subcommands["principal-peer"], "pki issue should register the principal-peer subcommand")
+	assert.True(t, subcommands["principal"], "pki issue should register the principal subcommand")
+}
+
+func TestNewPKICommand_Subcommands(t *testing.T) {
+	cmd := NewPKICommand()
+	subcommands := map[string]bool{}
+	for _, c := range cmd.Commands() {
+		subcommands[c.Name()] = true
+	}
+
+	assert.True(t, subcommands["propagate"], "pki should register the propagate subcommand")
+	assert.True(t, subcommands["propagate-ca"], "pki should register the propagate-ca subcommand")
+}
+
+func TestNewPKIPropagateCACommand_Flags(t *testing.T) {
+	cmd := NewPKIPropagateCACommand()
+	assert.NotNil(t, cmd.Flags().Lookup("target-context"), "propagate-ca should expose a --target-context flag")
+	assert.NotNil(t, cmd.Flags().Lookup("target-namespace"), "propagate-ca should expose a --target-namespace flag")
+	assert.NotNil(t, cmd.Flags().Lookup("force"), "propagate-ca should expose a --force flag")
+}

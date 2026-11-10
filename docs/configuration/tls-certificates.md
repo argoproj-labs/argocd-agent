@@ -594,7 +594,7 @@ cat > principal.ext << EOF
 authorityKeyIdentifier=keyid,issuer
 basicConstraints=CA:FALSE
 keyUsage=keyEncipherment,dataEncipherment,digitalSignature
-extendedKeyUsage=serverAuth,clientAuth
+extendedKeyUsage=serverAuth
 subjectAltName=@alt_names
 
 [alt_names]

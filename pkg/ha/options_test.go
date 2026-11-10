@@ -258,6 +258,38 @@ func TestWithAdminTLS(t *testing.T) {
 	})
 }
 
+func TestWithPeerClientTLS(t *testing.T) {
+	t.Run("both paths provided", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithPeerClientTLS("/path/cert.pem", "/path/key.pem")(opts)
+		require.NoError(t, err)
+		assert.Equal(t, "/path/cert.pem", opts.PeerClientCertPath)
+		assert.Equal(t, "/path/key.pem", opts.PeerClientKeyPath)
+	})
+
+	t.Run("both empty is no-op", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithPeerClientTLS("", "")(opts)
+		require.NoError(t, err)
+		assert.Empty(t, opts.PeerClientCertPath)
+		assert.Empty(t, opts.PeerClientKeyPath)
+	})
+
+	t.Run("missing key returns error", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithPeerClientTLS("/path/cert.pem", "")(opts)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ha-peer-tls requires both")
+	})
+
+	t.Run("missing cert returns error", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithPeerClientTLS("", "/path/key.pem")(opts)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ha-peer-tls requires both")
+	})
+}
+
 func TestOptionsValidate(t *testing.T) {
 	t.Run("disabled is always valid", func(t *testing.T) {
 		opts := DefaultOptions()

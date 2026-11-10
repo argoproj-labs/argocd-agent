@@ -8,9 +8,40 @@ This page covers configuration for running the principal in active/passive HA mo
 ## Prerequisites
 
 - Two principal deployments in **separate Kubernetes clusters**
-- Shared CA so both principals can verify each other's client certificates
-- Principal server certificates with both `serverAuth` and `clientAuth` extended key usage (the replica reuses its server certificate as a client certificate for replication). Certificates issued by `argocd-agentctl pki issue principal` include both automatically.
+- Shared CA (see [Shared CA Setup](#shared-ca-setup)) so both principals can verify each other's client certificates
+- A dedicated **client certificate** for each principal to authenticate to its peer for replication (see [Replication Client Certificate](#replication-client-certificate)). This is separate from the principal's server certificate — the server certificate stays `serverAuth` only.
 - A DNS/GSLB endpoint (or simple DNS A record) pointing to the active principal
+
+## Shared CA Setup
+
+Both principals must be signed by, and trust, the exact same CA. This isn't If each principal has its own independent CA, certificates issued on one side won't be trusted on the other. In particular, if the active principal fails over to the other region, agents will be unable to reconnect to the newly active principal, their client certificates were signed by a CA the new principal doesn't trust, and the new principal's server certificate was signed by a CA the agents don't trust either. TLS handshakes fail in both directions and agents stay disconnected until the CA mismatch is fixed.
+
+Set this up before issuing any other certificates:
+
+1. Run `argocd-agentctl pki init` on primary principal cluster:
+
+    ```bash
+    argocd-agentctl pki init \
+      --principal-context region-a \
+      --principal-namespace argocd
+    ```
+
+2. Copy that CA, including its private key, into replica principal cluster, using `pki propagate-ca`:
+
+    ```bash
+    argocd-agentctl pki propagate-ca \
+      --principal-context region-a \
+      --principal-namespace argocd \
+      --target-context region-b \
+      --target-namespace argocd
+    ```
+
+    This creates the same `argocd-agent-ca` secret in replica principal, so that certificates issued against either cluster are signed by, and trusted by, the identical CA. The private key is intentionally included here, unlike an agent, replica principal must be able to independently issue and renew its own server and replication client certificates, including during a failover when the original primary cluster may be unreachable.
+
+3. Now proceed to issue the principal server, resource proxy, and replication client certificates for both principals, each `pki issue` invocation signs using whatever CA secret already exists in the context you point it at, so both sides need the shared CA in place first.
+
+!!! note "This is different from agent CA propagation"
+    `pki propagate` and `pki issue agent` copy only the CA's public certificate to an agent cluster, because agents never issue their own certificates. `pki propagate-ca` copies the private key too, because replica principal does.
 
 ## Principal Configuration
 
@@ -64,7 +95,7 @@ Address of the peer principal's gRPC server. Required on the replica; optional o
 
 Explicit allowlist of peer identities permitted to connect for replication. Identities are extracted using the server's `--auth` method.
 
-**Example:** `region-b,principal-replica`
+**Example:** `argocd-agent-principal-peer` (the common name of the certificate issued by `argocd-agentctl pki issue principal-peer`, see [Replication Client Certificate](#replication-client-certificate))
 
 ### Admin Port
 
@@ -120,6 +151,29 @@ argocd-agentctl pki issue ha-admin
 argocd-agentctl pki issue ha-admin --name admin1 --upsert
 ```
 
+### Replication Client Certificate
+
+When connecting to its peer for replication, a replica principal authenticates with a **dedicated client certificate** that is separate from its server certificate. The server certificate remains `serverAuth` only; mixing `serverAuth` and `clientAuth` into one certificate is discouraged and rejected by many CAs.
+
+The certificate must be signed by the shared CA, and its common name (or whatever identity the peer's `--auth` method extracts) must appear in the peer's [`--ha-allowed-replication-clients`](#allowed-replication-clients).
+
+Both flags must be provided together:
+
+| | |
+|---|---|
+| **CLI Flags** | `--ha-peer-tls-cert`, `--ha-peer-tls-key` |
+| **Environment Variables** | `ARGOCD_PRINCIPAL_HA_PEER_TLS_CERT`, `ARGOCD_PRINCIPAL_HA_PEER_TLS_KEY` |
+| **Type** | String (file path) |
+| **Default** | `""` |
+
+**Issue the replication client certificate using the CLI:**
+
+```bash
+argocd-agentctl pki issue principal-peer
+```
+
+This issues a `clientAuth`-only certificate (common name `argocd-agent-principal-peer`) signed by the principal's CA and stores it in the `argocd-agent-ha-peer-tls` secret in the principal namespace. Mount that secret into the principal and point `--ha-peer-tls-cert` / `--ha-peer-tls-key` at it.
+
 ## Ports Summary
 
 | Port | Bind | TLS | Purpose |
@@ -137,7 +191,9 @@ argocd-agent principal \
   --ha-enabled \
   --ha-preferred-role=primary \
   --ha-peer-address=principal.region-b.internal:8443 \
-  --ha-allowed-replication-clients=region-b \
+  --ha-allowed-replication-clients=argocd-agent-principal-peer \
+  --ha-peer-tls-cert=/tls/peer/tls.crt \
+  --ha-peer-tls-key=/tls/peer/tls.key \
   --ha-admin-auth="mtls:subject:CN=ha-admin"
 ```
 
@@ -148,7 +204,9 @@ argocd-agent principal \
   --ha-enabled \
   --ha-preferred-role=replica \
   --ha-peer-address=principal.region-a.internal:8443 \
-  --ha-allowed-replication-clients=region-a \
+  --ha-allowed-replication-clients=argocd-agent-principal-peer \
+  --ha-peer-tls-cert=/tls/peer/tls.crt \
+  --ha-peer-tls-key=/tls/peer/tls.key \
   --ha-admin-auth="mtls:subject:CN=ha-admin"
 ```
 

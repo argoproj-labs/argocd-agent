@@ -123,7 +123,7 @@ func GenerateClientCertificate(name string, signerCert *x509.Certificate, signer
 // authentication.
 //
 // It will return the certificate and its private key as PEM encoded strings.
-func GenerateServerCertificate(name string, signerCert *x509.Certificate, signerKey crypto.PrivateKey, ips []string, dns []string, validityDays int, includeClientAuth bool, opts KeyGenOptions) (string, string, error) {
+func GenerateServerCertificate(name string, signerCert *x509.Certificate, signerKey crypto.PrivateKey, ips []string, dns []string, validityDays int, opts KeyGenOptions) (string, string, error) {
 	if err := validateValidityDays(validityDays); err != nil {
 		return "", "", err
 	}
@@ -137,10 +137,6 @@ func GenerateServerCertificate(name string, signerCert *x509.Certificate, signer
 		}
 		ipAddresses = append(ipAddresses, addr)
 	}
-	extKeyUsage := []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
-	if includeClientAuth {
-		extKeyUsage = append(extKeyUsage, x509.ExtKeyUsageClientAuth)
-	}
 	cert := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
@@ -150,7 +146,7 @@ func GenerateServerCertificate(name string, signerCert *x509.Certificate, signer
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(0, 0, validityDays),
 		IsCA:                  false,
-		ExtKeyUsage:           extKeyUsage,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true,
 		DNSNames:              dnsNames,
