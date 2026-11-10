@@ -200,13 +200,11 @@ func (suite *DestinationMappingTestSuite) TestStatusUpdateConfusedDeputy() {
 	requires.Never(func() bool {
 		found, err := appHasCondition(suite, victimKey, "ConfusedDeputyPoC", marker)
 		if err != nil {
-			t.Logf("could not read the application, skipping this assertion: %v", err)
-			return false
+			t.Logf("could not read the victim application: %v", err)
+			return true
 		}
 		return found
-	}, 10*time.Second, 500*time.Millisecond,
-		"the principal applied a status-update sent by an agent that does not own this Application; "+
-			"the ownership check in principal/event.go (assertManagedAgentOwnsApp) has regressed")
+	}, 10*time.Second, 500*time.Millisecond)
 }
 
 // TestOperationPropagationConfusedDeputy covers the second half of the same
@@ -286,17 +284,20 @@ func (suite *DestinationMappingTestSuite) TestOperationPropagationConfusedDeputy
 	requires.Never(func() bool {
 		principalApp := &v1alpha1.Application{}
 		if err := suite.PrincipalClient.Get(suite.Ctx, victimKey, principalApp, metav1.GetOptions{}); err != nil {
-			return false
+			t.Logf("could not read the victim application on the principal: %v", err)
+			return true
 		}
 		return principalApp.Operation != nil && principalApp.Operation.InitiatedBy.Username == marker
 	}, 20*time.Second, 500*time.Millisecond,
-		"the principal accepted an Operation on this Application from an agent that does not own it")
+		"either the principal accepted an Operation on this Application from an agent that does not own it, "+
+			"or the application could not be read so nothing was proven; the log above says which")
 
 	t.Log("CONFIRMED BOUNDARY: the forged operation must never reach the real agent's own cluster or be executed there")
 	requires.Never(func() bool {
 		agentApp := &v1alpha1.Application{}
 		if err := suite.ManagedAgentClient.Get(suite.Ctx, victimKey, agentApp, metav1.GetOptions{}); err != nil {
-			return false
+			t.Logf("could not read the victim application on the agent: %v", err)
+			return true
 		}
 		if agentApp.Operation != nil && agentApp.Operation.InitiatedBy.Username == marker {
 			t.Logf("UNEXPECTED: forged operation reached the real agent's local Operation field")
@@ -307,9 +308,7 @@ func (suite *DestinationMappingTestSuite) TestOperationPropagationConfusedDeputy
 			return true
 		}
 		return false
-	}, 15*time.Second, 1*time.Second,
-		"the forged operation reached or was executed on the real agent's cluster; the propagation boundary described "+
-			"in this test's comment has changed (principal/callbacks.go) and needs re-assessment")
+	}, 15*time.Second, 1*time.Second)
 }
 
 // TestDeleteConfusedDeputy covers the delete branch of the same missing
@@ -374,19 +373,17 @@ func (suite *DestinationMappingTestSuite) TestDeleteConfusedDeputy() {
 		if err := suite.PrincipalClient.Get(suite.Ctx, victimKey, stored, metav1.GetOptions{}); err != nil {
 			if errors.IsNotFound(err) {
 				t.Logf("UNEXPECTED: the victim application is gone")
-				return true
+			} else {
+				t.Logf("could not read the victim application: %v", err)
 			}
-			t.Logf("could not read the victim application, skipping this sample: %v", err)
-			return false
+			return true
 		}
 		if len(stored.Finalizers) == 0 {
 			t.Logf("UNEXPECTED: the victim application's finalizers were stripped")
 			return true
 		}
 		return false
-	}, 20*time.Second, 500*time.Millisecond,
-		"a foreign agent finished the deletion of another agent's Application on the principal, before its "+
-			"real owner confirmed cleanup - the finalizer interlock has been bypassed")
+	}, 20*time.Second, 500*time.Millisecond)
 }
 
 // TestResyncRequestUpdateConfusedDeputy covers the resync path, which leaks in
