@@ -1197,9 +1197,44 @@ func Test_ProcessRequestUpdateEvent_Ownership(t *testing.T) {
 		}
 
 		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
-		assert.Nil(t, err, "an unauthorised request should be ignored, not surfaced as an error")
-		assert.Zero(t, handler.sendQ.Len(),
+		assert.Nil(t, err, "an unauthorised request should be handled, not surfaced as an error")
+
+		// The requester is told to drop its stale copy, but must not be sent
+		// the owner's spec: a delete event carries only name/namespace/UID.
+		require.Equal(t, 1, handler.sendQ.Len())
+		ev, shutdown := handler.sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type(),
 			"the principal must not leak another agent's Application spec back to the requester")
+
+		leaked := &v1alpha1.Application{}
+		require.NoError(t, ev.DataAs(leaked))
+		assert.Empty(t, leaked.Spec.Destination.Name, "the delete event must not carry the owner's spec")
+		assert.Nil(t, leaked.Spec.Source, "the delete event must not carry the owner's spec")
+		assert.Equal(t, "victim-app", leaked.Name)
+	})
+
+	t.Run("principal stays silent when the application's owner cannot be determined", func(t *testing.T) {
+		handler := newPrincipalHandler(t, true)
+
+		// No destination name: the principal cannot route this Application to
+		// anyone, so ownership is inconclusive rather than "someone else's".
+		// Deleting on a guess could prune live workloads, so nothing is sent.
+		resource := fakeUnresAppWithDestination("unrouted-app", "tenant-apps", "")
+		_, err := handler.dynClient.Resource(gvr).Namespace("tenant-apps").Create(ctx, resource, v1.CreateOptions{})
+		require.Nil(t, err)
+
+		reqUpdate := &event.RequestUpdate{
+			Name:      "unrouted-app",
+			Namespace: "tenant-apps",
+			Kind:      "Application",
+			Checksum:  []byte("deliberately-wrong"),
+		}
+
+		err = handler.ProcessRequestUpdateEvent(ctx, testAgentName, types.AgentModeManaged, reqUpdate)
+		assert.Nil(t, err)
+		assert.Zero(t, handler.sendQ.Len(),
+			"an inconclusive ownership result must not trigger a destructive delete")
 	})
 
 	t.Run("principal answers a request update for the agent's own application", func(t *testing.T) {
@@ -1340,33 +1375,37 @@ func Test_isApplicationRelevant(t *testing.T) {
 
 	t.Run("nil resolver skips the check", func(t *testing.T) {
 		res := fakeUnresAppWithDestination("app", "ns", "other-agent")
-		relevant, err := handler.isApplicationRelevant(logCtx, testAgentName, res)
+		owner, relevant, err := handler.isApplicationRelevant(logCtx, testAgentName, res)
 		require.Nil(t, err)
 		assert.True(t, relevant)
+		assert.Empty(t, owner)
 	})
 
 	withResolver := createFakeHandler(t).WithAppOwnerResolver(destinationOwnerResolver)
 
 	t.Run("owner matches", func(t *testing.T) {
 		res := fakeUnresAppWithDestination("app", "ns", testAgentName)
-		relevant, err := withResolver.isApplicationRelevant(logCtx, testAgentName, res)
+		owner, relevant, err := withResolver.isApplicationRelevant(logCtx, testAgentName, res)
 		require.Nil(t, err)
 		assert.True(t, relevant)
+		assert.Equal(t, testAgentName, owner)
 	})
 
 	t.Run("owner differs", func(t *testing.T) {
 		res := fakeUnresAppWithDestination("app", "ns", "other-agent")
-		relevant, err := withResolver.isApplicationRelevant(logCtx, testAgentName, res)
+		owner, relevant, err := withResolver.isApplicationRelevant(logCtx, testAgentName, res)
 		require.Nil(t, err)
 		assert.False(t, relevant)
+		assert.Equal(t, "other-agent", owner, "a known owner lets the caller send a delete")
 	})
 
 	t.Run("empty destination name is never owned", func(t *testing.T) {
 		// An Application without a destination name cannot be routed to any
 		// agent under destination-based mapping, so it must not be claimable.
 		res := fakeUnresAppWithDestination("app", "ns", "")
-		relevant, err := withResolver.isApplicationRelevant(logCtx, testAgentName, res)
+		owner, relevant, err := withResolver.isApplicationRelevant(logCtx, testAgentName, res)
 		require.Nil(t, err)
 		assert.False(t, relevant)
+		assert.Empty(t, owner, "an empty owner marks the result inconclusive, not someone else's")
 	})
 }

@@ -368,12 +368,22 @@ func (r *RequestHandler) ProcessRequestUpdateEvent(ctx context.Context, agentNam
 	// is shared with autonomous agents, which legitimately receive request
 	// updates from the principal and must not be subjected to this check.
 	if r.role == manager.ManagerRolePrincipal && reqUpdate.Kind == "Application" && r.destinationBasedMapping {
-		isRelevant, err := r.isApplicationRelevant(logCtx, agentName, res)
+		owner, isRelevant, err := r.isApplicationRelevant(logCtx, agentName, res)
 		if err != nil {
 			return err
 		}
 		if !isRelevant {
-			return nil
+			if owner == "" {
+				// Ownership is inconclusive - for example the destination was
+				// momentarily cleared mid-edit.
+				logCtx.Trace("Could not determine the owner of the application, leaving the agent's copy alone")
+				return nil
+			}
+
+			// The application belongs to a different agent, so the requester
+			// is holding a stale copy - send a delete event to remove the orphaned resource from the peer.
+			logCtx.WithField("owner", owner).Trace("Sending a request to delete the stale application")
+			return r.handleDeletedResource(logCtx, reqUpdate)
 		}
 	}
 
@@ -480,28 +490,34 @@ func (r *RequestHandler) stampPrincipalUID(ev *cloudevent.Event) {
 // isApplicationRelevant reports whether the Application res is mapped to
 // agentName, i.e. whether the principal would route this Application to that
 // agent in the first place.
-func (r *RequestHandler) isApplicationRelevant(logCtx *logrus.Entry, agentName string, res *unstructured.Unstructured) (bool, error) {
+//
+// The resolved owner is returned alongside, so the caller can tell "this
+// belongs to a different agent" (owner set) apart from "ownership could not
+// be determined" (owner empty). Those warrant different responses: the former
+// means the requester is holding a stale copy, the latter is inconclusive and
+// must not be acted on destructively.
+func (r *RequestHandler) isApplicationRelevant(logCtx *logrus.Entry, agentName string, res *unstructured.Unstructured) (owner string, relevant bool, err error) {
 	if r.appOwnerResolver == nil {
-		return true, nil
+		return "", true, nil
 	}
 
 	resBytes, err := res.MarshalJSON()
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 
 	app := &v1alpha1.Application{}
 	if err := json.Unmarshal(resBytes, app); err != nil {
-		return false, fmt.Errorf("could not unmarshal application for ownership check: %w", err)
+		return "", false, fmt.Errorf("could not unmarshal application for ownership check: %w", err)
 	}
 
-	owner := r.appOwnerResolver(app)
+	owner = r.appOwnerResolver(app)
 	if owner != agentName {
-		logCtx.WithField("owner", owner).Trace("Application is not mapped to the requesting agent, ignoring the request update")
-		return false, nil
+		logCtx.WithField("owner", owner).Trace("Application is not mapped to the requesting agent")
+		return owner, false, nil
 	}
 
-	return true, nil
+	return owner, true, nil
 }
 
 // isAppProjectRelevant checks if the incoming AppProject/Repository is still relevant to the agent based on the AppProject rules.

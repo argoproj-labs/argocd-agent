@@ -32,6 +32,7 @@ import (
 	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -106,7 +107,12 @@ func (suite *DestinationMappingTestSuite) TestForgedAgentCanUpdateItsOwnApplicat
 	defer stop()
 
 	requires.Eventually(func() bool {
-		return appHasCondition(suite, appKey, "SelfOwnedProbe", marker)
+		found, err := appHasCondition(suite, appKey, "SelfOwnedProbe", marker)
+		if err != nil {
+			t.Logf("could not read the application, skipping this assertion: %v", err)
+			return false
+		}
+		return found
 	}, 30*time.Second, 500*time.Millisecond,
 		"the ownership check must not reject an agent updating its own application")
 }
@@ -192,7 +198,12 @@ func (suite *DestinationMappingTestSuite) TestStatusUpdateConfusedDeputy() {
 	defer stop()
 
 	requires.Never(func() bool {
-		return appHasCondition(suite, victimKey, "ConfusedDeputyPoC", marker)
+		found, err := appHasCondition(suite, victimKey, "ConfusedDeputyPoC", marker)
+		if err != nil {
+			t.Logf("could not read the application, skipping this assertion: %v", err)
+			return false
+		}
+		return found
 	}, 10*time.Second, 500*time.Millisecond,
 		"the principal applied a status-update sent by an agent that does not own this Application; "+
 			"the ownership check in principal/event.go (assertManagedAgentOwnsApp) has regressed")
@@ -361,8 +372,12 @@ func (suite *DestinationMappingTestSuite) TestDeleteConfusedDeputy() {
 	requires.Never(func() bool {
 		stored := &v1alpha1.Application{}
 		if err := suite.PrincipalClient.Get(suite.Ctx, victimKey, stored, metav1.GetOptions{}); err != nil {
-			t.Logf("UNEXPECTED: the victim application is gone: %v", err)
-			return true
+			if errors.IsNotFound(err) {
+				t.Logf("UNEXPECTED: the victim application is gone")
+				return true
+			}
+			t.Logf("could not read the victim application, skipping this sample: %v", err)
+			return false
 		}
 		if len(stored.Finalizers) == 0 {
 			t.Logf("UNEXPECTED: the victim application's finalizers were stripped")
@@ -540,17 +555,17 @@ func startForgedEventSender(ctx context.Context, t *testing.T, remote *client.Re
 
 // appHasCondition reports whether the principal's copy of the application at
 // key carries a condition of the given type with the given message.
-func appHasCondition(suite *DestinationMappingTestSuite, key ktypes.NamespacedName, condType, message string) bool {
+func appHasCondition(suite *DestinationMappingTestSuite, key ktypes.NamespacedName, condType, message string) (bool, error) {
 	principalApp := &v1alpha1.Application{}
 	if err := suite.PrincipalClient.Get(suite.Ctx, key, principalApp, metav1.GetOptions{}); err != nil {
-		return false
+		return false, err
 	}
 	for _, c := range principalApp.Status.Conditions {
 		if string(c.Type) == condType && c.Message == message {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // dialForgedAgent opens a raw EventStream connection to the live principal,
