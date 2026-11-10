@@ -33,7 +33,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/tracing"
 	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
-	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
+	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/health"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"

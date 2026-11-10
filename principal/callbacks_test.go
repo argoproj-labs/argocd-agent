@@ -35,7 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
-	synccommon "github.com/argoproj/argo-cd/gitops-engine/pkg/sync/common"
+	synccommon "github.com/argoproj/argo-cd/gitops-engine/v3/pkg/sync/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
