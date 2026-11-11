@@ -172,7 +172,7 @@ jobs:
           ./hack/generate-release-notes.sh ${GITHUB_REF_NAME}
 
       - name: Install goreleaser
-        uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7.0.0
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           install-only: true
 
