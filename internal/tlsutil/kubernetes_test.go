@@ -2,6 +2,8 @@ package tlsutil
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
@@ -325,4 +327,62 @@ func Test_JWTSigningKeyFromSecret(t *testing.T) {
 		_, err := JWTSigningKeyFromSecret(context.TODO(), kcl, "argocd", "jwt-secret")
 		assert.ErrorContains(t, err, "malformed PEM data")
 	})
+}
+
+func Test_X509CertPoolFromSecret_InvalidData(t *testing.T) {
+	certPem := testutil.MustReadFile("testdata/001_test_cert.pem")
+	s := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ca-certs", Namespace: "argocd"},
+		Data: map[string][]byte{
+			"ca.crt": []byte(certPem),
+			"junk":   []byte("not a certificate"),
+		},
+	}
+	kcl := kube.NewFakeClientsetWithResources(s)
+
+	t.Run("a secret without data is an error", func(t *testing.T) {
+		empty := &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "argocd"}}
+		pool, err := X509CertPoolFromSecret(context.TODO(), kube.NewFakeClientsetWithResources(empty), "argocd", "empty")
+
+		require.ErrorContains(t, err, "argocd/empty: empty secret")
+		assert.Nil(t, pool)
+	})
+
+	t.Run("reading all fields fails on a field that holds no certificate", func(t *testing.T) {
+		pool, err := X509CertPoolFromSecret(context.TODO(), kcl, "argocd", "ca-certs")
+
+		require.ErrorContains(t, err, "field junk does not hold valid certificate data")
+		assert.Nil(t, pool)
+	})
+
+	t.Run("a requested field that holds no certificate is an error", func(t *testing.T) {
+		pool, err := X509CertPoolFromSecret(context.TODO(), kcl, "argocd", "ca-certs", "junk")
+
+		require.ErrorContains(t, err, "field junk does not hold valid certificate data")
+		assert.Nil(t, pool)
+	})
+
+	t.Run("a field that is not requested is not read", func(t *testing.T) {
+		pool, err := X509CertPoolFromSecret(context.TODO(), kcl, "argocd", "ca-certs", "ca.crt")
+
+		require.NoError(t, err)
+		want := x509.NewCertPool()
+		require.True(t, want.AppendCertsFromPEM([]byte(certPem)))
+		assert.True(t, want.Equal(pool))
+	})
+}
+
+func Test_JWTSigningKeyFromSecret_InvalidKey(t *testing.T) {
+	secret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "jwt-secret", Namespace: "argocd"},
+		Data: map[string][]byte{
+			jwtKeyFieldName: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("junk")}),
+		},
+	}
+	kcl := kube.NewFakeClientsetWithResources(secret)
+
+	key, err := JWTSigningKeyFromSecret(context.TODO(), kcl, "argocd", "jwt-secret")
+
+	require.ErrorContains(t, err, "could not parse JWT signing key from secret argocd/jwt-secret")
+	assert.Nil(t, key)
 }
