@@ -54,6 +54,10 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 		"http_method": rreq.Method,
 	})
 
+	if rreq.Impersonate != "" {
+		logCtx = logCtx.WithField("impersonate", rreq.Impersonate)
+	}
+
 	logCtx.Tracef("Start processing %v", rreq)
 
 	ctx, cancel := context.WithTimeout(a.context, defaultResourceRequestTimeout)

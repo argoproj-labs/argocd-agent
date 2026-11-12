@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,10 +15,13 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	agentkube "github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -1909,6 +1913,39 @@ func Test_processIncomingResourceRequest_impersonation(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("the impersonated user is part of the log of the request", func(t *testing.T) {
+		for _, tt := range []struct {
+			name     string
+			identity string
+			want     any
+		}{
+			{"with an identity", user, user},
+			{"without an identity", "", nil},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				lg := logrus.New()
+				lg.SetOutput(io.Discard)
+				hook := logtest.NewLocal(lg)
+				api := newFakeKubeAPI(t)
+				a := newTestAgent(t, api.kubeClient(t), true)
+				a.resourceProxyLogger = logging.New(lg)
+				rreq := operations[0].req
+				rreq.Impersonate = tt.identity
+
+				assert.Equal(t, http.StatusOK, process(t, a, rreq))
+
+				var processed *logrus.Entry
+				for _, e := range hook.AllEntries() {
+					if strings.HasPrefix(e.Message, "Processing resource request") {
+						processed = e
+					}
+				}
+				require.NotNil(t, processed, "the request is not logged")
+				assert.Equal(t, tt.want, processed.Data["impersonate"])
+			})
+		}
+	})
 
 	t.Run("fails closed when the agent has no REST config to impersonate with", func(t *testing.T) {
 		a := newTestAgent(t, kube.NewDynamicFakeClient(), true)

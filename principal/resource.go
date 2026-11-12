@@ -95,21 +95,31 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 
 	logCtx = logCtx.WithField("agent", agentName)
 
+	if s.metrics != nil {
+		s.metrics.ResourceProxyRequests.WithLabelValues(agentName).Inc()
+	}
+
 	impersonate, err := impersonatedUser(r.Header)
 	if err != nil {
 		logCtx.WithError(err).Warn("Refusing request with invalid impersonation")
+		if s.metrics != nil {
+			s.metrics.ResourceProxyErrors.WithLabelValues(agentName, "invalid_impersonation").Inc()
+		}
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte("invalid impersonation"))
 		return
 	}
 
-	if s.metrics != nil {
-		s.metrics.ResourceProxyRequests.WithLabelValues(agentName).Inc()
+	if impersonate != "" {
+		logCtx = logCtx.WithField("impersonate", impersonate)
 	}
 
 	subresource := params.Get("subresource")
 	if impersonate != "" && subresource == "exec" {
 		logCtx.Warn("Refusing exec request with impersonation, which it does not support")
+		if s.metrics != nil {
+			s.metrics.ResourceProxyErrors.WithLabelValues(agentName, "impersonation_unsupported").Inc()
+		}
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte("impersonation is not supported for exec"))
 		return

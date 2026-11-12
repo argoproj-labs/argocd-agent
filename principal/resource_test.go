@@ -10,17 +10,23 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	"github.com/argoproj-labs/argocd-agent/internal/metrics"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	logstream "github.com/argoproj-labs/argocd-agent/principal/apis/logstreamapi"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -419,6 +425,12 @@ func Test_resourceRequester_impersonation(t *testing.T) {
 		assert.Empty(t, logRequest(t, nil).Impersonate)
 	})
 
+	t.Run("refuses a malformed identity on a log request", func(t *testing.T) {
+		rreq, w := proxy(t, newRequest(map[string]string{"Impersonate-User": "system:masters"}), "log")
+		assert.Nil(t, rreq, "request must not reach the agent")
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+	})
+
 	t.Run("refuses several Impersonate-User values", func(t *testing.T) {
 		r := newRequest(nil)
 		r.Header.Add("Impersonate-User", "system:serviceaccount:tenant-a:deployer")
@@ -579,4 +591,99 @@ func Test_extractAgentFromAuth(t *testing.T) {
 		// Should use bearer token's agent name, not cert CN
 		assert.Equal(t, "token-agent", agentName)
 	})
+}
+
+func Test_resourceRequester_impersonationObservability(t *testing.T) {
+	const user = "system:serviceaccount:tenant-a:deployer"
+
+	newRequest := func(headers map[string]string) *http.Request {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.TLS = &tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{{Subject: pkix.Name{CommonName: "agent"}}},
+		}
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		return r
+	}
+
+	// newMetricsServer returns a server whose resource proxy errors can be
+	// read. The counter is not registered, as the metrics of a registered
+	// principal can only be created once per process.
+	newMetricsServer := func(t *testing.T) (*Server, *prometheus.CounterVec, *prometheus.CounterVec) {
+		t.Helper()
+		s := newResourceTestServer(t)
+		errs := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "test_resource_proxy_errors_total"}, []string{"agent_name", "reason"})
+		requests := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "test_resource_proxy_requests_total"}, []string{"agent_name"})
+		s.metrics = &metrics.PrincipalMetrics{ResourceProxyRequests: requests, ResourceProxyErrors: errs}
+		return s, requests, errs
+	}
+
+	t.Run("an invalid identity is counted as a resource proxy error", func(t *testing.T) {
+		s, requests, errs := newMetricsServer(t)
+		w := httptest.NewRecorder()
+		s.processResourceRequest(w, newRequest(map[string]string{"Impersonate-User": "system:masters"}), resourceproxy.NewParams())
+
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+		assert.Equal(t, 1.0, testutil.ToFloat64(errs.WithLabelValues("agent", "invalid_impersonation")))
+		assert.Equal(t, 1.0, testutil.ToFloat64(requests.WithLabelValues("agent")), "a refused request is still a request")
+	})
+
+	t.Run("exec with an identity is counted as a resource proxy error", func(t *testing.T) {
+		s, requests, errs := newMetricsServer(t)
+		w := httptest.NewRecorder()
+		params := resourceproxy.NewParams()
+		params.Set("subresource", "exec")
+		s.processResourceRequest(w, newRequest(map[string]string{"Impersonate-User": user}), params)
+
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+		assert.Equal(t, 1.0, testutil.ToFloat64(errs.WithLabelValues("agent", "impersonation_unsupported")))
+		assert.Equal(t, 1.0, testutil.ToFloat64(requests.WithLabelValues("agent")), "a refused request is still a request")
+	})
+
+	for _, tt := range []struct {
+		name    string
+		headers map[string]string
+		want    any
+	}{
+		{"with an identity", map[string]string{"Impersonate-User": user}, user},
+		{"without an identity", nil, nil},
+	} {
+		t.Run("the impersonated user is part of the log of the request: "+tt.name, func(t *testing.T) {
+			old := logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
+			oldLevel := logrus.GetLevel()
+			logrus.SetLevel(logrus.InfoLevel)
+			hook := &logtest.Hook{}
+			logrus.AddHook(hook)
+			t.Cleanup(func() {
+				logrus.StandardLogger().ReplaceHooks(old)
+				logrus.SetLevel(oldLevel)
+			})
+
+			s := newResourceTestServer(t)
+			s.eventStreamSrv.MarkConnected("agent")
+			defer s.eventStreamSrv.MarkDisconnected("agent")
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				s.processResourceRequest(httptest.NewRecorder(), newRequest(tt.headers), resourceproxy.NewParams())
+			}()
+			sendq := s.queues.SendQ("agent")
+			require.Eventually(t, func() bool { return sendq.Len() > 0 }, 5*time.Second, 5*time.Millisecond)
+			ev, _ := sendq.Get()
+			_, sendCh := s.resourceProxy.Tracked(event.EventID(ev))
+			require.NotNil(t, sendCh)
+			sendCh <- s.events.NewResourceResponseEvent(event.EventID(ev), 200, "ok")
+			<-done
+
+			var proxied *logrus.Entry
+			for _, e := range hook.AllEntries() {
+				if strings.HasPrefix(e.Message, "Proxying request") {
+					proxied = e
+				}
+			}
+			require.NotNil(t, proxied, "the request is not logged")
+			assert.Equal(t, tt.want, proxied.Data["impersonate"])
+		})
+	}
 }
