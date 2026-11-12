@@ -55,7 +55,7 @@ func Test_ParseServiceAccountUser(t *testing.T) {
 		{name: "underscore in name", user: "system:serviceaccount:tenant-a:bad_name", wantErr: true},
 		{name: "namespace with dot", user: "system:serviceaccount:tenant.a:deployer", wantErr: true},
 		{name: "leading space", user: " system:serviceaccount:tenant-a:deployer", wantErr: true},
-		{name: "newline injected", user: "system:serviceaccount:tenant-a:deployer\nImpersonate-Group: system:masters", wantErr: true},
+		{name: "newline in the name", user: "system:serviceaccount:tenant-a:deployer\nx", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
