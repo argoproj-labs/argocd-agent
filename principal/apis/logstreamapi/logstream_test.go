@@ -616,6 +616,13 @@ func TestStreamLogsAgentMismatch(t *testing.T) {
 		assert.Equal(t, codes.PermissionDenied, status.Code(err))
 		assert.Contains(t, err.Error(), "agent mismap between session and caller")
 		assert.NotContains(t, w.GetBody(), "hijacked log line")
+
+		// The denied caller must not be able to finalize (delete/close) the victim's session.
+		server.mu.RLock()
+		sess, ok := server.sessions[requestUUID]
+		server.mu.RUnlock()
+		require.True(t, ok, "victim session must survive a denied cross-agent attempt")
+		assert.Equal(t, testAgentName, sess.agentName)
 	})
 
 	t.Run("rejects missing agent identity", func(t *testing.T) {

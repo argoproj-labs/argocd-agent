@@ -68,6 +68,7 @@ type logClient struct {
 	cancelFn     context.CancelFunc
 	logCtx       *logrus.Entry
 	requestID    string
+	authorized   bool  // true once this stream's agent is confirmed to own requestID
 	terminateErr error // returned as stream status when set
 }
 
@@ -197,8 +198,9 @@ func (s *Server) StreamLogs(stream logstreamapi.LogStreamService_StreamLogsServe
 
 	s.processLogStreamLoop(c, agentName, dataCh, errCh)
 
-	// Cleanup session
-	if c.requestID != "" {
+	// Cleanup session. Only finalize if this stream's agent was confirmed to own
+	// requestID; otherwise a denied caller could delete/close another agent's session.
+	if c.requestID != "" && c.authorized {
 		s.finalizeSession(c.requestID)
 	}
 	c.mu.Lock()
@@ -265,7 +267,16 @@ func (s *Server) processLogStreamLoop(c *logClient, agentName string, dataCh <-c
 						c.cancelFn()
 					}
 				}
+				// This stream's agent is confirmed to own requestID.
+				c.authorized = true
 				s.mu.Unlock()
+			} else if c.requestID != "" && msg.GetRequestUuid() != c.requestID {
+				// A stream is bound to a single request UUID at the first message.
+				// Reject any later message carrying a different UUID, so an agent
+				// cannot piggyback access to another session on an already-authorized stream.
+				c.logCtx.WithField("msg_request_id", msg.GetRequestUuid()).Error("Request UUID mismatch within stream")
+				c.setTerminateErr(status.Error(codes.PermissionDenied, "request UUID mismatch within stream"))
+				return
 			}
 
 			if err := s.processLogMessage(c, msg); err != nil {
