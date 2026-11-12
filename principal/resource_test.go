@@ -17,6 +17,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
+	logstream "github.com/argoproj-labs/argocd-agent/principal/apis/logstreamapi"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -361,16 +362,62 @@ func Test_resourceRequester_impersonation(t *testing.T) {
 		})
 	}
 
-	// Logs and exec do not carry the identity to the agent yet, so they must
-	// not be served at all rather than with the agent's own identity.
-	for _, sub := range []string{"log", "exec"} {
-		t.Run("refuses "+sub+" while impersonating", func(t *testing.T) {
-			r := newRequest(map[string]string{"Impersonate-User": "system:serviceaccount:tenant-a:deployer"})
-			rreq, w := proxy(t, r, sub)
-			assert.Nil(t, rreq, "request must not reach the agent")
-			assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
-		})
+	// Exec does not carry the identity to the agent yet, so it must not be
+	// served at all rather than with the agent's own identity.
+	t.Run("refuses exec while impersonating", func(t *testing.T) {
+		r := newRequest(map[string]string{"Impersonate-User": "system:serviceaccount:tenant-a:deployer"})
+		rreq, w := proxy(t, r, "exec")
+		assert.Nil(t, rreq, "request must not reach the agent")
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+	})
+
+	// logRequest proxies a request for the logs of a pod and returns the log
+	// request that reached the agent's queue.
+	logRequest := func(t *testing.T, headers map[string]string) *event.ContainerLogRequest {
+		t.Helper()
+		s := newResourceTestServer(t)
+		s.logStream = logstream.NewServer()
+		s.eventStreamSrv.MarkConnected("agent")
+		defer s.eventStreamSrv.MarkDisconnected("agent")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		r := newRequest(headers).WithContext(ctx)
+		r.URL.RawQuery = "follow=true"
+		params := resourceproxy.NewParams()
+		params.Set("subresource", "log")
+		params.Set("namespace", "tenant-a")
+		params.Set("name", "pod-1")
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.processResourceRequest(httptest.NewRecorder(), r, params)
+		}()
+
+		sendq := s.queues.SendQ("agent")
+		require.Eventually(t, func() bool { return sendq.Len() > 0 }, 5*time.Second, 5*time.Millisecond)
+		ev, shutdown := sendq.Get()
+		require.False(t, shutdown)
+		logReq, err := event.New(ev, targets.ContainerLog).ContainerLogRequest()
+		require.NoError(t, err)
+
+		// A following log request keeps the handler open until the client is gone.
+		cancel()
+		<-done
+		return logReq
 	}
+
+	t.Run("log request carries the identity to the agent", func(t *testing.T) {
+		const user = "system:serviceaccount:tenant-a:deployer"
+		logReq := logRequest(t, map[string]string{"Impersonate-User": user})
+		assert.Equal(t, user, logReq.Impersonate)
+		assert.Equal(t, "pod-1", logReq.PodName)
+	})
+
+	t.Run("log request without an identity asks for none", func(t *testing.T) {
+		assert.Empty(t, logRequest(t, nil).Impersonate)
+	})
 
 	t.Run("refuses several Impersonate-User values", func(t *testing.T) {
 		r := newRequest(nil)

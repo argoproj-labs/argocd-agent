@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -258,6 +259,75 @@ func TestCreateKubernetesLogStream(t *testing.T) {
 		logReqNotFound.PodName = "non-existent-pod"
 		_, err := agent.createKubernetesLogStream(ctx, logReqNotFound)
 		assert.NoError(t, err)
+	})
+}
+
+func TestCreateKubernetesLogStream_Impersonate(t *testing.T) {
+	const user = "system:serviceaccount:tenant-a:deployer"
+
+	newTestAgent := func(t *testing.T, api *fakeKubeAPI, impersonation bool) *Agent {
+		t.Helper()
+		return &Agent{
+			context:                          context.Background(),
+			kubeClient:                       api.kubeClient(t),
+			enableResourceProxyImpersonation: impersonation,
+		}
+	}
+
+	t.Run("logs are read as the service account", func(t *testing.T) {
+		api := newFakeKubeAPI(t)
+		a := newTestAgent(t, api, true)
+		logReq := createTestLogRequest(false)
+		logReq.Impersonate = user
+
+		rc, err := a.createKubernetesLogStream(context.Background(), logReq)
+		require.NoError(t, err)
+		require.NoError(t, rc.Close())
+
+		seen := api.seen()
+		require.Len(t, seen, 1)
+		assert.Equal(t, "GET", seen[0].method)
+		assert.True(t, strings.HasSuffix(seen[0].path, "/pods/test-pod/log"), seen[0].path)
+		assert.Equal(t, user, seen[0].impersonate)
+	})
+
+	t.Run("without a requested identity the agent uses its own", func(t *testing.T) {
+		for _, impersonation := range []bool{true, false} {
+			api := newFakeKubeAPI(t)
+			a := newTestAgent(t, api, impersonation)
+
+			rc, err := a.createKubernetesLogStream(context.Background(), createTestLogRequest(false))
+			require.NoError(t, err)
+			require.NoError(t, rc.Close())
+
+			seen := api.seen()
+			require.Len(t, seen, 1)
+			assert.Empty(t, seen[0].impersonate, "impersonation=%v", impersonation)
+		}
+	})
+
+	t.Run("refused when impersonation is not enabled on the agent", func(t *testing.T) {
+		api := newFakeKubeAPI(t)
+		a := newTestAgent(t, api, false)
+		logReq := createTestLogRequest(false)
+		logReq.Impersonate = user
+
+		_, err := a.createKubernetesLogStream(context.Background(), logReq)
+		require.Error(t, err)
+		assert.True(t, k8serrors.IsForbidden(err), "got %v", err)
+		assert.Empty(t, api.seen(), "a refused request must not reach the API")
+	})
+
+	t.Run("refused when the identity is not a service account", func(t *testing.T) {
+		api := newFakeKubeAPI(t)
+		a := newTestAgent(t, api, true)
+		logReq := createTestLogRequest(false)
+		logReq.Impersonate = "system:masters"
+
+		_, err := a.createKubernetesLogStream(context.Background(), logReq)
+		require.Error(t, err)
+		assert.True(t, k8serrors.IsForbidden(err), "got %v", err)
+		assert.Empty(t, api.seen(), "a refused request must not reach the API")
 	})
 }
 

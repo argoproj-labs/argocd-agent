@@ -644,3 +644,29 @@ func TestNewResourceRequestEvent_Impersonate(t *testing.T) {
 		require.NotContains(t, string(cev.Data()), "impersonate")
 	})
 }
+
+func TestNewLogRequestEvent_Impersonate(t *testing.T) {
+	source := NewEventSource("principal")
+
+	t.Run("the impersonated user survives the round trip through the event", func(t *testing.T) {
+		const user = "system:serviceaccount:tenant-a:deployer"
+		cev, err := source.NewLogRequestEvent("tenant-a", "pod-1", "GET", map[string]string{"container": "app"}, user)
+		require.NoError(t, err)
+
+		logReq, err := New(cev, targets.ContainerLog).ContainerLogRequest()
+		require.NoError(t, err)
+		require.Equal(t, user, logReq.Impersonate)
+		require.Equal(t, "pod-1", logReq.PodName)
+		require.Equal(t, "app", logReq.Container)
+	})
+
+	t.Run("no impersonation leaves the field out of the payload", func(t *testing.T) {
+		cev, err := source.NewLogRequestEvent("tenant-a", "pod-1", "GET", nil, "")
+		require.NoError(t, err)
+
+		logReq, err := New(cev, targets.ContainerLog).ContainerLogRequest()
+		require.NoError(t, err)
+		require.Empty(t, logReq.Impersonate)
+		require.NotContains(t, string(cev.Data()), "impersonate")
+	})
+}
