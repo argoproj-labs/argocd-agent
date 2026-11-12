@@ -638,6 +638,42 @@ func TestStreamLogsAgentMismatch(t *testing.T) {
 	})
 }
 
+func TestUnknownSessionDoesNotAuthorizeFinalize(t *testing.T) {
+	server := NewServer()
+	requestUUID := "test-unknown-then-registered"
+
+	client := server.newLogClient(context.Background())
+	dataCh := make(chan *logstreamapi.LogStreamData, 1)
+	errCh := make(chan error, 1)
+	dataCh <- &logstreamapi.LogStreamData{
+		RequestUuid: requestUUID,
+		Data:        []byte("probe\n"),
+	}
+	close(dataCh)
+
+	server.processLogStreamLoop(client, "other-agent", dataCh, errCh)
+
+	client.mu.Lock()
+	require.Error(t, client.terminateErr)
+	assert.Equal(t, codes.NotFound, status.Code(client.terminateErr))
+	client.mu.Unlock()
+	require.False(t, client.authorized, "stream must not be authorized to finalize a session it never owned")
+
+	w := mock.NewMockHTTPResponseWriter()
+	r := httptest.NewRequest("GET", "/logs", nil)
+	require.NoError(t, server.RegisterHTTP(requestUUID, testAgentName, w, r))
+
+	if client.requestID != "" && client.authorized {
+		server.finalizeSession(client.requestID)
+	}
+
+	server.mu.RLock()
+	sess, ok := server.sessions[requestUUID]
+	server.mu.RUnlock()
+	require.True(t, ok, "legitimately registered session must survive an earlier unauthorized probe")
+	assert.Equal(t, testAgentName, sess.agentName)
+}
+
 func TestProcessLogStreamLoopAgentMismatch(t *testing.T) {
 	server := NewServer()
 	requestUUID := "test-request-loop-mismatch"

@@ -253,21 +253,27 @@ func (s *Server) processLogStreamLoop(c *logClient, agentName string, dataCh <-c
 
 				s.mu.Lock()
 				sess, ok := s.sessions[c.requestID]
-				if ok {
-					// The authenticated agent must own this session.
-					if sess.agentName != agentName {
-						s.mu.Unlock()
-						c.logCtx.WithField("session_agent", sess.agentName).Error("Agent mismap between log session and caller")
-						c.setTerminateErr(status.Error(codes.PermissionDenied, "agent mismap between session and caller"))
-						return
-					}
-					sess.cancelFn = func() {
-						// tag this stream as terminated due to client detach
-						c.setTerminateErr(status.Error(codes.Canceled, "client detached timeout"))
-						c.cancelFn()
-					}
+				if !ok {
+					s.mu.Unlock()
+					c.logCtx.Warn("received data for unknown request; terminating")
+					c.setTerminateErr(status.Error(codes.NotFound, "unknown request id"))
+					return
 				}
-				// This stream's agent is confirmed to own requestID.
+				// The authenticated agent must own this session.
+				if sess.agentName != agentName {
+					sessAgentName := sess.agentName
+					s.mu.Unlock()
+					c.logCtx.WithField("session_agent", sessAgentName).Error("Agent mismap between log session and caller")
+					c.setTerminateErr(status.Error(codes.PermissionDenied, "agent mismap between session and caller"))
+					return
+				}
+				sess.cancelFn = func() {
+					// tag this stream as terminated due to client detach
+					c.setTerminateErr(status.Error(codes.Canceled, "client detached timeout"))
+					c.cancelFn()
+				}
+				// This stream's agent is confirmed to own an existing session for requestID;
+				// only now is it safe for this stream to finalize that session on cleanup.
 				c.authorized = true
 				s.mu.Unlock()
 			} else if c.requestID != "" && msg.GetRequestUuid() != c.requestID {
