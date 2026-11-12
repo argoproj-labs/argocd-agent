@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	agentsession "github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/logstreamapi/mock"
 	"github.com/sirupsen/logrus"
@@ -31,6 +32,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+const testAgentName = "test-agent"
 
 func TestNewServer(t *testing.T) {
 	server := NewServer()
@@ -47,7 +50,7 @@ func TestRegisterHTTP(t *testing.T) {
 		w := mock.NewMockHTTPResponseWriter()
 		r := httptest.NewRequest("GET", "/logs", nil)
 
-		err := server.RegisterHTTP(requestUUID, w, r)
+		err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 		assert.NoError(t, err)
 
 		// Check headers were set
@@ -62,6 +65,7 @@ func TestRegisterHTTP(t *testing.T) {
 		server.mu.RUnlock()
 		assert.True(t, exists)
 		assert.NotNil(t, sess)
+		assert.Equal(t, testAgentName, sess.agentName)
 		assert.NotNil(t, sess.hw)
 		assert.NotNil(t, sess.completeCh)
 	})
@@ -71,7 +75,7 @@ func TestRegisterHTTP(t *testing.T) {
 		w := &mock.MockWriterWithoutFlusher{}
 		r := httptest.NewRequest("GET", "/logs", nil)
 
-		err := server.RegisterHTTP(requestUUID, w, r)
+		err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "writer does not support flushing")
 	})
@@ -80,13 +84,13 @@ func TestRegisterHTTP(t *testing.T) {
 		// First registration
 		w1 := mock.NewMockHTTPResponseWriter()
 		r1 := httptest.NewRequest("GET", "/logs", nil)
-		err := server.RegisterHTTP(requestUUID, w1, r1)
+		err := server.RegisterHTTP(requestUUID, testAgentName, w1, r1)
 		assert.NoError(t, err)
 
 		// Second registration (upsert)
 		w2 := mock.NewMockHTTPResponseWriter()
 		r2 := httptest.NewRequest("GET", "/logs", nil)
-		err = server.RegisterHTTP(requestUUID, w2, r2)
+		err = server.RegisterHTTP(requestUUID, testAgentName, w2, r2)
 		assert.NoError(t, err)
 
 		// Check session was updated
@@ -106,11 +110,11 @@ func TestStreamLogs(t *testing.T) {
 		// Register HTTP session first
 		w := mock.NewMockHTTPResponseWriter()
 		r := httptest.NewRequest("GET", "/logs", nil)
-		err := server.RegisterHTTP(requestUUID, w, r)
+		err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 		require.NoError(t, err)
 
 		// Create mock stream
-		ctx := context.Background()
+		ctx := agentsession.ClientInfoToContext(context.Background(), testAgentName, "managed")
 		mockStream := mock.NewMockLogStreamServer(ctx)
 
 		// Add test data
@@ -141,11 +145,11 @@ func TestStreamLogs(t *testing.T) {
 		// Register HTTP session first
 		w := mock.NewMockHTTPResponseWriter()
 		r := httptest.NewRequest("GET", "/logs", nil)
-		err := server.RegisterHTTP(requestUUID, w, r)
+		err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 		require.NoError(t, err)
 
 		// Create mock stream
-		ctx := context.Background()
+		ctx := agentsession.ClientInfoToContext(context.Background(), testAgentName, "managed")
 		mockStream := mock.NewMockLogStreamServer(ctx)
 
 		// Add error data
@@ -162,7 +166,7 @@ func TestStreamLogs(t *testing.T) {
 
 	t.Run("stream with unknown request ID", func(t *testing.T) {
 		// Don't register HTTP session
-		ctx := context.Background()
+		ctx := agentsession.ClientInfoToContext(context.Background(), testAgentName, "managed")
 		mockStream := mock.NewMockLogStreamServer(ctx)
 
 		// Add data with unknown request ID
@@ -181,11 +185,11 @@ func TestStreamLogs(t *testing.T) {
 		// Register HTTP session first
 		w := mock.NewMockHTTPResponseWriter()
 		r := httptest.NewRequest("GET", "/logs", nil)
-		err := server.RegisterHTTP(requestUUID, w, r)
+		err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 		require.NoError(t, err)
 
 		// Create mock stream
-		ctx := context.Background()
+		ctx := agentsession.ClientInfoToContext(context.Background(), testAgentName, "managed")
 		mockStream := mock.NewMockLogStreamServer(ctx)
 
 		// Add a nil message to the recv data
@@ -201,11 +205,11 @@ func TestStreamLogs(t *testing.T) {
 		// Register HTTP session first
 		w := mock.NewMockHTTPResponseWriter()
 		r := httptest.NewRequest("GET", "/logs", nil)
-		err := server.RegisterHTTP(requestUUID, w, r)
+		err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 		require.NoError(t, err)
 
 		// Create mock stream with already canceled context
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(agentsession.ClientInfoToContext(context.Background(), testAgentName, "managed"))
 		cancel() // Cancel immediately
 		mockStream := mock.NewMockLogStreamServer(ctx)
 
@@ -223,7 +227,7 @@ func TestProcessLogMessage(t *testing.T) {
 	// Register HTTP session first
 	w := mock.NewMockHTTPResponseWriter()
 	r := httptest.NewRequest("GET", "/logs", nil)
-	err := server.RegisterHTTP(requestUUID, w, r)
+	err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 	require.NoError(t, err)
 
 	// Create log client
@@ -335,7 +339,7 @@ func TestProcessLogStreamLoop(t *testing.T) {
 		// Register HTTP session first
 		w := mock.NewMockHTTPResponseWriter()
 		r := httptest.NewRequest("GET", "/logs", nil)
-		err := server.RegisterHTTP(requestUUID, w, r)
+		err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 		require.NoError(t, err)
 
 		// Create log client
@@ -357,7 +361,7 @@ func TestProcessLogStreamLoop(t *testing.T) {
 		close(dataCh)
 
 		// Run processLogStreamLoop
-		server.processLogStreamLoop(client, dataCh, errCh)
+		server.processLogStreamLoop(client, testAgentName, dataCh, errCh)
 
 		server.mu.RLock()
 		session := server.sessions[requestUUID]
@@ -387,7 +391,7 @@ func TestProcessLogStreamLoop(t *testing.T) {
 		errCh <- status.Error(codes.Internal, "agent error")
 		close(errCh)
 
-		server.processLogStreamLoop(client, dataCh, errCh)
+		server.processLogStreamLoop(client, testAgentName, dataCh, errCh)
 
 		client.mu.Lock()
 		assert.Error(t, client.terminateErr)
@@ -407,7 +411,7 @@ func TestProcessLogStreamLoop(t *testing.T) {
 		cancel() // Cancel immediately
 
 		// Run StreamLogs
-		server.processLogStreamLoop(client, dataCh, errCh)
+		server.processLogStreamLoop(client, testAgentName, dataCh, errCh)
 		client.mu.Lock()
 		assert.Error(t, client.terminateErr)
 		assert.Contains(t, client.terminateErr.Error(), "client detached timeout")
@@ -423,7 +427,7 @@ func TestWaitForCompletion(t *testing.T) {
 		// Register session
 		w := mock.NewMockHTTPResponseWriter()
 		r := httptest.NewRequest("GET", "/logs", nil)
-		err := server.RegisterHTTP(requestUUID, w, r)
+		err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 		require.NoError(t, err)
 
 		// Signal completion
@@ -449,7 +453,7 @@ func TestWaitForCompletion(t *testing.T) {
 		// Register session
 		w := mock.NewMockHTTPResponseWriter()
 		r := httptest.NewRequest("GET", "/logs", nil)
-		err := server.RegisterHTTP(requestUUID, w, r)
+		err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 		require.NoError(t, err)
 
 		// Wait for completion (should timeout)
@@ -470,7 +474,7 @@ func TestFinalizeSession(t *testing.T) {
 	// Register session
 	w := mock.NewMockHTTPResponseWriter()
 	r := httptest.NewRequest("GET", "/logs", nil)
-	err := server.RegisterHTTP(requestUUID, w, r)
+	err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 	require.NoError(t, err)
 
 	// Verify session exists
@@ -536,7 +540,7 @@ func TestConcurrentAccess(t *testing.T) {
 	// Register session
 	w := mock.NewMockHTTPResponseWriter()
 	r := httptest.NewRequest("GET", "/logs", nil)
-	err := server.RegisterHTTP(requestUUID, w, r)
+	err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
 	require.NoError(t, err)
 
 	// Test concurrent access to sessions map
@@ -571,7 +575,7 @@ func TestWaitForCompletion_RaceWithFinalizeSession(t *testing.T) {
 
 		w := mock.NewMockHTTPResponseWriter()
 		r := httptest.NewRequest("GET", "/logs", nil)
-		require.NoError(t, server.RegisterHTTP(reqID, w, r))
+		require.NoError(t, server.RegisterHTTP(reqID, testAgentName, w, r))
 
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -588,6 +592,69 @@ func TestWaitForCompletion_RaceWithFinalizeSession(t *testing.T) {
 
 		wg.Wait()
 	}
+}
+
+func TestStreamLogsAgentMismatch(t *testing.T) {
+	server := NewServer()
+	requestUUID := "test-request-mismatch"
+
+	w := mock.NewMockHTTPResponseWriter()
+	r := httptest.NewRequest("GET", "/logs", nil)
+	err := server.RegisterHTTP(requestUUID, testAgentName, w, r)
+	require.NoError(t, err)
+
+	t.Run("rejects mismatched agent", func(t *testing.T) {
+		ctx := agentsession.ClientInfoToContext(context.Background(), "other-agent", "managed")
+		mockStream := mock.NewMockLogStreamServer(ctx)
+		mockStream.AddRecvData(&logstreamapi.LogStreamData{
+			RequestUuid: requestUUID,
+			Data:        []byte("hijacked log line\n"),
+		})
+
+		err := server.StreamLogs(mockStream)
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+		assert.Contains(t, err.Error(), "agent mismap between session and caller")
+		assert.NotContains(t, w.GetBody(), "hijacked log line")
+	})
+
+	t.Run("rejects missing agent identity", func(t *testing.T) {
+		mockStream := mock.NewMockLogStreamServer(context.Background())
+		mockStream.AddRecvData(&logstreamapi.LogStreamData{
+			RequestUuid: requestUUID,
+			Data:        []byte("unauthenticated log line\n"),
+		})
+
+		err := server.StreamLogs(mockStream)
+		require.Error(t, err)
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
+}
+
+func TestProcessLogStreamLoopAgentMismatch(t *testing.T) {
+	server := NewServer()
+	requestUUID := "test-request-loop-mismatch"
+
+	w := mock.NewMockHTTPResponseWriter()
+	r := httptest.NewRequest("GET", "/logs", nil)
+	require.NoError(t, server.RegisterHTTP(requestUUID, testAgentName, w, r))
+
+	client := server.newLogClient(context.Background())
+	dataCh := make(chan *logstreamapi.LogStreamData, 1)
+	errCh := make(chan error, 1)
+	dataCh <- &logstreamapi.LogStreamData{
+		RequestUuid: requestUUID,
+		Data:        []byte("hijacked\n"),
+	}
+	close(dataCh)
+
+	server.processLogStreamLoop(client, "other-agent", dataCh, errCh)
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	require.Error(t, client.terminateErr)
+	assert.Equal(t, codes.PermissionDenied, status.Code(client.terminateErr))
+	assert.NotContains(t, w.GetBody(), "hijacked")
 }
 
 func init() {
