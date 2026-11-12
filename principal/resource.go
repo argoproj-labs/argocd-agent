@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/sirupsen/logrus"
@@ -40,6 +41,32 @@ const resourceRequestRegexp = `^/(?:api|apis|(?:api|apis/(?P<group>[^\/]+))/(?P<
 //
 // TODO(jannfis): Make the timeout configurable
 const requestTimeout = 30 * time.Second
+
+// impersonatedUser returns the service account the Argo CD API server asks the
+// request to be performed as, or the empty string if it asks for none. Argo CD
+// only ever asks for a service account, so anything else, such as groups, a UID,
+// extra attributes or a malformed user, is refused rather than dropped.
+func impersonatedUser(h http.Header) (string, error) {
+	for k := range h {
+		lk := strings.ToLower(k)
+		if lk == "impersonate-group" || lk == "impersonate-uid" || strings.HasPrefix(lk, "impersonate-extra-") {
+			return "", fmt.Errorf("unsupported impersonation header %q", k)
+		}
+	}
+
+	users := h.Values("Impersonate-User")
+	switch len(users) {
+	case 0:
+		return "", nil
+	case 1:
+		if _, _, err := kube.ParseServiceAccountUser(users[0]); err != nil {
+			return "", err
+		}
+		return users[0], nil
+	default:
+		return "", fmt.Errorf("multiple Impersonate-User headers")
+	}
+}
 
 // processResourceRequest is being executed by the resource proxy once it
 // received a request for a specific resource. It will encapsulate this request
@@ -68,13 +95,28 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 
 	logCtx = logCtx.WithField("agent", agentName)
 
+	impersonate, err := impersonatedUser(r.Header)
+	if err != nil {
+		logCtx.WithError(err).Warn("Refusing request with invalid impersonation")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("invalid impersonation"))
+		return
+	}
+
 	if s.metrics != nil {
 		s.metrics.ResourceProxyRequests.WithLabelValues(agentName).Inc()
 	}
 
+	subresource := params.Get("subresource")
+	if impersonate != "" && (subresource == "log" || subresource == "exec") {
+		logCtx.Warnf("Refusing %s request with impersonation, which it does not support", subresource)
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("impersonation is not supported for " + subresource))
+		return
+	}
+
 	// Handle exec subresource separately.
 	// because it requires WebSocket for bidirectional streaming
-	subresource := params.Get("subresource")
 	if subresource == "exec" {
 		s.processTerminalRequest(w, r, params, agentName)
 		return
@@ -152,7 +194,7 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 	} else {
-		sentEv, err = s.events.NewResourceRequestEvent(gvr, requestedNamespace, requestedName, requestedSubresource, r.Method, reqBody, reqParams)
+		sentEv, err = s.events.NewResourceRequestEvent(gvr, requestedNamespace, requestedName, requestedSubresource, r.Method, reqBody, reqParams, impersonate)
 		if err != nil {
 			logCtx.Errorf("Could not create event: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)

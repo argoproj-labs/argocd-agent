@@ -11,9 +11,11 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
+	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream"
 	"github.com/argoproj-labs/argocd-agent/principal/resourceproxy"
 	"github.com/argoproj-labs/argocd-agent/test/fake/kube"
@@ -253,6 +255,131 @@ func Test_resourceRequester(t *testing.T) {
 		defer w.Result().Body.Close()
 	})
 
+}
+
+func Test_resourceRequester_impersonation(t *testing.T) {
+	newRequest := func(headers map[string]string) *http.Request {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.TLS = &tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{{Subject: pkix.Name{CommonName: "agent"}}},
+		}
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		return r
+	}
+
+	// proxy runs processResourceRequest to completion and returns the resource
+	// request that reached the agent's queue, if any.
+	proxy := func(t *testing.T, r *http.Request, subresource string) (*event.ResourceRequest, *httptest.ResponseRecorder) {
+		t.Helper()
+		s := newResourceTestServer(t)
+		s.eventStreamSrv.MarkConnected("agent")
+		defer s.eventStreamSrv.MarkDisconnected("agent")
+		w := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			params := resourceproxy.NewParams()
+			if subresource != "" {
+				params.Set("subresource", subresource)
+			}
+			s.processResourceRequest(w, r, params)
+		}()
+
+		sendq := s.queues.SendQ("agent")
+		require.NotNil(t, sendq)
+		var rreq *event.ResourceRequest
+		require.Eventually(t, func() bool {
+			select {
+			case <-done:
+				return true
+			default:
+				return sendq.Len() > 0
+			}
+		}, 5*time.Second, 5*time.Millisecond)
+		select {
+		case <-done:
+			// Refused before anything was queued.
+			assert.Equal(t, 0, sendq.Len())
+		default:
+			ev, shutdown := sendq.Get()
+			require.False(t, shutdown)
+			var err error
+			rreq, err = event.New(ev, targets.Resource).ResourceRequest()
+			require.NoError(t, err)
+			_, sendCh := s.resourceProxy.Tracked(event.EventID(ev))
+			require.NotNil(t, sendCh)
+			sendCh <- s.events.NewResourceResponseEvent(event.EventID(ev), 200, "ok")
+			<-done
+		}
+		return rreq, w
+	}
+
+	t.Run("service account from the Impersonate-User header reaches the agent", func(t *testing.T) {
+		const user = "system:serviceaccount:tenant-a:deployer"
+		rreq, w := proxy(t, newRequest(map[string]string{"Impersonate-User": user}), "")
+		require.NotNil(t, rreq)
+		assert.Equal(t, user, rreq.Impersonate)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	t.Run("no header means no impersonation", func(t *testing.T) {
+		rreq, w := proxy(t, newRequest(nil), "")
+		require.NotNil(t, rreq)
+		assert.Empty(t, rreq.Impersonate)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	refused := []struct {
+		name    string
+		headers map[string]string
+	}{
+		{"user that is not a service account", map[string]string{"Impersonate-User": "system:masters"}},
+		{"plain user name", map[string]string{"Impersonate-User": "admin"}},
+		{"malformed service account", map[string]string{"Impersonate-User": "system:serviceaccount:tenant-a"}},
+		{"groups next to a valid user", map[string]string{
+			"Impersonate-User":  "system:serviceaccount:tenant-a:deployer",
+			"Impersonate-Group": "system:masters",
+		}},
+		{"groups without a user", map[string]string{"Impersonate-Group": "system:masters"}},
+		{"uid next to a valid user", map[string]string{
+			"Impersonate-User": "system:serviceaccount:tenant-a:deployer",
+			"Impersonate-Uid":  "1234",
+		}},
+		{"extra next to a valid user", map[string]string{
+			"Impersonate-User":         "system:serviceaccount:tenant-a:deployer",
+			"Impersonate-Extra-Scopes": "all",
+		}},
+		{"empty user", map[string]string{"Impersonate-User": ""}},
+	}
+	for _, tt := range refused {
+		t.Run("refuses "+tt.name, func(t *testing.T) {
+			rreq, w := proxy(t, newRequest(tt.headers), "")
+			assert.Nil(t, rreq, "request must not reach the agent")
+			assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+		})
+	}
+
+	// Logs and exec do not carry the identity to the agent yet, so they must
+	// not be served at all rather than with the agent's own identity.
+	for _, sub := range []string{"log", "exec"} {
+		t.Run("refuses "+sub+" while impersonating", func(t *testing.T) {
+			r := newRequest(map[string]string{"Impersonate-User": "system:serviceaccount:tenant-a:deployer"})
+			rreq, w := proxy(t, r, sub)
+			assert.Nil(t, rreq, "request must not reach the agent")
+			assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+		})
+	}
+
+	t.Run("refuses several Impersonate-User values", func(t *testing.T) {
+		r := newRequest(nil)
+		r.Header.Add("Impersonate-User", "system:serviceaccount:tenant-a:deployer")
+		r.Header.Add("Impersonate-User", "system:serviceaccount:tenant-b:admin")
+		rreq, w := proxy(t, r, "")
+		assert.Nil(t, rreq, "request must not reach the agent")
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+	})
 }
 
 func Test_resourceRegexp(t *testing.T) {

@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
@@ -24,7 +28,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	fakediscovery "k8s.io/client-go/discovery/fake"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -811,7 +818,7 @@ func Test_getAvailableResources(t *testing.T) {
 			Resource: "pods", // Resource should be empty for API discovery
 		}
 
-		_, err := agent.getAvailableResources(context.Background(), gvr, "", nil)
+		_, err := agent.getAvailableResources(context.Background(), agent.kubeClient, gvr, "", nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not authorized to list resources")
 	})
@@ -845,7 +852,7 @@ func Test_getAvailableResources(t *testing.T) {
 			Resource: "apiresources",
 		}
 
-		list, err := agent.getAvailableResources(context.Background(), gvr, "default", nil)
+		list, err := agent.getAvailableResources(context.Background(), agent.kubeClient, gvr, "default", nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, list)
 	})
@@ -877,7 +884,7 @@ func Test_getAvailableResources(t *testing.T) {
 			Resource: "apigroups",
 		}
 
-		list, err := agent.getAvailableResources(context.Background(), gvr, "", nil)
+		list, err := agent.getAvailableResources(context.Background(), agent.kubeClient, gvr, "", nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, list)
 	})
@@ -914,7 +921,7 @@ func Test_getAvailableResources(t *testing.T) {
 			"labelSelector": "app=test",
 		}
 
-		_, err := agent.getAvailableResources(context.Background(), gvr, "default", params)
+		_, err := agent.getAvailableResources(context.Background(), agent.kubeClient, gvr, "default", params)
 		assert.NoError(t, err)
 		assert.Equal(t, "involvedObject.name=my-pod,involvedObject.namespace=default", capturedListRestrictions.Fields.String())
 		assert.Equal(t, "app=test", capturedListRestrictions.Labels.String())
@@ -951,7 +958,7 @@ func Test_getAvailableResources(t *testing.T) {
 			"continue": "abc123",
 		}
 
-		_, err := agent.getAvailableResources(context.Background(), gvr, "default", params)
+		_, err := agent.getAvailableResources(context.Background(), agent.kubeClient, gvr, "default", params)
 		assert.NoError(t, err)
 		assert.NotNil(t, capturedAction)
 	})
@@ -976,7 +983,7 @@ func Test_getAvailableResources(t *testing.T) {
 			Resource: "events",
 		}
 
-		_, err := agent.getAvailableResources(context.Background(), gvr, "default", nil)
+		_, err := agent.getAvailableResources(context.Background(), agent.kubeClient, gvr, "default", nil)
 		assert.NoError(t, err)
 	})
 }
@@ -1175,7 +1182,7 @@ func Test_processIncomingPostResourceRequest(t *testing.T) {
 				},
 			}
 
-			res, err := agent.processIncomingPostResourceRequest(context.Background(), req, gvr)
+			res, err := agent.processIncomingPostResourceRequest(context.Background(), agent.kubeClient, req, gvr)
 			if tc.expectErr {
 				assert.Error(t, err)
 				assert.Nil(t, res)
@@ -1309,7 +1316,7 @@ func Test_processIncomingPatchResourceRequest(t *testing.T) {
 				},
 			}
 
-			res, err := agent.processIncomingPatchResourceRequest(context.Background(), req, gvr)
+			res, err := agent.processIncomingPatchResourceRequest(context.Background(), agent.kubeClient, req, gvr)
 			if tc.expectErr {
 				assert.Error(t, err)
 				assert.Nil(t, res)
@@ -1332,7 +1339,7 @@ func Test_getAvailableAPIs(t *testing.T) {
 			kubeClient: kube.NewDynamicFakeClient(),
 		}
 
-		result, err := agent.getAvailableAPIs(context.Background(), "apps", "v1")
+		result, err := agent.getAvailableAPIs(context.Background(), agent.kubeClient, "apps", "v1")
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
@@ -1366,7 +1373,7 @@ func Test_getAvailableAPIs(t *testing.T) {
 			kubeClient: kube.NewDynamicFakeClient(),
 		}
 
-		result, err := agent.getAvailableAPIs(context.Background(), "", "v1")
+		result, err := agent.getAvailableAPIs(context.Background(), agent.kubeClient, "", "v1")
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
@@ -1399,7 +1406,7 @@ func Test_getAvailableAPIs(t *testing.T) {
 			kubeClient: kube.NewDynamicFakeClient(),
 		}
 
-		result, err := agent.getAvailableAPIs(context.Background(), "", "")
+		result, err := agent.getAvailableAPIs(context.Background(), agent.kubeClient, "", "")
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
@@ -1437,7 +1444,7 @@ func Test_getAvailableAPIs(t *testing.T) {
 			kubeClient: kube.NewDynamicFakeClient(),
 		}
 
-		result, err := agent.getAvailableAPIs(context.Background(), "nonexistent", "v1")
+		result, err := agent.getAvailableAPIs(context.Background(), agent.kubeClient, "nonexistent", "v1")
 		assert.Error(t, err)
 		assert.Nil(t, result)
 	})
@@ -1543,7 +1550,7 @@ func Test_processIncomingDeleteResourceRequest(t *testing.T) {
 				},
 			}
 
-			err := agent.processIncomingDeleteResourceRequest(context.Background(), req, gvr)
+			err := agent.processIncomingDeleteResourceRequest(context.Background(), agent.kubeClient, req, gvr)
 
 			if tc.expectErr {
 				assert.Error(t, err)
@@ -1681,4 +1688,238 @@ func TestBuildSubresourcePathValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// apiRequest is a request that reached the fake Kubernetes API server.
+type apiRequest struct {
+	method      string
+	path        string
+	impersonate string
+}
+
+// fakeKubeAPI is a Kubernetes API server that records who each request was
+// made as. It serves a pod that carries no tracking label but is owned by a
+// ReplicaSet that does, so deciding whether the pod is managed takes the agent
+// a discovery request and an owner lookup in addition to the pod request.
+type fakeKubeAPI struct {
+	mu       sync.Mutex
+	requests []apiRequest
+	denyGet  string
+	server   *httptest.Server
+}
+
+func newFakeKubeAPI(t *testing.T) *fakeKubeAPI {
+	t.Helper()
+	api := &fakeKubeAPI{}
+	api.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.mu.Lock()
+		api.requests = append(api.requests, apiRequest{r.Method, r.URL.Path, r.Header.Get("Impersonate-User")})
+		denied := api.denyGet != "" && r.Method == http.MethodGet && r.Header.Get("Impersonate-User") == api.denyGet
+		api.mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case denied:
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"apiVersion":"v1","kind":"Status","status":"Failure","reason":"Forbidden","code":403,"message":"forbidden"}`))
+		case r.URL.Path == "/api":
+			_, _ = w.Write([]byte(`{"kind":"APIVersions","versions":["v1"]}`))
+		case r.URL.Path == "/apis":
+			_, _ = w.Write([]byte(`{"kind":"APIGroupList","apiVersion":"v1","groups":[]}`))
+		case r.URL.Path == "/api/v1":
+			_, _ = w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"v1","resources":[]}`))
+		case r.URL.Path == "/apis/batch/v1":
+			_, _ = w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"batch/v1","resources":[]}`))
+		case r.URL.Path == "/apis/apps/v1":
+			_, _ = w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"apps/v1","resources":[{"name":"replicasets","kind":"ReplicaSet","namespaced":true,"verbs":["get"]}]}`))
+		case strings.Contains(r.URL.Path, "/replicasets/"):
+			_, _ = w.Write([]byte(`{"apiVersion":"apps/v1","kind":"ReplicaSet","metadata":{"name":"rs-1","namespace":"default","labels":{"app.kubernetes.io/instance":"test-app"}}}`))
+		case strings.HasSuffix(r.URL.Path, "/events"):
+			_, _ = w.Write([]byte(`{"apiVersion":"v1","kind":"EventList","metadata":{},"items":[]}`))
+		case r.Method == http.MethodDelete:
+			_, _ = w.Write([]byte(`{"apiVersion":"v1","kind":"Status","status":"Success"}`))
+		default:
+			_, _ = w.Write([]byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"test-pod","namespace":"default","ownerReferences":[{"apiVersion":"apps/v1","kind":"ReplicaSet","name":"rs-1","uid":"u1"}]}}`))
+		}
+	}))
+	t.Cleanup(api.server.Close)
+	return api
+}
+
+// denyReadsAs makes the API refuse every GET made on behalf of user.
+func (api *fakeKubeAPI) denyReadsAs(user string) {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	api.denyGet = user
+}
+
+func (api *fakeKubeAPI) seen() []apiRequest {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	return append([]apiRequest(nil), api.requests...)
+}
+
+func (api *fakeKubeAPI) kubeClient(t *testing.T) *agentkube.KubernetesClient {
+	t.Helper()
+	cfg := &rest.Config{Host: api.server.URL}
+	clientset, err := kubernetes.NewForConfig(cfg)
+	require.NoError(t, err)
+	dyn, err := dynamic.NewForConfig(cfg)
+	require.NoError(t, err)
+	kc := agentkube.NewKubernetesClient(context.Background(), clientset, nil, "argocd")
+	kc.DynamicClient = dyn
+	kc.RestConfig = cfg
+	return kc
+}
+
+func Test_processIncomingResourceRequest_impersonation(t *testing.T) {
+	const user = "system:serviceaccount:default:deployer"
+	pods := v1.GroupVersionResource{Version: "v1", Resource: "pods"}
+	events := v1.GroupVersionResource{Version: "v1", Resource: "events"}
+
+	operations := []struct {
+		name string
+		req  event.ResourceRequest
+		// managedCheck is true if the agent decides whether the target is
+		// managed by Argo CD before acting on it.
+		managedCheck bool
+	}{
+		{"get resource", event.ResourceRequest{Method: http.MethodGet, Name: "test-pod", Namespace: "default", GroupVersionResource: pods}, true},
+		{"get subresource", event.ResourceRequest{Method: http.MethodGet, Name: "test-pod", Namespace: "default", Subresource: "status", GroupVersionResource: pods}, true},
+		{"list events", event.ResourceRequest{Method: http.MethodGet, Namespace: "default", GroupVersionResource: events}, false},
+		{"list API groups", event.ResourceRequest{Method: http.MethodGet}, false},
+		{"list APIs of a version", event.ResourceRequest{Method: http.MethodGet, GroupVersionResource: v1.GroupVersionResource{Version: "v1"}}, false},
+		{"list APIs of a group version", event.ResourceRequest{Method: http.MethodGet, GroupVersionResource: v1.GroupVersionResource{Group: "batch", Version: "v1"}}, false},
+		{"create resource", event.ResourceRequest{Method: http.MethodPost, Namespace: "default", Body: []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"new-pod"}}`), GroupVersionResource: pods}, false},
+		{"post subresource", event.ResourceRequest{Method: http.MethodPost, Name: "test-pod", Namespace: "default", Subresource: "eviction", Body: []byte(`{}`), GroupVersionResource: pods}, true},
+		{"patch resource", event.ResourceRequest{Method: http.MethodPatch, Name: "test-pod", Namespace: "default", Body: []byte(`{"metadata":{"labels":{"a":"b"}}}`), GroupVersionResource: pods}, true},
+		{"patch subresource", event.ResourceRequest{Method: http.MethodPatch, Name: "test-pod", Namespace: "default", Subresource: "status", Body: []byte(`{}`), GroupVersionResource: pods}, true},
+		{"delete resource", event.ResourceRequest{Method: http.MethodDelete, Name: "test-pod", Namespace: "default", Body: []byte(`{}`), GroupVersionResource: pods}, true},
+	}
+
+	// process runs the resource request through the agent and returns the HTTP
+	// status the agent reports back to the principal.
+	process := func(t *testing.T, a *Agent, rreq event.ResourceRequest) int {
+		t.Helper()
+		rreq.UUID = "test-uuid"
+		ev := cloudevents.NewEvent()
+		ev.SetType(event.GetRequest.String())
+		require.NoError(t, ev.SetData(cloudevents.ApplicationJSON, &rreq))
+		require.NoError(t, a.processIncomingResourceRequest(event.New(&ev, targets.Resource)))
+
+		sendq := a.queues.SendQ(defaultQueueName)
+		require.Eventually(t, func() bool { return sendq.Len() > 0 }, 5*time.Second, 5*time.Millisecond, "agent emitted no response")
+		responseEv, shutdown := sendq.Get()
+		require.False(t, shutdown)
+		resp := &event.ResourceResponse{}
+		require.NoError(t, responseEv.DataAs(resp))
+		require.Equal(t, "test-uuid", resp.UUID)
+		return resp.Status
+	}
+
+	newTestAgent := func(t *testing.T, kc *agentkube.KubernetesClient, impersonation bool) *Agent {
+		t.Helper()
+		a := &Agent{
+			context:                          context.Background(),
+			kubeClient:                       kc,
+			queues:                           queue.NewSendRecvQueues(),
+			emitter:                          event.NewEventSource("test-agent"),
+			enableResourceProxy:              true,
+			enableResourceProxyImpersonation: impersonation,
+			trackingReader:                   newTestTrackingReader(v1alpha1.TrackingMethodLabel),
+		}
+		require.NoError(t, a.queues.Create(defaultQueueName))
+		return a
+	}
+
+	for _, op := range operations {
+		t.Run(op.name+": the user's requests are made as the service account, the agent's own lookups are not", func(t *testing.T) {
+			api := newFakeKubeAPI(t)
+			a := newTestAgent(t, api.kubeClient(t), true)
+			rreq := op.req
+			rreq.Impersonate = user
+
+			assert.Equal(t, http.StatusOK, process(t, a, rreq))
+
+			var userRequests, agentRequests int
+			for _, r := range api.seen() {
+				if r.path == "/apis/apps/v1" || strings.Contains(r.path, "/replicasets/") {
+					agentRequests++
+					assert.Empty(t, r.impersonate, "%s %s is the agent's own ownership lookup", r.method, r.path)
+					continue
+				}
+				userRequests++
+				assert.Equal(t, user, r.impersonate, "%s %s was made on behalf of the user", r.method, r.path)
+			}
+			assert.Positive(t, userRequests, "no request on behalf of the user reached the API")
+			if op.managedCheck {
+				assert.Positive(t, agentRequests, "the managed check must run with the agent's identity")
+			}
+		})
+
+		t.Run(op.name+": without a requested identity the agent uses its own", func(t *testing.T) {
+			for _, impersonation := range []bool{true, false} {
+				api := newFakeKubeAPI(t)
+				a := newTestAgent(t, api.kubeClient(t), impersonation)
+
+				assert.Equal(t, http.StatusOK, process(t, a, op.req))
+
+				require.NotEmpty(t, api.seen())
+				for _, r := range api.seen() {
+					assert.Empty(t, r.impersonate, "%s %s with impersonation=%v", r.method, r.path, impersonation)
+				}
+			}
+		})
+
+		t.Run(op.name+": refused when impersonation is not enabled on the agent", func(t *testing.T) {
+			api := newFakeKubeAPI(t)
+			a := newTestAgent(t, api.kubeClient(t), false)
+			rreq := op.req
+			rreq.Impersonate = user
+
+			assert.Equal(t, http.StatusForbidden, process(t, a, rreq))
+			assert.Empty(t, api.seen(), "a refused request must not reach the API")
+		})
+
+		t.Run(op.name+": refused when the identity is not a service account", func(t *testing.T) {
+			api := newFakeKubeAPI(t)
+			a := newTestAgent(t, api.kubeClient(t), true)
+			rreq := op.req
+			rreq.Impersonate = "system:masters"
+
+			assert.Equal(t, http.StatusForbidden, process(t, a, rreq))
+			assert.Empty(t, api.seen(), "a refused request must not reach the API")
+		})
+	}
+
+	for _, op := range operations {
+		if !op.managedCheck {
+			continue
+		}
+		t.Run(op.name+": a read denied to the service account stops the request", func(t *testing.T) {
+			api := newFakeKubeAPI(t)
+			api.denyReadsAs(user)
+			a := newTestAgent(t, api.kubeClient(t), true)
+			rreq := op.req
+			rreq.Impersonate = user
+
+			assert.Equal(t, http.StatusForbidden, process(t, a, rreq))
+			for _, r := range api.seen() {
+				assert.Equal(t, http.MethodGet, r.method, "%s %s must not be sent after the read was denied", r.method, r.path)
+			}
+		})
+	}
+
+	t.Run("fails closed when the agent has no REST config to impersonate with", func(t *testing.T) {
+		a := newTestAgent(t, kube.NewDynamicFakeClient(), true)
+		rreq := operations[0].req
+		rreq.Impersonate = user
+
+		kc, err := a.kubeClientFor(&rreq)
+		assert.Nil(t, kc)
+		require.Error(t, err)
+		assert.True(t, errors.IsInternalError(err), "got %v", err)
+		assert.ErrorContains(t, err, "REST configuration")
+		assert.Equal(t, http.StatusInternalServerError, process(t, a, rreq))
+	})
 }
