@@ -617,3 +617,30 @@ func TestPrincipalUID(t *testing.T) {
 		require.Equal(t, "", PrincipalUID(&ev))
 	})
 }
+
+func TestNewResourceRequestEvent_Impersonate(t *testing.T) {
+	gvr := metav1.GroupVersionResource{Version: "v1", Resource: "pods"}
+	source := NewEventSource("principal")
+
+	t.Run("the impersonated user survives the round trip through the event", func(t *testing.T) {
+		const user = "system:serviceaccount:tenant-a:deployer"
+		cev, err := source.NewResourceRequestEvent(gvr, "tenant-a", "pod-1", "", "GET", nil, nil, user)
+		require.NoError(t, err)
+
+		rreq, err := New(cev, targets.Resource).ResourceRequest()
+		require.NoError(t, err)
+		require.Equal(t, user, rreq.Impersonate)
+		require.Equal(t, "pod-1", rreq.Name)
+		require.Equal(t, "tenant-a", rreq.Namespace)
+	})
+
+	t.Run("no impersonation leaves the field out of the payload", func(t *testing.T) {
+		cev, err := source.NewResourceRequestEvent(gvr, "tenant-a", "pod-1", "", "GET", nil, nil, "")
+		require.NoError(t, err)
+
+		rreq, err := New(cev, targets.Resource).ResourceRequest()
+		require.NoError(t, err)
+		require.Empty(t, rreq.Impersonate)
+		require.NotContains(t, string(cev.Data()), "impersonate")
+	})
+}

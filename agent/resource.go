@@ -73,45 +73,51 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 		logCtx.Infof("Processing resource request for resource of type %s named %s/%s", gvr.String(), namespace, name)
 	}
 
-	switch rreq.Method {
-	case http.MethodGet:
-		// If we have a request for a named resource, we fetch that particular
-		// resource. If the name is empty, we fetch either a list of resources
-		// or a list of APIs instead.
-		if name != "" {
-			if gvr.Resource != "" {
-				if subresource != "" {
-					logCtx.Debugf("Fetching subresource %s of managed resource %s/%s/%s", subresource, gvr.Group, gvr.Version, gvr.Resource)
-					unres, err = a.getManagedResourceSubresource(ctx, gvr, name, namespace, subresource)
+	// The request is performed with the identity the principal asked for, or
+	// with the agent's own if it asked for none. If we cannot honor the
+	// requested identity, the request is refused without touching the API.
+	kc, err := a.kubeClientFor(rreq)
+	if err == nil {
+		switch rreq.Method {
+		case http.MethodGet:
+			// If we have a request for a named resource, we fetch that particular
+			// resource. If the name is empty, we fetch either a list of resources
+			// or a list of APIs instead.
+			if name != "" {
+				if gvr.Resource != "" {
+					if subresource != "" {
+						logCtx.Debugf("Fetching subresource %s of managed resource %s/%s/%s", subresource, gvr.Group, gvr.Version, gvr.Resource)
+						unres, err = a.getManagedResourceSubresource(ctx, kc, gvr, name, namespace, subresource)
+					} else {
+						logCtx.Debugf("Fetching managed resource %s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
+						unres, err = a.getManagedResource(ctx, kc, gvr, name, namespace)
+					}
+				}
+			} else {
+				if gvr.Resource != "" {
+					unlist, err = a.getAvailableResources(ctx, kc, gvr, namespace, rreq.Params)
 				} else {
-					logCtx.Debugf("Fetching managed resource %s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
-					unres, err = a.getManagedResource(ctx, gvr, name, namespace)
+					logCtx.Debugf("Fetching APIs for group %s and version %s", gvr.Group, gvr.Version)
+					unres, err = a.getAvailableAPIs(ctx, kc, gvr.Group, gvr.Version)
 				}
 			}
-		} else {
-			if gvr.Resource != "" {
-				unlist, err = a.getAvailableResources(ctx, gvr, namespace, rreq.Params)
+		case http.MethodPost:
+			if subresource != "" {
+				unres, err = a.processIncomingPostSubresourceRequest(ctx, kc, rreq, gvr, subresource)
 			} else {
-				logCtx.Debugf("Fetching APIs for group %s and version %s", gvr.Group, gvr.Version)
-				unres, err = a.getAvailableAPIs(ctx, gvr.Group, gvr.Version)
+				unres, err = a.processIncomingPostResourceRequest(ctx, kc, rreq, gvr)
 			}
+		case http.MethodPatch:
+			if subresource != "" {
+				unres, err = a.processIncomingPatchSubresourceRequest(ctx, kc, rreq, gvr, subresource)
+			} else {
+				unres, err = a.processIncomingPatchResourceRequest(ctx, kc, rreq, gvr)
+			}
+		case http.MethodDelete:
+			err = a.processIncomingDeleteResourceRequest(ctx, kc, rreq, gvr)
+		default:
+			err = fmt.Errorf("invalid HTTP method %s for resource request", rreq.Method)
 		}
-	case http.MethodPost:
-		if subresource != "" {
-			unres, err = a.processIncomingPostSubresourceRequest(ctx, rreq, gvr, subresource)
-		} else {
-			unres, err = a.processIncomingPostResourceRequest(ctx, rreq, gvr)
-		}
-	case http.MethodPatch:
-		if subresource != "" {
-			unres, err = a.processIncomingPatchSubresourceRequest(ctx, rreq, gvr, subresource)
-		} else {
-			unres, err = a.processIncomingPatchResourceRequest(ctx, rreq, gvr)
-		}
-	case http.MethodDelete:
-		err = a.processIncomingDeleteResourceRequest(ctx, rreq, gvr)
-	default:
-		err = fmt.Errorf("invalid HTTP method %s for resource request", rreq.Method)
 	}
 
 	if err != nil {
@@ -145,7 +151,7 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	return nil
 }
 
-func (a *Agent) processIncomingPostResourceRequest(ctx context.Context, req *event.ResourceRequest, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
+func (a *Agent) processIncomingPostResourceRequest(ctx context.Context, kc *kube.KubernetesClient, req *event.ResourceRequest, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
 	resourceObj := &unstructured.Unstructured{}
 	if err := json.Unmarshal(req.Body, resourceObj); err != nil {
 		return nil, err
@@ -164,13 +170,13 @@ func (a *Agent) processIncomingPostResourceRequest(ctx context.Context, req *eve
 		createOpts.FieldManager = fieldMgr
 	}
 
-	client := a.kubeClient.DynamicClient.Resource(gvr)
+	client := kc.DynamicClient.Resource(gvr)
 	return client.Namespace(req.Namespace).Create(ctx, resourceObj, createOpts)
 }
 
-func (a *Agent) processIncomingPatchResourceRequest(ctx context.Context, req *event.ResourceRequest, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
+func (a *Agent) processIncomingPatchResourceRequest(ctx context.Context, kc *kube.KubernetesClient, req *event.ResourceRequest, gvr schema.GroupVersionResource) (*unstructured.Unstructured, error) {
 	// Check to see if resource is managed by an Argo CD application.
-	_, err := a.getManagedResource(ctx, gvr, req.Name, req.Namespace)
+	_, err := a.getManagedResource(ctx, kc, gvr, req.Name, req.Namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -196,11 +202,11 @@ func (a *Agent) processIncomingPatchResourceRequest(ctx context.Context, req *ev
 		patchOpts.FieldManager = fieldMgr
 	}
 
-	client := a.kubeClient.DynamicClient.Resource(gvr)
+	client := kc.DynamicClient.Resource(gvr)
 	return client.Namespace(req.Namespace).Patch(ctx, req.Name, k8stypes.MergePatchType, req.Body, patchOpts)
 }
 
-func (a *Agent) processIncomingDeleteResourceRequest(ctx context.Context, req *event.ResourceRequest, gvr schema.GroupVersionResource) error {
+func (a *Agent) processIncomingDeleteResourceRequest(ctx context.Context, kc *kube.KubernetesClient, req *event.ResourceRequest, gvr schema.GroupVersionResource) error {
 	// DeleteOptions are sent in the request body as a JSON object.
 	deleteOpts := &v1.DeleteOptions{}
 	if err := json.Unmarshal(req.Body, deleteOpts); err != nil {
@@ -208,13 +214,37 @@ func (a *Agent) processIncomingDeleteResourceRequest(ctx context.Context, req *e
 	}
 
 	// Retrieve the resource and check if it is managed by an Argo CD application.
-	_, err := a.getManagedResource(ctx, gvr, req.Name, req.Namespace)
+	_, err := a.getManagedResource(ctx, kc, gvr, req.Name, req.Namespace)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve resource: %w", err)
 	}
 
-	client := a.kubeClient.DynamicClient.Resource(gvr)
+	client := kc.DynamicClient.Resource(gvr)
 	return client.Namespace(req.Namespace).Delete(ctx, req.Name, *deleteOpts)
+}
+
+// kubeClientFor returns the client the request is performed with: the agent's
+// own, or one impersonating the service account the principal asked for. A
+// request for an identity the agent may not or cannot assume is refused, never
+// performed with the agent's own identity instead.
+func (a *Agent) kubeClientFor(rreq *event.ResourceRequest) (*kube.KubernetesClient, error) {
+	if rreq.Impersonate == "" {
+		return a.kubeClient, nil
+	}
+
+	gr := schema.GroupResource{Group: rreq.Group, Resource: rreq.Resource}
+	if !a.enableResourceProxyImpersonation {
+		return nil, apierrors.NewForbidden(gr, rreq.Name, errors.New("impersonation is not enabled on this agent"))
+	}
+	if _, _, err := kube.ParseServiceAccountUser(rreq.Impersonate); err != nil {
+		return nil, apierrors.NewForbidden(gr, rreq.Name, err)
+	}
+
+	kc, err := a.kubeClient.Impersonate(rreq.Impersonate)
+	if err != nil {
+		return nil, apierrors.NewInternalError(err)
+	}
+	return kc, nil
 }
 
 // rreqEventToGvk returns a GroupVersionResource object, name and namespace for
@@ -292,9 +322,9 @@ func (a *Agent) executeSubresourceRequest(ctx context.Context, req *rest.Request
 
 // getManagedResourceSubresource retrieves a subresource of a single resource from the cluster
 // and returns it as unstructured data. The resource to be returned must be managed by Argo CD.
-func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.GroupVersionResource, name, namespace, subresource string) (*unstructured.Unstructured, error) {
+func (a *Agent) getManagedResourceSubresource(ctx context.Context, kc *kube.KubernetesClient, gvr schema.GroupVersionResource, name, namespace, subresource string) (*unstructured.Unstructured, error) {
 	// First check if the parent resource is managed
-	_, err := a.getManagedResource(ctx, gvr, name, namespace)
+	_, err := a.getManagedResource(ctx, kc, gvr, name, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +334,7 @@ func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.Gr
 	if err != nil {
 		return nil, fmt.Errorf("invalid subresource path: %w", err)
 	}
-	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
+	restClient := kc.Clientset.Discovery().RESTClient()
 	req := restClient.Get().AbsPath(path)
 
 	result, err := a.executeSubresourceRequest(ctx, req, subresource)
@@ -318,11 +348,11 @@ func (a *Agent) getManagedResourceSubresource(ctx context.Context, gvr schema.Gr
 // getManagedResource retrieves a single resource from the cluster
 // and returns it as unstructured data. The resource to be returned must be
 // managed by Argo CD.
-func (a *Agent) getManagedResource(ctx context.Context, gvr schema.GroupVersionResource, name, namespace string) (*unstructured.Unstructured, error) {
+func (a *Agent) getManagedResource(ctx context.Context, kc *kube.KubernetesClient, gvr schema.GroupVersionResource, name, namespace string) (*unstructured.Unstructured, error) {
 	var err error
 	var res *unstructured.Unstructured
 
-	rif := a.kubeClient.DynamicClient.Resource(gvr)
+	rif := kc.DynamicClient.Resource(gvr)
 
 	if namespace != "" {
 		res, err = rif.Namespace(namespace).Get(ctx, name, v1.GetOptions{})
@@ -333,6 +363,8 @@ func (a *Agent) getManagedResource(ctx context.Context, gvr schema.GroupVersionR
 		return nil, err
 	}
 
+	// Owners are looked up with the agent's own identity, as the identity the
+	// request is performed with may not be allowed to read them.
 	ok, err := isResourceManaged(a.kubeClient, res, ownerLookupRecursionLimit, a.trackingReader)
 	if !ok {
 		if err != nil {
@@ -406,7 +438,7 @@ func listOptionsFromParams(params map[string]string) v1.ListOptions {
 // getAvailableResources retrieves a list of available resources for a given
 // combination of group and version specified in gvr. The resource in the gvr
 // must be empty, otherwise an error is returned.
-func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersionResource, namespace string, params map[string]string) (*unstructured.UnstructuredList, error) {
+func (a *Agent) getAvailableResources(ctx context.Context, kc *kube.KubernetesClient, gvr schema.GroupVersionResource, namespace string, params map[string]string) (*unstructured.UnstructuredList, error) {
 	var err error
 	var res *unstructured.UnstructuredList
 
@@ -423,7 +455,7 @@ func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersi
 	}
 
 	listOpts := listOptionsFromParams(params)
-	rif := a.kubeClient.DynamicClient.Resource(gvr)
+	rif := kc.DynamicClient.Resource(gvr)
 
 	if namespace != "" {
 		res, err = rif.Namespace(namespace).List(ctx, listOpts)
@@ -440,18 +472,18 @@ func (a *Agent) getAvailableResources(ctx context.Context, gvr schema.GroupVersi
 // If group and version are not empty, all APIs for the given group and version are returned.
 //
 // It does not yet support the new aggregated API.
-func (a *Agent) getAvailableAPIs(ctx context.Context, group, version string) (*unstructured.Unstructured, error) {
+func (a *Agent) getAvailableAPIs(ctx context.Context, kc *kube.KubernetesClient, group, version string) (*unstructured.Unstructured, error) {
 	groupVersion := fmt.Sprintf("%s/%s", group, version)
 	var groupList *v1.APIGroupList
 	var resourceList *v1.APIResourceList
 	var err error
 
 	if group == "" && version == "" {
-		groupList, err = a.kubeClient.Clientset.Discovery().ServerGroups()
+		groupList, err = kc.Clientset.Discovery().ServerGroups()
 	} else if group == "" && version != "" {
-		resourceList, err = a.kubeClient.Clientset.Discovery().ServerResourcesForGroupVersion(version)
+		resourceList, err = kc.Clientset.Discovery().ServerResourcesForGroupVersion(version)
 	} else {
-		resourceList, err = a.kubeClient.Clientset.Discovery().ServerResourcesForGroupVersion(groupVersion)
+		resourceList, err = kc.Clientset.Discovery().ServerResourcesForGroupVersion(groupVersion)
 	}
 	if err != nil {
 		return nil, err
@@ -578,9 +610,9 @@ func isResourceManaged(kube *kube.KubernetesClient, res *unstructured.Unstructur
 }
 
 // processIncomingPostSubresourceRequest handles POST requests for subresources
-func (a *Agent) processIncomingPostSubresourceRequest(ctx context.Context, rreq *event.ResourceRequest, gvr schema.GroupVersionResource, subresource string) (*unstructured.Unstructured, error) {
+func (a *Agent) processIncomingPostSubresourceRequest(ctx context.Context, kc *kube.KubernetesClient, rreq *event.ResourceRequest, gvr schema.GroupVersionResource, subresource string) (*unstructured.Unstructured, error) {
 	// First check if the parent resource is managed
-	_, err := a.getManagedResource(ctx, gvr, rreq.Name, rreq.Namespace)
+	_, err := a.getManagedResource(ctx, kc, gvr, rreq.Name, rreq.Namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -590,7 +622,7 @@ func (a *Agent) processIncomingPostSubresourceRequest(ctx context.Context, rreq 
 	if err != nil {
 		return nil, fmt.Errorf("invalid subresource path: %w", err)
 	}
-	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
+	restClient := kc.Clientset.Discovery().RESTClient()
 	req := restClient.Post().AbsPath(path).Body(rreq.Body)
 
 	result, err := a.executeSubresourceRequest(ctx, req, subresource)
@@ -602,9 +634,9 @@ func (a *Agent) processIncomingPostSubresourceRequest(ctx context.Context, rreq 
 }
 
 // processIncomingPatchSubresourceRequest handles PATCH requests for subresources
-func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, rreq *event.ResourceRequest, gvr schema.GroupVersionResource, subresource string) (*unstructured.Unstructured, error) {
+func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, kc *kube.KubernetesClient, rreq *event.ResourceRequest, gvr schema.GroupVersionResource, subresource string) (*unstructured.Unstructured, error) {
 	// First check if the parent resource is managed
-	_, err := a.getManagedResource(ctx, gvr, rreq.Name, rreq.Namespace)
+	_, err := a.getManagedResource(ctx, kc, gvr, rreq.Name, rreq.Namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -625,7 +657,7 @@ func (a *Agent) processIncomingPatchSubresourceRequest(ctx context.Context, rreq
 	if err != nil {
 		return nil, fmt.Errorf("invalid subresource path: %w", err)
 	}
-	restClient := a.kubeClient.Clientset.Discovery().RESTClient()
+	restClient := kc.Clientset.Discovery().RESTClient()
 	req := restClient.Patch(patchType).AbsPath(path).Body(rreq.Body)
 
 	result, err := a.executeSubresourceRequest(ctx, req, subresource)

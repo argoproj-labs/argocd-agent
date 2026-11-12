@@ -108,6 +108,16 @@ func WithEnableResourceProxy(enable bool) AgentOption {
 	}
 }
 
+// WithEnableResourceProxyImpersonation makes the agent perform resource proxy
+// requests on behalf of the service account the principal asks for. It needs
+// the permission to impersonate service accounts on the cluster.
+func WithEnableResourceProxyImpersonation(enable bool) AgentOption {
+	return func(o *Agent) error {
+		o.enableResourceProxyImpersonation = enable
+		return nil
+	}
+}
+
 func WithCacheRefreshInterval(interval time.Duration) AgentOption {
 	return func(o *Agent) error {
 		o.cacheRefreshInterval = interval

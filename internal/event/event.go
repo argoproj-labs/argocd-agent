@@ -340,6 +340,10 @@ type ResourceRequest struct {
 	Body []byte `json:"body,omitempty"`
 	// Parameters from the HTTP request
 	Params map[string]string `json:"params,omitempty"`
+	// Impersonate is the service account user, in the form
+	// system:serviceaccount:<namespace>:<name>, on whose behalf the agent must
+	// perform the request. If empty, the agent uses its own identity.
+	Impersonate string `json:"impersonate,omitempty"`
 	// The group and version of the requested resource
 	v1.GroupVersionResource
 }
@@ -442,9 +446,12 @@ func (evs EventSource) NewRedisResponseEvent(reqUUID string, connectionUUID stri
 // gvr, and its name and namespace. If namespace is empty, the request will
 // be for a cluster-scoped resource.
 //
+// If impersonate is not empty, the agent will perform the request as that
+// service account user instead of with its own identity.
+//
 // The event's resource ID and event ID will be set to a randomly generated
 // UUID, because we'll have
-func (evs EventSource) NewResourceRequestEvent(gvr v1.GroupVersionResource, namespace, name, subresource, method string, body []byte, params map[string]string) (*cloudevents.Event, error) {
+func (evs EventSource) NewResourceRequestEvent(gvr v1.GroupVersionResource, namespace, name, subresource, method string, body []byte, params map[string]string, impersonate string) (*cloudevents.Event, error) {
 	reqUUID := uuid.NewString()
 	rr := &ResourceRequest{
 		UUID:                 reqUUID,
@@ -455,6 +462,7 @@ func (evs EventSource) NewResourceRequestEvent(gvr v1.GroupVersionResource, name
 		Method:               method,
 		Body:                 body,
 		Params:               params,
+		Impersonate:          impersonate,
 	}
 	cev := cloudevents.NewEvent()
 	cev.SetSource(evs.source)
