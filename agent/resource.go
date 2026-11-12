@@ -76,7 +76,7 @@ func (a *Agent) processIncomingResourceRequest(ev *event.Event) error {
 	// The request is performed with the identity the principal asked for, or
 	// with the agent's own if it asked for none. If we cannot honor the
 	// requested identity, the request is refused without touching the API.
-	kc, err := a.kubeClientFor(rreq)
+	kc, err := a.kubeClientFor(rreq.Impersonate, schema.GroupResource{Group: rreq.Group, Resource: rreq.Resource}, rreq.Name)
 	if err == nil {
 		switch rreq.Method {
 		case http.MethodGet:
@@ -223,24 +223,23 @@ func (a *Agent) processIncomingDeleteResourceRequest(ctx context.Context, kc *ku
 	return client.Namespace(req.Namespace).Delete(ctx, req.Name, *deleteOpts)
 }
 
-// kubeClientFor returns the client the request is performed with: the agent's
-// own, or one impersonating the service account the principal asked for. A
-// request for an identity the agent may not or cannot assume is refused, never
-// performed with the agent's own identity instead.
-func (a *Agent) kubeClientFor(rreq *event.ResourceRequest) (*kube.KubernetesClient, error) {
-	if rreq.Impersonate == "" {
+// kubeClientFor returns the client a request for the named resource is
+// performed with: the agent's own, or one impersonating the service account
+// the principal asked for. A request for an identity the agent may not or cannot
+// assume is refused, never performed with the agent's own identity instead.
+func (a *Agent) kubeClientFor(user string, gr schema.GroupResource, name string) (*kube.KubernetesClient, error) {
+	if user == "" {
 		return a.kubeClient, nil
 	}
 
-	gr := schema.GroupResource{Group: rreq.Group, Resource: rreq.Resource}
 	if !a.enableResourceProxyImpersonation {
-		return nil, apierrors.NewForbidden(gr, rreq.Name, errors.New("impersonation is not enabled on this agent"))
+		return nil, apierrors.NewForbidden(gr, name, errors.New("impersonation is not enabled on this agent"))
 	}
-	if _, _, err := kube.ParseServiceAccountUser(rreq.Impersonate); err != nil {
-		return nil, apierrors.NewForbidden(gr, rreq.Name, err)
+	if _, _, err := kube.ParseServiceAccountUser(user); err != nil {
+		return nil, apierrors.NewForbidden(gr, name, err)
 	}
 
-	kc, err := a.kubeClient.Impersonate(rreq.Impersonate)
+	kc, err := a.kubeClient.Impersonate(user)
 	if err != nil {
 		return nil, apierrors.NewInternalError(err)
 	}

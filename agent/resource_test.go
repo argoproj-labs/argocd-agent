@@ -1915,7 +1915,7 @@ func Test_processIncomingResourceRequest_impersonation(t *testing.T) {
 		rreq := operations[0].req
 		rreq.Impersonate = user
 
-		kc, err := a.kubeClientFor(&rreq)
+		kc, err := a.kubeClientFor(rreq.Impersonate, schema.GroupResource{Group: rreq.Group, Resource: rreq.Resource}, rreq.Name)
 		assert.Nil(t, kc)
 		require.Error(t, err)
 		assert.True(t, errors.IsInternalError(err), "got %v", err)

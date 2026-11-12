@@ -108,10 +108,10 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 	}
 
 	subresource := params.Get("subresource")
-	if impersonate != "" && (subresource == "log" || subresource == "exec") {
-		logCtx.Warnf("Refusing %s request with impersonation, which it does not support", subresource)
+	if impersonate != "" && subresource == "exec" {
+		logCtx.Warn("Refusing exec request with impersonation, which it does not support")
 		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte("impersonation is not supported for " + subresource))
+		_, _ = w.Write([]byte("impersonation is not supported for exec"))
 		return
 	}
 
@@ -182,7 +182,7 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 			http.Error(w, "Missing required parameters: namespace and pod", http.StatusBadRequest)
 			return
 		}
-		sentEv, err = s.events.NewLogRequestEvent(requestedNamespace, requestedName, r.Method, reqParams)
+		sentEv, err = s.events.NewLogRequestEvent(requestedNamespace, requestedName, r.Method, reqParams, impersonate)
 		if err != nil {
 			logCtx.WithFields(logrus.Fields{
 				"namespace": requestedNamespace,

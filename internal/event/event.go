@@ -797,17 +797,24 @@ type ContainerLogRequest struct {
 	Previous                     bool   `json:"previous,omitempty"`
 	InsecureSkipTLSVerifyBackend bool   `json:"insecureSkipTLSVerifyBackend,omitempty"`
 	LimitBytes                   *int64 `json:"limitBytes,omitempty"`
+	// Impersonate is the service account user, in the form
+	// system:serviceaccount:<namespace>:<name>, on whose behalf the agent must
+	// read the logs. If empty, the agent uses its own identity.
+	Impersonate string `json:"impersonate,omitempty"`
 }
 
-// NewLogRequestEvent creates a cloud event for requesting logs
-func (evs EventSource) NewLogRequestEvent(namespace, podName, method string, params map[string]string) (*cloudevents.Event, error) {
+// NewLogRequestEvent creates a cloud event for requesting logs. If impersonate
+// is not empty, the agent will read the logs as that service account user
+// instead of with its own identity.
+func (evs EventSource) NewLogRequestEvent(namespace, podName, method string, params map[string]string, impersonate string) (*cloudevents.Event, error) {
 	reqUUID := uuid.NewString()
 
 	// Parse log-specific parameters
 	logReq := &ContainerLogRequest{
-		UUID:      reqUUID,
-		Namespace: namespace,
-		PodName:   podName,
+		UUID:        reqUUID,
+		Namespace:   namespace,
+		PodName:     podName,
+		Impersonate: impersonate,
 	}
 
 	if container, ok := params["container"]; ok {
