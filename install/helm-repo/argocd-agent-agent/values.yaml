@@ -204,6 +204,12 @@ pprofPort: "6161"
 pprofEnabled: "false"
 # -- Whether to enable resource proxy.
 enableResourceProxy: true
+# -- Whether the resource proxy performs requests on behalf of the service
+# account that Argo CD asks for, instead of refusing them. Needs the
+# `impersonate` verb on `serviceaccounts`, which the chart grants cluster-wide
+# through the ClusterRole when this and `rbac.createClusterRole` are true.
+# Otherwise grant it yourself.
+enableResourceProxyImpersonation: false
 # -- Cache refresh interval.
 cacheRefreshInterval: "10s"
 # -- Timeout for the initial informer sync at agent startup. Increase on

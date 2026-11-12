@@ -101,6 +101,12 @@
       "title": "enableResourceProxy",
       "type": "boolean"
     },
+    "enableResourceProxyImpersonation": {
+      "default": false,
+      "description": "Whether the resource proxy performs requests on behalf of the service\naccount that Argo CD asks for, instead of refusing them. Needs the\n`impersonate` verb on `serviceaccounts`, which the chart grants cluster-wide\nthrough the ClusterRole when this and `rbac.createClusterRole` are true.\nOtherwise grant it yourself.",
+      "title": "enableResourceProxyImpersonation",
+      "type": "boolean"
+    },
     "enableWebSocket": {
       "default": false,
       "description": "Whether to enable WebSocket connections.",
@@ -1132,6 +1138,7 @@
     "enableCompression",
     "pprofPort",
     "enableResourceProxy",
+    "enableResourceProxyImpersonation",
     "cacheRefreshInterval",
     "informerSyncTimeout",
     "keepAliveInterval",

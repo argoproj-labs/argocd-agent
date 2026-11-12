@@ -515,6 +515,22 @@ Enable the resource proxy to allow access to live resources on this agent cluste
 - Performance optimization when live resource viewing is not needed
 - Troubleshooting resource proxy related issues
 
+### Enable Resource Proxy Impersonation
+
+| | |
+|---|---|
+| **CLI Flag** | `--enable-resource-proxy-impersonation` |
+| **Environment Variable** | `ARGOCD_AGENT_ENABLE_RESOURCE_PROXY_IMPERSONATION` |
+| **ConfigMap Entry** | `agent.resource-proxy.impersonation.enabled` |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Perform resource proxy requests on behalf of the service account that Argo CD asks for, instead of with the agent's own identity. The agent needs the `impersonate` verb on `serviceaccounts`.
+
+While disabled, the agent refuses with `403 Forbidden` any request that asks for a service account. It never serves such a request with its own identity.
+
+See [Per-tenant isolation with impersonation](../../user-guide/live-resources.md#per-tenant-isolation-with-impersonation) for the requirements and the permissions the service accounts need.
+
 ## Resource Filtering
 
 ### Label Selector
