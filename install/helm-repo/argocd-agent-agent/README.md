@@ -1,6 +1,6 @@
 # argocd-agent-agent
 
-![Version: 0.2.8](https://img.shields.io/badge/Version-0.2.8-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
+![Version: 0.2.9](https://img.shields.io/badge/Version-0.2.9-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
 
 Argo CD Agent for connecting managed clusters to a Principal
 
@@ -38,6 +38,7 @@ Kubernetes: `>=1.24.0-0`
 | dnsPolicy | string | `""` | DNS policy for the Pod (e.g. ClusterFirst, None). Empty leaves the default. |
 | enableCompression | bool | `false` | Whether to enable gRPC compression. |
 | enableResourceProxy | bool | `true` | Whether to enable resource proxy. |
+| enableResourceProxyImpersonation | bool | `false` | Whether the resource proxy performs requests on behalf of the service account that Argo CD asks for, instead of refusing them. Needs the `impersonate` verb on `serviceaccounts`, which the chart grants cluster-wide through the ClusterRole when this and `rbac.createClusterRole` are true. Otherwise grant it yourself. |
 | enableWebSocket | bool | `false` | Whether to enable WebSocket connections. |
 | fullnameOverride | string | `""` | Override the fully-qualified resource name (defaults to `<release>-agent-helm`). |
 | healthzPort | string | `"8002"` | Healthz server port exposed by the agent. |

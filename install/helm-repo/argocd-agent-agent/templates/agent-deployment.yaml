@@ -260,6 +260,12 @@ spec:
                 name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
                 key: agent.resource-proxy.enabled
                 optional: true
+          - name: ARGOCD_AGENT_ENABLE_RESOURCE_PROXY_IMPERSONATION
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "argocd-agent-agent.paramsConfigMapName" . }}
+                key: agent.resource-proxy.impersonation.enabled
+                optional: true
           - name: ARGOCD_AGENT_CACHE_REFRESH_INTERVAL
             valueFrom:
               configMapKeyRef:

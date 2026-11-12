@@ -27,4 +27,12 @@ rules:
   - update
   - delete
   - patch
+{{- if .Values.enableResourceProxyImpersonation }}
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - impersonate
+{{- end }}
 {{- end }}
