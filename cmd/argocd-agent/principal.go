@@ -142,6 +142,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		haAdminTLSCert                 string
 		haAdminTLSKey                  string
 		haAdminCA                      string
+		haPeerTLSCert                  string
+		haPeerTLSKey                   string
 
 		// SPIRE integration
 		spireAgentSocket string
@@ -570,6 +572,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 				if haAdminTLSCert != "" || haAdminTLSKey != "" || haAdminCA != "" {
 					haOpts = append(haOpts, ha.WithAdminTLS(haAdminTLSCert, haAdminTLSKey, haAdminCA))
 				}
+				if haPeerTLSCert != "" || haPeerTLSKey != "" {
+					haOpts = append(haOpts, ha.WithPeerClientTLS(haPeerTLSCert, haPeerTLSKey))
+				}
 				opts = append(opts, principal.WithHA(haOpts...))
 				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
 			}
@@ -841,6 +846,12 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringVar(&haAdminCA, "ha-admin-ca",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_ADMIN_CA", nil, ""),
 		"Path to CA certificate for verifying HA admin client certs")
+	command.Flags().StringVar(&haPeerTLSCert, "ha-peer-tls-cert",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_PEER_TLS_CERT", nil, ""),
+		"Path to the dedicated client certificate a replica presents to its peer principal for replication")
+	command.Flags().StringVar(&haPeerTLSKey, "ha-peer-tls-key",
+		env.StringWithDefault("ARGOCD_PRINCIPAL_HA_PEER_TLS_KEY", nil, ""),
+		"Path to the private key for the HA peer replication client certificate")
 
 	return command
 }

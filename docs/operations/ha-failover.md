@@ -230,6 +230,8 @@ kubectl exec -it <replica-pod> -- curl -sS http://<primary-addr>:8003/healthz
 
 Check that the server's `--auth` method is configured correctly — the replica needs a client certificate the primary trusts, and the extracted identity must be in `--ha-allowed-replication-clients`.
 
+Make sure the replica is configured with its dedicated replication client certificate via `--ha-peer-tls-cert` / `--ha-peer-tls-key`. If these are not set, the replica will not connect. Issue the certificate with `argocd-agentctl pki issue principal-peer` (see [HA configuration](../configuration/ha.md#replication-client-certificate)).
+
 ### Promote refuses (replication stream active)
 
 The safety check prevents promoting while still receiving events from a peer. If you're certain the primary is dead but the stream hasn't timed out:
@@ -243,6 +245,7 @@ argocd-agentctl ha promote --force
 - Check DNS TTL — agents won't resolve the new address until TTL expires (default recommendation: 60s)
 - Verify `/healthz` returns 200 on the newly promoted principal
 - Check GSLB health check configuration points to port 8003
+- If agents fail with TLS/certificate trust errors (not just a connection timeout) after failover, the two principal clusters likely don't share the same CA — see [Shared CA Setup](../configuration/ha.md#shared-ca-setup). Compare the CA certificate in the `argocd-agent-ca` secret on both principal clusters; they must be identical.
 
 ### Sequence gaps and frequent reconciliation
 

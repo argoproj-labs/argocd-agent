@@ -326,6 +326,17 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 
 	haOptions := controller.Options()
 
+	// When TLS is enabled, replication to a peer requires a dedicated client certificate.
+	plaintext := server.options != nil && server.options.insecurePlaintext
+	if haOptions.Enabled && haOptions.PeerAddress != "" && !plaintext {
+		if haOptions.PeerClientCertPath == "" || haOptions.PeerClientKeyPath == "" {
+			return nil, fmt.Errorf("HA replication requires --ha-peer-tls-cert and --ha-peer-tls-key when TLS is enabled")
+		}
+		if _, err := tlsutil.TLSCertFromFile(haOptions.PeerClientCertPath, haOptions.PeerClientKeyPath, false); err != nil {
+			return nil, fmt.Errorf("could not load HA peer client certificate: %w", err)
+		}
+	}
+
 	// Replication server — no TLS/auth options; the main gRPC server handles that
 	components.ReplicationServer = replicationserver.NewServer(
 		components.ReplicationForwarder,
@@ -379,7 +390,7 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 					log().WithError(err).Warn("HA: failed to load TLS config for replication client")
 					return nil
 				}
-				return replicationClientTLSConfig(serverTLSConfig)
+				return replicationClientTLSConfig(serverTLSConfig, haOptions)
 			}))
 		}
 
@@ -411,12 +422,24 @@ func NewHAComponents(ctx context.Context, server *Server, haOpts ...ha.Option) (
 	return components, nil
 }
 
-func replicationClientTLSConfig(serverTLSConfig *tls.Config) *tls.Config {
+// replicationClientTLSConfig builds the TLS config a replica principal uses to
+// connect to its peer for replication.
+func replicationClientTLSConfig(serverTLSConfig *tls.Config, haOptions *ha.Options) *tls.Config {
 	if serverTLSConfig == nil {
 		return nil
 	}
+	if haOptions == nil || haOptions.PeerClientCertPath == "" || haOptions.PeerClientKeyPath == "" {
+		log().Error("HA: replication requires a dedicated client certificate; " +
+			"configure --ha-peer-tls-cert and --ha-peer-tls-key")
+		return nil
+	}
+	cert, err := tlsutil.TLSCertFromFile(haOptions.PeerClientCertPath, haOptions.PeerClientKeyPath, false)
+	if err != nil {
+		log().WithError(err).Error("HA: failed to load replication client certificate")
+		return nil
+	}
 	return &tls.Config{
-		Certificates:     serverTLSConfig.Certificates,
+		Certificates:     []tls.Certificate{cert},
 		RootCAs:          serverTLSConfig.ClientCAs,
 		MinVersion:       serverTLSConfig.MinVersion,
 		MaxVersion:       serverTLSConfig.MaxVersion,

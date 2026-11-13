@@ -83,6 +83,7 @@ OR TO PROTECT ANY KIND OF DATA.
 	command.AddCommand(NewPKIPrintCommand())
 	command.AddCommand(NewPKIIssueCommand())
 	command.AddCommand(NewPKIPropagateCommand())
+	command.AddCommand(NewPKIPropagateCACommand())
 	return command
 }
 
@@ -207,6 +208,93 @@ func NewPKIPropagateCommand() *cobra.Command {
 		},
 	}
 	command.Flags().BoolVarP(&force, "force", "f", false, "Force regeneration of PKI if it exists")
+	return command
+}
+
+// NewPKIPropagateCACommand returns a command that copies the principal's CA,
+// including its private key, into a replica principal's cluster.
+//
+// This is used to set up HA: both principals must be signed by, and trust,
+// the exact same CA for cross-cluster mTLS to work.
+func NewPKIPropagateCACommand() *cobra.Command {
+	var (
+		force           bool
+		targetContext   string
+		targetNamespace string
+	)
+	command := &cobra.Command{
+		Use:   "propagate-ca",
+		Short: "NON-PROD!! Copy the CA, including its private key, to a replica principal cluster for HA",
+		Long: `In HA mode, both principals must be signed by, and trust, the exact same CA:
+the active principal's server certificate must be verifiable by agents and by
+its replica, and the replica's replication client certificate must be trusted by
+the active principal.
+
+Run "pki init" once against a primary principal cluster, then use this command
+to copy that CA (certificate and private key) into replica principal
+cluster in the HA pair, before issuing any certificates there with "pki issue".`,
+		Run: func(cmd *cobra.Command, args []string) {
+			if principalCfg.KubeContext == "" || targetContext == "" {
+				cmdutil.Fatal("Both --principal-context and --target-context must be set.")
+			}
+			if principalCfg.KubeContext == targetContext && principalCfg.Namespace == targetNamespace {
+				cmdutil.Fatal("Source and target principal contexts cannot be identical.")
+			}
+
+			ctx := context.TODO()
+			srcClt, err := kube.NewKubernetesClientFromConfig(ctx, principalCfg.Namespace, "", principalCfg.KubeContext)
+			if err != nil {
+				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
+			}
+			dstClt, err := kube.NewKubernetesClientFromConfig(ctx, targetNamespace, "", targetContext)
+			if err != nil {
+				cmdutil.Fatal("Error creating Kubernetes client: %v", err)
+			}
+
+			caSecret, err := srcClt.Clientset.CoreV1().Secrets(principalCfg.Namespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			if err != nil {
+				cmdutil.Fatal("Error getting CA secret from source principal: %v", err)
+			}
+
+			targetSecret := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      config.SecretNamePrincipalCA,
+					Namespace: targetNamespace,
+				},
+				Type: corev1.SecretTypeTLS,
+				Data: map[string][]byte{
+					"tls.crt": caSecret.Data["tls.crt"],
+					"tls.key": caSecret.Data["tls.key"],
+				},
+			}
+
+			exists := false
+			_, err = dstClt.Clientset.CoreV1().Secrets(targetNamespace).Get(ctx, config.SecretNamePrincipalCA, v1.GetOptions{})
+			if err != nil {
+				if !errors.IsNotFound(err) {
+					cmdutil.Fatal("Error getting target CA secret: %v", err)
+				}
+			} else {
+				if !force {
+					cmdutil.Fatal("CA secret already exists in target context. Use --force to overwrite.")
+				}
+				exists = true
+			}
+
+			if !exists {
+				_, err = dstClt.Clientset.CoreV1().Secrets(targetNamespace).Create(ctx, targetSecret, v1.CreateOptions{})
+			} else {
+				_, err = dstClt.Clientset.CoreV1().Secrets(targetNamespace).Update(ctx, targetSecret, v1.UpdateOptions{})
+			}
+			if err != nil {
+				cmdutil.Fatal("Error writing CA secret to target context: %v", err)
+			}
+			fmt.Printf("CA secret propagated to %s/%s in context %s\n", targetNamespace, config.SecretNamePrincipalCA, targetContext)
+		},
+	}
+	command.Flags().BoolVarP(&force, "force", "f", false, "Overwrite an existing CA secret in the target context")
+	command.Flags().StringVar(&targetContext, "target-context", "", "Kube context of the replica principal cluster to copy the CA into")
+	command.Flags().StringVar(&targetNamespace, "target-namespace", "argocd", "Namespace of the replica principal cluster to copy the CA into")
 	return command
 }
 
@@ -377,6 +465,7 @@ func NewPKIIssueCommand() *cobra.Command {
 	command.AddCommand(NewPKIIssueAgentClientCert())
 	command.AddCommand(NewPKIIssueSharedClientCert())
 	command.AddCommand(NewPKIIssueHAAdminCommand())
+	command.AddCommand(NewPKIIssuePrincipalPeerCommand())
 	return command
 }
 
@@ -553,6 +642,41 @@ Only the principal context is required. No agent context needed.`,
 			keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
 			issueAndSaveSecret(principalCfg.KubeContext, config.SecretNameSharedClientCert, principalCfg.Namespace, upsert, days, keyOpts, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
 				return tlsutil.GenerateClientCertificate("argocd-agent-shared-client", c, pk, days, keyOpts)
+			})
+		},
+	}
+	command.Flags().BoolVarP(&upsert, "upsert", "u", false, "Whether to update an existing certificate if it exists")
+	command.Flags().IntVar(&days, "days", tlsutil.DefaultLeafCertValidityDays, "Number of days the certificate is valid for")
+	addKeyGenFlags(command, &keyAlgorithm, &keySize)
+	return command
+}
+
+// NewPKIIssuePrincipalPeerCommand returns a command to issue a dedicated client
+// certificate used by a replica principal to authenticate to its peer principal
+// for HA replication.
+func NewPKIIssuePrincipalPeerCommand() *cobra.Command {
+	var (
+		upsert       bool
+		days         int
+		keyAlgorithm string
+		keySize      int
+	)
+	command := &cobra.Command{
+		Use:   "principal-peer",
+		Short: "NON-PROD!! Issue a client certificate for HA principal-to-peer replication",
+		Long: `Issues a TLS client certificate and stores it in the principal namespace.
+In HA mode, a replica principal presents this certificate when connecting to its
+peer principal's replication endpoint for disaster recovery. The certificate's
+common name must be listed in the peer's --ha-allowed-replication-clients.
+
+Only the principal context is required.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			if principalCfg.KubeContext == "" {
+				cmdutil.Fatal("Principal kubecontext must be set.")
+			}
+			keyOpts := parseKeyGenFlags(keyAlgorithm, keySize)
+			issueAndSaveSecret(principalCfg.KubeContext, config.SecretNameHAPeerTLS, principalCfg.Namespace, upsert, days, keyOpts, func(c *x509.Certificate, pk crypto.PrivateKey) (string, string, error) {
+				return tlsutil.GenerateClientCertificate("argocd-agent-principal-peer", c, pk, days, keyOpts)
 			})
 		},
 	}
