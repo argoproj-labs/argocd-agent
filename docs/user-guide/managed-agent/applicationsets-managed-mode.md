@@ -62,7 +62,7 @@ spec:
 
 ### Namespace-based routing
 
-With namespace-based mapping (the default), ApplicationSets can still be used but each generated Application must be placed in the namespace that matches the target agent. This limits each ApplicationSet to targeting a single agent unless combined with additional namespace logic.
+With namespace-based mapping (deprecated, the default before v1.0.0), ApplicationSets can still be used but each generated Application must be placed in the namespace that matches the target agent. This limits each ApplicationSet to targeting a single agent unless combined with additional namespace logic.
 
 ### Configuration
 

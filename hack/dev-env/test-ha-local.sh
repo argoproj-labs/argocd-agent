@@ -100,6 +100,7 @@ echo "Starting PRIMARY principal (preferred role: primary)..."
     --ha-peer-address "localhost:$REPLICA_PORT" \
     --ha-failover-timeout 10s \
     --ha-admin-auth "mtls:subject:CN=ha-admin" \
+    --destination-based-mapping=${ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING:-false} \
     2>&1 | sed 's/^/[PRIMARY] /' &
 PRIMARY_PID=$!
 
@@ -121,6 +122,7 @@ echo "Starting REPLICA principal (preferred role: replica)..."
     --ha-admin-port 8406 \
     --ha-failover-timeout 10s \
     --ha-admin-auth "mtls:subject:CN=ha-admin" \
+    --destination-based-mapping=${ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING:-false} \
     2>&1 | sed 's/^/[REPLICA] /' &
 REPLICA_PID=$!
 
