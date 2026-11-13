@@ -23,7 +23,6 @@ Making the project more reliable and easier to use.
 Improving authentication and access control.
 
 - **[SPIFFE/SPIRE support](https://github.com/argoproj-labs/argocd-agent/issues/345)**: Better identity verification
-- **[Private repository support](https://github.com/argoproj-labs/argocd-agent/issues/474)**: Sync Git credentials to agents
 - **Better RBAC**: Multi-tenant access controls
 
 ## Usability
@@ -32,9 +31,7 @@ Making day-to-day operations easier.
 
 - **Better CLI tools**: Easier agent bootstrapping and registration
 - **ApplicationSet support**: Full lifecycle management in distributed setups
-- **[Observability improvements](https://github.com/argoproj-labs/argocd-agent/issues/119)**: OpenTelemetry integration and better metrics
-- **[Pod log streaming](https://github.com/argoproj-labs/argocd-agent/issues/128)**: Access logs from remote clusters
-- **[Terminal access](https://github.com/argoproj-labs/argocd-agent/issues/129)**: Debug pods on remote clusters
+- **[Better metrics](https://github.com/argoproj-labs/argocd-agent/issues/924)**: More consistent metric names
 
 ## Scalability
 
@@ -42,8 +39,17 @@ Supporting larger deployments.
 
 - **[Principal high availability](https://github.com/argoproj-labs/argocd-agent/issues/186)**: Multi-instance deployments
 - **Alternative storage backends**: Database options for larger scale
-- **[Protocol optimization](https://github.com/argoproj-labs/argocd-agent/issues/113)**: Data compression for slow networks
 - **Better scaling**: Horizontal scaling of principal components
+
+## Completed
+
+Items from earlier versions of this roadmap that have shipped.
+
+- **[Private repository support](https://github.com/argoproj-labs/argocd-agent/issues/474)**: Sync Git credentials to agents
+- **[OpenTelemetry integration](https://github.com/argoproj-labs/argocd-agent/issues/119)**: Tracing for the principal and the agent (experimental)
+- **[Pod log streaming](https://github.com/argoproj-labs/argocd-agent/issues/128)**: Access logs from remote clusters
+- **[Terminal access](https://github.com/argoproj-labs/argocd-agent/issues/129)**: Debug pods on remote clusters
+- **[Protocol optimization](https://github.com/argoproj-labs/argocd-agent/issues/113)**: Data compression for slow networks
 
 ## Community Input
 
