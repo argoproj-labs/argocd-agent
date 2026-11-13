@@ -21,9 +21,12 @@ import (
 	"sync"
 
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/terminalstreamapi"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Server implements the TerminalStreamService gRPC server.
@@ -65,6 +68,13 @@ func (s *Server) StreamTerminal(stream terminalstreamapi.TerminalStreamService_S
 	logCtx := log().WithField("method", "StreamTerminal")
 	logCtx.Info("Agent connected to terminal stream")
 
+	agentName, err := session.ClientIDFromContext(stream.Context())
+	if err != nil {
+		logCtx.WithError(err).Error("Failed to get authenticated agent identity from stream context")
+		return status.Error(codes.Unauthenticated, err.Error())
+	}
+	logCtx = logCtx.WithField("agent", agentName)
+
 	// Read the first message to get the session UUID.
 	// This is the initial empty message to handshake and establish the stream connection.
 	handshakeMsg, err := tryRecvWithCancel(stream.Context(), stream.Recv)
@@ -82,10 +92,16 @@ func (s *Server) StreamTerminal(stream terminalstreamapi.TerminalStreamService_S
 	logCtx = logCtx.WithField("session_uuid", sessionUUID)
 
 	// Get the session
-	session := s.sessions.Get(sessionUUID)
-	if session == nil {
+	termSession := s.sessions.Get(sessionUUID)
+	if termSession == nil {
 		logCtx.Error("Session not found")
 		return fmt.Errorf("session %s not found", sessionUUID)
+	}
+
+	// The authenticated agent must own this session.
+	if termSession.AgentName != agentName {
+		logCtx.WithField("session_agent", termSession.AgentName).Error("Agent mismap between terminal session and caller")
+		return status.Errorf(codes.PermissionDenied, "agent mismap between session and caller")
 	}
 
 	logCtx.Info("Terminal session handshake completed with agent")
@@ -93,21 +109,21 @@ func (s *Server) StreamTerminal(stream terminalstreamapi.TerminalStreamService_S
 	// Handle incoming data from agent and send to WebSocket
 	go func() {
 		defer func() {
-			session.Close()
+			termSession.Close()
 			// Close the channels when agent finishes to terminate the terminal
 			func() {
 				defer func() { _ = recover() }()
-				close(session.ToAgent)
+				close(termSession.ToAgent)
 			}()
 			func() {
 				defer func() { _ = recover() }()
-				close(session.FromAgent)
+				close(termSession.FromAgent)
 			}()
 			logCtx.Info("Agent to WebSocket goroutine exited, channels closed")
 		}()
 
 		// Send handshake message to WebSocket
-		if err := s.sendToWebSocket(session, handshakeMsg, logCtx); err != nil {
+		if err := s.sendToWebSocket(termSession, handshakeMsg, logCtx); err != nil {
 			logCtx.WithError(err).Error("Failed to send handshake message to WebSocket")
 			return
 		}
@@ -130,7 +146,7 @@ func (s *Server) StreamTerminal(stream terminalstreamapi.TerminalStreamService_S
 
 			logCtx.WithField("data_size", len(msg.Data)).Info("Received data from agent")
 
-			if err := s.sendToWebSocket(session, msg, logCtx); err != nil {
+			if err := s.sendToWebSocket(termSession, msg, logCtx); err != nil {
 				logCtx.WithError(err).Error("Failed to send data to WebSocket")
 				return
 			}
@@ -143,7 +159,7 @@ func (s *Server) StreamTerminal(stream terminalstreamapi.TerminalStreamService_S
 		case <-stream.Context().Done():
 			logCtx.Info("Terminal stream context done due to user closing the terminal")
 			return stream.Context().Err()
-		case msg, ok := <-session.ToAgent:
+		case msg, ok := <-termSession.ToAgent:
 			if !ok {
 				logCtx.Info("ToAgent channel closed, terminal stream terminated")
 				return nil

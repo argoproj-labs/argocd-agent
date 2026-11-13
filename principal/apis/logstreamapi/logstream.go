@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	agentsession "github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/logstreamapi"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
@@ -36,6 +37,7 @@ type Server struct {
 }
 
 type session struct {
+	agentName  string
 	hw         *httpWriter
 	completeCh chan bool // signaled on EOF (static logs)
 	cancelFn   context.CancelFunc
@@ -66,6 +68,7 @@ type logClient struct {
 	cancelFn     context.CancelFunc
 	logCtx       *logrus.Entry
 	requestID    string
+	authorized   bool  // true once this stream's agent is confirmed to own requestID
 	terminateErr error // returned as stream status when set
 }
 
@@ -93,8 +96,8 @@ func NewServer() *Server {
 	}
 }
 
-// RegisterHTTP registers an HTTP writer for a given request UUID
-func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http.Request) error {
+// RegisterHTTP registers an HTTP writer for a given request UUID owned by agentName.
+func (s *Server) RegisterHTTP(requestUUID, agentName string, w http.ResponseWriter, r *http.Request) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -112,6 +115,7 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 	sess := s.sessions[requestUUID]
 	if sess == nil {
 		sess = &session{
+			agentName:  agentName,
 			hw:         &httpWriter{w: w, flusher: flusher},
 			completeCh: make(chan bool, 1),
 			doneCh:     make(chan struct{}),
@@ -124,7 +128,7 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 			close(sess.doneCh)
 		}
 		sess.doneCh = make(chan struct{})
-
+		sess.agentName = agentName
 		sess.hw = &httpWriter{w: w, flusher: flusher}
 	}
 
@@ -159,6 +163,14 @@ func (s *Server) RegisterHTTP(requestUUID string, w http.ResponseWriter, r *http
 // StreamLogs receives log data from agent
 func (s *Server) StreamLogs(stream logstreamapi.LogStreamService_StreamLogsServer) error {
 	c := s.newLogClient(stream.Context())
+
+	agentName, err := agentsession.ClientIDFromContext(stream.Context())
+	if err != nil {
+		c.logCtx.WithError(err).Error("Failed to get authenticated agent identity from stream context")
+		return status.Error(codes.Unauthenticated, err.Error())
+	}
+	c.logCtx = c.logCtx.WithField("agent", agentName)
+
 	// One background pump goroutine per stream.
 	dataCh := make(chan *logstreamapi.LogStreamData)
 	errCh := make(chan error, 1)
@@ -184,10 +196,11 @@ func (s *Server) StreamLogs(stream logstreamapi.LogStreamService_StreamLogsServe
 		}
 	}()
 
-	s.processLogStreamLoop(c, dataCh, errCh)
+	s.processLogStreamLoop(c, agentName, dataCh, errCh)
 
-	// Cleanup session
-	if c.requestID != "" {
+	// Cleanup session. Only finalize if this stream's agent was confirmed to own
+	// requestID; otherwise a denied caller could delete/close another agent's session.
+	if c.requestID != "" && c.authorized {
 		s.finalizeSession(c.requestID)
 	}
 	c.mu.Lock()
@@ -202,7 +215,7 @@ func (s *Server) StreamLogs(stream logstreamapi.LogStreamService_StreamLogsServe
 
 // processLogStreamLoop processes log data from agent and forwards to HTTP writer
 // It also handles client detachment and timeout.
-func (s *Server) processLogStreamLoop(c *logClient, dataCh <-chan *logstreamapi.LogStreamData, errCh <-chan error) {
+func (s *Server) processLogStreamLoop(c *logClient, agentName string, dataCh <-chan *logstreamapi.LogStreamData, errCh <-chan error) {
 	// Always unblock the recv pump on any return path.
 	defer c.cancelFn()
 	for {
@@ -239,14 +252,37 @@ func (s *Server) processLogStreamLoop(c *logClient, dataCh <-chan *logstreamapi.
 				c.logCtx.Info("LogStream started")
 
 				s.mu.Lock()
-				if sess, ok := s.sessions[c.requestID]; ok {
-					sess.cancelFn = func() {
-						// tag this stream as terminated due to client detach
-						c.setTerminateErr(status.Error(codes.Canceled, "client detached timeout"))
-						c.cancelFn()
-					}
+				sess, ok := s.sessions[c.requestID]
+				if !ok {
+					s.mu.Unlock()
+					c.logCtx.Warn("received data for unknown request; terminating")
+					c.setTerminateErr(status.Error(codes.NotFound, "unknown request id"))
+					return
 				}
+				// The authenticated agent must own this session.
+				if sess.agentName != agentName {
+					sessAgentName := sess.agentName
+					s.mu.Unlock()
+					c.logCtx.WithField("session_agent", sessAgentName).Error("Agent mismap between log session and caller")
+					c.setTerminateErr(status.Error(codes.PermissionDenied, "agent mismap between session and caller"))
+					return
+				}
+				sess.cancelFn = func() {
+					// tag this stream as terminated due to client detach
+					c.setTerminateErr(status.Error(codes.Canceled, "client detached timeout"))
+					c.cancelFn()
+				}
+				// This stream's agent is confirmed to own an existing session for requestID;
+				// only now is it safe for this stream to finalize that session on cleanup.
+				c.authorized = true
 				s.mu.Unlock()
+			} else if c.requestID != "" && msg.GetRequestUuid() != c.requestID {
+				// A stream is bound to a single request UUID at the first message.
+				// Reject any later message carrying a different UUID, so an agent
+				// cannot piggyback access to another session on an already-authorized stream.
+				c.logCtx.WithField("msg_request_id", msg.GetRequestUuid()).Error("Request UUID mismatch within stream")
+				c.setTerminateErr(status.Error(codes.PermissionDenied, "request UUID mismatch within stream"))
+				return
 			}
 
 			if err := s.processLogMessage(c, msg); err != nil {
