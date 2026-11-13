@@ -377,7 +377,13 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 		logCtx.Infof("deletionTimestamp of managed agent changed from nil to non-nil, so deleting Application")
 		// Mark this as a valid deletion so the callback does not treat it as a user-initiated deletion.
 		if m.deletions != nil {
-			if v, ok := updated.Annotations[manager.SourceUIDAnnotation]; ok {
+			// When the update failed, the application on the cluster is still
+			// the one that was read, and updated does not carry it.
+			onCluster := updated
+			if err != nil {
+				onCluster = originalOnCluster
+			}
+			if v, ok := onCluster.Annotations[manager.SourceUIDAnnotation]; ok {
 				m.deletions.MarkExpected(ty.UID(v))
 			}
 		}

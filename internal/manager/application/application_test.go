@@ -31,6 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
+	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 
 	synccommon "github.com/argoproj/argo-cd/gitops-engine/v3/pkg/sync/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -352,6 +354,51 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, updated)
 		require.Empty(t, updated.Finalizers)
+	})
+
+	t.Run("A deletion from the principal is marked as expected", func(t *testing.T) {
+		patchErr := errors.NewInternalError(fmt.Errorf("the patch failed"))
+		tests := []struct {
+			name    string
+			wantErr error
+		}{
+			{name: "when the application was updated"},
+			{name: "when the update failed", wantErr: patchErr},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				existing := &v1alpha1.Application{
+					ObjectMeta: v1.ObjectMeta{
+						Name:        "foobar",
+						Namespace:   "argocd",
+						Annotations: map[string]string{manager.SourceUIDAnnotation: "source-uid"},
+					},
+				}
+				incoming := existing.DeepCopy()
+				incoming.DeletionTimestamp = ptr.To(v1.Now())
+				appC, ai := fakeInformer(t, "", existing)
+				if tt.wantErr != nil {
+					appC.PrependReactor("patch", "applications", func(k8stesting.Action) (bool, runtime.Object, error) {
+						return true, nil, tt.wantErr
+					})
+				}
+				be := application.NewKubernetesBackend(appC, "", ai, true)
+				tracker := manager.NewDeletionTracker()
+				mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent), WithDeletionTracker(tracker))
+				require.NoError(t, err)
+
+				_, err = mgr.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{})
+
+				if tt.wantErr != nil {
+					require.ErrorIs(t, err, tt.wantErr)
+				} else {
+					require.NoError(t, err)
+				}
+				_, err = appC.ArgoprojV1alpha1().Applications("argocd").Get(context.Background(), "foobar", v1.GetOptions{})
+				require.True(t, errors.IsNotFound(err), "the application must be deleted")
+				assert.True(t, tracker.RemoveExpected("source-uid"), "the deletion must be marked as expected")
+			})
+		}
 	})
 }
 
