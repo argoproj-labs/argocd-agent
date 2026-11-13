@@ -1,0 +1,75 @@
+name: Assign
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  issues: write
+
+jobs:
+  assign:
+    name: Assign or unassign the commenter
+    if: ${{ github.event.issue.pull_request == null && (contains(github.event.comment.body, '/assign') || contains(github.event.comment.body, '/unassign')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const command = context.payload.comment.body.trim().split(/\s+/)[0];
+            if (command !== '/assign' && command !== '/unassign') {
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.issue.number;
+            const commenter = context.payload.comment.user.login;
+            const mention = (logins) => logins.map((l) => `@${l}`).join(', ');
+            const readAssignees = async () => {
+              const { data } = await github.rest.issues.get({ owner, repo, issue_number });
+              return (data.assignees || []).map((a) => a.login);
+            };
+
+            const assignees = await readAssignees();
+
+            if (command === '/unassign') {
+              if (!assignees.includes(commenter)) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number,
+                  body: `@${commenter}, you are not assigned to this issue.`,
+                });
+                return;
+              }
+              await github.rest.issues.removeAssignees({
+                owner, repo, issue_number, assignees: [commenter],
+              });
+              return;
+            }
+
+            if (assignees.includes(commenter)) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number,
+                body: `@${commenter}, this issue is already assigned to you.`,
+              });
+              return;
+            }
+            if (assignees.length > 0) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number,
+                body: `@${commenter}, this issue is already assigned to ${mention(assignees)}.`,
+              });
+              return;
+            }
+
+            await github.rest.issues.addAssignees({
+              owner, repo, issue_number, assignees: [commenter],
+            });
+
+            const current = await readAssignees();
+            if (!current.includes(commenter)) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number,
+                body: `@${commenter}, I could not assign this issue to you. GitHub only allows issues to be assigned to users with access to the repository, so a maintainer may need to assign you manually.`,
+              });
+            }
