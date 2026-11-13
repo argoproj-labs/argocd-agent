@@ -44,6 +44,34 @@ type RedisProxyTestSuite struct {
 }
 
 func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
+	appOnPrincipal, appClient, argoEndpoint, sessionToken := suite.setupManagedAppWithArgoCDClient()
+
+	verifyResourceTreeViaRedisProxy(&suite.BaseSuite, appOnPrincipal, appClient, argoEndpoint, sessionToken)
+}
+
+// Test_RedisProxy_ManagedAgent_LiveViewSurvivesAgentRestart verifies that a live resource view that was opened before
+// the agent restarted keeps receiving updates afterwards. The agent keeps its redis subscriptions in memory only, so
+// after a restart the principal has to make Argo CD subscribe again (see #1104).
+func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_LiveViewSurvivesAgentRestart() {
+	appOnPrincipal, appClient, argoEndpoint, sessionToken := suite.setupManagedAppWithArgoCDClient()
+
+	// Open the live view and make sure it works before the restart
+	msgChan, cancelFunc := openResourceTreeStream(&suite.BaseSuite, appOnPrincipal, argoEndpoint, sessionToken)
+	defer cancelFunc()
+	verifyResourceTreeUpdatesOnStream(&suite.BaseSuite, appOnPrincipal, appClient, msgChan)
+
+	fixture.RestartAgent(suite.T(), fixture.AgentManagedName)
+	fixture.CheckReadiness(suite.T(), fixture.AgentManagedName)
+	// The principal only acts on the restart once the agent is connected again
+	fixture.VerifyAgentConnected(suite.T(), fixture.AgentManagedName, suite.ClusterDetails)
+
+	// The same, still open, live view must keep receiving updates from the restarted agent
+	verifyResourceTreeUpdatesOnStream(&suite.BaseSuite, appOnPrincipal, appClient, msgChan)
+}
+
+// setupManagedAppWithArgoCDClient creates a synced and healthy managed guestbook app on the principal and returns it
+// together with an Argo CD API client, the Argo CD server endpoint and a session token for it.
+func (suite *RedisProxyTestSuite) setupManagedAppWithArgoCDClient() (*v1alpha1.Application, application.ApplicationServiceClient, string, string) {
 	requires := suite.Require()
 
 	// Get the Argo server endpoint to use
@@ -77,13 +105,13 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 		},
 	}
 
-	argocdClient, sessionToken, closer, err := createArgoCDAPIClient(suite.Ctx, argoEndpoint, password)
+	argocdClient, sessionToken, sessionCloser, err := createArgoCDAPIClient(suite.Ctx, argoEndpoint, password)
 	requires.NoError(err)
-	defer closer.Close()
+	suite.T().Cleanup(func() { _ = sessionCloser.Close() })
 
-	closer, appClient, err := argocdClient.NewApplicationClient()
+	appCloser, appClient, err := argocdClient.NewApplicationClient()
 	requires.NoError(err)
-	defer closer.Close()
+	suite.T().Cleanup(func() { _ = appCloser.Close() })
 
 	argoClient := fixture.NewArgoClient(argoEndpoint, "admin", password)
 	err = argoClient.Login()
@@ -92,7 +120,7 @@ func (suite *RedisProxyTestSuite) Test_RedisProxy_ManagedAgent_Argo() {
 	err = ensureAppExistsAndIsSyncedAndHealthy(&appOnPrincipal, suite.PrincipalClient, &suite.BaseSuite)
 	requires.NoError(err)
 
-	verifyResourceTreeViaRedisProxy(&suite.BaseSuite, &appOnPrincipal, appClient, argoEndpoint, sessionToken)
+	return &appOnPrincipal, appClient, argoEndpoint, sessionToken
 }
 
 func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
@@ -101,11 +129,23 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 	endpoint string,
 	sessionToken string) {
 
+	msgChan, cancelFunc := openResourceTreeStream(suite, appOnPrincipal, endpoint, sessionToken)
+	defer cancelFunc()
+
+	verifyResourceTreeUpdatesOnStream(suite, appOnPrincipal, appClient, msgChan)
+}
+
+// openResourceTreeStream opens the resource tree event stream of the given app on Argo CD server, which is what the
+// UI's live resource view uses. The returned channel receives the raw events; call the returned function to close the stream.
+func openResourceTreeStream(suite *fixture.BaseSuite,
+	appOnPrincipal *v1alpha1.Application,
+	endpoint string,
+	sessionToken string) (chan string, context.CancelFunc) {
+
 	requires := suite.Require()
 	t := suite.T()
 
 	cancellableContext, cancelFunc := context.WithCancel(suite.Ctx)
-	defer cancelFunc()
 
 	resourceTreeURL := "https://" + endpoint + "/api/v1/stream/applications/" + appOnPrincipal.Name + "/resource-tree?appNamespace=" + appOnPrincipal.Namespace
 
@@ -124,22 +164,45 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 
 	requires.NotNil(msgChan)
 
-	// Find pod on managed-agent client
-	var podList corev1.PodList
-	err := suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
-	requires.NoError(err)
+	return msgChan, cancelFunc
+}
 
-	requires.True(len(podList.Items) == 1, fmt.Sprintf("should (only be) one kustomize-guestbook pod: %v", podList.Items))
+// verifyResourceTreeUpdatesOnStream deletes the guestbook pod on the managed agent cluster and verifies that the
+// replacement pod shows up on the already open resource tree stream msgChan, which only happens if the redis proxy
+// subscription for the app is working.
+func verifyResourceTreeUpdatesOnStream(suite *fixture.BaseSuite,
+	appOnPrincipal *v1alpha1.Application,
+	appClient application.ApplicationServiceClient,
+	msgChan chan string) {
 
-	// Locate guestbook pod
+	requires := suite.Require()
+	t := suite.T()
+
+	// Find pod on managed-agent client. A pod deleted by an earlier call may still be terminating, so wait until
+	// exactly one guestbook pod is not being deleted.
 	var oldPod corev1.Pod
-	for idx := range podList.Items {
-		pod := podList.Items[idx]
-		if strings.Contains(pod.Name, "kustomize-guestbook-ui") {
-			oldPod = pod
-			break
+	requires.Eventually(func() bool {
+		var podList corev1.PodList
+		// Don't fail from inside the condition: testify runs it on its own goroutine. Retry instead.
+		if err := suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{}); err != nil {
+			t.Logf("listing guestbook pods failed, retrying: %v", err)
+			return false
 		}
-	}
+
+		var livePods []corev1.Pod
+		for idx := range podList.Items {
+			pod := podList.Items[idx]
+			if strings.Contains(pod.Name, "kustomize-guestbook-ui") && pod.DeletionTimestamp == nil {
+				livePods = append(livePods, pod)
+			}
+		}
+		if len(livePods) != 1 {
+			t.Logf("expected exactly one kustomize-guestbook pod, found %d", len(livePods))
+			return false
+		}
+		oldPod = livePods[0]
+		return true
+	}, time.Second*60, time.Second*5)
 	requires.NotEmpty(oldPod.Name)
 
 	// Wait for the old pod to appear in the resource tree
@@ -177,19 +240,22 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 	requires.NotNil(tree)
 
 	// Delete pod on managed agent cluster
-	err = suite.ManagedAgentClient.Delete(suite.Ctx, &oldPod, metav1.DeleteOptions{})
+	err := suite.ManagedAgentClient.Delete(suite.Ctx, &oldPod, metav1.DeleteOptions{})
 	requires.NoError(err)
 
-	// Wait for new pod to be created, to replace the old one that was deleted
+	// Wait for new pod to be created, to replace the old one that was deleted. A pod deleted by an
+	// earlier call may still be terminating, so it must not be mistaken for the replacement.
 	var newPod corev1.Pod
 	requires.Eventually(func() bool {
 		var podList corev1.PodList
-		err = suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{})
-		requires.NoError(err)
+		if err := suite.ManagedAgentClient.List(suite.Ctx, "guestbook", &podList, metav1.ListOptions{}); err != nil {
+			t.Logf("listing guestbook pods failed, retrying: %v", err)
+			return false
+		}
 
 		for idx := range podList.Items {
 			pod := podList.Items[idx]
-			if strings.Contains(pod.Name, "kustomize-guestbook-ui") && pod.Name != oldPod.Name {
+			if strings.Contains(pod.Name, "kustomize-guestbook-ui") && pod.Name != oldPod.Name && pod.DeletionTimestamp == nil {
 				newPod = pod
 				break
 			}
@@ -199,22 +265,25 @@ func verifyResourceTreeViaRedisProxy(suite *fixture.BaseSuite,
 
 	}, time.Second*60, time.Second*5)
 
-	// Verify the name of the new pod exists in what has been sent from the channel (this will only be true if redis proxy subscription is working)
-	requires.Eventually(func() bool {
-		for {
-			// drain channel looking for name of new pod
-			select {
-			case msg := <-msgChan:
-				t.Log("Processing message:", msg)
-				if strings.Contains(msg, newPod.Name) {
-					t.Log("new pod name found:", newPod.Name)
-					return true
-				}
-			default:
-				return false
+	// Verify the name of the new pod exists in what has been sent from the channel (this will only be true if redis
+	// proxy subscription is working). The stream producer sends on an unbuffered channel and, after an agent restart,
+	// there can be a backlog of tree snapshots in front of the one we want, so drain until the deadline rather than
+	// giving up as soon as no message is ready.
+	deadline := time.After(60 * time.Second)
+	found := false
+	for !found {
+		select {
+		case msg := <-msgChan:
+			// Each message is a full resource tree snapshot, so only log its size
+			t.Logf("Processing message of %d bytes", len(msg))
+			if strings.Contains(msg, newPod.Name) {
+				t.Log("new pod name found:", newPod.Name)
+				found = true
 			}
+		case <-deadline:
+			requires.Fail("new pod never showed up on the resource tree stream", "pod %s", newPod.Name)
 		}
-	}, time.Second*30, time.Second*5)
+	}
 
 	// Ensure that the pod appears in the new resource tree value returned by Argo CD server
 	tree, err = appClient.ResourceTree(suite.Ctx, &application.ResourcesQuery{
@@ -571,11 +640,15 @@ func streamFromEventSourceNew(ctx context.Context, eventSourceAPIURL string, ses
 	go func() {
 
 		connect := func(client *http.Client, req *http.Request) bool {
+			// Once the context is cancelled the test may already be over, so return without touching t.
 			resp, err := client.Do(req)
 			if err != nil {
+				if ctx.Err() != nil {
+					return true
+				}
 				t.Logf("Error performing request: %v", err)
 
-				return strings.Contains(err.Error(), "context canceled")
+				return false
 			}
 
 			defer resp.Body.Close()
@@ -584,19 +657,22 @@ func streamFromEventSourceNew(ctx context.Context, eventSourceAPIURL string, ses
 			for {
 				line, err := reader.ReadString('\n')
 				if err != nil {
+					if ctx.Err() != nil {
+						return true
+					}
 					t.Logf("Error reading from stream: %v", err)
 
-					return strings.Contains(err.Error(), "context canceled")
+					return false
 				}
 
 				if after, ok := strings.CutPrefix(line, "data:"); ok {
 					data := strings.TrimSpace(after)
+					// The send must stay cancellable: once the test stops reading, a plain send would block
+					// this goroutine (and the response body) until the process exits.
 					select {
 					case <-ctx.Done():
-						t.Log("Context is complete")
 						return true
-					default:
-						msgChan <- data
+					case msgChan <- data:
 					}
 
 				}
@@ -628,11 +704,9 @@ func streamFromEventSourceNew(ctx context.Context, eventSourceAPIURL string, ses
 			contextCancelled := connect(client, req)
 
 			if contextCancelled {
-				t.Log("context cancelled on event source stream")
 				return
-			} else {
-				time.Sleep(250 * time.Millisecond)
 			}
+			time.Sleep(250 * time.Millisecond)
 		}
 
 	}()
