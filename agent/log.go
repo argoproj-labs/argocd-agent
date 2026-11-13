@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // processIncomingContainerLogRequest handles container log requests from Principal
@@ -176,7 +177,11 @@ func (a *Agent) createKubernetesLogStream(ctx context.Context, logReq *event.Con
 			logOptions.SinceTime = &mt
 		}
 	}
-	request := a.kubeClient.Clientset.CoreV1().Pods(logReq.Namespace).GetLogs(logReq.PodName, logOptions)
+	kc, err := a.kubeClientFor(logReq.Impersonate, schema.GroupResource{Resource: "pods"}, logReq.PodName)
+	if err != nil {
+		return nil, err
+	}
+	request := kc.Clientset.CoreV1().Pods(logReq.Namespace).GetLogs(logReq.PodName, logOptions)
 	return request.Stream(ctx)
 }
 

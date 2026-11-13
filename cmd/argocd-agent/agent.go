@@ -77,6 +77,7 @@ func NewAgentRunCommand() *cobra.Command {
 		redisPassword        string
 		redisCredsDirPath    string
 		enableResourceProxy  bool
+		proxyImpersonation   bool
 
 		// Time interval for agent to principal ping
 		// Ex: "30m", "1h" or "1h20m10s". Valid time units are "s", "m", "h".
@@ -374,6 +375,7 @@ func NewAgentRunCommand() *cobra.Command {
 			}
 
 			agentOpts = append(agentOpts, agent.WithEnableResourceProxy(enableResourceProxy))
+			agentOpts = append(agentOpts, agent.WithEnableResourceProxyImpersonation(proxyImpersonation))
 			agentOpts = append(agentOpts, agent.WithCacheRefreshInterval(cacheRefreshInterval))
 			agentOpts = append(agentOpts, agent.WithInformerSyncTimeout(informerSyncTimeout))
 			agentOpts = append(agentOpts, agent.WithApplicationInformerEventBufferInterval(bufferK8sInformerEvents))
@@ -524,6 +526,9 @@ func NewAgentRunCommand() *cobra.Command {
 	command.Flags().BoolVar(&enableResourceProxy, "enable-resource-proxy",
 		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_RESOURCE_PROXY", true),
 		"Enable resource proxy")
+	command.Flags().BoolVar(&proxyImpersonation, "enable-resource-proxy-impersonation",
+		env.BoolWithDefault("ARGOCD_AGENT_ENABLE_RESOURCE_PROXY_IMPERSONATION", false),
+		"Perform resource proxy requests on behalf of the service account requested by the principal")
 	command.Flags().DurationVar(&cacheRefreshInterval, "cache-refresh-interval",
 		env.DurationWithDefault("ARGOCD_AGENT_CACHE_REFRESH_INTERVAL", nil, 10*time.Second),
 		"Interval to refresh cluster cache info in principal")

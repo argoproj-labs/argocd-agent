@@ -41,3 +41,11 @@ Configuration overview
 - Agent mode: {{ .Values.agentMode }}
 - Remote server: {{ .Values.server }}:{{ .Values.serverPort }}
 - Redis address: {{ .Values.redisAddress }}
+{{- if and .Values.enableResourceProxyImpersonation (not (and .Values.rbac.create .Values.rbac.createClusterRole)) }}
+
+Resource proxy impersonation
+----------------------------
+Impersonation is enabled, but this release does not grant the agent the
+impersonate verb on serviceaccounts, because the ClusterRole is not created.
+Requests that ask for a service account fail until you grant it yourself.
+{{- end }}

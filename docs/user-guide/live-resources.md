@@ -347,6 +347,73 @@ subjects:
   namespace: default  # Agent's namespace
 ```
 
+## Per-tenant isolation with impersonation
+
+By default the agent performs every resource proxy request with its own service account. That account needs the permissions of all tenants combined, so the Kubernetes API does not isolate tenants from each other.
+
+Since version 3.5, Argo CD [impersonates](https://argo-cd.readthedocs.io/en/latest/operator-manual/app-sync-using-impersonation/) the service account configured in the `destinationServiceAccounts` of an application's `AppProject` for operations triggered by users, such as viewing resources, events and logs, or running resource actions. With impersonation enabled on the agent, the agent performs these requests as that service account on the workload cluster.
+
+### Requirements
+
+1. Impersonation is enabled in Argo CD (`application.sync.impersonation.enabled: "true"` in `argocd-cm`), and the `AppProject` of the application defines `destinationServiceAccounts`. For managed agents, see [AppProjects in managed mode](managed-agent/appprojects-managed-mode.md) for how the entries are matched to the agent.
+2. The agent runs with impersonation enabled: `--enable-resource-proxy-impersonation`, or `enableResourceProxyImpersonation: true` in the Helm chart. See the [agent reference](../configuration/reference/agent.md#enable-resource-proxy-impersonation).
+3. The agent is allowed to impersonate service accounts, see below.
+4. The service accounts named in `destinationServiceAccounts` exist on the workload cluster and have the permissions listed below.
+5. The principal and the agents run a release that includes this feature. The Helm chart installs the agent version in its `appVersion`, so check that it is new enough before you turn the option on.
+
+### Agent permissions
+
+The agent needs the `impersonate` verb on `serviceaccounts`. The Helm chart adds it to the agent's `ClusterRole` when `enableResourceProxyImpersonation` is `true`. With the Kustomize manifests, add the rule yourself:
+
+```yaml
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - impersonate
+```
+
+Granted through a `ClusterRole`, the agent can impersonate any service account in the cluster. Kubernetes checks the `impersonate` permission against the namespace of the service account, so you can instead grant it with a `Role` and `RoleBinding` in each tenant namespace.
+
+The chart does not create those per-namespace roles. Setting `rbac.createClusterRole` to `false` removes the whole `ClusterRole`, including the rules the agent needs for destination-based mapping, so only do it if you manage the cluster-scoped permissions of the agent yourself. With it set to `false` the chart grants no `impersonate` permission at all, and requests that ask for a service account fail until you grant it.
+
+### Service account permissions
+
+The agent performs the request as the service account, so the account needs the permissions of the operation. These are the ones Argo CD documents, with one addition for the agent: it checks that the target is managed by Argo CD before it changes or deletes it, which takes a `get` as the same service account.
+
+| Operation | Required verbs |
+|---|---|
+| Get resource | `get` |
+| Create resource | `create` |
+| Patch resource | `get`, `patch` |
+| Delete resource | `get`, `delete` |
+| List resource events | `list` on `events` |
+| View pod logs | `get` on `pods/log` |
+| Run resource action | `get`, `create`, `patch` |
+
+Argo CD's own documentation also lists `get` on `pods` for viewing logs. The agent reads only `pods/log`.
+
+### Behavior
+
+- A request that asks for a service account is **never** performed with the agent's own identity instead. If the agent has impersonation disabled, or the service account is not a well-formed `system:serviceaccount:<namespace>:<name>`, the agent refuses it, and resource requests get `403 Forbidden`. If the agent cannot build the client for the service account, they get `500 Internal Server Error` instead. For pod logs the principal has already started the response when the agent answers, so Argo CD shows an empty log with status `200`, and the reason is only in the logs of the agent and the principal.
+- The principal refuses requests that ask for impersonation of anything else, such as groups, a UID or extra attributes, with `403 Forbidden`.
+- A request that asks for no service account, for example because the application's project has no matching `destinationServiceAccounts` entry and enforcement is off, is performed with the agent's own identity as before.
+- Whether a service account is required is decided by Argo CD (`application.sync.impersonation.enforced`), not by the agent.
+- API discovery is performed as the service account as well. Kubernetes allows it to every authenticated user by default, so the service accounts need no extra permission for it.
+- The agent resolves which resources own the target, to decide whether it is managed by Argo CD, with its own identity, because the service account may not be allowed to read the owners.
+
+### Limitations
+
+- **Web terminal**: Argo CD does not impersonate the web terminal (exec). It is performed with the agent's own identity, as it is for Argo CD without agents. Control access to it with the `exec` permission of Argo CD's RBAC. Should a request for the web terminal ever carry a service account, the principal refuses it with `403 Forbidden` instead of performing it with the agent's identity.
+- **Live state cache**: the live state that Argo CD keeps in its cache and shows in the resource tree is not read through impersonation.
+
+### Upgrading
+
+- The principal only accepts agents of its own version, so principal and agents are always upgraded together and an older agent never receives a request that asks for a service account.
+- The principal now refuses with `403 Forbidden` requests whose `Impersonate-*` headers it cannot honor: groups, a UID, extra attributes, repeated headers, or a user that is not a service account. It previously dropped these headers and let the agent perform the request with its own identity.
+- With impersonation disabled on the agent, which is the default, requests that ask for a service account are now refused. They were previously performed with the agent's own identity. This affects setups where Argo CD impersonation is enabled and a `destinationServiceAccounts` entry matches the agent's resource proxy URL.
+
 ## Supported Operations
 
 The resource proxy supports the following Kubernetes API operations:

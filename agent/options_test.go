@@ -195,3 +195,32 @@ func Test_WithInformerSyncTimeout(t *testing.T) {
 		assert.Contains(t, err.Error(), "informer sync timeout must be greater than 0")
 	})
 }
+
+func Test_WithEnableResourceProxyImpersonation(t *testing.T) {
+	newTestAgent := func(t *testing.T, opts ...AgentOption) *Agent {
+		t.Helper()
+		kubec := fakekube.NewKubernetesFakeClientWithApps("argocd")
+		remote, err := client.NewRemote("127.0.0.1", 8080)
+		require.NoError(t, err)
+		opts = append([]AgentOption{
+			WithRemote(remote),
+			WithCacheRefreshInterval(10 * time.Second),
+			WithInformerSyncTimeout(10 * time.Second),
+		}, opts...)
+		a, err := NewAgent(context.TODO(), kubec, "argocd", opts...)
+		require.NoError(t, err)
+		return a
+	}
+
+	t.Run("disabled by default", func(t *testing.T) {
+		assert.False(t, newTestAgent(t).enableResourceProxyImpersonation)
+	})
+
+	t.Run("can be enabled", func(t *testing.T) {
+		assert.True(t, newTestAgent(t, WithEnableResourceProxyImpersonation(true)).enableResourceProxyImpersonation)
+	})
+
+	t.Run("can be disabled explicitly", func(t *testing.T) {
+		assert.False(t, newTestAgent(t, WithEnableResourceProxyImpersonation(false)).enableResourceProxyImpersonation)
+	})
+}
