@@ -316,6 +316,10 @@ func (a *Agent) updateManagedApplicationIdentity(incomingApp *v1alpha1.Applicati
 
 func (a *Agent) syncManagedApplication(logCtx *logrus.Entry, incomingApp *v1alpha1.Application, identity *application.IdentityCompareResult, principalUID string) error {
 	if identity == nil || !identity.Exists {
+		if incomingApp.DeletionTimestamp != nil {
+			logCtx.Debug("Application is being deleted and does not exist locally. Not creating")
+			return nil
+		}
 		logCtx.Debug("Application does not exist locally. Creating")
 		if _, err := a.createApplication(incomingApp, principalUID); err != nil {
 			return fmt.Errorf("could not create incoming app: %w", err)

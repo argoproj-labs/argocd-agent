@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 
 	synccommon "github.com/argoproj/argo-cd/gitops-engine/v3/pkg/sync/common"
@@ -354,6 +355,188 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, updated)
 		require.Empty(t, updated.Finalizers)
+	})
+
+	t.Run("A deletion from the principal is marked as expected", func(t *testing.T) {
+		patchErr := errors.NewInternalError(fmt.Errorf("the patch failed"))
+		tests := []struct {
+			name     string
+			patchErr error
+		}{
+			{name: "when the application was updated"},
+			{name: "when the update failed", patchErr: patchErr},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				existing := &v1alpha1.Application{
+					ObjectMeta: v1.ObjectMeta{
+						Name:        "foobar",
+						Namespace:   "argocd",
+						Annotations: map[string]string{manager.SourceUIDAnnotation: "source-uid"},
+					},
+				}
+				incoming := existing.DeepCopy()
+				incoming.DeletionTimestamp = ptr.To(v1.Now())
+				appC, ai := fakeInformer(t, "", existing)
+				if tt.patchErr != nil {
+					appC.PrependReactor("patch", "applications", func(k8stesting.Action) (bool, runtime.Object, error) {
+						return true, nil, tt.patchErr
+					})
+				}
+				be := application.NewKubernetesBackend(appC, "", ai, true)
+				tracker := manager.NewDeletionTracker()
+				mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent), WithDeletionTracker(tracker))
+				require.NoError(t, err)
+
+				got, err := mgr.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{})
+
+				require.NoError(t, err, "a deletion that went through is not an error, whatever happened to the update before it")
+				require.NotNil(t, got)
+				assert.Nil(t, got.DeletionTimestamp, "the result is the application as it was on the cluster, not the incoming one")
+				_, err = appC.ArgoprojV1alpha1().Applications("argocd").Get(context.Background(), "foobar", v1.GetOptions{})
+				require.True(t, errors.IsNotFound(err), "the application must be deleted")
+				assert.True(t, tracker.RemoveExpected("source-uid"), "the deletion must be marked as expected")
+			})
+		}
+	})
+
+	t.Run("A failed update that has finalizers to remove", func(t *testing.T) {
+		const finalizer = "resources-finalizer.argocd.argoproj.io"
+		tests := []struct {
+			name               string
+			patchErr           error
+			incomingFinalizers []string
+			wantRetry          bool
+		}{
+			{
+				name:      "keeps the application for a retry when the error is worth retrying",
+				patchErr:  errors.NewInternalError(fmt.Errorf("the patch failed")),
+				wantRetry: true,
+			},
+			{
+				name:               "keeps the application for a retry when a finalizer is replaced",
+				patchErr:           errors.NewInternalError(fmt.Errorf("the patch failed")),
+				incomingFinalizers: []string{"other-finalizer"},
+				wantRetry:          true,
+			},
+			{
+				name:               "does not hold back the deletion when the finalizers do not change",
+				patchErr:           errors.NewInternalError(fmt.Errorf("the patch failed")),
+				incomingFinalizers: []string{finalizer},
+			},
+			{
+				name:     "does not hold back the deletion when the error is not worth retrying",
+				patchErr: errors.NewForbidden(schema.GroupResource{Resource: "applications"}, "foobar", fmt.Errorf("denied")),
+			},
+			{
+				name:     "does not hold back the deletion when the update is invalid",
+				patchErr: errors.NewInvalid(schema.GroupKind{Group: "argoproj.io", Kind: "Application"}, "foobar", nil),
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				existing := &v1alpha1.Application{
+					ObjectMeta: v1.ObjectMeta{
+						Name:        "foobar",
+						Namespace:   "argocd",
+						Annotations: map[string]string{manager.SourceUIDAnnotation: "source-uid"},
+						Finalizers:  []string{finalizer},
+					},
+				}
+				incoming := existing.DeepCopy()
+				incoming.Finalizers = tt.incomingFinalizers
+				incoming.DeletionTimestamp = ptr.To(v1.Now())
+				appC, ai := fakeInformer(t, "", existing)
+				appC.PrependReactor("patch", "applications", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.patchErr
+				})
+				be := application.NewKubernetesBackend(appC, "", ai, true)
+				tracker := manager.NewDeletionTracker()
+				mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent), WithDeletionTracker(tracker))
+				require.NoError(t, err)
+
+				_, err = mgr.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{})
+
+				_, getErr := appC.ArgoprojV1alpha1().Applications("argocd").Get(context.Background(), "foobar", v1.GetOptions{})
+				if tt.wantRetry {
+					require.ErrorIs(t, err, tt.patchErr)
+					require.NoError(t, getErr, "the application must stay so that the retry removes its finalizers")
+					assert.False(t, tracker.RemoveExpected("source-uid"), "nothing was deleted, so nothing is expected")
+					return
+				}
+				require.NoError(t, err)
+				require.True(t, errors.IsNotFound(getErr), "the application must be deleted")
+				assert.True(t, tracker.RemoveExpected("source-uid"), "the deletion must be marked as expected")
+			})
+		}
+	})
+
+	t.Run("A failed update that was written anyway marks the source UID it wrote", func(t *testing.T) {
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:        "foobar",
+				Namespace:   "argocd",
+				Annotations: map[string]string{manager.SourceUIDAnnotation: "source-uid"},
+			},
+		}
+		incoming := existing.DeepCopy()
+		incoming.DeletionTimestamp = ptr.To(v1.Now())
+		appC, ai := fakeInformer(t, "", existing)
+		// The write goes through, but the answer is lost.
+		appC.PrependReactor("patch", "applications", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			if _, _, err := k8stesting.ObjectReaction(appC.Tracker())(action); err != nil {
+				return true, nil, err
+			}
+			return true, nil, errors.NewTimeoutError("timed out", 1)
+		})
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		tracker := manager.NewDeletionTracker()
+		mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent), WithDeletionTracker(tracker))
+		require.NoError(t, err)
+
+		_, err = mgr.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{SourceUID: "new-source-uid"})
+
+		require.NoError(t, err)
+		gets := 0
+		for _, action := range appC.Actions() {
+			if action.Matches("get", "applications") {
+				gets++
+			}
+		}
+		assert.Equal(t, 2, gets, "the second read must go to the cluster, the informer cache may be stale")
+		_, err = appC.ArgoprojV1alpha1().Applications("argocd").Get(context.Background(), "foobar", v1.GetOptions{})
+		require.True(t, errors.IsNotFound(err), "the application must be deleted")
+		assert.True(t, tracker.RemoveExpected("new-source-uid"), "the deleted application carries the new source UID")
+		assert.False(t, tracker.RemoveExpected("source-uid"), "the old source UID is not on the cluster anymore")
+	})
+
+	t.Run("A deletion that fails is reported", func(t *testing.T) {
+		existing := &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:        "foobar",
+				Namespace:   "argocd",
+				Annotations: map[string]string{manager.SourceUIDAnnotation: "source-uid"},
+			},
+		}
+		incoming := existing.DeepCopy()
+		incoming.DeletionTimestamp = ptr.To(v1.Now())
+		deleteErr := errors.NewInternalError(fmt.Errorf("the delete failed"))
+		appC, ai := fakeInformer(t, "", existing)
+		appC.PrependReactor("patch", "applications", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.NewInternalError(fmt.Errorf("the patch failed"))
+		})
+		appC.PrependReactor("delete", "applications", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, deleteErr
+		})
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		mgr, err := NewApplicationManager(be, "argocd", WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent), WithDeletionTracker(manager.NewDeletionTracker()))
+		require.NoError(t, err)
+
+		_, err = mgr.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{})
+
+		require.ErrorIs(t, err, deleteErr)
+		_, err = appC.ArgoprojV1alpha1().Applications("argocd").Get(context.Background(), "foobar", v1.GetOptions{})
+		require.NoError(t, err, "the application must still be there so that the event is retried")
 	})
 }
 
@@ -2083,7 +2266,7 @@ func Test_ApplicationManager_UpdateManagedApp_Details(t *testing.T) {
 		})
 
 		for _, patching := range []bool{false, true} {
-			t.Run(fmt.Sprintf("a failed write is returned and the application still deleted, patch support: %t", patching), func(t *testing.T) {
+			t.Run(fmt.Sprintf("a failed write does not stop the application from being deleted, patch support: %t", patching), func(t *testing.T) {
 				be, m := newMockedAppManager(t, managedAgentOpts()...)
 				incoming := newExisting()
 				incoming.DeletionTimestamp = &now
@@ -2094,12 +2277,15 @@ func Test_ApplicationManager_UpdateManagedApp_Details(t *testing.T) {
 				} else {
 					be.EXPECT().Update(mock.Anything, mock.Anything).Return(nil, errBackend).Once()
 				}
+				// Reading the application again fails too, so the one read first is used.
+				be.EXPECT().Get(mock.Anything, "app", testNamespace).Return(nil, errBackend).Once()
 				be.EXPECT().Delete(mock.Anything, "app", testNamespace, foreground).Return(nil).Once()
 
 				got, err := m.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{})
 
-				require.ErrorIs(t, err, errBackend)
-				assert.Nil(t, got)
+				require.NoError(t, err)
+				require.NotNil(t, got)
+				assert.Equal(t, "app", got.Name)
 				assert.Zero(t, m.ObservedResources.Len())
 			})
 		}
