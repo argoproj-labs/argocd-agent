@@ -114,6 +114,19 @@ func WithCacheRefreshInterval(interval time.Duration) AgentOption {
 		return nil
 	}
 }
+
+// WithResyncInterval sets the interval at which the agent will periodically
+// resync its resources with the principal. An interval of 0 disables
+// periodic resync.
+func WithResyncInterval(interval time.Duration) AgentOption {
+	return func(o *Agent) error {
+		if interval < 0 {
+			return fmt.Errorf("resync interval must be non-negative")
+		}
+		o.resyncInterval = interval
+		return nil
+	}
+}
 func WithApplicationInformerEventBufferInterval(interval time.Duration) AgentOption {
 	return func(o *Agent) error {
 		if interval < 0 {

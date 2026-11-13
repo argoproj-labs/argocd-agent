@@ -195,3 +195,36 @@ func Test_WithInformerSyncTimeout(t *testing.T) {
 		assert.Contains(t, err.Error(), "informer sync timeout must be greater than 0")
 	})
 }
+
+func Test_WithResyncInterval(t *testing.T) {
+	newTestAgent := func(t *testing.T, opts ...AgentOption) (*Agent, error) {
+		t.Helper()
+		kubec := fakekube.NewKubernetesFakeClientWithApps("argocd")
+		remote, err := client.NewRemote("127.0.0.1", 8080)
+		require.NoError(t, err)
+		baseOpts := []AgentOption{
+			WithRemote(remote),
+			WithCacheRefreshInterval(10 * time.Second),
+			WithInformerSyncTimeout(10 * time.Second),
+		}
+		return NewAgent(context.TODO(), kubec, "argocd", append(baseOpts, opts...)...)
+	}
+
+	t.Run("positive interval is accepted", func(t *testing.T) {
+		a, err := newTestAgent(t, WithResyncInterval(5*time.Minute))
+		require.NoError(t, err)
+		assert.Equal(t, 5*time.Minute, a.resyncInterval)
+	})
+
+	t.Run("zero interval disables periodic resync", func(t *testing.T) {
+		a, err := newTestAgent(t, WithResyncInterval(0))
+		require.NoError(t, err)
+		assert.Zero(t, a.resyncInterval)
+	})
+
+	t.Run("negative interval returns error", func(t *testing.T) {
+		_, err := newTestAgent(t, WithResyncInterval(-time.Second))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "resync interval must be non-negative")
+	})
+}
