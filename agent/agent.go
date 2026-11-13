@@ -78,6 +78,9 @@ type Agent struct {
 	// infStopCh is not currently used
 	infStopCh chan struct{}
 	connected atomic.Bool
+	// streamOpen is true while an event stream with the principal is up. The
+	// connection alone can outlive its stream.
+	streamOpen atomic.Bool
 	// syncCh is not currently used
 	syncCh           chan bool
 	remote           *client.Remote
@@ -753,7 +756,7 @@ func (a *Agent) logInformerEventBuffer() *logrus.Entry {
 
 func (a *Agent) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
-	if a.IsConnected() {
+	if a.IsConnected() && a.streamOpen.Load() {
 		w.WriteHeader(http.StatusOK)
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)

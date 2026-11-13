@@ -227,6 +227,7 @@ func Test_Healthz(t *testing.T) {
 
 	t.Run("Healthz when agent is connected", func(t *testing.T) {
 		agent.SetConnected(true)
+		agent.streamOpen.Store(true)
 		testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			agent.healthzHandler(w, r)
 		}))
@@ -236,6 +237,21 @@ func Test_Healthz(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Equal(t, http.StatusOK, resp.StatusCode)
+		defer resp.Body.Close()
+	})
+
+	t.Run("Healthz when the connection is up but no stream is open", func(t *testing.T) {
+		agent.SetConnected(true)
+		agent.streamOpen.Store(false)
+		testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			agent.healthzHandler(w, r)
+		}))
+		defer testServer.Close()
+
+		resp, err := http.Get(testServer.URL + "/healthz")
+		require.NoError(t, err)
+
+		require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 		defer resp.Body.Close()
 	})
 
