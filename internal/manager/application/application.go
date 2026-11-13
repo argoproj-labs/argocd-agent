@@ -614,7 +614,13 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 		if existingRefresh && !incomingRefresh {
 			patch = append(patch, jsondiff.Operation{Type: "remove", Path: "/metadata/annotations/argocd.argoproj.io~1refresh"})
 		} else if !existingRefresh && incomingRefresh {
-			patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations/argocd.argoproj.io~1refresh", Value: refresh})
+			if len(existing.Annotations) == 0 {
+				// An add below /metadata/annotations is rejected when the
+				// application has no annotations, so the map is added instead.
+				patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations", Value: map[string]string{"argocd.argoproj.io/refresh": refresh}})
+			} else {
+				patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations/argocd.argoproj.io~1refresh", Value: refresh})
+			}
 		}
 
 		// If there is no status yet on our application (this happens when the
