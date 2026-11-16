@@ -424,9 +424,25 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		}
 	}
 
+	// Register this client as the agent's active one, and preempt whichever
+	// client it replaces.
+	//
+	// The new client must be registered before the previous one is canceled, so
+	// that the previous client's onDisconnect sees that it is no longer the
+	// active client and leaves this connection's status alone.
 	s.activeClientsMu.Lock()
+	previous := s.activeClients[c.agentName]
 	s.activeClients[c.agentName] = c
 	s.activeClientsMu.Unlock()
+
+	if previous != nil && previous != c {
+		// An agent is only ever expected to hold one Subscribe stream.
+		previous.logCtx.WithFields(logrus.Fields{
+			"previous_client_addr": grpcutil.AddressFromContext(previous.ctx),
+			"new_client_addr":      grpcutil.AddressFromContext(subs.Context()),
+		}).Warn("Agent connected while a previous stream was still active, disconnecting the previous stream")
+		previous.cancelFn()
+	}
 
 	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
 
@@ -521,16 +537,24 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	s.onDisconnect(c)
 
 	s.activeClientsMu.Lock()
-	if s.activeClients[c.agentName] == c {
+	wasActiveClient := s.activeClients[c.agentName] == c
+	if wasActiveClient {
 		delete(s.activeClients, c.agentName)
 	}
 	s.activeClientsMu.Unlock()
 
 	if s.metrics != nil {
 		// decrease counter when an agent is disconnected with principal
+		// Every Subscribe increments this once, so every Subscribe has to
+		// decrement it once, preempted or not.
 		s.metrics.AgentConnected.Dec()
-		// remove connection time of agent
-		metrics.DeleteAgentConnectionTime(c.agentName)
+
+		// Remove connection time of agent. This is keyed by agent name alone,
+		// so a preempted client must not remove it: the entry now belongs to
+		// the connection that replaced this one.
+		if wasActiveClient {
+			metrics.DeleteAgentConnectionTime(c.agentName)
+		}
 	}
 
 	return nil

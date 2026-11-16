@@ -273,10 +273,24 @@ func (ew *EventWriter) SendWaitingEvents(ctx context.Context) {
 			})
 
 			for _, resourceID := range resourceIDs {
-				ew.sendEvent(resourceID)
+				// Check for cancellation between every event instead of only once per pass.
+				select {
+				case <-ctx.Done():
+					logCtx.Info("Shutting down event writer")
+					return
+				default:
+					ew.sendEvent(resourceID)
+				}
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+
+		// Wait before the next pass, but wake up immediately on cancellation.
+		select {
+		case <-ctx.Done():
+			logCtx.Info("Shutting down event writer")
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }
 

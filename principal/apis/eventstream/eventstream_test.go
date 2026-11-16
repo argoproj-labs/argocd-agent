@@ -30,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream/mock"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -67,8 +68,13 @@ func (f *fakeStatusUpdater) statusesFor(name string) []v1alpha1.ConnectionStatus
 	return out
 }
 
+// testMetrics is shared by every test in this package: PrincipalMetrics
+// registers with the default prometheus registerer, which panics on a second
+// registration of the same collector.
+var testMetrics = metrics.NewPrincipalMetrics()
+
 func Test_Subscribe(t *testing.T) {
-	metric := metrics.NewPrincipalMetrics()
+	metric := testMetrics
 	cluster := &cluster.Manager{}
 
 	t.Run("Test send to subcription stream", func(t *testing.T) {
@@ -602,4 +608,95 @@ func TestOnDisconnectConnectionStatus(t *testing.T) {
 
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
+}
+
+// An agent that connects while the principal still holds its previous stream
+// must preempt that previous client.
+func TestSubscribe_PreemptsPreviousClientForSameAgent(t *testing.T) {
+	statusUpdater := &fakeStatusUpdater{}
+	qs := queue.NewSendRecvQueues()
+	qs.Create("agent-p")
+	s := NewServer(qs, event.NewEventWritersMap(), testMetrics, statusUpdater)
+
+	connectedBefore := testutil.ToFloat64(testMetrics.AgentConnected)
+
+	// Both streams belong to the same agent, as they would on a reconnect.
+	newStream := func() (*mock.MockEventServer, chan struct{}) {
+		gate := make(chan struct{})
+		st := &mock.MockEventServer{
+			AgentName: "agent-p",
+			AgentMode: string(types.AgentModeManaged),
+		}
+		st.AddRecvHook(func(_ *mock.MockEventServer) error {
+			<-gate
+			return io.EOF
+		})
+		return st, gate
+	}
+
+	activeClient := func() *client {
+		s.activeClientsMu.Lock()
+		defer s.activeClientsMu.Unlock()
+		return s.activeClients["agent-p"]
+	}
+
+	first, firstGate := newStream()
+	firstReturned := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(first)
+		close(firstReturned)
+	}()
+
+	var firstClient *client
+	require.Eventually(t, func() bool {
+		firstClient = activeClient()
+		return firstClient != nil
+	}, time.Second, 10*time.Millisecond)
+
+	// The agent reconnects while the first stream is still held.
+	second, secondGate := newStream()
+	secondReturned := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(second)
+		close(secondReturned)
+	}()
+
+	// The previous client must be canceled, so its goroutines (including its
+	// SendWaitingEvents loop) wind down.
+	select {
+	case <-firstClient.ctx.Done():
+	case <-time.After(3 * time.Second):
+		close(firstGate)
+		close(secondGate)
+		t.Fatal("a reconnect did not cancel the previous client within 3s")
+	}
+
+	// Releasing the first stream's Recv lets its Subscribe return.
+	close(firstGate)
+	select {
+	case <-firstReturned:
+	case <-time.After(3 * time.Second):
+		close(secondGate)
+		t.Fatal("the preempted Subscribe did not return within 3s")
+	}
+
+	// A preempted client must not take the agent's bookkeeping down with it:
+	// the agent is still connected, on the new stream.
+	assert.Equal(t, connectedBefore+1, testutil.ToFloat64(testMetrics.AgentConnected),
+		"the preempted connection must decrement the gauge it incremented, and no more")
+	assert.True(t, metrics.AgentConnectionTimeTracked("agent-p"),
+		"a preempted client must not delete the connection time of the connection that replaced it")
+
+	// The newest client stays registered and connected.
+	secondClient := activeClient()
+	require.NotNil(t, secondClient)
+	assert.NotSame(t, firstClient, secondClient)
+	assert.NoError(t, secondClient.ctx.Err(), "the new client must not be canceled by the preemption")
+
+	// Preempting the previous client must not report the agent as disconnected:
+	// it is connected, on the new stream.
+	assert.NotContains(t, statusUpdater.statusesFor("agent-p"), v1alpha1.ConnectionStatusFailed)
+
+	close(secondGate)
+	<-secondReturned
 }
