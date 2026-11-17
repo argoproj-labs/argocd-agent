@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net/http"
 	"path"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -182,4 +184,63 @@ func Test_Serve(t *testing.T) {
 	assert.Equal(t, v.Version, s.version.QualifiedVersion())
 	err = s.Shutdown()
 	assert.NoError(t, err)
+}
+
+func Test_ServeGRPCWithWebSocket(t *testing.T) {
+	for _, plaintext := range []bool{false, true} {
+		t.Run(fmt.Sprintf("plaintext=%t", plaintext), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			opts := []ServerOption{
+				WithGeneratedTokenSigningKey(),
+				WithListenerPort(0),
+				WithListenerAddress("127.0.0.1"),
+				WithWebSocket(true),
+				WithRedisProxyDisabled(),
+			}
+			scheme := "https"
+			var transportCreds credentials.TransportCredentials = credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
+			if plaintext {
+				opts = append(opts, WithInsecurePlaintext())
+				scheme = "http"
+				transportCreds = insecure.NewCredentials()
+			} else {
+				opts = append(opts, WithGeneratedTLS("localhost"))
+			}
+			s, err := NewServer(ctx, kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace, opts...)
+			require.NoError(t, err)
+			t.Cleanup(s.ctxCancel)
+			errch := make(chan error, 1)
+			require.NoError(t, s.serveGRPC(ctx, nil, errch))
+			t.Cleanup(func() {
+				_ = s.listener.l.Close()
+				s.grpcServer.Stop()
+			})
+
+			// HTTP/1 requests and native gRPC must share the same listener.
+			transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+			defer transport.CloseIdleConnections()
+			client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+			resp, err := client.Get(scheme + "://" + s.listener.Address() + "/")
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+			assert.Equal(t, 1, resp.ProtoMajor)
+
+			conn, err := grpc.NewClient(s.listener.Address(), grpc.WithTransportCredentials(transportCreds))
+			require.NoError(t, err)
+			defer conn.Close()
+			v, err := versionapi.NewVersionClient(conn).Version(ctx, &versionapi.VersionRequest{})
+			require.NoError(t, err)
+			assert.Equal(t, s.version.QualifiedVersion(), v.Version)
+
+			if !plaintext {
+				plaintextConn, err := grpc.NewClient(s.listener.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+				require.NoError(t, err)
+				defer plaintextConn.Close()
+				_, err = versionapi.NewVersionClient(plaintextConn).Version(ctx, &versionapi.VersionRequest{})
+				require.Error(t, err, "TLS listener must reject plaintext gRPC")
+			}
+		})
+	}
 }
