@@ -178,6 +178,21 @@ data:
   # Applied at runtime: editing this key takes effect without a restart.
   # Default: none
   principal.log.full-detail: ""
+  # principal.application.annotations.allow-list: Comma-separated list of glob
+  # patterns for Application annotations that should be transferred between the
+  # principal and its agents, in addition to the ones argocd-agent handles
+  # itself (notice.argocd.argoproj.io/*, manifest-generate-paths,
+  # skip-reconcile and refresh). Annotations that are not matched are left
+  # untouched on both sides and are not sent in events.
+  # Patterns that would capture an annotation argocd-agent depends on, or one
+  # that is only meaningful on a child Application (sync-wave, hook,
+  # sync-options, compare-options, hook-delete-policy,
+  # ignore-resource-updates), are rejected and logged.
+  # The agents must be configured with the same list.
+  # Example: "argocd-image-updater.argoproj.io/*"
+  # Applied at runtime: editing this key takes effect without a restart.
+  # Default: ""
+  principal.application.annotations.allow-list: ""
   # principal.redis.server.address: The address of the Redis server.
   # Default: "argocd-redis:6379"
   principal.redis.server.address: "argocd-redis:6379"

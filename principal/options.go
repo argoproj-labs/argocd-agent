@@ -35,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/blocklist"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/spire"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/ha"
@@ -146,6 +147,21 @@ func WithEventProcessors(numProcessors int64) ServerOption {
 			return fmt.Errorf("event processors must be greater than 0")
 		}
 		o.options.eventProcessors = numProcessors
+		return nil
+	}
+}
+
+// WithAnnotationFilter sets the Application annotation filter the principal
+// uses when emitting events and when applying updates from an agent. Pass the
+// same filter instance that the settings watcher updates, so that an
+// allow-list change made in the params ConfigMap takes effect without a
+// restart.
+func WithAnnotationFilter(f *manager.AnnotationFilter) ServerOption {
+	return func(o *Server) error {
+		if f == nil {
+			return fmt.Errorf("annotation filter must not be nil")
+		}
+		o.annotationFilter = f
 		return nil
 	}
 }

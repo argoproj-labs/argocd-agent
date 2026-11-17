@@ -111,6 +111,11 @@ type Agent struct {
 	// enableResourceProxy determines if the agent should proxy resources to the principal
 	enableResourceProxy bool
 
+	// annotationFilter decides which Application annotations may travel to the
+	// principal and which incoming ones may be established locally. Never nil
+	// after NewAgent.
+	annotationFilter *manager.AnnotationFilter
+
 	// resourceProcSem bounds the number of resource requests that are
 	// processed concurrently. See processIncomingEvent.
 	resourceProcSem chan struct{}
@@ -246,6 +251,12 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		}
 	}
 
+	// An agent without an explicitly configured allow list still needs a
+	// filter: the built-in classification applies regardless.
+	if a.annotationFilter == nil {
+		a.annotationFilter = manager.NewAnnotationFilter(nil)
+	}
+
 	// Register metrics early
 	if a.options.metricsPort > 0 {
 		a.metrics = metrics.NewAgentMetrics()
@@ -364,6 +375,7 @@ func NewAgent(ctx context.Context, client *kube.KubernetesClient, namespace stri
 		application.WithMode(managerMode),
 		application.WithDeletionTracker(a.deletions),
 		application.WithDestinationBasedMapping(a.destinationBasedMapping),
+		application.WithAnnotationFilter(a.annotationFilter),
 	}
 
 	appInformer, err := informer.NewInformer(ctx, appInformerOptions...)
@@ -562,7 +574,8 @@ func (a *Agent) Start(ctx context.Context) error {
 		metrics.StartMetricsServer(metrics.WithListener("", a.options.metricsPort))
 	}
 
-	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"))
+	a.emitter = event.NewEventSource(fmt.Sprintf("agent://%s", "agent-managed"),
+		event.WithAnnotationFilter(a.annotationFilter))
 
 	if a.labelSelector != "" {
 		log().Infof("Agent informers are using the label selector: %s", a.labelSelector)
@@ -776,7 +789,7 @@ func (a *Agent) populateSourceCache(ctx context.Context) error {
 	for _, app := range appList {
 		sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
 		if exists {
-			a.sourceCache.Application.Set(ty.UID(sourceUID), app.Spec)
+			a.sourceCache.Application.Set(ty.UID(sourceUID), a.appManager.CacheState(&app))
 		}
 	}
 

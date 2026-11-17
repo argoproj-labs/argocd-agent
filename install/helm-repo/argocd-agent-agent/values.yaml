@@ -171,6 +171,17 @@ logLevel: "info"
 # informers). Very verbose; for debugging only. Applied at runtime: editing
 # agent.log.full-detail in the params ConfigMap takes effect without a restart.
 logFullDetail: ""
+# -- Comma-separated glob patterns for Application annotations to transfer
+# between this agent and the principal, in addition to the ones argocd-agent
+# handles itself (notice.argocd.argoproj.io/*, manifest-generate-paths,
+# skip-reconcile and refresh). Unmatched annotations are left untouched on both
+# sides and are not sent in events. Patterns capturing annotations argocd-agent
+# depends on, or ones only meaningful on a child Application, are rejected and
+# logged. The principal must be configured with the same list. Applied at
+# runtime: editing agent.application.annotations.allow-list in the params
+# ConfigMap takes effect without a restart.
+# E.g. "argocd-image-updater.argoproj.io/*"
+applicationAnnotationsAllowList: ""
 # -- Log format for the agent (text or json).
 logFormat: "text"
 # -- Principal server address (hostname or host:port).

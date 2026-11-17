@@ -194,6 +194,11 @@ func (a *Agent) processIncomingApplication(ev *event.Event) error {
 		return err
 	}
 
+	// Drop annotations that must not be established locally. A principal
+	// running an older version does not filter them on the way out, so an
+	// event can still carry them.
+	a.appManager.FilterIncomingAnnotations(incomingApp)
+
 	// Determine the target namespace for the application.
 	// When destination-based mapping is enabled and the agent is in a different
 	// namespace than the principal, getTargetNamespaceForApp falls back to the
@@ -310,7 +315,7 @@ func (a *Agent) updateManagedApplicationIdentity(incomingApp *v1alpha1.Applicati
 	if err != nil {
 		return err
 	}
-	a.sourceCache.Application.Set(resolvedSourceUID, incomingApp.Spec)
+	a.sourceCache.Application.Set(resolvedSourceUID, a.appManager.CacheState(incomingApp))
 	return nil
 }
 
@@ -840,7 +845,7 @@ func (a *Agent) createApplication(incoming *v1alpha1.Application, principalUID s
 
 	if a.mode == types.AgentModeManaged {
 		// Store app spec in cache
-		a.sourceCache.Application.Set(sourceUIDForApp(incoming), incoming.Spec)
+		a.sourceCache.Application.Set(sourceUIDForApp(incoming), a.appManager.CacheState(incoming))
 	}
 
 	created, err := a.appManager.CreateWithPrincipalUID(a.context, incoming, principalUID)
@@ -895,7 +900,7 @@ func (a *Agent) updateApplication(incoming *v1alpha1.Application) (*v1alpha1.App
 
 		// Update app spec in cache
 		logCtx.Tracef("Calling update spec for this event")
-		a.sourceCache.Application.Set(sourceUIDForApp(incoming), incoming.Spec)
+		a.sourceCache.Application.Set(sourceUIDForApp(incoming), a.appManager.CacheState(incoming))
 
 		napp, err = a.appManager.UpdateManagedApp(a.context, incoming, application.ManagedIdentity{})
 	case types.AgentModeAutonomous:

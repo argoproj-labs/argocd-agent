@@ -22,6 +22,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,19 +56,19 @@ func defaultDefaultConfig() DefaultConfig {
 
 func TestManager_PprofEnabled(t *testing.T) {
 	t.Run("baseline disabled by default", func(t *testing.T) {
-		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), newTestSubLoggers())
+		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), newTestSubLoggers(), nil)
 		assert.False(t, m.PprofEnabled())
 	})
 
 	t.Run("baseline enabled", func(t *testing.T) {
 		b := defaultDefaultConfig()
 		b.PprofEnabled = true
-		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers())
+		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers(), nil)
 		assert.True(t, m.PprofEnabled())
 	})
 
 	t.Run("configmap enables and disables", func(t *testing.T) {
-		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), newTestSubLoggers())
+		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), newTestSubLoggers(), nil)
 
 		m.Apply(map[string]string{pKey(KeyPprofEnabled): "true"})
 		assert.True(t, m.PprofEnabled())
@@ -79,7 +80,7 @@ func TestManager_PprofEnabled(t *testing.T) {
 	t.Run("absent key reverts to baseline", func(t *testing.T) {
 		b := defaultDefaultConfig()
 		b.PprofEnabled = true
-		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers())
+		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers(), nil)
 
 		m.Apply(map[string]string{pKey(KeyPprofEnabled): "false"})
 		assert.False(t, m.PprofEnabled())
@@ -92,7 +93,7 @@ func TestManager_PprofEnabled(t *testing.T) {
 	t.Run("invalid value is ignored, keeps baseline", func(t *testing.T) {
 		b := defaultDefaultConfig()
 		b.PprofEnabled = true
-		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers())
+		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers(), nil)
 
 		m.Apply(map[string]string{pKey(KeyPprofEnabled): "not-a-bool"})
 		assert.True(t, m.PprofEnabled())
@@ -103,7 +104,7 @@ func TestManager_PprofEnabled(t *testing.T) {
 func TestManager_LogLevel(t *testing.T) {
 	t.Run("override sets global and subsystem levels", func(t *testing.T) {
 		ss := newTestSubLoggers()
-		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), ss)
+		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), ss, nil)
 
 		m.Apply(map[string]string{pKey(KeyLogLevel): "debug"})
 		assert.Equal(t, logrus.DebugLevel, logrus.GetLevel())
@@ -113,7 +114,7 @@ func TestManager_LogLevel(t *testing.T) {
 
 	t.Run("per-subsystem override", func(t *testing.T) {
 		ss := newTestSubLoggers()
-		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), ss)
+		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), ss, nil)
 
 		m.Apply(map[string]string{pKey(KeyLogLevel): "warning,resource-proxy=trace"})
 		assert.Equal(t, logrus.WarnLevel, logrus.GetLevel())
@@ -125,7 +126,7 @@ func TestManager_LogLevel(t *testing.T) {
 		ss := newTestSubLoggers()
 		b := defaultDefaultConfig()
 		b.LogLevels = []string{"warning"}
-		m := NewManager(PrincipalKeyPrefix, b, ss)
+		m := NewManager(PrincipalKeyPrefix, b, ss, nil)
 
 		m.Apply(map[string]string{pKey(KeyLogLevel): "trace"})
 		assert.Equal(t, logrus.TraceLevel, logrus.GetLevel())
@@ -140,7 +141,7 @@ func TestManager_LogLevel(t *testing.T) {
 		ss := newTestSubLoggers()
 		b := defaultDefaultConfig()
 		b.LogLevels = []string{"info"}
-		m := NewManager(PrincipalKeyPrefix, b, ss)
+		m := NewManager(PrincipalKeyPrefix, b, ss, nil)
 
 		// Turn a single subsystem to trace via the ConfigMap.
 		m.Apply(map[string]string{pKey(KeyLogLevel): "info,grpc-event=trace"})
@@ -156,7 +157,7 @@ func TestManager_LogLevel(t *testing.T) {
 		ss := newTestSubLoggers()
 		b := defaultDefaultConfig()
 		b.LogLevels = []string{"warning"}
-		m := NewManager(PrincipalKeyPrefix, b, ss)
+		m := NewManager(PrincipalKeyPrefix, b, ss, nil)
 
 		m.Apply(map[string]string{pKey(KeyLogLevel): "not-a-level"})
 		// Baseline stays in effect; the invalid override is dropped whole.
@@ -166,7 +167,7 @@ func TestManager_LogLevel(t *testing.T) {
 
 func TestManager_FullDetail(t *testing.T) {
 	t.Run("override enables categories", func(t *testing.T) {
-		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), newTestSubLoggers())
+		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), newTestSubLoggers(), nil)
 
 		m.Apply(map[string]string{pKey(KeyFullDetail): "actions,events"})
 		cfg := logging.GetFullDetailConfig()
@@ -176,7 +177,7 @@ func TestManager_FullDetail(t *testing.T) {
 	})
 
 	t.Run("all enables everything", func(t *testing.T) {
-		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), newTestSubLoggers())
+		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), newTestSubLoggers(), nil)
 
 		m.Apply(map[string]string{pKey(KeyFullDetail): "all"})
 		cfg := logging.GetFullDetailConfig()
@@ -188,7 +189,7 @@ func TestManager_FullDetail(t *testing.T) {
 	t.Run("removing override reverts to default", func(t *testing.T) {
 		b := defaultDefaultConfig()
 		b.FullDetail = []string{"informers"}
-		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers())
+		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers(), nil)
 
 		m.Apply(map[string]string{pKey(KeyFullDetail): "all"})
 		require.True(t, logging.GetFullDetailConfig().Actions)
@@ -206,7 +207,7 @@ func TestManager_FullDetail(t *testing.T) {
 	t.Run("empty value switches full detail off", func(t *testing.T) {
 		b := defaultDefaultConfig()
 		b.FullDetail = []string{"actions"}
-		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers())
+		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers(), nil)
 
 		m.Apply(nil)
 		require.True(t, logging.GetFullDetailConfig().Actions)
@@ -228,7 +229,7 @@ func TestManager_ApplyNilData(t *testing.T) {
 	ss := newTestSubLoggers()
 	b := defaultDefaultConfig()
 	b.LogLevels = []string{"error"}
-	m := NewManager(PrincipalKeyPrefix, b, ss)
+	m := NewManager(PrincipalKeyPrefix, b, ss, nil)
 
 	assert.NotPanics(t, func() { m.Apply(nil) })
 	assert.Equal(t, logrus.ErrorLevel, logrus.GetLevel())
@@ -237,7 +238,7 @@ func TestManager_ApplyNilData(t *testing.T) {
 func TestManager_NilSubLoggers(t *testing.T) {
 	// A nil subsystem-logger set must be tolerated (only the standard logger is
 	// affected).
-	m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), nil)
+	m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), nil, nil)
 	assert.NotPanics(t, func() {
 		m.Apply(map[string]string{pKey(KeyLogLevel): "debug"})
 	})
@@ -251,7 +252,7 @@ func TestManager_KeyPrefixIsolation(t *testing.T) {
 	ss := newTestSubLoggers()
 	b := defaultDefaultConfig()
 	b.LogLevels = []string{"warning"}
-	m := NewManager(PrincipalKeyPrefix, b, ss)
+	m := NewManager(PrincipalKeyPrefix, b, ss, nil)
 
 	m.Apply(map[string]string{
 		AgentKeyPrefix + KeyLogLevel:     "trace",
@@ -265,7 +266,7 @@ func TestManager_KeyPrefixIsolation(t *testing.T) {
 	assert.Equal(t, logrus.WarnLevel, logrus.GetLevel())
 
 	// The agent manager reads the very same data and does react.
-	am := NewManager(AgentKeyPrefix, b, ss)
+	am := NewManager(AgentKeyPrefix, b, ss, nil)
 	am.Apply(map[string]string{AgentKeyPrefix + KeyLogLevel: "trace"})
 	assert.Equal(t, logrus.TraceLevel, logrus.GetLevel())
 }
@@ -290,7 +291,7 @@ func TestManager_StartWatcher(t *testing.T) {
 
 	b := defaultDefaultConfig()
 	b.LogLevels = []string{"warning"}
-	m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers())
+	m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers(), nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -327,4 +328,76 @@ func TestManager_StartWatcher(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return logrus.GetLevel() == logrus.WarnLevel
 	}, 5*time.Second, 10*time.Millisecond, "ConfigMap deletion did not revert to the default configuration")
+}
+
+func TestManager_AnnotationsAllowList(t *testing.T) {
+	t.Run("a nil filter makes the key inert", func(t *testing.T) {
+		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), newTestSubLoggers(), nil)
+		// Must not panic: components may legitimately run without a filter.
+		m.Apply(map[string]string{pKey(KeyAnnotationsAllowList): "example.com/*"})
+	})
+
+	t.Run("an absent key leaves the flag-derived default in place", func(t *testing.T) {
+		f := manager.NewAnnotationFilter(nil)
+		b := defaultDefaultConfig()
+		b.AnnotationsAllowList = []string{"example.com/*"}
+		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers(), f)
+
+		m.Apply(map[string]string{})
+		assert.Equal(t, []string{"example.com/*"}, f.AllowList())
+	})
+
+	t.Run("a present key overrides the default", func(t *testing.T) {
+		f := manager.NewAnnotationFilter(nil)
+		b := defaultDefaultConfig()
+		b.AnnotationsAllowList = []string{"example.com/*"}
+		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers(), f)
+
+		m.Apply(map[string]string{pKey(KeyAnnotationsAllowList): "other.com/*, third.com/x"})
+		assert.Equal(t, []string{"other.com/*", "third.com/x"}, f.AllowList())
+	})
+
+	t.Run("a present but empty key switches the allow list off", func(t *testing.T) {
+		// This is the only way to undo an allow list configured by flag
+		// without restarting the component.
+		f := manager.NewAnnotationFilter(nil)
+		b := defaultDefaultConfig()
+		b.AnnotationsAllowList = []string{"example.com/*"}
+		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers(), f)
+
+		m.Apply(map[string]string{pKey(KeyAnnotationsAllowList): ""})
+		assert.Empty(t, f.AllowList())
+	})
+
+	t.Run("a deleted ConfigMap reverts to the default", func(t *testing.T) {
+		f := manager.NewAnnotationFilter(nil)
+		b := defaultDefaultConfig()
+		b.AnnotationsAllowList = []string{"example.com/*"}
+		m := NewManager(PrincipalKeyPrefix, b, newTestSubLoggers(), f)
+
+		m.Apply(map[string]string{pKey(KeyAnnotationsAllowList): "other.com/*"})
+		require.Equal(t, []string{"other.com/*"}, f.AllowList())
+
+		m.Apply(nil)
+		assert.Equal(t, []string{"example.com/*"}, f.AllowList())
+	})
+
+	t.Run("a reserved pattern is dropped without disabling the rest", func(t *testing.T) {
+		f := manager.NewAnnotationFilter(nil)
+		m := NewManager(PrincipalKeyPrefix, defaultDefaultConfig(), newTestSubLoggers(), f)
+
+		m.Apply(map[string]string{pKey(KeyAnnotationsAllowList): "argocd.argoproj.io/*,example.com/*"})
+		assert.Equal(t, []string{"example.com/*"}, f.AllowList())
+	})
+
+	t.Run("the agent prefix is isolated from the principal's", func(t *testing.T) {
+		f := manager.NewAnnotationFilter(nil)
+		m := NewManager(AgentKeyPrefix, defaultDefaultConfig(), newTestSubLoggers(), f)
+
+		m.Apply(map[string]string{pKey(KeyAnnotationsAllowList): "example.com/*"})
+		assert.Empty(t, f.AllowList(), "a principal-prefixed key must not configure the agent")
+
+		m.Apply(map[string]string{AgentKeyPrefix + KeyAnnotationsAllowList: "example.com/*"})
+		assert.Equal(t, []string{"example.com/*"}, f.AllowList())
+	})
 }

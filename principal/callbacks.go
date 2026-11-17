@@ -147,6 +147,8 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 	s.resources.Add(agentName, resources.NewResourceKeyFromApp(new))
 	s.trackAppToAgent(new, agentName)
 
+	reverted := false
+	var revertedApp *v1alpha1.Application
 	if s.isResourceFromAutonomousAgent(new) {
 		// Remove finalizers from autonomous agent applications if it is being deleted
 		if new.DeletionTimestamp != nil && len(new.Finalizers) > 0 {
@@ -172,18 +174,30 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 				}
 			}
 		}
-
-		// Revert modifications on autonomous agent applications
-		if s.appManager.RevertAutonomousAppChanges(s.ctx, new.DeepCopy(), s.sourceCache.Application) {
-			logCtx.Trace("Modifications to the application are reverted")
-			return
-		}
 	}
 
+	// Capture ignore status before RevertAutonomousAppChanges, which writes a
+	// corrective update and replaces the app's ignored resourceVersion.
 	if s.appManager.IsChangeIgnored(new.QualifiedName(), new.ResourceVersion) {
 		logCtx.WithField("resource_version", new.ResourceVersion).Debugf("Resource version has already been seen")
 		return
 	}
+
+	if s.isResourceFromAutonomousAgent(new) {
+		// Revert modifications on autonomous agent applications
+		revertedApp = new.DeepCopy()
+		if s.appManager.RevertAutonomousAppChanges(s.ctx, revertedApp, s.sourceCache.Application) {
+			logCtx.Trace("Modifications to the application are reverted")
+			reverted = true
+		}
+	}
+
+	terminateOperation := isTerminateOperation(old, new)
+	setOperation := !terminateOperation && old.Operation == nil && new.Operation != nil
+	if reverted && !terminateOperation && !setOperation {
+		return
+	}
+
 	if !s.queues.HasQueuePair(agentName) {
 		if err := s.queues.Create(agentName); err != nil {
 			logCtx.WithError(err).Error("failed to create a queue pair for agent")
@@ -197,34 +211,40 @@ func (s *Server) updateAppCallback(old *v1alpha1.Application, new *v1alpha1.Appl
 		return
 	}
 
-	setOperation := false
 	var ev *cloudevents.Event
-
-	if isTerminateOperation(old, new) {
-		ev = s.events.ApplicationEvent(event.TerminateOperation, new)
-	} else {
+	if terminateOperation {
+		target := new
+		if reverted {
+			target = revertedApp
+		}
+		ev = s.events.ApplicationEvent(event.TerminateOperation, target)
+	} else if !reverted {
 		// DeepCopy to avoid mutating the informer object.
 		// Strip the operation from SpecUpdate; operations are
 		// delivered via a dedicated SetOperation event instead.
 		out := new.DeepCopy()
 		out.Operation = nil
 		ev = s.events.ApplicationEvent(event.SpecUpdate, out)
-
-		if old.Operation == nil && new.Operation != nil {
-			setOperation = true
-		}
 	}
 
-	// Inject trace context into the event for propagation to agent
-	s.stampEvent(ctx, ev)
-	q.Add(ev)
-	s.ha.ForwardEventForReplication(event.New(ev, targets.Application), agentName, replication.DirectionOutbound)
-	logCtx.WithField("event_type", ev.Type()).Tracef("Added app to send queue, total length now %d", q.Len())
+	if ev != nil {
+		// Inject trace context into the event for propagation to agent
+		s.stampEvent(ctx, ev)
+		q.Add(ev)
+		s.ha.ForwardEventForReplication(event.New(ev, targets.Application), agentName, replication.DirectionOutbound)
+		logCtx.WithField("event_type", ev.Type()).Tracef("Added app to send queue, total length now %d", q.Len())
+	}
 
 	// When a new operation appears (nil → non-nil), send it as a separate
 	// SetOperation event so that it is not overwritten by the next SpecUpdate.
+	// This still runs when autonomous drift was reverted so the operation is not
+	// dropped while the reverted update's own resourceVersion is ignored.
 	if setOperation {
-		opEv := s.events.ApplicationEvent(event.SetOperation, new)
+		target := new
+		if reverted {
+			target = revertedApp
+		}
+		opEv := s.events.ApplicationEvent(event.SetOperation, target)
 		tracing.InjectTraceContext(ctx, opEv)
 		q.Add(opEv)
 		s.ha.ForwardEventForReplication(event.New(opEv, targets.Application), agentName, replication.DirectionOutbound)
