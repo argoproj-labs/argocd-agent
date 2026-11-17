@@ -31,14 +31,16 @@ export ARGOCD_PRINCIPAL_METRICS_PORT=8500
 
 The effective value will be `9000` (from the command line flag).
 
-### Exception: Runtime-Switchable Debug Settings
+### Exception: Runtime-Switchable Settings
 
-Three debug settings are re-read from the `argocd-agent-params` ConfigMap while
+A few settings are re-read from the `argocd-agent-params` ConfigMap while
 the component runs, so that they can be changed without a restart:
 
 * `<component>.log.level`
 * `<component>.log.full-detail`
 * `<component>.pprof.enabled`
+* `<component>.application.annotations.allow-list` — see
+  [Application annotation syncing](../user-guide/annotation-syncing.md)
 
 For these keys the precedence above is reversed: the flag or environment
 variable provides the value the component starts with, but once the ConfigMap

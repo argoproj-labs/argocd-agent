@@ -15,6 +15,12 @@
       "title": "agentMode",
       "type": "string"
     },
+    "applicationAnnotationsAllowList": {
+      "default": "",
+      "description": "Comma-separated glob patterns for Application annotations to transfer between this agent and the principal, in addition to the ones argocd-agent handles itself. The principal must be configured with the same list.",
+      "title": "applicationAnnotationsAllowList",
+      "type": "string"
+    },
     "allowedNamespaces": {
       "default": "",
       "description": "Comma-separated list of additional namespaces the agent is allowed to\nmanage applications in (used with applications in any namespace feature). Supports glob patterns (e.g., \"team-*,prod-*\").",

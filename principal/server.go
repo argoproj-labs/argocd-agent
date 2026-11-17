@@ -215,6 +215,11 @@ type Server struct {
 	// based on spec.destination.name instead of namespace
 	destinationBasedMapping bool
 
+	// annotationFilter decides which Application annotations may travel to an
+	// agent and which incoming ones may be established locally. Never nil
+	// after NewServer.
+	annotationFilter *manager.AnnotationFilter
+
 	// agentRegistrationManager handles automatic registration of agents
 	agentRegistrationManager *registration.AgentRegistrationManager
 
@@ -275,6 +280,12 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	// A principal without an explicitly configured allow list still needs a
+	// filter: the built-in classification applies regardless.
+	if s.annotationFilter == nil {
+		s.annotationFilter = manager.NewAnnotationFilter(nil)
 	}
 
 	if s.options.metricsPort > 0 {
@@ -368,6 +379,7 @@ func NewServer(ctx context.Context, kubeClient *kube.KubernetesClient, namespace
 		application.WithAllowUpsert(true),
 		application.WithRole(manager.ManagerRolePrincipal),
 		application.WithDestinationBasedMapping(s.destinationBasedMapping),
+		application.WithAnnotationFilter(s.annotationFilter),
 	}
 
 	projInformerOpts := []informer.InformerOption[*v1alpha1.AppProject]{
@@ -786,7 +798,8 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 		syncTimeout = waitForSyncedDuration
 	}
 
-	s.events = event.NewEventSource(s.options.serverName)
+	s.events = event.NewEventSource(s.options.serverName,
+		event.WithAnnotationFilter(s.annotationFilter))
 
 	if err := s.clusterMgr.Start(); err != nil {
 		return fmt.Errorf("unable to start cluster manager with informer sync timeout %v: %w", syncTimeout, err)
@@ -1423,6 +1436,11 @@ func (s *Server) defaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 			return name != "" && name != "in-cluster"
 		})
 	}
+
+	// Drop updates whose only change is to an annotation that is never
+	// transferred, so that editing one does not fan an event out to the agent.
+	c.AppendChangeFilter(s.annotationFilter.AppChangeFilter)
+
 	return c
 }
 
@@ -1519,7 +1537,7 @@ func (s *Server) populateSourceCache(ctx context.Context) error {
 	for _, app := range appList {
 		sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
 		if exists {
-			s.sourceCache.Application.Set(k8stypes.UID(sourceUID), app.Spec)
+			s.sourceCache.Application.Set(k8stypes.UID(sourceUID), s.appManager.CacheState(&app))
 		}
 	}
 

@@ -555,7 +555,7 @@ func Test_ProcessIncomingAppWithUIDMismatch(t *testing.T) {
 		}, incomingApp.Name)
 		getMock = be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(nil, notFoundError)
 
-		a.sourceCache.Application.Set(incomingApp.UID, incomingApp.Spec)
+		a.sourceCache.Application.Set(incomingApp.UID, a.appManager.CacheState(incomingApp))
 
 		ev := event.New(evs.ApplicationEvent(event.Delete, incomingApp), targets.Application)
 		err := a.processIncomingApplication(ev)
@@ -1343,9 +1343,9 @@ func Test_UpdateApplication(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, napp)
 
-		cachedSpec, ok := a.sourceCache.Application.Get(ktypes.UID("old-source-uid"))
+		cachedState, ok := a.sourceCache.Application.Get(ktypes.UID("old-source-uid"))
 		require.True(t, ok)
-		assert.Equal(t, appWithInheritedSourceUID.Spec, cachedSpec)
+		assert.Equal(t, appWithInheritedSourceUID.Spec, cachedState.Spec)
 
 		_, ok = a.sourceCache.Application.Get(ktypes.UID("new-principal-uid"))
 		require.False(t, ok)

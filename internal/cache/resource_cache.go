@@ -23,8 +23,22 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// ApplicationState is the part of an Application that the source of truth
+// owns, and which is therefore restored on the peer when it drifts.
+//
+// Annotations are held alongside the spec because they drift independently:
+// an annotation edited directly on the peer is not a spec change, so caching
+// the spec alone leaves no way to notice it.
+type ApplicationState struct {
+	Spec v1alpha1.ApplicationSpec
+	// Annotations holds only the annotations the source of truth owns, i.e.
+	// the ones classified as mirrored. Everything else on the peer is none of
+	// the source of truth's business and must never be reverted.
+	Annotations map[string]string
+}
+
 type SourceCache struct {
-	Application *ResourceCache[v1alpha1.ApplicationSpec]
+	Application *ResourceCache[ApplicationState]
 	AppProject  *ResourceCache[v1alpha1.AppProjectSpec]
 	Repository  *ResourceCache[map[string][]byte]
 	GPGKey      *ResourceCache[map[string]string]
@@ -32,7 +46,7 @@ type SourceCache struct {
 
 func NewSourceCache() *SourceCache {
 	return &SourceCache{
-		Application: newResourceCache[v1alpha1.ApplicationSpec]("ApplicationSpec"),
+		Application: newResourceCache[ApplicationState]("ApplicationState"),
 		AppProject:  newResourceCache[v1alpha1.AppProjectSpec]("AppProjectSpec"),
 		Repository:  newResourceCache[map[string][]byte]("RepositorySpec"),
 		GPGKey:      newResourceCache[map[string]string]("GPGKeyData"),

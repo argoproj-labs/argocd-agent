@@ -218,6 +218,14 @@ func (i *Informer[T]) installEventHandlers() error {
 				if !oldOk || !newOk {
 					return
 				}
+				// Change filters get the chance to classify this update as
+				// uninteresting before any handler runs, so that a change we
+				// would not act on never becomes an event. A chain without
+				// change filters admits everything.
+				if i.filters != nil && !i.filters.ProcessChange(oldRes, newRes) {
+					i.logger.Tracef("Ignoring update for %s: no relevant change", i.resType)
+					return
+				}
 				logging.LogInformerUpdate(i.logger, oldObj, newObj)
 				if i.onUpdate != nil {
 					i.onUpdate(oldRes, newRes)
