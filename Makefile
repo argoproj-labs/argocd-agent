@@ -206,6 +206,8 @@ cli-all:
 	BIN_ARCH=arm BIN_OS=linux BIN_NAME_CLI=$(BIN_NAME_CLI)_linux-arm make cli
 	BIN_ARCH=amd64 BIN_OS=darwin BIN_NAME_CLI=$(BIN_NAME_CLI)_darwin-amd64 make cli
 	BIN_ARCH=arm64 BIN_OS=darwin BIN_NAME_CLI=$(BIN_NAME_CLI)_darwin-arm64 make cli
+	BIN_ARCH=amd64 BIN_OS=windows BIN_NAME_CLI=$(BIN_NAME_CLI)_windows-amd64.exe make cli
+	BIN_ARCH=arm64 BIN_OS=windows BIN_NAME_CLI=$(BIN_NAME_CLI)_windows-arm64.exe make cli
 
 .PHONY: cli
 cli:
